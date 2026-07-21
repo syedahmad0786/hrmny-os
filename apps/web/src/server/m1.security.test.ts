@@ -1,0 +1,69 @@
+import { describe, expect, it } from "vitest";
+import { createCaller } from "./trpc/root";
+import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+
+/**
+ * M1 security / insurance checks — RLS SQL grants, margin strip, secrets hygiene.
+ */
+describe("M1 security insurance", () => {
+  it("RLS SQL revokes UPDATE/DELETE on audit_event and asset_version", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/rls/001_m1_rls.sql"),
+      join(process.cwd(), "../../packages/db/rls/001_m1_rls.sql"),
+      join(__dirname, "../../../../packages/db/rls/001_m1_rls.sql"),
+    ];
+    const path = candidates.find((p) => existsSync(p));
+    expect(path, "rls sql not found").toBeTruthy();
+    const sql = readFileSync(path!, "utf8");
+    expect(sql).toMatch(/REVOKE\s+UPDATE,\s*DELETE\s+ON\s+public\.audit_event/i);
+    expect(sql).toMatch(/REVOKE\s+UPDATE,\s*DELETE\s+ON\s+public\.asset_version/i);
+  });
+
+  it("gitignore keeps secrets out of the monorepo", () => {
+    const candidates = [
+      join(process.cwd(), ".gitignore"),
+      join(process.cwd(), "../../.gitignore"),
+      join(__dirname, "../../../../.gitignore"),
+    ];
+    const path = candidates.find((p) => existsSync(p));
+    expect(path).toBeTruthy();
+    const gi = readFileSync(path!, "utf8");
+    expect(gi).toMatch(/\.env/);
+    expect(gi).toMatch(/\.env\.local/);
+  });
+
+  it("portal session never claims margin view", async () => {
+    const user = resolveDevUser("portal_a");
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: false,
+      clientId: user.clientId,
+    });
+    const session = await caller.portal.auth.session();
+    expect(session.canViewMargin).toBe(false);
+    expect("marginPct" in session).toBe(false);
+  });
+
+  it("magic-link stub issues token and verify is single-use", async () => {
+    const user = resolveDevUser("partner");
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: sessionCanViewMargin(user),
+    });
+    const sent = await caller.portal.auth.magicLink({
+      email: "client@demo.local",
+    });
+    expect(sent.sent).toBe(true);
+    expect(sent.stubToken).toBeTruthy();
+    const ok = await caller.portal.auth.verify({ token: sent.stubToken! });
+    expect(ok.ok).toBe(true);
+    const reuse = await caller.portal.auth.verify({ token: sent.stubToken! });
+    expect(reuse.ok).toBe(false);
+  });
+});

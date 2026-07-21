@@ -1,0 +1,25 @@
+# Supabase local/link stub for hrmny OS V1.
+# Create project in dashboard, then: `npx supabase link --project-ref <ref>`
+# Apply SQL: see packages/db/APPLY.md (migrations + rls + seed).
+
+project_id = "hrmny-os"
+
+[api]
+enabled = true
+port = 54321
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/**"]
+
+[storage]
+enabled = true

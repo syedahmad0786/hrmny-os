@@ -1,0 +1,12 @@
+:root {
+  --hrmny-ochre: #e47300;
+  --hrmny-ink: #0a0908;
+  --hrmny-paper: #f7f4ef;
+  --hrmny-sand: #e8e0d4;
+  --hrmny-muted: #6b6560;
+  --hrmny-danger: #b42318;
+  --hrmny-success: #1b7a4e;
+
+  --font-display: "Syne", "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+}
