@@ -63,6 +63,10 @@ export const SEED_ROLE_KEYS = [
   "director",
   "creative",
   "developer",
+  "creative_director",
+  "hr",
+  "staff",
+  "traffic",
 ] as const;
 
 export type SeedRoleKey = (typeof SEED_ROLE_KEYS)[number];

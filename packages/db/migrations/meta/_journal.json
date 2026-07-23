@@ -57,6 +57,13 @@
       "when": 1784870000000,
       "tag": "0007_m1_production_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784876400000,
+      "tag": "0008_employee_directory",
+      "breakpoints": true
     }
   ]
 }

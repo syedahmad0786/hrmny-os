@@ -157,10 +157,27 @@ export const adminRouter = router({
   }),
   health: router({
     get: protectedProcedure.query(async () => {
+      const db = getDb();
+      const [cap] = db
+        ? await db
+            .select({ payload: convention.payload })
+            .from(convention)
+            .where(
+              and(
+                eq(convention.ruleKey, "llm.spend_cap"),
+                eq(convention.isActive, true),
+              ),
+            )
+            .limit(1)
+        : [];
       return {
         ok: true as const,
         signals: await listHealthSignals(10),
-        spendCaps: { llmMonthlyAed: process.env.LLM_MONTHLY_CAP_AED ?? null },
+        spendCaps: {
+          llmMonthlyAed:
+            cap?.payload.monthlyAed ??
+            (Number(process.env.LLM_MONTHLY_CAP_AED ?? 0) || null),
+        },
         chatWebhookConfigured: Boolean(process.env.GOOGLE_CHAT_WEBHOOK_URL),
       };
     }),

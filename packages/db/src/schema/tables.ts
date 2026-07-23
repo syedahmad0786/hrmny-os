@@ -75,6 +75,9 @@ export const employee = pgTable("employee", {
   employeeId: uuid("employee_id").defaultRandom().primaryKey(),
   displayName: text("display_name").notNull(),
   email: text("email").notNull().unique(),
+  jobTitle: text("job_title"),
+  department: text("department"),
+  reportsToEmail: text("reports_to_email"),
   lifecycleStatus: employeeLifecycleEnum("lifecycle_status")
     .default("active")
     .notNull(),

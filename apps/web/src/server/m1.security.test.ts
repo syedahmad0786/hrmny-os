@@ -113,4 +113,18 @@ describe("M1 security insurance", () => {
     expect(magic.sent).toBe(false);
     expect(magic.stubToken).toBeUndefined();
   });
+
+  it("reports the configured monthly LLM cap", async () => {
+    vi.stubEnv("LLM_MONTHLY_CAP_AED", "10");
+    const user = resolveDevUser("partner");
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: sessionCanViewMargin(user),
+    });
+
+    const health = await caller.admin.health.get();
+    expect(health.spendCaps.llmMonthlyAed).toBe(10);
+  });
 });
