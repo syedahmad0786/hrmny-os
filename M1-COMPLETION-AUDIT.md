@@ -99,8 +99,9 @@ Result: the old signed Module 1 remains a multi-milestone outcome; it should not
 3. In Assets, upload one non-sensitive JPG or PDF, create a new version, and open its signed link.
 4. In CRM, move a test deal through one legal next stage, then attempt an illegal stage jump and confirm it is blocked.
 5. Ask the Director/Partner to open Audit and confirm the upload, legal transition, and blocked attempt are recorded.
-6. Repeat login and signed-file opening once on a phone using mobile data.
-7. Send back the tester names, timestamps, browser/device, screenshots, and any error text. Do not send client-confidential production material for this test.
+6. Confirm the Hrmny Google Chat space contains the M1 production acceptance alert.
+7. Repeat login and signed-file opening once on a phone using mobile data.
+8. Send back the tester names, timestamps, browser/device, screenshots, and any error text. Do not send client-confidential production material for this test.
 
 ## Remaining closeout
 
