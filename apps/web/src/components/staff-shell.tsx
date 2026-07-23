@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { setDevRole, getDevRole, trpc } from "@/lib/trpc";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { initials } from "@/components/crm/format";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -66,9 +66,26 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [role, setRole] = useState("partner");
+  const [connectionMessage, setConnectionMessage] = useState<string | null>(
+    null,
+  );
+  const completingGoogle = useRef(false);
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
   const users = trpc.auth.devUsers.useQuery();
+  const saveGoogleWorkspace = trpc.connections.saveGoogleWorkspace.useMutation({
+    onSuccess: async (result) => {
+      localStorage.removeItem("hrmny-google-workspace-connect");
+      setConnectionMessage(`Google Workspace connected: ${result.account}`);
+      await utils.connections.list.invalidate();
+      router.replace("/settings/connections");
+    },
+    onError: (error) => {
+      localStorage.removeItem("hrmny-google-workspace-connect");
+      setConnectionMessage(error.message);
+      router.replace("/settings/connections");
+    },
+  });
   const deals = trpc.crm.deals.list.useQuery(undefined, {
     enabled: Boolean(session.data?.employeeId),
     staleTime: 30_000,
@@ -86,6 +103,39 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
       router.replace("/login");
     }
   }, [router, session.data, session.isError]);
+
+  useEffect(() => {
+    if (
+      !session.data?.employeeId ||
+      completingGoogle.current ||
+      localStorage.getItem("hrmny-google-workspace-connect") !== "pending"
+    ) {
+      return;
+    }
+    completingGoogle.current = true;
+    void getSupabaseBrowserClient()
+      ?.auth.getSession()
+      .then(({ data, error }) => {
+        const providerToken = data.session?.provider_token;
+        const refreshToken = data.session?.provider_refresh_token;
+        if (error || !providerToken || !refreshToken) {
+          throw new Error(
+            error?.message ?? "Google did not return an offline refresh token",
+          );
+        }
+        saveGoogleWorkspace.mutate({
+          accessToken: providerToken,
+          refreshToken,
+        });
+      })
+      .catch((error: unknown) => {
+        localStorage.removeItem("hrmny-google-workspace-connect");
+        setConnectionMessage(
+          error instanceof Error ? error.message : "Google connection failed",
+        );
+        router.replace("/settings/connections");
+      });
+  }, [router, saveGoogleWorkspace, session.data?.employeeId]);
 
   async function onRoleChange(next: string) {
     setDevRole(next);
@@ -201,7 +251,14 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
             {avatar}
           </span>
         </header>
-        <div className="desk-content">{children}</div>
+        <div className="desk-content">
+          {connectionMessage ? (
+            <p className="mb-4 rounded border border-sand bg-white/70 p-3 text-sm">
+              {connectionMessage}
+            </p>
+          ) : null}
+          {children}
+        </div>
       </div>
     </div>
   );

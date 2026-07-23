@@ -11,6 +11,28 @@ const composio = createComposioStub();
 const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat"]);
 const oauthToolkit = z.enum(["gmail", "calendar", "canva", "linkedin"]);
 
+export const GoogleProfileSchema = z.object({
+  email: z
+    .string()
+    .email()
+    .refine((email) => email.toLowerCase().endsWith("@hrmny.co"), {
+      message: "Connect an @hrmny.co Google Workspace account",
+    }),
+  email_verified: z.literal(true),
+});
+
+const GoogleWorkspaceSecretSchema = z.object({
+  accessToken: z.string().min(20),
+  refreshToken: z.string().min(20),
+  expiresAt: z.string().datetime(),
+});
+
+const GoogleTokenResponseSchema = z.object({
+  access_token: z.string().min(20),
+  expires_in: z.number().int().positive(),
+  refresh_token: z.string().min(20).optional(),
+});
+
 export const CONNECTION_CATALOG = [
   {
     toolkit: "apollo",
@@ -34,18 +56,11 @@ export const CONNECTION_CATALOG = [
     note: "API key storage is ready; CSV remains the fallback.",
   },
   {
-    toolkit: "gmail",
-    label: "Gmail",
+    toolkit: "google_workspace",
+    label: "Google Workspace",
     authType: "oauth",
-    ready: false,
-    note: "Needs one-time Google/Composio provider registration.",
-  },
-  {
-    toolkit: "calendar",
-    label: "Google Calendar",
-    authType: "oauth",
-    ready: false,
-    note: "Needs one-time Google/Composio provider registration.",
+    ready: true,
+    note: "Gmail, Calendar, Drive, and Sheets via the existing Google SSO app.",
   },
   {
     toolkit: "canva",
@@ -112,6 +127,104 @@ export async function getEmployeeIntegrationSecret(
   return typeof decrypted === "string" ? decrypted : null;
 }
 
+export async function getGoogleWorkspaceAccessToken(
+  employeeId: string,
+): Promise<string | null> {
+  const db = getDb();
+  if (!db) return null;
+  const [row] = await db
+    .select({
+      connectionAccountId: connectionAccount.connectionAccountId,
+      secretId: connectionAccount.secretId,
+    })
+    .from(connectionAccount)
+    .where(
+      and(
+        eq(connectionAccount.ownerEmployeeId, employeeId),
+        eq(connectionAccount.toolkit, "google_workspace"),
+        eq(connectionAccount.scope, "staff"),
+        eq(connectionAccount.status, "connected"),
+      ),
+    )
+    .limit(1);
+  if (!row?.secretId) return null;
+
+  const secrets = await db.execute(
+    sql<{ decrypted_secret: string }>`
+      select decrypted_secret
+      from vault.decrypted_secrets
+      where id = ${row.secretId}::uuid
+      limit 1
+    `,
+  );
+  const decrypted = secrets[0]?.decrypted_secret;
+  if (typeof decrypted !== "string") {
+    throw new Error("Google Workspace connection secret is unavailable");
+  }
+  const stored = GoogleWorkspaceSecretSchema.parse(JSON.parse(decrypted));
+  if (Date.parse(stored.expiresAt) > Date.now() + 60_000) {
+    return stored.accessToken;
+  }
+
+  const clientId = (
+    process.env.GOOGLE_OAUTH_CLIENT_ID ?? process.env.client_id
+  )?.trim();
+  const clientSecret = (
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? process.env.client_secret
+  )?.trim();
+  if (!clientId || !clientSecret) {
+    throw new Error("Google OAuth client credentials are not configured");
+  }
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "refresh_token",
+      refresh_token: stored.refreshToken,
+    }),
+  });
+  if (!response.ok) {
+    await db
+      .update(connectionAccount)
+      .set({
+        status: "error",
+        lastError: `Google token refresh failed (${response.status})`,
+        updatedAt: new Date(),
+      })
+      .where(
+        eq(connectionAccount.connectionAccountId, row.connectionAccountId),
+      );
+    throw new Error(`Google token refresh failed (${response.status})`);
+  }
+
+  const refreshed = GoogleTokenResponseSchema.parse(await response.json());
+  const expiresAt = new Date(Date.now() + refreshed.expires_in * 1000);
+  const replacement = JSON.stringify({
+    accessToken: refreshed.access_token,
+    refreshToken: refreshed.refresh_token ?? stored.refreshToken,
+    expiresAt: expiresAt.toISOString(),
+  });
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select vault.update_secret(${row.secretId}::uuid, ${replacement})`,
+    );
+    await tx
+      .update(connectionAccount)
+      .set({
+        expiresAt,
+        lastTestedAt: new Date(),
+        lastError: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        eq(connectionAccount.connectionAccountId, row.connectionAccountId),
+      );
+  });
+  return refreshed.access_token;
+}
+
 export const connectionsRouter = router({
   list: staffProcedure
     .input(
@@ -144,6 +257,7 @@ export const connectionsRouter = router({
           toolkit: connectionAccount.toolkit,
           status: connectionAccount.status,
           secretId: connectionAccount.secretId,
+          externalConnectionId: connectionAccount.externalConnectionId,
           lastTestedAt: connectionAccount.lastTestedAt,
           lastError: connectionAccount.lastError,
         })
@@ -163,7 +277,7 @@ export const connectionsRouter = router({
           connectionAccountId: row?.connectionAccountId ?? null,
           scope: "staff" as const,
           status: row?.status ?? "disconnected",
-          externalConnectionId: null as string | null,
+          externalConnectionId: row?.externalConnectionId ?? null,
           hasSecret: Boolean(row?.secretId),
           lastTestedAt: row?.lastTestedAt?.toISOString() ?? null,
           lastError: row?.lastError ?? null,
@@ -257,6 +371,117 @@ export const connectionsRouter = router({
         toolkit: row.toolkit,
         status: row.status,
         hasSecret: true,
+      };
+    }),
+
+  saveGoogleWorkspace: staffProcedure
+    .input(
+      z.object({
+        accessToken: z.string().min(20).max(8192),
+        refreshToken: z.string().min(20).max(8192),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const employeeId = requireEmployeeId(ctx.employeeId);
+      const profileResponse = await fetch(
+        "https://www.googleapis.com/oauth2/v3/userinfo",
+        { headers: { authorization: `Bearer ${input.accessToken}` } },
+      );
+      if (!profileResponse.ok) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Google rejected the connection token",
+        });
+      }
+      const profile = GoogleProfileSchema.parse(await profileResponse.json());
+      const db = requireDb();
+      const [existing] = await db
+        .select()
+        .from(connectionAccount)
+        .where(
+          and(
+            eq(connectionAccount.ownerEmployeeId, employeeId),
+            eq(connectionAccount.toolkit, "google_workspace"),
+            eq(connectionAccount.scope, "staff"),
+          ),
+        )
+        .limit(1);
+      const expiresAt = new Date(Date.now() + 55 * 60 * 1000);
+      const secret = JSON.stringify({
+        accessToken: input.accessToken,
+        refreshToken: input.refreshToken,
+        expiresAt: expiresAt.toISOString(),
+      });
+
+      const saved = await db.transaction(async (tx) => {
+        let secretId = existing?.secretId ?? null;
+        if (secretId) {
+          await tx.execute(
+            sql`select vault.update_secret(${secretId}::uuid, ${secret})`,
+          );
+        } else {
+          const created = await tx.execute(
+            sql<{ id: string }>`
+              select vault.create_secret(
+                ${secret},
+                ${`hrmny:${employeeId}:google_workspace`},
+                'Google Workspace OAuth tokens managed by hrmny OS'
+              ) as id
+            `,
+          );
+          const createdId = created[0]?.id;
+          secretId = typeof createdId === "string" ? createdId : null;
+        }
+        if (!secretId) throw new Error("Vault did not return a secret id");
+
+        const values = {
+          ownerEmployeeId: employeeId,
+          toolkit: "google_workspace",
+          scope: "staff",
+          authType: "oauth",
+          label: "Google Workspace",
+          secretId,
+          externalConnectionId: profile.email.toLowerCase(),
+          status: "connected",
+          expiresAt,
+          lastTestedAt: new Date(),
+          lastError: null,
+          updatedAt: new Date(),
+        };
+        const [row] = existing
+          ? await tx
+              .update(connectionAccount)
+              .set(values)
+              .where(
+                eq(
+                  connectionAccount.connectionAccountId,
+                  existing.connectionAccountId,
+                ),
+              )
+              .returning()
+          : await tx.insert(connectionAccount).values(values).returning();
+        await tx.insert(auditEvent).values({
+          actorEmployeeId: employeeId,
+          action: existing
+            ? "connections.replaceOAuth"
+            : "connections.connectOAuth",
+          entityType: "connection_account",
+          entityId: row!.connectionAccountId,
+          before: existing ? { status: existing.status } : null,
+          after: {
+            toolkit: "google_workspace",
+            status: "connected",
+            account: profile.email.toLowerCase(),
+          },
+        });
+        return row!;
+      });
+
+      return {
+        connectionAccountId: saved.connectionAccountId,
+        toolkit: saved.toolkit,
+        status: saved.status,
+        account: profile.email.toLowerCase(),
       };
     }),
 

@@ -2,7 +2,16 @@
 
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
+import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { useState } from "react";
+
+const GOOGLE_WORKSPACE_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/spreadsheets",
+].join(" ");
 
 export default function ConnectionsPage() {
   const utils = trpc.useUtils();
@@ -16,6 +25,28 @@ export default function ConnectionsPage() {
   });
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [redirect, setRedirect] = useState<string | null>(null);
+
+  async function connectGoogleWorkspace() {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    localStorage.setItem("hrmny-google-workspace-connect", "pending");
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+        scopes: GOOGLE_WORKSPACE_SCOPES,
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent",
+          hd: "hrmny.co",
+        },
+      },
+    });
+    if (error) {
+      localStorage.removeItem("hrmny-google-workspace-connect");
+      throw error;
+    }
+  }
 
   return (
     <main className="flex flex-col gap-6">
@@ -45,6 +76,11 @@ export default function ConnectionsPage() {
                   · {item.status}
                 </p>
                 <p className="mt-1 text-xs text-muted">{item.note}</p>
+                {item.externalConnectionId ? (
+                  <p className="mt-1 text-xs font-medium text-ink">
+                    {item.externalConnectionId}
+                  </p>
+                ) : null}
               </div>
               {item.connectionAccountId ? (
                 <Button
@@ -97,14 +133,17 @@ export default function ConnectionsPage() {
                 type="button"
                 variant="ghost"
                 disabled={!item.ready || startOAuth.isPending}
-                onClick={() =>
+                onClick={() => {
+                  if (item.toolkit === "google_workspace") {
+                    void connectGoogleWorkspace();
+                    return;
+                  }
                   void startOAuth
                     .mutateAsync({
-                      toolkit: item.toolkit as
-                        "gmail" | "calendar" | "canva" | "linkedin",
+                      toolkit: item.toolkit as "canva",
                     })
-                    .then((result) => setRedirect(result.redirectUrl))
-                }
+                    .then((result) => setRedirect(result.redirectUrl));
+                }}
               >
                 {item.ready ? "Connect with OAuth" : "Provider setup needed"}
               </Button>

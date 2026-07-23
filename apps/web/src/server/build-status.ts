@@ -39,8 +39,8 @@ export async function getBuildStatus() {
       id: "M1",
       title: "Substrate",
       fee: "$1,500",
-      status: "done",
-      summary: "Gate engine, RBAC, audit, DAM, app shell",
+      status: "live_pending",
+      summary: "Core live; durable jobs, Chat alert, and team rollout remain",
       href: "/gate",
       demoReady: true,
     },
@@ -58,7 +58,9 @@ export async function getBuildStatus() {
       title: "Sales platform",
       fee: "$1,500",
       status:
-        apolloMode === "live" && hunterMode === "live" ? "done" : "live_pending",
+        apolloMode === "live" && hunterMode === "live"
+          ? "done"
+          : "live_pending",
       summary: "BUAF, quotes, HITL outreach, Won→Handover",
       href: "/sales",
       demoReady: true,
@@ -107,13 +109,15 @@ export async function getBuildStatus() {
       status: dbPing.ok ? "active" : databaseUrl ? "missing" : "missing",
       detail: dbPing.ok
         ? `Connected via pooler · ${dbPing.tables} tables · ${dbPing.roles} roles · ${dbPing.employees} employees · ${dbPing.deals} deals`
-        : dbPing.error ?? "DATABASE_URL not set or unreachable",
+        : (dbPing.error ?? "DATABASE_URL not set or unreachable"),
     },
     {
       id: "vercel",
       label: "Vercel",
       status: appUrl ? "active" : "missing",
-      detail: appUrl ? `${appUrl} — CRM at /crm` : "Vercel project not configured",
+      detail: appUrl
+        ? `${appUrl} — CRM at /crm`
+        : "Vercel project not configured",
     },
     {
       id: "composio",
@@ -121,37 +125,20 @@ export async function getBuildStatus() {
       status: composioKey ? "active" : "mock",
       detail: composioKey
         ? "API key present — live OAuth/send available"
-        : "MCP active (Gmail/Calendar/Drive/Sheets/Asana). App key optional.",
+        : "Not configured; direct provider connections are used instead.",
     },
     {
-      id: "gmail",
-      label: "Gmail",
-      status: "active",
-      detail: "developer@hrmny.co via Composio",
-    },
-    {
-      id: "gcal",
-      label: "Google Calendar",
-      status: "active",
-      detail: "Connected via Composio",
-    },
-    {
-      id: "gdrive",
-      label: "Google Drive",
-      status: "active",
-      detail: "Connected via Composio",
-    },
-    {
-      id: "gsheets",
-      label: "Google Sheets",
-      status: "active",
-      detail: "Connected via Composio",
+      id: "google-workspace",
+      label: "Google Workspace",
+      status: "missing",
+      detail:
+        "Each user connects Gmail, Calendar, Drive, and Sheets in Settings.",
     },
     {
       id: "asana",
       label: "Asana",
-      status: "active",
-      detail: "Connected — boards migrate in-house over time",
+      status: "missing",
+      detail: "Not connected; migration and reconciliation are still required.",
     },
     {
       id: "canva",
@@ -190,7 +177,9 @@ export async function getBuildStatus() {
 
   return {
     product: "hrmny OS",
-    phase: dbPing.ok ? "Production wiring · Postgres live" : "Production wiring",
+    phase: dbPing.ok
+      ? "Production wiring · Postgres live"
+      : "Production wiring",
     authMode,
     database: dbPing,
     progress: {
@@ -202,10 +191,10 @@ export async function getBuildStatus() {
     milestones,
     connections,
     nextActions: [
-      dbPing.ok
-        ? "Postgres live — next: migrate demo store reads for deals/roles onto Drizzle"
-        : "Fix DATABASE_URL (use pooler IPv4 host if direct db.* fails)",
-      "Optional: Canva Composio connect",
+      dbPing.ok ? "Postgres live" : "Fix DATABASE_URL",
+      "M1: wire durable background jobs and the Google Chat health webhook",
+      "M1: provision and verify every staff role",
+      "Connect Google Workspace per staff user in Settings",
       "LinkedIn: keep copy-draft only (no account connect)",
       "Tomorrow: Xero + Apollo + Hunter keys → flip *_MODE=live",
     ],

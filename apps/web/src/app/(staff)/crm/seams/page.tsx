@@ -52,7 +52,10 @@ export default function CrmSeamsPage() {
       ) : (
         <div className="crm-cards">
           {cards.map((card) => {
-            const row = byToolkit.get(card.key);
+            const row =
+              card.key === "gmail" || card.key === "calendar"
+                ? byToolkit.get("google_workspace")
+                : byToolkit.get(card.key);
             const status =
               card.key === "linkedin"
                 ? "Draft only"
