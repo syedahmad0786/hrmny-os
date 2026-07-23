@@ -58,9 +58,9 @@ export default function StaffHomePage() {
               {data.product}
             </h1>
             <p className="mt-3 text-base text-sand/90">
-              Live desk for Creative Harmony. Milestone demos run locally today;
-              production wiring (Supabase schema, Composio, Vercel) lands as
-              credentials arrive.
+              Live operating desk for Creative Harmony. Supabase, Postgres,
+              Google Workspace sign-in, storage, and Vercel are connected;
+              remaining external tool connections activate as credentials arrive.
             </p>
           </div>
           <div className="min-w-[200px] rounded-xl border border-white/10 bg-white/5 px-5 py-4 backdrop-blur">

@@ -216,7 +216,8 @@ export async function resolveSupabaseUser(
     throw new Error("AUTH_MODE=supabase requires DATABASE_URL");
   }
 
-  const [staff] = await db
+  const email = data.user.email?.trim().toLowerCase();
+  let [staff] = await db
     .select({
       employeeId: employee.employeeId,
       email: employee.email,
@@ -227,6 +228,21 @@ export async function resolveSupabaseUser(
     .innerJoin(employee, eq(employeeAuth.employeeId, employee.employeeId))
     .where(eq(employeeAuth.authUserId, data.user.id))
     .limit(1);
+
+  // An approved employee email is enough for the first login. Where provisioned,
+  // the optional employee_auth link remains the stronger identifier.
+  if (!staff && email && data.user.email_confirmed_at) {
+    [staff] = await db
+      .select({
+        employeeId: employee.employeeId,
+        email: employee.email,
+        displayName: employee.displayName,
+        isActive: employee.isActive,
+      })
+      .from(employee)
+      .where(sql`${employee.isActive} = true and lower(${employee.email}) = ${email}`)
+      .limit(1);
+  }
 
   if (staff?.isActive) {
     const access = await db
@@ -259,7 +275,6 @@ export async function resolveSupabaseUser(
     };
   }
 
-  const email = data.user.email?.trim().toLowerCase();
   if (!email || !data.user.email_confirmed_at) return null;
   const portalUsers = await db
     .select({
