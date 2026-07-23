@@ -51,8 +51,12 @@ import {
 } from "./enums";
 
 const timestamps = {
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 };
 
 /** 22. role */
@@ -138,7 +142,9 @@ export const contact = pgTable("contact", {
 export const deal = pgTable("deal", {
   dealId: uuid("deal_id").defaultRandom().primaryKey(),
   companyId: uuid("company_id").references(() => company.companyId),
-  primaryContactId: uuid("primary_contact_id").references(() => contact.contactId),
+  primaryContactId: uuid("primary_contact_id").references(
+    () => contact.contactId,
+  ),
   companyName: text("company_name").notNull(),
   sector: text("sector"),
   stage: dealStageEnum("stage").default("discover").notNull(),
@@ -162,7 +168,9 @@ export const deal = pgTable("deal", {
   })
     .default("20.00")
     .notNull(),
-  ownerEmployeeId: uuid("owner_employee_id").references(() => employee.employeeId),
+  ownerEmployeeId: uuid("owner_employee_id").references(
+    () => employee.employeeId,
+  ),
   ...timestamps,
 });
 
@@ -175,8 +183,12 @@ export const activity = pgTable("activity", {
   companyId: uuid("company_id").references(() => company.companyId),
   contactId: uuid("contact_id").references(() => contact.contactId),
   dealId: uuid("deal_id").references(() => deal.dealId),
-  actorEmployeeId: uuid("actor_employee_id").references(() => employee.employeeId),
-  occurredAt: timestamp("occurred_at", { withTimezone: true }).defaultNow().notNull(),
+  actorEmployeeId: uuid("actor_employee_id").references(
+    () => employee.employeeId,
+  ),
+  occurredAt: timestamp("occurred_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
   ...timestamps,
 });
@@ -188,7 +200,9 @@ export const crmNote = pgTable("crm_note", {
   companyId: uuid("company_id").references(() => company.companyId),
   contactId: uuid("contact_id").references(() => contact.contactId),
   dealId: uuid("deal_id").references(() => deal.dealId),
-  authorEmployeeId: uuid("author_employee_id").references(() => employee.employeeId),
+  authorEmployeeId: uuid("author_employee_id").references(
+    () => employee.employeeId,
+  ),
   ...timestamps,
 });
 
@@ -201,7 +215,9 @@ export const crmTask = pgTable("crm_task", {
   companyId: uuid("company_id").references(() => company.companyId),
   contactId: uuid("contact_id").references(() => contact.contactId),
   dealId: uuid("deal_id").references(() => deal.dealId),
-  ownerEmployeeId: uuid("owner_employee_id").references(() => employee.employeeId),
+  ownerEmployeeId: uuid("owner_employee_id").references(
+    () => employee.employeeId,
+  ),
   ...timestamps,
 });
 
@@ -232,7 +248,9 @@ export const client = pgTable("client", {
 export const accountTeamMember = pgTable(
   "account_team_member",
   {
-    accountTeamMemberId: uuid("account_team_member_id").defaultRandom().primaryKey(),
+    accountTeamMemberId: uuid("account_team_member_id")
+      .defaultRandom()
+      .primaryKey(),
     clientId: uuid("client_id")
       .notNull()
       .references(() => client.clientId),
@@ -322,7 +340,9 @@ export const task = pgTable("task", {
   taskType: text("task_type").notNull(),
   status: taskStatusEnum("status").default("backlog").notNull(),
   situationalState: text("situational_state"),
-  ownerEmployeeId: uuid("owner_employee_id").references(() => employee.employeeId),
+  ownerEmployeeId: uuid("owner_employee_id").references(
+    () => employee.employeeId,
+  ),
   deadline: date("deadline"),
   priority: text("priority"),
   ...timestamps,
@@ -366,7 +386,9 @@ export const bayzatEmployeeMirror = pgTable("bayzat_employee_mirror", {
   employeeId: uuid("employee_id").references(() => employee.employeeId),
   externalId: text("external_id").notNull().unique(),
   payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
-  syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+  syncedAt: timestamp("synced_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
   ...timestamps,
 });
 
@@ -386,21 +408,29 @@ export const invoice = pgTable("invoice", {
 
 /** 14. xero_invoice_mirror */
 export const xeroInvoiceMirror = pgTable("xero_invoice_mirror", {
-  xeroInvoiceMirrorId: uuid("xero_invoice_mirror_id").defaultRandom().primaryKey(),
+  xeroInvoiceMirrorId: uuid("xero_invoice_mirror_id")
+    .defaultRandom()
+    .primaryKey(),
   invoiceId: uuid("invoice_id").references(() => invoice.invoiceId),
   externalId: text("external_id").notNull().unique(),
   payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
-  syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+  syncedAt: timestamp("synced_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
   ...timestamps,
 });
 
 /** 15. airtable_task_mirror */
 export const airtableTaskMirror = pgTable("airtable_task_mirror", {
-  airtableTaskMirrorId: uuid("airtable_task_mirror_id").defaultRandom().primaryKey(),
+  airtableTaskMirrorId: uuid("airtable_task_mirror_id")
+    .defaultRandom()
+    .primaryKey(),
   taskId: uuid("task_id").references(() => task.taskId),
   externalId: text("external_id").notNull().unique(),
   payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
-  syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+  syncedAt: timestamp("synced_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
   ...timestamps,
 });
 
@@ -417,19 +447,25 @@ export const convention = pgTable("convention", {
 /** 17. audit_event — append-only */
 export const auditEvent = pgTable("audit_event", {
   auditEventId: uuid("audit_event_id").defaultRandom().primaryKey(),
-  actorEmployeeId: uuid("actor_employee_id").references(() => employee.employeeId),
+  actorEmployeeId: uuid("actor_employee_id").references(
+    () => employee.employeeId,
+  ),
   action: text("action").notNull(),
   entityType: text("entity_type").notNull(),
   entityId: uuid("entity_id"),
   before: jsonb("before").$type<Record<string, unknown> | null>(),
   after: jsonb("after").$type<Record<string, unknown> | null>(),
   reason: text("reason"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 
 /** 18. client_portal_user */
 export const clientPortalUser = pgTable("client_portal_user", {
-  clientPortalUserId: uuid("client_portal_user_id").defaultRandom().primaryKey(),
+  clientPortalUserId: uuid("client_portal_user_id")
+    .defaultRandom()
+    .primaryKey(),
   clientId: uuid("client_id")
     .notNull()
     .references(() => client.clientId),
@@ -457,26 +493,59 @@ export const assetVersion = pgTable("asset_version", {
     .notNull()
     .references(() => asset.assetId),
   storagePath: text("storage_path").notNull(),
-  versionNumber: numeric("version_number", { precision: 6, scale: 0 }).notNull(),
+  versionNumber: numeric("version_number", {
+    precision: 6,
+    scale: 0,
+  }).notNull(),
   isClientRevision: boolean("is_client_revision").default(false).notNull(),
   uploadedByEmployeeId: uuid("uploaded_by_employee_id").references(
     () => employee.employeeId,
   ),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 
 /** M1: Composio / direct connection metadata */
 export const connectionAccount = pgTable("connection_account", {
-  connectionAccountId: uuid("connection_account_id").defaultRandom().primaryKey(),
-  ownerEmployeeId: uuid("owner_employee_id").references(() => employee.employeeId),
+  connectionAccountId: uuid("connection_account_id")
+    .defaultRandom()
+    .primaryKey(),
+  ownerEmployeeId: uuid("owner_employee_id").references(
+    () => employee.employeeId,
+  ),
   ownerPortalUserId: uuid("owner_portal_user_id").references(
     () => clientPortalUser.clientPortalUserId,
   ),
   toolkit: text("toolkit").notNull(),
   scope: text("scope").notNull(), // staff | portal
+  authType: text("auth_type").default("oauth").notNull(),
+  label: text("label"),
+  secretId: uuid("secret_id"), // Supabase Vault id; never return the secret
   externalConnectionId: text("external_connection_id"),
   status: text("status").default("disconnected").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
+  lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  ...timestamps,
+});
+
+/** Product requests: idea/voice intake → editable PRD → approval → build. */
+export const featureRequest = pgTable("feature_request", {
+  featureRequestId: uuid("feature_request_id").defaultRandom().primaryKey(),
+  submittedByEmployeeId: uuid("submitted_by_employee_id")
+    .notNull()
+    .references(() => employee.employeeId),
+  title: text("title").notNull(),
+  rawInput: text("raw_input").notNull(),
+  voiceStoragePath: text("voice_storage_path"),
+  prd: jsonb("prd").$type<Record<string, unknown>>().default({}).notNull(),
+  status: text("status").default("draft").notNull(),
+  approvalNote: text("approval_note"),
+  approvedByEmployeeId: uuid("approved_by_employee_id").references(
+    () => employee.employeeId,
+  ),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
   ...timestamps,
 });
 
@@ -487,22 +556,21 @@ export const healthSignal = pgTable("health_signal", {
   severity: text("severity").notNull(), // info | warn | critical
   payload: jsonb("payload").$type<Record<string, unknown>>().default({}),
   notifiedAt: timestamp("notified_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 
 /** Optional link: Supabase auth.users.id → employee */
-export const employeeAuth = pgTable(
-  "employee_auth",
-  {
-    employeeAuthId: uuid("employee_auth_id").defaultRandom().primaryKey(),
-    employeeId: uuid("employee_id")
-      .notNull()
-      .references(() => employee.employeeId)
-      .unique(),
-    authUserId: uuid("auth_user_id").notNull().unique(),
-    ...timestamps,
-  },
-);
+export const employeeAuth = pgTable("employee_auth", {
+  employeeAuthId: uuid("employee_auth_id").defaultRandom().primaryKey(),
+  employeeId: uuid("employee_id")
+    .notNull()
+    .references(() => employee.employeeId)
+    .unique(),
+  authUserId: uuid("auth_user_id").notNull().unique(),
+  ...timestamps,
+});
 
 /**
  * Semantic memory chunks (pgvector). CRM tables remain SoT.
@@ -514,8 +582,13 @@ export const memoryChunk = pgTable("memory_chunk", {
   sourceId: uuid("source_id"),
   content: text("content").notNull(),
   embedding: vector1536("embedding"),
-  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  metadata: jsonb("metadata")
+    .$type<Record<string, unknown>>()
+    .default({})
+    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 
 /**
@@ -549,7 +622,10 @@ export const ticket = pgTable("ticket", {
   ),
   aiDraftReply: text("ai_draft_reply"),
   aiDraftApprovedAt: timestamp("ai_draft_approved_at", { withTimezone: true }),
-  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  metadata: jsonb("metadata")
+    .$type<Record<string, unknown>>()
+    .default({})
+    .notNull(),
   ...timestamps,
 });
 
@@ -563,11 +639,12 @@ export const ticketComment = pgTable("ticket_comment", {
   isInternal: boolean("is_internal").default(false).notNull(),
   /** AI-authored draft awaiting human approve before client-visible */
   isAiDraft: boolean("is_ai_draft").default(false).notNull(),
-  authorEmployeeId: uuid("author_employee_id").references(() => employee.employeeId),
+  authorEmployeeId: uuid("author_employee_id").references(
+    () => employee.employeeId,
+  ),
   authorPortalUserId: uuid("author_portal_user_id").references(
     () => clientPortalUser.clientPortalUserId,
   ),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   ...timestamps,
 });
-

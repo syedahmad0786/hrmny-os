@@ -13,7 +13,8 @@ const PRIMARY_NAV = [
     href: "/crm",
     label: "CRM",
     index: "02",
-    match: (p: string) => p === "/crm" || p.startsWith("/crm/") || p.startsWith("/sales"),
+    match: (p: string) =>
+      p === "/crm" || p.startsWith("/crm/") || p.startsWith("/sales"),
   },
   {
     href: "/delivery",
@@ -38,12 +39,20 @@ const PRIMARY_NAV = [
     label: "Ops / HR",
     index: "05",
     match: (p: string) =>
-      ["/hr", "/payroll", "/roles"].some((h) => p === h || p.startsWith(`${h}/`)),
+      ["/hr", "/payroll", "/roles"].some(
+        (h) => p === h || p.startsWith(`${h}/`),
+      ),
+  },
+  {
+    href: "/requests",
+    label: "Requests",
+    index: "06",
+    match: (p: string) => p === "/requests" || p.startsWith("/requests/"),
   },
   {
     href: "/settings/connections",
     label: "Settings",
-    index: "06",
+    index: "07",
     match: (p: string) =>
       p.startsWith("/settings") ||
       p.startsWith("/admin") ||

@@ -12,7 +12,9 @@ function readMigration(name: string): string {
 
 function createdTables(sql: string): string[] {
   return [
-    ...sql.matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+"?([a-z_]+)"?/gi),
+    ...sql.matchAll(
+      /CREATE TABLE(?: IF NOT EXISTS)?\s+(?:public\.)?"?([a-z_]+)"?/gi,
+    ),
   ].map((match) => match[1]!);
 }
 
@@ -24,6 +26,7 @@ describe("production migration security", () => {
         "0002_crm_entities.sql",
         "0003_pgvector_memory.sql",
         "0004_tickets.sql",
+        "0006_connectors_feature_requests.sql",
       ].flatMap((name) => createdTables(readMigration(name))),
     );
     const lockdown = readMigration("0005_lock_down_data_api.sql");
@@ -54,7 +57,10 @@ describe("production migration security", () => {
       "0003_pgvector_memory",
       "0004_tickets",
       "0005_lock_down_data_api",
+      "0006_connectors_feature_requests",
     ]);
-    expect(journal.entries.map(({ idx }) => idx)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(journal.entries.map(({ idx }) => idx)).toEqual([
+      0, 1, 2, 3, 4, 5, 6,
+    ]);
   });
 });

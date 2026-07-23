@@ -2,19 +2,10 @@
 
 import Link from "next/link";
 import { trpc } from "@/lib/trpc";
-import {
-  CrmBtn,
-  CrmEmpty,
-  CrmPageHeader,
-  CrmTag,
-} from "@/components/crm/ui";
+import { CrmBtn, CrmEmpty, CrmPageHeader, CrmTag } from "@/components/crm/ui";
 
 export default function CrmSeamsPage() {
   const connections = trpc.connections.list.useQuery({ scope: "staff" });
-  const start = trpc.connections.startOAuth.useMutation();
-  const complete = trpc.connections.completeOAuth.useMutation({
-    onSuccess: () => void connections.refetch(),
-  });
 
   const byToolkit = new Map(
     (connections.data ?? []).map((c) => [c.toolkit, c]),
@@ -93,7 +84,9 @@ export default function CrmSeamsPage() {
                       : "No data requested"}
                   </span>
                   {card.key === "linkedin" ? (
-                    <span className="text-[var(--ochre-dark)]">{card.action} →</span>
+                    <span className="text-[var(--ochre-dark)]">
+                      {card.action} →
+                    </span>
                   ) : row?.status === "connected" ? (
                     <Link
                       href="/settings/connections"
@@ -102,21 +95,12 @@ export default function CrmSeamsPage() {
                       {card.action} →
                     </Link>
                   ) : (
-                    <button
-                      type="button"
+                    <Link
+                      href="/settings/connections"
                       className="text-[var(--ochre-dark)]"
-                      onClick={() => {
-                        if (card.key === "gmail" || card.key === "calendar") {
-                          const toolkit =
-                            card.key === "calendar" ? "calendar" : "gmail";
-                          void start
-                            .mutateAsync({ toolkit })
-                            .then(() => complete.mutateAsync({ toolkit }));
-                        }
-                      }}
                     >
                       Connect →
-                    </button>
+                    </Link>
                   )}
                 </div>
               </article>
@@ -128,7 +112,9 @@ export default function CrmSeamsPage() {
               <CrmTag kind="warn">Disconnected</CrmTag>
             </div>
             <h3>Another calendar</h3>
-            <p>Connect a supported workspace calendar when your team is ready.</p>
+            <p>
+              Connect a supported workspace calendar when your team is ready.
+            </p>
             <div className="crm-object-foot">
               <span>No data requested</span>
               <Link

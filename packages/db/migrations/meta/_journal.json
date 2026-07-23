@@ -43,6 +43,13 @@
       "when": 1784786388879,
       "tag": "0005_lock_down_data_api",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784800000000,
+      "tag": "0006_connectors_feature_requests",
+      "breakpoints": true
     }
   ]
 }

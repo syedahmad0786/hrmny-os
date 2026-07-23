@@ -6,99 +6,131 @@ import { useState } from "react";
 
 export default function ConnectionsPage() {
   const utils = trpc.useUtils();
-  const list = trpc.connections.list.useQuery({ scope: "staff" });
-  const start = trpc.connections.startOAuth.useMutation({
+  const list = trpc.connections.list.useQuery();
+  const saveKey = trpc.connections.saveApiKey.useMutation({
     onSuccess: () => void utils.connections.list.invalidate(),
   });
-  const complete = trpc.connections.completeOAuth.useMutation({
-    onSuccess: () => void utils.connections.invalidate(),
+  const startOAuth = trpc.connections.startOAuth.useMutation();
+  const disconnect = trpc.connections.disconnect.useMutation({
+    onSuccess: () => void utils.connections.list.invalidate(),
   });
-  const canva = trpc.connections.canvaListDesigns.useQuery(undefined, {
-    enabled: false,
-  });
+  const [keys, setKeys] = useState<Record<string, string>>({});
   const [redirect, setRedirect] = useState<string | null>(null);
-  const [canvaMsg, setCanvaMsg] = useState<string | null>(null);
-
-  async function connect(toolkit: "gmail" | "linkedin" | "canva" | "calendar") {
-    const result = await start.mutateAsync({ toolkit });
-    setRedirect(result.redirectUrl);
-  }
-
-  async function connectCanvaDemo() {
-    await start.mutateAsync({ toolkit: "canva" });
-    const row = await complete.mutateAsync({ toolkit: "canva" });
-    setRedirect(null);
-    setCanvaMsg(`Canva connected (stub): ${row.connectionAccountId}`);
-    const smoke = await canva.refetch();
-    if (smoke.data?.ok) {
-      setCanvaMsg(
-        `Canva connected · ${smoke.data.designs.length} stub designs listed`,
-      );
-    }
-  }
 
   return (
     <main className="flex flex-col gap-6">
-      <h1 className="font-display text-3xl font-semibold">Connections</h1>
-      <p className="text-muted">
-        Composio OAuth — Canva is connect-only (no Canva clone). Redirect URLs
-        are placeholders until <code>COMPOSIO_API_KEY</code> is set.
-      </p>
-
-      <section className="rounded-lg border border-sand bg-white/70 p-4">
-        <h2 className="font-display text-lg">Canva toolkit</h2>
-        <p className="mt-1 text-sm text-muted">
-          M4 demo: connect stub → list/export smoke. Deep ads analytics parked.
+      <div>
+        <h1 className="font-display text-3xl font-semibold">Connections</h1>
+        <p className="mt-2 text-muted">
+          Connect, replace, or remove tools here. API keys are encrypted in
+          Supabase Vault and are never returned to the browser.
         </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button type="button" onClick={() => void connectCanvaDemo()}>
-            Connect Canva (Composio stub)
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() =>
-              void canva.refetch().then((r) => {
-                if (!r.data?.ok) {
-                  setCanvaMsg(r.data?.reason ?? "Not connected");
-                } else {
-                  setCanvaMsg(
-                    `Designs: ${r.data.designs.map((d) => d.title).join("; ")}`,
-                  );
-                }
-              })
-            }
-          >
-            List Canva designs (smoke)
-          </Button>
-        </div>
-        {canvaMsg ? <p className="mt-3 text-sm text-ink">{canvaMsg}</p> : null}
-      </section>
+      </div>
 
-      <div className="flex flex-wrap gap-2">
-        {(["gmail", "linkedin", "canva", "calendar"] as const).map((t) => (
-          <Button
-            key={t}
-            type="button"
-            variant="ghost"
-            onClick={() => void connect(t)}
-            disabled={start.isPending}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {(list.data ?? []).map((item) => (
+          <section
+            key={item.toolkit}
+            className="rounded-lg border border-sand bg-white/70 p-4"
           >
-            Connect {t}
-          </Button>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="font-display text-lg">{item.label}</h2>
+                <p className="text-sm text-muted">
+                  {item.authType === "api_key"
+                    ? "API key"
+                    : item.authType === "oauth"
+                      ? "OAuth"
+                      : "Manual"}{" "}
+                  · {item.status}
+                </p>
+                <p className="mt-1 text-xs text-muted">{item.note}</p>
+              </div>
+              {item.connectionAccountId ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={disconnect.isPending}
+                  onClick={() =>
+                    disconnect.mutate({ id: item.connectionAccountId! })
+                  }
+                >
+                  Disconnect
+                </Button>
+              ) : null}
+            </div>
+
+            {item.authType === "api_key" ? (
+              <div className="mt-4 flex gap-2">
+                <input
+                  className="min-w-0 flex-1 rounded border border-sand bg-white px-3 py-2"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={
+                    item.hasSecret ? "Paste replacement key" : "Paste API key"
+                  }
+                  value={keys[item.toolkit] ?? ""}
+                  onChange={(event) =>
+                    setKeys((current) => ({
+                      ...current,
+                      [item.toolkit]: event.target.value,
+                    }))
+                  }
+                />
+                <Button
+                  type="button"
+                  disabled={!keys[item.toolkit]?.trim() || saveKey.isPending}
+                  onClick={() => {
+                    saveKey.mutate({
+                      toolkit: item.toolkit as "apollo" | "hunter" | "bayzat",
+                      apiKey: keys[item.toolkit]!,
+                    });
+                    setKeys((current) => ({ ...current, [item.toolkit]: "" }));
+                  }}
+                >
+                  {item.hasSecret ? "Replace" : "Connect"}
+                </Button>
+              </div>
+            ) : item.authType === "oauth" ? (
+              <Button
+                className="mt-4"
+                type="button"
+                variant="ghost"
+                disabled={!item.ready || startOAuth.isPending}
+                onClick={() =>
+                  void startOAuth
+                    .mutateAsync({
+                      toolkit: item.toolkit as
+                        "gmail" | "calendar" | "canva" | "linkedin",
+                    })
+                    .then((result) => setRedirect(result.redirectUrl))
+                }
+              >
+                {item.ready ? "Connect with OAuth" : "Provider setup needed"}
+              </Button>
+            ) : (
+              <p className="mt-4 text-sm text-muted">
+                Outreach stays human-approved and is copied into LinkedIn
+                manually.
+              </p>
+            )}
+          </section>
         ))}
       </div>
+
       {redirect ? (
-        <p className="text-sm">
-          OAuth redirect (stub):{" "}
+        <p className="rounded-lg border border-sand bg-white/70 p-4 text-sm">
+          Authorization ready:{" "}
           <a className="text-ochre underline" href={redirect}>
-            {redirect}
+            open provider login
           </a>
         </p>
       ) : null}
-      <pre className="overflow-x-auto rounded-lg border border-sand bg-white/70 p-4 text-sm">
-        {JSON.stringify(list.data ?? [], null, 2)}
-      </pre>
+      {saveKey.error || disconnect.error || startOAuth.error ? (
+        <p className="text-sm text-red-700">
+          {(saveKey.error ?? disconnect.error ?? startOAuth.error)?.message}
+        </p>
+      ) : null}
     </main>
   );
 }

@@ -38,6 +38,7 @@ BEGIN
     'employee',
     'employee_auth',
     'employee_role',
+    'feature_request',
     'health_signal',
     'immersion',
     'invoice',

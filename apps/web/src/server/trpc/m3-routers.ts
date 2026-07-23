@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { createApolloLive, createHunterLive } from "@hrmny/integrations";
 import {
   bootstrapGateRegistry,
   computeQuoteMetrics,
@@ -22,8 +23,29 @@ import {
   router,
 } from "./trpc";
 import { month1Router } from "./m4-routers";
+import { getEmployeeIntegrationSecret } from "./connections-router";
 
 bootstrapGateRegistry();
+
+async function apolloFor(employeeId: string) {
+  const apiKey = await getEmployeeIntegrationSecret(employeeId, "apollo");
+  return {
+    client: apiKey
+      ? createApolloLive({ mode: "live", apiKey })
+      : getDemoStore().apollo,
+    live: Boolean(apiKey),
+  };
+}
+
+async function hunterFor(employeeId: string) {
+  const apiKey = await getEmployeeIntegrationSecret(employeeId, "hunter");
+  return {
+    client: apiKey
+      ? createHunterLive({ mode: "live", apiKey })
+      : getDemoStore().hunter,
+    live: Boolean(apiKey),
+  };
+}
 
 const leadSourceLaneSchema = z.enum([
   "industry_scanning",
@@ -79,9 +101,7 @@ async function runDealTransition(
   const store = getDemoStore();
   return transition(actorFromCtx(ctx), dealEntity(deal), input, {
     authorize: async (a) =>
-      a.roles.some((r) =>
-        ["partner", "am", "finance", "director"].includes(r),
-      ),
+      a.roles.some((r) => ["partner", "am", "finance", "director"].includes(r)),
     apply: async ({ request }) => {
       const next = {
         ...deal,
@@ -293,7 +313,11 @@ export const dealsRouter = router({
         after: { temperature: scored.temperature, hot: scored.hot },
         reason: null,
       });
-      return { temperature: scored.temperature, hot: scored.hot, score: scored.score };
+      return {
+        temperature: scored.temperature,
+        hot: scored.hot,
+        score: scored.score,
+      };
     }),
 
   verifyEmail: protectedProcedure
@@ -309,22 +333,26 @@ export const dealsRouter = router({
       if (!deal) throw new Error("NOT_FOUND");
 
       // Apollo → Hunter waterfall
-      const apolloPerson = await store.apollo.enrichPerson(input.email);
+      const apollo = await apolloFor(ctx.employeeId!);
+      const apolloPerson = await apollo.client.enrichPerson(input.email);
       const apolloOk =
         apolloPerson &&
         (apolloPerson.emailStatus === "verified" ||
           apolloPerson.source === "apollo_mock");
       let provider: "apollo" | "hunter" = "apollo";
       let emailVerified = Boolean(apolloOk);
+      let liveProviders = apollo.live;
       let verdict = apolloOk
         ? `apollo-verified:${input.email}`
         : `apollo-miss:${input.email}`;
 
       if (!emailVerified) {
-        const hunter = await store.hunter.verifyEmail(input.email);
+        const hunter = await hunterFor(ctx.employeeId!);
+        liveProviders = liveProviders && hunter.live;
+        const result = await hunter.client.verifyEmail(input.email);
         provider = "hunter";
-        emailVerified = hunter.emailVerified;
-        verdict = hunter.verdict;
+        emailVerified = result.emailVerified;
+        verdict = result.verdict;
       }
 
       const next: DemoDeal = {
@@ -336,11 +364,9 @@ export const dealsRouter = router({
           apollo: apolloPerson,
           verifyProvider: provider,
           verdict,
-          mockWaiver:
-            process.env.APOLLO_MODE !== "live" ||
-            process.env.HUNTER_MODE !== "live"
-              ? "mock adapters used — keys absent or mode=mock"
-              : null,
+          mockWaiver: liveProviders
+            ? null
+            : "mock adapters used — connect Apollo/Hunter in Settings",
         },
       };
       store.deals.set(deal.dealId, next);
@@ -443,7 +469,10 @@ export const dealsRouter = router({
           ok: false as const,
           code: "GATE_BLOCKED" as const,
           blockedBy: [
-            { gate: "deal.lost_reason", reason: "lostReason required when lost" },
+            {
+              gate: "deal.lost_reason",
+              reason: "lostReason required when lost",
+            },
           ],
         };
       }
@@ -474,7 +503,11 @@ export const dealsRouter = router({
       const updated = store.deals.get(input.id)!;
       if (updated.stage !== "close") {
         // Force stage close for won path when already past price_cost in demos
-        if (["propose", "scope", "engage", "qualify", "discover"].includes(updated.stage)) {
+        if (
+          ["propose", "scope", "engage", "qualify", "discover"].includes(
+            updated.stage,
+          )
+        ) {
           return {
             ok: false as const,
             code: "GATE_BLOCKED" as const,
@@ -735,8 +768,7 @@ export const scopesRouter = router({
       const next = {
         ...scope,
         title: input.title ?? scope.title,
-        value:
-          input.value !== undefined ? input.value.toFixed(2) : scope.value,
+        value: input.value !== undefined ? input.value.toFixed(2) : scope.value,
         status: input.status ?? scope.status,
         terms: input.terms === undefined ? scope.terms : input.terms,
       };
@@ -891,8 +923,8 @@ export const clientsRouter = router({
   onboarding: router({
     get: protectedProcedure
       .input(z.object({ clientId: z.string().uuid() }))
-      .query(({ input }) =>
-        getDemoStore().onboarding.get(input.clientId) ?? [],
+      .query(
+        ({ input }) => getDemoStore().onboarding.get(input.clientId) ?? [],
       ),
 
     signoff: protectedProcedure
@@ -925,7 +957,11 @@ export const clientsRouter = router({
           entityType: "onboarding_phase",
           entityId: phase.phaseId,
           before: null,
-          after: { phaseIndex: input.phaseIndex, advanced, signoffType: input.signoffType },
+          after: {
+            phaseIndex: input.phaseIndex,
+            advanced,
+            signoffType: input.signoffType,
+          },
           reason: null,
         });
         return { advanced, phases: store.onboarding.get(input.clientId) };
@@ -969,7 +1005,10 @@ export const outreachRouter = router({
         const store = getDemoStore();
         const deal = store.deals.get(input.dealId);
         if (!deal) throw new Error("NOT_FOUND");
-        if (!deal.buafFit || (deal.buafTemperature !== "hot" && deal.buafTemperature !== "warm")) {
+        if (
+          !deal.buafFit ||
+          (deal.buafTemperature !== "hot" && deal.buafTemperature !== "warm")
+        ) {
           throw new Error("BUAF_REQUIRED");
         }
         const item = {
@@ -1176,9 +1215,7 @@ export const leadsRouter = router({
           vendorHandlingFeePct: "20.00",
           quoteLines: [],
           ownerEmployeeId: null,
-          enrichment: input.message
-            ? { inboundMessage: input.message }
-            : null,
+          enrichment: input.message ? { inboundMessage: input.message } : null,
           commercialMode: "project",
         };
         store.deals.set(deal.dealId, deal);
@@ -1191,7 +1228,8 @@ export const leadsRouter = router({
       .input(z.object({ query: z.string().min(1) }))
       .mutation(async ({ input, ctx }) => {
         const store = getDemoStore();
-        const companies = await store.apollo.searchCompanies(input.query);
+        const apollo = await apolloFor(ctx.employeeId!);
+        const companies = await apollo.client.searchCompanies(input.query);
         const created: DemoDeal[] = [];
         for (const c of companies.slice(0, 5)) {
           const name = String(c.name ?? input.query);

@@ -1,7 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { bootstrapGateRegistry } from "@hrmny/gate";
-import { createComposioStub } from "@hrmny/integrations";
 import { getDemoStore } from "../demo-store";
 import { getBuildStatus } from "../build-status";
 import { DEV_USERS, getAuthMode } from "../auth/session";
@@ -29,6 +27,8 @@ import {
 import { crmRouter } from "./crm-routers";
 import { ticketsRouter } from "./tickets-router";
 import { automationRouter } from "./automation-router";
+import { connectionsRouter } from "./connections-router";
+import { featureRequestsRouter } from "./feature-requests-router";
 import {
   briefsRouter as m4BriefsRouter,
   calendarsRouter as m4CalendarsRouter,
@@ -49,8 +49,6 @@ import {
 } from "./m6-routers";
 
 bootstrapGateRegistry();
-
-const composio = createComposioStub();
 
 export const authRouter = router({
   session: publicProcedure.query(({ ctx }) => ({
@@ -87,8 +85,18 @@ export const adminRouter = router({
     list: protectedProcedure.query(({ ctx }) => {
       const policies = [
         { role: "am", resource: "margin", action: "view", effect: "deny" },
-        { role: "partner", resource: "margin", action: "view", effect: "allow" },
-        { role: "finance", resource: "margin", action: "view", effect: "allow" },
+        {
+          role: "partner",
+          resource: "margin",
+          action: "view",
+          effect: "allow",
+        },
+        {
+          role: "finance",
+          resource: "margin",
+          action: "view",
+          effect: "allow",
+        },
         { role: "am", resource: "deal", action: "transition", effect: "allow" },
       ];
       return {
@@ -101,7 +109,9 @@ export const adminRouter = router({
   audit: router({
     list: protectedProcedure
       .use(requirePermission("audit", "view"))
-      .input(z.object({ limit: z.number().min(1).max(100).optional() }).optional())
+      .input(
+        z.object({ limit: z.number().min(1).max(100).optional() }).optional(),
+      )
       .query(({ input }) => {
         const limit = input?.limit ?? 25;
         return getDemoStore().audits.slice(0, limit);
@@ -143,7 +153,8 @@ export const conventionsRouter = router({
     .input(z.object({ ruleKey: z.string().optional() }).optional())
     .query(({ input }) => {
       const rows = [...getDemoStore().conventions.values()];
-      if (input?.ruleKey) return rows.filter((r) => r.ruleKey === input.ruleKey);
+      if (input?.ruleKey)
+        return rows.filter((r) => r.ruleKey === input.ruleKey);
       return rows.sort((a, b) => a.ruleKey.localeCompare(b.ruleKey));
     }),
   upsert: protectedProcedure
@@ -178,137 +189,6 @@ export const conventionsRouter = router({
     }),
 });
 
-export const connectionsRouter = router({
-  list: protectedProcedure
-    .input(z.object({ scope: z.enum(["staff", "portal"]).optional() }).optional())
-    .query(async ({ input }) => {
-      const toolkits = await composio.listToolkits();
-      const store = getDemoStore();
-      const existing = store.connections.filter(
-        (c) => !input?.scope || c.scope === input.scope,
-      );
-      if (existing.length > 0) return existing;
-      return toolkits.map((toolkit) => ({
-        connectionAccountId: `stub-${toolkit}`,
-        toolkit,
-        scope: (input?.scope ?? "staff") as "staff" | "portal",
-        status: "disconnected",
-        externalConnectionId: null as string | null,
-      }));
-    }),
-  startOAuth: protectedProcedure
-    .input(
-      z.object({
-        toolkit: z.enum(["gmail", "linkedin", "canva", "calendar"]),
-        redirectUri: z.string().url().optional(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const redirectUri =
-        input.redirectUri ??
-        `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/settings/connections/callback`;
-      const { redirectUrl } = await composio.startOAuth(input.toolkit, redirectUri);
-      getDemoStore().connections.push({
-        connectionAccountId: randomUUID(),
-        toolkit: input.toolkit,
-        scope: "staff",
-        status: "pending",
-        externalConnectionId: null,
-      });
-      getDemoStore().appendAudit({
-        actorEmployeeId: ctx.employeeId!,
-        action: "connections.startOAuth",
-        entityType: "connection_account",
-        entityId: "00000000-0000-4000-8000-000000000000",
-        before: null,
-        after: { toolkit: input.toolkit, status: "pending" },
-        reason: null,
-      });
-      return { redirectUrl };
-    }),
-  disconnect: protectedProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(async ({ input }) => {
-      await composio.disconnect(input.id);
-      const store = getDemoStore();
-      store.connections = store.connections.filter(
-        (c) => c.connectionAccountId !== input.id,
-      );
-      return { ok: true as const };
-    }),
-  status: protectedProcedure
-    .input(z.object({ toolkit: z.string() }))
-    .query(async ({ input, ctx }) =>
-      composio.status(input.toolkit, ctx.employeeId!),
-    ),
-  /** Dev/stub: complete OAuth callback and mark toolkit connected. */
-  completeOAuth: protectedProcedure
-    .input(
-      z.object({
-        toolkit: z.enum(["gmail", "linkedin", "canva", "calendar"]),
-      }),
-    )
-    .mutation(({ input, ctx }) => {
-      const store = getDemoStore();
-      let row = store.connections.find(
-        (c) => c.toolkit === input.toolkit && c.scope === "staff",
-      );
-      if (!row) {
-        row = {
-          connectionAccountId: randomUUID(),
-          toolkit: input.toolkit,
-          scope: "staff",
-          status: "connected",
-          externalConnectionId: `stub-${input.toolkit}-${Date.now()}`,
-        };
-        store.connections.push(row);
-      } else {
-        row.status = "connected";
-        row.externalConnectionId = `stub-${input.toolkit}-${Date.now()}`;
-      }
-      store.appendAudit({
-        actorEmployeeId: ctx.employeeId!,
-        action: "connections.completeOAuth",
-        entityType: "connection_account",
-        entityId: row.connectionAccountId,
-        before: null,
-        after: { toolkit: input.toolkit, status: "connected" },
-        reason: null,
-      });
-      return row;
-    }),
-  /** Canva connect-only smoke: list stub designs when connected. */
-  canvaListDesigns: protectedProcedure.query(({ ctx }) => {
-    const store = getDemoStore();
-    const canva = store.connections.find(
-      (c) => c.toolkit === "canva" && c.status === "connected",
-    );
-    if (!canva) {
-      return {
-        ok: false as const,
-        reason: "Canva not connected — use Connections → Connect canva",
-        designs: [] as { id: string; title: string }[],
-      };
-    }
-    store.appendAudit({
-      actorEmployeeId: ctx.employeeId!,
-      action: "connections.canvaListDesigns",
-      entityType: "connection_account",
-      entityId: canva.connectionAccountId,
-      before: null,
-      after: { smoke: true },
-      reason: null,
-    });
-    return {
-      ok: true as const,
-      designs: [
-        { id: "stub-design-1", title: "Brand kit cover (Canva stub)" },
-        { id: "stub-design-2", title: "Social template pack (Canva stub)" },
-      ],
-    };
-  }),
-});
-
 export const assetsRouter = router({
   create: protectedProcedure
     .input(
@@ -318,7 +198,10 @@ export const assetsRouter = router({
       }),
     )
     .mutation(({ input }) => {
-      const asset = getDemoStore().createAsset(input.title, input.clientId ?? null);
+      const asset = getDemoStore().createAsset(
+        input.title,
+        input.clientId ?? null,
+      );
       return asset;
     }),
   uploadVersion: protectedProcedure
@@ -359,7 +242,9 @@ export const assetsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const asset = getDemoStore().assets.get(input.assetId);
       if (!asset) return null;
-      const version = asset.versions.find((v) => v.assetVersionId === input.versionId);
+      const version = asset.versions.find(
+        (v) => v.assetVersionId === input.versionId,
+      );
       if (!version) return null;
       const ttl = Number(process.env.DAM_SIGNED_URL_TTL_SECONDS ?? 300);
       const signed = await getDemoStore().objectStore.signedUrl(
@@ -428,7 +313,13 @@ export const assetsRouter = router({
     }),
 });
 
-export { dealsRouter, scopesRouter, clientsRouter, outreachRouter, leadsRouter };
+export {
+  dealsRouter,
+  scopesRouter,
+  clientsRouter,
+  outreachRouter,
+  leadsRouter,
+};
 
 export const calendarsRouter = m4CalendarsRouter;
 export const briefsRouter = m4BriefsRouter;
@@ -457,6 +348,7 @@ export const appRouter = router({
   admin: adminRouter,
   conventions: conventionsRouter,
   connections: connectionsRouter,
+  featureRequests: featureRequestsRouter,
   assets: assetsRouter,
   /** Legacy M3 demo-store deals (gates, BUAF, HITL). Prefer `crm.*` for durable CRM. */
   deals: dealsRouter,
