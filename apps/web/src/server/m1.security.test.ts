@@ -15,17 +15,27 @@ import { join } from "node:path";
 describe("M1 security insurance", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it("RLS SQL revokes UPDATE/DELETE on audit_event and asset_version", () => {
+  it("Data API lockdown protects audit and asset history", () => {
     const candidates = [
-      join(process.cwd(), "packages/db/rls/001_m1_rls.sql"),
-      join(process.cwd(), "../../packages/db/rls/001_m1_rls.sql"),
-      join(__dirname, "../../../../packages/db/rls/001_m1_rls.sql"),
+      join(process.cwd(), "packages/db/migrations/0005_lock_down_data_api.sql"),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0005_lock_down_data_api.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0005_lock_down_data_api.sql",
+      ),
     ];
     const path = candidates.find((p) => existsSync(p));
-    expect(path, "rls sql not found").toBeTruthy();
+    expect(path, "Data API lockdown migration not found").toBeTruthy();
     const sql = readFileSync(path!, "utf8");
-    expect(sql).toMatch(/REVOKE\s+UPDATE,\s*DELETE\s+ON\s+public\.audit_event/i);
-    expect(sql).toMatch(/REVOKE\s+UPDATE,\s*DELETE\s+ON\s+public\.asset_version/i);
+    expect(sql).toMatch(/ALTER TABLE public\.%I ENABLE ROW LEVEL SECURITY/i);
+    expect(sql).toMatch(
+      /REVOKE ALL PRIVILEGES ON TABLE public\.%I FROM PUBLIC/i,
+    );
+    expect(sql).toMatch(/'audit_event'/);
+    expect(sql).toMatch(/'asset_version'/);
   });
 
   it("gitignore keeps secrets out of the monorepo", () => {

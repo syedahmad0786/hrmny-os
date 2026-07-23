@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCaller } from "./trpc/root";
 import { getDemoStore } from "./demo-store";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
@@ -22,15 +22,17 @@ describe("M1 fail-loud + idempotency scaffolding", () => {
     getDemoStore().resetDemoDeal();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("DAM_STORAGE=supabase without keys fails loud at factory", async () => {
-    const prev = process.env.DAM_STORAGE;
-    process.env.DAM_STORAGE = "supabase";
-    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
-    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    vi.stubEnv("DAM_STORAGE", "supabase");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
     const { createObjectStoreFromEnv } = await import("./demo-store");
     expect(() => createObjectStoreFromEnv()).toThrow(/DAM_STORAGE=supabase/);
-    if (prev === undefined) delete process.env.DAM_STORAGE;
-    else process.env.DAM_STORAGE = prev;
   });
 
   it("health emit always records a signal (never silent)", async () => {

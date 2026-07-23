@@ -42,6 +42,7 @@ pnpm install
 | `AUTH_MODE` | Auth | `dev` (default) uses `x-dev-role` personas; `supabase` when project exists |
 | `NEXT_PUBLIC_SUPABASE_URL` | Live auth/storage | Leave empty for memory/dev demo |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Live browser auth | Preferred public key; legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` remains supported |
+| `SUPABASE_SECRET_KEY` | Server-side storage | Preferred server secret; never expose as `NEXT_PUBLIC_*` |
 | `NEXT_PUBLIC_APP_URL` | Production redirects/status | Canonical Vercel production URL |
 | `XERO_MODE` | Finance post | `mock` (default) or `live` — live without keys **fails loud** |
 | `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` | Live Xero | Only when `XERO_MODE=live` |

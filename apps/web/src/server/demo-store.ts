@@ -19,6 +19,7 @@ import { createProvider, type LLMProvider } from "@hrmny/ai";
 import { VENDOR_FEE_DEFAULT_PCT } from "@hrmny/gate";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
+import { getSupabaseAdminConfig } from "./supabase-admin-config";
 
 export type DemoConvention = {
   ruleKey: string;
@@ -28,19 +29,18 @@ export type DemoConvention = {
   updatedByEmployeeId: string | null;
 };
 
-/** DAM_STORAGE=memory (default) | supabase — live Storage when URL+service role set. */
+/** DAM_STORAGE=memory (default) | supabase — live server-side Storage. */
 export function createObjectStoreFromEnv(): ObjectStore {
   const mode = (process.env.DAM_STORAGE ?? "memory").toLowerCase();
   if (mode === "supabase") {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const config = getSupabaseAdminConfig();
     const bucket = process.env.DAM_BUCKET ?? "hrmny-dam";
-    if (!url || !key) {
+    if (!config) {
       throw new Error(
-        "DAM_STORAGE=supabase requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY",
+        "DAM_STORAGE=supabase requires NEXT_PUBLIC_SUPABASE_URL and a Supabase server secret key",
       );
     }
-    const client = createClient(url, key);
+    const client = createClient(config.url, config.key);
     return createSupabaseObjectStore(client, bucket);
   }
   return createMemoryObjectStore();

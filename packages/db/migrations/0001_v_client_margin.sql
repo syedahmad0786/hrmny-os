@@ -1,7 +1,8 @@
 -- View 19: v_client_margin (derived; no writes)
 -- Apply after 0000 migration, before or with RLS.
 
-CREATE OR REPLACE VIEW public.v_client_margin AS
+CREATE OR REPLACE VIEW public.v_client_margin
+WITH (security_invoker = true) AS
 SELECT
   c.client_id,
   c.name AS client_name,
