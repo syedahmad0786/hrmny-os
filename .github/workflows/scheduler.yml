@@ -1,0 +1,21 @@
+name: hrmny OS scheduler
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run-due-jobs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run due jobs
+        env:
+          CRON_SECRET: ${{ secrets.HRMNY_CRON_SECRET }}
+        run: >-
+          curl --fail --silent --show-error --retry 2
+          -H "Authorization: Bearer ${CRON_SECRET}"
+          https://hrmny-os.vercel.app/api/cron/jobs

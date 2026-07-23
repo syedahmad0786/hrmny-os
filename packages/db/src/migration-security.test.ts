@@ -58,9 +58,10 @@ describe("production migration security", () => {
       "0004_tickets",
       "0005_lock_down_data_api",
       "0006_connectors_feature_requests",
+      "0007_m1_production_hardening",
     ]);
     expect(journal.entries.map(({ idx }) => idx)).toEqual([
-      0, 1, 2, 3, 4, 5, 6,
+      0, 1, 2, 3, 4, 5, 6, 7,
     ]);
   });
 });

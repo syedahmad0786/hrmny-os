@@ -1,8 +1,29 @@
 import { z } from "zod";
+import {
+  and,
+  asset,
+  assetVersion,
+  auditEvent,
+  convention,
+  desc,
+  eq,
+  permissionPolicy,
+  role,
+  scheduledJob,
+  sql,
+} from "@hrmny/db";
+import { randomUUID } from "node:crypto";
 import { bootstrapGateRegistry } from "@hrmny/gate";
 import { getDemoStore } from "../demo-store";
+import { getDb } from "../db";
 import { getBuildStatus } from "../build-status";
 import { DEV_USERS, getAuthMode } from "../auth/session";
+import {
+  emitHealthSignal,
+  listAudit,
+  listHealthSignals,
+  writeAudit,
+} from "../m1-persistence";
 import {
   createCallerFactory,
   protectedProcedure,
@@ -79,26 +100,46 @@ export const authRouter = router({
 
 export const adminRouter = router({
   roles: router({
-    list: protectedProcedure.query(() => getDemoStore().roles),
+    list: protectedProcedure.query(async () => {
+      const db = getDb();
+      if (!db) return getDemoStore().roles;
+      return db.select().from(role).orderBy(role.displayName);
+    }),
   }),
   permissions: router({
-    list: protectedProcedure.query(({ ctx }) => {
-      const policies = [
-        { role: "am", resource: "margin", action: "view", effect: "deny" },
-        {
-          role: "partner",
-          resource: "margin",
-          action: "view",
-          effect: "allow",
-        },
-        {
-          role: "finance",
-          resource: "margin",
-          action: "view",
-          effect: "allow",
-        },
-        { role: "am", resource: "deal", action: "transition", effect: "allow" },
-      ];
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const db = getDb();
+      const policies = db
+        ? await db
+            .select({
+              role: role.key,
+              resource: permissionPolicy.resource,
+              action: permissionPolicy.action,
+              effect: permissionPolicy.effect,
+            })
+            .from(permissionPolicy)
+            .innerJoin(role, eq(permissionPolicy.roleId, role.roleId))
+        : [
+            { role: "am", resource: "margin", action: "view", effect: "deny" },
+            {
+              role: "partner",
+              resource: "margin",
+              action: "view",
+              effect: "allow",
+            },
+            {
+              role: "finance",
+              resource: "margin",
+              action: "view",
+              effect: "allow",
+            },
+            {
+              role: "am",
+              resource: "deal",
+              action: "transition",
+              effect: "allow",
+            },
+          ];
       return {
         policies,
         viewerCanSeeMargin: ctx.canViewMargin,
@@ -112,17 +153,13 @@ export const adminRouter = router({
       .input(
         z.object({ limit: z.number().min(1).max(100).optional() }).optional(),
       )
-      .query(({ input }) => {
-        const limit = input?.limit ?? 25;
-        return getDemoStore().audits.slice(0, limit);
-      }),
+      .query(({ input }) => listAudit(input?.limit ?? 25)),
   }),
   health: router({
-    get: protectedProcedure.query(() => {
-      const store = getDemoStore();
+    get: protectedProcedure.query(async () => {
       return {
         ok: true as const,
-        signals: store.healthSignals.slice(0, 10),
+        signals: await listHealthSignals(10),
         spendCaps: { llmMonthlyAed: process.env.LLM_MONTHLY_CAP_AED ?? null },
         chatWebhookConfigured: Boolean(process.env.GOOGLE_CHAT_WEBHOOK_URL),
       };
@@ -134,16 +171,68 @@ export const adminRouter = router({
           severity: z.enum(["info", "warn", "critical"]).default("info"),
         }),
       )
-      .mutation(({ input }) => {
-        const row = getDemoStore().pushHealth(input.signalKey, input.severity, {
+      .mutation(async ({ input }) => {
+        const row = await emitHealthSignal(input.signalKey, input.severity, {
           source: "admin.health.emitStub",
         });
-        const webhookConfigured = Boolean(process.env.GOOGLE_CHAT_WEBHOOK_URL);
+        const webhookConfigured = Boolean(
+          process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim(),
+        );
         return {
           ...row,
-          chat: webhookConfigured ? ("posted" as const) : ("stubbed" as const),
+          chat:
+            webhookConfigured && row.notifiedAt
+              ? ("posted" as const)
+              : ("stubbed" as const),
           webhookConfigured,
         };
+      }),
+  }),
+  jobs: router({
+    list: protectedProcedure.query(async () => {
+      const db = getDb();
+      if (!db) return [];
+      return db
+        .select()
+        .from(scheduledJob)
+        .orderBy(desc(scheduledJob.createdAt))
+        .limit(20);
+    }),
+    scheduleHealth: protectedProcedure
+      .input(
+        z.object({
+          delayMinutes: z.number().int().min(1).max(10_080),
+          signalKey: z.string().min(1).max(120),
+          severity: z.enum(["info", "warn", "critical"]).default("info"),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = getDb();
+        if (!db) throw new Error("DATABASE_URL is required for scheduled jobs");
+        const runAt = new Date(Date.now() + input.delayMinutes * 60_000);
+        return db.transaction(async (tx) => {
+          const [job] = await tx
+            .insert(scheduledJob)
+            .values({
+              jobKey: randomUUID(),
+              kind: "health_signal",
+              runAt,
+              payload: {
+                signalKey: input.signalKey,
+                severity: input.severity,
+                payload: { source: "admin.jobs.scheduleHealth" },
+              },
+            })
+            .returning();
+          await tx.insert(auditEvent).values({
+            actorEmployeeId: ctx.employeeId,
+            action: "scheduledJob.create",
+            entityType: "scheduled_job",
+            entityId: job!.scheduledJobId,
+            after: { kind: job!.kind, runAt: runAt.toISOString() },
+          });
+          return job!;
+        });
       }),
   }),
 });
@@ -151,7 +240,22 @@ export const adminRouter = router({
 export const conventionsRouter = router({
   list: protectedProcedure
     .input(z.object({ ruleKey: z.string().optional() }).optional())
-    .query(({ input }) => {
+    .query(async ({ input }) => {
+      const db = getDb();
+      if (db) {
+        return db
+          .select()
+          .from(convention)
+          .where(
+            input?.ruleKey
+              ? and(
+                  eq(convention.isActive, true),
+                  eq(convention.ruleKey, input.ruleKey),
+                )
+              : eq(convention.isActive, true),
+          )
+          .orderBy(convention.ruleKey);
+      }
       const rows = [...getDemoStore().conventions.values()];
       if (input?.ruleKey)
         return rows.filter((r) => r.ruleKey === input.ruleKey);
@@ -165,7 +269,46 @@ export const conventionsRouter = router({
         payload: z.record(z.unknown()),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      const db = getDb();
+      if (db) {
+        return db.transaction(async (tx) => {
+          const [previous] = await tx
+            .select()
+            .from(convention)
+            .where(eq(convention.ruleKey, input.ruleKey))
+            .orderBy(desc(convention.version))
+            .limit(1);
+          await tx
+            .update(convention)
+            .set({ isActive: false, updatedAt: new Date() })
+            .where(
+              and(
+                eq(convention.ruleKey, input.ruleKey),
+                eq(convention.isActive, true),
+              ),
+            );
+          const [next] = await tx
+            .insert(convention)
+            .values({
+              ruleKey: input.ruleKey,
+              version: String(Number(previous?.version ?? 0) + 1),
+              payload: input.payload,
+            })
+            .returning();
+          await tx.insert(auditEvent).values({
+            actorEmployeeId: ctx.employeeId,
+            action: "convention.upsert",
+            entityType: "convention",
+            entityId: next!.conventionId,
+            before: previous
+              ? { version: previous.version, payload: previous.payload }
+              : null,
+            after: { version: next!.version, payload: next!.payload },
+          });
+          return next!;
+        });
+      }
       const store = getDemoStore();
       const prev = store.conventions.get(input.ruleKey);
       const next = {
@@ -197,24 +340,106 @@ export const assetsRouter = router({
         clientId: z.string().uuid().nullable().optional(),
       }),
     )
-    .mutation(({ input }) => {
-      const asset = getDemoStore().createAsset(
+    .mutation(async ({ input, ctx }) => {
+      const db = getDb();
+      if (db) {
+        return db.transaction(async (tx) => {
+          const [created] = await tx
+            .insert(asset)
+            .values({
+              title: input.title,
+              clientId: input.clientId ?? null,
+            })
+            .returning();
+          await tx.insert(auditEvent).values({
+            actorEmployeeId: ctx.employeeId,
+            action: "assets.create",
+            entityType: "asset",
+            entityId: created!.assetId,
+            after: { title: created!.title, clientId: created!.clientId },
+          });
+          return { ...created!, versions: [] };
+        });
+      }
+      const demoAsset = getDemoStore().createAsset(
         input.title,
         input.clientId ?? null,
       );
-      return asset;
+      return demoAsset;
     }),
   uploadVersion: protectedProcedure
     .input(
       z.object({
         assetId: z.string().uuid(),
-        fileName: z.string().min(1),
+        fileName: z.string().min(1).max(180),
         contentType: z.string().default("application/octet-stream"),
-        contentBase64: z.string().min(1),
+        contentBase64: z.string().min(1).max(15_000_000),
         isClientRevision: z.boolean().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      const db = getDb();
+      if (db) {
+        const [existing] = await db
+          .select({ assetId: asset.assetId })
+          .from(asset)
+          .where(eq(asset.assetId, input.assetId))
+          .limit(1);
+        if (!existing) throw new Error("NOT_FOUND");
+        const [latest] = await db
+          .select({
+            version: sql<number>`coalesce(max(${assetVersion.versionNumber}), 0)::int`,
+          })
+          .from(assetVersion)
+          .where(eq(assetVersion.assetId, input.assetId));
+        const versionNumber = Number(latest?.version ?? 0) + 1;
+        const fileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "-");
+        const storagePath = `dam/${input.assetId}/v${versionNumber}-${fileName}`;
+        const raw = Buffer.from(input.contentBase64, "base64");
+        if (raw.byteLength > 10_000_000) {
+          throw new Error("Asset versions are limited to 10 MB");
+        }
+        await getDemoStore().objectStore.put({
+          path: storagePath,
+          body: new Uint8Array(raw),
+          contentType: input.contentType,
+        });
+        let version: typeof assetVersion.$inferSelect;
+        try {
+          version = await db.transaction(async (tx) => {
+            const [created] = await tx
+              .insert(assetVersion)
+              .values({
+                assetId: input.assetId,
+                storagePath,
+                versionNumber: String(versionNumber),
+                isClientRevision: input.isClientRevision ?? false,
+                uploadedByEmployeeId: ctx.employeeId,
+              })
+              .returning();
+            await tx.insert(auditEvent).values({
+              actorEmployeeId: ctx.employeeId,
+              action: "assets.uploadVersion",
+              entityType: "asset",
+              entityId: input.assetId,
+              after: {
+                assetVersionId: created!.assetVersionId,
+                storagePath,
+                versionNumber,
+              },
+            });
+            return created!;
+          });
+        } catch (error) {
+          await getDemoStore().objectStore.remove?.(storagePath);
+          throw error;
+        }
+        await emitHealthSignal("dam_upload", "info", {
+          assetId: input.assetId,
+          versionNumber,
+        });
+        return { ...version, versionNumber };
+      }
       const version = await getDemoStore().uploadVersion({
         assetId: input.assetId,
         contentBase64: input.contentBase64,
@@ -231,7 +456,28 @@ export const assetsRouter = router({
     }),
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => getDemoStore().assets.get(input.id) ?? null),
+    .query(async ({ input }) => {
+      const db = getDb();
+      if (!db) return getDemoStore().assets.get(input.id) ?? null;
+      const [row] = await db
+        .select()
+        .from(asset)
+        .where(eq(asset.assetId, input.id))
+        .limit(1);
+      if (!row) return null;
+      const versions = await db
+        .select()
+        .from(assetVersion)
+        .where(eq(assetVersion.assetId, input.id))
+        .orderBy(assetVersion.versionNumber);
+      return {
+        ...row,
+        versions: versions.map((version) => ({
+          ...version,
+          versionNumber: Number(version.versionNumber),
+        })),
+      };
+    }),
   signedUrl: protectedProcedure
     .input(
       z.object({
@@ -240,6 +486,35 @@ export const assetsRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      const db = getDb();
+      if (db) {
+        const [version] = await db
+          .select()
+          .from(assetVersion)
+          .where(
+            and(
+              eq(assetVersion.assetId, input.assetId),
+              eq(assetVersion.assetVersionId, input.versionId),
+            ),
+          )
+          .limit(1);
+        if (!version) return null;
+        const ttl = Number(process.env.DAM_SIGNED_URL_TTL_SECONDS ?? 300);
+        const signed = await getDemoStore().objectStore.signedUrl(
+          version.storagePath,
+          ttl,
+        );
+        await writeAudit({
+          actorEmployeeId: ctx.employeeId,
+          action: "assets.signedUrl",
+          entityType: "asset_version",
+          entityId: version.assetVersionId,
+          before: null,
+          after: { path: version.storagePath, expiresAt: signed.expiresAt },
+          reason: null,
+        });
+        return signed;
+      }
       const asset = getDemoStore().assets.get(input.assetId);
       if (!asset) return null;
       const version = asset.versions.find(
@@ -262,7 +537,23 @@ export const assetsRouter = router({
       });
       return signed;
     }),
-  list: protectedProcedure.query(() => [...getDemoStore().assets.values()]),
+  list: protectedProcedure.query(async () => {
+    const db = getDb();
+    if (!db) return [...getDemoStore().assets.values()];
+    const [assets, versions] = await Promise.all([
+      db.select().from(asset).orderBy(desc(asset.createdAt)),
+      db.select().from(assetVersion).orderBy(assetVersion.versionNumber),
+    ]);
+    return assets.map((row) => ({
+      ...row,
+      versions: versions
+        .filter((version) => version.assetId === row.assetId)
+        .map((version) => ({
+          ...version,
+          versionNumber: Number(version.versionNumber),
+        })),
+    }));
+  }),
   qc: protectedProcedure
     .input(
       z.object({
@@ -271,10 +562,7 @@ export const assetsRouter = router({
         notes: z.string().optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
-      const store = getDemoStore();
-      const asset = store.assets.get(input.id);
-      if (!asset) throw new Error("NOT_FOUND");
+    .mutation(async ({ input, ctx }) => {
       const isCd =
         ctx.roles.includes("creative_director") ||
         ctx.roles.includes("partner") ||
@@ -286,30 +574,83 @@ export const assetsRouter = router({
           reason: "Only Creative Director may QC assets",
         };
       }
-      asset.qcPassed = input.decision === "pass" || input.decision === "waive";
-      asset.status =
+      const db = getDb();
+      if (db) {
+        return db.transaction(async (tx) => {
+          const [existing] = await tx
+            .select()
+            .from(asset)
+            .where(eq(asset.assetId, input.id))
+            .limit(1);
+          if (!existing) throw new Error("NOT_FOUND");
+          const [latest] = await tx
+            .select({ assetVersionId: assetVersion.assetVersionId })
+            .from(assetVersion)
+            .where(eq(assetVersion.assetId, input.id))
+            .orderBy(desc(assetVersion.createdAt))
+            .limit(1);
+          const qcPassed =
+            input.decision === "pass" || input.decision === "waive";
+          const [updated] = await tx
+            .update(asset)
+            .set({
+              status:
+                input.decision === "fail" ? "internal_review" : "qc_passed",
+              approvedVersionId: qcPassed
+                ? (latest?.assetVersionId ?? null)
+                : null,
+              updatedAt: new Date(),
+            })
+            .where(eq(asset.assetId, input.id))
+            .returning();
+          await tx.insert(auditEvent).values({
+            actorEmployeeId: ctx.employeeId,
+            action: "assets.qc",
+            entityType: "asset",
+            entityId: input.id,
+            before: {
+              status: existing.status,
+              approvedVersionId: existing.approvedVersionId,
+            },
+            after: {
+              decision: input.decision,
+              qcPassed,
+              status: updated!.status,
+              approvedVersionId: updated!.approvedVersionId,
+            },
+            reason: input.notes ?? null,
+          });
+          return { ok: true as const, asset: updated! };
+        });
+      }
+      const store = getDemoStore();
+      const demoAsset = store.assets.get(input.id);
+      if (!demoAsset) throw new Error("NOT_FOUND");
+      demoAsset.qcPassed =
+        input.decision === "pass" || input.decision === "waive";
+      demoAsset.status =
         input.decision === "fail"
           ? "internal_review"
           : input.decision === "pass" || input.decision === "waive"
             ? "qc_passed"
-            : asset.status;
-      if (asset.taskId) {
-        const task = store.tasks.get(asset.taskId);
+            : demoAsset.status;
+      if (demoAsset.taskId) {
+        const task = store.tasks.get(demoAsset.taskId);
         if (task) {
-          task.qcPassed = asset.qcPassed;
-          if (asset.qcPassed) task.status = "qc";
+          task.qcPassed = demoAsset.qcPassed;
+          if (demoAsset.qcPassed) task.status = "qc";
         }
       }
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "assets.qc",
         entityType: "asset",
-        entityId: asset.assetId,
+        entityId: demoAsset.assetId,
         before: null,
-        after: { decision: input.decision, qcPassed: asset.qcPassed },
+        after: { decision: input.decision, qcPassed: demoAsset.qcPassed },
         reason: input.notes ?? null,
       });
-      return { ok: true as const, asset };
+      return { ok: true as const, asset: demoAsset };
     }),
 });
 

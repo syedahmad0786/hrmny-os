@@ -2,6 +2,8 @@ import {
   boolean,
   customType,
   date,
+  index,
+  integer,
   jsonb,
   numeric,
   pgTable,
@@ -64,6 +66,7 @@ export const role = pgTable("role", {
   roleId: uuid("role_id").defaultRandom().primaryKey(),
   key: text("key").notNull().unique(),
   displayName: text("display_name").notNull(),
+  legacyTitles: jsonb("legacy_titles").$type<string[]>().default([]).notNull(),
   ...timestamps,
 });
 
@@ -560,6 +563,29 @@ export const healthSignal = pgTable("health_signal", {
     .defaultNow()
     .notNull(),
 });
+
+/** M1: durable timer/retry queue, claimed by the scheduled worker. */
+export const scheduledJob = pgTable(
+  "scheduled_job",
+  {
+    scheduledJobId: uuid("scheduled_job_id").defaultRandom().primaryKey(),
+    jobKey: text("job_key").notNull().unique(),
+    kind: text("kind").notNull(),
+    runAt: timestamp("run_at", { withTimezone: true }).notNull(),
+    payload: jsonb("payload")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    status: text("status").default("pending").notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    lastError: text("last_error"),
+    ...timestamps,
+  },
+  (table) => [index("scheduled_job_due_idx").on(table.status, table.runAt)],
+);
 
 /** Optional link: Supabase auth.users.id → employee */
 export const employeeAuth = pgTable("employee_auth", {

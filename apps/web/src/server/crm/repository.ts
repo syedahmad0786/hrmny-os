@@ -153,12 +153,7 @@ async function withDb<T>(
 ): Promise<T> {
   const db = getDb();
   if (!db) return fallback();
-  try {
-    return await fn(db);
-  } catch {
-    // Schema not migrated yet — fall back so demos/tests still work.
-    return fallback();
-  }
+  return fn(db);
 }
 
 // ── Companies ──────────────────────────────────────────────
@@ -412,7 +407,11 @@ export async function updateContact(
       const mem = getCrmMemory();
       const existing = mem.contacts.get(id);
       if (!existing) return null;
-      const next = { ...existing, ...input, updatedAt: new Date().toISOString() };
+      const next = {
+        ...existing,
+        ...input,
+        updatedAt: new Date().toISOString(),
+      };
       mem.contacts.set(id, next);
       return next;
     },
@@ -467,7 +466,8 @@ export async function createDeal(input: {
   leadSourceLane?: string;
   ownerEmployeeId?: string | null;
 }): Promise<DealRow> {
-  const lane = (input.leadSourceLane ?? "relationship_led") as DealRow["leadSourceLane"];
+  const lane = (input.leadSourceLane ??
+    "relationship_led") as DealRow["leadSourceLane"];
   return withDb(
     async (db) => {
       let companyName = input.companyName;
@@ -570,7 +570,11 @@ export async function updateDeal(
       const mem = getCrmMemory();
       const existing = mem.deals.get(id);
       if (!existing) return null;
-      const next = { ...existing, ...input, updatedAt: new Date().toISOString() };
+      const next = {
+        ...existing,
+        ...input,
+        updatedAt: new Date().toISOString(),
+      };
       mem.deals.set(id, next);
       return next;
     },
@@ -582,7 +586,11 @@ export async function moveDealStage(input: {
   to: string;
   actorEmployeeId?: string | null;
 }): Promise<{ ok: true; deal: DealRow } | { ok: false; reason: string }> {
-  if (!CRM_PIPELINE_STAGES.includes(input.to as (typeof CRM_PIPELINE_STAGES)[number])) {
+  if (
+    !CRM_PIPELINE_STAGES.includes(
+      input.to as (typeof CRM_PIPELINE_STAGES)[number],
+    )
+  ) {
     return { ok: false, reason: `Invalid stage: ${input.to}` };
   }
   const existing = await getDeal(input.dealId);
@@ -593,7 +601,10 @@ export async function moveDealStage(input: {
     async (db) => {
       const [row] = await db
         .update(deal)
-        .set({ stage: input.to as typeof deal.$inferInsert.stage, updatedAt: new Date() })
+        .set({
+          stage: input.to as typeof deal.$inferInsert.stage,
+          updatedAt: new Date(),
+        })
         .where(eq(deal.dealId, input.dealId))
         .returning();
       return row ? mapDeal(row) : null;
@@ -602,7 +613,11 @@ export async function moveDealStage(input: {
       const mem = getCrmMemory();
       const d = mem.deals.get(input.dealId);
       if (!d) return null;
-      const next = { ...d, stage: input.to, updatedAt: new Date().toISOString() };
+      const next = {
+        ...d,
+        stage: input.to,
+        updatedAt: new Date().toISOString(),
+      };
       mem.deals.set(input.dealId, next);
       return next;
     },
@@ -716,15 +731,16 @@ export async function listNotes(q?: {
 }): Promise<CrmNoteRow[]> {
   return withDb(
     async (db) => {
-      const rows = await db.select().from(crmNote).orderBy(desc(crmNote.createdAt));
-      return rows
-        .map(mapNote)
-        .filter((n) => {
-          if (q?.dealId && n.dealId !== q.dealId) return false;
-          if (q?.companyId && n.companyId !== q.companyId) return false;
-          if (q?.contactId && n.contactId !== q.contactId) return false;
-          return true;
-        });
+      const rows = await db
+        .select()
+        .from(crmNote)
+        .orderBy(desc(crmNote.createdAt));
+      return rows.map(mapNote).filter((n) => {
+        if (q?.dealId && n.dealId !== q.dealId) return false;
+        if (q?.companyId && n.companyId !== q.companyId) return false;
+        if (q?.contactId && n.contactId !== q.contactId) return false;
+        return true;
+      });
     },
     () => {
       let rows = [...getCrmMemory().notes.values()];
@@ -796,16 +812,14 @@ export async function listCrmTasks(q?: {
   return withDb(
     async (db) => {
       const rows = await db.select().from(crmTask).orderBy(crmTask.dueDate);
-      return rows
-        .map(mapTask)
-        .filter((t) => {
-          if (q?.dealId && t.dealId !== q.dealId) return false;
-          if (q?.companyId && t.companyId !== q.companyId) return false;
-          if (q?.status && t.status !== q.status) return false;
-          if (q?.ownerEmployeeId && t.ownerEmployeeId !== q.ownerEmployeeId)
-            return false;
-          return true;
-        });
+      return rows.map(mapTask).filter((t) => {
+        if (q?.dealId && t.dealId !== q.dealId) return false;
+        if (q?.companyId && t.companyId !== q.companyId) return false;
+        if (q?.status && t.status !== q.status) return false;
+        if (q?.ownerEmployeeId && t.ownerEmployeeId !== q.ownerEmployeeId)
+          return false;
+        return true;
+      });
     },
     () => {
       let rows = [...getCrmMemory().tasks.values()];
@@ -884,7 +898,11 @@ export async function updateCrmTask(
       const mem = getCrmMemory();
       const existing = mem.tasks.get(id);
       if (!existing) return null;
-      const next = { ...existing, ...input, updatedAt: new Date().toISOString() };
+      const next = {
+        ...existing,
+        ...input,
+        updatedAt: new Date().toISOString(),
+      };
       mem.tasks.set(id, next);
       return next;
     },
@@ -919,7 +937,9 @@ export async function crmHealth(): Promise<CrmHealth> {
     const count = async (
       table: typeof company | typeof contact | typeof deal,
     ): Promise<number> => {
-      const [r] = await db.select({ n: sql<number>`count(*)::int` }).from(table);
+      const [r] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(table);
       return Number(r?.n ?? 0);
     };
     return {
@@ -928,9 +948,8 @@ export async function crmHealth(): Promise<CrmHealth> {
       contacts: await count(contact),
       deals: await count(deal),
       activities: Number(
-        (
-          await db.select({ n: sql<number>`count(*)::int` }).from(activity)
-        )[0]?.n ?? 0,
+        (await db.select({ n: sql<number>`count(*)::int` }).from(activity))[0]
+          ?.n ?? 0,
       ),
       notes: Number(
         (await db.select({ n: sql<number>`count(*)::int` }).from(crmNote))[0]

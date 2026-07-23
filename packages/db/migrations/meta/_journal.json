@@ -50,6 +50,13 @@
       "when": 1784800000000,
       "tag": "0006_connectors_feature_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784870000000,
+      "tag": "0007_m1_production_hardening",
+      "breakpoints": true
     }
   ]
 }

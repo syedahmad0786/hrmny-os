@@ -29,8 +29,8 @@ import {
   updateCrmTask,
   updateDeal,
 } from "../crm/repository";
-import { getDemoStore } from "../demo-store";
 import { redactDealMargin } from "../crm/types";
+import { emitHealthSignal, writeAudit } from "../m1-persistence";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
 
 bootstrapGateRegistry();
@@ -54,7 +54,12 @@ const leadLaneSchema = z.enum([
   "relationship_led",
   "tejari",
 ]);
-const crmTaskStatusSchema = z.enum(["open", "in_progress", "done", "cancelled"]);
+const crmTaskStatusSchema = z.enum([
+  "open",
+  "in_progress",
+  "done",
+  "cancelled",
+]);
 const activityTypeSchema = z.enum([
   "note",
   "call",
@@ -237,7 +242,6 @@ export const crmDealsRouter = router({
       const existing = await getDeal(input.id);
       if (!existing) return { ok: false as const, reason: "Deal not found" };
 
-      const store = getDemoStore();
       const gateResult = await transition(
         actorFromCtx(ctx),
         {
@@ -273,7 +277,7 @@ export const crmDealsRouter = router({
             };
           },
           audit: async (event) => {
-            const row = store.appendAudit({
+            const row = await writeAudit({
               actorEmployeeId: event.actorEmployeeId,
               action: event.action,
               entityType: event.entityType,
@@ -285,7 +289,13 @@ export const crmDealsRouter = router({
             return { auditId: row.auditEventId };
           },
           emit: async (event) => {
-            store.pushHealth("crm_deal_transition", "info", event.payload);
+            await emitHealthSignal(
+              event.name.endsWith("transition_blocked")
+                ? "gate_blocked"
+                : "crm_deal_transition",
+              event.name.endsWith("transition_blocked") ? "warn" : "info",
+              event.payload,
+            );
           },
         },
       );
@@ -301,7 +311,8 @@ export const crmDealsRouter = router({
       }
 
       const deal = await getDeal(input.id);
-      if (!deal) return { ok: false as const, reason: "Deal missing after apply" };
+      if (!deal)
+        return { ok: false as const, reason: "Deal missing after apply" };
       return {
         ok: true as const,
         deal: redactDealMargin(deal, ctx.canViewMargin),
