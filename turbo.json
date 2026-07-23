@@ -3,7 +3,13 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "env": ["AUTH_MODE", "DATABASE_URL"],
+      "env": [
+        "AUTH_MODE",
+        "DATABASE_URL",
+        "DAM_STORAGE",
+        "DAM_BUCKET",
+        "SUPABASE_SECRET_KEY"
+      ],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
     "dev": {
