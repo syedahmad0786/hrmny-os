@@ -4,7 +4,7 @@ import { bootstrapGateRegistry } from "@hrmny/gate";
 import { createComposioStub } from "@hrmny/integrations";
 import { getDemoStore } from "../demo-store";
 import { getBuildStatus } from "../build-status";
-import { DEV_USERS } from "../auth/session";
+import { DEV_USERS, getAuthMode } from "../auth/session";
 import {
   createCallerFactory,
   protectedProcedure,
@@ -61,18 +61,20 @@ export const authRouter = router({
     canViewMargin: ctx.canViewMargin,
     actorType: ctx.user?.actorType ?? null,
     clientId: ctx.user?.clientId ?? null,
-    authMode: process.env.AUTH_MODE ?? "dev",
+    authMode: getAuthMode(),
   })),
   /** Dev-only: list switchable personas for M1–M6 demo. */
   devUsers: publicProcedure.query(() =>
-    Object.entries(DEV_USERS).map(([key, u]) => ({
-      key,
-      displayName: u.displayName,
-      email: u.email,
-      roles: u.roles,
-      actorType: u.actorType,
-      clientId: u.clientId,
-    })),
+    getAuthMode() === "dev"
+      ? Object.entries(DEV_USERS).map(([key, u]) => ({
+          key,
+          displayName: u.displayName,
+          email: u.email,
+          roles: u.roles,
+          actorType: u.actorType,
+          clientId: u.clientId,
+        }))
+      : [],
   ),
   logout: publicProcedure.mutation(() => undefined),
 });

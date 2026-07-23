@@ -1,4 +1,17 @@
-import { canViewMargin, hasPermission } from "@hrmny/db";
+import { createClient } from "@supabase/supabase-js";
+import {
+  canViewMargin,
+  clientPortalUser,
+  employee,
+  employeeAuth,
+  employeeRole,
+  eq,
+  hasPermission,
+  permissionPolicy,
+  role,
+  sql,
+} from "@hrmny/db";
+import { getDb } from "../db";
 
 export type AuthMode = "dev" | "supabase";
 
@@ -152,10 +165,10 @@ export const DEV_USERS: Record<string, SessionUser> = {
 
 export function getAuthMode(): AuthMode {
   const mode = process.env.AUTH_MODE?.toLowerCase();
+  // Never expose dev persona impersonation from a production deployment.
+  if (process.env.NODE_ENV === "production") return "supabase";
   if (mode === "supabase") return "supabase";
-  // Default to dev when no Supabase URL — keeps local demo runnable
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return "dev";
-  return (mode as AuthMode) || "dev";
+  return "dev";
 }
 
 export function resolveDevUser(roleKey: string | null | undefined): SessionUser {
@@ -174,4 +187,108 @@ export function sessionHas(
   action: string,
 ): boolean {
   return hasPermission(user.permissions, resource, action);
+}
+
+/** Verify a Supabase access token, then load authorization from Postgres. */
+export async function resolveSupabaseUser(
+  accessToken: string,
+): Promise<SessionUser | null> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (!url || !anonKey) {
+    throw new Error(
+      "AUTH_MODE=supabase requires NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    );
+  }
+
+  const supabase = createClient(url, anonKey, {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: false,
+    },
+  });
+  const { data, error } = await supabase.auth.getUser(accessToken);
+  if (error || !data.user) return null;
+
+  const db = getDb();
+  if (!db) {
+    throw new Error("AUTH_MODE=supabase requires DATABASE_URL");
+  }
+
+  const [staff] = await db
+    .select({
+      employeeId: employee.employeeId,
+      email: employee.email,
+      displayName: employee.displayName,
+      isActive: employee.isActive,
+    })
+    .from(employeeAuth)
+    .innerJoin(employee, eq(employeeAuth.employeeId, employee.employeeId))
+    .where(eq(employeeAuth.authUserId, data.user.id))
+    .limit(1);
+
+  if (staff?.isActive) {
+    const access = await db
+      .select({
+        role: role.key,
+        resource: permissionPolicy.resource,
+        action: permissionPolicy.action,
+        effect: permissionPolicy.effect,
+      })
+      .from(employeeRole)
+      .innerJoin(role, eq(employeeRole.roleId, role.roleId))
+      .leftJoin(
+        permissionPolicy,
+        eq(employeeRole.roleId, permissionPolicy.roleId),
+      )
+      .where(eq(employeeRole.employeeId, staff.employeeId));
+
+    return {
+      employeeId: staff.employeeId,
+      email: staff.email,
+      displayName: staff.displayName,
+      roles: [...new Set(access.map((row) => row.role))],
+      permissions: access.flatMap((row) =>
+        row.resource && row.action && row.effect
+          ? [`${row.effect}:${row.resource}:${row.action}`]
+          : [],
+      ),
+      actorType: "staff",
+      clientId: null,
+    };
+  }
+
+  const email = data.user.email?.trim().toLowerCase();
+  if (!email || !data.user.email_confirmed_at) return null;
+  const portalUsers = await db
+    .select({
+      portalUserId: clientPortalUser.clientPortalUserId,
+      clientId: clientPortalUser.clientId,
+      email: clientPortalUser.email,
+      displayName: clientPortalUser.displayName,
+    })
+    .from(clientPortalUser)
+    .where(
+      sql`${clientPortalUser.isActive} = true and lower(${clientPortalUser.email}) = ${email}`,
+    )
+    .limit(2);
+  if (portalUsers.length !== 1) return null;
+
+  const portal = portalUsers[0]!;
+  return {
+    employeeId: portal.portalUserId,
+    email: portal.email,
+    displayName: portal.displayName,
+    roles: ["portal_client"],
+    permissions: [
+      "allow:portal:read",
+      "allow:portal:approve",
+      "deny:margin:view",
+      "deny:invoice:*",
+      "deny:payroll:*",
+    ],
+    actorType: "portal",
+    clientId: portal.clientId,
+  };
 }

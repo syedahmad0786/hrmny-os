@@ -4,6 +4,7 @@ import {
   DEMO_CLIENT_ID,
   getDemoStore,
 } from "../demo-store";
+import { getAuthMode } from "../auth/session";
 import { driveSeam, listSeams, type SeamName } from "../seams";
 import {
   portalProcedure,
@@ -45,6 +46,13 @@ export const portalRouter = router({
     magicLink: publicProcedure
       .input(z.object({ email: z.string().email() }))
       .mutation(({ input }) => {
+        if (getAuthMode() === "supabase") {
+          return {
+            sent: false as const,
+            stubToken: undefined,
+            reason: "Use Supabase Auth for production magic links",
+          };
+        }
         const store = getDemoStore();
         // Map known demo emails → portal clients; unknown emails still get a token
         // but verify will fail isolation unless clientId is known.
@@ -71,7 +79,8 @@ export const portalRouter = router({
         // Dev stub: return token so UI/tests can complete without email delivery.
         return {
           sent: true as const,
-          stubToken: process.env.AUTH_MODE === "supabase" ? undefined : token,
+          stubToken: token,
+          reason: undefined,
         };
       }),
     /** Consume magic-link token (dev) or rely on x-dev-role persona. */
@@ -80,6 +89,12 @@ export const portalRouter = router({
       .mutation(({ input, ctx }) => {
         const store = getDemoStore();
         if (input?.token) {
+          if (getAuthMode() === "supabase") {
+            return {
+              ok: false as const,
+              reason: "Dev magic-link tokens are disabled in production",
+            };
+          }
           const row = store.portalMagicTokens.get(input.token);
           if (!row || row.expiresAt < Date.now()) {
             return { ok: false as const, reason: "Invalid or expired magic link" };

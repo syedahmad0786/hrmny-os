@@ -7,9 +7,9 @@
   },
   "scripts": {
     "dev": "turbo run dev",
-    "build": "turbo run build",
+    "build": "turbo run build --concurrency=1",
     "lint": "turbo run lint",
-    "test": "turbo run test",
+    "test": "turbo run test --concurrency=1",
     "typecheck": "turbo run typecheck",
     "e2e": "pnpm --filter @hrmny/web e2e",
     "db:generate": "pnpm --filter @hrmny/db generate",

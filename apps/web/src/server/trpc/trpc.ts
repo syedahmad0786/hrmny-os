@@ -4,6 +4,7 @@ import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import {
   getAuthMode,
   resolveDevUser,
+  resolveSupabaseUser,
   sessionCanViewMargin,
   sessionHas,
   type SessionUser,
@@ -39,26 +40,22 @@ export async function createContext(
     };
   }
 
-  // Supabase mode: expect Authorization Bearer; full session resolve lands with live project.
-  // Until wired, fall back to anonymous (forces protectedProcedure to fail closed).
   const authHeader = headers?.get("authorization");
-  if (!authHeader) {
+  const match = /^Bearer\s+(\S+)$/i.exec(authHeader?.trim() ?? "");
+  if (!match) {
     return { user: null, employeeId: null, roles: [], canViewMargin: false };
   }
-
-  // Placeholder: JWT verification via @supabase/ssr in follow-up when project exists
-  const role = headers?.get("x-dev-role");
-  if (role) {
-    const user = resolveDevUser(role);
-    return {
-      user,
-      employeeId: user.employeeId,
-      roles: user.roles,
-      canViewMargin: sessionCanViewMargin(user),
-    };
+  const user = await resolveSupabaseUser(match[1]!);
+  if (!user) {
+    return { user: null, employeeId: null, roles: [], canViewMargin: false };
   }
-
-  return { user: null, employeeId: null, roles: [], canViewMargin: false };
+  return {
+    user,
+    employeeId: user.employeeId,
+    roles: user.roles,
+    canViewMargin: sessionCanViewMargin(user),
+    clientId: user.clientId,
+  };
 }
 
 const t = initTRPC.context<TrpcContext>().create({

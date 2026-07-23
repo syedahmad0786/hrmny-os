@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCaller } from "./trpc/root";
-import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
+import {
+  getAuthMode,
+  resolveDevUser,
+  sessionCanViewMargin,
+} from "./auth/session";
+import { createContext } from "./trpc/trpc";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -8,6 +13,8 @@ import { join } from "node:path";
  * M1 security / insurance checks — RLS SQL grants, margin strip, secrets hygiene.
  */
 describe("M1 security insurance", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it("RLS SQL revokes UPDATE/DELETE on audit_event and asset_version", () => {
     const candidates = [
       join(process.cwd(), "packages/db/rls/001_m1_rls.sql"),
@@ -65,5 +72,35 @@ describe("M1 security insurance", () => {
     expect(ok.ok).toBe(true);
     const reuse = await caller.portal.auth.verify({ token: sent.stubToken! });
     expect(reuse.ok).toBe(false);
+  });
+
+  it("never enables dev persona impersonation in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AUTH_MODE", "dev");
+    expect(getAuthMode()).toBe("supabase");
+
+    const req = new Request("https://hrmny.example/api/trpc", {
+      headers: {
+        authorization: "not-a-valid-bearer-header",
+        "x-dev-role": "partner",
+      },
+    });
+    const ctx = await createContext({
+      req,
+    } as NonNullable<Parameters<typeof createContext>[0]>);
+    expect(ctx.user).toBeNull();
+
+    const partner = resolveDevUser("partner");
+    const caller = createCaller({
+      user: partner,
+      employeeId: partner.employeeId,
+      roles: partner.roles,
+      canViewMargin: sessionCanViewMargin(partner),
+    });
+    const magic = await caller.portal.auth.magicLink({
+      email: "client@example.com",
+    });
+    expect(magic.sent).toBe(false);
+    expect(magic.stubToken).toBeUndefined();
   });
 });
