@@ -18,7 +18,7 @@ Neither definition is 100% client-accepted today. The current M1 production code
 - Database: 36 public tables, all 36 with RLS enabled.
 - Database region: Supabase `ap-southeast-1` (Singapore).
 - Live provisioning: 3 employee records, 6 roles, and 3 role assignments.
-- Live acceptance records at audit time: 8 `audit_event`, 1 `asset`, 1 `asset_version`, 3 `health_signal`, 1 `scheduled_job`, and 0 `connection_account` rows.
+- Live acceptance records at audit time: 8 `audit_event`, 1 `asset`, 1 `asset_version`, 4 `health_signal`, 1 completed `scheduled_job`, and 0 `connection_account` rows.
 - Verification: all-package typecheck passed, production build passed, and 106/106 automated tests passed.
 
 ## Current M1 — Substrate
