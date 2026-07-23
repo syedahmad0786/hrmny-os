@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { setDevRole, getDevRole, trpc } from "@/lib/trpc";
 import { useEffect, useMemo, useState } from "react";
 import { initials } from "@/components/crm/format";
+import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 const PRIMARY_NAV = [
   { href: "/", label: "Home", index: "01", match: (p: string) => p === "/" },
@@ -60,12 +61,22 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   const session = trpc.auth.session.useQuery();
   const users = trpc.auth.devUsers.useQuery();
   const deals = trpc.crm.deals.list.useQuery(undefined, {
+    enabled: Boolean(session.data?.employeeId),
     staleTime: 30_000,
   });
 
   useEffect(() => {
     setRole(getDevRole());
   }, []);
+
+  useEffect(() => {
+    if (
+      session.isError ||
+      (session.data?.authMode === "supabase" && !session.data.employeeId)
+    ) {
+      router.replace("/login");
+    }
+  }, [router, session.data, session.isError]);
 
   async function onRoleChange(next: string) {
     setDevRole(next);
@@ -74,12 +85,30 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     router.refresh();
   }
 
+  async function onSignOut() {
+    await getSupabaseBrowserClient()?.auth.signOut();
+    await utils.invalidate();
+    router.replace("/login");
+  }
+
   const dealCount = useMemo(
     () => String((deals.data ?? []).length || ""),
     [deals.data],
   );
 
   const avatar = initials(session.data?.displayName ?? "Partner");
+
+  if (
+    session.isLoading ||
+    session.isError ||
+    (session.data?.authMode === "supabase" && !session.data.employeeId)
+  ) {
+    return (
+      <main className="flex min-h-screen items-center justify-center text-sm text-muted">
+        Checking access…
+      </main>
+    );
+  }
 
   return (
     <div className="desk-shell">
@@ -134,22 +163,31 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
               {session.data?.displayName ?? "…"}
             </p>
           </div>
-          <div className="desk-devbox">
-            <label htmlFor="persona">Persona</label>
-            <select
-              id="persona"
-              value={role}
-              onChange={(e) => void onRoleChange(e.target.value)}
-            >
-              {(users.data ?? [{ key: "partner", displayName: "Partner" }]).map(
-                (u) => (
+          {(users.data ?? []).length > 0 ? (
+            <div className="desk-devbox">
+              <label htmlFor="persona">Persona</label>
+              <select
+                id="persona"
+                value={role}
+                onChange={(e) => void onRoleChange(e.target.value)}
+              >
+                {users.data!.map((u) => (
                   <option key={u.key} value={u.key}>
                     {u.displayName}
                   </option>
-                ),
-              )}
-            </select>
-          </div>
+                ))}
+              </select>
+            </div>
+          ) : null}
+          {session.data?.authMode === "supabase" && session.data.employeeId ? (
+            <button
+              type="button"
+              className="text-xs underline"
+              onClick={() => void onSignOut()}
+            >
+              Sign out
+            </button>
+          ) : null}
           <span className="desk-avatar" aria-hidden>
             {avatar}
           </span>

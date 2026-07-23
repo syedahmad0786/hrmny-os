@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getDevRole, setDevRole, trpc } from "@/lib/trpc";
+import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 const NAV = [
   { href: "/portal", label: "Home" },
@@ -19,12 +20,14 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState("portal_a");
   const utils = trpc.useUtils();
   const session = trpc.portal.auth.session.useQuery(undefined, {
+    enabled: pathname !== "/portal/login",
     retry: false,
   });
   const users = trpc.auth.devUsers.useQuery();
   const portalUsers = (users.data ?? []).filter((u) => u.actorType === "portal");
 
   useEffect(() => {
+    if (pathname === "/portal/login") return;
     const current = getDevRole();
     if (!current.startsWith("portal")) {
       setDevRole("portal_a");
@@ -32,13 +35,35 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     } else {
       setRole(current);
     }
-  }, []);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (pathname !== "/portal/login" && session.isError) {
+      router.replace("/portal/login");
+    }
+  }, [pathname, router, session.isError]);
 
   async function onRoleChange(next: string) {
     setDevRole(next);
     setRole(next);
     await utils.invalidate();
     router.refresh();
+  }
+
+  async function onSignOut() {
+    await getSupabaseBrowserClient()?.auth.signOut();
+    await utils.invalidate();
+    router.replace("/portal/login");
+  }
+
+  if (pathname === "/portal/login") return children;
+
+  if (session.isLoading || session.isError) {
+    return (
+      <main className="flex min-h-screen items-center justify-center text-sm text-muted">
+        Checking portal access…
+      </main>
+    );
   }
 
   return (
@@ -57,20 +82,22 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
               </span>
             </p>
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <span className="text-muted">Client persona</span>
-            <select
-              className="rounded border border-[#D9D0C4] bg-white px-2 py-1"
-              value={role}
-              onChange={(e) => void onRoleChange(e.target.value)}
-            >
-              {portalUsers.map((u) => (
-                <option key={u.key} value={u.key}>
-                  {u.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
+          {portalUsers.length > 0 ? (
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-muted">Client persona</span>
+              <select
+                className="rounded border border-[#D9D0C4] bg-white px-2 py-1"
+                value={role}
+                onChange={(e) => void onRoleChange(e.target.value)}
+              >
+                {portalUsers.map((u) => (
+                  <option key={u.key} value={u.key}>
+                    {u.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
         <nav className="mx-auto flex max-w-4xl gap-1 px-4 pb-3">
           {NAV.map((item) => {
@@ -95,6 +122,15 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
           >
             Staff app →
           </Link>
+          {portalUsers.length === 0 ? (
+            <button
+              type="button"
+              className="rounded px-3 py-1.5 text-sm text-muted hover:text-ink"
+              onClick={() => void onSignOut()}
+            >
+              Sign out
+            </button>
+          ) : null}
         </nav>
       </header>
       <div className="mx-auto max-w-4xl px-6 py-8">{children}</div>

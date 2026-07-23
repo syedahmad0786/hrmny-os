@@ -4,15 +4,33 @@ import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 import Link from "next/link";
+import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 export default function PortalLoginPage() {
-  const [email, setEmail] = useState("client@demo.local");
+  const [email, setEmail] = useState("");
   const [token, setToken] = useState<string | null>(null);
   const [verified, setVerified] = useState<unknown>(null);
   const magic = trpc.portal.auth.magicLink.useMutation();
   const verify = trpc.portal.auth.verify.useMutation();
+  const devUsers = trpc.auth.devUsers.useQuery();
 
   async function requestLink() {
+    const supabase = getSupabaseBrowserClient();
+    if (supabase) {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${window.location.origin}/portal` },
+      });
+      setVerified(
+        error
+          ? { ok: false, reason: error.message }
+          : {
+              ok: true,
+              message: "Check your email for the secure sign-in link.",
+            },
+      );
+      return;
+    }
     const result = await magic.mutateAsync({ email });
     setToken(result.stubToken ?? null);
     setVerified(null);
@@ -30,8 +48,7 @@ export default function PortalLoginPage() {
         <p className="text-sm uppercase tracking-wide text-muted">Client portal</p>
         <h1 className="font-display text-3xl font-semibold">Magic link</h1>
         <p className="mt-2 text-muted">
-          Dev stub issues a token instead of email. Live Supabase Auth replaces
-          this in production.
+          Enter an approved client email to receive a secure sign-in link.
         </p>
       </div>
       <label className="flex flex-col gap-1 text-sm">
@@ -43,7 +60,11 @@ export default function PortalLoginPage() {
           onChange={(e) => setEmail(e.target.value)}
         />
       </label>
-      <Button type="button" onClick={() => void requestLink()} disabled={magic.isPending}>
+      <Button
+        type="button"
+        onClick={() => void requestLink()}
+        disabled={magic.isPending || !email.trim()}
+      >
         Send magic link
       </Button>
       {token ? (
@@ -65,9 +86,11 @@ export default function PortalLoginPage() {
           {JSON.stringify(verified, null, 2)}
         </pre>
       ) : null}
-      <Link href="/portal" className="text-sm underline">
-        Continue to portal (dev persona)
-      </Link>
+      {(devUsers.data ?? []).some((user) => user.actorType === "portal") ? (
+        <Link href="/portal" className="text-sm underline">
+          Continue to portal (dev persona)
+        </Link>
+      ) : null}
     </main>
   );
 }

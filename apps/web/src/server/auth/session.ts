@@ -12,6 +12,7 @@ import {
   sql,
 } from "@hrmny/db";
 import { getDb } from "../db";
+import { getSupabasePublicConfig } from "@/lib/supabase-config";
 
 export type AuthMode = "dev" | "supabase";
 
@@ -193,15 +194,14 @@ export function sessionHas(
 export async function resolveSupabaseUser(
   accessToken: string,
 ): Promise<SessionUser | null> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-  if (!url || !anonKey) {
+  const config = getSupabasePublicConfig();
+  if (!config) {
     throw new Error(
-      "AUTH_MODE=supabase requires NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      "AUTH_MODE=supabase requires NEXT_PUBLIC_SUPABASE_URL and a Supabase publishable key",
     );
   }
 
-  const supabase = createClient(url, anonKey, {
+  const supabase = createClient(config.url, config.key, {
     auth: {
       autoRefreshToken: false,
       detectSessionInUrl: false,

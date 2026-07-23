@@ -15,7 +15,8 @@ cp .env.example .env.local
 | `DATABASE_URL` | Project Settings → Database → URI (use **Transaction** pooler for app; port 6543) |
 | `DIRECT_URL` | Direct connection (port 5432) — preferred for `drizzle-kit migrate` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon public key |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | publishable public key (preferred) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | legacy anon public key (fallback) |
 | `SUPABASE_SERVICE_ROLE_KEY` | service_role (server only) |
 
 For local Supabase CLI defaults:

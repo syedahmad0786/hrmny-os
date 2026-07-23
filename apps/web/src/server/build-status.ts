@@ -1,4 +1,5 @@
 import { pingDatabase } from "@hrmny/db";
+import { getSupabasePublicConfig } from "@/lib/supabase-config";
 
 export type MilestoneStatus = "done" | "live_pending" | "blocked" | "next";
 
@@ -20,14 +21,16 @@ export type ConnectionCard = {
 };
 
 export async function getBuildStatus() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
-  const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
+  const supabase = getSupabasePublicConfig();
   const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
   const composioKey = process.env.COMPOSIO_API_KEY?.trim() ?? "";
   const xeroMode = process.env.XERO_MODE ?? "mock";
   const apolloMode = process.env.APOLLO_MODE ?? "mock";
   const hunterMode = process.env.HUNTER_MODE ?? "mock";
   const authMode = process.env.AUTH_MODE ?? "dev";
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
 
   const dbPing = await pingDatabase(databaseUrl);
 
@@ -93,10 +96,10 @@ export async function getBuildStatus() {
     {
       id: "supabase",
       label: "Supabase API",
-      status: supabaseUrl && supabaseAnon ? "active" : "missing",
-      detail: supabaseUrl
-        ? supabaseUrl.replace("https://", "")
-        : "Set NEXT_PUBLIC_SUPABASE_URL + anon key",
+      status: supabase ? "active" : "missing",
+      detail: supabase
+        ? supabase.url.replace("https://", "")
+        : "Set NEXT_PUBLIC_SUPABASE_URL + publishable key",
     },
     {
       id: "postgres",
@@ -109,8 +112,8 @@ export async function getBuildStatus() {
     {
       id: "vercel",
       label: "Vercel",
-      status: "active",
-      detail: "https://hrmny-os-desk-hrmnyco.vercel.app — CRM at /crm",
+      status: appUrl ? "active" : "missing",
+      detail: appUrl ? `${appUrl} — CRM at /crm` : "Vercel project not configured",
     },
     {
       id: "composio",
