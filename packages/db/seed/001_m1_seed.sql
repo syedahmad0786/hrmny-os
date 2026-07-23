@@ -28,13 +28,27 @@ FROM role WHERE key = 'finance'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO permission_policy (permission_policy_id, role_id, resource, action, effect)
-SELECT 'b0000000-0000-4000-8000-000000000004', role_id, 'deal', 'transition', 'allow'
-FROM role WHERE key IN ('partner', 'am', 'finance', 'director')
+SELECT v.permission_policy_id::uuid, r.role_id, 'deal', 'transition', 'allow'
+FROM (
+  VALUES
+    ('b0000000-0000-4000-8000-000000000004', 'partner'),
+    ('b0000000-0000-4000-8000-000000000005', 'am'),
+    ('b0000000-0000-4000-8000-000000000006', 'finance'),
+    ('b0000000-0000-4000-8000-000000000007', 'director')
+) AS v(permission_policy_id, role_key)
+JOIN role r ON r.key = v.role_key
 ON CONFLICT DO NOTHING;
 
 INSERT INTO permission_policy (permission_policy_id, role_id, resource, action, effect)
-SELECT 'b0000000-0000-4000-8000-000000000010', role_id, 'audit', 'view', 'allow'
-FROM role WHERE key IN ('partner', 'finance', 'director', 'developer')
+SELECT v.permission_policy_id::uuid, r.role_id, 'audit', 'view', 'allow'
+FROM (
+  VALUES
+    ('b0000000-0000-4000-8000-000000000010', 'partner'),
+    ('b0000000-0000-4000-8000-000000000011', 'finance'),
+    ('b0000000-0000-4000-8000-000000000012', 'director'),
+    ('b0000000-0000-4000-8000-000000000013', 'developer')
+) AS v(permission_policy_id, role_key)
+JOIN role r ON r.key = v.role_key
 ON CONFLICT DO NOTHING;
 
 -- Demo employees (dev auth uses these emails)
