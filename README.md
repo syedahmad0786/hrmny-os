@@ -176,11 +176,11 @@ Until **15 Aug 2026**, execution used nested agents + mock-first adapters so qua
 
 | File | Purpose |
 |---|---|
-| `vercel.json` | Turborepo install/build for `@hrmny/web` |
+| `apps/web/vercel.json` | Turborepo install/build for `@hrmny/web` |
 | `supabase/config.toml` | Local/link stub — create project in dashboard, then `npx supabase link` |
 | `packages/db/APPLY.md` | Apply migrations + RLS + seed to Supabase Postgres |
 
-Link Vercel project root to `hrmny-os/`, set env from `.env.example`, deploy. Live SSO/keys still required for production acceptance.
+Set the Vercel Root Directory to `apps/web`, set env from `.env.example`, and deploy. Live SSO/keys still required for production acceptance.
 
 ## Remaining gaps (production)
 
