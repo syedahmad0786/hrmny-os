@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   budgetSummary,
@@ -9,6 +10,16 @@ import {
 } from "./work-planning";
 
 describe("work planning calculations", () => {
+  it("groups database reports by the project's section membership", () => {
+    const router = readFileSync(
+      new URL("./trpc/work-management-router.ts", import.meta.url),
+      "utf8",
+    );
+    expect(router).toContain(
+      "section.work_section_id = membership.work_section_id",
+    );
+  });
+
   it("rolls up progress, capacity, budgets, and timer days", () => {
     expect(
       weightedProgress([

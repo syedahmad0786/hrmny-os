@@ -11061,7 +11061,7 @@ export const workManagementRouter = router({
                 left join public.employee employee
                   on employee.employee_id = item.assignee_employee_id
                 left join public.work_section section
-                  on section.work_section_id = item.work_section_id
+                  on section.work_section_id = membership.work_section_id
                 where membership.work_project_id = ${input.projectId}::uuid
                   and item.archived_at is null
               `)
