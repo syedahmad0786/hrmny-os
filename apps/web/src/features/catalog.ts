@@ -489,6 +489,16 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     defaultEnabled: true,
   }),
   feature({
+    key: "work.rules.external_actions",
+    name: "External rule actions",
+    description:
+      "Send signed, retryable rule events to approved public webhook destinations.",
+    group: "Workflows",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
+  feature({
     key: "work.templates",
     name: "Project & task templates",
     description:

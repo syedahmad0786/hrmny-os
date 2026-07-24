@@ -1738,6 +1738,7 @@ const workWebhookEvents = [
   "task.moved",
   "task.removed",
   "comment.created",
+  "rule.triggered",
 ] as const;
 
 function ApiWebhooksPanel({

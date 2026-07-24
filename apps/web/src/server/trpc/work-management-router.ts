@@ -261,6 +261,7 @@ type WorkForm = {
 type WorkRule = {
   ruleId: string;
   projectId: string;
+  ownerEmployeeId?: string;
   name: string;
   triggerType:
     | "task_added"
@@ -284,6 +285,14 @@ type WorkRuleRun = {
   status: "succeeded" | "skipped" | "failed";
   output: Record<string, unknown>;
   errorMessage: string | null;
+  createdAt: string;
+};
+type WorkExternalRuleEvent = {
+  eventId: string;
+  projectId: string;
+  itemId: string;
+  message: string;
+  taskTitle: string;
   createdAt: string;
 };
 type WorkTemplate = {
@@ -442,6 +451,7 @@ type DemoWork = {
   >;
   rules: Map<string, WorkRule>;
   ruleRuns: Map<string, WorkRuleRun>;
+  externalRuleEvents: Map<string, WorkExternalRuleEvent>;
   templates: Map<string, WorkTemplate>;
   bundles: Map<string, WorkBundle>;
   projectBundles: Map<string, { version: number; appliedAt: string }>;
@@ -573,6 +583,7 @@ export function getDemoWork(): DemoWork {
     formSubmissions: new Map(),
     rules: new Map(),
     ruleRuns: new Map(),
+    externalRuleEvents: new Map(),
     templates: new Map(),
     bundles: new Map(),
     projectBundles: new Map(),
@@ -854,6 +865,10 @@ const ruleActionSchema = z.discriminatedUnion("type", [
     statusOptionId: uuid,
   }),
   z.object({ type: z.literal("add_tag"), tagId: uuid }),
+  z.object({
+    type: z.literal("send_webhook"),
+    message: z.string().trim().min(1).max(2000),
+  }),
   z.object({
     type: z.literal("create_subtask"),
     title: z.string().trim().min(1).max(500),
@@ -2222,6 +2237,16 @@ async function executeRuleAction(
       const tags = store.itemTags.get(itemId) ?? new Set<string>();
       tags.add(action.tagId);
       store.itemTags.set(itemId, tags);
+    } else if (action.type === "send_webhook") {
+      const eventId = randomUUID();
+      store.externalRuleEvents.set(eventId, {
+        eventId,
+        projectId,
+        itemId,
+        message: action.message,
+        taskTitle: item.title,
+        createdAt: new Date().toISOString(),
+      });
     } else {
       const subtaskId = randomUUID();
       store.items.set(subtaskId, {
@@ -2238,6 +2263,7 @@ async function executeRuleAction(
         recurrence: null,
       });
     }
+    if (action.type === "send_webhook") return;
     if (action.type === "complete") {
       const enabled = await featureEnabled("work.recurring_tasks", {
         userId: ctx.employeeId,
@@ -2331,6 +2357,19 @@ async function executeRuleAction(
       `);
       if (!exists[0]) throw new Error("Tag not found");
     }
+  } else if (action.type === "send_webhook") {
+    const task = await ruleSnapshot(itemId, projectId);
+    await db.execute(sql`
+      select public.enqueue_work_webhook_event(
+        ${projectId}::uuid, 'rule.triggered', 'task', ${itemId}::uuid,
+        ${JSON.stringify({
+          message: action.message,
+          taskTitle: task.title,
+          assigneeEmployeeId: task.assigneeEmployeeId,
+          dueAt: task.dueAt,
+        })}::jsonb
+      )
+    `);
   } else {
     const [created] = await db.execute<{ id: string }>(sql`
       insert into public.work_item (
@@ -2353,6 +2392,7 @@ async function executeRuleAction(
         and membership.work_item_id = ${itemId}::uuid
     `);
   }
+  if (action.type === "send_webhook") return;
   if (action.type === "complete") {
     const enabled = await featureEnabled("work.recurring_tasks", {
       userId: ctx.employeeId,
@@ -2693,6 +2733,22 @@ function ruleUsesCustomTaskTypes(
   );
 }
 
+function ruleUsesExternalActions(rule: Pick<WorkRule, "branches">) {
+  return rule.branches.some((branch) =>
+    branch.actions.some((action) => action.type === "send_webhook"),
+  );
+}
+
+async function requireExternalRuleFeatures(
+  ctx: TrpcContext,
+  projectId: string,
+) {
+  await Promise.all([
+    requireScopedFeature(ctx, "work.rules.external_actions", projectId),
+    requireScopedFeature(ctx, "work.api_webhooks", projectId),
+  ]);
+}
+
 async function requireRuleTriggerFeature(
   ctx: TrpcContext,
   projectId: string,
@@ -2730,6 +2786,9 @@ async function runProjectRules(
     "work.custom_task_types",
     scope,
   );
+  const externalActionsEnabled =
+    (await featureEnabled("work.rules.external_actions", scope)) &&
+    (await featureEnabled("work.api_webhooks", scope));
   if (triggerType === "custom_status_changed" && !customTaskTypesEnabled)
     return;
   if (triggerType !== "collaborator_added" && triggerType !== "scheduled")
@@ -2775,6 +2834,7 @@ async function runProjectRules(
     const parsed = z.array(ruleBranchSchema).safeParse(candidate.branches);
     const rule = { ...candidate, branches: parsed.success ? parsed.data : [] };
     if (!customTaskTypesEnabled && ruleUsesCustomTaskTypes(rule)) continue;
+    if (!externalActionsEnabled && ruleUsesExternalActions(rule)) continue;
     const branch = rule.branches.find((value) =>
       ruleBranchMatches(value, snapshot),
     );
@@ -8242,16 +8302,26 @@ export const workManagementRouter = router({
           clientId: project.clientId,
           roles: ctx.roles,
         };
-        const [scheduledEnabled, collaboratorEnabled, customTypesEnabled] =
-          await Promise.all([
-            featureEnabled("work.rules.scheduled", scope),
-            featureEnabled("work.rules.collaborator_trigger", scope),
-            featureEnabled("work.custom_task_types", scope),
-          ]);
+        const [
+          scheduledEnabled,
+          collaboratorEnabled,
+          customTypesEnabled,
+          externalActionsEnabled,
+          apiWebhooksEnabled,
+        ] = await Promise.all([
+          featureEnabled("work.rules.scheduled", scope),
+          featureEnabled("work.rules.collaborator_trigger", scope),
+          featureEnabled("work.custom_task_types", scope),
+          featureEnabled("work.rules.external_actions", scope),
+          featureEnabled("work.api_webhooks", scope),
+        ]);
         const visible = (rule: WorkRule) =>
           (rule.triggerType !== "scheduled" || scheduledEnabled) &&
           (rule.triggerType !== "collaborator_added" || collaboratorEnabled) &&
-          (customTypesEnabled || !ruleUsesCustomTaskTypes(rule));
+          (customTypesEnabled || !ruleUsesCustomTaskTypes(rule)) &&
+          (externalActionsEnabled && apiWebhooksEnabled
+            ? true
+            : !ruleUsesExternalActions(rule));
         const db = getDb();
         if (!db)
           return [...getDemoWork().rules.values()].filter(
@@ -8293,6 +8363,8 @@ export const workManagementRouter = router({
           input.triggerType,
         );
         for (const branch of input.branches) {
+          if (branch.actions.some((action) => action.type === "send_webhook"))
+            await requireExternalRuleFeatures(ctx, input.projectId);
           if (
             branch.conditions.some((condition) =>
               ["customTaskTypeId", "customTaskStatusOptionId"].includes(
@@ -8335,6 +8407,7 @@ export const workManagementRouter = router({
         const rule: WorkRule = {
           ruleId: randomUUID(),
           projectId: input.projectId,
+          ownerEmployeeId: actor(ctx),
           name: input.name,
           triggerType: input.triggerType,
           scheduleMinutes: input.scheduleMinutes,
@@ -8404,6 +8477,23 @@ export const workManagementRouter = router({
             )[0];
         if (!rule) throw new TRPCError({ code: "NOT_FOUND" });
         await requireProjectAccess(ctx, rule.projectId, "editor");
+        const parsedBranches = z
+          .array(ruleBranchSchema)
+          .safeParse(rule.branches);
+        const hasExternalActions =
+          parsedBranches.success &&
+          ruleUsesExternalActions({ branches: parsedBranches.data });
+        if (hasExternalActions)
+          await requireExternalRuleFeatures(ctx, rule.projectId);
+        if (
+          hasExternalActions &&
+          rule.ownerEmployeeId &&
+          rule.ownerEmployeeId !== actor(ctx)
+        )
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Only the external rule owner can change it",
+          });
         if (input.enabled)
           await requireRuleTriggerFeature(
             ctx,
@@ -8411,11 +8501,10 @@ export const workManagementRouter = router({
             rule.triggerType,
           );
         if (input.enabled) {
-          const branches = z.array(ruleBranchSchema).safeParse(rule.branches);
           if (
             ruleUsesCustomTaskTypes({
               triggerType: rule.triggerType,
-              branches: branches.success ? branches.data : [],
+              branches: parsedBranches.success ? parsedBranches.data : [],
             })
           )
             await requireScopedFeature(
@@ -8423,8 +8512,8 @@ export const workManagementRouter = router({
               "work.custom_task_types",
               rule.projectId,
             );
-          if (branches.success)
-            for (const branch of branches.data) {
+          if (parsedBranches.success)
+            for (const branch of parsedBranches.data) {
               await validateRuleActions(rule.projectId, branch.actions, ctx);
               for (const condition of branch.conditions)
                 await validateCustomTaskRuleCondition(
@@ -8486,41 +8575,66 @@ export const workManagementRouter = router({
           clientId: project.clientId,
           roles: ctx.roles,
         };
-        const [scheduledEnabled, collaboratorEnabled] = await Promise.all([
+        const [
+          scheduledEnabled,
+          collaboratorEnabled,
+          externalActionsEnabled,
+          apiWebhooksEnabled,
+        ] = await Promise.all([
           featureEnabled("work.rules.scheduled", scope),
           featureEnabled("work.rules.collaborator_trigger", scope),
+          featureEnabled("work.rules.external_actions", scope),
+          featureEnabled("work.api_webhooks", scope),
         ]);
-        const visible = (run: WorkRuleRun) =>
+        const visible = (run: WorkRuleRun, rule?: WorkRule) =>
           (run.triggerType !== "scheduled" || scheduledEnabled) &&
-          (run.triggerType !== "collaborator_added" || collaboratorEnabled);
+          (run.triggerType !== "collaborator_added" || collaboratorEnabled) &&
+          (externalActionsEnabled && apiWebhooksEnabled
+            ? true
+            : !rule || !ruleUsesExternalActions(rule));
         const db = getDb();
         if (!db) {
-          const ruleIds = new Set(
+          const rules = new Map(
             [...getDemoWork().rules.values()]
               .filter((rule) => rule.projectId === input.projectId)
-              .map((rule) => rule.ruleId),
+              .map((rule) => [rule.ruleId, rule]),
           );
           return [...getDemoWork().ruleRuns.values()]
-            .filter((run) => ruleIds.has(run.ruleId) && visible(run))
+            .filter((run) => {
+              const rule = rules.get(run.ruleId);
+              return rule && visible(run, rule);
+            })
             .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
             .slice(0, input.limit);
         }
         const rows = await db.execute<
-          WorkRuleRun & { createdAt: Date | string }
+          WorkRuleRun & { createdAt: Date | string; branches: unknown }
         >(sql`
           select run.work_rule_run_id as "ruleRunId",
             run.work_rule_id as "ruleId", run.work_item_id as "itemId",
             run.trigger_type as "triggerType", run.status, run.output,
-            run.error_message as "errorMessage", run.created_at as "createdAt"
+            run.error_message as "errorMessage", run.created_at as "createdAt",
+            rule.branches
           from public.work_rule_run run
           join public.work_rule rule on rule.work_rule_id = run.work_rule_id
           where rule.work_project_id = ${input.projectId}::uuid
           order by run.created_at desc limit ${input.limit}
         `);
-        return rows.filter(visible).map((run) => ({
-          ...run,
-          createdAt: new Date(run.createdAt).toISOString(),
-        }));
+        return rows.flatMap(({ branches, ...run }) => {
+          const parsed = z.array(ruleBranchSchema).safeParse(branches);
+          const rule = {
+            ruleId: run.ruleId,
+            projectId: input.projectId,
+            name: "",
+            triggerType: run.triggerType,
+            scheduleMinutes: null,
+            branches: parsed.success ? parsed.data : [],
+            isEnabled: true,
+          } satisfies WorkRule;
+          return visible(run, rule)
+            ? [{ ...run, createdAt: new Date(run.createdAt).toISOString() }]
+            : [];
+        });
       }),
   }),
 
@@ -9505,6 +9619,8 @@ export const workManagementRouter = router({
             input.projectId,
             rule.triggerType,
           );
+          if (ruleUsesExternalActions(rule))
+            await requireExternalRuleFeatures(ctx, input.projectId);
           if (ruleUsesCustomTaskTypes(rule)) {
             await requireScopedFeature(
               ctx,
@@ -9640,6 +9756,7 @@ export const workManagementRouter = router({
             store.rules.set(ruleId, {
               ruleId,
               projectId: input.projectId,
+              ownerEmployeeId: employeeId,
               ...rule,
               branches: remapBranches(rule.branches),
               isEnabled: true,

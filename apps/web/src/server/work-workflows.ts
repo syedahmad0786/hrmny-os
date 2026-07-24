@@ -149,6 +149,7 @@ export type WorkRuleAction =
       statusOptionId: string;
     }
   | { type: "add_tag"; tagId: string }
+  | { type: "send_webhook"; message: string }
   | { type: "create_subtask"; title: string; dueInDays?: number };
 
 export type WorkRuleBranch = {
