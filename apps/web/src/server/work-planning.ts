@@ -152,6 +152,39 @@ export function countReportBuckets(labels: readonly string[]) {
   return { data, total: labels.length };
 }
 
+export function matchesMetadataReportFilters(
+  row: {
+    ownerEmployeeId: string | null;
+    status?: string | null;
+    privacy?: string | null;
+    sourcePlatform?: string | null;
+    scope?: string | null;
+    timePeriod?: string | null;
+    parentId?: string | null;
+  },
+  filters: {
+    ownerEmployeeId?: string | null;
+    status?: string | null;
+    privacy?: string | null;
+    sourcePlatform?: string | null;
+    scope?: string | null;
+    timePeriod?: string | null;
+    includeSubgoals?: boolean;
+  },
+) {
+  return (
+    (!filters.ownerEmployeeId ||
+      row.ownerEmployeeId === filters.ownerEmployeeId) &&
+    (!filters.status || row.status === filters.status) &&
+    (!filters.privacy || row.privacy === filters.privacy) &&
+    (!filters.sourcePlatform ||
+      row.sourcePlatform === filters.sourcePlatform) &&
+    (!filters.scope || row.scope === filters.scope) &&
+    (!filters.timePeriod || row.timePeriod === filters.timePeriod) &&
+    (filters.includeSubgoals !== false || !row.parentId)
+  );
+}
+
 export function criticalPath(
   items: readonly {
     itemId: string;

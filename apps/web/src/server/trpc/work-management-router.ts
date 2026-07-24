@@ -1080,6 +1080,27 @@ const metadataReportSpecSchema = z.object({
     "portfolio_owner",
     "portfolio_privacy",
   ]),
+  ownerEmployeeId: nullableUuid.optional(),
+  status: z
+    .enum([
+      "on_track",
+      "at_risk",
+      "off_track",
+      "complete",
+      "achieved",
+      "dropped",
+    ])
+    .nullable()
+    .optional(),
+  privacy: z.enum(["organization", "private"]).nullable().optional(),
+  sourcePlatform: z.enum(["native", "asana"]).nullable().optional(),
+  scope: z.enum(["company", "team", "individual"]).nullable().optional(),
+  timePeriod: z
+    .string()
+    .regex(/^Q[1-4] \d{4}$/)
+    .nullable()
+    .optional(),
+  includeSubgoals: z.boolean().optional(),
 });
 const dashboardConfigSchema = z
   .object({
@@ -1124,6 +1145,30 @@ const dashboardConfigSchema = z
         code: z.ZodIssueCode.custom,
         path: ["spec", "groupBy"],
         message: "Group does not match the report type",
+      });
+    if (reportType === "tasks" || "metric" in value.spec) return;
+    const metadata = value.spec;
+    const invalidStatus =
+      metadata.status &&
+      (reportType === "goals"
+        ? !["on_track", "at_risk", "off_track", "achieved", "dropped"].includes(
+            metadata.status,
+          )
+        : !["on_track", "at_risk", "off_track", "complete"].includes(
+            metadata.status,
+          ));
+    const invalidFields =
+      (reportType !== "projects" && metadata.sourcePlatform) ||
+      (reportType !== "goals" &&
+        (metadata.scope ||
+          metadata.timePeriod ||
+          metadata.includeSubgoals !== undefined)) ||
+      (reportType === "goals" && metadata.privacy);
+    if (invalidStatus || invalidFields)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["spec"],
+        message: "Filter does not match the report type",
       });
   });
 
@@ -3050,10 +3095,11 @@ async function requireDashboardAccess(
   }
   const spec = config.spec;
   if (
-    reportType === "projects" &&
+    (reportType === "projects" || reportType === "portfolios") &&
     spec &&
     typeof spec === "object" &&
-    (spec as Record<string, unknown>).groupBy === "project_health"
+    (String((spec as Record<string, unknown>).groupBy).endsWith("_health") ||
+      typeof (spec as Record<string, unknown>).status === "string")
   )
     await requireScopedFeature(ctx, "work.status_updates", null);
   if (

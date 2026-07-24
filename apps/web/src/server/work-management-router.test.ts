@@ -2383,7 +2383,13 @@ describe("work management", () => {
       config: {
         reportType: "projects",
         chartStyle: "donut",
-        spec: { groupBy: "project_health" },
+        spec: {
+          groupBy: "project_health",
+          ownerEmployeeId: employeeId,
+          status: "complete",
+          privacy: "private",
+          sourcePlatform: "native",
+        },
       },
     });
     const goalReportDashboard = await caller.work.reporting.saveDashboard({
@@ -2391,7 +2397,14 @@ describe("work management", () => {
       config: {
         reportType: "goals",
         chartStyle: "bar",
-        spec: { groupBy: "goal_status" },
+        spec: {
+          groupBy: "goal_status",
+          ownerEmployeeId: employeeId,
+          status: "on_track",
+          scope: "company",
+          timePeriod: "Q3 2026",
+          includeSubgoals: false,
+        },
       },
     });
     const portfolioReportDashboard = await caller.work.reporting.saveDashboard({
@@ -2399,7 +2412,12 @@ describe("work management", () => {
       config: {
         reportType: "portfolios",
         chartStyle: "number",
-        spec: { groupBy: "portfolio_health" },
+        spec: {
+          groupBy: "portfolio_health",
+          ownerEmployeeId: employeeId,
+          status: "on_track",
+          privacy: "organization",
+        },
       },
     });
     expect(await caller.work.reporting.dashboards()).toEqual(
@@ -2419,6 +2437,19 @@ describe("work management", () => {
         },
       }),
     ).rejects.toThrow("Group does not match the report type");
+    await expect(
+      caller.work.reporting.saveDashboard({
+        name: "Invalid goal filter",
+        config: {
+          reportType: "goals",
+          chartStyle: "bar",
+          spec: {
+            groupBy: "goal_status",
+            privacy: "organization",
+          },
+        },
+      }),
+    ).rejects.toThrow("Filter does not match the report type");
     await expect(
       caller.work.reporting.portfolioChart({
         portfolioId: portfolio.portfolioId,
@@ -2722,6 +2753,23 @@ describe("work management", () => {
       expect.objectContaining({ dashboardId: goalReportDashboard.dashboardId }),
     );
     await caller.admin.features.setOverride({
+      featureKey: "work.status_updates",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    expect(await caller.work.reporting.dashboards()).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({
+          dashboardId: projectReportDashboard.dashboardId,
+        }),
+        expect.objectContaining({
+          dashboardId: portfolioReportDashboard.dashboardId,
+        }),
+      ]),
+    );
+    await caller.admin.features.setOverride({
       featureKey: "work.portfolios",
       scopeType: "global",
       scopeKey: "global",
@@ -2731,18 +2779,6 @@ describe("work management", () => {
     expect(await caller.work.reporting.dashboards()).not.toContainEqual(
       expect.objectContaining({
         dashboardId: portfolioReportDashboard.dashboardId,
-      }),
-    );
-    await caller.admin.features.setOverride({
-      featureKey: "work.status_updates",
-      scopeType: "global",
-      scopeKey: "global",
-      enabled: false,
-      reason: "test",
-    });
-    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
-      expect.objectContaining({
-        dashboardId: projectReportDashboard.dashboardId,
       }),
     );
     await caller.admin.features.setOverride({
