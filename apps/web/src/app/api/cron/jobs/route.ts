@@ -5,6 +5,7 @@ import { emitHealthSignal } from "@/server/m1-persistence";
 import { featureEnabled } from "@/server/features";
 import { syncAsanaWorkspace } from "@/server/asana-sync";
 import { getVerifiedAsanaConnection } from "@/server/trpc/connections-router";
+import { refreshAsanaWebhooksIfEnabled } from "@/server/asana-webhooks";
 
 export const dynamic = "force-dynamic";
 
@@ -86,7 +87,7 @@ export async function GET(request: Request) {
             payload.actorEmployeeId,
           );
           if (!verified) throw new Error("Asana connection is unavailable");
-          result = await syncAsanaWorkspace({
+          const synced = await syncAsanaWorkspace({
             db,
             adapter: verified.adapter,
             workspaceGid: payload.workspaceGid,
@@ -94,6 +95,23 @@ export async function GET(request: Request) {
             connectedAccountId: verified.account.id,
             actorEmployeeId: payload.actorEmployeeId,
           });
+          const webhookRefresh = synced.reconciled
+            ? await refreshAsanaWebhooksIfEnabled({
+                adapter: verified.adapter,
+                connectedAccountId: verified.account.id,
+                workspace: {
+                  gid: payload.workspaceGid,
+                  name: payload.workspaceName,
+                },
+                employeeId: payload.actorEmployeeId,
+              }).catch((error) => ({
+                error:
+                  error instanceof Error
+                    ? error.message.slice(0, 500)
+                    : "Webhook refresh failed",
+              }))
+            : null;
+          result = { ...synced, webhookRefresh };
           recurring = true;
         } else result = { ok: true, disabled: true };
       } else {

@@ -5,6 +5,12 @@ import { DEV_USERS } from "../auth/session";
 import { importAsanaWorkspace } from "../asana-import";
 import { scanAsanaWorkspace } from "../asana-migration";
 import { syncAsanaWorkspace } from "../asana-sync";
+import {
+  disableAsanaWebhooks,
+  enableAsanaWebhooks,
+  getAsanaWebhookStatus,
+  refreshAsanaWebhooksIfEnabled,
+} from "../asana-webhooks";
 import { getDb } from "../db";
 import { writeAudit } from "../m1-persistence";
 import { getVerifiedAsanaConnection } from "./connections-router";
@@ -252,6 +258,14 @@ export const asanaMigrationRouter = router({
           connectedAccountId: verified.account.id,
           actorEmployeeId: ctx.employeeId!,
         });
+        if (result.reconciled) {
+          await refreshAsanaWebhooksIfEnabled({
+            adapter: verified.adapter,
+            connectedAccountId: verified.account.id,
+            workspace,
+            employeeId: ctx.employeeId!,
+          }).catch(() => undefined);
+        }
         await writeAudit({
           actorEmployeeId: ctx.employeeId,
           action: "asanaMigration.sync",
@@ -289,5 +303,68 @@ export const asanaMigrationRouter = router({
           throw new TRPCError({ code: "CONFLICT", message: error.message });
         throw error;
       }
+    }),
+
+  syncWebhookStatus: asanaAdminProcedure
+    .input(z.object({ workspaceGid: z.string().trim().min(1).max(120) }))
+    .query(async ({ ctx, input }) => {
+      const verified = await requireAsana(ctx.employeeId!);
+      return getAsanaWebhookStatus(verified.account.id, input.workspaceGid);
+    }),
+
+  syncWebhookEnable: asanaAdminProcedure
+    .input(z.object({ workspaceGid: z.string().trim().min(1).max(120) }))
+    .mutation(async ({ ctx, input }) => {
+      const verified = await requireAsana(ctx.employeeId!);
+      const workspace = (await verified.adapter.listWorkspaces()).find(
+        (candidate) => candidate.gid === input.workspaceGid,
+      );
+      if (!workspace)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Asana workspace not found on this connection",
+        });
+      const result = await enableAsanaWebhooks({
+        adapter: verified.adapter,
+        connectedAccountId: verified.account.id,
+        workspace,
+        employeeId: ctx.employeeId!,
+      });
+      await writeAudit({
+        actorEmployeeId: ctx.employeeId,
+        action: "asanaMigration.webhooks.enable",
+        entityType: "asana_workspace",
+        entityId: null,
+        before: null,
+        after: {
+          workspaceGid: input.workspaceGid,
+          active: result.active,
+          requested: result.requested,
+          failures: result.failures.length,
+        },
+        reason: "Enable signed Asana push reconciliation",
+      });
+      return result;
+    }),
+
+  syncWebhookDisable: asanaAdminProcedure
+    .input(z.object({ workspaceGid: z.string().trim().min(1).max(120) }))
+    .mutation(async ({ ctx, input }) => {
+      const verified = await requireAsana(ctx.employeeId!);
+      const result = await disableAsanaWebhooks({
+        adapter: verified.adapter,
+        connectedAccountId: verified.account.id,
+        workspaceGid: input.workspaceGid,
+      });
+      await writeAudit({
+        actorEmployeeId: ctx.employeeId,
+        action: "asanaMigration.webhooks.disable",
+        entityType: "asana_workspace",
+        entityId: null,
+        before: null,
+        after: { workspaceGid: input.workspaceGid, ...result },
+        reason: "Disable signed Asana push reconciliation",
+      });
+      return result;
     }),
 });

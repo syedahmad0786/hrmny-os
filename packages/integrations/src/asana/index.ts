@@ -97,6 +97,18 @@ export type AsanaEventPage = {
   reset: boolean;
 };
 
+export type AsanaWebhook = {
+  gid: string;
+  active: boolean;
+  target: string;
+  resource: { gid: string; resource_type?: string; name?: string };
+};
+
+export type AsanaWebhookFilter = {
+  resource_type: string;
+  action: "added" | "changed" | "deleted" | "removed" | "undeleted";
+};
+
 type AsanaPage<T> = {
   data: T[];
   next_page?: { offset?: string | null; uri?: string | null } | null;
@@ -130,10 +142,18 @@ export interface AsanaAdapter {
   listStories(taskGid: string): Promise<AsanaStory[]>;
   listAttachments(taskGid: string): Promise<AsanaAttachment[]>;
   workspaceEvents(workspaceGid: string, sync?: string): Promise<AsanaEventPage>;
+  createWebhook(
+    resourceGid: string,
+    target: string,
+    filters?: readonly AsanaWebhookFilter[],
+  ): Promise<AsanaWebhook>;
+  deleteWebhook(webhookGid: string): Promise<void>;
 }
 
 type AsanaTransport = {
   get<T>(path: string, query?: URLSearchParams): Promise<T>;
+  post<T>(path: string, body: Record<string, unknown>): Promise<T>;
+  delete(path: string): Promise<void>;
 };
 
 const TASK_FIELDS = [
@@ -180,21 +200,32 @@ function directTransport(input: {
     "",
   );
   const fetchImpl = input.fetchImpl ?? fetch;
+  async function request<T>(
+    path: string,
+    method: "GET" | "POST" | "DELETE",
+    query?: URLSearchParams,
+    body?: Record<string, unknown>,
+  ) {
+    const url = `${baseUrl}${path}${query ? `?${query}` : ""}`;
+    const response = await fetchImpl(url, {
+      method,
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${token}`,
+        ...(body ? { "content-type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new AsanaApiError(response.status, payload);
+    return payload as T;
+  }
   return {
-    async get<T>(path: string, query?: URLSearchParams) {
-      const url = `${baseUrl}${path}${query ? `?${query}` : ""}`;
-      const response = await fetchImpl(url, {
-        headers: {
-          accept: "application/json",
-          authorization: `Bearer ${token}`,
-        },
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new AsanaApiError(response.status, payload);
-      }
-      return payload as T;
-    },
+    get: <T>(path: string, query?: URLSearchParams) =>
+      request<T>(path, "GET", query),
+    post: <T>(path: string, body: Record<string, unknown>) =>
+      request<T>(path, "POST", undefined, body),
+    delete: (path: string) => request<void>(path, "DELETE"),
   };
 }
 
@@ -217,6 +248,34 @@ function composioTransport(input: {
           parameters,
         });
         return result.data;
+      } catch (error) {
+        if (error instanceof ComposioApiError)
+          throw new AsanaApiError(error.status, error.data);
+        throw error;
+      }
+    },
+    async post<T>(path: string, body: Record<string, unknown>) {
+      try {
+        const result = await input.client.proxy<T>({
+          connectedAccountId: input.connectedAccountId,
+          endpoint: `/api/1.0${path}`,
+          method: "POST",
+          body,
+        });
+        return result.data;
+      } catch (error) {
+        if (error instanceof ComposioApiError)
+          throw new AsanaApiError(error.status, error.data);
+        throw error;
+      }
+    },
+    async delete(path: string) {
+      try {
+        await input.client.proxy({
+          connectedAccountId: input.connectedAccountId,
+          endpoint: `/api/1.0${path}`,
+          method: "DELETE",
+        });
       } catch (error) {
         if (error instanceof ComposioApiError)
           throw new AsanaApiError(error.status, error.data);
@@ -343,6 +402,22 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         }
         throw error;
       }
+    },
+    async createWebhook(resourceGid, target, filters = []) {
+      const response = await transport.post<AsanaSingle<AsanaWebhook>>(
+        "/webhooks",
+        {
+          data: {
+            resource: resourceGid,
+            target,
+            ...(filters.length ? { filters } : {}),
+          },
+        },
+      );
+      return response.data;
+    },
+    async deleteWebhook(webhookGid) {
+      await transport.delete(`/webhooks/${encodeURIComponent(webhookGid)}`);
     },
   };
 }

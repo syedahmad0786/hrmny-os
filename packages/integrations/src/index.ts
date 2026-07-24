@@ -23,6 +23,8 @@ export {
   type AsanaStory,
   type AsanaTask,
   type AsanaUser,
+  type AsanaWebhook,
+  type AsanaWebhookFilter,
   type AsanaWorkspace,
 } from "./asana";
 export {

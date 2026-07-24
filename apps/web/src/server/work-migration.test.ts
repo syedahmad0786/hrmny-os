@@ -118,4 +118,29 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/employee_email_lower_uniq/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("stores signed Asana webhook subscriptions and deduplicated receipts", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0027_asana_webhooks.sql"),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0027_asana_webhooks.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0027_asana_webhooks.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.asana_webhook_subscription/i,
+    );
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.asana_webhook_receipt/i,
+    );
+    expect(migration).toMatch(/payload_hash text NOT NULL/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

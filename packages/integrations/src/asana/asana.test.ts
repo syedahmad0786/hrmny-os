@@ -137,4 +137,39 @@ describe("Asana integration", () => {
       reset: false,
     });
   });
+
+  it("registers and removes a signed Asana webhook", async () => {
+    const fetchMock = vi.fn(
+      async (_request: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "DELETE") return json({ data: {} });
+        expect(JSON.parse(String(init?.body))).toEqual({
+          data: {
+            resource: "w1",
+            target: "https://portal.hrmny.com/api/asana/webhooks/token",
+            filters: [{ resource_type: "project", action: "added" }],
+          },
+        });
+        return json({
+          data: {
+            gid: "hook-1",
+            active: true,
+            target: "https://portal.hrmny.com/api/asana/webhooks/token",
+            resource: { gid: "w1", resource_type: "workspace" },
+          },
+        });
+      },
+    );
+    const fetchImpl = fetchMock as unknown as typeof fetch;
+    const asana = createAsanaDirect({ accessToken: "token", fetchImpl });
+
+    await expect(
+      asana.createWebhook(
+        "w1",
+        "https://portal.hrmny.com/api/asana/webhooks/token",
+        [{ resource_type: "project", action: "added" }],
+      ),
+    ).resolves.toMatchObject({ gid: "hook-1", active: true });
+    await asana.deleteWebhook("hook-1");
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "DELETE" });
+  });
 });
