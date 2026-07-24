@@ -127,6 +127,7 @@ export const workAiRouter = router({
           )
           .max(3)
           .default([]),
+        allProjects: z.boolean().default(false),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -135,6 +136,7 @@ export const workAiRouter = router({
         summaryPortfolioId,
         includeInbox,
         images: requestedImages,
+        allProjects,
         projectIds: selectedProjectIds,
         ...generation
       } = input;
@@ -229,6 +231,61 @@ export const workAiRouter = router({
             ),
           });
         }
+      }
+      if (allProjects) {
+        if (
+          !["smart_chat", "smart_summaries", "risk_reports", "dash"].includes(
+            input.kind,
+          )
+        )
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Workspace context is unavailable for this capability",
+          });
+        await requireFeature(ctx, "work.projects");
+        const work = createWorkCaller(ctx);
+        const terms = [
+          ...new Set(
+            input.requestText
+              .toLowerCase()
+              .match(/[a-z0-9]+/g)
+              ?.filter((term) => term.length > 2) ?? [],
+          ),
+        ];
+        const projects = (await work.projects.list())
+          .map((project) => ({
+            project,
+            score: terms.reduce(
+              (score, term) =>
+                score +
+                Number(project.description.toLowerCase().includes(term)) +
+                Number(project.name.toLowerCase().includes(term)) * 5,
+              0,
+            ),
+          }))
+          .sort(
+            (left, right) =>
+              right.score - left.score ||
+              left.project.name.localeCompare(right.project.name),
+          );
+        for (const { project } of projects)
+          if (!projectIds.includes(project.projectId) && projectIds.length < 10)
+            projectIds.push(project.projectId);
+        // ponytail: the prompt window holds 100 project summaries; add indexed retrieval when larger workspaces appear.
+        for (const { project } of projects.slice(0, 100))
+          externalSources.push({
+            id: project.projectId,
+            type: "project",
+            label: project.name,
+            content: JSON.stringify({
+              description: project.description.slice(0, 300),
+              health: project.health,
+              startDate: project.startDate,
+              dueDate: project.dueDate,
+              privacy: project.privacy,
+              sourcePlatform: project.sourcePlatform,
+            }),
+          });
       }
       return generateWorkAi({
         ...generation,

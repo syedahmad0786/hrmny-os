@@ -831,16 +831,20 @@ async function buildContext(
       });
     }
   }
-  const external = externalSources.slice(0, 10).map((source) => ({
+  const external = externalSources.slice(0, 100).map((source) => ({
     ...source,
     content: source.content.slice(0, 30_000),
   }));
   const included: WorkAiContextSource[] = [];
   const lines: string[] = [];
+  const seen = new Set<string>();
   let length = 0;
   for (const source of [...external, ...sources]) {
+    const key = `${source.type}:${source.id}`;
+    if (seen.has(key)) continue;
     const line = JSON.stringify(source);
     if (length + line.length + Number(lines.length > 0) > 100_000) break;
+    seen.add(key);
     included.push(source);
     lines.push(line);
     length += line.length + Number(lines.length > 1);

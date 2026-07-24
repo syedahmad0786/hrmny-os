@@ -112,6 +112,7 @@ export default function WorkAiPage() {
   const [includeInbox, setIncludeInbox] = useState(false);
   const [images, setImages] = useState<AiImage[]>([]);
   const [imageError, setImageError] = useState("");
+  const [allProjects, setAllProjects] = useState(false);
   const [itemId, setItemId] = useState("");
   const [requestText, setRequestText] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -238,6 +239,13 @@ export default function WorkAiPage() {
                           dataBase64,
                         }))
                       : [],
+                  allProjects:
+                    [
+                      "smart_chat",
+                      "smart_summaries",
+                      "risk_reports",
+                      "dash",
+                    ].includes(kind) && allProjects,
                 });
               }}
             >
@@ -259,8 +267,23 @@ export default function WorkAiPage() {
               <fieldset>
                 <legend className="text-sm font-medium">Project context</legend>
                 <p className="mt-1 text-xs text-muted">
-                  Select only the work this request needs.
+                  Selected projects are always prioritized for detailed context.
                 </p>
+                {[
+                  "smart_chat",
+                  "smart_summaries",
+                  "risk_reports",
+                  "dash",
+                ].includes(kind) ? (
+                  <label className="mt-2 flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={allProjects}
+                      onChange={(event) => setAllProjects(event.target.checked)}
+                    />
+                    Add workspace overview (up to 100 visible projects)
+                  </label>
+                ) : null}
                 <div className="mt-2 grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-sand bg-white p-3 sm:grid-cols-2">
                   {(projects.data ?? []).map((project) => (
                     <label
