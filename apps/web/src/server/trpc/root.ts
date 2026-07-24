@@ -65,6 +65,7 @@ import { workManagementRouter } from "./work-management-router";
 import { workAdminRouter } from "./work-admin-router";
 import { workAiRouter } from "./work-ai-router";
 import { workAiStudioRouter } from "./work-ai-studio-router";
+import { workAiTeammatesRouter } from "./work-ai-teammates-router";
 import { asanaMigrationRouter } from "./asana-migration-router";
 import {
   briefsRouter as m4BriefsRouter,
@@ -749,6 +750,7 @@ export const appRouter = router({
   workAdmin: workAdminRouter,
   workAi: workAiRouter,
   workAiStudio: workAiStudioRouter,
+  workAiTeammates: workAiTeammatesRouter,
   asanaMigration: asanaMigrationRouter,
   assets: assetsRouter,
   /** Legacy M3 demo-store deals (gates, BUAF, HITL). Prefer `crm.*` for durable CRM. */

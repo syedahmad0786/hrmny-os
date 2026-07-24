@@ -628,6 +628,35 @@ function mockResult(
       priority: null,
       dueAt: null,
     });
+  if (kind === "teammate" && itemId && actionTypes?.includes("create_comment"))
+    actions.push({
+      type: "create_comment",
+      itemId,
+      body: `AI Teammate draft: ${request.slice(0, 1_000)}`,
+    });
+  else if (
+    kind === "teammate" &&
+    itemId &&
+    actionTypes?.includes("update_task")
+  )
+    actions.push({
+      type: "update_task",
+      itemId,
+      description: request.slice(0, 20_000),
+    });
+  else if (
+    kind === "teammate" &&
+    projectId &&
+    actionTypes?.includes("create_task")
+  )
+    actions.push({
+      type: "create_task",
+      projectId,
+      title: request.slice(0, 160),
+      description: "Drafted by an AI Teammate for review.",
+      priority: null,
+      dueAt: null,
+    });
   if (
     kind === "smart_chat" &&
     projectId &&

@@ -218,6 +218,13 @@
       "when": 1784955600000,
       "tag": "0030_work_ai_studio",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784959200000,
+      "tag": "0031_work_ai_teammates",
+      "breakpoints": true
     }
   ]
 }

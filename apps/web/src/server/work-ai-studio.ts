@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { sql } from "@hrmny/db";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { DEV_USERS, type SessionUser } from "./auth/session";
 import { getDb } from "./db";
 import { writeAudit } from "./m1-persistence";
 import type { TrpcContext } from "./trpc/trpc";
@@ -18,6 +17,7 @@ import {
   type WorkAiRun,
   type WorkAiStudioDraft,
 } from "./work-ai";
+import { workAiContextForEmployee } from "./work-ai-actor";
 
 export const workAiStudioTriggerTypes = [
   "manual",
@@ -607,53 +607,6 @@ export async function draftWorkAiStudioWorkflow(
   return { draft: run.result.studioDraft, run };
 }
 
-async function contextForEmployee(employeeId: string): Promise<TrpcContext> {
-  const demo = Object.values(DEV_USERS).find(
-    (candidate) => candidate.employeeId === employeeId,
-  );
-  if (demo)
-    return {
-      user: demo,
-      employeeId,
-      roles: demo.roles,
-      canViewMargin: false,
-      clientId: demo.clientId,
-    };
-  const db = getDb();
-  if (!db) throw new Error("Workflow actor is unavailable");
-  const [employee] = await db.execute<{
-    email: string;
-    displayName: string;
-    roles: string[];
-  }>(sql`
-    select employee.email, employee.display_name as "displayName",
-      coalesce(array_agg(role.key) filter (where role.key is not null), '{}'::text[]) as roles
-    from public.employee employee
-    left join public.employee_role membership
-      on membership.employee_id = employee.employee_id
-    left join public.role role on role.role_id = membership.role_id
-    where employee.employee_id = ${employeeId}::uuid and employee.is_active = true
-    group by employee.employee_id
-  `);
-  if (!employee) throw new Error("Workflow actor is unavailable");
-  const user: SessionUser = {
-    employeeId,
-    email: employee.email,
-    displayName: employee.displayName,
-    roles: employee.roles,
-    permissions: [],
-    actorType: "staff",
-    clientId: null,
-  };
-  return {
-    user,
-    employeeId,
-    roles: user.roles,
-    canViewMargin: false,
-    clientId: null,
-  };
-}
-
 export async function runWorkAiStudioJob(input: {
   workflowId: string;
   itemId: string | null;
@@ -661,7 +614,7 @@ export async function runWorkAiStudioJob(input: {
   eventKey: string;
   recurring: boolean;
 }) {
-  const actorContext = await contextForEmployee(input.actorEmployeeId);
+  const actorContext = await workAiContextForEmployee(input.actorEmployeeId);
   const visible = await workflowById(actorContext, input.workflowId);
   if (visible.status !== "published")
     return {
@@ -672,7 +625,9 @@ export async function runWorkAiStudioJob(input: {
       scheduleMinutes: visible.scheduleMinutes,
       disabled: true,
     };
-  const ownerContext = await contextForEmployee(visible.createdByEmployeeId);
+  const ownerContext = await workAiContextForEmployee(
+    visible.createdByEmployeeId,
+  );
   await workflowById(ownerContext, input.workflowId);
   const result = await runWorkAiStudioWorkflow({
     ctx: ownerContext,

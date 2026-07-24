@@ -217,4 +217,34 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/allowed_action_types text\[\] NOT NULL/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("adds access-scoped AI Teammates, skills, and task-bound memory", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0031_work_ai_teammates.sql"),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0031_work_ai_teammates.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0031_work_ai_teammates.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    for (const table of [
+      "work_ai_teammate",
+      "work_ai_teammate_member",
+      "work_ai_teammate_project_access",
+      "work_ai_teammate_skill",
+      "work_ai_teammate_memory",
+      "work_ai_teammate_run",
+    ])
+      expect(migration).toMatch(
+        new RegExp(`CREATE TABLE IF NOT EXISTS public\\.${table}`, "i"),
+      );
+    expect(migration).toMatch(/forgotten_at timestamptz/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

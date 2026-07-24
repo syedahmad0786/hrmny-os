@@ -30,6 +30,10 @@ import {
 } from "../work-planning";
 import { validateDailyMinutes } from "../shifts-timesheets";
 import { queueWorkAiStudioEvent } from "../work-ai-studio-events";
+import {
+  queueAssignedWorkAiTeammate,
+  queueMentionedWorkAiTeammates,
+} from "../work-ai-teammate-events";
 import { router, staffProcedure, type TrpcContext } from "./trpc";
 
 type AccessLevel = "admin" | "editor" | "commenter" | "viewer";
@@ -2229,6 +2233,11 @@ export const workManagementRouter = router({
             "assigned",
             `Assigned: ${item.title}`,
           );
+          await queueAssignedWorkAiTeammate(
+            ctx,
+            item.itemId,
+            item.assigneeEmployeeId,
+          );
         }
         await runProjectRules(ctx, input.projectId, item.itemId, "task_added");
         return item;
@@ -2339,6 +2348,12 @@ export const workManagementRouter = router({
           "updated",
           "A followed task was updated",
         );
+        if (input.assigneeEmployeeId !== undefined)
+          await queueAssignedWorkAiTeammate(
+            ctx,
+            input.itemId,
+            input.assigneeEmployeeId,
+          );
         if (input.priority !== undefined)
           await runProjectRules(
             ctx,
@@ -2576,6 +2591,7 @@ export const workManagementRouter = router({
           "commented",
           "New comment on a followed task",
         );
+        await queueMentionedWorkAiTeammates(ctx, input.itemId, input.body);
         return comment;
       }),
   }),

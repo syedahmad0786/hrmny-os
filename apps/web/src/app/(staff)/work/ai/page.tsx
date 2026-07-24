@@ -146,6 +146,14 @@ export default function WorkAiPage() {
             Open AI Studio
           </Link>
         ) : null}
+        {enabled.has("work.ai.teammates") ? (
+          <Link
+            className="inline-flex rounded-lg border border-sand bg-white px-4 py-2 text-sm"
+            href="/work/ai/teammates"
+          >
+            Open AI Teammates
+          </Link>
+        ) : null}
         <WorkNav />
       </header>
 
