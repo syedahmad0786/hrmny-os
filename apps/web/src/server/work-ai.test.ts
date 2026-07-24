@@ -154,6 +154,19 @@ describe("governed Work AI", () => {
         ],
       }),
     ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.attachments" });
+    const filteredOverview = await caller.workAi.generate({
+      kind: "smart_chat",
+      requestText: "Describe this image across visible projects",
+      projectIds: [],
+      itemId: null,
+      allProjects: true,
+      images: [{ name: "brief.png", mediaType: "image/png", dataBase64: png }],
+    });
+    expect(filteredOverview.result?.sources).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: project.projectId }),
+      ]),
+    );
 
     await caller.admin.features.setOverride({
       featureKey: "work.attachments",
@@ -173,6 +186,46 @@ describe("governed Work AI", () => {
         ],
       }),
     ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.attachments" });
+  });
+
+  it("uses a permission-filtered workspace overview and relevant project detail", async () => {
+    const caller = partnerCaller();
+    await caller.admin.features.setOverride({
+      featureKey: "work.ai.smart_chat",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: true,
+      reason: "test",
+    });
+    const unrelated = await caller.work.projects.create({
+      name: `Alphabetical ${crypto.randomUUID()}`,
+      description: "Unrelated work",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const relevant = await caller.work.projects.create({
+      name: `Mars launch ${crypto.randomUUID()}`,
+      description: "Mission readiness",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const run = await caller.workAi.generate({
+      kind: "smart_chat",
+      requestText: "Create a task for the Mars launch",
+      projectIds: [],
+      itemId: null,
+      allProjects: true,
+    });
+    expect(run.result?.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: relevant.projectId }),
+        expect.objectContaining({ id: unrelated.projectId }),
+      ]),
+    );
+    expect(run.result?.actions[0]).toMatchObject({
+      type: "create_task",
+      projectId: relevant.projectId,
+    });
   });
 
   it("fails closed when the capability is disabled", async () => {
