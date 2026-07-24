@@ -3,11 +3,18 @@ import { sql } from "@hrmny/db";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { SessionUser } from "./auth/session";
+import {
+  composioAiConnectedApps,
+  searchComposioConnectedData,
+} from "./composio-connected-data-ai";
 import { getDb } from "./db";
 import { featureEnabled } from "./features";
 import { searchGoogleWorkspace } from "./google-workspace-ai";
 import { writeAudit } from "./m1-persistence";
-import { getGoogleWorkspaceAccessToken } from "./trpc/connections-router";
+import {
+  getGoogleWorkspaceAccessToken,
+  getVerifiedWorkAppConnection,
+} from "./trpc/connections-router";
 import type { TrpcContext } from "./trpc/trpc";
 import {
   getDemoWork,
@@ -50,7 +57,14 @@ const teammateActionTypes = [
   "create_external_file",
 ] as const;
 type TeammateActionType = (typeof teammateActionTypes)[number];
-const teammateConnectedApps = ["google_workspace"] as const;
+const teammateConnectedApps = [
+  "google_workspace",
+  "one_drive",
+  "outlook",
+  "slack",
+  "microsoft_teams",
+  "jira",
+] as const;
 type TeammateConnectedApp = (typeof teammateConnectedApps)[number];
 type TeammateMemberAccess = "owner" | "editor" | "user";
 type ProjectAccess = "editor" | "commenter" | "viewer";
@@ -1253,19 +1267,43 @@ export async function runWorkAiTeammate(input: {
   try {
     let externalSources: WorkAiContextSource[] = [];
     if (
-      teammate.allowedConnectedApps.includes("google_workspace") &&
-      (await featureEnabled("work.ai.connectors", {
+      await featureEnabled("work.ai.connectors", {
         userId: ctx.employeeId,
         clientId: ctx.clientId,
         roles: ctx.roles,
-      }))
+      })
     ) {
-      const accessToken = await getGoogleWorkspaceAccessToken(employeeId);
-      if (accessToken)
-        externalSources = await searchGoogleWorkspace({
-          accessToken,
-          query: input.requestText,
-        });
+      const searches: Promise<WorkAiContextSource[]>[] = [];
+      if (teammate.allowedConnectedApps.includes("google_workspace"))
+        searches.push(
+          getGoogleWorkspaceAccessToken(employeeId).then((accessToken) =>
+            accessToken
+              ? searchGoogleWorkspace({
+                  accessToken,
+                  query: input.requestText,
+                })
+              : [],
+          ),
+        );
+      for (const definition of composioAiConnectedApps) {
+        if (!teammate.allowedConnectedApps.includes(definition.app)) continue;
+        searches.push(
+          getVerifiedWorkAppConnection(employeeId, definition.app, ctx).then(
+            (verified) =>
+              verified
+                ? searchComposioConnectedData({
+                    client: verified.client,
+                    connectedAccountId: verified.account.id,
+                    app: definition.app,
+                    query: input.requestText,
+                  })
+                : [],
+          ),
+        );
+      }
+      externalSources = (await Promise.allSettled(searches)).flatMap(
+        (result) => (result.status === "fulfilled" ? result.value : []),
+      );
     }
     const run = await generateWorkAi({
       ctx,

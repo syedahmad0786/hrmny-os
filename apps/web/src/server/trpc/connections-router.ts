@@ -7,6 +7,7 @@ import {
   ComposioApiError,
   type AsanaAdapter,
   type ComposioConnectedAccount,
+  type ComposioLiveClient,
 } from "@hrmny/integrations";
 import { z } from "zod";
 import { getDb } from "../db";
@@ -118,6 +119,7 @@ const workAppToolkits = [
   "servicenow",
 ] as const;
 const workAppToolkit = z.enum(workAppToolkits);
+export type WorkAppToolkit = (typeof workAppToolkits)[number];
 
 export const WORK_APP_CATALOG = [
   {
@@ -375,6 +377,46 @@ export async function getEmployeeIntegrationSecret(
 }
 
 const ACTIVE_COMPOSIO_STATUSES = new Set(["ACTIVE", "CONNECTED", "SUCCESS"]);
+
+export type VerifiedWorkAppConnection = {
+  account: ComposioConnectedAccount;
+  client: ComposioLiveClient;
+};
+
+export async function getVerifiedWorkAppConnection(
+  employeeId: string,
+  toolkit: WorkAppToolkit,
+  ctx: { clientId?: string | null; roles: readonly string[] },
+): Promise<VerifiedWorkAppConnection | null> {
+  const definition = WORK_APP_CATALOG.find(
+    (candidate) => candidate.toolkit === toolkit,
+  )!;
+  const subject = { employeeId, clientId: ctx.clientId, roles: ctx.roles };
+  const [bridgeAllowed, toolkitAllowed, familyEnabled, providerEnabled] =
+    await Promise.all([
+      isWorkConnectedAppAllowed("composio"),
+      isWorkConnectedAppAllowed(toolkit),
+      featureEnabled(definition.familyFeatureKey, featureSubject(subject)),
+      featureEnabled(definition.featureKey, featureSubject(subject)),
+    ]);
+  if (!bridgeAllowed || !toolkitAllowed || !familyEnabled || !providerEnabled)
+    return null;
+  const apiKey =
+    (await getEmployeeIntegrationSecret(employeeId, "composio")) ??
+    process.env.COMPOSIO_API_KEY?.trim();
+  if (!apiKey) return null;
+  const client = createComposioLive({ apiKey });
+  const accounts = await client.listConnectedAccounts({
+    toolkit,
+    userId: employeeId,
+  });
+  const account = accounts.find(
+    (candidate) =>
+      !candidate.is_disabled &&
+      ACTIVE_COMPOSIO_STATUSES.has(candidate.status.toUpperCase()),
+  );
+  return account ? { account, client } : null;
+}
 
 export type VerifiedAsanaConnection = {
   account: ComposioConnectedAccount;

@@ -54,6 +54,14 @@ const proxyResponseSchema = z
   })
   .passthrough();
 
+const toolResponseSchema = z
+  .object({
+    data: z.unknown(),
+    error: z.unknown().nullable().optional(),
+    successful: z.boolean().optional(),
+  })
+  .passthrough();
+
 export type ComposioConnectedAccount = z.infer<typeof connectedAccountSchema>;
 export type ComposioAuthConfig = z.infer<typeof authConfigSchema>;
 export type ComposioConnectLink = z.infer<typeof connectLinkSchema>;
@@ -87,6 +95,13 @@ export type ComposioLiveClient = {
     connectedAccountId: string;
     revokeOnDelete?: boolean;
   }): Promise<void>;
+  executeTool<T = unknown>(input: {
+    connectedAccountId: string;
+    toolSlug: string;
+    arguments?: Record<string, unknown>;
+    text?: string;
+    version?: string;
+  }): Promise<T>;
   proxy<T = unknown>(input: {
     connectedAccountId: string;
     endpoint: string;
@@ -194,6 +209,36 @@ export function createComposioLive(input: {
         `/connected_accounts/${encodeURIComponent(deleteInput.connectedAccountId)}?${query}`,
         { method: "DELETE" },
       );
+    },
+
+    async executeTool<T>(toolInput: {
+      connectedAccountId: string;
+      toolSlug: string;
+      arguments?: Record<string, unknown>;
+      text?: string;
+      version?: string;
+    }) {
+      const result = toolResponseSchema.parse(
+        await request(
+          `/tools/execute/${encodeURIComponent(toolInput.toolSlug)}`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              connected_account_id: toolInput.connectedAccountId,
+              arguments: toolInput.arguments,
+              text: toolInput.text,
+              version: toolInput.version ?? "latest",
+            }),
+          },
+        ),
+      );
+      if (result.successful === false)
+        throw new ComposioApiError(
+          "Composio tool execution failed",
+          502,
+          result.error,
+        );
+      return result.data as T;
     },
 
     async proxy<T>(proxyInput: {
