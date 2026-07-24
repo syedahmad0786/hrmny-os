@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const CRM_TABS: { href: string; label: string; exact?: boolean }[] = [
   { href: "/crm", label: "Pipeline", exact: true },
+  { href: "/clients", label: "Clients" },
   { href: "/crm/deals", label: "Deals" },
   { href: "/crm/companies", label: "Companies" },
   { href: "/crm/contacts", label: "Contacts" },

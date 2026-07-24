@@ -67,6 +67,11 @@ export default function WorkPage() {
   >("organization");
   const [sectionName, setSectionName] = useState("");
   const [quickTasks, setQuickTasks] = useState<Record<string, string>>({});
+  const [headerTaskTitle, setHeaderTaskTitle] = useState("");
+  const [dragItemId, setDragItemId] = useState<string | null>(null);
+  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(
+    null,
+  );
   const [comment, setComment] = useState("");
   const [subtask, setSubtask] = useState("");
   const [dependencyId, setDependencyId] = useState("");
@@ -280,6 +285,10 @@ export default function WorkPage() {
   });
 
   const sections = detail.data?.sections ?? [];
+  const boardSections: Array<{ sectionId: string | null; name: string }> = [
+    { sectionId: null, name: "No section" },
+    ...sections,
+  ];
   const items = detail.data?.items ?? [];
   const mentionOptions = useMemo<WorkMentionOption[]>(
     () => [
@@ -376,6 +385,20 @@ export default function WorkPage() {
     setQuickTasks((current) => ({ ...current, [key]: "" }));
   }
 
+  function moveDraggedTask(sectionId: string | null) {
+    if (!projectId || !dragItemId || !canEdit) return;
+    const item = items.find((candidate) => candidate.itemId === dragItemId);
+    if (!item || item.sectionId === sectionId) return;
+    moveTask.mutate({
+      itemId: item.itemId,
+      projectId,
+      sectionId,
+      position: topLevelItems.filter(
+        (candidate) => candidate.sectionId === sectionId,
+      ).length,
+    });
+  }
+
   function taskRow(item: (typeof items)[number]) {
     const blockedBy = dependencies.get(item.itemId) ?? [];
     const blocked = blockedBy.some(
@@ -458,13 +481,46 @@ export default function WorkPage() {
             One work graph for native hrmny projects and imported Asana work.
           </p>
         </div>
-        <button
-          type="button"
-          className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-white"
-          onClick={() => setNewProject((value) => !value)}
-        >
-          + New project
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {projectId && canEdit ? (
+            <form
+              className="flex"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const title = headerTaskTitle.trim();
+                if (!title) return;
+                createTask.mutate({
+                  projectId,
+                  sectionId: sections[0]?.sectionId ?? null,
+                  title,
+                  description: "",
+                });
+                setHeaderTaskTitle("");
+              }}
+            >
+              <input
+                aria-label="New task title"
+                className="rounded-l-full border border-sand bg-white px-4 py-2 text-sm"
+                placeholder="Task title"
+                value={headerTaskTitle}
+                onChange={(event) => setHeaderTaskTitle(event.target.value)}
+              />
+              <button
+                className="rounded-r-full bg-ochre px-4 py-2 text-sm font-medium text-white"
+                disabled={!headerTaskTitle.trim() || createTask.isPending}
+              >
+                + Add task
+              </button>
+            </form>
+          ) : null}
+          <button
+            type="button"
+            className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-white"
+            onClick={() => setNewProject((value) => !value)}
+          >
+            + New project
+          </button>
+        </div>
       </header>
 
       {mutationError ? (
@@ -641,14 +697,31 @@ export default function WorkPage() {
 
               {view === "board" && boardEnabled ? (
                 <div className="mt-4 flex gap-4 overflow-x-auto pb-4">
-                  {sections.map((section) => {
+                  {boardSections.map((section) => {
                     const sectionItems = topLevelItems.filter(
                       (item) => item.sectionId === section.sectionId,
                     );
+                    const sectionKey = section.sectionId ?? "none";
                     return (
                       <div
-                        key={section.sectionId}
-                        className="w-72 shrink-0 rounded-xl bg-[var(--paper)] p-3"
+                        key={sectionKey}
+                        className={`w-72 shrink-0 rounded-xl border p-3 ${dragOverSectionId === sectionKey ? "border-ochre bg-ochre/10" : "border-transparent bg-[var(--paper)]"}`}
+                        onDragEnter={() => setDragOverSectionId(sectionKey)}
+                        onDragLeave={(event) => {
+                          if (
+                            !event.currentTarget.contains(
+                              event.relatedTarget as Node,
+                            )
+                          )
+                            setDragOverSectionId(null);
+                        }}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          moveDraggedTask(section.sectionId);
+                          setDragItemId(null);
+                          setDragOverSectionId(null);
+                        }}
                       >
                         <div className="flex items-center justify-between">
                           <h3 className="text-sm font-semibold">
@@ -663,7 +736,20 @@ export default function WorkPage() {
                             <button
                               key={item.itemId}
                               type="button"
-                              className="rounded-lg border border-sand bg-white p-3 text-left shadow-sm"
+                              draggable={canEdit}
+                              className="cursor-grab rounded-lg border border-sand bg-white p-3 text-left shadow-sm active:cursor-grabbing"
+                              onDragStart={(event) => {
+                                setDragItemId(item.itemId);
+                                event.dataTransfer.effectAllowed = "move";
+                                event.dataTransfer.setData(
+                                  "text/plain",
+                                  item.itemId,
+                                );
+                              }}
+                              onDragEnd={() => {
+                                setDragItemId(null);
+                                setDragOverSectionId(null);
+                              }}
                               onClick={() => setSelectedItemId(item.itemId)}
                             >
                               <p
@@ -699,11 +785,11 @@ export default function WorkPage() {
                             <input
                               className="w-full rounded-lg border border-dashed border-sand bg-white/70 px-3 py-2 text-sm"
                               placeholder="+ Add task"
-                              value={quickTasks[section.sectionId] ?? ""}
+                              value={quickTasks[sectionKey] ?? ""}
                               onChange={(event) =>
                                 setQuickTasks((current) => ({
                                   ...current,
-                                  [section.sectionId]: event.target.value,
+                                  [sectionKey]: event.target.value,
                                 }))
                               }
                             />

@@ -22,7 +22,10 @@ const PRIMARY_NAV = [
     index: "02",
     features: ["crm.workspace"],
     match: (p: string) =>
-      p === "/crm" || p.startsWith("/crm/") || p.startsWith("/sales"),
+      p === "/crm" ||
+      p.startsWith("/crm/") ||
+      p.startsWith("/sales") ||
+      p.startsWith("/clients"),
   },
   {
     href: "/work",
@@ -333,8 +336,17 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
                 </select>
               </div>
             ) : null}
-            <Link href="/client-preview" className="desk-topbar-primary">
-              Client preview
+            <Link
+              href={
+                pathname.startsWith("/client-preview")
+                  ? "/clients"
+                  : "/client-preview"
+              }
+              className="desk-topbar-primary"
+            >
+              {pathname.startsWith("/client-preview")
+                ? "← Staff admin"
+                : "View client portal"}
             </Link>
             <Link
               href="/admin/audit"

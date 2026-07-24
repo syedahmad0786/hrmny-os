@@ -17,21 +17,26 @@ function requirePresenter(roles: string[]) {
 }
 
 export const clientPreviewRouter = router({
-  workspace: staffProcedure.query(async ({ ctx }) => {
-    requirePresenter(ctx.roles);
-    return readPortalWorkspace(await demoPortalClientId());
-  }),
+  workspace: staffProcedure
+    .input(z.object({ clientId: z.string().uuid().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      requirePresenter(ctx.roles);
+      return readPortalWorkspace(
+        input?.clientId ?? (await demoPortalClientId()),
+      );
+    }),
   act: staffProcedure
     .input(
       z.object({
         id: z.string().uuid(),
+        clientId: z.string().uuid().optional(),
         action: z.enum(["approve", "reject"]),
         feedback: z.string().trim().max(2_000).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
       requirePresenter(ctx.roles);
-      const clientId = await demoPortalClientId();
+      const clientId = input.clientId ?? (await demoPortalClientId());
       return actOnPortalApproval({
         clientId,
         approvalId: input.id,

@@ -235,6 +235,36 @@ describe("M3 sales platform demo", () => {
     expect(immersion.completedAt).toBeTruthy();
   });
 
+  it("creates a client directly and opens that client's portal preview", async () => {
+    const partner = callerFor("partner");
+    const client = await partner.clients.create({
+      name: "Presentation Client",
+      market: "UAE",
+      engagementType: "project",
+      contractValue: 25_000,
+    });
+
+    expect(
+      (await partner.clients.list()).some(
+        (row) => row.clientId === client.clientId,
+      ),
+    ).toBe(true);
+    await expect(
+      callerFor("am").clients.create({
+        name: "Unauthorized Client",
+        market: "UAE",
+        engagementType: "project",
+        contractValue: 0,
+      }),
+    ).rejects.toThrow(/Partner or director/);
+
+    const preview = await partner.clientPreview.workspace({
+      clientId: client.clientId,
+    });
+    expect(preview.clientName).toBe("Presentation Client");
+    expect(preview.tasks).toEqual([]);
+  });
+
   it("outreach draft stays pending until HITL approve (stub send)", async () => {
     const am = callerFor("am");
     await am.deals.buaf({

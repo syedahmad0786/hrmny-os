@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { sql } from "@hrmny/db";
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { createApolloLive, createHunterLive } from "@hrmny/integrations";
 import {
   bootstrapGateRegistry,
@@ -16,11 +18,13 @@ import {
   type DemoDeal,
   type DemoQuoteLine,
 } from "../demo-store";
+import { getDb } from "../db";
 import {
   protectedProcedure,
   publicProcedure,
   requireMarginView,
   router,
+  staffProcedure,
 } from "./trpc";
 import { month1Router } from "./m4-routers";
 import { getEmployeeIntegrationSecret } from "./connections-router";
@@ -787,16 +791,64 @@ export const scopesRouter = router({
 
 export const clientsRouter = router({
   month1: month1Router,
-  list: protectedProcedure
+  list: staffProcedure
     .input(
       z
         .object({
-          lifecycle: z.string().optional(),
-          market: z.string().optional(),
+          lifecycle: z
+            .enum([
+              "onboarding",
+              "active",
+              "renewing",
+              "at_risk",
+              "churned",
+              "closed",
+            ])
+            .optional(),
+          market: z.enum(["UAE", "KSA", "Both"]).optional(),
         })
         .optional(),
     )
-    .query(({ ctx, input }) => {
+    .query(async ({ ctx, input }) => {
+      const db = getDb();
+      if (db) {
+        const rows = await db.execute<{
+          clientId: string;
+          dealId: string;
+          name: string;
+          market: string;
+          engagementType: string;
+          contractValue: string | null;
+          currency: string;
+          startDate: string | null;
+          renewalDate: string | null;
+          fee: string | null;
+          lifecycleStatus: string;
+          contacts: Record<string, unknown>;
+          approvers: Record<string, unknown>;
+          portalUserCount: number;
+        }>(sql`
+          select
+            c.client_id as "clientId", c.deal_id as "dealId", c.name,
+            c.market, c.engagement_type as "engagementType",
+            c.contract_value::text as "contractValue", c.currency,
+            c.start_date as "startDate", c.renewal_date as "renewalDate",
+            c.fee::text as fee, c.lifecycle_status as "lifecycleStatus",
+            c.contacts, c.approvers,
+            count(portal.client_portal_user_id) filter (where portal.is_active)::int
+              as "portalUserCount"
+          from public.client c
+          left join public.client_portal_user portal on portal.client_id = c.client_id
+          where true
+            ${input?.lifecycle ? sql`and c.lifecycle_status = ${input.lifecycle}::client_lifecycle_enum` : sql``}
+            ${input?.market ? sql`and c.market = ${input.market}::market_enum` : sql``}
+          group by c.client_id
+          order by lower(c.name)
+        `);
+        return rows.map((client) =>
+          ctx.canViewMargin ? client : { ...client, fee: undefined },
+        );
+      }
       let rows = [...getDemoStore().clients.values()];
       if (input?.lifecycle) {
         rows = rows.filter((c) => c.lifecycleStatus === input.lifecycle);
@@ -811,9 +863,42 @@ export const clientsRouter = router({
       );
     }),
 
-  get: protectedProcedure
+  get: staffProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input, ctx }) => {
+    .query(async ({ input, ctx }) => {
+      const db = getDb();
+      if (db) {
+        const rows = await db.execute<{
+          clientId: string;
+          dealId: string;
+          name: string;
+          market: string;
+          engagementType: string;
+          contractValue: string | null;
+          currency: string;
+          startDate: string | null;
+          renewalDate: string | null;
+          fee: string | null;
+          lifecycleStatus: string;
+          contacts: Record<string, unknown>;
+          approvers: Record<string, unknown>;
+        }>(sql`
+          select
+            client_id as "clientId", deal_id as "dealId", name, market,
+            engagement_type as "engagementType",
+            contract_value::text as "contractValue", currency,
+            start_date as "startDate", renewal_date as "renewalDate",
+            fee::text as fee, lifecycle_status as "lifecycleStatus",
+            contacts, approvers
+          from public.client where client_id = ${input.id}::uuid limit 1
+        `);
+        const client = rows[0];
+        return client
+          ? ctx.canViewMargin
+            ? client
+            : { ...client, fee: undefined }
+          : null;
+      }
       const c = getDemoStore().clients.get(input.id);
       if (!c) return null;
       if (ctx.canViewMargin) return c;
@@ -821,26 +906,118 @@ export const clientsRouter = router({
       return rest;
     }),
 
-  create: protectedProcedure
+  create: staffProcedure
     .input(
       z.object({
-        dealId: z.string().uuid(),
-        name: z.string().min(1),
-        market: z.string().default("UAE"),
-        engagementType: z.string().default("project"),
-        contractValue: z.string().default("0"),
+        dealId: z.string().uuid().optional(),
+        name: z.string().trim().min(2).max(200),
+        market: z.enum(["UAE", "KSA", "Both"]).default("UAE"),
+        engagementType: z.enum(["retainer", "project"]).default("project"),
+        contractValue: z.coerce
+          .number()
+          .nonnegative()
+          .max(999_999_999)
+          .default(0),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (
+        !ctx.roles.some((role) => role === "partner" || role === "director")
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Partner or director access required",
+        });
+      }
+      const db = getDb();
+      if (db) {
+        return db.transaction(async (tx) => {
+          let dealId = input.dealId;
+          if (dealId) {
+            const deals = await tx.execute<{ dealId: string }>(sql`
+              select deal_id as "dealId" from public.deal
+              where deal_id = ${dealId}::uuid and close_outcome = 'won'
+              limit 1
+            `);
+            if (!deals[0]) {
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message:
+                  "The selected deal must be won before creating a client",
+              });
+            }
+          } else {
+            const companies = await tx.execute<{ companyId: string }>(sql`
+              insert into public.company (name, market)
+              values (${input.name}, ${input.market}::market_enum)
+              returning company_id as "companyId"
+            `);
+            const deals = await tx.execute<{ dealId: string }>(sql`
+              insert into public.deal (
+                company_id, company_name, stage, close_outcome,
+                lead_source_lane, quote_value, owner_employee_id
+              ) values (
+                ${companies[0]!.companyId}::uuid, ${input.name}, 'close', 'won',
+                'relationship_led', ${input.contractValue.toFixed(2)},
+                ${ctx.employeeId}::uuid
+              ) returning deal_id as "dealId"
+            `);
+            dealId = deals[0]!.dealId;
+          }
+          const clients = await tx.execute<{
+            clientId: string;
+            dealId: string;
+            name: string;
+            market: string;
+            engagementType: string;
+            contractValue: string;
+            currency: string;
+            lifecycleStatus: string;
+          }>(sql`
+            insert into public.client (
+              deal_id, name, market, engagement_type, contract_value,
+              currency, lifecycle_status, start_date
+            ) values (
+              ${dealId}::uuid, ${input.name}, ${input.market}::market_enum,
+              ${input.engagementType}::engagement_type_enum,
+              ${input.contractValue.toFixed(2)}, 'AED', 'onboarding', current_date
+            ) returning
+              client_id as "clientId", deal_id as "dealId", name, market,
+              engagement_type as "engagementType",
+              contract_value::text as "contractValue", currency,
+              lifecycle_status as "lifecycleStatus"
+          `);
+          const client = clients[0]!;
+          await tx.execute(sql`
+            insert into public.audit_event (
+              actor_employee_id, action, entity_type, entity_id, before, after
+            ) values (
+              ${ctx.employeeId}::uuid, 'clients.create', 'client',
+              ${client.clientId}::uuid, null,
+              ${JSON.stringify({ name: client.name, dealId: client.dealId })}::jsonb
+            )
+          `);
+          return client;
+        });
+      }
       const store = getDemoStore();
-      const deal = store.deals.get(input.dealId);
+      const deal = input.dealId
+        ? store.deals.get(input.dealId)
+        : { ...store.deal, dealId: randomUUID() };
       if (!deal) throw new Error("NOT_FOUND");
+      store.deals.set(deal.dealId, {
+        ...deal,
+        companyName: input.name,
+        quoteValue: input.contractValue.toFixed(2),
+        commercialMode: input.engagementType,
+      });
       const client = store.createClientFromWonDeal({
         ...deal,
         companyName: input.name,
-        quoteValue: input.contractValue,
-        commercialMode: input.engagementType as DemoDeal["commercialMode"],
+        quoteValue: input.contractValue.toFixed(2),
+        commercialMode: input.engagementType,
       });
+      client.market = input.market;
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "clients.create",
@@ -852,6 +1029,117 @@ export const clientsRouter = router({
       });
       return client;
     }),
+
+  portalUsers: router({
+    list: staffProcedure
+      .input(z.object({ clientId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        const db = getDb();
+        if (!db) return [];
+        return db.execute<{
+          portalUserId: string;
+          email: string;
+          displayName: string;
+          isActive: boolean;
+        }>(sql`
+          select client_portal_user_id as "portalUserId", email,
+            display_name as "displayName", is_active as "isActive"
+          from public.client_portal_user
+          where client_id = ${input.clientId}::uuid
+          order by is_active desc, lower(display_name)
+        `);
+      }),
+
+    invite: staffProcedure
+      .input(
+        z.object({
+          clientId: z.string().uuid(),
+          email: z.string().trim().email().max(320),
+          displayName: z.string().trim().min(2).max(160),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (
+          !ctx.roles.some((role) => role === "partner" || role === "director")
+        ) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Partner or director access required",
+          });
+        }
+        const db = getDb();
+        if (!db) {
+          return {
+            portalUserId: randomUUID(),
+            email: input.email.toLowerCase(),
+            displayName: input.displayName,
+            isActive: true,
+          };
+        }
+        const email = input.email.toLowerCase();
+        return db.transaction(async (tx) => {
+          await tx.execute(sql`
+            select pg_advisory_xact_lock(hashtextextended(${email}, 0))
+          `);
+          const conflicts = await tx.execute<{ clientId: string }>(sql`
+            select client_id as "clientId" from public.client_portal_user
+            where lower(email) = ${email} and is_active
+              and client_id <> ${input.clientId}::uuid
+            limit 1
+          `);
+          if (conflicts[0]) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "This email already has access to another client portal",
+            });
+          }
+          const existing = await tx.execute<{ portalUserId: string }>(sql`
+            select client_portal_user_id as "portalUserId"
+            from public.client_portal_user
+            where client_id = ${input.clientId}::uuid and lower(email) = ${email}
+            limit 1
+          `);
+          const users = existing[0]
+            ? await tx.execute<{
+                portalUserId: string;
+                email: string;
+                displayName: string;
+                isActive: boolean;
+              }>(sql`
+                update public.client_portal_user set
+                  email = ${email}, display_name = ${input.displayName},
+                  is_active = true, updated_at = now()
+                where client_portal_user_id = ${existing[0].portalUserId}::uuid
+                returning client_portal_user_id as "portalUserId", email,
+                  display_name as "displayName", is_active as "isActive"
+              `)
+            : await tx.execute<{
+                portalUserId: string;
+                email: string;
+                displayName: string;
+                isActive: boolean;
+              }>(sql`
+                insert into public.client_portal_user (
+                  client_id, email, display_name, is_active
+                ) values (
+                  ${input.clientId}::uuid, ${email}, ${input.displayName}, true
+                ) returning client_portal_user_id as "portalUserId", email,
+                  display_name as "displayName", is_active as "isActive"
+              `);
+          const user = users[0]!;
+          await tx.execute(sql`
+            insert into public.audit_event (
+              actor_employee_id, action, entity_type, entity_id, before, after
+            ) values (
+              ${ctx.employeeId}::uuid, 'clients.portal_user.invite',
+              'client_portal_user', ${user.portalUserId}::uuid, null,
+              ${JSON.stringify({ clientId: input.clientId, email })}::jsonb
+            )
+          `);
+          return user;
+        });
+      }),
+  }),
 
   immersion: router({
     upsert: protectedProcedure
