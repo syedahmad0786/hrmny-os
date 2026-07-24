@@ -43,6 +43,15 @@ function limited(value: string, length: number): string {
   return value.trim().slice(0, length) || "Untitled";
 }
 
+function textArray(values: readonly string[]) {
+  return values.length
+    ? sql`array[${sql.join(
+        values.map((value) => sql`${value}`),
+        sql.raw(", "),
+      )}]::text[]`
+    : sql`array[]::text[]`;
+}
+
 const ASANA_COLORS: Record<string, string> = {
   "dark-blue": "#2A5CAA",
   "dark-brown": "#765548",
@@ -175,10 +184,16 @@ export async function importAsanaWorkspace(input: {
   scan: AsanaWorkspaceScan;
   workspaceGid: string;
   workspaceName: string;
+  connectedAccountId: string;
   actorEmployeeId: string;
   mode?: "import" | "sync";
 }): Promise<{ runId: string; summary: AsanaImportSummary }> {
   const { db, scan, actorEmployeeId } = input;
+  if (scan.depth !== "full") {
+    throw new Error(
+      "Asana import requires a full scan for safe reconciliation",
+    );
+  }
   const [run] = await db.execute(sql<{ run_id: string }>`
     insert into public.work_migration_run (
       source_platform, workspace_external_id, workspace_name, mode, status,
@@ -226,36 +241,47 @@ export async function importAsanaWorkspace(input: {
         const [row] = await tx.execute(sql<{ id: string }>`
           insert into public.work_team (
             name, description, privacy, source_platform, external_id,
+            source_workspace_external_id, source_connection_external_id,
             created_by_employee_id
           ) values (
             ${limited(team.name, 160)},
             ${team.description ?? team.html_description ?? ""},
             ${teamPrivacy(team.visibility)}, 'asana', ${team.gid},
+            ${input.workspaceGid}, ${input.connectedAccountId},
             ${actorEmployeeId}::uuid
           )
           on conflict (source_platform, external_id)
             where external_id is not null
           do update set name = excluded.name, description = excluded.description,
-            privacy = excluded.privacy, archived_at = null, updated_at = now()
+            privacy = excluded.privacy, archived_at = null,
+            source_workspace_external_id = excluded.source_workspace_external_id,
+            source_connection_external_id = excluded.source_connection_external_id,
+            updated_at = now()
           returning work_team_id as id
         `);
         teamIds.set(team.gid, String(row!.id));
       }
 
       let teamMemberships = 0;
+      const teamMembershipExternalIds: string[] = [];
       for (const entry of scan.teamMemberships) {
         const teamId = teamIds.get(entry.teamGid);
         const employeeId = employeeForUser(entry.membership.user);
         if (!teamId || !employeeId) continue;
         await tx.execute(sql`
-          insert into public.work_team_member (work_team_id, employee_id, role)
+          insert into public.work_team_member (
+            work_team_id, employee_id, role, source_platform, external_id
+          )
           values (
             ${teamId}::uuid, ${employeeId}::uuid,
-            ${entry.membership.is_admin ? "admin" : "member"}
+            ${entry.membership.is_admin ? "admin" : "member"}, 'asana',
+            ${entry.membership.gid}
           )
           on conflict (work_team_id, employee_id) do update set
-            role = excluded.role, updated_at = now()
+            role = excluded.role, source_platform = excluded.source_platform,
+            external_id = excluded.external_id, updated_at = now()
         `);
+        teamMembershipExternalIds.push(entry.membership.gid);
         teamMemberships++;
       }
 
@@ -264,15 +290,17 @@ export async function importAsanaWorkspace(input: {
         const [row] = await tx.execute(sql<{ id: string }>`
           insert into public.work_project (
             name, description, color, privacy, owner_employee_id,
-            created_by_employee_id, source_platform, external_id, archived_at
-            , start_date, due_date
+            created_by_employee_id, source_platform, external_id, archived_at,
+            start_date, due_date, source_workspace_external_id,
+            source_connection_external_id
           ) values (
             ${limited(project.name, 160)}, ${project.notes ?? ""}, ${asanaColor(project.color)},
             ${privateInAsana(project.privacy_setting)},
             ${employeeForUser(project.owner)}::uuid,
             ${actorEmployeeId}::uuid, 'asana', ${project.gid},
             ${project.archived ? (project.modified_at ?? project.created_at ?? new Date().toISOString()) : null}::timestamptz,
-            ${project.start_on ?? null}::date, ${project.due_on ?? null}::date
+            ${project.start_on ?? null}::date, ${project.due_on ?? null}::date,
+            ${input.workspaceGid}, ${input.connectedAccountId}
           )
           on conflict (source_platform, external_id)
             where external_id is not null
@@ -285,6 +313,8 @@ export async function importAsanaWorkspace(input: {
             archived_at = excluded.archived_at,
             start_date = excluded.start_date,
             due_date = excluded.due_date,
+            source_workspace_external_id = excluded.source_workspace_external_id,
+            source_connection_external_id = excluded.source_connection_external_id,
             updated_at = now()
           returning work_project_id as id
         `);
@@ -292,16 +322,27 @@ export async function importAsanaWorkspace(input: {
       }
 
       let projectMemberships = 0;
+      const projectMembershipExternalIds: string[] = [];
+      const teamProjectExternalIds: string[] = [];
       for (const project of scan.projects) {
         const teamId = project.team?.gid ? teamIds.get(project.team.gid) : null;
         const projectId = projectIds.get(project.gid);
         if (!teamId || !projectId) continue;
         await tx.execute(sql`
           insert into public.work_team_project (
-            work_team_id, work_project_id, access_level
-          ) values (${teamId}::uuid, ${projectId}::uuid, 'editor')
-          on conflict (work_team_id, work_project_id) do nothing
+            work_team_id, work_project_id, access_level, source_platform,
+            external_id
+          ) values (
+            ${teamId}::uuid, ${projectId}::uuid, 'editor', 'asana',
+            ${`project-team:${project.gid}:${project.team!.gid}`}
+          )
+          on conflict (work_team_id, work_project_id) do update set
+            source_platform = excluded.source_platform,
+            external_id = excluded.external_id
         `);
+        teamProjectExternalIds.push(
+          `project-team:${project.gid}:${project.team!.gid}`,
+        );
       }
       for (const entry of scan.projectMemberships) {
         const projectId = projectIds.get(entry.projectGid);
@@ -315,24 +356,36 @@ export async function importAsanaWorkspace(input: {
           if (!teamId) continue;
           await tx.execute(sql`
             insert into public.work_team_project (
-              work_team_id, work_project_id, access_level
+              work_team_id, work_project_id, access_level, source_platform,
+              external_id
             ) values (
               ${teamId}::uuid, ${projectId}::uuid,
-              ${level === "admin" ? "editor" : level}
+              ${level === "admin" ? "editor" : level}, 'asana',
+              ${entry.membership.gid}
             )
             on conflict (work_team_id, work_project_id) do update set
-              access_level = excluded.access_level
+              access_level = excluded.access_level,
+              source_platform = excluded.source_platform,
+              external_id = excluded.external_id
           `);
+          teamProjectExternalIds.push(entry.membership.gid);
         } else {
           const employeeId = employeeForUser(entry.membership.member);
           if (!employeeId) continue;
           await tx.execute(sql`
             insert into public.work_project_member (
-              work_project_id, employee_id, access_level
-            ) values (${projectId}::uuid, ${employeeId}::uuid, ${level})
+              work_project_id, employee_id, access_level, source_platform,
+              external_id
+            ) values (
+              ${projectId}::uuid, ${employeeId}::uuid, ${level}, 'asana',
+              ${entry.membership.gid}
+            )
             on conflict (work_project_id, employee_id) do update set
-              access_level = excluded.access_level, updated_at = now()
+              access_level = excluded.access_level,
+              source_platform = excluded.source_platform,
+              external_id = excluded.external_id, updated_at = now()
           `);
+          projectMembershipExternalIds.push(entry.membership.gid);
         }
         projectMemberships++;
       }
@@ -365,7 +418,8 @@ export async function importAsanaWorkspace(input: {
             title, description, item_type, assignee_employee_id,
             created_by_employee_id, start_date, due_at, completed_at,
             estimated_minutes,
-            source_platform, external_id
+            source_platform, external_id, source_workspace_external_id,
+            source_connection_external_id
           ) values (
             ${limited(task.name, 500)}, ${task.notes ?? ""},
             ${asanaItemType(task.resource_subtype)},
@@ -373,7 +427,8 @@ export async function importAsanaWorkspace(input: {
             ${actorEmployeeId}::uuid, ${task.start_on ?? null}::date,
             ${asanaDueAt(task)}::timestamptz, ${completedAt(task)}::timestamptz,
             ${task.estimated_minutes ?? null},
-            'asana', ${task.gid}
+            'asana', ${task.gid}, ${input.workspaceGid},
+            ${input.connectedAccountId}
           )
           on conflict (source_platform, external_id)
             where external_id is not null
@@ -386,6 +441,8 @@ export async function importAsanaWorkspace(input: {
             due_at = excluded.due_at,
             completed_at = excluded.completed_at,
             estimated_minutes = excluded.estimated_minutes,
+            source_workspace_external_id = excluded.source_workspace_external_id,
+            source_connection_external_id = excluded.source_connection_external_id,
             archived_at = null,
             updated_at = now()
           returning work_item_id as id
@@ -407,6 +464,7 @@ export async function importAsanaWorkspace(input: {
       }
 
       let position = 0;
+      const projectItemExternalIds: string[] = [];
       for (const link of scan.projectTasks) {
         const projectId = projectIds.get(link.projectGid);
         const itemId = itemIds.get(link.taskGid);
@@ -416,22 +474,31 @@ export async function importAsanaWorkspace(input: {
           : null;
         await tx.execute(sql`
           insert into public.work_project_item (
-            work_project_id, work_item_id, work_section_id, position
+            work_project_id, work_item_id, work_section_id, position,
+            source_platform, external_id
           ) values (
-            ${projectId}::uuid, ${itemId}::uuid, ${sectionId}::uuid, ${position++}
+            ${projectId}::uuid, ${itemId}::uuid, ${sectionId}::uuid, ${position++},
+            'asana', ${`${link.projectGid}:${link.taskGid}`}
           )
           on conflict (work_project_id, work_item_id)
           do update set
             work_section_id = excluded.work_section_id,
             position = excluded.position,
+            source_platform = excluded.source_platform,
+            external_id = excluded.external_id,
             updated_at = now()
         `);
+        projectItemExternalIds.push(`${link.projectGid}:${link.taskGid}`);
       }
 
       let dependencies = 0;
       let followers = 0;
       let tags = 0;
       let customFieldValues = 0;
+      const dependencyExternalIds: string[] = [];
+      const followerExternalIds: string[] = [];
+      const itemTagExternalIds: string[] = [];
+      const customFieldValueExternalIds: string[] = [];
       for (const task of scan.tasks) {
         const itemId = itemIds.get(task.gid);
         if (!itemId) continue;
@@ -440,21 +507,33 @@ export async function importAsanaWorkspace(input: {
           if (!dependencyId) continue;
           await tx.execute(sql`
             insert into public.work_item_dependency (
-              work_item_id, depends_on_work_item_id, created_by_employee_id
+              work_item_id, depends_on_work_item_id, created_by_employee_id,
+              source_platform, external_id
             ) values (
-              ${itemId}::uuid, ${dependencyId}::uuid, ${actorEmployeeId}::uuid
-            ) on conflict (work_item_id, depends_on_work_item_id) do nothing
+              ${itemId}::uuid, ${dependencyId}::uuid, ${actorEmployeeId}::uuid,
+              'asana', ${`${task.gid}:${dependency.gid}`}
+            ) on conflict (work_item_id, depends_on_work_item_id) do update set
+              source_platform = excluded.source_platform,
+              external_id = excluded.external_id
           `);
+          dependencyExternalIds.push(`${task.gid}:${dependency.gid}`);
           dependencies++;
         }
         for (const follower of task.followers ?? []) {
           const employeeId = employeeFor(follower.email);
           if (!employeeId) continue;
           await tx.execute(sql`
-            insert into public.work_item_follower (work_item_id, employee_id)
-            values (${itemId}::uuid, ${employeeId}::uuid)
-            on conflict (work_item_id, employee_id) do nothing
+            insert into public.work_item_follower (
+              work_item_id, employee_id, source_platform, external_id
+            ) values (
+              ${itemId}::uuid, ${employeeId}::uuid, 'asana',
+              ${`${task.gid}:${follower.gid}`}
+            )
+            on conflict (work_item_id, employee_id) do update set
+              source_platform = excluded.source_platform,
+              external_id = excluded.external_id
           `);
+          followerExternalIds.push(`${task.gid}:${follower.gid}`);
           followers++;
         }
         for (const tag of task.tags ?? []) {
@@ -465,10 +544,17 @@ export async function importAsanaWorkspace(input: {
             returning work_tag_id as id
           `);
           await tx.execute(sql`
-            insert into public.work_item_tag (work_item_id, work_tag_id)
-            values (${itemId}::uuid, ${String(tagRow!.id)}::uuid)
-            on conflict (work_item_id, work_tag_id) do nothing
+            insert into public.work_item_tag (
+              work_item_id, work_tag_id, source_platform, external_id
+            ) values (
+              ${itemId}::uuid, ${String(tagRow!.id)}::uuid, 'asana',
+              ${`${task.gid}:${tag.gid}`}
+            )
+            on conflict (work_item_id, work_tag_id) do update set
+              source_platform = excluded.source_platform,
+              external_id = excluded.external_id
           `);
+          itemTagExternalIds.push(`${task.gid}:${tag.gid}`);
           tags++;
         }
 
@@ -496,20 +582,28 @@ export async function importAsanaWorkspace(input: {
             `);
             await tx.execute(sql`
               insert into public.work_custom_field_value (
-                work_item_id, work_custom_field_id, value
+                work_item_id, work_custom_field_id, value, source_platform,
+                external_id
               ) values (
                 ${itemId}::uuid, ${String(fieldRow!.id)}::uuid,
-                ${JSON.stringify(field)}::jsonb
+                ${JSON.stringify(field)}::jsonb, 'asana',
+                ${`${task.gid}:${projectGid}:${field.gid}`}
               )
               on conflict (work_item_id, work_custom_field_id)
-              do update set value = excluded.value, updated_at = now()
+              do update set value = excluded.value,
+                source_platform = excluded.source_platform,
+                external_id = excluded.external_id, updated_at = now()
             `);
+            customFieldValueExternalIds.push(
+              `${task.gid}:${projectGid}:${field.gid}`,
+            );
             customFieldValues++;
           }
         }
       }
 
       let comments = 0;
+      const commentExternalIds: string[] = [];
       for (const entry of scan.stories ?? []) {
         const { story } = entry;
         if (
@@ -535,12 +629,15 @@ export async function importAsanaWorkspace(input: {
           )
           on conflict (source_platform, external_id)
             where external_id is not null
-          do update set body = excluded.body, edited_at = now(), updated_at = now()
+          do update set body = excluded.body, edited_at = now(),
+            deleted_at = null, updated_at = now()
         `);
+        commentExternalIds.push(story.gid);
         comments++;
       }
 
       let attachments = 0;
+      const attachmentExternalIds: string[] = [];
       for (const entry of scan.attachments ?? []) {
         const itemId = itemIds.get(entry.taskGid);
         const attachment = entry.attachment;
@@ -565,6 +662,7 @@ export async function importAsanaWorkspace(input: {
             external_url = excluded.external_url,
             updated_at = now()
         `);
+        attachmentExternalIds.push(attachment.gid);
         attachments++;
       }
 
@@ -574,7 +672,8 @@ export async function importAsanaWorkspace(input: {
           insert into public.work_goal (
             name, description, scope, owner_employee_id, status, progress,
             start_date, due_date, privacy, created_by_employee_id,
-            source_platform, external_id, source_data, created_at
+            source_platform, external_id, source_data, created_at,
+            source_workspace_external_id, source_connection_external_id
           ) values (
             ${limited(goal.name, 300)}, ${goal.notes ?? ""},
             ${goal.is_workspace_level ? "company" : goal.team ? "team" : "individual"},
@@ -583,7 +682,8 @@ export async function importAsanaWorkspace(input: {
             ${goal.due_on ?? null}::date, ${privateInAsana(goal.privacy_setting)},
             ${actorEmployeeId}::uuid, 'asana', ${goal.gid},
             ${JSON.stringify(goal)}::jsonb,
-            ${goal.created_at ?? new Date().toISOString()}::timestamptz
+            ${goal.created_at ?? new Date().toISOString()}::timestamptz,
+            ${input.workspaceGid}, ${input.connectedAccountId}
           )
           on conflict (source_platform, external_id)
             where external_id is not null
@@ -592,6 +692,8 @@ export async function importAsanaWorkspace(input: {
             status = excluded.status, progress = excluded.progress,
             start_date = excluded.start_date, due_date = excluded.due_date,
             privacy = excluded.privacy, source_data = excluded.source_data,
+            source_workspace_external_id = excluded.source_workspace_external_id,
+            source_connection_external_id = excluded.source_connection_external_id,
             archived_at = null, updated_at = now()
           returning work_goal_id as id
         `);
@@ -604,7 +706,8 @@ export async function importAsanaWorkspace(input: {
           insert into public.work_portfolio (
             name, description, color, privacy, owner_employee_id,
             created_by_employee_id, start_date, due_date, source_platform,
-            external_id, source_data, archived_at, created_at
+            external_id, source_data, archived_at, created_at,
+            source_workspace_external_id, source_connection_external_id
           ) values (
             ${limited(portfolio.name, 200)}, '', ${asanaColor(portfolio.color)},
             ${privateInAsana(portfolio.privacy_setting)},
@@ -612,7 +715,8 @@ export async function importAsanaWorkspace(input: {
             ${portfolio.start_on ?? null}::date, ${portfolio.due_on ?? null}::date,
             'asana', ${portfolio.gid}, ${JSON.stringify(portfolio)}::jsonb,
             ${portfolio.archived ? (portfolio.created_at ?? new Date().toISOString()) : null}::timestamptz,
-            ${portfolio.created_at ?? new Date().toISOString()}::timestamptz
+            ${portfolio.created_at ?? new Date().toISOString()}::timestamptz,
+            ${input.workspaceGid}, ${input.connectedAccountId}
           )
           on conflict (source_platform, external_id)
             where external_id is not null
@@ -620,6 +724,8 @@ export async function importAsanaWorkspace(input: {
             privacy = excluded.privacy, owner_employee_id = excluded.owner_employee_id,
             start_date = excluded.start_date, due_date = excluded.due_date,
             source_data = excluded.source_data, archived_at = excluded.archived_at,
+            source_workspace_external_id = excluded.source_workspace_external_id,
+            source_connection_external_id = excluded.source_connection_external_id,
             updated_at = now()
           returning work_portfolio_id as id
         `);
@@ -627,21 +733,39 @@ export async function importAsanaWorkspace(input: {
       }
 
       let portfolioItems = 0;
+      const portfolioProjectExternalIds: string[] = [];
       for (const [position, item] of scan.portfolioItems.entries()) {
         const portfolioId = portfolioIds.get(item.portfolioGid);
         const projectId = projectIds.get(item.projectGid);
         if (!portfolioId || !projectId) continue;
         await tx.execute(sql`
           insert into public.work_portfolio_project (
-            work_portfolio_id, work_project_id, position
-          ) values (${portfolioId}::uuid, ${projectId}::uuid, ${position})
+            work_portfolio_id, work_project_id, position, source_platform,
+            external_id
+          ) values (
+            ${portfolioId}::uuid, ${projectId}::uuid, ${position}, 'asana',
+            ${`${item.portfolioGid}:${item.projectGid}`}
+          )
           on conflict (work_portfolio_id, work_project_id) do update set
-            position = excluded.position
+            position = excluded.position,
+            source_platform = excluded.source_platform,
+            external_id = excluded.external_id
         `);
+        portfolioProjectExternalIds.push(
+          `${item.portfolioGid}:${item.projectGid}`,
+        );
         portfolioItems++;
       }
 
+      await tx.execute(sql`
+        update public.work_goal set parent_work_goal_id = null, updated_at = now()
+        where source_platform = 'asana'
+          and source_workspace_external_id = ${input.workspaceGid}
+          and source_connection_external_id = ${input.connectedAccountId}
+          and parent_work_goal_id is not null
+      `);
       let goalRelationships = 0;
+      const goalLinkExternalIds: string[] = [];
       for (const entry of scan.goalRelationships) {
         const goalId = goalIds.get(entry.goalGid);
         const resource = entry.relationship.supporting_resource;
@@ -693,6 +817,7 @@ export async function importAsanaWorkspace(input: {
             supporting_work_goal_id = excluded.supporting_work_goal_id,
             weight = excluded.weight
         `);
+        goalLinkExternalIds.push(entry.relationship.gid);
         goalRelationships++;
       }
 
@@ -701,15 +826,19 @@ export async function importAsanaWorkspace(input: {
         await tx.execute(sql`
           insert into public.work_template (
             name, template_type, blueprint, created_by_employee_id,
-            source_platform, external_id
+            source_platform, external_id, source_workspace_external_id,
+            source_connection_external_id
           ) values (
             ${limited(template.name, 160)}, 'project',
             ${JSON.stringify(template)}::jsonb, ${actorEmployeeId}::uuid,
-            'asana', ${template.gid}
+            'asana', ${template.gid}, ${input.workspaceGid},
+            ${input.connectedAccountId}
           )
           on conflict (source_platform, external_id)
             where external_id is not null
           do update set name = excluded.name, blueprint = excluded.blueprint,
+            source_workspace_external_id = excluded.source_workspace_external_id,
+            source_connection_external_id = excluded.source_connection_external_id,
             archived_at = null, updated_at = now()
         `);
         templates++;
@@ -721,22 +850,27 @@ export async function importAsanaWorkspace(input: {
         await tx.execute(sql`
           insert into public.work_template (
             work_project_id, name, template_type, blueprint,
-            created_by_employee_id, source_platform, external_id
+            created_by_employee_id, source_platform, external_id,
+            source_workspace_external_id, source_connection_external_id
           ) values (
             ${projectId}::uuid, ${limited(template.name, 160)}, 'task',
             ${JSON.stringify(template)}::jsonb, ${actorEmployeeId}::uuid,
-            'asana', ${template.gid}
+            'asana', ${template.gid}, ${input.workspaceGid},
+            ${input.connectedAccountId}
           )
           on conflict (source_platform, external_id)
             where external_id is not null
           do update set work_project_id = excluded.work_project_id,
             name = excluded.name, blueprint = excluded.blueprint,
+            source_workspace_external_id = excluded.source_workspace_external_id,
+            source_connection_external_id = excluded.source_connection_external_id,
             archived_at = null, updated_at = now()
         `);
         templates++;
       }
 
       let statusUpdates = 0;
+      const statusExternalIds: string[] = [];
       for (const entry of scan.statusUpdates ?? []) {
         const projectId =
           entry.parentType === "project"
@@ -768,10 +902,12 @@ export async function importAsanaWorkspace(input: {
           do update set health = excluded.health, title = excluded.title,
             body = excluded.body, source_data = excluded.source_data
         `);
+        statusExternalIds.push(entry.status.gid);
         statusUpdates++;
       }
 
       let timeTrackingEntries = 0;
+      const timeEntryExternalIds: string[] = [];
       for (const row of scan.timeTrackingEntries ?? []) {
         const employeeId = employeeForUser(row.entry.created_by);
         const itemId = itemIds.get(row.taskGid);
@@ -818,7 +954,246 @@ export async function importAsanaWorkspace(input: {
             decided_at = excluded.decided_at, source_data = excluded.source_data,
             updated_at = now()
         `);
+        timeEntryExternalIds.push(row.entry.gid);
         timeTrackingEntries++;
+      }
+
+      const projectExternalIds = scan.projects.map((value) => value.gid);
+      const taskExternalIds = scan.tasks.map((value) => value.gid);
+      const teamExternalIds = scan.teams.map((value) => value.gid);
+      const goalExternalIds = scan.goals.map((value) => value.gid);
+      const portfolioExternalIds = scan.portfolios.map((value) => value.gid);
+      const templateExternalIds = [
+        ...scan.projectTemplates,
+        ...scan.taskTemplates,
+      ].map((value) => value.gid);
+
+      for (const [table, ids] of [
+        ["work_project", projectExternalIds],
+        ["work_item", taskExternalIds],
+        ["work_team", teamExternalIds],
+        ["work_goal", goalExternalIds],
+        ["work_portfolio", portfolioExternalIds],
+        ["work_template", templateExternalIds],
+      ] as const) {
+        await tx.execute(sql`
+          update public.${sql.raw(table)}
+          set archived_at = coalesce(archived_at, now()), updated_at = now()
+          where source_platform = 'asana'
+            and source_workspace_external_id = ${input.workspaceGid}
+            and source_connection_external_id = ${input.connectedAccountId}
+            and coalesce(external_id, '') <> all(${textArray(ids)})
+        `);
+      }
+
+      await tx.execute(sql`
+        delete from public.work_team_member member
+        using public.work_team team
+        where member.work_team_id = team.work_team_id
+          and team.source_platform = 'asana'
+          and team.source_workspace_external_id = ${input.workspaceGid}
+          and team.source_connection_external_id = ${input.connectedAccountId}
+          and member.source_platform = 'asana'
+          and coalesce(member.external_id, '') <>
+            all(${textArray(teamMembershipExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_project_member member
+        using public.work_project project
+        where member.work_project_id = project.work_project_id
+          and project.source_platform = 'asana'
+          and project.source_workspace_external_id = ${input.workspaceGid}
+          and project.source_connection_external_id = ${input.connectedAccountId}
+          and member.source_platform = 'asana'
+          and coalesce(member.external_id, '') <>
+            all(${textArray(projectMembershipExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_team_project link
+        using public.work_project project
+        where link.work_project_id = project.work_project_id
+          and project.source_platform = 'asana'
+          and project.source_workspace_external_id = ${input.workspaceGid}
+          and project.source_connection_external_id = ${input.connectedAccountId}
+          and link.source_platform = 'asana'
+          and coalesce(link.external_id, '') <>
+            all(${textArray(teamProjectExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_portfolio_project link
+        using public.work_portfolio portfolio
+        where link.work_portfolio_id = portfolio.work_portfolio_id
+          and portfolio.source_platform = 'asana'
+          and portfolio.source_workspace_external_id = ${input.workspaceGid}
+          and portfolio.source_connection_external_id = ${input.connectedAccountId}
+          and link.source_platform = 'asana'
+          and coalesce(link.external_id, '') <>
+            all(${textArray(portfolioProjectExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_goal_link link
+        using public.work_goal goal
+        where link.work_goal_id = goal.work_goal_id
+          and goal.source_platform = 'asana'
+          and goal.source_workspace_external_id = ${input.workspaceGid}
+          and goal.source_connection_external_id = ${input.connectedAccountId}
+          and link.source_platform = 'asana'
+          and coalesce(link.external_id, '') <>
+            all(${textArray(goalLinkExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_section section
+        using public.work_project project
+        where section.work_project_id = project.work_project_id
+          and project.source_platform = 'asana'
+          and project.source_workspace_external_id = ${input.workspaceGid}
+          and project.source_connection_external_id = ${input.connectedAccountId}
+          and section.source_platform = 'asana'
+          and coalesce(section.external_id, '') <>
+            all(${textArray(scan.sections.map((value) => value.gid))})
+      `);
+      await tx.execute(sql`
+        delete from public.work_project_item link
+        using public.work_project project
+        where link.work_project_id = project.work_project_id
+          and project.source_platform = 'asana'
+          and project.source_workspace_external_id = ${input.workspaceGid}
+          and project.source_connection_external_id = ${input.connectedAccountId}
+          and link.source_platform = 'asana'
+          and coalesce(link.external_id, '') <>
+            all(${textArray(projectItemExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_item_dependency dependency
+        using public.work_item item
+        where dependency.work_item_id = item.work_item_id
+          and item.source_platform = 'asana'
+          and item.source_workspace_external_id = ${input.workspaceGid}
+          and item.source_connection_external_id = ${input.connectedAccountId}
+          and dependency.source_platform = 'asana'
+          and coalesce(dependency.external_id, '') <>
+            all(${textArray(dependencyExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_item_follower follower
+        using public.work_item item
+        where follower.work_item_id = item.work_item_id
+          and item.source_platform = 'asana'
+          and item.source_workspace_external_id = ${input.workspaceGid}
+          and item.source_connection_external_id = ${input.connectedAccountId}
+          and follower.source_platform = 'asana'
+          and coalesce(follower.external_id, '') <>
+            all(${textArray(followerExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_item_tag link
+        using public.work_item item
+        where link.work_item_id = item.work_item_id
+          and item.source_platform = 'asana'
+          and item.source_workspace_external_id = ${input.workspaceGid}
+          and item.source_connection_external_id = ${input.connectedAccountId}
+          and link.source_platform = 'asana'
+          and coalesce(link.external_id, '') <>
+            all(${textArray(itemTagExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_custom_field_value value
+        using public.work_item item
+        where value.work_item_id = item.work_item_id
+          and item.source_platform = 'asana'
+          and item.source_workspace_external_id = ${input.workspaceGid}
+          and item.source_connection_external_id = ${input.connectedAccountId}
+          and value.source_platform = 'asana'
+          and coalesce(value.external_id, '') <>
+            all(${textArray(customFieldValueExternalIds)})
+      `);
+
+      for (const project of scan.projects) {
+        const fieldExternalIds = new Set<string>();
+        for (const link of scan.projectTasks) {
+          if (link.projectGid !== project.gid) continue;
+          const task = scan.tasks.find((value) => value.gid === link.taskGid);
+          for (const field of task?.custom_fields ?? [])
+            fieldExternalIds.add(field.gid);
+        }
+        const projectId = projectIds.get(project.gid);
+        if (!projectId) continue;
+        await tx.execute(sql`
+          delete from public.work_custom_field
+          where work_project_id = ${projectId}::uuid
+            and source_platform = 'asana'
+            and coalesce(external_id, '') <>
+              all(${textArray([...fieldExternalIds])})
+        `);
+      }
+
+      if (scan.stories !== null) {
+        await tx.execute(sql`
+          update public.work_comment comment set deleted_at = coalesce(deleted_at, now()),
+            updated_at = now()
+          from public.work_item item
+          where comment.work_item_id = item.work_item_id
+            and item.source_platform = 'asana'
+            and item.source_workspace_external_id = ${input.workspaceGid}
+            and item.source_connection_external_id = ${input.connectedAccountId}
+            and comment.source_platform = 'asana'
+            and coalesce(comment.external_id, '') <>
+              all(${textArray(commentExternalIds)})
+        `);
+      }
+      if (scan.attachments !== null) {
+        await tx.execute(sql`
+          delete from public.work_attachment attachment
+          using public.work_item item
+          where attachment.work_item_id = item.work_item_id
+            and item.source_platform = 'asana'
+            and item.source_workspace_external_id = ${input.workspaceGid}
+            and item.source_connection_external_id = ${input.connectedAccountId}
+            and attachment.source_platform = 'asana'
+            and coalesce(attachment.external_id, '') <>
+              all(${textArray(attachmentExternalIds)})
+        `);
+      }
+      if (scan.statusUpdates !== null) {
+        await tx.execute(sql`
+          delete from public.work_status_update status
+          where status.source_platform = 'asana'
+            and (
+              status.work_project_id in (
+                select work_project_id from public.work_project
+                where source_platform = 'asana'
+                  and source_workspace_external_id = ${input.workspaceGid}
+                  and source_connection_external_id = ${input.connectedAccountId}
+              )
+              or status.work_portfolio_id in (
+                select work_portfolio_id from public.work_portfolio
+                where source_platform = 'asana'
+                  and source_workspace_external_id = ${input.workspaceGid}
+                  and source_connection_external_id = ${input.connectedAccountId}
+              )
+              or status.work_goal_id in (
+                select work_goal_id from public.work_goal
+                where source_platform = 'asana'
+                  and source_workspace_external_id = ${input.workspaceGid}
+                  and source_connection_external_id = ${input.connectedAccountId}
+              )
+            )
+            and coalesce(status.external_id, '') <>
+              all(${textArray(statusExternalIds)})
+        `);
+      }
+      if (scan.timeTrackingEntries !== null) {
+        await tx.execute(sql`
+          delete from public.time_entry entry
+          using public.work_item item
+          where entry.work_item_id = item.work_item_id
+            and item.source_platform = 'asana'
+            and item.source_workspace_external_id = ${input.workspaceGid}
+            and item.source_connection_external_id = ${input.connectedAccountId}
+            and entry.source_platform = 'asana'
+            and coalesce(entry.external_id, '') <>
+              all(${textArray(timeEntryExternalIds)})
+        `);
       }
 
       return {

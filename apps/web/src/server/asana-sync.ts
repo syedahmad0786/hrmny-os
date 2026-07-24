@@ -168,6 +168,7 @@ export async function syncAsanaWorkspace(input: {
         scan,
         workspaceGid: input.workspaceGid,
         workspaceName: input.workspaceName,
+        connectedAccountId: input.connectedAccountId,
         actorEmployeeId: input.actorEmployeeId,
         mode: "sync",
       });
