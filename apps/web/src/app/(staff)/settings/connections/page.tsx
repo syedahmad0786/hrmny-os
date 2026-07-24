@@ -86,6 +86,11 @@ export default function ConnectionsPage() {
                     · {verifiedAsana ? "connected" : item.status}
                   </p>
                   <p className="mt-1 text-xs text-muted">{item.note}</p>
+                  {!item.allowed ? (
+                    <p className="mt-1 text-xs font-semibold text-amber-800">
+                      Blocked by the organization connected-app policy
+                    </p>
+                  ) : null}
                   {asanaUser ? (
                     <p className="mt-1 text-xs font-medium text-ink">
                       {asanaUser.email ?? asanaUser.name}
@@ -115,6 +120,7 @@ export default function ConnectionsPage() {
                   <input
                     className="min-w-0 flex-1 rounded border border-sand bg-white px-3 py-2"
                     type="password"
+                    disabled={!item.allowed}
                     autoComplete="off"
                     placeholder={
                       item.hasSecret ? "Paste replacement key" : "Paste API key"
@@ -129,7 +135,11 @@ export default function ConnectionsPage() {
                   />
                   <Button
                     type="button"
-                    disabled={!keys[item.toolkit]?.trim() || saveKey.isPending}
+                    disabled={
+                      !item.allowed ||
+                      !keys[item.toolkit]?.trim() ||
+                      saveKey.isPending
+                    }
                     onClick={() => {
                       saveKey.mutate({
                         toolkit: item.toolkit as
@@ -150,7 +160,9 @@ export default function ConnectionsPage() {
                   className="mt-4"
                   type="button"
                   variant="ghost"
-                  disabled={!item.ready || startOAuth.isPending}
+                  disabled={
+                    !item.allowed || !item.ready || startOAuth.isPending
+                  }
                   onClick={() => {
                     if (item.toolkit === "google_workspace") {
                       void connectGoogleWorkspace();
@@ -165,7 +177,7 @@ export default function ConnectionsPage() {
                 >
                   {item.ready ? "Connect with OAuth" : "Provider setup needed"}
                 </Button>
-              ) : item.toolkit === "asana" ? (
+              ) : item.toolkit === "asana" && item.allowed ? (
                 <div className="mt-4 flex items-center gap-3">
                   <Link
                     className="rounded border border-sand px-3 py-2 text-sm font-medium hover:bg-cream"

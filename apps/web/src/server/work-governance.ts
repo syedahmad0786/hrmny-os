@@ -38,6 +38,17 @@ const defaultPolicy = (): WorkOrganizationPolicy => ({
 let demoPolicy = defaultPolicy();
 const demoLicenses = new Map<string, "full" | "view_only">();
 const demoGuestShares = new Map<string, DemoGuestShare>();
+const CURATED_WORK_APPS = new Set([
+  "apollo",
+  "asana",
+  "bayzat",
+  "canva",
+  "calendar",
+  "composio",
+  "gmail",
+  "google_workspace",
+  "hunter",
+]);
 
 export function normalizeDomains(domains: readonly string[]) {
   return [...new Set(domains.map((domain) => domain.trim().toLowerCase()))]
@@ -118,6 +129,15 @@ export async function saveWorkOrganizationPolicy(
       updated_at = now()
   `);
   return getWorkOrganizationPolicy();
+}
+
+export async function isWorkConnectedAppAllowed(toolkit: string) {
+  const policy = await getWorkOrganizationPolicy();
+  if (policy.appPolicy === "disabled") return false;
+  return (
+    policy.appPolicy === "allow_all" ||
+    CURATED_WORK_APPS.has(toolkit.trim().toLowerCase())
+  );
 }
 
 export async function isWorkViewOnlyMember(employeeId: string | null) {

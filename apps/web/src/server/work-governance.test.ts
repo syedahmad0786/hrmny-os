@@ -3,7 +3,11 @@ import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 import { clearDemoFeatureOverrides } from "./features";
 import { createCaller } from "./trpc/root";
 import { clearDemoWorkAdmin, rowsToCsv } from "./trpc/work-admin-router";
-import { clearDemoWorkGovernance, normalizeDomains } from "./work-governance";
+import {
+  clearDemoWorkGovernance,
+  isWorkConnectedAppAllowed,
+  normalizeDomains,
+} from "./work-governance";
 
 function caller(persona: string) {
   const user = resolveDevUser(persona);
@@ -30,6 +34,21 @@ describe("Work governance", () => {
     expect(rowsToCsv([{ name: "A, B", note: 'He said "yes"' }])).toBe(
       'name,note\r\n"A, B","He said ""yes"""',
     );
+  });
+
+  it("allows curated apps under the default approved-only policy", async () => {
+    expect(await isWorkConnectedAppAllowed("asana")).toBe(true);
+    expect(await isWorkConnectedAppAllowed("unreviewed_app")).toBe(false);
+    await caller("partner").workAdmin.policy.save({
+      approvedDomains: [],
+      defaultProjectPrivacy: "organization",
+      defaultTeamPrivacy: "request",
+      guestInvitePolicy: "admins",
+      externalSharingEnabled: true,
+      appPolicy: "disabled",
+      sessionTimeoutMinutes: 720,
+    });
+    expect(await isWorkConnectedAppAllowed("asana")).toBe(false);
   });
 
   it("manages teams and denies every Work mutation for a view-only member", async () => {
