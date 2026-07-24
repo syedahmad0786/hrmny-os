@@ -79,6 +79,64 @@ describe("Asana integration", () => {
     });
   });
 
+  it("uses live Composio auth configs for connect and revoke", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = vi.fn(
+      async (request: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(request);
+        requests.push({ url, init });
+        if (url.includes("/auth_configs"))
+          return json({
+            items: [
+              {
+                id: "ac_slack",
+                toolkit: { slug: "slack" },
+                name: "Slack managed auth",
+                auth_scheme: "OAUTH2",
+                is_composio_managed: true,
+                status: "ENABLED",
+              },
+            ],
+            next_cursor: null,
+          });
+        if (url.endsWith("/connected_accounts/link"))
+          return json(
+            {
+              redirect_url: "https://backend.composio.dev/link/token",
+              connected_account_id: "ca_slack",
+              expires_at: "2026-07-24T12:00:00Z",
+            },
+            201,
+          );
+        return json({ success: true });
+      },
+    ) as typeof fetch;
+    const composio = createComposioLive({ apiKey: "key", fetchImpl });
+
+    const configs = await composio.listAuthConfigs({ toolkits: ["slack"] });
+    const link = await composio.createConnectLink({
+      authConfigId: configs[0]!.id,
+      userId: "employee-1",
+      callbackUrl: "https://portal.hrmny.co/settings/connections",
+    });
+    await composio.deleteConnectedAccount({
+      connectedAccountId: link.connected_account_id,
+    });
+
+    expect(requests[0]!.url).toContain("toolkit_slug=slack");
+    expect(JSON.parse(String(requests[1]!.init?.body))).toEqual({
+      auth_config_id: "ac_slack",
+      user_id: "employee-1",
+      callback_url: "https://portal.hrmny.co/settings/connections",
+    });
+    expect(requests[2]).toMatchObject({
+      url: expect.stringContaining(
+        "/connected_accounts/ca_slack?revoke_on_delete=true",
+      ),
+      init: { method: "DELETE" },
+    });
+  });
+
   it("discovers active and archived projects and requests completed tasks", async () => {
     const requests: string[] = [];
     const fetchImpl = vi.fn(async (request: RequestInfo | URL) => {

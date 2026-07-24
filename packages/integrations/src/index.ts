@@ -8,6 +8,8 @@ export {
 export {
   createComposioLive,
   ComposioApiError,
+  type ComposioAuthConfig,
+  type ComposioConnectLink,
   type ComposioConnectedAccount,
   type ComposioManagedToolkit,
   type ComposioLiveClient,

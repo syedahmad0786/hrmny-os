@@ -40,14 +40,27 @@ const demoLicenses = new Map<string, "full" | "view_only">();
 const demoGuestShares = new Map<string, DemoGuestShare>();
 const CURATED_WORK_APPS = new Set([
   "apollo",
+  "adobe",
   "asana",
   "bayzat",
+  "box",
   "canva",
   "calendar",
   "composio",
+  "dropbox",
   "gmail",
+  "googledrive",
   "google_workspace",
   "hunter",
+  "jira",
+  "microsoft_teams",
+  "one_drive",
+  "outlook",
+  "power_bi",
+  "salesforce",
+  "servicenow",
+  "slack",
+  "zoom",
 ]);
 
 export function normalizeDomains(domains: readonly string[]) {
