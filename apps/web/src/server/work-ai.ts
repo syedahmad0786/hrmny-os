@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createProvider } from "@hrmny/ai";
+import { createProvider, type LLMImageInput } from "@hrmny/ai";
 import { sql } from "@hrmny/db";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -323,6 +323,7 @@ const sourceSchema = z.object({
     "goal",
     "portfolio",
     "inbox",
+    "image",
     "external_file",
   ]),
   label: z.string().trim().min(1).max(300),
@@ -1318,6 +1319,7 @@ export async function generateWorkAi(input: {
   aiCondition?: string | null;
   allowedActionTypes?: readonly WorkAiAction["type"][];
   externalSources?: readonly WorkAiContextSource[];
+  images?: readonly LLMImageInput[];
   statusTarget?: {
     targetType: "project" | "portfolio" | "goal";
     targetId: string;
@@ -1390,6 +1392,7 @@ export async function generateWorkAi(input: {
                 content: `Capability: ${input.kind}\nRequest: ${input.requestText}\nAllowed source IDs: ${context.sources.map((source) => source.id).join(", ")}\nReference JSON string: ${JSON.stringify(input.referenceText?.slice(0, 50_000) ?? "")}\nContext JSON records:\n${context.text}`,
               },
             ],
+            images: [...(input.images ?? [])],
           });
     const parsed = workAiResultSchema.parse(generated.object);
     const result = safeResult(

@@ -35,6 +35,27 @@ import {
 
 const uuid = z.string().uuid();
 const createWorkCaller = createCallerFactory(workManagementRouter);
+const imageMediaType = z.enum([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+
+function detectImageMediaType(body: Buffer) {
+  if (body.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")))
+    return "image/png";
+  if (body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff)
+    return "image/jpeg";
+  if (["GIF87a", "GIF89a"].includes(body.subarray(0, 6).toString("ascii")))
+    return "image/gif";
+  if (
+    body.subarray(0, 4).toString("ascii") === "RIFF" &&
+    body.subarray(8, 12).toString("ascii") === "WEBP"
+  )
+    return "image/webp";
+  return null;
+}
 
 function actor(ctx: TrpcContext) {
   if (!ctx.employeeId) throw new TRPCError({ code: "UNAUTHORIZED" });
@@ -90,19 +111,72 @@ export const workAiRouter = router({
           .default(null),
         summaryPortfolioId: uuid.nullable().default(null),
         includeInbox: z.boolean().default(false),
+        images: z
+          .array(
+            z.object({
+              name: z.string().trim().min(1).max(255),
+              mediaType: imageMediaType,
+              dataBase64: z
+                .string()
+                .min(1)
+                .max(7_000_000)
+                .regex(
+                  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
+                ),
+            }),
+          )
+          .max(3)
+          .default([]),
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      await requireWorkAiFeature(ctx, input.kind);
       const {
         summaryPortfolioId,
         includeInbox,
+        images: requestedImages,
         projectIds: selectedProjectIds,
         ...generation
       } = input;
       const projectIds = [...selectedProjectIds];
       const externalSources: WorkAiContextSource[] = [];
+      let imageBytes = 0;
+      const images = requestedImages.map((image, index) => {
+        const body = Buffer.from(image.dataBase64, "base64");
+        imageBytes += body.byteLength;
+        if (detectImageMediaType(body) !== image.mediaType)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Invalid image: ${image.name}`,
+          });
+        externalSources.push({
+          id: `image:${index}`,
+          type: "image",
+          label: image.name,
+          content: JSON.stringify({
+            mediaType: image.mediaType,
+            sizeBytes: body.byteLength,
+          }),
+        });
+        return {
+          mediaType: image.mediaType,
+          dataBase64: image.dataBase64,
+        };
+      });
+      if (images.length) {
+        if (input.kind !== "smart_chat")
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Image analysis is available in Smart Chat",
+          });
+        if (imageBytes > 10_000_000)
+          throw new TRPCError({
+            code: "PAYLOAD_TOO_LARGE",
+            message: "Images are limited to 10 MB per request",
+          });
+        await requireFeature(ctx, "work.attachments");
+      }
       if (input.kind === "smart_summaries") {
-        await requireWorkAiFeature(ctx, input.kind);
         const work = createWorkCaller(ctx);
         if (summaryPortfolioId) {
           await requireFeature(ctx, "work.portfolios");
@@ -161,6 +235,7 @@ export const workAiRouter = router({
         ctx,
         projectIds,
         externalSources,
+        images,
       });
     }),
 

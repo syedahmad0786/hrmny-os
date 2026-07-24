@@ -69,7 +69,30 @@ const capabilities = [
 ] as const;
 
 type Kind = (typeof capabilities)[number][0];
+type AiImage = {
+  name: string;
+  mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  dataBase64: string;
+  size: number;
+};
 const card = "rounded-xl border border-sand bg-white/80 p-5";
+
+function readImage(file: File): Promise<AiImage> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.onload = () => {
+      const result = String(reader.result);
+      resolve({
+        name: file.name,
+        mediaType: file.type as AiImage["mediaType"],
+        dataBase64: result.slice(result.indexOf(",") + 1),
+        size: file.size,
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function WorkAiPage() {
   const session = trpc.auth.session.useQuery();
@@ -87,6 +110,8 @@ export default function WorkAiPage() {
   const [statusTarget, setStatusTarget] = useState("");
   const [summaryPortfolioId, setSummaryPortfolioId] = useState("");
   const [includeInbox, setIncludeInbox] = useState(false);
+  const [images, setImages] = useState<AiImage[]>([]);
+  const [imageError, setImageError] = useState("");
   const [itemId, setItemId] = useState("");
   const [requestText, setRequestText] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -205,6 +230,14 @@ export default function WorkAiPage() {
                       ? summaryPortfolioId
                       : null,
                   includeInbox: kind === "smart_summaries" && includeInbox,
+                  images:
+                    kind === "smart_chat"
+                      ? images.map(({ name, mediaType, dataBase64 }) => ({
+                          name,
+                          mediaType,
+                          dataBase64,
+                        }))
+                      : [],
                 });
               }}
             >
@@ -333,6 +366,87 @@ export default function WorkAiPage() {
                       />
                       Include my permission-filtered Inbox
                     </label>
+                  ) : null}
+                </fieldset>
+              ) : null}
+
+              {kind === "smart_chat" && enabled.has("work.attachments") ? (
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">Images</legend>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    multiple
+                    onChange={async (event) => {
+                      const files = [...(event.target.files ?? [])];
+                      setImageError("");
+                      setImages([]);
+                      if (files.length > 3) {
+                        setImageError("Choose up to three images.");
+                        return;
+                      }
+                      if (
+                        files.some(
+                          (file) =>
+                            ![
+                              "image/png",
+                              "image/jpeg",
+                              "image/webp",
+                              "image/gif",
+                            ].includes(file.type),
+                        )
+                      ) {
+                        setImageError(
+                          "Use PNG, JPEG, WebP, or GIF images only.",
+                        );
+                        return;
+                      }
+                      if (
+                        files.reduce((total, file) => total + file.size, 0) >
+                        10_000_000
+                      ) {
+                        setImageError(
+                          "Images are limited to 10 MB per request.",
+                        );
+                        return;
+                      }
+                      try {
+                        setImages(await Promise.all(files.map(readImage)));
+                      } catch (error) {
+                        setImageError(
+                          error instanceof Error
+                            ? error.message
+                            : "Could not read the selected images.",
+                        );
+                      }
+                    }}
+                  />
+                  {images.length ? (
+                    <div className="flex items-start justify-between gap-3">
+                      <ul className="space-y-1 text-xs text-muted">
+                        {images.map((image, index) => (
+                          <li key={`${image.name}:${index}`}>
+                            {image.name} · {(image.size / 1_000_000).toFixed(1)}{" "}
+                            MB
+                          </li>
+                        ))}
+                      </ul>
+                      <button
+                        type="button"
+                        className="text-xs underline"
+                        onClick={() => setImages([])}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  ) : null}
+                  {imageError ? (
+                    <p
+                      role="alert"
+                      className="text-sm text-[var(--hrmny-danger)]"
+                    >
+                      {imageError}
+                    </p>
                   ) : null}
                 </fieldset>
               ) : null}

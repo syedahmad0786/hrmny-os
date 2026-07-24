@@ -78,6 +78,58 @@ describe("governed Work AI", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
+  it("accepts validated Smart Chat image context only when Attachments is enabled", async () => {
+    const caller = partnerCaller();
+    await caller.admin.features.setOverride({
+      featureKey: "work.ai.smart_chat",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: true,
+      reason: "test",
+    });
+    const png = "iVBORw0KGgoAAAANSUhEUg==";
+    const run = await caller.workAi.generate({
+      kind: "smart_chat",
+      requestText: "Describe this image",
+      projectIds: [],
+      itemId: null,
+      images: [{ name: "brief.png", mediaType: "image/png", dataBase64: png }],
+    });
+    expect(run.result?.sources).toContainEqual(
+      expect.objectContaining({ id: "image:0", type: "image" }),
+    );
+    await expect(
+      caller.workAi.generate({
+        kind: "smart_chat",
+        requestText: "Describe this image",
+        projectIds: [],
+        itemId: null,
+        images: [
+          { name: "fake.jpg", mediaType: "image/jpeg", dataBase64: png },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    await caller.admin.features.setOverride({
+      featureKey: "work.attachments",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.workAi.generate({
+        kind: "smart_chat",
+        requestText: "Describe this image",
+        projectIds: [],
+        itemId: null,
+        images: [
+          { name: "brief.png", mediaType: "image/png", dataBase64: png },
+        ],
+      }),
+    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.attachments" });
+  });
+
   it("fails closed when the capability is disabled", async () => {
     const caller = partnerCaller();
     await expect(
