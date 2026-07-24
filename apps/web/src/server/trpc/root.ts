@@ -63,6 +63,7 @@ import { listFeatureOverrides, resolveFeatureCatalog } from "../features";
 import { workManagementRouter } from "./work-management-router";
 import { workAdminRouter } from "./work-admin-router";
 import { workAiRouter } from "./work-ai-router";
+import { workAiStudioRouter } from "./work-ai-studio-router";
 import { asanaMigrationRouter } from "./asana-migration-router";
 import { clientPreviewRouter } from "./client-preview-router";
 import { opsRouter } from "./ops-router";
@@ -744,6 +745,7 @@ export const appRouter = router({
   work: workManagementRouter,
   workAdmin: workAdminRouter,
   workAi: workAiRouter,
+  workAiStudio: workAiStudioRouter,
   asanaMigration: asanaMigrationRouter,
   clientPreview: clientPreviewRouter,
   assets: assetsRouter,

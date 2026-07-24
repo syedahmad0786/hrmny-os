@@ -48,6 +48,7 @@ const ITEMS = [
       "work.ai.smart_rules",
       "work.ai.risk_reports",
       "work.ai.dash",
+      "work.ai.studio",
     ],
   },
 ] as const;
@@ -64,7 +65,7 @@ export function WorkNav() {
         <Link
           key={item.href}
           href={item.href}
-          className={`rounded-full border px-3 py-1.5 text-sm ${pathname === item.href ? "border-ink bg-ink text-white" : "border-sand bg-white/70"}`}
+          className={`rounded-full border px-3 py-1.5 text-sm ${pathname === item.href || (item.href !== "/work" && pathname.startsWith(`${item.href}/`)) ? "border-ink bg-ink text-white" : "border-sand bg-white/70"}`}
         >
           {item.label}
         </Link>
