@@ -1,5 +1,11 @@
 export type WorkRuleField =
-  "title" | "priority" | "completed" | "sectionId" | "itemType";
+  | "title"
+  | "priority"
+  | "completed"
+  | "sectionId"
+  | "itemType"
+  | "customTaskTypeId"
+  | "customTaskStatusOptionId";
 
 export type WorkFormQuestion = {
   key: string;
@@ -98,6 +104,11 @@ export type WorkRuleAction =
   | { type: "move_section"; sectionId: string }
   | { type: "assign"; employeeId: string | null }
   | { type: "complete" }
+  | {
+      type: "set_custom_task_status";
+      customTaskTypeId: string;
+      statusOptionId: string;
+    }
   | { type: "add_tag"; tagId: string }
   | { type: "create_subtask"; title: string; dueInDays?: number };
 
@@ -113,6 +124,8 @@ export type WorkRuleSnapshot = {
   completed: boolean;
   sectionId: string | null;
   itemType: string;
+  customTaskTypeId: string | null;
+  customTaskStatusOptionId: string | null;
 };
 
 export function ruleBranchMatches(

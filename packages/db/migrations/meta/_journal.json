@@ -330,6 +330,13 @@
       "when": 1785013200000,
       "tag": "0046_work_custom_task_types",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1785016800000,
+      "tag": "0047_work_custom_task_type_automation",
+      "breakpoints": true
     }
   ]
 }

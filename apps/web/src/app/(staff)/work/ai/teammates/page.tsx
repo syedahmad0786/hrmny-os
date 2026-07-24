@@ -14,6 +14,7 @@ const actionTypes = [
   ["delete_task", "Archive tasks"],
   ["create_subtask", "Create subtasks"],
   ["set_custom_field", "Update custom fields"],
+  ["set_custom_task_status", "Set custom task status"],
   ["add_to_project", "Add tasks to projects"],
   ["add_follower", "Add collaborators"],
   ["remove_follower", "Remove collaborators"],
@@ -322,26 +323,32 @@ export default function WorkAiTeammatesPage() {
                   Actions this teammate may propose
                 </legend>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {actionTypes.map(([value, label]) => (
-                    <label
-                      key={value}
-                      className="flex items-center gap-2 text-sm"
-                    >
-                      <input
-                        type="checkbox"
-                        disabled={!canEdit}
-                        checked={allowedActionTypes.includes(value)}
-                        onChange={() =>
-                          setAllowedActionTypes((current) =>
-                            current.includes(value)
-                              ? current.filter((item) => item !== value)
-                              : [...current, value],
-                          )
-                        }
-                      />
-                      {label}
-                    </label>
-                  ))}
+                  {actionTypes
+                    .filter(
+                      ([value]) =>
+                        enabled.has("work.custom_task_types") ||
+                        value !== "set_custom_task_status",
+                    )
+                    .map(([value, label]) => (
+                      <label
+                        key={value}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={!canEdit}
+                          checked={allowedActionTypes.includes(value)}
+                          onChange={() =>
+                            setAllowedActionTypes((current) =>
+                              current.includes(value)
+                                ? current.filter((item) => item !== value)
+                                : [...current, value],
+                            )
+                          }
+                        />
+                        {label}
+                      </label>
+                    ))}
                 </div>
               </fieldset>
               <fieldset className="md:col-span-2">

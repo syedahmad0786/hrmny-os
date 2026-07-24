@@ -12,6 +12,13 @@ import {
 } from "@/components/work-rich-text";
 
 type View = "list" | "board" | "calendar" | "timeline" | "files";
+type EditableCustomTaskStatus = {
+  statusOptionId?: string;
+  name: string;
+  color: string;
+  completionState: "incomplete" | "complete";
+  enabled: boolean;
+};
 
 function dateInputValue(value: string | null | undefined) {
   return value ? value.slice(0, 10) : "";
@@ -98,6 +105,14 @@ export default function WorkPage() {
   const [sortByCustomTaskType, setSortByCustomTaskType] = useState(false);
   const [groupByCustomTaskType, setGroupByCustomTaskType] = useState(false);
   const [shareTargetProjectId, setShareTargetProjectId] = useState("");
+  const [editingCustomTaskTypeId, setEditingCustomTaskTypeId] = useState<
+    string | null
+  >(null);
+  const [customTaskTypeEditName, setCustomTaskTypeEditName] = useState("");
+  const [customTaskTypeEditIcon, setCustomTaskTypeEditIcon] = useState("");
+  const [customTaskTypeEditStatuses, setCustomTaskTypeEditStatuses] = useState<
+    EditableCustomTaskStatus[]
+  >([]);
   const [attachmentName, setAttachmentName] = useState("");
   const [attachmentUrl, setAttachmentUrl] = useState("");
   const [descriptionDraft, setDescriptionDraft] = useState("");
@@ -310,7 +325,23 @@ export default function WorkPage() {
     trpc.work.customTaskTypes.setDefault.useMutation({
       onSuccess: () => utils.work.customTaskTypes.list.invalidate(),
     });
-  const shareCustomTaskType = trpc.work.customTaskTypes.share.useMutation();
+  const shareCustomTaskType = trpc.work.customTaskTypes.share.useMutation({
+    onSuccess: () => utils.work.customTaskTypes.list.invalidate(),
+  });
+  const updateCustomTaskType = trpc.work.customTaskTypes.update.useMutation({
+    onSuccess: async () => {
+      setEditingCustomTaskTypeId(null);
+      await Promise.all([
+        utils.work.customTaskTypes.list.invalidate(),
+        utils.work.customTaskTypes.assignments.invalidate(),
+        utils.work.projects.get.invalidate(),
+      ]);
+    },
+  });
+  const removeCustomTaskTypeFromProject =
+    trpc.work.customTaskTypes.removeFromProject.useMutation({
+      onSuccess: () => utils.work.customTaskTypes.list.invalidate(),
+    });
   const addAttachmentLink = trpc.work.attachments.addLink.useMutation({
     onSuccess: async () => {
       setAttachmentName("");
@@ -494,6 +525,8 @@ export default function WorkPage() {
     setCustomTaskType.error ??
     setDefaultCustomTaskType.error ??
     shareCustomTaskType.error ??
+    updateCustomTaskType.error ??
+    removeCustomTaskTypeFromProject.error ??
     addAttachmentLink.error ??
     uploadAttachment.error ??
     openAttachment.error ??
@@ -845,14 +878,22 @@ export default function WorkPage() {
                       }}
                     >
                       <option value="">All task types</option>
-                      {(customTaskTypes.data ?? []).map((type) => (
-                        <option
-                          key={type.customTaskTypeId}
-                          value={type.customTaskTypeId}
-                        >
-                          {type.icon} {type.name}
-                        </option>
-                      ))}
+                      {(customTaskTypes.data ?? [])
+                        .filter(
+                          (type) =>
+                            type.isAssociated ||
+                            type.customTaskTypeId ===
+                              selectedCustomTaskAssignment?.customTaskTypeId,
+                        )
+                        .map((type) => (
+                          <option
+                            key={type.customTaskTypeId}
+                            value={type.customTaskTypeId}
+                          >
+                            {type.icon} {type.name}
+                            {!type.isAssociated ? " (task only)" : ""}
+                          </option>
+                        ))}
                     </select>
                   </label>
                   <label>
@@ -1858,37 +1899,90 @@ export default function WorkPage() {
                               Asana
                             </span>
                           ) : null}
+                          {!type.isAssociated ? (
+                            <span className="ml-2 text-[10px] uppercase text-muted">
+                              Task only
+                            </span>
+                          ) : null}
                         </p>
                         {canEdit && projectId ? (
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              className="rounded-full border border-sand px-2.5 py-1 text-xs"
-                              onClick={() =>
-                                setDefaultCustomTaskType.mutate({
-                                  projectId,
-                                  customTaskTypeId: type.isDefault
-                                    ? null
-                                    : type.customTaskTypeId,
-                                })
-                              }
-                            >
-                              {type.isDefault ? "Default ✓" : "Make default"}
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded-full border border-sand px-2.5 py-1 text-xs"
-                              disabled={!shareTargetProjectId}
-                              onClick={() =>
-                                shareCustomTaskType.mutate({
-                                  sourceProjectId: projectId,
-                                  targetProjectId: shareTargetProjectId,
-                                  customTaskTypeId: type.customTaskTypeId,
-                                })
-                              }
-                            >
-                              Share
-                            </button>
+                          <div className="flex flex-wrap gap-2">
+                            {type.isAssociated ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-sand px-2.5 py-1 text-xs"
+                                  onClick={() =>
+                                    setDefaultCustomTaskType.mutate({
+                                      projectId,
+                                      customTaskTypeId: type.isDefault
+                                        ? null
+                                        : type.customTaskTypeId,
+                                    })
+                                  }
+                                >
+                                  {type.isDefault
+                                    ? "Default ✓"
+                                    : "Make default"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-sand px-2.5 py-1 text-xs"
+                                  disabled={!shareTargetProjectId}
+                                  onClick={() =>
+                                    shareCustomTaskType.mutate({
+                                      sourceProjectId: projectId,
+                                      targetProjectId: shareTargetProjectId,
+                                      customTaskTypeId: type.customTaskTypeId,
+                                    })
+                                  }
+                                >
+                                  Share
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-sand px-2.5 py-1 text-xs"
+                                  onClick={() => {
+                                    if (
+                                      window.confirm(
+                                        "Remove this task type from the project? Tasks already using it will keep their type and status.",
+                                      )
+                                    )
+                                      removeCustomTaskTypeFromProject.mutate({
+                                        projectId,
+                                        customTaskTypeId: type.customTaskTypeId,
+                                      });
+                                  }}
+                                >
+                                  Remove
+                                </button>
+                              </>
+                            ) : null}
+                            {type.sourcePlatform === "native" &&
+                            type.ownerProjectId === projectId ? (
+                              <button
+                                type="button"
+                                className="rounded-full border border-sand px-2.5 py-1 text-xs"
+                                onClick={() => {
+                                  setEditingCustomTaskTypeId(
+                                    type.customTaskTypeId,
+                                  );
+                                  setCustomTaskTypeEditName(type.name);
+                                  setCustomTaskTypeEditIcon(type.icon);
+                                  setCustomTaskTypeEditStatuses(
+                                    type.statuses.map((status) => ({
+                                      statusOptionId: status.statusOptionId,
+                                      name: status.name,
+                                      color: status.color,
+                                      completionState: status.completionState,
+                                      enabled: status.enabled,
+                                    })),
+                                  );
+                                }}
+                              >
+                                Edit
+                              </button>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
@@ -1904,6 +1998,181 @@ export default function WorkPage() {
                           </span>
                         ))}
                       </div>
+                      {editingCustomTaskTypeId === type.customTaskTypeId &&
+                      projectId ? (
+                        <form
+                          className="mt-3 space-y-2 border-t border-sand pt-3"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            updateCustomTaskType.mutate({
+                              projectId,
+                              customTaskTypeId: type.customTaskTypeId,
+                              name: customTaskTypeEditName,
+                              icon: customTaskTypeEditIcon,
+                              statuses: customTaskTypeEditStatuses
+                                .filter((status) => status.enabled)
+                                .map(
+                                  ({ enabled: _enabled, ...status }) => status,
+                                ),
+                            });
+                          }}
+                        >
+                          <div className="grid grid-cols-[4rem_1fr] gap-2">
+                            <input
+                              aria-label="Edit task type icon"
+                              className="rounded border border-sand px-2 py-1 text-center text-sm"
+                              maxLength={16}
+                              value={customTaskTypeEditIcon}
+                              onChange={(event) =>
+                                setCustomTaskTypeEditIcon(event.target.value)
+                              }
+                            />
+                            <input
+                              aria-label="Edit task type name"
+                              className="rounded border border-sand px-2 py-1 text-sm"
+                              maxLength={120}
+                              value={customTaskTypeEditName}
+                              onChange={(event) =>
+                                setCustomTaskTypeEditName(event.target.value)
+                              }
+                            />
+                          </div>
+                          {customTaskTypeEditStatuses.map((status, index) => (
+                            <div
+                              key={status.statusOptionId ?? `new-${index}`}
+                              className="grid gap-2 sm:grid-cols-[auto_1fr_3rem_8rem]"
+                            >
+                              <input
+                                aria-label={`Enable status ${status.name || index + 1}`}
+                                type="checkbox"
+                                checked={status.enabled}
+                                onChange={(event) =>
+                                  setCustomTaskTypeEditStatuses((current) =>
+                                    current.map((candidate, candidateIndex) =>
+                                      candidateIndex === index
+                                        ? {
+                                            ...candidate,
+                                            enabled: event.target.checked,
+                                          }
+                                        : candidate,
+                                    ),
+                                  )
+                                }
+                              />
+                              <input
+                                aria-label={`Status ${index + 1} name`}
+                                className="rounded border border-sand px-2 py-1 text-sm"
+                                maxLength={120}
+                                value={status.name}
+                                onChange={(event) =>
+                                  setCustomTaskTypeEditStatuses((current) =>
+                                    current.map((candidate, candidateIndex) =>
+                                      candidateIndex === index
+                                        ? {
+                                            ...candidate,
+                                            name: event.target.value,
+                                          }
+                                        : candidate,
+                                    ),
+                                  )
+                                }
+                              />
+                              <input
+                                aria-label={`Status ${index + 1} color`}
+                                className="h-8 w-12 rounded border border-sand"
+                                type="color"
+                                value={status.color}
+                                onChange={(event) =>
+                                  setCustomTaskTypeEditStatuses((current) =>
+                                    current.map((candidate, candidateIndex) =>
+                                      candidateIndex === index
+                                        ? {
+                                            ...candidate,
+                                            color: event.target.value,
+                                          }
+                                        : candidate,
+                                    ),
+                                  )
+                                }
+                              />
+                              <select
+                                aria-label={`Status ${index + 1} completion`}
+                                className="rounded border border-sand px-2 py-1 text-sm"
+                                value={status.completionState}
+                                onChange={(event) =>
+                                  setCustomTaskTypeEditStatuses((current) =>
+                                    current.map((candidate, candidateIndex) =>
+                                      candidateIndex === index
+                                        ? {
+                                            ...candidate,
+                                            completionState: event.target
+                                              .value as
+                                              "incomplete" | "complete",
+                                          }
+                                        : candidate,
+                                    ),
+                                  )
+                                }
+                              >
+                                <option value="incomplete">Incomplete</option>
+                                <option value="complete">Complete</option>
+                              </select>
+                            </div>
+                          ))}
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="rounded border border-sand px-3 py-1 text-xs"
+                              onClick={() =>
+                                setCustomTaskTypeEditStatuses((current) => [
+                                  ...current,
+                                  {
+                                    name: "",
+                                    color: "#6B7280",
+                                    completionState: "incomplete",
+                                    enabled: true,
+                                  },
+                                ])
+                              }
+                            >
+                              Add status
+                            </button>
+                            <button
+                              className="rounded bg-ink px-3 py-1 text-xs text-white"
+                              disabled={
+                                !customTaskTypeEditName.trim() ||
+                                !customTaskTypeEditIcon.trim() ||
+                                customTaskTypeEditStatuses.filter(
+                                  (status) => status.enabled,
+                                ).length < 2 ||
+                                customTaskTypeEditStatuses.some(
+                                  (status) =>
+                                    status.enabled && !status.name.trim(),
+                                ) ||
+                                !customTaskTypeEditStatuses.some(
+                                  (status) =>
+                                    status.enabled &&
+                                    status.completionState === "incomplete",
+                                ) ||
+                                !customTaskTypeEditStatuses.some(
+                                  (status) =>
+                                    status.enabled &&
+                                    status.completionState === "complete",
+                                )
+                              }
+                            >
+                              Save changes
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded border border-sand px-3 py-1 text-xs"
+                              onClick={() => setEditingCustomTaskTypeId(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : null}
                     </div>
                   ))}
                 </div>

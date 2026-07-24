@@ -23,6 +23,8 @@ describe("work workflow rules", () => {
           completed: false,
           sectionId: null,
           itemType: "task",
+          customTaskTypeId: null,
+          customTaskStatusOptionId: null,
         },
       ),
     ).toBe(true);

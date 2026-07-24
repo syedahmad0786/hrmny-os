@@ -676,4 +676,29 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/sync_custom_task_status_completion/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("permits custom task statuses in rules and governed AI", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0047_work_custom_task_type_automation.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0047_work_custom_task_type_automation.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0047_work_custom_task_type_automation.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toContain("'custom_status_changed'");
+    expect(migration).toContain("'set_custom_task_status'");
+    expect(migration).toMatch(/work_rule_trigger_type_check/i);
+    expect(migration).toMatch(/work_ai_studio_workflow_trigger_type_check/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

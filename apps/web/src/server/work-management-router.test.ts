@@ -878,12 +878,206 @@ describe("work management", () => {
       expect.objectContaining({ customTaskTypeId: type.customTaskTypeId }),
     );
 
+    const backlog = type.statuses.find((status) => status.name === "Backlog")!;
+    const waitingName = `Waiting ${Date.now()}`;
+    await caller.work.customTaskTypes.update({
+      projectId: source.projectId,
+      customTaskTypeId: type.customTaskTypeId,
+      name: "Service request",
+      icon: "◇",
+      statuses: [
+        {
+          statusOptionId: backlog.statusOptionId,
+          name: "Queued",
+          color: "#6B7280",
+          completionState: "incomplete",
+        },
+        {
+          name: waitingName,
+          color: "#C7702E",
+          completionState: "incomplete",
+        },
+        {
+          statusOptionId: completeStatus.statusOptionId,
+          name: "Closed",
+          color: "#2E7D5B",
+          completionState: "complete",
+        },
+      ],
+    });
+    const updatedType = (
+      await caller.work.customTaskTypes.list({ projectId: source.projectId })
+    ).find(
+      (candidate) => candidate.customTaskTypeId === type.customTaskTypeId,
+    )!;
+    expect(updatedType).toMatchObject({ name: "Service request", icon: "◇" });
+    expect(updatedType.statuses).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Queued", enabled: true }),
+        expect.objectContaining({ name: "In progress", enabled: false }),
+        expect.objectContaining({ name: "Closed", enabled: true }),
+      ]),
+    );
+    await expect(
+      caller.work.customTaskTypes.update({
+        projectId: source.projectId,
+        customTaskTypeId: type.customTaskTypeId,
+        name: "Service request",
+        icon: "◇",
+        statuses: [
+          {
+            statusOptionId: backlog.statusOptionId,
+            name: "Queued",
+            color: "#6B7280",
+            completionState: "incomplete",
+          },
+          {
+            name: "In progress",
+            color: "#C7702E",
+            completionState: "incomplete",
+          },
+          {
+            statusOptionId: completeStatus.statusOptionId,
+            name: "Closed",
+            color: "#2E7D5B",
+            completionState: "complete",
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Re-enable the existing status before reusing its name",
+    });
+    const waitingStatus = updatedType.statuses.find(
+      (status) => status.name === waitingName,
+    )!;
+    await caller.work.rules.create({
+      projectId: source.projectId,
+      name: `Escalate waiting ${Date.now()}`,
+      triggerType: "custom_status_changed",
+      scheduleMinutes: null,
+      branches: [
+        {
+          mode: "all",
+          conditions: [
+            {
+              field: "customTaskStatusOptionId",
+              operator: "equals",
+              value: waitingStatus.statusOptionId,
+            },
+          ],
+          actions: [{ type: "set_priority", value: "urgent" }],
+        },
+      ],
+    });
+    await caller.work.customTaskTypes.setForTask({
+      projectId: source.projectId,
+      itemId: task.itemId,
+      customTaskTypeId: type.customTaskTypeId,
+      statusOptionId: waitingStatus.statusOptionId,
+    });
+    expect(
+      (
+        await caller.work.projects.get({ projectId: source.projectId })
+      ).items.find((item) => item.itemId === task.itemId)?.priority,
+    ).toBe("urgent");
+
+    await caller.work.rules.create({
+      projectId: source.projectId,
+      name: `Close new requests ${Date.now()}`,
+      triggerType: "task_added",
+      scheduleMinutes: null,
+      branches: [
+        {
+          mode: "all",
+          conditions: [],
+          actions: [
+            {
+              type: "set_custom_task_status",
+              customTaskTypeId: type.customTaskTypeId,
+              statusOptionId: completeStatus.statusOptionId,
+            },
+          ],
+        },
+      ],
+    });
+    const closedByRule = await caller.work.tasks.create({
+      projectId: source.projectId,
+      title: "Rule-managed request",
+      description: "",
+    });
+    expect(
+      (
+        await caller.work.projects.get({ projectId: source.projectId })
+      ).items.find((item) => item.itemId === closedByRule.itemId)?.completedAt,
+    ).toBeTruthy();
+
+    await caller.work.customTaskTypes.removeFromProject({
+      projectId: source.projectId,
+      customTaskTypeId: type.customTaskTypeId,
+    });
+    expect(
+      (
+        await caller.work.customTaskTypes.list({
+          projectId: source.projectId,
+        })
+      ).find(
+        (candidate) => candidate.customTaskTypeId === type.customTaskTypeId,
+      ),
+    ).toMatchObject({ isAssociated: false });
+    await expect(
+      caller.work.customTaskTypes.setForTask({
+        projectId: source.projectId,
+        itemId: task.itemId,
+        customTaskTypeId: type.customTaskTypeId,
+        statusOptionId: completeStatus.statusOptionId,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    const standardTask = await caller.work.tasks.create({
+      projectId: source.projectId,
+      title: "Standard after removal",
+      description: "",
+    });
+    await expect(
+      caller.work.customTaskTypes.setForTask({
+        projectId: source.projectId,
+        itemId: standardTask.itemId,
+        customTaskTypeId: type.customTaskTypeId,
+        statusOptionId: completeStatus.statusOptionId,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
     await caller.admin.features.setOverride({
       featureKey: "work.custom_task_types",
       scopeType: "global",
       scopeKey: "global",
       enabled: false,
       reason: "test",
+    });
+    expect(
+      await caller.work.rules.list({ projectId: source.projectId }),
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ triggerType: "custom_status_changed" }),
+      ]),
+    );
+    await expect(
+      caller.work.rules.create({
+        projectId: source.projectId,
+        name: "Hidden custom status rule",
+        triggerType: "custom_status_changed",
+        scheduleMinutes: null,
+        branches: [
+          {
+            mode: "all",
+            conditions: [],
+            actions: [{ type: "set_priority", value: "high" }],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.custom_task_types",
     });
     await expect(
       caller.work.customTaskTypes.list({ projectId: source.projectId }),

@@ -247,6 +247,7 @@ type WorkRule = {
     | "priority_changed"
     | "due_date_set"
     | "approval_decided"
+    | "custom_status_changed"
     | "collaborator_added"
     | "scheduled";
   scheduleMinutes: number | null;
@@ -595,6 +596,48 @@ function applyDemoDefaultCustomTaskType(item: WorkItem) {
   }
 }
 
+function validateCustomTaskStatusUpdate(
+  statuses: Array<z.infer<typeof customTaskStatusInput>>,
+  existing: Array<{ statusOptionId: string; name: string }>,
+) {
+  const existingIds = new Set(existing.map((status) => status.statusOptionId));
+  if (
+    statuses.some(
+      (status) =>
+        status.statusOptionId && !existingIds.has(status.statusOptionId),
+    )
+  )
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Custom task status does not belong to this type",
+    });
+  const selectedIds = new Set(
+    statuses.flatMap((status) =>
+      status.statusOptionId ? [status.statusOptionId] : [],
+    ),
+  );
+  const existingByName = new Map(
+    existing.map((status) => [
+      status.name.toLowerCase(),
+      status.statusOptionId,
+    ]),
+  );
+  if (
+    statuses.some((status) => {
+      const collision = existingByName.get(status.name.toLowerCase());
+      return (
+        collision &&
+        collision !== status.statusOptionId &&
+        !selectedIds.has(collision)
+      );
+    })
+  )
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Re-enable the existing status before reusing its name",
+    });
+}
+
 function syncDemoCustomTaskCompletion(item: WorkItem, completed: boolean) {
   if (!item.customTaskTypeId) return;
   const status = getDemoWork()
@@ -667,6 +710,7 @@ const workRuleTriggerSchema = z.enum([
   "priority_changed",
   "due_date_set",
   "approval_decided",
+  "custom_status_changed",
   "collaborator_added",
   "scheduled",
 ]);
@@ -718,17 +762,41 @@ const formQuestionSchema = z.object({
     })
     .optional(),
 });
-const ruleConditionSchema = z.object({
-  field: z.enum(["title", "priority", "completed", "sectionId", "itemType"]),
-  operator: z.enum([
-    "equals",
-    "not_equals",
-    "contains",
-    "is_empty",
-    "is_not_empty",
-  ]),
-  value: z.union([z.string().max(500), z.boolean(), z.null()]).optional(),
-});
+const ruleConditionSchema = z
+  .object({
+    field: z.enum([
+      "title",
+      "priority",
+      "completed",
+      "sectionId",
+      "itemType",
+      "customTaskTypeId",
+      "customTaskStatusOptionId",
+    ]),
+    operator: z.enum([
+      "equals",
+      "not_equals",
+      "contains",
+      "is_empty",
+      "is_not_empty",
+    ]),
+    value: z.union([z.string().max(500), z.boolean(), z.null()]).optional(),
+  })
+  .superRefine((condition, ctx) => {
+    if (
+      ["customTaskTypeId", "customTaskStatusOptionId"].includes(
+        condition.field,
+      ) &&
+      !["equals", "not_equals", "is_empty", "is_not_empty"].includes(
+        condition.operator,
+      )
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["operator"],
+        message: "Custom task type conditions require an exact comparison",
+      });
+  });
 const ruleActionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("set_priority"),
@@ -737,6 +805,11 @@ const ruleActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("move_section"), sectionId: uuid }),
   z.object({ type: z.literal("assign"), employeeId: nullableUuid }),
   z.object({ type: z.literal("complete") }),
+  z.object({
+    type: z.literal("set_custom_task_status"),
+    customTaskTypeId: uuid,
+    statusOptionId: uuid,
+  }),
   z.object({ type: z.literal("add_tag"), tagId: uuid }),
   z.object({
     type: z.literal("create_subtask"),
@@ -1923,6 +1996,8 @@ async function ruleSnapshot(
     select item.work_item_id as "itemId",
       item.parent_work_item_id as "parentItemId", item.title,
       item.description, item.item_type as "itemType", item.priority,
+      item.work_custom_task_type_id as "customTaskTypeId",
+      item.work_custom_task_status_option_id as "customTaskStatusOptionId",
       item.assignee_employee_id as "assigneeEmployeeId",
       null::text as "assigneeName", item.start_date as "startDate",
       item.due_at as "dueAt", item.completed_at as "completedAt",
@@ -1969,6 +2044,25 @@ async function executeRuleAction(
       item.assigneeName = action.employeeId ? "Dev Partner" : null;
     } else if (action.type === "complete") {
       item.completedAt = new Date().toISOString();
+      syncDemoCustomTaskCompletion(item, true);
+    } else if (action.type === "set_custom_task_status") {
+      const association = store.projectCustomTaskTypes.get(
+        customTaskTypeProjectKey(projectId, action.customTaskTypeId),
+      );
+      const status = store.customTaskTypes
+        .get(action.customTaskTypeId)
+        ?.statuses.find(
+          (candidate) =>
+            candidate.statusOptionId === action.statusOptionId &&
+            candidate.enabled,
+        );
+      if (!association || !status) throw new Error("Task status not found");
+      item.customTaskTypeId = action.customTaskTypeId;
+      item.customTaskStatusOptionId = action.statusOptionId;
+      item.completedAt =
+        status.completionState === "complete"
+          ? (item.completedAt ?? new Date().toISOString())
+          : null;
     } else if (action.type === "add_tag") {
       if (!store.tags.has(action.tagId)) throw new Error("Tag not found");
       const tags = store.itemTags.get(itemId) ?? new Set<string>();
@@ -2045,6 +2139,27 @@ async function executeRuleAction(
       update public.work_item set completed_at = now(), updated_at = now()
       where work_item_id = ${itemId}::uuid
     `);
+  } else if (action.type === "set_custom_task_status") {
+    const updated = await db.execute(sql`
+      update public.work_item item set
+        work_custom_task_type_id = ${action.customTaskTypeId}::uuid,
+        work_custom_task_status_option_id = ${action.statusOptionId}::uuid,
+        completed_at = case when status.completion_state = 'complete'
+          then coalesce(item.completed_at, now()) else null end,
+        updated_at = now()
+      from public.work_custom_task_status_option status
+      where item.work_item_id = ${itemId}::uuid and item.item_type = 'task'
+        and status.work_custom_task_type_id = ${action.customTaskTypeId}::uuid
+        and status.work_custom_task_status_option_id = ${action.statusOptionId}::uuid
+        and status.enabled
+        and exists (
+          select 1 from public.work_project_custom_task_type association
+          where association.work_project_id = ${projectId}::uuid
+            and association.work_custom_task_type_id = ${action.customTaskTypeId}::uuid
+        )
+      returning item.work_item_id
+    `);
+    if (!updated[0]) throw new Error("Task status not found");
   } else if (action.type === "add_tag") {
     const inserted = await db.execute(sql`
       insert into public.work_item_tag (work_item_id, work_tag_id)
@@ -2121,6 +2236,23 @@ async function validateRuleActions(
         });
       if (action.type === "add_tag" && !store.tags.has(action.tagId))
         throw new TRPCError({ code: "BAD_REQUEST", message: "Tag not found" });
+      if (action.type === "set_custom_task_status") {
+        const association = store.projectCustomTaskTypes.get(
+          customTaskTypeProjectKey(projectId, action.customTaskTypeId),
+        );
+        const status = store.customTaskTypes
+          .get(action.customTaskTypeId)
+          ?.statuses.find(
+            (candidate) =>
+              candidate.statusOptionId === action.statusOptionId &&
+              candidate.enabled,
+          );
+        if (!association || !status)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Task status not found",
+          });
+      }
       if (
         action.type === "assign" &&
         action.employeeId &&
@@ -2151,6 +2283,21 @@ async function validateRuleActions(
       );
       if (!rows[0])
         throw new TRPCError({ code: "BAD_REQUEST", message: "Tag not found" });
+    } else if (action.type === "set_custom_task_status") {
+      const rows = await db.execute(sql`
+        select 1 from public.work_project_custom_task_type association
+        join public.work_custom_task_status_option status
+          on status.work_custom_task_type_id = association.work_custom_task_type_id
+          and status.work_custom_task_status_option_id = ${action.statusOptionId}::uuid
+          and status.enabled
+        where association.work_project_id = ${projectId}::uuid
+          and association.work_custom_task_type_id = ${action.customTaskTypeId}::uuid
+      `);
+      if (!rows[0])
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Task status not found",
+        });
     } else if (action.type === "assign" && action.employeeId) {
       const rows = await db.execute(sql`
         select 1 from public.employee
@@ -2163,6 +2310,70 @@ async function validateRuleActions(
         });
     }
   }
+}
+
+async function validateCustomTaskRuleCondition(
+  projectId: string,
+  condition: WorkRuleBranch["conditions"][number],
+) {
+  if (
+    !["customTaskTypeId", "customTaskStatusOptionId"].includes(
+      condition.field,
+    ) ||
+    ["is_empty", "is_not_empty"].includes(condition.operator)
+  )
+    return;
+  if (
+    typeof condition.value !== "string" ||
+    !uuid.safeParse(condition.value).success
+  )
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Custom task type condition is invalid",
+    });
+  const db = getDb();
+  const exists = !db
+    ? condition.field === "customTaskTypeId"
+      ? getDemoWork().projectCustomTaskTypes.has(
+          customTaskTypeProjectKey(projectId, condition.value),
+        )
+      : [...getDemoWork().projectCustomTaskTypes.values()].some(
+          (association) =>
+            association.projectId === projectId &&
+            getDemoWork()
+              .customTaskTypes.get(association.customTaskTypeId)
+              ?.statuses.some(
+                (status) =>
+                  status.statusOptionId === condition.value && status.enabled,
+              ),
+        )
+    : Boolean(
+        (
+          await db.execute(sql`
+            select 1 from public.work_project_custom_task_type association
+            ${
+              condition.field === "customTaskStatusOptionId"
+                ? sql`join public.work_custom_task_status_option status
+                    on status.work_custom_task_type_id = association.work_custom_task_type_id
+                    and status.work_custom_task_status_option_id = ${condition.value}::uuid
+                    and status.enabled`
+                : sql``
+            }
+            where association.work_project_id = ${projectId}::uuid
+              ${
+                condition.field === "customTaskTypeId"
+                  ? sql`and association.work_custom_task_type_id = ${condition.value}::uuid`
+                  : sql``
+              }
+            limit 1
+          `)
+        )[0],
+      );
+  if (!exists)
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Custom task type condition is not available in this project",
+    });
 }
 
 async function recordRuleRun(
@@ -2290,11 +2501,35 @@ async function visibleDemoNotification(
 
 function ruleTriggerFeatureKey(
   triggerType: WorkRule["triggerType"],
-): "work.rules.scheduled" | "work.rules.collaborator_trigger" | null {
+):
+  | "work.rules.scheduled"
+  | "work.rules.collaborator_trigger"
+  | "work.custom_task_types"
+  | null {
   if (triggerType === "scheduled") return "work.rules.scheduled";
   if (triggerType === "collaborator_added")
     return "work.rules.collaborator_trigger";
+  if (triggerType === "custom_status_changed") return "work.custom_task_types";
   return null;
+}
+
+function ruleUsesCustomTaskTypes(
+  rule: Pick<WorkRule, "triggerType" | "branches">,
+) {
+  return (
+    rule.triggerType === "custom_status_changed" ||
+    rule.branches.some(
+      (branch) =>
+        branch.conditions.some((condition) =>
+          ["customTaskTypeId", "customTaskStatusOptionId"].includes(
+            condition.field,
+          ),
+        ) ||
+        branch.actions.some(
+          (action) => action.type === "set_custom_task_status",
+        ),
+    )
+  );
 }
 
 async function requireRuleTriggerFeature(
@@ -2324,14 +2559,20 @@ async function runProjectRules(
   triggerType: WorkRule["triggerType"],
   onlyRuleId?: string,
 ) {
-  if (triggerType !== "collaborator_added" && triggerType !== "scheduled")
-    await queueWorkAiStudioEvent(ctx, projectId, itemId, triggerType);
   const scope = {
     userId: ctx.employeeId,
     clientId: await projectClientId(projectId),
     roles: ctx.roles,
   };
   const triggerFeatureKey = ruleTriggerFeatureKey(triggerType);
+  const customTaskTypesEnabled = await featureEnabled(
+    "work.custom_task_types",
+    scope,
+  );
+  if (triggerType === "custom_status_changed" && !customTaskTypesEnabled)
+    return;
+  if (triggerType !== "collaborator_added" && triggerType !== "scheduled")
+    await queueWorkAiStudioEvent(ctx, projectId, itemId, triggerType);
   if (
     !(await featureEnabled("work.rules", scope)) ||
     (triggerFeatureKey && !(await featureEnabled(triggerFeatureKey, scope)))
@@ -2366,10 +2607,13 @@ async function runProjectRules(
     completed: Boolean(item.completedAt),
     sectionId: item.sectionId,
     itemType: item.itemType,
+    customTaskTypeId: item.customTaskTypeId ?? null,
+    customTaskStatusOptionId: item.customTaskStatusOptionId ?? null,
   };
   for (const candidate of rules) {
     const parsed = z.array(ruleBranchSchema).safeParse(candidate.branches);
     const rule = { ...candidate, branches: parsed.success ? parsed.data : [] };
+    if (!customTaskTypesEnabled && ruleUsesCustomTaskTypes(rule)) continue;
     const branch = rule.branches.find((value) =>
       ruleBranchMatches(value, snapshot),
     );
@@ -4265,19 +4509,45 @@ export const workManagementRouter = router({
     list: staffProcedure
       .input(z.object({ projectId: uuid }))
       .query(async ({ input, ctx }) => {
-        await requireWorkFeature(ctx, "work.custom_task_types");
+        await requireScopedFeature(
+          ctx,
+          "work.custom_task_types",
+          input.projectId,
+        );
         await requireProjectAccess(ctx, input.projectId);
         const db = getDb();
         if (!db) {
           const store = getDemoWork();
-          return [...store.projectCustomTaskTypes.values()]
-            .filter((association) => association.projectId === input.projectId)
-            .flatMap((association) => {
-              const type = store.customTaskTypes.get(
+          const associations = new Map(
+            [...store.projectCustomTaskTypes.values()]
+              .filter(
+                (association) => association.projectId === input.projectId,
+              )
+              .map((association) => [
                 association.customTaskTypeId,
-              );
+                association,
+              ]),
+          );
+          const typeIds = new Set([
+            ...associations.keys(),
+            ...[...store.items.values()].flatMap((item) =>
+              item.projectId === input.projectId && item.customTaskTypeId
+                ? [item.customTaskTypeId]
+                : [],
+            ),
+          ]);
+          return [...typeIds]
+            .flatMap((customTaskTypeId) => {
+              const type = store.customTaskTypes.get(customTaskTypeId);
+              const association = associations.get(customTaskTypeId);
               return type
-                ? [{ ...type, isDefault: association.isDefault }]
+                ? [
+                    {
+                      ...type,
+                      isAssociated: Boolean(association),
+                      isDefault: association?.isDefault ?? false,
+                    },
+                  ]
                 : [];
             })
             .sort((a, b) => a.name.localeCompare(b.name));
@@ -4288,6 +4558,7 @@ export const workManagementRouter = router({
           name: string;
           icon: string;
           sourcePlatform: "native" | "asana";
+          isAssociated: boolean;
           isDefault: boolean;
           statusOptionId: string;
           statusName: string;
@@ -4298,22 +4569,34 @@ export const workManagementRouter = router({
         }>(sql`
           select type.work_custom_task_type_id as "customTaskTypeId",
             type.owner_work_project_id as "ownerProjectId", type.name, type.icon,
-            type.source_platform as "sourcePlatform", association.is_default as "isDefault",
+            type.source_platform as "sourcePlatform",
+            association.work_project_custom_task_type_id is not null as "isAssociated",
+            coalesce(association.is_default, false) as "isDefault",
             status.work_custom_task_status_option_id as "statusOptionId",
             status.name as "statusName", status.color as "statusColor",
             status.completion_state as "completionState", status.enabled, status.position
-          from public.work_project_custom_task_type association
-          join public.work_custom_task_type type
-            on type.work_custom_task_type_id = association.work_custom_task_type_id
+          from public.work_custom_task_type type
+          left join public.work_project_custom_task_type association
+            on association.work_custom_task_type_id = type.work_custom_task_type_id
+            and association.work_project_id = ${input.projectId}::uuid
           join public.work_custom_task_status_option status
             on status.work_custom_task_type_id = type.work_custom_task_type_id
-          where association.work_project_id = ${input.projectId}::uuid
-            and type.archived_at is null
+          where type.archived_at is null and (
+            association.work_project_custom_task_type_id is not null
+            or exists (
+              select 1 from public.work_project_item membership
+              join public.work_item item
+                on item.work_item_id = membership.work_item_id
+              where membership.work_project_id = ${input.projectId}::uuid
+                and item.work_custom_task_type_id = type.work_custom_task_type_id
+                and item.archived_at is null
+            )
+          )
           order by lower(type.name), status.position, status.created_at
         `);
         const types = new Map<
           string,
-          WorkCustomTaskType & { isDefault: boolean }
+          WorkCustomTaskType & { isAssociated: boolean; isDefault: boolean }
         >();
         for (const row of rows) {
           const type = types.get(row.customTaskTypeId) ?? {
@@ -4322,6 +4605,7 @@ export const workManagementRouter = router({
             name: row.name,
             icon: row.icon,
             sourcePlatform: row.sourcePlatform,
+            isAssociated: row.isAssociated,
             isDefault: row.isDefault,
             statuses: [],
           };
@@ -4342,7 +4626,11 @@ export const workManagementRouter = router({
     assignments: staffProcedure
       .input(z.object({ projectId: uuid }))
       .query(async ({ input, ctx }) => {
-        await requireWorkFeature(ctx, "work.custom_task_types");
+        await requireScopedFeature(
+          ctx,
+          "work.custom_task_types",
+          input.projectId,
+        );
         await requireProjectAccess(ctx, input.projectId);
         const db = getDb();
         if (!db) {
@@ -4407,7 +4695,11 @@ export const workManagementRouter = router({
         }),
       )
       .mutation(async ({ input, ctx }) => {
-        await requireWorkFeature(ctx, "work.custom_task_types");
+        await requireScopedFeature(
+          ctx,
+          "work.custom_task_types",
+          input.projectId,
+        );
         await requireProjectAccess(ctx, input.projectId, "editor");
         validateCustomTaskStatuses(input.statuses);
         const db = getDb();
@@ -4504,6 +4796,181 @@ export const workManagementRouter = router({
         return type;
       }),
 
+    update: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          customTaskTypeId: uuid,
+          name: z.string().trim().min(1).max(120),
+          icon: z.string().trim().min(1).max(16),
+          statuses: z.array(customTaskStatusInput).min(2).max(20),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireScopedFeature(
+          ctx,
+          "work.custom_task_types",
+          input.projectId,
+        );
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        validateCustomTaskStatuses(input.statuses);
+        const db = getDb();
+        if (!db) {
+          const store = getDemoWork();
+          const type = store.customTaskTypes.get(input.customTaskTypeId);
+          if (!type || type.ownerProjectId !== input.projectId)
+            throw new TRPCError({ code: "NOT_FOUND" });
+          if (type.sourcePlatform !== "native")
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "Asana-managed task types are updated by source sync",
+            });
+          validateCustomTaskStatusUpdate(input.statuses, type.statuses);
+          const selectedIds = new Set(
+            input.statuses.flatMap((status) =>
+              status.statusOptionId ? [status.statusOptionId] : [],
+            ),
+          );
+          for (const status of type.statuses)
+            if (!selectedIds.has(status.statusOptionId)) status.enabled = false;
+          type.statuses = [
+            ...input.statuses.map((status, position) => {
+              const current = status.statusOptionId
+                ? type.statuses.find(
+                    (candidate) =>
+                      candidate.statusOptionId === status.statusOptionId,
+                  )
+                : null;
+              return {
+                statusOptionId: current?.statusOptionId ?? randomUUID(),
+                customTaskTypeId: input.customTaskTypeId,
+                name: status.name,
+                color: status.color,
+                completionState: status.completionState,
+                enabled: true,
+                position,
+              } satisfies WorkCustomTaskStatusOption;
+            }),
+            ...type.statuses.filter(
+              (status) => !selectedIds.has(status.statusOptionId),
+            ),
+          ];
+          type.name = input.name;
+          type.icon = input.icon;
+          for (const item of store.items.values()) {
+            if (item.customTaskTypeId !== input.customTaskTypeId) continue;
+            const status = type.statuses.find(
+              (candidate) =>
+                candidate.statusOptionId === item.customTaskStatusOptionId,
+            );
+            if (!status?.enabled) continue;
+            item.completedAt =
+              status.completionState === "complete"
+                ? (item.completedAt ?? new Date().toISOString())
+                : null;
+          }
+        } else {
+          await db.transaction(async (tx) => {
+            const [type] = await tx.execute<{
+              ownerProjectId: string | null;
+              sourcePlatform: string;
+            }>(sql`
+              select owner_work_project_id as "ownerProjectId",
+                source_platform as "sourcePlatform"
+              from public.work_custom_task_type
+              where work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+                and archived_at is null for update
+            `);
+            if (!type || type.ownerProjectId !== input.projectId)
+              throw new TRPCError({ code: "NOT_FOUND" });
+            if (type.sourcePlatform !== "native")
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message: "Asana-managed task types are updated by source sync",
+              });
+            const existing = await tx.execute<{
+              statusOptionId: string;
+              name: string;
+            }>(sql`
+              select work_custom_task_status_option_id as "statusOptionId", name
+              from public.work_custom_task_status_option
+              where work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+            `);
+            validateCustomTaskStatusUpdate(input.statuses, existing);
+            await tx.execute(sql`
+              update public.work_custom_task_type set name = ${input.name},
+                icon = ${input.icon}, updated_at = now()
+              where work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+            `);
+            const selectedIds: string[] = [];
+            const selectedExistingIds = input.statuses.flatMap((status) =>
+              status.statusOptionId ? [status.statusOptionId] : [],
+            );
+            if (selectedExistingIds.length)
+              await tx.execute(sql`
+                update public.work_custom_task_status_option
+                set name = '__hrmny_edit_' || work_custom_task_status_option_id::text
+                where work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+                  and work_custom_task_status_option_id in ${sql`(${sql.join(
+                    selectedExistingIds.map((id) => sql`${id}::uuid`),
+                    sql`, `,
+                  )})`}
+              `);
+            for (const [position, status] of input.statuses.entries()) {
+              if (status.statusOptionId) {
+                await tx.execute(sql`
+                  update public.work_custom_task_status_option
+                  set name = ${status.name}, color = ${status.color},
+                    completion_state = ${status.completionState}, enabled = true,
+                    position = ${position}, updated_at = now()
+                  where work_custom_task_status_option_id = ${status.statusOptionId}::uuid
+                    and work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+                `);
+                selectedIds.push(status.statusOptionId);
+              } else {
+                const [created] = await tx.execute<{ id: string }>(sql`
+                  insert into public.work_custom_task_status_option (
+                    work_custom_task_type_id, name, color, completion_state, position
+                  ) values (
+                    ${input.customTaskTypeId}::uuid, ${status.name}, ${status.color},
+                    ${status.completionState}, ${position}
+                  ) returning work_custom_task_status_option_id as id
+                `);
+                selectedIds.push(created!.id);
+              }
+            }
+            await tx.execute(sql`
+              update public.work_custom_task_status_option set enabled = false,
+                updated_at = now()
+              where work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+                and work_custom_task_status_option_id not in ${sql`(${sql.join(
+                  selectedIds.map((id) => sql`${id}::uuid`),
+                  sql`, `,
+                )})`}
+            `);
+            await tx.execute(sql`
+              update public.work_item item set completed_at = case
+                when status.completion_state = 'complete'
+                  then coalesce(item.completed_at, now())
+                else null
+              end, updated_at = now()
+              from public.work_custom_task_status_option status
+              where item.work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+                and item.work_custom_task_status_option_id = status.work_custom_task_status_option_id
+                and status.enabled
+            `);
+          });
+        }
+        await audit(
+          ctx,
+          "work.customTaskType.update",
+          "work_custom_task_type",
+          input.customTaskTypeId,
+          { projectId: input.projectId, name: input.name },
+        );
+        return { ok: true as const };
+      }),
+
     share: staffProcedure
       .input(
         z.object({
@@ -4513,7 +4980,18 @@ export const workManagementRouter = router({
         }),
       )
       .mutation(async ({ input, ctx }) => {
-        await requireWorkFeature(ctx, "work.custom_task_types");
+        await Promise.all([
+          requireScopedFeature(
+            ctx,
+            "work.custom_task_types",
+            input.sourceProjectId,
+          ),
+          requireScopedFeature(
+            ctx,
+            "work.custom_task_types",
+            input.targetProjectId,
+          ),
+        ]);
         await requireProjectAccess(ctx, input.sourceProjectId, "editor");
         await requireProjectAccess(ctx, input.targetProjectId, "editor");
         const db = getDb();
@@ -4566,10 +5044,48 @@ export const workManagementRouter = router({
         return { ok: true as const };
       }),
 
+    removeFromProject: staffProcedure
+      .input(z.object({ projectId: uuid, customTaskTypeId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireScopedFeature(
+          ctx,
+          "work.custom_task_types",
+          input.projectId,
+        );
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        const db = getDb();
+        if (!db) {
+          const removed = getDemoWork().projectCustomTaskTypes.delete(
+            customTaskTypeProjectKey(input.projectId, input.customTaskTypeId),
+          );
+          if (!removed) throw new TRPCError({ code: "NOT_FOUND" });
+        } else {
+          const removed = await db.execute(sql`
+            delete from public.work_project_custom_task_type
+            where work_project_id = ${input.projectId}::uuid
+              and work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+            returning work_project_custom_task_type_id
+          `);
+          if (!removed[0]) throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        await audit(
+          ctx,
+          "work.customTaskType.removeFromProject",
+          "work_custom_task_type",
+          input.customTaskTypeId,
+          { projectId: input.projectId },
+        );
+        return { ok: true as const };
+      }),
+
     setDefault: staffProcedure
       .input(z.object({ projectId: uuid, customTaskTypeId: nullableUuid }))
       .mutation(async ({ input, ctx }) => {
-        await requireWorkFeature(ctx, "work.custom_task_types");
+        await requireScopedFeature(
+          ctx,
+          "work.custom_task_types",
+          input.projectId,
+        );
         await requireProjectAccess(ctx, input.projectId, "editor");
         const db = getDb();
         if (!db) {
@@ -4645,7 +5161,11 @@ export const workManagementRouter = router({
           ),
       )
       .mutation(async ({ input, ctx }) => {
-        await requireWorkFeature(ctx, "work.custom_task_types");
+        await requireScopedFeature(
+          ctx,
+          "work.custom_task_types",
+          input.projectId,
+        );
         await requireProjectAccess(ctx, input.projectId, "editor");
         await requireItemInProject(ctx, input.itemId, input.projectId);
         const db = getDb();
@@ -4672,7 +5192,11 @@ export const workManagementRouter = router({
                   candidate.statusOptionId === input.statusOptionId &&
                   candidate.enabled,
               );
-            if (!association || !status)
+            if (
+              (!association &&
+                item.customTaskTypeId !== input.customTaskTypeId) ||
+              !status
+            )
               throw new TRPCError({
                 code: "BAD_REQUEST",
                 message: "Custom task type or status is not available",
@@ -4716,16 +5240,21 @@ export const workManagementRouter = router({
               updated_at = now()
             from (
               select status.completion_state
-              from public.work_project_custom_task_type association
-              join public.work_custom_task_status_option status
-                on status.work_custom_task_type_id = association.work_custom_task_type_id
+              from public.work_custom_task_status_option status
+              where status.work_custom_task_type_id = ${input.customTaskTypeId}::uuid
                 and status.work_custom_task_status_option_id = ${input.statusOptionId}::uuid
                 and status.enabled
-              where association.work_project_id = ${input.projectId}::uuid
-                and association.work_custom_task_type_id = ${input.customTaskTypeId}::uuid
             ) selected
             where item.work_item_id = ${input.itemId}::uuid
               and item.item_type = 'task'
+              and (
+                item.work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+                or exists (
+                  select 1 from public.work_project_custom_task_type association
+                  where association.work_project_id = ${input.projectId}::uuid
+                    and association.work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+                )
+              )
             returning item.completed_at as "completedAt"
           `);
           if (!updated)
@@ -4751,6 +5280,12 @@ export const workManagementRouter = router({
           input.itemId,
           "updated",
           "A task type or status was updated",
+        );
+        await runProjectRules(
+          ctx,
+          input.projectId,
+          input.itemId,
+          "custom_status_changed",
         );
         return { ok: true as const, completedAt };
       }),
@@ -6875,13 +7410,16 @@ export const workManagementRouter = router({
           clientId: project.clientId,
           roles: ctx.roles,
         };
-        const [scheduledEnabled, collaboratorEnabled] = await Promise.all([
-          featureEnabled("work.rules.scheduled", scope),
-          featureEnabled("work.rules.collaborator_trigger", scope),
-        ]);
+        const [scheduledEnabled, collaboratorEnabled, customTypesEnabled] =
+          await Promise.all([
+            featureEnabled("work.rules.scheduled", scope),
+            featureEnabled("work.rules.collaborator_trigger", scope),
+            featureEnabled("work.custom_task_types", scope),
+          ]);
         const visible = (rule: WorkRule) =>
           (rule.triggerType !== "scheduled" || scheduledEnabled) &&
-          (rule.triggerType !== "collaborator_added" || collaboratorEnabled);
+          (rule.triggerType !== "collaborator_added" || collaboratorEnabled) &&
+          (customTypesEnabled || !ruleUsesCustomTaskTypes(rule));
         const db = getDb();
         if (!db)
           return [...getDemoWork().rules.values()].filter(
@@ -6897,9 +7435,12 @@ export const workManagementRouter = router({
           order by lower(name)
         `);
         return rows.flatMap((rule) => {
-          if (!visible(rule)) return [];
           const branches = z.array(ruleBranchSchema).safeParse(rule.branches);
-          return [{ ...rule, branches: branches.success ? branches.data : [] }];
+          const normalized = {
+            ...rule,
+            branches: branches.success ? branches.data : [],
+          };
+          return visible(normalized) ? [normalized] : [];
         });
       }),
     create: staffProcedure
@@ -6920,7 +7461,24 @@ export const workManagementRouter = router({
           input.triggerType,
         );
         for (const branch of input.branches) {
+          if (
+            branch.conditions.some((condition) =>
+              ["customTaskTypeId", "customTaskStatusOptionId"].includes(
+                condition.field,
+              ),
+            ) ||
+            branch.actions.some(
+              (action) => action.type === "set_custom_task_status",
+            )
+          )
+            await requireScopedFeature(
+              ctx,
+              "work.custom_task_types",
+              input.projectId,
+            );
           await validateRuleActions(input.projectId, branch.actions);
+          for (const condition of branch.conditions)
+            await validateCustomTaskRuleCondition(input.projectId, condition);
           const sectionConditions = branch.conditions.flatMap((condition) =>
             condition.field === "sectionId" &&
             typeof condition.value === "string"
@@ -6998,11 +7556,12 @@ export const workManagementRouter = router({
                 triggerType: WorkRule["triggerType"];
                 scheduleMinutes: number | null;
                 ownerEmployeeId: string;
+                branches: unknown;
               }>(sql`
                 select work_project_id as "projectId",
                   trigger_type as "triggerType",
                   schedule_minutes as "scheduleMinutes",
-                  owner_employee_id as "ownerEmployeeId"
+                  owner_employee_id as "ownerEmployeeId", branches
                 from public.work_rule
                 where work_rule_id = ${input.ruleId}::uuid
               `)
@@ -7015,6 +7574,20 @@ export const workManagementRouter = router({
             rule.projectId,
             rule.triggerType,
           );
+        if (input.enabled) {
+          const branches = z.array(ruleBranchSchema).safeParse(rule.branches);
+          if (
+            ruleUsesCustomTaskTypes({
+              triggerType: rule.triggerType,
+              branches: branches.success ? branches.data : [],
+            })
+          )
+            await requireScopedFeature(
+              ctx,
+              "work.custom_task_types",
+              rule.projectId,
+            );
+        }
         if (!db)
           getDemoWork().rules.get(input.ruleId)!.isEnabled = input.enabled;
         else
@@ -7772,12 +8345,33 @@ export const workManagementRouter = router({
             code: "PRECONDITION_FAILED",
             message: "Bundle is invalid",
           });
-        for (const rule of parsed.data.rules)
+        for (const rule of parsed.data.rules) {
           await requireRuleTriggerFeature(
             ctx,
             input.projectId,
             rule.triggerType,
           );
+          if (ruleUsesCustomTaskTypes(rule)) {
+            await requireScopedFeature(
+              ctx,
+              "work.custom_task_types",
+              input.projectId,
+            );
+            for (const branch of rule.branches) {
+              await validateRuleActions(
+                input.projectId,
+                branch.actions.filter(
+                  (action) => action.type === "set_custom_task_status",
+                ),
+              );
+              for (const condition of branch.conditions)
+                await validateCustomTaskRuleCondition(
+                  input.projectId,
+                  condition,
+                );
+            }
+          }
+        }
         const store = getDemoWork();
         const key = `${input.projectId}:${input.bundleId}`;
         if (!db) {

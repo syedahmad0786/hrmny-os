@@ -36,6 +36,7 @@ const teammateActionTypes = [
   "delete_task",
   "create_subtask",
   "set_custom_field",
+  "set_custom_task_status",
   "add_to_project",
   "add_follower",
   "remove_follower",
