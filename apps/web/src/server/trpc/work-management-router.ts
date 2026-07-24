@@ -851,6 +851,7 @@ const formQuestionSchema = z.object({
   label: z.string().trim().min(1).max(200),
   type: z.enum([
     "text",
+    "email",
     "textarea",
     "single_select",
     "multi_select",
@@ -4607,6 +4608,31 @@ async function workFormById(formId: string): Promise<WorkForm | null> {
   return questions.success ? { ...raw, questions: questions.data } : null;
 }
 
+async function formOwnerFeatureEnabled(
+  form: Pick<WorkForm, "createdByEmployeeId" | "projectId">,
+  featureKey: string,
+  ctx?: TrpcContext,
+) {
+  const db = getDb();
+  const roles =
+    ctx?.employeeId === form.createdByEmployeeId
+      ? ctx.roles
+      : db
+        ? (
+            await db.execute<{ key: string }>(sql`
+              select role.key from public.employee_role membership
+              join public.role role on role.role_id = membership.role_id
+              where membership.employee_id = ${form.createdByEmployeeId}::uuid
+            `)
+          ).map((role) => role.key)
+        : [];
+  return featureEnabled(featureKey, {
+    userId: form.createdByEmployeeId,
+    clientId: await projectClientId(form.projectId),
+    roles,
+  });
+}
+
 function formAttachments(
   questions: readonly WorkFormQuestion[],
   answers: Record<string, unknown>,
@@ -4671,21 +4697,6 @@ async function submitWorkForm(
         message: "Form is unavailable",
       });
   }
-  let answers: Record<string, unknown>;
-  try {
-    answers = normalizeFormAnswers(raw.questions, input.answers);
-  } catch (error) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: error instanceof Error ? error.message : "Answers are invalid",
-    });
-  }
-  const title = answers[raw.titleQuestionKey];
-  if (typeof title !== "string" || !title.trim())
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Task title is required",
-    });
   let executionCtx = ctx;
   if (publicSubmission) {
     try {
@@ -4699,13 +4710,36 @@ async function submitWorkForm(
     }
     executionCtx.clientId = await projectClientId(raw.projectId);
   }
+  const emailReceiptsEnabled = await formOwnerFeatureEnabled(
+    raw,
+    "work.forms.email_receipts",
+    executionCtx,
+  );
+  const questions = emailReceiptsEnabled
+    ? raw.questions
+    : raw.questions.filter((question) => question.type !== "email");
+  let answers: Record<string, unknown>;
+  try {
+    answers = normalizeFormAnswers(questions, input.answers);
+  } catch (error) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: error instanceof Error ? error.message : "Answers are invalid",
+    });
+  }
+  const title = answers[raw.titleQuestionKey];
+  if (typeof title !== "string" || !title.trim())
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Task title is required",
+    });
   if (raw.defaultAssigneeEmployeeId)
     await requireAssignableEmployee(
       executionCtx,
       raw.projectId,
       raw.defaultAssigneeEmployeeId,
     );
-  const description = raw.questions
+  const description = questions
     .flatMap((question) => {
       const answer = answers[question.key];
       if (answer === undefined) return [];
@@ -4724,7 +4758,11 @@ async function submitWorkForm(
   const submissionId = randomUUID();
   const submittedByEmployeeId = publicSubmission ? null : actor(ctx);
   const createdByEmployeeId = submittedByEmployeeId ?? raw.createdByEmployeeId;
-  const attachments = formAttachments(raw.questions, answers, itemId);
+  const attachments = formAttachments(questions, answers, itemId);
+  const receiptEmail = questions
+    .filter((question) => question.type === "email")
+    .map((question) => answers[question.key])
+    .find((answer): answer is string => typeof answer === "string");
   const storedPaths: string[] = [];
   try {
     for (const { attachment, body } of attachments) {
@@ -4848,6 +4886,14 @@ async function submitWorkForm(
               ${submittedByEmployeeId}::uuid
             )
           `);
+        if (receiptEmail)
+          await tx.execute(sql`
+            insert into public.scheduled_job (job_key, kind, run_at, payload)
+            values (
+              ${`work-form-receipt:${submissionId}`}, 'work_form_receipt', now(),
+              ${JSON.stringify({ submissionId })}::jsonb
+            ) on conflict (job_key) do nothing
+          `);
       });
     }
   } catch (error) {
@@ -4885,6 +4931,7 @@ async function submitWorkForm(
     submissionId,
     itemId,
     message: raw.confirmationMessage,
+    receiptQueued: Boolean(getDb() && receiptEmail),
   };
 }
 
@@ -9634,17 +9681,28 @@ export const workManagementRouter = router({
         });
         const db = getDb();
         if (!db)
-          return [...getDemoWork().forms.values()]
-            .filter((form) => form.projectId === input.projectId)
-            .map((form) => ({
-              ...form,
-              defaultAssigneeEmployeeId:
-                aiTeammatesEnabled ||
-                !form.defaultAssigneeEmployeeId ||
-                !isDemoWorkAiActor(form.defaultAssigneeEmployeeId)
-                  ? form.defaultAssigneeEmployeeId
-                  : null,
-            }));
+          return Promise.all(
+            [...getDemoWork().forms.values()]
+              .filter((form) => form.projectId === input.projectId)
+              .map(async (form) => ({
+                ...form,
+                questions: (await formOwnerFeatureEnabled(
+                  form,
+                  "work.forms.email_receipts",
+                  ctx,
+                ))
+                  ? form.questions
+                  : form.questions.filter(
+                      (question) => question.type !== "email",
+                    ),
+                defaultAssigneeEmployeeId:
+                  aiTeammatesEnabled ||
+                  !form.defaultAssigneeEmployeeId ||
+                  !isDemoWorkAiActor(form.defaultAssigneeEmployeeId)
+                    ? form.defaultAssigneeEmployeeId
+                    : null,
+              })),
+          );
         const rows = await db.execute<
           WorkForm & { questions: unknown; defaultAssigneeIsAi: boolean }
         >(sql`
@@ -9664,20 +9722,31 @@ export const workManagementRouter = router({
           where form.work_project_id = ${input.projectId}::uuid
           order by lower(name)
         `);
-        return rows.map((form) => {
-          const questions = z
-            .array(formQuestionSchema)
-            .safeParse(form.questions);
-          const { defaultAssigneeIsAi, ...visible } = form;
-          return {
-            ...visible,
-            defaultAssigneeEmployeeId:
-              aiTeammatesEnabled || !defaultAssigneeIsAi
-                ? form.defaultAssigneeEmployeeId
-                : null,
-            questions: questions.success ? questions.data : [],
-          };
-        });
+        return Promise.all(
+          rows.map(async (form) => {
+            const questions = z
+              .array(formQuestionSchema)
+              .safeParse(form.questions);
+            const { defaultAssigneeIsAi, ...visible } = form;
+            const parsedQuestions = questions.success ? questions.data : [];
+            return {
+              ...visible,
+              defaultAssigneeEmployeeId:
+                aiTeammatesEnabled || !defaultAssigneeIsAi
+                  ? form.defaultAssigneeEmployeeId
+                  : null,
+              questions: (await formOwnerFeatureEnabled(
+                form,
+                "work.forms.email_receipts",
+                ctx,
+              ))
+                ? parsedQuestions
+                : parsedQuestions.filter(
+                    (question) => question.type !== "email",
+                  ),
+            };
+          }),
+        );
       }),
     create: staffProcedure
       .input(
@@ -9707,6 +9776,12 @@ export const workManagementRouter = router({
         await requireProjectAccess(ctx, input.projectId, "editor");
         if (input.accessLevel === "anyone")
           await requireScopedFeature(ctx, "work.forms.public", input.projectId);
+        if (input.questions.some((question) => question.type === "email"))
+          await requireScopedFeature(
+            ctx,
+            "work.forms.email_receipts",
+            input.projectId,
+          );
         const keys = new Set(input.questions.map((question) => question.key));
         if (keys.size !== input.questions.length)
           throw new TRPCError({
@@ -9880,7 +9955,12 @@ export const workManagementRouter = router({
           formId: form.formId,
           name: form.name,
           description: form.description,
-          questions: form.questions,
+          questions: (await formOwnerFeatureEnabled(
+            form,
+            "work.forms.email_receipts",
+          ))
+            ? form.questions
+            : form.questions.filter((question) => question.type !== "email"),
           confirmationMessage: form.confirmationMessage,
         };
       }),
