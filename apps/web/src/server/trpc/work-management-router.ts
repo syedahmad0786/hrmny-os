@@ -28,10 +28,12 @@ import {
 } from "../work-workflows";
 import {
   budgetSummary,
+  buildWorkReportChart,
   capacityUtilization,
   criticalPath,
   splitTimerByUtcDay,
   weightedProgress,
+  type WorkReportChartRow,
 } from "../work-planning";
 import { validateDailyMinutes } from "../shifts-timesheets";
 import { queueWorkAiStudioEvent } from "../work-ai-studio-events";
@@ -1022,6 +1024,33 @@ const bundleBlueprintSchema = z.object({
     )
     .max(200),
 });
+
+const reportChartSpecSchema = z
+  .object({
+    groupBy: z.enum([
+      "completion",
+      "assignee",
+      "priority",
+      "section",
+      "task_type",
+    ]),
+    metric: z.enum(["task_count", "estimated_minutes", "actual_minutes"]),
+    completion: z.enum(["all", "complete", "incomplete"]),
+    dueFrom: z.string().date().nullable(),
+    dueTo: z.string().date().nullable(),
+    includeSubtasks: z.boolean(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.dueFrom && value.dueTo && value.dueFrom > value.dueTo)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dueTo"],
+        message: "Due through must be on or after due from",
+      });
+  });
+const dashboardConfigSchema = z
+  .object({ projectId: uuid })
+  .catchall(z.unknown());
 
 function actor(ctx: TrpcContext): string {
   if (!ctx.employeeId) throw new TRPCError({ code: "UNAUTHORIZED" });
@@ -10979,30 +11008,109 @@ export const workManagementRouter = router({
     summary: staffProcedure
       .input(z.object({ projectId: uuid }))
       .query(({ input, ctx }) => projectPlanningSummary(ctx, input.projectId)),
+    chart: staffProcedure
+      .input(z.object({ projectId: uuid, spec: reportChartSpecSchema }))
+      .query(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        const rows: WorkReportChartRow[] = !db
+          ? [...getDemoWork().items.values()]
+              .filter((item) => item.projectId === input.projectId)
+              .map((item) => ({
+                itemId: item.itemId,
+                parentItemId: item.parentItemId,
+                itemType: item.itemType,
+                priority: item.priority,
+                assigneeName: item.assigneeName,
+                sectionName: item.sectionId
+                  ? (getDemoWork().sections.get(item.sectionId)?.name ?? null)
+                  : null,
+                dueAt: item.dueAt,
+                completedAt: item.completedAt,
+                estimatedMinutes: item.estimatedMinutes ?? null,
+                actualMinutes: [...getDemoWork().timeEntries.values()]
+                  .filter(
+                    (entry) =>
+                      entry.projectId === input.projectId &&
+                      entry.itemId === item.itemId,
+                  )
+                  .reduce((sum, entry) => sum + entry.minutes, 0),
+              }))
+          : (
+              await db.execute<
+                Omit<WorkReportChartRow, "dueAt" | "completedAt"> & {
+                  dueAt: Date | string | null;
+                  completedAt: Date | string | null;
+                }
+              >(sql`
+                select distinct item.work_item_id as "itemId",
+                  item.parent_work_item_id as "parentItemId",
+                  item.item_type as "itemType", item.priority,
+                  employee.display_name as "assigneeName",
+                  section.name as "sectionName", item.due_at as "dueAt",
+                  item.completed_at as "completedAt",
+                  item.estimated_minutes as "estimatedMinutes",
+                  coalesce((select sum(entry.minutes)
+                    from public.time_entry entry
+                    where entry.work_project_id = ${input.projectId}::uuid
+                      and entry.work_item_id = item.work_item_id), 0)::int
+                    as "actualMinutes"
+                from public.work_project_item membership
+                join public.work_item item
+                  on item.work_item_id = membership.work_item_id
+                left join public.employee employee
+                  on employee.employee_id = item.assignee_employee_id
+                left join public.work_section section
+                  on section.work_section_id = item.work_section_id
+                where membership.work_project_id = ${input.projectId}::uuid
+                  and item.archived_at is null
+              `)
+            ).map((item) => ({
+              ...item,
+              dueAt: iso(item.dueAt),
+              completedAt: iso(item.completedAt),
+              estimatedMinutes: Number(item.estimatedMinutes ?? 0),
+              actualMinutes: Number(item.actualMinutes),
+            }));
+        return buildWorkReportChart(rows, input.spec);
+      }),
     dashboards: staffProcedure.query(async ({ ctx }) => {
       const employeeId = actor(ctx);
       const db = getDb();
-      if (!db)
-        return [...getDemoWork().dashboards.values()].filter(
-          (item) => item.ownerEmployeeId === employeeId,
-        );
-      return db.execute<WorkDashboard>(sql`
-        select work_reporting_dashboard_id as "dashboardId",
-          owner_employee_id as "ownerEmployeeId", name, config
-        from public.work_reporting_dashboard
-        where owner_employee_id = ${employeeId}::uuid order by lower(name)
-      `);
+      const dashboards = !db
+        ? [...getDemoWork().dashboards.values()].filter(
+            (item) => item.ownerEmployeeId === employeeId,
+          )
+        : await db.execute<WorkDashboard>(sql`
+            select work_reporting_dashboard_id as "dashboardId",
+              owner_employee_id as "ownerEmployeeId", name, config
+            from public.work_reporting_dashboard
+            where owner_employee_id = ${employeeId}::uuid order by lower(name)
+          `);
+      const visible: WorkDashboard[] = [];
+      for (const dashboard of dashboards) {
+        const projectId = dashboard.config.projectId;
+        if (typeof projectId !== "string") continue;
+        try {
+          await requireProjectAccess(ctx, projectId);
+          visible.push(dashboard);
+        } catch (error) {
+          if (!(error instanceof TRPCError)) throw error;
+        }
+      }
+      return visible;
     }),
     saveDashboard: staffProcedure
       .input(
         z.object({
           dashboardId: uuid.optional(),
           name: z.string().trim().min(1).max(160),
-          config: z.record(z.string(), z.unknown()),
+          config: dashboardConfigSchema,
         }),
       )
       .mutation(async ({ input, ctx }) => {
         const employeeId = actor(ctx);
+        await requireProjectAccess(ctx, input.config.projectId);
         const dashboard: WorkDashboard = {
           dashboardId: input.dashboardId ?? randomUUID(),
           ownerEmployeeId: employeeId,
@@ -11046,13 +11154,30 @@ export const workManagementRouter = router({
           const dashboard = getDemoWork().dashboards.get(input.dashboardId);
           if (!dashboard || dashboard.ownerEmployeeId !== employeeId)
             throw new TRPCError({ code: "NOT_FOUND" });
+          const projectId = dashboard.config.projectId;
+          if (typeof projectId !== "string")
+            throw new TRPCError({ code: "NOT_FOUND" });
+          await requireProjectAccess(ctx, projectId);
           getDemoWork().dashboards.delete(input.dashboardId);
-        } else
+        } else {
+          const [dashboard] = await db.execute<{
+            config: Record<string, unknown>;
+          }>(sql`
+            select config from public.work_reporting_dashboard
+            where work_reporting_dashboard_id = ${input.dashboardId}::uuid
+              and owner_employee_id = ${employeeId}::uuid
+            limit 1
+          `);
+          const projectId = dashboard?.config.projectId;
+          if (typeof projectId !== "string")
+            throw new TRPCError({ code: "NOT_FOUND" });
+          await requireProjectAccess(ctx, projectId);
           await db.execute(sql`
             delete from public.work_reporting_dashboard
             where work_reporting_dashboard_id = ${input.dashboardId}::uuid
               and owner_employee_id = ${employeeId}::uuid
           `);
+        }
         return { ok: true as const };
       }),
     exportProject: staffProcedure

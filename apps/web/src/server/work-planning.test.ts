@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   budgetSummary,
+  buildWorkReportChart,
   capacityUtilization,
   criticalPath,
   splitTimerByUtcDay,
@@ -38,5 +39,43 @@ describe("work planning calculations", () => {
       { workDate: "2026-07-25", minutes: 45 },
     ]);
     expect(() => splitTimerByUtcDay("bad", new Date())).toThrow();
+    expect(
+      buildWorkReportChart(
+        [
+          {
+            itemId: "a",
+            parentItemId: null,
+            itemType: "task",
+            priority: "high",
+            assigneeName: "Aisha",
+            sectionName: "Doing",
+            dueAt: "2026-07-24T12:00:00.000Z",
+            completedAt: null,
+            estimatedMinutes: 120,
+            actualMinutes: 60,
+          },
+          {
+            itemId: "b",
+            parentItemId: "a",
+            itemType: "task",
+            priority: "high",
+            assigneeName: "Aisha",
+            sectionName: "Doing",
+            dueAt: "2026-07-25T12:00:00.000Z",
+            completedAt: null,
+            estimatedMinutes: 30,
+            actualMinutes: 15,
+          },
+        ],
+        {
+          groupBy: "assignee",
+          metric: "estimated_minutes",
+          completion: "incomplete",
+          dueFrom: "2026-07-20",
+          dueTo: "2026-07-26",
+          includeSubtasks: false,
+        },
+      ),
+    ).toEqual({ data: [{ label: "Aisha", value: 120 }], total: 120 });
   });
 });
