@@ -3,12 +3,21 @@
 import { useEffect, useState } from "react";
 import { WorkLikeButton } from "@/components/work-like-button";
 import { WorkNav } from "@/components/work-nav";
+import {
+  WorkRichText,
+  WorkRichTextEditor,
+  type WorkMentionOption,
+} from "@/components/work-rich-text";
 import { trpc } from "@/lib/trpc";
 
 export default function WorkMessagesPage() {
   const utils = trpc.useUtils();
+  const session = trpc.auth.session.useQuery();
   const projects = trpc.work.projects.list.useQuery();
+  const employees = trpc.work.members.listEmployees.useQuery();
   const teams = trpc.work.messages.teams.useQuery();
+  const richTextEnabled =
+    session.data?.enabledFeatureKeys.includes("work.rich_text") ?? false;
   const [scopeType, setScopeType] = useState<"project" | "team">("project");
   const [scopeId, setScopeId] = useState("");
   useEffect(() => {
@@ -89,6 +98,28 @@ export default function WorkMessagesPage() {
     scopeType === "project"
       ? canPost
       : currentTeam?.role === "admin" || currentTeam?.role === "member";
+  const mentionOptions: WorkMentionOption[] = [
+    ...(employees.data ?? []).map((employee) => ({
+      id: employee.employeeId,
+      label: employee.displayName,
+      type: "person" as const,
+    })),
+    ...(projects.data ?? []).map((project) => ({
+      id: project.projectId,
+      label: project.name,
+      type: "project" as const,
+    })),
+    ...(teams.data ?? []).map((team) => ({
+      id: team.teamId,
+      label: team.name,
+      type: "team" as const,
+    })),
+    ...(messages.data ?? []).map((message) => ({
+      id: message.messageId,
+      label: message.subject,
+      type: "message" as const,
+    })),
+  ];
 
   return (
     <main className="flex flex-col gap-5">
@@ -163,14 +194,25 @@ export default function WorkMessagesPage() {
             value={subject}
             onChange={(event) => setSubject(event.target.value)}
           />
-          <textarea
-            aria-label="Message body"
-            className="min-h-28 rounded border border-sand px-3 py-2"
-            placeholder="Share an update…"
-            maxLength={50000}
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-          />
+          {richTextEnabled ? (
+            <WorkRichTextEditor
+              ariaLabel="Message body"
+              maxLength={50_000}
+              mentions={mentionOptions}
+              placeholder="Share an update…"
+              value={body}
+              onChange={setBody}
+            />
+          ) : (
+            <textarea
+              aria-label="Message body"
+              className="min-h-28 rounded border border-sand px-3 py-2"
+              placeholder="Share an update…"
+              maxLength={50_000}
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+            />
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -208,9 +250,16 @@ export default function WorkMessagesPage() {
                 {message.isAnnouncement ? "Announcement" : "Message"}
               </p>
               <h3 className="mt-1 font-medium">{message.subject}</h3>
-              <p className="mt-2 line-clamp-2 text-sm text-muted">
-                {message.body}
-              </p>
+              {richTextEnabled ? (
+                <WorkRichText
+                  className="mt-2 line-clamp-2 text-sm text-muted"
+                  value={message.body}
+                />
+              ) : (
+                <p className="mt-2 line-clamp-2 whitespace-pre-wrap text-sm text-muted">
+                  {message.body}
+                </p>
+              )}
               <p className="mt-2 text-xs text-muted">
                 {message.authorName} · {message.commentCount} replies ·{" "}
                 {message.likeCount} likes
@@ -253,14 +302,24 @@ export default function WorkMessagesPage() {
                 </button>
               </div>
             </div>
-            <p className="mt-5 whitespace-pre-wrap text-sm">{selected.body}</p>
+            {richTextEnabled ? (
+              <WorkRichText className="mt-5 text-sm" value={selected.body} />
+            ) : (
+              <p className="mt-5 whitespace-pre-wrap text-sm">
+                {selected.body}
+              </p>
+            )}
             <div className="mt-6 space-y-3 border-t border-sand pt-4">
               {(comments.data ?? []).map((entry) => (
                 <div
                   key={entry.messageCommentId}
                   className="rounded-lg bg-canvas p-3"
                 >
-                  <p className="text-sm">{entry.body}</p>
+                  {richTextEnabled ? (
+                    <WorkRichText className="text-sm" value={entry.body} />
+                  ) : (
+                    <p className="whitespace-pre-wrap text-sm">{entry.body}</p>
+                  )}
                   <div className="mt-2 flex items-center justify-between text-xs text-muted">
                     <span>
                       {entry.authorName} ·{" "}
@@ -278,7 +337,7 @@ export default function WorkMessagesPage() {
               ))}
               {canComment ? (
                 <form
-                  className="flex gap-2"
+                  className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end"
                   onSubmit={(event) => {
                     event.preventDefault();
                     comment.mutate({
@@ -287,13 +346,24 @@ export default function WorkMessagesPage() {
                     });
                   }}
                 >
-                  <input
-                    aria-label="Reply"
-                    className="min-w-0 flex-1 rounded border border-sand px-3 py-2 text-sm"
-                    placeholder="Reply…"
-                    value={reply}
-                    onChange={(event) => setReply(event.target.value)}
-                  />
+                  {richTextEnabled ? (
+                    <WorkRichTextEditor
+                      ariaLabel="Reply"
+                      maxLength={20_000}
+                      mentions={mentionOptions}
+                      placeholder="Reply…"
+                      value={reply}
+                      onChange={setReply}
+                    />
+                  ) : (
+                    <input
+                      aria-label="Reply"
+                      className="min-w-0 flex-1 rounded border border-sand px-3 py-2 text-sm"
+                      placeholder="Reply…"
+                      value={reply}
+                      onChange={(event) => setReply(event.target.value)}
+                    />
+                  )}
                   <button
                     className="rounded bg-ink px-3 py-2 text-sm text-white"
                     disabled={!reply.trim()}

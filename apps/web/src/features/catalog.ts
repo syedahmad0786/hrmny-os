@@ -427,8 +427,8 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     description: "Structured text, lists, links, mentions, and formatting.",
     group: "Communication",
     source: "asana",
-    availability: "planned",
-    defaultEnabled: false,
+    availability: "beta",
+    defaultEnabled: true,
   }),
   feature({
     key: "work.forms",

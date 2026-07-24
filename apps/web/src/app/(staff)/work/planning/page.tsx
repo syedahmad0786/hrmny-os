@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { WorkNav } from "@/components/work-nav";
 import { WorkLikeButton } from "@/components/work-like-button";
+import {
+  WorkRichText,
+  WorkRichTextEditor,
+  type WorkMentionOption,
+} from "@/components/work-rich-text";
 import { trpc } from "@/lib/trpc";
 
 function monday() {
@@ -32,6 +37,7 @@ export default function PlanningPage() {
   const budgetsEnabled = enabled.has("work.budgets");
   const timeEnabled = enabled.has("work.time_tracking");
   const ganttEnabled = enabled.has("work.views.gantt");
+  const richTextEnabled = enabled.has("work.rich_text");
 
   const projects = trpc.work.projects.list.useQuery();
   const employees = trpc.work.members.listEmployees.useQuery();
@@ -86,6 +92,23 @@ export default function PlanningPage() {
     { projectId },
     { enabled: Boolean(projectId && ganttEnabled) },
   );
+  const mentionOptions: WorkMentionOption[] = [
+    ...(employees.data ?? []).map((employee) => ({
+      id: employee.employeeId,
+      label: employee.displayName,
+      type: "person" as const,
+    })),
+    ...(projects.data ?? []).map((project) => ({
+      id: project.projectId,
+      label: project.name,
+      type: "project" as const,
+    })),
+    ...(detail.data?.items ?? []).map((item) => ({
+      id: item.itemId,
+      label: item.title,
+      type: "task" as const,
+    })),
+  ];
 
   const [goalName, setGoalName] = useState("");
   const [goalDueDate, setGoalDueDate] = useState("");
@@ -466,7 +489,7 @@ export default function PlanningPage() {
         <section className="rounded-xl border border-sand bg-white/70 p-5">
           <h2 className="font-display text-xl">Status updates</h2>
           <form
-            className="mt-3 grid gap-2 md:grid-cols-4"
+            className="mt-3 grid gap-2 md:grid-cols-[1fr_2fr_auto_auto] md:items-end"
             onSubmit={(event) => {
               event.preventDefault();
               createStatus.mutate({
@@ -485,12 +508,25 @@ export default function PlanningPage() {
               value={statusTitle}
               onChange={(event) => setStatusTitle(event.target.value)}
             />
-            <input
-              className="rounded border border-sand px-3 py-2"
-              placeholder="What changed?"
-              value={statusBody}
-              onChange={(event) => setStatusBody(event.target.value)}
-            />
+            {richTextEnabled ? (
+              <WorkRichTextEditor
+                ariaLabel="Status update body"
+                maxLength={50_000}
+                mentions={mentionOptions}
+                placeholder="What changed?"
+                value={statusBody}
+                onChange={setStatusBody}
+              />
+            ) : (
+              <input
+                aria-label="Status update body"
+                className="rounded border border-sand px-3 py-2"
+                maxLength={50_000}
+                placeholder="What changed?"
+                value={statusBody}
+                onChange={(event) => setStatusBody(event.target.value)}
+              />
+            )}
             <select
               aria-label="Health"
               className="rounded border border-sand px-3 py-2"
@@ -523,7 +559,16 @@ export default function PlanningPage() {
                     {update.health.replaceAll("_", " ")}
                   </span>
                 </div>
-                <p className="mt-1 text-sm text-muted">{update.body}</p>
+                {richTextEnabled ? (
+                  <WorkRichText
+                    className="mt-1 text-sm text-muted"
+                    value={update.body}
+                  />
+                ) : (
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-muted">
+                    {update.body}
+                  </p>
+                )}
                 <div className="mt-2">
                   <WorkLikeButton
                     targetType="status_update"

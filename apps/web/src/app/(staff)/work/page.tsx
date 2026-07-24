@@ -5,6 +5,11 @@ import { trpc } from "@/lib/trpc";
 import { WorkNav } from "@/components/work-nav";
 import { WorkLikeButton } from "@/components/work-like-button";
 import { WorkProofingDialog } from "@/components/work-proofing-dialog";
+import {
+  WorkRichText,
+  WorkRichTextEditor,
+  type WorkMentionOption,
+} from "@/components/work-rich-text";
 
 type View = "list" | "board" | "calendar" | "timeline" | "files";
 
@@ -56,6 +61,7 @@ export default function WorkPage() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [newProject, setNewProject] = useState(false);
   const [projectName, setProjectName] = useState("");
+  const [projectDescription, setProjectDescription] = useState("");
   const [projectPrivacy, setProjectPrivacy] = useState<
     "organization" | "private"
   >("organization");
@@ -78,6 +84,7 @@ export default function WorkPage() {
   const [fieldOptions, setFieldOptions] = useState("");
   const [attachmentName, setAttachmentName] = useState("");
   const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState("");
   const [proofingAttachment, setProofingAttachment] = useState<{
     attachmentId: string;
     name: string;
@@ -95,6 +102,9 @@ export default function WorkPage() {
   );
   const selectedItem =
     detail.data?.items.find((item) => item.itemId === selectedItemId) ?? null;
+  useEffect(() => {
+    setDescriptionDraft(selectedItem?.description ?? "");
+  }, [selectedItem?.description, selectedItem?.itemId]);
   const employeeById = useMemo(
     () =>
       new Map(
@@ -137,6 +147,8 @@ export default function WorkPage() {
     session.data?.enabledFeatureKeys.includes("work.recurring_tasks") ?? false;
   const timeEnabled =
     session.data?.enabledFeatureKeys.includes("work.time_tracking") ?? false;
+  const richTextEnabled =
+    session.data?.enabledFeatureKeys.includes("work.rich_text") ?? false;
   const comments = trpc.work.comments.list.useQuery(
     { itemId: selectedItemId! },
     { enabled: Boolean(selectedItemId && commentsEnabled) },
@@ -180,6 +192,7 @@ export default function WorkPage() {
     onSuccess: async (created) => {
       setProjectId(created.projectId);
       setProjectName("");
+      setProjectDescription("");
       setNewProject(false);
       await refreshProject();
     },
@@ -268,6 +281,26 @@ export default function WorkPage() {
 
   const sections = detail.data?.sections ?? [];
   const items = detail.data?.items ?? [];
+  const mentionOptions = useMemo<WorkMentionOption[]>(
+    () => [
+      ...(employees.data ?? []).map((employee) => ({
+        id: employee.employeeId,
+        label: employee.displayName,
+        type: "person" as const,
+      })),
+      ...(projects.data ?? []).map((project) => ({
+        id: project.projectId,
+        label: project.name,
+        type: "project" as const,
+      })),
+      ...items.map((item) => ({
+        id: item.itemId,
+        label: item.title,
+        type: "task" as const,
+      })),
+    ],
+    [employees.data, items, projects.data],
+  );
   const topLevelItems = items.filter((item) => !item.parentItemId);
   const canEdit = ["admin", "editor"].includes(
     detail.data?.project.accessLevel ?? "viewer",
@@ -447,7 +480,7 @@ export default function WorkPage() {
             event.preventDefault();
             createProject.mutate({
               name: projectName,
-              description: "",
+              description: projectDescription,
               privacy: projectPrivacy,
             });
           }}
@@ -475,6 +508,27 @@ export default function WorkPage() {
           >
             Create
           </button>
+          <div className="md:col-span-3">
+            {richTextEnabled ? (
+              <WorkRichTextEditor
+                ariaLabel="Project description"
+                maxLength={20_000}
+                mentions={mentionOptions}
+                placeholder="Project description (optional)"
+                value={projectDescription}
+                onChange={setProjectDescription}
+              />
+            ) : (
+              <textarea
+                aria-label="Project description"
+                className="min-h-20 w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+                maxLength={20_000}
+                placeholder="Project description (optional)"
+                value={projectDescription}
+                onChange={(event) => setProjectDescription(event.target.value)}
+              />
+            )}
+          </div>
         </form>
       ) : null}
 
@@ -520,10 +574,17 @@ export default function WorkPage() {
                       {detail.data.project.name}
                     </h2>
                   </div>
-                  <p className="mt-1 text-sm text-muted">
-                    {detail.data.project.description ||
-                      "No project description yet."}
-                  </p>
+                  {richTextEnabled && detail.data.project.description ? (
+                    <WorkRichText
+                      className="mt-1 text-sm text-muted"
+                      value={detail.data.project.description}
+                    />
+                  ) : (
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted">
+                      {detail.data.project.description ||
+                        "No project description yet."}
+                    </p>
+                  )}
                   <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">
                     {detail.data.project.privacy} ·{" "}
                     {detail.data.project.accessLevel}
@@ -1063,21 +1124,47 @@ export default function WorkPage() {
               </label>
             </div>
 
-            <label className="mt-5 block text-xs font-bold uppercase tracking-[0.1em] text-muted">
+            <div className="mt-5 text-xs font-bold uppercase tracking-[0.1em] text-muted">
               Description
-              <textarea
-                className="mt-1 min-h-28 w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-ink"
-                defaultValue={selectedItem.description}
-                readOnly={!canEdit}
-                onBlur={(event) => {
-                  if (event.target.value !== selectedItem.description)
-                    updateTask.mutate({
-                      itemId: selectedItem.itemId,
-                      description: event.target.value,
-                    });
-                }}
-              />
-            </label>
+              {richTextEnabled && canEdit ? (
+                <WorkRichTextEditor
+                  ariaLabel="Task description"
+                  className="mt-1 font-normal normal-case tracking-normal text-ink"
+                  maxLength={20_000}
+                  mentions={mentionOptions}
+                  value={descriptionDraft}
+                  onChange={setDescriptionDraft}
+                  onBlur={() => {
+                    if (descriptionDraft !== selectedItem.description)
+                      updateTask.mutate({
+                        itemId: selectedItem.itemId,
+                        description: descriptionDraft,
+                      });
+                  }}
+                />
+              ) : richTextEnabled ? (
+                <WorkRichText
+                  className="mt-1 rounded-lg border border-sand bg-white p-3 text-sm font-normal normal-case tracking-normal text-ink"
+                  value={selectedItem.description}
+                />
+              ) : (
+                <textarea
+                  aria-label="Task description"
+                  className="mt-1 min-h-28 w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-ink"
+                  maxLength={20_000}
+                  readOnly={!canEdit}
+                  value={descriptionDraft}
+                  onBlur={() => {
+                    if (descriptionDraft !== selectedItem.description)
+                      updateTask.mutate({
+                        itemId: selectedItem.itemId,
+                        description: descriptionDraft,
+                      });
+                  }}
+                  onChange={(event) => setDescriptionDraft(event.target.value)}
+                />
+              )}
+            </div>
 
             {followersEnabled ? (
               <section className="mt-6 border-t border-sand pt-5">
@@ -1644,9 +1731,16 @@ export default function WorkPage() {
                           {new Date(entry.createdAt).toLocaleString()}
                         </span>
                       </div>
-                      <p className="mt-2 whitespace-pre-wrap text-sm">
-                        {entry.body}
-                      </p>
+                      {richTextEnabled ? (
+                        <WorkRichText
+                          className="mt-2 text-sm"
+                          value={entry.body}
+                        />
+                      ) : (
+                        <p className="mt-2 whitespace-pre-wrap text-sm">
+                          {entry.body}
+                        </p>
+                      )}
                       <div className="mt-2">
                         <WorkLikeButton
                           targetType="comment"
@@ -1658,7 +1752,7 @@ export default function WorkPage() {
                 </div>
                 {canComment ? (
                   <form
-                    className="mt-3 flex gap-2"
+                    className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end"
                     onSubmit={(event) => {
                       event.preventDefault();
                       createComment.mutate({
@@ -1667,12 +1761,25 @@ export default function WorkPage() {
                       });
                     }}
                   >
-                    <textarea
-                      className="min-h-20 min-w-0 flex-1 rounded-lg border border-sand bg-white px-3 py-2 text-sm"
-                      placeholder="Write a comment"
-                      value={comment}
-                      onChange={(event) => setComment(event.target.value)}
-                    />
+                    {richTextEnabled ? (
+                      <WorkRichTextEditor
+                        ariaLabel="Comment"
+                        maxLength={20_000}
+                        mentions={mentionOptions}
+                        placeholder="Write a comment"
+                        value={comment}
+                        onChange={setComment}
+                      />
+                    ) : (
+                      <textarea
+                        aria-label="Comment"
+                        className="min-h-20 min-w-0 flex-1 rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+                        maxLength={20_000}
+                        placeholder="Write a comment"
+                        value={comment}
+                        onChange={(event) => setComment(event.target.value)}
+                      />
+                    )}
                     <button
                       className="self-end rounded-lg bg-ochre px-4 py-2 text-sm font-medium text-white"
                       disabled={!comment.trim()}
