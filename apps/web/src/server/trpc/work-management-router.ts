@@ -27,7 +27,6 @@ import {
   type WorkRuleBranch,
 } from "../work-workflows";
 import {
-  budgetSummary,
   buildWorkReportChart,
   capacityUtilization,
   criticalPath,
@@ -470,6 +469,7 @@ type DemoWork = {
   allocations: Map<string, WorkCapacityAllocation>;
   timers: Map<string, WorkTimer>;
   timeEntries: Map<string, WorkTimeEntry>;
+  projectRates: Map<string, number>;
   dashboards: Map<string, WorkDashboard>;
   baselines: Map<string, WorkBaseline>;
 };
@@ -602,6 +602,7 @@ export function getDemoWork(): DemoWork {
     allocations: new Map(),
     timers: new Map(),
     timeEntries: new Map(),
+    projectRates: new Map(),
     dashboards: new Map(),
     baselines: new Map(),
   };
@@ -1812,12 +1813,43 @@ async function projectPlanningSummary(ctx: TrpcContext, projectId: string) {
     const items = [...store.items.values()].filter(
       (item) => item.projectId === projectId,
     );
-    const actualMinutes = [...store.timeEntries.values()]
-      .filter((entry) => entry.projectId === projectId)
-      .reduce((sum, entry) => sum + entry.minutes, 0);
+    const entries = [...store.timeEntries.values()].filter(
+      (entry) => entry.projectId === projectId,
+    );
+    const actualMinutes = entries.reduce(
+      (sum, entry) => sum + entry.minutes,
+      0,
+    );
     const remainingEstimatedMinutes = items
       .filter((item) => !item.completedAt)
       .reduce((sum, item) => sum + (item.estimatedMinutes ?? 0), 0);
+    const defaultRate = project.hourlyCostRate ?? 0;
+    const rateFor = (employeeId: string | null) =>
+      (employeeId
+        ? store.projectRates.get(`${projectId}:${employeeId}`)
+        : undefined) ?? defaultRate;
+    const actualCost =
+      Math.round(
+        entries.reduce(
+          (sum, entry) =>
+            sum + (entry.minutes / 60) * rateFor(entry.employeeId),
+          0,
+        ) * 100,
+      ) / 100;
+    const remainingCost =
+      Math.round(
+        items
+          .filter((item) => !item.completedAt)
+          .reduce(
+            (sum, item) =>
+              sum +
+              ((item.estimatedMinutes ?? 0) / 60) *
+                rateFor(item.assigneeEmployeeId),
+            0,
+          ) * 100,
+      ) / 100;
+    const forecastCost = Math.round((actualCost + remainingCost) * 100) / 100;
+    const budgetAmount = project.budgetAmount ?? null;
     return {
       projectId,
       name: project.name,
@@ -1831,18 +1863,15 @@ async function projectPlanningSummary(ctx: TrpcContext, projectId: string) {
       unassignedTasks: items.filter((item) => !item.assigneeEmployeeId).length,
       actualMinutes,
       remainingEstimatedMinutes,
-      budgetAmount: project.budgetAmount ?? null,
+      budgetAmount,
       budgetCurrency: project.budgetCurrency ?? "AED",
       hourlyCostRate: project.hourlyCostRate ?? null,
-      ...budgetSummary(
-        project.budgetAmount ?? null,
-        project.hourlyCostRate ?? null,
-        actualMinutes,
-        remainingEstimatedMinutes,
-      ),
+      actualCost,
+      forecastCost,
+      variance: budgetAmount === null ? null : budgetAmount - forecastCost,
     };
   }
-  const [settings, metrics] = await Promise.all([
+  const [settings, metrics, costs] = await Promise.all([
     db.execute<{
       budgetAmount: string | number | null;
       budgetCurrency: string;
@@ -1880,6 +1909,40 @@ async function projectPlanningSummary(ctx: TrpcContext, projectId: string) {
       where membership.work_project_id = ${projectId}::uuid
         and item.archived_at is null
     `),
+    db.execute<{
+      actualCost: string | number;
+      remainingCost: string | number;
+    }>(sql`
+      select coalesce((
+        select round(sum(
+          entry.minutes::numeric / 60 * coalesce(
+            rate.hourly_cost_rate, project.hourly_cost_rate, 0
+          )
+        ), 2)
+        from public.time_entry entry
+        left join public.work_project_rate rate
+          on rate.work_project_id = project.work_project_id
+          and rate.employee_id = entry.employee_id
+        where entry.work_project_id = project.work_project_id
+      ), 0) as "actualCost",
+      coalesce((
+        select round(sum(
+          coalesce(item.estimated_minutes, 0)::numeric / 60 * coalesce(
+            rate.hourly_cost_rate, project.hourly_cost_rate, 0
+          )
+        ), 2)
+        from public.work_project_item membership
+        join public.work_item item
+          on item.work_item_id = membership.work_item_id
+        left join public.work_project_rate rate
+          on rate.work_project_id = project.work_project_id
+          and rate.employee_id = item.assignee_employee_id
+        where membership.work_project_id = project.work_project_id
+          and item.archived_at is null and item.completed_at is null
+      ), 0) as "remainingCost"
+      from public.work_project project
+      where project.work_project_id = ${projectId}::uuid
+    `),
   ]);
   const setting = settings[0]!;
   const metric = metrics[0] ?? {
@@ -1894,6 +1957,9 @@ async function projectPlanningSummary(ctx: TrpcContext, projectId: string) {
     setting.budgetAmount === null ? null : Number(setting.budgetAmount);
   const hourlyCostRate =
     setting.hourlyCostRate === null ? null : Number(setting.hourlyCostRate);
+  const actualCost = Number(costs[0]?.actualCost ?? 0);
+  const forecastCost =
+    Math.round((actualCost + Number(costs[0]?.remainingCost ?? 0)) * 100) / 100;
   return {
     projectId,
     name: project.name,
@@ -1902,12 +1968,9 @@ async function projectPlanningSummary(ctx: TrpcContext, projectId: string) {
     budgetAmount,
     budgetCurrency: setting.budgetCurrency,
     hourlyCostRate,
-    ...budgetSummary(
-      budgetAmount,
-      hourlyCostRate,
-      metric.actualMinutes,
-      metric.remainingEstimatedMinutes,
-    ),
+    actualCost,
+    forecastCost,
+    variance: budgetAmount === null ? null : budgetAmount - forecastCost,
   };
 }
 
@@ -11632,6 +11695,110 @@ export const workManagementRouter = router({
     summary: staffProcedure
       .input(z.object({ projectId: uuid }))
       .query(({ input, ctx }) => projectPlanningSummary(ctx, input.projectId)),
+    rates: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        if (!db) {
+          const prefix = `${input.projectId}:`;
+          return [...getDemoWork().projectRates.entries()]
+            .filter(([key]) => key.startsWith(prefix))
+            .map(([key, hourlyCostRate]) => ({
+              projectId: input.projectId,
+              employeeId: key.slice(prefix.length),
+              employeeName: "Dev Partner",
+              hourlyCostRate,
+            }));
+        }
+        const rows = await db.execute<{
+          projectId: string;
+          employeeId: string;
+          employeeName: string;
+          hourlyCostRate: string | number;
+        }>(sql`
+          select rate.work_project_id as "projectId",
+            rate.employee_id as "employeeId",
+            employee.display_name as "employeeName",
+            rate.hourly_cost_rate as "hourlyCostRate"
+          from public.work_project_rate rate
+          join public.employee employee on employee.employee_id = rate.employee_id
+          where rate.work_project_id = ${input.projectId}::uuid
+          order by lower(employee.display_name)
+        `);
+        return rows.map((row) => ({
+          ...row,
+          hourlyCostRate: Number(row.hourlyCostRate),
+        }));
+      }),
+    setRate: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          employeeId: uuid,
+          hourlyCostRate: z.number().min(0).max(1_000_000_000).nullable(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId, "admin");
+        const db = getDb();
+        if (!db) {
+          if (input.employeeId !== "c0000000-0000-4000-8000-000000000001")
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Employee not found",
+            });
+          const key = `${input.projectId}:${input.employeeId}`;
+          if (input.hourlyCostRate === null)
+            getDemoWork().projectRates.delete(key);
+          else getDemoWork().projectRates.set(key, input.hourlyCostRate);
+        } else
+          await db.transaction(async (tx) => {
+            const [employee] = await tx.execute(sql`
+              select 1 from public.employee
+              where employee_id = ${input.employeeId}::uuid and is_active = true
+            `);
+            if (!employee)
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Employee not found",
+              });
+            if (input.hourlyCostRate === null)
+              await tx.execute(sql`
+                delete from public.work_project_rate
+                where work_project_id = ${input.projectId}::uuid
+                  and employee_id = ${input.employeeId}::uuid
+              `);
+            else
+              await tx.execute(sql`
+                insert into public.work_project_rate (
+                  work_project_id, employee_id, hourly_cost_rate,
+                  set_by_employee_id
+                ) values (
+                  ${input.projectId}::uuid, ${input.employeeId}::uuid,
+                  ${input.hourlyCostRate}, ${actor(ctx)}::uuid
+                ) on conflict (work_project_id, employee_id) do update
+                  set hourly_cost_rate = excluded.hourly_cost_rate,
+                    set_by_employee_id = excluded.set_by_employee_id,
+                    updated_at = now()
+              `);
+          });
+        await audit(
+          ctx,
+          "work.budget.rate.set",
+          "work_project",
+          input.projectId,
+          {
+            employeeId: input.employeeId,
+            hourlyCostRate: input.hourlyCostRate,
+          },
+        );
+        return {
+          projectId: input.projectId,
+          employeeId: input.employeeId,
+          hourlyCostRate: input.hourlyCostRate,
+        };
+      }),
     update: staffProcedure
       .input(
         z.object({

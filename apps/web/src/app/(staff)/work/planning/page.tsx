@@ -228,6 +228,10 @@ export default function PlanningPage() {
     { projectId },
     { enabled: Boolean(projectId && budgetsEnabled) },
   );
+  const costRates = trpc.work.budgets.rates.useQuery(
+    { projectId },
+    { enabled: Boolean(projectId && budgetsEnabled) },
+  );
   const entries = trpc.work.time.list.useQuery(
     { projectId },
     { enabled: Boolean(projectId && timeEnabled) },
@@ -365,9 +369,30 @@ export default function PlanningPage() {
 
   const [budgetAmount, setBudgetAmount] = useState("");
   const [hourlyRate, setHourlyRate] = useState("");
+  const [rateEmployeeId, setRateEmployeeId] = useState("");
+  const [employeeRate, setEmployeeRate] = useState("");
+  useEffect(() => {
+    if (!rateEmployeeId && employees.data?.[0])
+      setRateEmployeeId(employees.data[0].employeeId);
+  }, [employees.data, rateEmployeeId]);
+  useEffect(() => {
+    const rate = (costRates.data ?? []).find(
+      (item) => item.employeeId === rateEmployeeId,
+    );
+    setEmployeeRate(rate?.hourlyCostRate.toString() ?? "");
+  }, [costRates.data, rateEmployeeId]);
   const updateBudget = trpc.work.budgets.update.useMutation({
     onSuccess: async () => {
       await Promise.all([
+        utils.work.budgets.summary.invalidate(),
+        utils.work.reporting.summary.invalidate(),
+      ]);
+    },
+  });
+  const setCostRate = trpc.work.budgets.setRate.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.work.budgets.rates.invalidate(),
         utils.work.budgets.summary.invalidate(),
         utils.work.reporting.summary.invalidate(),
       ]);
@@ -437,6 +462,7 @@ export default function PlanningPage() {
     deleteDashboard.error,
     shareDashboard.error,
     saveDashboard.error,
+    setCostRate.error,
     updateBudget.error,
     upsertAllocation.error,
     logTime.error,
@@ -1302,12 +1328,12 @@ export default function PlanningPage() {
               onChange={(event) => setBudgetAmount(event.target.value)}
             />
             <input
-              aria-label="Hourly cost rate"
+              aria-label="Project default hourly cost rate"
               className="rounded border border-sand px-3 py-2"
               type="number"
               min="0"
               placeholder={
-                budget.data.hourlyCostRate?.toString() ?? "Hourly cost rate"
+                budget.data.hourlyCostRate?.toString() ?? "Default hourly rate"
               }
               value={hourlyRate}
               onChange={(event) => setHourlyRate(event.target.value)}
@@ -1316,6 +1342,65 @@ export default function PlanningPage() {
               Save budget
             </button>
           </form>
+          <div className="mt-4 border-t border-sand pt-4">
+            <h3 className="font-semibold">Person cost rates</h3>
+            <p className="text-xs text-muted">
+              Overrides use the project default when left blank.
+            </p>
+            <form
+              className="mt-2 grid gap-2 md:grid-cols-[2fr_1fr_auto]"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!rateEmployeeId) return;
+                setCostRate.mutate({
+                  projectId,
+                  employeeId: rateEmployeeId,
+                  hourlyCostRate: employeeRate ? Number(employeeRate) : null,
+                });
+              }}
+            >
+              <select
+                aria-label="Person"
+                className="rounded border border-sand px-3 py-2"
+                value={rateEmployeeId}
+                onChange={(event) => setRateEmployeeId(event.target.value)}
+              >
+                {(employees.data ?? []).map((employee) => (
+                  <option key={employee.employeeId} value={employee.employeeId}>
+                    {employee.displayName}
+                  </option>
+                ))}
+              </select>
+              <input
+                aria-label="Person hourly cost rate"
+                className="rounded border border-sand px-3 py-2"
+                type="number"
+                min="0"
+                placeholder="Use project default"
+                value={employeeRate}
+                onChange={(event) => setEmployeeRate(event.target.value)}
+              />
+              <button
+                className="rounded border border-sand px-4 py-2"
+                disabled={!rateEmployeeId || setCostRate.isPending}
+              >
+                Save rate
+              </button>
+            </form>
+            {(costRates.data ?? []).length ? (
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                {(costRates.data ?? []).map((rate) => (
+                  <span
+                    key={rate.employeeId}
+                    className="rounded-full border border-sand px-3 py-1"
+                  >
+                    {rate.employeeName}: {budget.data.budgetCurrency}{" "}
+                    {rate.hourlyCostRate.toLocaleString()}/hour
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </section>
       ) : null}
 

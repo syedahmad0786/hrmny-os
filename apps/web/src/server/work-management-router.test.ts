@@ -2522,6 +2522,29 @@ describe("work management", () => {
       hourlyCostRate: 100,
     });
     expect(budget).toMatchObject({ actualCost: 200, variance: 800 });
+    await caller.work.budgets.setRate({
+      projectId: project.projectId,
+      employeeId,
+      hourlyCostRate: 175,
+    });
+    expect(
+      await caller.work.budgets.rates({ projectId: project.projectId }),
+    ).toContainEqual({
+      projectId: project.projectId,
+      employeeId,
+      employeeName: "Dev Partner",
+      hourlyCostRate: 175,
+    });
+    expect(
+      await caller.work.budgets.summary({ projectId: project.projectId }),
+    ).toMatchObject({ actualCost: 350, forecastCost: 350, variance: 650 });
+    await expect(
+      caller.work.budgets.setRate({
+        projectId: project.projectId,
+        employeeId: "c0000000-0000-4000-8000-000000000099",
+        hourlyCostRate: 50,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     const dashboard = await caller.work.reporting.saveDashboard({
       name: "Planning view",
       config: { projectId: project.projectId },
