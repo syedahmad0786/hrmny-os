@@ -401,6 +401,9 @@ type WorkDashboard = {
   ownerEmployeeId: string;
   name: string;
   config: Record<string, unknown>;
+  visibility: "private" | "organization";
+  viewerEmployeeIds: string[];
+  currentAccess: "admin" | "viewer";
 };
 type WorkBaseline = {
   baselineId: string;
@@ -11149,14 +11152,46 @@ export const workManagementRouter = router({
       const employeeId = actor(ctx);
       const db = getDb();
       const dashboards = !db
-        ? [...getDemoWork().dashboards.values()].filter(
-            (item) => item.ownerEmployeeId === employeeId,
+        ? [...getDemoWork().dashboards.values()].flatMap((item) =>
+            item.ownerEmployeeId === employeeId ||
+            item.visibility === "organization" ||
+            item.viewerEmployeeIds.includes(employeeId)
+              ? [
+                  {
+                    ...item,
+                    viewerEmployeeIds:
+                      item.ownerEmployeeId === employeeId
+                        ? item.viewerEmployeeIds
+                        : [],
+                    currentAccess:
+                      item.ownerEmployeeId === employeeId
+                        ? ("admin" as const)
+                        : ("viewer" as const),
+                  },
+                ]
+              : [],
           )
         : await db.execute<WorkDashboard>(sql`
-            select work_reporting_dashboard_id as "dashboardId",
-              owner_employee_id as "ownerEmployeeId", name, config
-            from public.work_reporting_dashboard
-            where owner_employee_id = ${employeeId}::uuid order by lower(name)
+            select dashboard.work_reporting_dashboard_id as "dashboardId",
+              dashboard.owner_employee_id as "ownerEmployeeId",
+              dashboard.name, dashboard.config, dashboard.visibility,
+              case when dashboard.owner_employee_id = ${employeeId}::uuid
+                then 'admin' else 'viewer' end as "currentAccess",
+              case when dashboard.owner_employee_id = ${employeeId}::uuid
+                then coalesce((select array_agg(viewer.employee_id order by viewer.created_at)
+                  from public.work_reporting_dashboard_viewer viewer
+                  where viewer.work_reporting_dashboard_id = dashboard.work_reporting_dashboard_id
+                ), array[]::uuid[])
+                else array[]::uuid[] end as "viewerEmployeeIds"
+            from public.work_reporting_dashboard dashboard
+            where dashboard.owner_employee_id = ${employeeId}::uuid
+              or dashboard.visibility = 'organization'
+              or exists (
+                select 1 from public.work_reporting_dashboard_viewer viewer
+                where viewer.work_reporting_dashboard_id = dashboard.work_reporting_dashboard_id
+                  and viewer.employee_id = ${employeeId}::uuid
+              )
+            order by lower(dashboard.name)
           `);
       const visible: WorkDashboard[] = [];
       for (const dashboard of dashboards) {
@@ -11185,15 +11220,24 @@ export const workManagementRouter = router({
           ownerEmployeeId: employeeId,
           name: input.name,
           config: input.config,
+          visibility: "private",
+          viewerEmployeeIds: [],
+          currentAccess: "admin",
         };
         const db = getDb();
         if (!db) {
           const existing = getDemoWork().dashboards.get(dashboard.dashboardId);
           if (existing && existing.ownerEmployeeId !== employeeId)
             throw new TRPCError({ code: "NOT_FOUND" });
+          if (existing) {
+            dashboard.visibility = existing.visibility;
+            dashboard.viewerEmployeeIds = existing.viewerEmployeeIds;
+          }
           getDemoWork().dashboards.set(dashboard.dashboardId, dashboard);
-        } else
-          await db.execute(sql`
+        } else {
+          const [saved] = await db.execute<{
+            visibility: WorkDashboard["visibility"];
+          }>(sql`
             insert into public.work_reporting_dashboard (
               work_reporting_dashboard_id, owner_employee_id, name, config
             ) values (
@@ -11202,7 +11246,19 @@ export const workManagementRouter = router({
             ) on conflict (work_reporting_dashboard_id) do update
               set name = excluded.name, config = excluded.config, updated_at = now()
               where work_reporting_dashboard.owner_employee_id = ${employeeId}::uuid
+            returning visibility
           `);
+          if (!saved) throw new TRPCError({ code: "NOT_FOUND" });
+          dashboard.visibility = saved.visibility;
+          dashboard.viewerEmployeeIds = (
+            await db.execute<{ employeeId: string }>(sql`
+              select employee_id as "employeeId"
+              from public.work_reporting_dashboard_viewer
+              where work_reporting_dashboard_id = ${dashboard.dashboardId}::uuid
+              order by created_at
+            `)
+          ).map((viewer) => viewer.employeeId);
+        }
         await audit(
           ctx,
           "work.dashboard.save",
@@ -11210,6 +11266,103 @@ export const workManagementRouter = router({
           dashboard.dashboardId,
           {
             name: dashboard.name,
+          },
+        );
+        return dashboard;
+      }),
+    shareDashboard: staffProcedure
+      .input(
+        z.object({
+          dashboardId: uuid,
+          visibility: z.enum(["private", "organization"]),
+          viewerEmployeeIds: z.array(uuid).max(500).default([]),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        const viewerEmployeeIds = [
+          ...new Set(input.viewerEmployeeIds.filter((id) => id !== employeeId)),
+        ];
+        const db = getDb();
+        let dashboard: WorkDashboard;
+        if (!db) {
+          const existing = getDemoWork().dashboards.get(input.dashboardId);
+          if (!existing || existing.ownerEmployeeId !== employeeId)
+            throw new TRPCError({ code: "NOT_FOUND" });
+          await requireDashboardAccess(ctx, existing.config);
+          dashboard = {
+            ...existing,
+            visibility: input.visibility,
+            viewerEmployeeIds,
+            currentAccess: "admin",
+          };
+          getDemoWork().dashboards.set(input.dashboardId, dashboard);
+        } else {
+          const [existing] = await db.execute<{
+            dashboardId: string;
+            ownerEmployeeId: string;
+            name: string;
+            config: Record<string, unknown>;
+          }>(sql`
+            select work_reporting_dashboard_id as "dashboardId",
+              owner_employee_id as "ownerEmployeeId", name, config
+            from public.work_reporting_dashboard
+            where work_reporting_dashboard_id = ${input.dashboardId}::uuid
+              and owner_employee_id = ${employeeId}::uuid
+            limit 1
+          `);
+          if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+          await requireDashboardAccess(ctx, existing.config);
+          await db.transaction(async (tx) => {
+            if (viewerEmployeeIds.length) {
+              const active = await tx.execute<{ employeeId: string }>(sql`
+                select employee_id as "employeeId"
+                from public.employee
+                where employee_id = any(${viewerEmployeeIds}::uuid[])
+                  and is_active = true
+              `);
+              if (active.length !== viewerEmployeeIds.length)
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: "One or more viewers are unavailable",
+                });
+            }
+            const [updated] = await tx.execute<{ dashboardId: string }>(sql`
+              update public.work_reporting_dashboard
+              set visibility = ${input.visibility}, updated_at = now()
+              where work_reporting_dashboard_id = ${input.dashboardId}::uuid
+                and owner_employee_id = ${employeeId}::uuid
+              returning work_reporting_dashboard_id as "dashboardId"
+            `);
+            if (!updated) throw new TRPCError({ code: "NOT_FOUND" });
+            await tx.execute(sql`
+              delete from public.work_reporting_dashboard_viewer
+              where work_reporting_dashboard_id = ${input.dashboardId}::uuid
+            `);
+            if (viewerEmployeeIds.length)
+              await tx.execute(sql`
+                insert into public.work_reporting_dashboard_viewer (
+                  work_reporting_dashboard_id, employee_id, added_by_employee_id
+                )
+                select ${input.dashboardId}::uuid, viewer_id, ${employeeId}::uuid
+                from unnest(${viewerEmployeeIds}::uuid[]) viewer_id
+              `);
+          });
+          dashboard = {
+            ...existing,
+            visibility: input.visibility,
+            viewerEmployeeIds,
+            currentAccess: "admin",
+          };
+        }
+        await audit(
+          ctx,
+          "work.dashboard.share",
+          "work_reporting_dashboard",
+          dashboard.dashboardId,
+          {
+            visibility: dashboard.visibility,
+            viewerCount: dashboard.viewerEmployeeIds.length,
           },
         );
         return dashboard;
