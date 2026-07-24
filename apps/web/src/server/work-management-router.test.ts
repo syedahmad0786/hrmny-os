@@ -2313,6 +2313,56 @@ describe("work management", () => {
         expect.objectContaining({ allocatedMinutes: 3_000, utilization: 125 }),
       ]),
     );
+    expect(
+      await caller.work.reporting.portfolioChart({
+        portfolioId: portfolio.portfolioId,
+        spec: {
+          groupBy: "project",
+          metric: "task_count",
+          completion: "all",
+          dueFrom: null,
+          dueTo: null,
+          includeSubtasks: true,
+          customFieldId: null,
+        },
+      }),
+    ).toEqual({
+      data: [{ label: "Planning pilot", value: 1 }],
+      total: 1,
+    });
+    const portfolioDashboard = await caller.work.reporting.saveDashboard({
+      name: "Portfolio delivery",
+      config: {
+        portfolioId: portfolio.portfolioId,
+        chartStyle: "bar",
+        spec: {
+          groupBy: "project",
+          metric: "task_count",
+          completion: "all",
+          dueFrom: null,
+          dueTo: null,
+          includeSubtasks: true,
+          customFieldId: null,
+        },
+      },
+    });
+    expect(await caller.work.reporting.dashboards()).toContainEqual(
+      portfolioDashboard,
+    );
+    await expect(
+      caller.work.reporting.portfolioChart({
+        portfolioId: portfolio.portfolioId,
+        spec: {
+          groupBy: "custom_field",
+          metric: "task_count",
+          completion: "all",
+          dueFrom: null,
+          dueTo: null,
+          includeSubtasks: true,
+          customFieldId: "a0000000-0000-4000-8000-000000000001",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     const clientId = resolveDevUser("portal_a").clientId!;
     getDemoWork().projects.get(secondProject.projectId)!.clientId = clientId;
     await caller.admin.features.setOverride({
@@ -2520,6 +2570,20 @@ describe("work management", () => {
     expect(await sharedViewer.work.reporting.dashboards()).not.toContainEqual(
       expect.objectContaining({ dashboardId: dashboard.dashboardId }),
     );
+    expect(
+      await caller.work.reporting.portfolioChart({
+        portfolioId: portfolio.portfolioId,
+        spec: {
+          groupBy: "project",
+          metric: "task_count",
+          completion: "all",
+          dueFrom: null,
+          dueTo: null,
+          includeSubtasks: true,
+          customFieldId: null,
+        },
+      }),
+    ).toEqual({ data: [], total: 0 });
     await expect(
       caller.work.reporting.chart({
         projectId: project.projectId,

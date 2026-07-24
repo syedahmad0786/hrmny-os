@@ -33,6 +33,7 @@ export default function PlanningPage() {
   const projects = trpc.work.projects.list.useQuery();
   const [projectId, setProjectId] = useState("");
   const [workloadPortfolioId, setWorkloadPortfolioId] = useState("");
+  const [chartPortfolioId, setChartPortfolioId] = useState("");
   const employees = trpc.work.members.listEmployees.useQuery({
     projectId: projectId || undefined,
   });
@@ -46,6 +47,7 @@ export default function PlanningPage() {
     | "priority"
     | "section"
     | "task_type"
+    | "project"
     | "custom_field"
   >("completion");
   const [chartMetric, setChartMetric] = useState<
@@ -111,12 +113,19 @@ export default function PlanningPage() {
   const reportingCustomFields = trpc.work.customFields.list.useQuery(
     { projectId },
     {
-      enabled: Boolean(projectId && reportingEnabled && customFieldsEnabled),
+      enabled: Boolean(
+        projectId &&
+        !chartPortfolioId &&
+        reportingEnabled &&
+        customFieldsEnabled,
+      ),
     },
   );
   useEffect(() => {
     const fields = reportingCustomFields.data ?? [];
-    if (!customFieldsEnabled || !fields.length) {
+    if (!chartPortfolioId && chartGroupBy === "project")
+      setChartGroupBy("completion");
+    if (chartPortfolioId || !customFieldsEnabled || !fields.length) {
       if (chartGroupBy === "custom_field") setChartGroupBy("completion");
       setChartCustomFieldId("");
       return;
@@ -126,10 +135,11 @@ export default function PlanningPage() {
   }, [
     chartCustomFieldId,
     chartGroupBy,
+    chartPortfolioId,
     customFieldsEnabled,
     reportingCustomFields.data,
   ]);
-  const chart = trpc.work.reporting.chart.useQuery(
+  const projectChart = trpc.work.reporting.chart.useQuery(
     {
       projectId,
       spec: {
@@ -145,11 +155,32 @@ export default function PlanningPage() {
     {
       enabled: Boolean(
         projectId &&
+        !chartPortfolioId &&
         reportingEnabled &&
         (chartGroupBy !== "custom_field" || chartCustomFieldId),
       ),
     },
   );
+  const portfolioChart = trpc.work.reporting.portfolioChart.useQuery(
+    {
+      portfolioId: chartPortfolioId,
+      spec: {
+        groupBy: chartGroupBy,
+        metric: chartMetric,
+        completion: chartCompletion,
+        dueFrom: chartDueFrom || null,
+        dueTo: chartDueTo || null,
+        includeSubtasks: chartIncludeSubtasks,
+        customFieldId: null,
+      },
+    },
+    {
+      enabled: Boolean(
+        chartPortfolioId && reportingEnabled && chartGroupBy !== "custom_field",
+      ),
+    },
+  );
+  const chart = chartPortfolioId ? portfolioChart : projectChart;
   const donutBackground = useMemo(() => {
     if (!chart.data?.total) return "#F0E9DE";
     let offset = 0;
@@ -269,8 +300,12 @@ export default function PlanningPage() {
   });
   const loadDashboard = (config: Record<string, unknown>) => {
     const spec = config.spec;
+    const savedProjectId =
+      typeof config.projectId === "string" ? config.projectId : null;
+    const savedPortfolioId =
+      typeof config.portfolioId === "string" ? config.portfolioId : null;
     if (
-      typeof config.projectId !== "string" ||
+      Boolean(savedProjectId) === Boolean(savedPortfolioId) ||
       !["bar", "donut", "number"].includes(String(config.chartStyle)) ||
       !spec ||
       typeof spec !== "object"
@@ -284,6 +319,7 @@ export default function PlanningPage() {
         "priority",
         "section",
         "task_type",
+        "project",
         "custom_field",
       ].includes(String(saved.groupBy)) ||
       !["task_count", "estimated_minutes", "actual_minutes"].includes(
@@ -292,7 +328,9 @@ export default function PlanningPage() {
       !["all", "complete", "incomplete"].includes(String(saved.completion))
     )
       return;
-    setProjectId(config.projectId);
+    if (savedPortfolioId && saved.groupBy === "custom_field") return;
+    if (savedProjectId) setProjectId(savedProjectId);
+    setChartPortfolioId(savedPortfolioId ?? "");
     setChartStyle(config.chartStyle as typeof chartStyle);
     setChartGroupBy(saved.groupBy as typeof chartGroupBy);
     setChartMetric(saved.metric as typeof chartMetric);
@@ -440,7 +478,9 @@ export default function PlanningPage() {
                 saveDashboard.mutate({
                   name: dashboardName,
                   config: {
-                    projectId,
+                    ...(chartPortfolioId
+                      ? { portfolioId: chartPortfolioId }
+                      : { projectId }),
                     view: "chart",
                     chartStyle,
                     spec: {
@@ -469,26 +509,28 @@ export default function PlanningPage() {
               >
                 Save view
               </button>
-              <button
-                type="button"
-                className="rounded border border-sand px-3 py-2 text-sm"
-                onClick={async () => {
-                  const result = await exportReport.refetch();
-                  if (!result.data) return;
-                  const url = URL.createObjectURL(
-                    new Blob([result.data.csv], {
-                      type: result.data.contentType,
-                    }),
-                  );
-                  const link = document.createElement("a");
-                  link.href = url;
-                  link.download = result.data.fileName;
-                  link.click();
-                  URL.revokeObjectURL(url);
-                }}
-              >
-                Export
-              </button>
+              {!chartPortfolioId ? (
+                <button
+                  type="button"
+                  className="rounded border border-sand px-3 py-2 text-sm"
+                  onClick={async () => {
+                    const result = await exportReport.refetch();
+                    if (!result.data) return;
+                    const url = URL.createObjectURL(
+                      new Blob([result.data.csv], {
+                        type: result.data.contentType,
+                      }),
+                    );
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = result.data.fileName;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export project
+                </button>
+              ) : null}
             </form>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -513,6 +555,24 @@ export default function PlanningPage() {
           </div>
           <div className="mt-5 border-t border-sand pt-4">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="grid gap-1 text-xs text-muted">
+                Chart across
+                <select
+                  className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                  value={chartPortfolioId}
+                  onChange={(event) => setChartPortfolioId(event.target.value)}
+                >
+                  <option value="">This project</option>
+                  {(portfolios.data ?? []).map((portfolio) => (
+                    <option
+                      key={portfolio.portfolioId}
+                      value={portfolio.portfolioId}
+                    >
+                      Portfolio: {portfolio.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="grid gap-1 text-xs text-muted">
                 Chart style
                 <select
@@ -543,7 +603,11 @@ export default function PlanningPage() {
                   <option value="priority">Priority</option>
                   <option value="section">Section</option>
                   <option value="task_type">Task type</option>
-                  {customFieldsEnabled &&
+                  {chartPortfolioId ? (
+                    <option value="project">Project</option>
+                  ) : null}
+                  {!chartPortfolioId &&
+                  customFieldsEnabled &&
                   (reportingCustomFields.data ?? []).length ? (
                     <option value="custom_field">Custom field</option>
                   ) : null}
