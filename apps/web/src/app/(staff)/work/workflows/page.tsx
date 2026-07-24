@@ -45,6 +45,7 @@ export default function WorkflowsPage() {
   );
   const formsEnabled = enabled.has("work.forms");
   const publicFormsEnabled = enabled.has("work.forms.public");
+  const emailReceiptsEnabled = enabled.has("work.forms.email_receipts");
   const rulesEnabled = enabled.has("work.rules");
   const scheduledRulesEnabled = enabled.has("work.rules.scheduled");
   const collaboratorRulesEnabled = enabled.has(
@@ -100,6 +101,7 @@ export default function WorkflowsPage() {
     "organization" | "anyone"
   >("organization");
   const [formAttachment, setFormAttachment] = useState(false);
+  const [formEmailReceipt, setFormEmailReceipt] = useState(true);
   const [answers, setAnswers] = useState<Answers>({});
   const createForm = trpc.work.forms.create.useMutation({
     onSuccess: async () => {
@@ -107,6 +109,7 @@ export default function WorkflowsPage() {
       setFormQuestions("");
       setFormAssigneeEmployeeId("");
       setFormAttachment(false);
+      setFormEmailReceipt(true);
       await utils.work.forms.list.invalidate();
     },
   });
@@ -297,7 +300,7 @@ export default function WorkflowsPage() {
             Every submission becomes a task in this project.
           </p>
           <form
-            className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-[1fr_2fr_1fr_auto_auto_auto]"
+            className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-[1fr_2fr_1fr_auto_auto_auto_auto]"
             onSubmit={(event) => {
               event.preventDefault();
               const extra = formQuestions
@@ -324,6 +327,17 @@ export default function WorkflowsPage() {
                     required: true,
                     options: [],
                   },
+                  ...(formEmailReceipt && emailReceiptsEnabled
+                    ? [
+                        {
+                          key: "email",
+                          label: "Email",
+                          type: "email" as const,
+                          required: true,
+                          options: [],
+                        },
+                      ]
+                    : []),
                   ...extra,
                   ...(formAttachment
                     ? [
@@ -397,6 +411,15 @@ export default function WorkflowsPage() {
                 onChange={(event) => setFormAttachment(event.target.checked)}
               />
               File upload
+            </label>
+            <label className="flex items-center gap-2 rounded border border-sand px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={emailReceiptsEnabled && formEmailReceipt}
+                disabled={!emailReceiptsEnabled}
+                onChange={(event) => setFormEmailReceipt(event.target.checked)}
+              />
+              Email receipt
             </label>
             <button
               className="rounded bg-ink px-4 py-2 text-white"
@@ -567,7 +590,9 @@ export default function WorkflowsPage() {
                                     ? "number"
                                     : question.type === "date"
                                       ? "date"
-                                      : "text"
+                                      : question.type === "email"
+                                        ? "email"
+                                        : "text"
                                 }
                                 value={String(formAnswers[question.key] ?? "")}
                                 onChange={(event) =>

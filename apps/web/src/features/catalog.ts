@@ -460,6 +460,16 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     defaultEnabled: true,
   }),
   feature({
+    key: "work.forms.email_receipts",
+    name: "Form email receipts",
+    description:
+      "Email submitters a confirmation and copy of their completed form.",
+    group: "Workflows",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
+  feature({
     key: "work.rules",
     name: "Rules",
     description: "Trigger, condition, branch, and action workflow automation.",

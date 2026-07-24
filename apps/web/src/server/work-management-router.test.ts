@@ -56,10 +56,7 @@ describe("work management", () => {
       customFieldAccessLevel(field, new Map([["ca1:cf1", "editor"]])),
     ).toBe("editor");
     expect(
-      customFieldAccessLevel(
-        { ...field, privacySetting: "public" },
-        new Map(),
-      ),
+      customFieldAccessLevel({ ...field, privacySetting: "public" }, new Map()),
     ).toBe("user");
   });
 
@@ -1935,6 +1932,63 @@ describe("work management", () => {
         answers: { title: "Blocked", brief: [] },
       }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("removes form email receipts when Feature Lab disables them", async () => {
+    const owner = partnerCaller();
+    const publicUser = anonymousCaller();
+    const project = await owner.work.projects.create({
+      name: `Receipt intake ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const form = await owner.work.forms.create({
+      projectId: project.projectId,
+      name: `Receipt form ${Date.now()}`,
+      description: "",
+      titleQuestionKey: "title",
+      questions: [
+        {
+          key: "title",
+          label: "Title",
+          type: "text",
+          required: true,
+          options: [],
+        },
+        {
+          key: "email",
+          label: "Email",
+          type: "email",
+          required: true,
+          options: [],
+        },
+      ],
+      confirmationMessage: "Received",
+      accessLevel: "anyone",
+    });
+    expect(
+      (await publicUser.work.forms.publicView({ formId: form.formId }))
+        .questions,
+    ).toContainEqual(expect.objectContaining({ type: "email" }));
+
+    await owner.admin.features.setOverride({
+      featureKey: "work.forms.email_receipts",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "receipts paused",
+    });
+    expect(
+      (await publicUser.work.forms.publicView({ formId: form.formId }))
+        .questions,
+    ).not.toContainEqual(expect.objectContaining({ type: "email" }));
+    await expect(
+      publicUser.work.forms.publicSubmit({
+        formId: form.formId,
+        answers: { title: "No receipt" },
+      }),
+    ).resolves.toMatchObject({ receiptQueued: false });
   });
 
   it("rate-limits public forms and obeys their Feature Lab switch", async () => {

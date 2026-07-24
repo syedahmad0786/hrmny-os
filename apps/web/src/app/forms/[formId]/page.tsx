@@ -237,7 +237,9 @@ export default function PublicFormPage() {
                         ? "number"
                         : question.type === "date"
                           ? "date"
-                          : "text"
+                          : question.type === "email"
+                            ? "email"
+                            : "text"
                     }
                     required={question.required}
                     value={String(answers[question.key] ?? "")}

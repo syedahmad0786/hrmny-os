@@ -10,6 +10,7 @@ import { deliverPendingWorkWebhooks } from "@/server/work-api";
 import { cleanupExpiredWorkAiRuns } from "@/server/work-ai";
 import { runWorkAiStudioJob } from "@/server/work-ai-studio";
 import { runWorkAiTeammateJob } from "@/server/work-ai-teammates";
+import { runWorkFormReceiptJob } from "@/server/work-form-receipts";
 import { runScheduledWorkRuleJob } from "@/server/trpc/work-management-router";
 
 export const dynamic = "force-dynamic";
@@ -152,6 +153,8 @@ export async function GET(request: Request) {
       } else if (job.kind === "work_ai_teammate") {
         const payload = WorkAiTeammateJobSchema.parse(job.payload);
         result = await runWorkAiTeammateJob(payload);
+      } else if (job.kind === "work_form_receipt") {
+        result = await runWorkFormReceiptJob(job.payload);
       } else if (job.kind === "work_rule") {
         const ruleRun = await runScheduledWorkRuleJob(job.payload);
         result = ruleRun;
