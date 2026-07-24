@@ -92,4 +92,30 @@ describe("work migration compatibility", () => {
     );
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("adds enforced SSO configuration and hashed SCIM credentials", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0026_work_identity.sql"),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0026_work_identity.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0026_work_identity.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_sso_configuration/i,
+    );
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_scim_token/i,
+    );
+    expect(migration).toMatch(/token_hash text NOT NULL UNIQUE/i);
+    expect(migration).toMatch(/employee_email_lower_uniq/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

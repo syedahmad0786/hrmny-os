@@ -60,7 +60,7 @@ Goals, sub-goals, weighted contributing projects/tasks, portfolio progress and h
 
 ### Enterprise administration
 
-Feature Lab and editable hrmny RBAC are available. Project-level admin/editor/commenter/viewer access, teams with privacy/members/projects, explicit guest project sharing, portal viewer/commenter access, workspace view-only licenses, domain and sharing defaults, connected-app policy, session defaults, full Work graph backup, audit CSV export, and the organization admin console are beta. External guest work is served only from the portal API boundary, and workspace view-only licenses deny every Work mutation server-side. SSO/SCIM enforcement and sandbox environments remain planned. The existing append-only audit trail is reused and now records guest comments with the portal principal.
+Feature Lab and editable hrmny RBAC are available. Project-level admin/editor/commenter/viewer access, teams with privacy/members/projects, explicit guest project sharing, portal viewer/commenter access, workspace view-only licenses, domain and sharing defaults, connected-app policy, session defaults, full Work graph backup, audit CSV export, the organization admin console, SAML SSO enforcement, and SCIM 2.0 Users/Groups provisioning are beta. External guest work is served only from the portal API boundary, and workspace view-only licenses deny every Work mutation server-side. SSO enforcement uses a Supabase-registered SAML provider, governed domains, and explicit break-glass accounts. SCIM uses expiring/revocable bearer tokens stored only as hashes, supports discovery plus create/read/replace/patch/deactivate flows, audits writes, and is denied immediately when Feature Lab disables `work.sso_scim` globally, for the token owner, or for the owner's role. Sandbox environments remain planned. The existing append-only audit trail is reused and records both guest and identity-provisioning changes.
 
 ### Import, sync, and integrations
 
@@ -88,7 +88,7 @@ AI features remain planned until the provider performs real generation, sources 
 3. **Asana connection and migration** — live Composio verification, read-only discovery, dry-run report, idempotent core import, workspace event cursors, recurring reconciliation, and destructive-event handling implemented in beta; signed push webhooks and non-core object migration remain.
 4. **Workflow depth** — custom fields, tags, files, followers, recurrence, forms, event rules, templates, bundles, and approvals implemented in beta; proofing, richer automation, and public intake remain.
 5. **Planning and reporting** — Calendar, Timeline, Files, My Tasks, Inbox, search, Gantt, goals, portfolios, statuses, dashboards, workload, capacity, budgets, and time are implemented in beta; richer cross-portfolio analytics remain.
-6. **Enterprise controls and integrations** — teams, guests, view-only licensing, sharing defaults, editable RBAC, admin console, audit export, and graph backup implemented in beta; SSO/SCIM, sandboxes, webhooks, and additional third-party apps remain.
+6. **Enterprise controls and integrations** — teams, guests, view-only licensing, sharing defaults, editable RBAC, admin console, audit export, graph backup, SAML SSO enforcement, and SCIM Users/Groups provisioning implemented in beta; sandboxes, webhooks, and additional third-party apps remain.
 7. **AI** — smart assists first, then AI Studio, Teammates/Skills, and the Dash equivalent, all using the same Feature Lab and permission resolver.
 
 ## Primary references
@@ -106,3 +106,6 @@ AI features remain planned until the provider performs real generation, sources 
 - https://developers.asana.com/reference/rest-api-reference
 - https://developers.asana.com/docs/webhooks-guide
 - https://developers.asana.com/reference/getworkspaceevents
+- https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml
+- https://www.rfc-editor.org/info/rfc7643/
+- https://www.rfc-editor.org/info/rfc7644/

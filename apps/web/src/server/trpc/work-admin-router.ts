@@ -5,6 +5,13 @@ import { z } from "zod";
 import { DEV_USERS } from "../auth/session";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
+import {
+  getWorkSsoConfiguration,
+  issueScimToken,
+  listScimTokens,
+  revokeScimToken,
+  saveWorkSsoConfiguration,
+} from "../enterprise-identity";
 import { writeAudit } from "../m1-persistence";
 import {
   getWorkOrganizationPolicy,
@@ -1027,6 +1034,93 @@ export const workAdminRouter = router({
             roleKey: input.roleKey,
             assigned: input.assigned,
           },
+        );
+        return { ok: true as const };
+      }),
+  }),
+
+  identity: router({
+    get: workAdminProcedure.query(async () => {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(
+        /\/$/,
+        "",
+      );
+      return {
+        sso: await getWorkSsoConfiguration(),
+        scimTokens: await listScimTokens(),
+        serviceProvider: supabaseUrl
+          ? {
+              entityId: `${supabaseUrl}/auth/v1/sso/saml/metadata`,
+              metadataUrl: `${supabaseUrl}/auth/v1/sso/saml/metadata`,
+              acsUrl: `${supabaseUrl}/auth/v1/sso/saml/acs`,
+              scimBaseUrl: `${process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "http://localhost:3000"}/api/scim/v2`,
+            }
+          : null,
+      };
+    }),
+
+    saveSso: workAdminProcedure
+      .input(
+        z.object({
+          status: z.enum(["disabled", "optional", "enforced"]),
+          providerId: z.string().trim().max(200).nullable(),
+          metadataUrl: z.string().trim().url().max(2048).nullable(),
+          domains: z.array(z.string().trim().min(1).max(253)).max(100),
+          breakGlassEmails: z.array(z.string().trim().email().max(320)).max(20),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx.employeeId);
+        const saved = await saveWorkSsoConfiguration(input, employeeId);
+        await audit(
+          employeeId,
+          "work.identity.sso.update",
+          "work_sso_configuration",
+          null,
+          {
+            status: saved.status,
+            providerId: saved.providerId,
+            domains: saved.domains,
+          },
+        );
+        return saved;
+      }),
+
+    issueScimToken: workAdminProcedure
+      .input(
+        z.object({
+          label: z.string().trim().min(1).max(120),
+          expiresAt: z.string().datetime().nullable(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx.employeeId);
+        const token = await issueScimToken({
+          label: input.label,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          employeeId,
+        });
+        await audit(
+          employeeId,
+          "work.identity.scim_token.issue",
+          "work_scim_token",
+          token.tokenId,
+          { label: token.label, expiresAt: token.expiresAt },
+        );
+        return token;
+      }),
+
+    revokeScimToken: workAdminProcedure
+      .input(z.object({ tokenId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx.employeeId);
+        await revokeScimToken(input.tokenId);
+        await audit(
+          employeeId,
+          "work.identity.scim_token.revoke",
+          "work_scim_token",
+          input.tokenId,
+          { revoked: true },
         );
         return { ok: true as const };
       }),

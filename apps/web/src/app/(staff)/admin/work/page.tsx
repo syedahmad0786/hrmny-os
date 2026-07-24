@@ -5,7 +5,13 @@ import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 
 type Tab =
-  "organization" | "teams" | "guests" | "members" | "roles" | "exports";
+  | "organization"
+  | "teams"
+  | "guests"
+  | "members"
+  | "roles"
+  | "identity"
+  | "exports";
 
 function download(result: {
   filename: string;
@@ -50,6 +56,9 @@ export default function WorkAdminPage() {
   const roles = trpc.workAdmin.rbac.list.useQuery(undefined, {
     enabled: enabled.has("work.custom_rbac"),
   });
+  const identity = trpc.workAdmin.identity.get.useQuery(undefined, {
+    enabled: enabled.has("work.sso_scim"),
+  });
 
   const tabs = [
     ["organization", "Organization", "work.domain_controls"],
@@ -57,6 +66,7 @@ export default function WorkAdminPage() {
     ["guests", "Guests", "work.guests"],
     ["members", "Members", "work.view_only"],
     ["roles", "Roles", "work.custom_rbac"],
+    ["identity", "SSO & SCIM", "work.sso_scim"],
     ["exports", "Exports", "work.data_export"],
   ] as const;
   const visibleTabs = tabs.filter(([, , feature]) =>
@@ -187,6 +197,12 @@ export default function WorkAdminPage() {
           roles={roles.data ?? []}
           employees={directory.data?.employees ?? []}
           refresh={() => utils.workAdmin.rbac.list.invalidate()}
+        />
+      ) : null}
+      {tab === "identity" && enabled.has("work.sso_scim") ? (
+        <IdentityPanel
+          identity={identity.data}
+          refresh={() => utils.workAdmin.identity.get.invalidate()}
         />
       ) : null}
       {tab === "exports" ? (
@@ -974,6 +990,284 @@ function RolesPanel({
             </div>
           </>
         ) : null}
+      </div>
+    </section>
+  );
+}
+
+function IdentityPanel({
+  identity,
+  refresh,
+}: {
+  identity:
+    | {
+        sso: {
+          status: "disabled" | "optional" | "enforced";
+          providerId: string | null;
+          metadataUrl: string | null;
+          domains: string[];
+          breakGlassEmails: string[];
+        };
+        scimTokens: {
+          tokenId: string;
+          label: string;
+          expiresAt: string | null;
+          lastUsedAt: string | null;
+          revokedAt: string | null;
+        }[];
+        serviceProvider: {
+          entityId: string;
+          metadataUrl: string;
+          acsUrl: string;
+          scimBaseUrl: string;
+        } | null;
+      }
+    | undefined;
+  refresh: () => Promise<unknown>;
+}) {
+  const [status, setStatus] = useState<"disabled" | "optional" | "enforced">(
+    "disabled",
+  );
+  const [providerId, setProviderId] = useState("");
+  const [metadataUrl, setMetadataUrl] = useState("");
+  const [domains, setDomains] = useState("");
+  const [breakGlass, setBreakGlass] = useState("");
+  const [tokenLabel, setTokenLabel] = useState("Identity provider");
+  const [tokenExpiresOn, setTokenExpiresOn] = useState(() => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() + 90);
+    return date.toISOString().slice(0, 10);
+  });
+  const [issuedToken, setIssuedToken] = useState<string | null>(null);
+  const save = trpc.workAdmin.identity.saveSso.useMutation({
+    onSuccess: refresh,
+  });
+  const issue = trpc.workAdmin.identity.issueScimToken.useMutation({
+    onSuccess: async (result) => {
+      setIssuedToken(result.token);
+      await refresh();
+    },
+  });
+  const revoke = trpc.workAdmin.identity.revokeScimToken.useMutation({
+    onSuccess: refresh,
+  });
+
+  useEffect(() => {
+    if (!identity) return;
+    setStatus(identity.sso.status);
+    setProviderId(identity.sso.providerId ?? "");
+    setMetadataUrl(identity.sso.metadataUrl ?? "");
+    setDomains(identity.sso.domains.join(", "));
+    setBreakGlass(identity.sso.breakGlassEmails.join(", "));
+  }, [identity]);
+
+  return (
+    <section className="grid gap-4 xl:grid-cols-2">
+      <form
+        className={cardClass}
+        onSubmit={(event) => {
+          event.preventDefault();
+          save.mutate({
+            status,
+            providerId: providerId.trim() || null,
+            metadataUrl: metadataUrl.trim() || null,
+            domains: domains
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean),
+            breakGlassEmails: breakGlass
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean),
+          });
+        }}
+      >
+        <h2 className="font-display text-xl font-semibold">SAML SSO</h2>
+        <p className="mt-1 text-sm text-muted">
+          Register the identity provider in Supabase, then enforce its provider
+          ID for selected company domains.
+        </p>
+        <div className="mt-4 space-y-3">
+          <Select
+            label="Policy"
+            value={status}
+            onChange={(value) => setStatus(value as typeof status)}
+            options={["disabled", "optional", "enforced"]}
+          />
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">
+              Supabase SSO provider ID
+            </span>
+            <input
+              className={inputClass}
+              value={providerId}
+              onChange={(event) => setProviderId(event.target.value)}
+              placeholder="Provider UUID"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">
+              Identity provider metadata URL
+            </span>
+            <input
+              className={inputClass}
+              type="url"
+              value={metadataUrl}
+              onChange={(event) => setMetadataUrl(event.target.value)}
+              placeholder="https://idp.example.com/metadata"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">Enforced domains</span>
+            <input
+              className={inputClass}
+              value={domains}
+              onChange={(event) => setDomains(event.target.value)}
+              placeholder="hrmny.com"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">
+              Break-glass administrator emails
+            </span>
+            <input
+              className={inputClass}
+              value={breakGlass}
+              onChange={(event) => setBreakGlass(event.target.value)}
+              placeholder="owner@hrmny.com"
+            />
+          </label>
+          <button
+            className="rounded-lg bg-ink px-4 py-2 text-sm text-white"
+            type="submit"
+            disabled={save.isPending}
+          >
+            Save SSO policy
+          </button>
+          {save.error ? (
+            <p className="text-sm text-[var(--hrmny-danger)]">
+              {save.error.message}
+            </p>
+          ) : null}
+        </div>
+        {identity?.serviceProvider ? (
+          <dl className="mt-5 space-y-2 rounded-lg border border-sand bg-white p-3 text-xs">
+            <div>
+              <dt className="font-semibold">Entity ID / metadata</dt>
+              <dd className="break-all text-muted">
+                {identity.serviceProvider.metadataUrl}
+              </dd>
+            </div>
+            <div>
+              <dt className="font-semibold">Assertion consumer URL</dt>
+              <dd className="break-all text-muted">
+                {identity.serviceProvider.acsUrl}
+              </dd>
+            </div>
+          </dl>
+        ) : null}
+      </form>
+
+      <div className={cardClass}>
+        <h2 className="font-display text-xl font-semibold">
+          SCIM 2.0 provisioning
+        </h2>
+        <p className="mt-1 text-sm text-muted">
+          Issue a bearer token to your identity provider for Users and Groups.
+          Tokens are stored only as hashes and shown once.
+        </p>
+        {identity?.serviceProvider ? (
+          <p className="mt-3 break-all rounded-lg border border-sand bg-white p-3 text-xs">
+            Base URL: {identity.serviceProvider.scimBaseUrl}
+          </p>
+        ) : null}
+        <form
+          className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto_auto]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            issue.mutate({
+              label: tokenLabel,
+              expiresAt: tokenExpiresOn
+                ? new Date(`${tokenExpiresOn}T23:59:59.999Z`).toISOString()
+                : null,
+            });
+          }}
+        >
+          <input
+            className={inputClass}
+            value={tokenLabel}
+            onChange={(event) => setTokenLabel(event.target.value)}
+            maxLength={120}
+          />
+          <input
+            className={inputClass}
+            type="date"
+            aria-label="Token expiry date"
+            value={tokenExpiresOn}
+            min={new Date().toISOString().slice(0, 10)}
+            onChange={(event) => setTokenExpiresOn(event.target.value)}
+          />
+          <button
+            className="rounded-lg bg-ink px-4 py-2 text-sm text-white"
+            type="submit"
+            disabled={issue.isPending}
+          >
+            {issue.isPending ? "Issuing…" : "Issue"}
+          </button>
+        </form>
+        {issuedToken ? (
+          <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3">
+            <p className="text-xs font-semibold">
+              Copy this token now. It will not be shown again.
+            </p>
+            <code className="mt-2 block break-all text-xs">{issuedToken}</code>
+            <button
+              className="mt-2 text-xs underline"
+              type="button"
+              onClick={() => void navigator.clipboard.writeText(issuedToken)}
+            >
+              Copy token
+            </button>
+          </div>
+        ) : null}
+        {issue.error ? (
+          <p className="mt-2 text-sm text-[var(--hrmny-danger)]">
+            {issue.error.message}
+          </p>
+        ) : null}
+        <div className="mt-5 divide-y divide-sand">
+          {(identity?.scimTokens ?? []).map((token) => (
+            <div
+              key={token.tokenId}
+              className="flex items-center justify-between gap-3 py-3 text-sm"
+            >
+              <div>
+                <p className="font-medium">{token.label}</p>
+                <p className="text-xs text-muted">
+                  {token.revokedAt
+                    ? "Revoked"
+                    : token.lastUsedAt
+                      ? `Last used ${new Date(token.lastUsedAt).toLocaleString()}`
+                      : "Never used"}
+                </p>
+                {token.expiresAt ? (
+                  <p className="text-xs text-muted">
+                    Expires {new Date(token.expiresAt).toLocaleDateString()}
+                  </p>
+                ) : null}
+              </div>
+              {!token.revokedAt ? (
+                <button
+                  type="button"
+                  className="text-xs text-[var(--hrmny-danger)] underline"
+                  onClick={() => revoke.mutate({ tokenId: token.tokenId })}
+                >
+                  Revoke
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );

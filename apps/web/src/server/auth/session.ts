@@ -12,6 +12,12 @@ import {
   sql,
 } from "@hrmny/db";
 import { getDb } from "../db";
+import {
+  getWorkSsoConfiguration,
+  ssoAccessAllowed,
+} from "../enterprise-identity";
+import { getWorkOrganizationPolicy } from "../work-governance";
+import { featureEnabled } from "../features";
 import { getSupabasePublicConfig } from "@/lib/supabase-config";
 
 export type AuthMode = "dev" | "supabase";
@@ -221,6 +227,14 @@ export async function resolveSupabaseUser(
   }
 
   const email = data.user.email?.trim().toLowerCase();
+  const [sso, workPolicy] = await Promise.all([
+    getWorkSsoConfiguration(),
+    getWorkOrganizationPolicy(),
+  ]);
+  const lastSignInAt = Date.parse(data.user.last_sign_in_at ?? "");
+  const sessionExpired =
+    Number.isFinite(lastSignInAt) &&
+    Date.now() - lastSignInAt > workPolicy.sessionTimeoutMinutes * 60_000;
   let [staff] = await db
     .select({
       employeeId: employee.employeeId,
@@ -266,11 +280,20 @@ export async function resolveSupabaseUser(
       )
       .where(eq(employeeRole.employeeId, staff.employeeId));
 
+    const roles = [...new Set(access.map((row) => row.role))];
+    const featureSubject = { userId: staff.employeeId, roles };
+    const [ssoEnabled, sessionControlsEnabled] = await Promise.all([
+      featureEnabled("work.sso_scim", featureSubject),
+      featureEnabled("work.domain_controls", featureSubject),
+    ]);
+    if (ssoEnabled && !ssoAccessAllowed(sso, data.user)) return null;
+    if (sessionControlsEnabled && sessionExpired) return null;
+
     return {
       employeeId: staff.employeeId,
       email: staff.email,
       displayName: staff.displayName,
-      roles: [...new Set(access.map((row) => row.role))],
+      roles,
       permissions: access.flatMap((row) =>
         row.resource && row.action && row.effect
           ? [`${row.effect}:${row.resource}:${row.action}`]
@@ -297,6 +320,16 @@ export async function resolveSupabaseUser(
   if (portalUsers.length !== 1) return null;
 
   const portal = portalUsers[0]!;
+  if (
+    sessionExpired &&
+    (await featureEnabled("work.domain_controls", {
+      userId: portal.portalUserId,
+      clientId: portal.clientId,
+      roles: ["portal_client"],
+    }))
+  ) {
+    return null;
+  }
   return {
     employeeId: portal.portalUserId,
     email: portal.email,

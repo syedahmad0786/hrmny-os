@@ -744,8 +744,8 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     description: "Enterprise authentication and automated user provisioning.",
     group: "Admin & Security",
     source: "asana",
-    availability: "planned",
-    defaultEnabled: false,
+    availability: "beta",
+    defaultEnabled: true,
   }),
   feature({
     key: "work.audit_export",
@@ -1079,6 +1079,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["workAdmin.members.", "work.view_only"],
   ["workAdmin.policy.", "work.domain_controls"],
   ["workAdmin.rbac.", "work.custom_rbac"],
+  ["workAdmin.identity.", "work.sso_scim"],
   ["workAdmin.export.audit", "work.audit_export"],
   ["workAdmin.export.organization", "work.data_export"],
   ["workAdmin.", "work.admin_console"],
