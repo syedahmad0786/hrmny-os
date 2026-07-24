@@ -2697,6 +2697,16 @@ describe("work management", () => {
         { title: "Portfolio health", reportType: "portfolios" },
       ],
     });
+    const projectRiskField =
+      getDemoWork().objectCustomFields.get("project-risk")!;
+    projectRiskField.privacySetting = "private";
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      projectReportDashboard,
+    );
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      mixedDashboard,
+    );
+    delete projectRiskField.privacySetting;
     await expect(
       caller.work.reporting.combineDashboards({
         name: "Duplicate views",

@@ -3465,6 +3465,12 @@ async function requireDashboardAccess(
         .objectIds as unknown[])
         if (typeof projectId === "string")
           await requireScopedFeature(ctx, "work.custom_fields", projectId);
+    await requireMetadataCustomFieldAccess(
+      ctx,
+      reportType,
+      typeof portfolioId === "string" ? portfolioId : null,
+      spec as Record<string, unknown>,
+    );
   }
   if (
     (reportType === "projects" || reportType === "portfolios") &&
@@ -3684,6 +3690,61 @@ async function objectCustomFieldsByTarget(
     byTarget.set(row.targetId, fields);
   }
   return byTarget;
+}
+
+async function requireMetadataCustomFieldAccess(
+  ctx: TrpcContext,
+  reportType: "projects" | "goals" | "portfolios",
+  portfolioId: string | null,
+  spec: Record<string, unknown>,
+) {
+  const key = spec.customFieldKey;
+  if (typeof key !== "string") throw new TRPCError({ code: "NOT_FOUND" });
+  const selected = new Set(
+    Array.isArray(spec.objectIds)
+      ? spec.objectIds.filter((id): id is string => typeof id === "string")
+      : [],
+  );
+  const caller = createCallerFactory(workManagementRouter)(ctx);
+  const hasField = (row: {
+    targetId: string;
+    customFields?: WorkObjectCustomField[];
+  }) =>
+    (!selected.size || selected.has(row.targetId)) &&
+    row.customFields?.some((field) => field.key === key);
+  if (reportType === "projects") {
+    const [projects, portfolios] = await Promise.all([
+      caller.projects.list(),
+      portfolioId ? caller.portfolios.list() : Promise.resolve([]),
+    ]);
+    const portfolio = portfolioId
+      ? portfolios.find((item) => item.portfolioId === portfolioId)
+      : null;
+    if (portfolioId && !portfolio) throw new TRPCError({ code: "NOT_FOUND" });
+    if (
+      !projects.some(
+        (project) =>
+          (!portfolio || portfolio.projectIds.includes(project.projectId)) &&
+          hasField({
+            targetId: project.projectId,
+            customFields: project.customFields,
+          }),
+      )
+    )
+      throw new TRPCError({ code: "NOT_FOUND" });
+    return;
+  }
+  const rows =
+    reportType === "goals"
+      ? (await caller.goals.list()).map((goal) => ({
+          targetId: goal.goalId,
+          customFields: goal.customFields,
+        }))
+      : (await caller.portfolios.list()).map((portfolio) => ({
+          targetId: portfolio.portfolioId,
+          customFields: portfolio.customFields,
+        }));
+  if (!rows.some(hasField)) throw new TRPCError({ code: "NOT_FOUND" });
 }
 
 async function reportRowsForProjects(
