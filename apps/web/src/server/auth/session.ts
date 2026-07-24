@@ -99,6 +99,7 @@ export const DEV_USERS: Record<string, SessionUser> = {
       "allow:convention:edit",
       "allow:convention:view",
       "allow:admin:features",
+      "allow:admin:work",
     ],
     actorType: "staff",
     clientId: null,
@@ -173,7 +174,9 @@ export function getAuthMode(): AuthMode {
   return "dev";
 }
 
-export function resolveDevUser(roleKey: string | null | undefined): SessionUser {
+export function resolveDevUser(
+  roleKey: string | null | undefined,
+): SessionUser {
   const key = (roleKey ?? "partner").toLowerCase();
   return DEV_USERS[key] ?? DEV_USERS.partner!;
 }
@@ -241,7 +244,9 @@ export async function resolveSupabaseUser(
         isActive: employee.isActive,
       })
       .from(employee)
-      .where(sql`${employee.isActive} = true and lower(${employee.email}) = ${email}`)
+      .where(
+        sql`${employee.isActive} = true and lower(${employee.email}) = ${email}`,
+      )
       .limit(1);
   }
 

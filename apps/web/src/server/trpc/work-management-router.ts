@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
 import { featureEnabled } from "../features";
+import { getWorkOrganizationPolicy } from "../work-governance";
 import { writeAudit } from "../m1-persistence";
 import {
   nextRecurrenceDate,
@@ -73,7 +74,8 @@ type WorkItem = {
 type WorkComment = {
   commentId: string;
   itemId: string;
-  authorEmployeeId: string;
+  authorEmployeeId: string | null;
+  authorPortalUserId?: string | null;
   authorName: string;
   body: string;
   createdAt: string;
@@ -306,7 +308,7 @@ const DEMO_SECTION_TODO = "a2000000-0000-4000-8000-000000000001";
 const DEMO_SECTION_DOING = "a2000000-0000-4000-8000-000000000002";
 let demoWork: DemoWork | undefined;
 
-function getDemoWork(): DemoWork {
+export function getDemoWork(): DemoWork {
   if (demoWork) return demoWork;
   const createdAt = new Date().toISOString();
   const projects = new Map<string, WorkProject>([
@@ -654,6 +656,7 @@ async function requireProjectAccess(
         when project.created_by_employee_id = ${employeeId}::uuid
           or project.owner_employee_id = ${employeeId}::uuid then 'admin'
         when member.access_level is not null then member.access_level
+        when team_access.access_level is not null then team_access.access_level
         else 'viewer'
       end as "accessLevel",
       project.created_at as "createdAt"
@@ -661,6 +664,17 @@ async function requireProjectAccess(
     left join public.work_project_member member
       on member.work_project_id = project.work_project_id
       and member.employee_id = ${employeeId}::uuid
+    left join lateral (
+      select team_project.access_level
+      from public.work_team_project team_project
+      join public.work_team_member team_member
+        on team_member.work_team_id = team_project.work_team_id
+      where team_project.work_project_id = project.work_project_id
+        and team_member.employee_id = ${employeeId}::uuid
+      order by case team_project.access_level
+        when 'editor' then 3 when 'commenter' then 2 else 1 end desc
+      limit 1
+    ) team_access on true
     where project.work_project_id = ${projectId}::uuid
       and project.archived_at is null
       and (
@@ -668,6 +682,7 @@ async function requireProjectAccess(
         or project.created_by_employee_id = ${employeeId}::uuid
         or project.owner_employee_id = ${employeeId}::uuid
         or member.employee_id is not null
+        or team_access.access_level is not null
       )
     limit 1
   `);
@@ -1733,6 +1748,7 @@ export const workManagementRouter = router({
             when project.created_by_employee_id = ${employeeId}::uuid
               or project.owner_employee_id = ${employeeId}::uuid then 'admin'
             when member.access_level is not null then member.access_level
+            when team_access.access_level is not null then team_access.access_level
             else 'viewer'
           end as "accessLevel",
           project.created_at as "createdAt"
@@ -1740,12 +1756,24 @@ export const workManagementRouter = router({
         left join public.work_project_member member
           on member.work_project_id = project.work_project_id
           and member.employee_id = ${employeeId}::uuid
+        left join lateral (
+          select team_project.access_level
+          from public.work_team_project team_project
+          join public.work_team_member team_member
+            on team_member.work_team_id = team_project.work_team_id
+          where team_project.work_project_id = project.work_project_id
+            and team_member.employee_id = ${employeeId}::uuid
+          order by case team_project.access_level
+            when 'editor' then 3 when 'commenter' then 2 else 1 end desc
+          limit 1
+        ) team_access on true
         where project.archived_at is null
           and (
             project.privacy = 'organization'
             or project.created_by_employee_id = ${employeeId}::uuid
             or project.owner_employee_id = ${employeeId}::uuid
             or member.employee_id is not null
+            or team_access.access_level is not null
           )
         order by lower(project.name)
       `);
@@ -1861,7 +1889,7 @@ export const workManagementRouter = router({
         z.object({
           name: z.string().trim().min(1).max(160),
           description: z.string().trim().max(20_000).default(""),
-          privacy: z.enum(["organization", "private"]).default("organization"),
+          privacy: z.enum(["organization", "private"]).optional(),
           clientId: nullableUuid.optional(),
           color: z
             .string()
@@ -1872,6 +1900,9 @@ export const workManagementRouter = router({
       .mutation(async ({ input, ctx }) => {
         const employeeId = actor(ctx);
         const db = getDb();
+        const privacy =
+          input.privacy ??
+          (await getWorkOrganizationPolicy()).defaultProjectPrivacy;
         let project: WorkProject;
         if (!db) {
           project = {
@@ -1879,7 +1910,7 @@ export const workManagementRouter = router({
             name: input.name,
             description: input.description,
             color: input.color,
-            privacy: input.privacy,
+            privacy,
             clientId: input.clientId ?? null,
             ownerEmployeeId: employeeId,
             sourcePlatform: "native",
@@ -1908,7 +1939,7 @@ export const workManagementRouter = router({
                 name, description, color, privacy, client_id,
                 owner_employee_id, created_by_employee_id
               ) values (
-                ${input.name}, ${input.description}, ${input.color}, ${input.privacy},
+                ${input.name}, ${input.description}, ${input.color}, ${privacy},
                 ${input.clientId ?? null}::uuid, ${employeeId}::uuid, ${employeeId}::uuid
               )
               returning work_project_id as "projectId", name, description, color,
@@ -2409,10 +2440,14 @@ export const workManagementRouter = router({
           WorkComment & { createdAt: Date | string }
         >(sql`
         select comment.work_comment_id as "commentId", comment.work_item_id as "itemId",
-          comment.author_employee_id as "authorEmployeeId", author.display_name as "authorName",
+          comment.author_employee_id as "authorEmployeeId",
+          comment.author_portal_user_id as "authorPortalUserId",
+          coalesce(author.display_name, portal_author.display_name, 'Unknown') as "authorName",
           comment.body, comment.created_at as "createdAt"
         from public.work_comment comment
-        join public.employee author on author.employee_id = comment.author_employee_id
+        left join public.employee author on author.employee_id = comment.author_employee_id
+        left join public.client_portal_user portal_author
+          on portal_author.client_portal_user_id = comment.author_portal_user_id
         where comment.work_item_id = ${input.itemId}::uuid and comment.deleted_at is null
         order by comment.created_at
       `);

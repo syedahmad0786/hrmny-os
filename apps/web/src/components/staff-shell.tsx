@@ -89,7 +89,11 @@ const PRIMARY_NAV = [
     href: "/admin/features",
     label: "Settings",
     index: "08",
-    features: ["admin.feature_lab", "integrations.connections"],
+    features: [
+      "admin.feature_lab",
+      "work.admin_console",
+      "integrations.connections",
+    ],
     match: (p: string) =>
       p.startsWith("/settings") ||
       p.startsWith("/admin") ||

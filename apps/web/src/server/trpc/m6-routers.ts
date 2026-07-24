@@ -1,11 +1,18 @@
 import { randomUUID } from "node:crypto";
+import { TRPCError } from "@trpc/server";
+import { sql } from "@hrmny/db";
 import { z } from "zod";
-import {
-  DEMO_CLIENT_ID,
-  getDemoStore,
-} from "../demo-store";
+import { DEMO_CLIENT_ID, getDemoStore } from "../demo-store";
 import { getAuthMode } from "../auth/session";
+import { getDb } from "../db";
+import {
+  featureEnabled,
+  listFeatureOverrides,
+  resolveFeatureCatalog,
+} from "../features";
 import { driveSeam, listSeams, type SeamName } from "../seams";
+import { getDemoGuestShare } from "../work-governance";
+import { getDemoWork } from "./work-management-router";
 import {
   portalProcedure,
   protectedProcedure,
@@ -14,10 +21,105 @@ import {
   staffProcedure,
 } from "./trpc";
 
-function requireClientId(ctx: { clientId?: string | null; user: { clientId: string | null } | null }): string {
+function requireClientId(ctx: {
+  clientId?: string | null;
+  user: { clientId: string | null } | null;
+}): string {
   const id = ctx.clientId ?? ctx.user?.clientId;
   if (!id) throw new Error("FORBIDDEN: missing client_id");
   return id;
+}
+
+async function requirePortalWorkFeature(
+  ctx: {
+    employeeId: string | null;
+    clientId?: string | null;
+    user: { roles: string[]; clientId: string | null } | null;
+  },
+  featureKey: string,
+) {
+  if (
+    !(await featureEnabled(featureKey, {
+      userId: ctx.employeeId,
+      clientId: ctx.clientId ?? ctx.user?.clientId,
+      roles: ctx.user?.roles ?? [],
+    }))
+  ) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `FEATURE_DISABLED:${featureKey}`,
+    });
+  }
+}
+
+async function requireGuestProject(
+  portalUserId: string,
+  projectId: string,
+  minimum: "viewer" | "commenter" = "viewer",
+) {
+  const db = getDb();
+  if (!db) {
+    const share = getDemoGuestShare(projectId, portalUserId);
+    if (!share) throw new TRPCError({ code: "NOT_FOUND" });
+    if (minimum === "commenter" && share.accessLevel !== "commenter") {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Comment access required",
+      });
+    }
+    return share;
+  }
+  const rows = await db.execute<{
+    projectId: string;
+    name: string;
+    description: string;
+    color: string;
+    accessLevel: "viewer" | "commenter";
+  }>(sql`
+    select project.work_project_id as "projectId", project.name,
+      project.description, project.color, guest.access_level as "accessLevel"
+    from public.work_project_guest guest
+    join public.work_project project on project.work_project_id = guest.work_project_id
+    where guest.portal_user_id = ${portalUserId}::uuid
+      and project.work_project_id = ${projectId}::uuid
+      and project.archived_at is null
+    limit 1
+  `);
+  const project = rows[0];
+  if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+  if (minimum === "commenter" && project.accessLevel !== "commenter") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Comment access required",
+    });
+  }
+  return project;
+}
+
+async function requireGuestItem(
+  portalUserId: string,
+  itemId: string,
+  minimum: "viewer" | "commenter" = "viewer",
+) {
+  const db = getDb();
+  if (!db) {
+    const item = getDemoWork().items.get(itemId);
+    if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+    await requireGuestProject(portalUserId, item.projectId, minimum);
+    return item;
+  }
+  const rows = await db.execute<{ projectId: string }>(sql`
+    select membership.work_project_id as "projectId"
+    from public.work_project_item membership
+    join public.work_project_guest guest
+      on guest.work_project_id = membership.work_project_id
+    where membership.work_item_id = ${itemId}::uuid
+      and guest.portal_user_id = ${portalUserId}::uuid
+      and (${minimum} = 'viewer' or guest.access_level = 'commenter')
+    limit 1
+  `);
+  if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
+  return rows[0];
 }
 
 /** Strip any finance-shaped keys before portal responses leave the server. */
@@ -58,7 +160,11 @@ export const portalRouter = router({
         // but verify will fail isolation unless clientId is known.
         const email = input.email.toLowerCase();
         let clientId = "00000000-0000-4000-8000-0000000000a1";
-        if (email.includes("other") || email.includes("portal_b") || email.includes("b@")) {
+        if (
+          email.includes("other") ||
+          email.includes("portal_b") ||
+          email.includes("b@")
+        ) {
           clientId = "00000000-0000-4000-8000-0000000000b1";
         }
         const token = `ml_${randomUUID().replace(/-/g, "")}`;
@@ -97,7 +203,10 @@ export const portalRouter = router({
           }
           const row = store.portalMagicTokens.get(input.token);
           if (!row || row.expiresAt < Date.now()) {
-            return { ok: false as const, reason: "Invalid or expired magic link" };
+            return {
+              ok: false as const,
+              reason: "Invalid or expired magic link",
+            };
           }
           store.portalMagicTokens.delete(input.token);
           store.appendAudit({
@@ -117,10 +226,15 @@ export const portalRouter = router({
             via: "magic_link" as const,
           };
         }
-        if (!ctx.user || ctx.user.actorType !== "portal" || !ctx.user.clientId) {
+        if (
+          !ctx.user ||
+          ctx.user.actorType !== "portal" ||
+          !ctx.user.clientId
+        ) {
           return {
             ok: false as const,
-            reason: "Switch Dev role to portal_a or portal_b, or pass a stubToken",
+            reason:
+              "Switch Dev role to portal_a or portal_b, or pass a stubToken",
           };
         }
         return {
@@ -131,9 +245,14 @@ export const portalRouter = router({
           via: "dev_persona" as const,
         };
       }),
-    session: portalProcedure.query(({ ctx }) => {
+    session: portalProcedure.query(async ({ ctx }) => {
       const clientId = requireClientId(ctx);
       const client = getDemoStore().clients.get(clientId);
+      const resolved = resolveFeatureCatalog(await listFeatureOverrides(), {
+        userId: ctx.employeeId,
+        clientId,
+        roles: ctx.roles,
+      });
       return {
         clientId,
         displayName: ctx.user.displayName,
@@ -141,7 +260,212 @@ export const portalRouter = router({
         clientName: client?.name ?? "Client",
         actorType: "portal" as const,
         canViewMargin: false as const,
+        enabledFeatureKeys: resolved
+          .filter((feature) => feature.enabled)
+          .map((feature) => feature.key),
       };
+    }),
+  }),
+
+  work: router({
+    projects: router({
+      list: portalProcedure.query(async ({ ctx }) => {
+        await requirePortalWorkFeature(ctx, "work.projects");
+        const portalUserId = ctx.employeeId;
+        if (!portalUserId) throw new TRPCError({ code: "UNAUTHORIZED" });
+        const db = getDb();
+        if (!db) {
+          return [...getDemoWork().projects.values()].flatMap((project) => {
+            const share = getDemoGuestShare(project.projectId, portalUserId);
+            return share
+              ? [{ ...project, accessLevel: share.accessLevel }]
+              : [];
+          });
+        }
+        return db.execute<{
+          projectId: string;
+          name: string;
+          description: string;
+          color: string;
+          accessLevel: "viewer" | "commenter";
+        }>(sql`
+          select project.work_project_id as "projectId", project.name,
+            project.description, project.color, guest.access_level as "accessLevel"
+          from public.work_project_guest guest
+          join public.work_project project on project.work_project_id = guest.work_project_id
+          where guest.portal_user_id = ${portalUserId}::uuid
+            and project.archived_at is null
+          order by lower(project.name)
+        `);
+      }),
+
+      get: portalProcedure
+        .input(z.object({ projectId: z.string().uuid() }))
+        .query(async ({ input, ctx }) => {
+          const portalUserId = ctx.employeeId;
+          if (!portalUserId) throw new TRPCError({ code: "UNAUTHORIZED" });
+          const project = await requireGuestProject(
+            portalUserId,
+            input.projectId,
+          );
+          const [showSections, showTasks] = await Promise.all([
+            featureEnabled("work.sections", {
+              userId: portalUserId,
+              clientId: ctx.clientId,
+              roles: ctx.roles,
+            }),
+            featureEnabled("work.tasks", {
+              userId: portalUserId,
+              clientId: ctx.clientId,
+              roles: ctx.roles,
+            }),
+          ]);
+          const db = getDb();
+          if (!db) {
+            const work = getDemoWork();
+            return {
+              project,
+              sections: showSections
+                ? [...work.sections.values()].filter(
+                    (section) => section.projectId === input.projectId,
+                  )
+                : [],
+              items: showTasks
+                ? [...work.items.values()].filter(
+                    (item) => item.projectId === input.projectId,
+                  )
+                : [],
+            };
+          }
+          const [sections, items] = await Promise.all([
+            showSections
+              ? db.execute(sql`
+                  select work_section_id as "sectionId", name, position
+                  from public.work_section
+                  where work_project_id = ${input.projectId}::uuid
+                  order by position, created_at
+                `)
+              : [],
+            showTasks
+              ? db.execute(sql`
+                  select item.work_item_id as "itemId",
+                    item.parent_work_item_id as "parentItemId", item.title,
+                    item.description, item.item_type as "itemType", item.priority,
+                    item.start_date as "startDate", item.due_at as "dueAt",
+                    item.completed_at as "completedAt",
+                    membership.work_section_id as "sectionId", membership.position
+                  from public.work_project_item membership
+                  join public.work_item item on item.work_item_id = membership.work_item_id
+                  where membership.work_project_id = ${input.projectId}::uuid
+                    and item.archived_at is null
+                  order by membership.position, item.created_at
+                `)
+              : [],
+          ]);
+          return { project, sections, items };
+        }),
+    }),
+
+    comments: router({
+      list: portalProcedure
+        .input(z.object({ itemId: z.string().uuid() }))
+        .query(async ({ input, ctx }) => {
+          await requirePortalWorkFeature(ctx, "work.comments");
+          const portalUserId = ctx.employeeId;
+          if (!portalUserId) throw new TRPCError({ code: "UNAUTHORIZED" });
+          await requireGuestItem(portalUserId, input.itemId);
+          const db = getDb();
+          if (!db) {
+            return [...getDemoWork().comments.values()].filter(
+              (comment) => comment.itemId === input.itemId,
+            );
+          }
+          return db.execute(sql`
+            select comment.work_comment_id as "commentId", comment.body,
+              coalesce(employee.display_name, portal.display_name, 'Unknown') as "authorName",
+              comment.created_at as "createdAt"
+            from public.work_comment comment
+            left join public.employee employee
+              on employee.employee_id = comment.author_employee_id
+            left join public.client_portal_user portal
+              on portal.client_portal_user_id = comment.author_portal_user_id
+            where comment.work_item_id = ${input.itemId}::uuid
+              and comment.deleted_at is null
+            order by comment.created_at
+          `);
+        }),
+
+      create: portalProcedure
+        .input(
+          z.object({
+            itemId: z.string().uuid(),
+            body: z.string().trim().min(1).max(20_000),
+          }),
+        )
+        .mutation(async ({ input, ctx }) => {
+          await requirePortalWorkFeature(ctx, "work.comments");
+          const portalUserId = ctx.employeeId;
+          if (!portalUserId) throw new TRPCError({ code: "UNAUTHORIZED" });
+          await requireGuestItem(portalUserId, input.itemId, "commenter");
+          const db = getDb();
+          if (!db) {
+            const comment = {
+              commentId: randomUUID(),
+              itemId: input.itemId,
+              authorEmployeeId: null,
+              authorPortalUserId: portalUserId,
+              authorName: ctx.user.displayName,
+              body: input.body,
+              createdAt: new Date().toISOString(),
+            };
+            getDemoWork().comments.set(comment.commentId, comment);
+            getDemoStore().appendAudit({
+              actorEmployeeId: portalUserId,
+              action: "portal.work.comment.create",
+              entityType: "work_comment",
+              entityId: comment.commentId,
+              before: null,
+              after: { itemId: input.itemId },
+              reason: null,
+            });
+            return comment;
+          }
+          const comment = await db.transaction(async (tx) => {
+            const rows = await tx.execute(sql`
+              insert into public.work_comment (
+                work_item_id, author_portal_user_id, body
+              ) values (${input.itemId}::uuid, ${portalUserId}::uuid, ${input.body})
+              returning work_comment_id as "commentId", work_item_id as "itemId",
+                body, created_at as "createdAt"
+            `);
+            const saved = rows[0]!;
+            await tx.execute(sql`
+              insert into public.audit_event (
+                actor_portal_user_id, action, entity_type, entity_id, after
+              ) values (
+                ${portalUserId}::uuid, 'portal.work.comment.create', 'work_comment',
+                ${String(saved.commentId)}::uuid,
+                jsonb_build_object('itemId', ${input.itemId})
+              )
+            `);
+            await tx.execute(sql`
+              insert into public.work_notification (
+                recipient_employee_id, work_item_id, work_project_id,
+                event_type, message
+              )
+              select follower.employee_id, ${input.itemId}::uuid,
+                min(project_item.work_project_id::text)::uuid, 'commented',
+                'New guest comment on a followed task'
+              from public.work_item_follower follower
+              left join public.work_project_item project_item
+                on project_item.work_item_id = follower.work_item_id
+              where follower.work_item_id = ${input.itemId}::uuid
+              group by follower.employee_id
+            `);
+            return saved;
+          });
+          return { ...comment, authorName: ctx.user.displayName };
+        }),
     }),
   }),
 
@@ -234,7 +558,10 @@ export const portalRouter = router({
           return { ok: false as const, reason: "No versions uploaded" };
         }
         const ttl = Number(process.env.DAM_SIGNED_URL_TTL_SECONDS ?? 300);
-        const signed = await store.objectStore.signedUrl(version.storagePath, ttl);
+        const signed = await store.objectStore.signedUrl(
+          version.storagePath,
+          ttl,
+        );
         return { ok: true as const, ...signed };
       }),
   }),
@@ -344,7 +671,9 @@ export const portalRouter = router({
 
 export const seamsRouter = router({
   list: staffProcedure
-    .input(z.object({ limit: z.number().min(1).max(100).optional() }).optional())
+    .input(
+      z.object({ limit: z.number().min(1).max(100).optional() }).optional(),
+    )
     .query(({ input }) => listSeams(input?.limit ?? 25)),
 
   drive: staffProcedure

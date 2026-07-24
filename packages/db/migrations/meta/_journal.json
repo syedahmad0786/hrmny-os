@@ -176,6 +176,13 @@
       "when": 1784934000000,
       "tag": "0024_asana_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784937600000,
+      "tag": "0025_work_governance",
+      "breakpoints": true
     }
   ]
 }

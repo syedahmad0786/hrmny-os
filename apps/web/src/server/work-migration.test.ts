@@ -61,4 +61,35 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/'dry_run', 'import', 'sync'/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("adds teams, guest shares, licenses, and organization policy", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0025_work_governance.sql"),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0025_work_governance.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0025_work_governance.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(/CREATE TABLE IF NOT EXISTS public\.work_team/i);
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_project_guest/i,
+    );
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_member_license/i,
+    );
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_organization_policy/i,
+    );
+    expect(migration).toMatch(
+      /work_team_project[\s\S]*access_level text NOT NULL DEFAULT 'editor'/i,
+    );
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

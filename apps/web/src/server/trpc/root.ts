@@ -62,6 +62,7 @@ import { digitalCardsRouter } from "./digital-cards-router";
 import { featureLabRouter } from "./feature-lab-router";
 import { listFeatureOverrides, resolveFeatureCatalog } from "../features";
 import { workManagementRouter } from "./work-management-router";
+import { workAdminRouter } from "./work-admin-router";
 import { asanaMigrationRouter } from "./asana-migration-router";
 import {
   briefsRouter as m4BriefsRouter,
@@ -743,6 +744,7 @@ export const appRouter = router({
   aiCustomApps: aiCustomAppsRouter,
   digitalCards: digitalCardsRouter,
   work: workManagementRouter,
+  workAdmin: workAdminRouter,
   asanaMigration: asanaMigrationRouter,
   assets: assetsRouter,
   /** Legacy M3 demo-store deals (gates, BUAF, HITL). Prefer `crm.*` for durable CRM. */
