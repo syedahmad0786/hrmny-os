@@ -139,7 +139,7 @@ describe("governed Work AI", () => {
       enabled: true,
       reason: "test",
     });
-    const unrelated = await caller.work.projects.create({
+    await caller.work.projects.create({
       name: `Alphabetical ${crypto.randomUUID()}`,
       description: "Unrelated work",
       privacy: "private",
@@ -160,8 +160,8 @@ describe("governed Work AI", () => {
     });
     expect(run.result?.sources).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ id: "workspace:projects" }),
         expect.objectContaining({ id: relevant.projectId }),
-        expect.objectContaining({ id: unrelated.projectId }),
       ]),
     );
     expect(run.result?.actions[0]).toMatchObject({
