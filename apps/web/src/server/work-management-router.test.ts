@@ -2234,6 +2234,20 @@ describe("work management", () => {
         (item) => item.goalId === goal.goalId,
       )?.progress,
     ).toBe(100);
+    const goalUpdate = await caller.work.statusUpdates.create({
+      targetType: "goal",
+      targetId: goal.goalId,
+      health: "complete",
+      progress: 100,
+      title: "Pilot delivered",
+      body: "The contributing project is complete.",
+    });
+    expect(
+      await caller.work.statusUpdates.list({
+        targetType: "goal",
+        targetId: goal.goalId,
+      }),
+    ).toContainEqual(goalUpdate);
 
     const portfolio = await caller.work.portfolios.create({
       name: "Strategic delivery",
