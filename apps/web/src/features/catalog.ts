@@ -638,8 +638,8 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Keyboard operation, reduced motion, and color-safe presentation.",
     group: "Personal productivity",
     source: "asana",
-    availability: "planned",
-    defaultEnabled: false,
+    availability: "beta",
+    defaultEnabled: true,
   }),
   feature({
     key: "work.mobile_pwa",
@@ -1156,6 +1156,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["work.likes.", "work.likes"],
   ["work.proofing.", "work.proofing"],
   ["work.outOfOffice.", "work.out_of_office"],
+  ["work.accessibility.", "work.accessibility"],
   ["work.tags.", "work.tags"],
   ["work.customFields.", "work.custom_fields"],
   ["work.attachments.", "work.attachments"],

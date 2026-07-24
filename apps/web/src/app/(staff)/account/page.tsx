@@ -42,9 +42,19 @@ export default function AccountRhythmPage() {
 
   const outOfOfficeEnabled =
     session.data?.enabledFeatureKeys.includes("work.out_of_office") ?? false;
+  const accessibilityEnabled =
+    session.data?.enabledFeatureKeys.includes("work.accessibility") ?? false;
   const outOfOffice = trpc.work.outOfOffice.list.useQuery(undefined, {
     enabled: outOfOfficeEnabled,
     retry: false,
+  });
+  const accessibility = trpc.work.accessibility.get.useQuery(undefined, {
+    enabled: accessibilityEnabled,
+    retry: false,
+  });
+  const saveAccessibility = trpc.work.accessibility.update.useMutation({
+    onSuccess: (preference) =>
+      utils.work.accessibility.get.setData(undefined, preference),
   });
   const clearAwayForm = () => {
     setOutOfOfficeId(null);
@@ -244,6 +254,66 @@ export default function AccountRhythmPage() {
               </li>
             ))}
           </ul>
+        </section>
+      ) : null}
+
+      {accessibilityEnabled && accessibility.data ? (
+        <section className="rounded-lg border border-sand bg-white/70 p-4">
+          <h2 className="font-display text-lg">Display & accessibility</h2>
+          <p className="mt-1 text-sm text-muted">
+            Screen reader landmarks, keyboard focus, and skip navigation are
+            active. Choose how the portal should look and move for you.
+          </p>
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <label className="grid gap-1 text-sm">
+              Theme
+              <select
+                className="rounded-md border border-sand bg-white px-3 py-2"
+                value={accessibility.data.theme}
+                onChange={(event) =>
+                  saveAccessibility.mutate({
+                    ...accessibility.data!,
+                    theme: event.target.value as "system" | "light" | "dark",
+                  })
+                }
+              >
+                <option value="system">Use device setting</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-3 rounded-md border border-sand px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={accessibility.data.colorblindMode}
+                onChange={(event) =>
+                  saveAccessibility.mutate({
+                    ...accessibility.data!,
+                    colorblindMode: event.target.checked,
+                  })
+                }
+              />
+              Colorblind-friendly palette
+            </label>
+            <label className="flex items-center gap-3 rounded-md border border-sand px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={accessibility.data.reducedMotion}
+                onChange={(event) =>
+                  saveAccessibility.mutate({
+                    ...accessibility.data!,
+                    reducedMotion: event.target.checked,
+                  })
+                }
+              />
+              Reduce motion
+            </label>
+          </div>
+          {saveAccessibility.error ? (
+            <p className="mt-3 text-sm text-red-700" role="alert">
+              {saveAccessibility.error.message}
+            </p>
+          ) : null}
         </section>
       ) : null}
 

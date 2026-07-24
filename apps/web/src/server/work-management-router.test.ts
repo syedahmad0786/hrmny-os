@@ -459,6 +459,51 @@ describe("work management", () => {
     });
   });
 
+  it("stores governed personal accessibility preferences", async () => {
+    const caller = partnerCaller();
+    expect(await caller.work.accessibility.get()).toMatchObject({
+      theme: "system",
+      colorblindMode: false,
+      reducedMotion: false,
+    });
+    expect(
+      await caller.work.accessibility.update({
+        theme: "dark",
+        colorblindMode: true,
+        reducedMotion: true,
+      }),
+    ).toMatchObject({
+      theme: "dark",
+      colorblindMode: true,
+      reducedMotion: true,
+    });
+    expect(await caller.work.accessibility.get()).toMatchObject({
+      theme: "dark",
+      colorblindMode: true,
+      reducedMotion: true,
+    });
+
+    await caller.admin.features.setOverride({
+      featureKey: "work.accessibility",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(caller.work.accessibility.get()).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.accessibility",
+    });
+    await expect(
+      caller.work.accessibility.update({
+        theme: "light",
+        colorblindMode: false,
+        reducedMotion: false,
+      }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.accessibility",
+    });
+  });
+
   it("enforces a Feature Lab switch at the API boundary", async () => {
     const caller = partnerCaller();
     const project = (await caller.work.projects.list())[0]!;

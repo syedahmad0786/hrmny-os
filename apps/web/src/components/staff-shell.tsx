@@ -113,6 +113,12 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   const completingGoogle = useRef(false);
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
+  const accessibilityEnabled =
+    session.data?.enabledFeatureKeys.includes("work.accessibility") ?? false;
+  const accessibility = trpc.work.accessibility.get.useQuery(undefined, {
+    enabled: accessibilityEnabled,
+    retry: false,
+  });
   const users = trpc.auth.devUsers.useQuery();
   const saveGoogleWorkspace = trpc.connections.saveGoogleWorkspace.useMutation({
     onSuccess: async (result) => {
@@ -135,6 +141,37 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setRole(getDevRole());
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const preference = accessibilityEnabled ? accessibility.data : null;
+    if (!preference) {
+      delete root.dataset.workTheme;
+      delete root.dataset.workColorblind;
+      delete root.dataset.workReducedMotion;
+      return;
+    }
+    const darkMode = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      root.dataset.workTheme =
+        preference.theme === "system"
+          ? darkMode.matches
+            ? "dark"
+            : "light"
+          : preference.theme;
+    };
+    applyTheme();
+    root.dataset.workColorblind = String(preference.colorblindMode);
+    root.dataset.workReducedMotion = String(preference.reducedMotion);
+    if (preference.theme === "system")
+      darkMode.addEventListener("change", applyTheme);
+    return () => {
+      darkMode.removeEventListener("change", applyTheme);
+      delete root.dataset.workTheme;
+      delete root.dataset.workColorblind;
+      delete root.dataset.workReducedMotion;
+    };
+  }, [accessibility.data, accessibilityEnabled]);
 
   useEffect(() => {
     if (
@@ -215,6 +252,9 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="desk-shell">
+      <a className="work-skip-link" href="#staff-main">
+        Skip to main content
+      </a>
       <aside className="desk-sidebar">
         <Link href="/" className="desk-brand">
           <span className="desk-brand-mark">
@@ -297,9 +337,12 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
             {avatar}
           </span>
         </header>
-        <div className="desk-content">
+        <div className="desk-content" id="staff-main" tabIndex={-1}>
           {connectionMessage ? (
-            <p className="mb-4 rounded border border-sand bg-white/70 p-3 text-sm">
+            <p
+              className="mb-4 rounded border border-sand bg-white/70 p-3 text-sm"
+              aria-live="polite"
+            >
               {connectionMessage}
             </p>
           ) : null}
