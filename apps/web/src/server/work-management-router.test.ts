@@ -2463,6 +2463,50 @@ describe("work management", () => {
       config: { projectId: project.projectId },
     });
     expect(await caller.work.reporting.dashboards()).toContainEqual(dashboard);
+    const sharedViewer = amCaller();
+    expect(await sharedViewer.work.reporting.dashboards()).not.toContainEqual(
+      expect.objectContaining({ dashboardId: dashboard.dashboardId }),
+    );
+    await caller.work.reporting.shareDashboard({
+      dashboardId: dashboard.dashboardId,
+      visibility: "organization",
+      viewerEmployeeIds: [],
+    });
+    expect(await sharedViewer.work.reporting.dashboards()).toContainEqual(
+      expect.objectContaining({
+        dashboardId: dashboard.dashboardId,
+        currentAccess: "viewer",
+        viewerEmployeeIds: [],
+      }),
+    );
+    const shared = await caller.work.reporting.shareDashboard({
+      dashboardId: dashboard.dashboardId,
+      visibility: "private",
+      viewerEmployeeIds: [resolveDevUser("am").employeeId],
+    });
+    expect(shared).toMatchObject({
+      visibility: "private",
+      viewerEmployeeIds: [resolveDevUser("am").employeeId],
+      currentAccess: "admin",
+    });
+    expect(await sharedViewer.work.reporting.dashboards()).toContainEqual(
+      expect.objectContaining({
+        dashboardId: dashboard.dashboardId,
+        currentAccess: "viewer",
+      }),
+    );
+    await expect(
+      sharedViewer.work.reporting.saveDashboard({
+        dashboardId: dashboard.dashboardId,
+        name: "Viewer edit",
+        config: { projectId: project.projectId },
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      sharedViewer.work.reporting.deleteDashboard({
+        dashboardId: dashboard.dashboardId,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
     await caller.admin.features.setOverride({
       featureKey: "work.reporting_dashboards",
       scopeType: "client",
@@ -2472,6 +2516,9 @@ describe("work management", () => {
     });
     expect(await caller.work.reporting.dashboards()).not.toContainEqual(
       dashboard,
+    );
+    expect(await sharedViewer.work.reporting.dashboards()).not.toContainEqual(
+      expect.objectContaining({ dashboardId: dashboard.dashboardId }),
     );
     await expect(
       caller.work.reporting.chart({

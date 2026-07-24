@@ -264,6 +264,9 @@ export default function PlanningPage() {
   const deleteDashboard = trpc.work.reporting.deleteDashboard.useMutation({
     onSuccess: () => utils.work.reporting.dashboards.invalidate(),
   });
+  const shareDashboard = trpc.work.reporting.shareDashboard.useMutation({
+    onSuccess: () => utils.work.reporting.dashboards.invalidate(),
+  });
   const loadDashboard = (config: Record<string, unknown>) => {
     const spec = config.spec;
     if (
@@ -373,6 +376,7 @@ export default function PlanningPage() {
     addPortfolioProject.error,
     createStatus.error,
     deleteDashboard.error,
+    shareDashboard.error,
     saveDashboard.error,
     updateBudget.error,
     upsertAllocation.error,
@@ -703,30 +707,110 @@ export default function PlanningPage() {
             <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
               <span className="text-muted">Saved views:</span>
               {(dashboards.data ?? []).map((item) => (
-                <span
+                <div
                   key={item.dashboardId}
-                  className="inline-flex overflow-hidden rounded border border-sand"
+                  className="overflow-hidden rounded border border-sand bg-white"
                 >
-                  <button
-                    type="button"
-                    className="bg-white px-2 py-1"
-                    onClick={() => loadDashboard(item.config)}
-                  >
-                    {item.name}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${item.name}`}
-                    className="border-l border-sand px-2 py-1 text-muted"
-                    onClick={() =>
-                      deleteDashboard.mutate({
-                        dashboardId: item.dashboardId,
-                      })
-                    }
-                  >
-                    ×
-                  </button>
-                </span>
+                  <div className="inline-flex items-center">
+                    <button
+                      type="button"
+                      className="px-2 py-1"
+                      onClick={() => loadDashboard(item.config)}
+                    >
+                      {item.name}
+                    </button>
+                    {item.currentAccess === "viewer" ? (
+                      <span className="border-l border-sand px-2 py-1 text-muted">
+                        Shared
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${item.name}`}
+                        className="border-l border-sand px-2 py-1 text-muted"
+                        onClick={() =>
+                          deleteDashboard.mutate({
+                            dashboardId: item.dashboardId,
+                          })
+                        }
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                  {item.currentAccess === "admin" ? (
+                    <details className="border-t border-sand px-2 py-1">
+                      <summary className="cursor-pointer text-muted">
+                        Share
+                      </summary>
+                      <div className="mt-2 grid min-w-56 gap-2 pb-1">
+                        <label className="grid gap-1">
+                          Who can open this view?
+                          <select
+                            className="rounded border border-sand bg-white px-2 py-1"
+                            value={item.visibility}
+                            disabled={shareDashboard.isPending}
+                            onChange={(event) =>
+                              shareDashboard.mutate({
+                                dashboardId: item.dashboardId,
+                                visibility: event.target.value as
+                                  "private" | "organization",
+                                viewerEmployeeIds: item.viewerEmployeeIds,
+                              })
+                            }
+                          >
+                            <option value="private">
+                              Only selected people
+                            </option>
+                            <option value="organization">
+                              Everyone with project access
+                            </option>
+                          </select>
+                        </label>
+                        {item.visibility === "private" ? (
+                          <fieldset className="grid gap-1">
+                            <legend className="text-muted">People</legend>
+                            {(employees.data ?? [])
+                              .filter(
+                                (employee) =>
+                                  employee.employeeId !== item.ownerEmployeeId,
+                              )
+                              .map((employee) => (
+                                <label
+                                  key={employee.employeeId}
+                                  className="flex items-center gap-2"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={item.viewerEmployeeIds.includes(
+                                      employee.employeeId,
+                                    )}
+                                    disabled={shareDashboard.isPending}
+                                    onChange={(event) =>
+                                      shareDashboard.mutate({
+                                        dashboardId: item.dashboardId,
+                                        visibility: item.visibility,
+                                        viewerEmployeeIds: event.target.checked
+                                          ? [
+                                              ...item.viewerEmployeeIds,
+                                              employee.employeeId,
+                                            ]
+                                          : item.viewerEmployeeIds.filter(
+                                              (id) =>
+                                                id !== employee.employeeId,
+                                            ),
+                                      })
+                                    }
+                                  />
+                                  {employee.displayName}
+                                </label>
+                              ))}
+                          </fieldset>
+                        ) : null}
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
               ))}
             </div>
           ) : null}
