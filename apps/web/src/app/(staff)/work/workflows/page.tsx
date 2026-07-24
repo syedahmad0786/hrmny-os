@@ -52,6 +52,7 @@ export default function WorkflowsPage() {
   );
   const customTaskTypesEnabled = enabled.has("work.custom_task_types");
   const templatesEnabled = enabled.has("work.templates");
+  const templateRolesEnabled = enabled.has("work.templates.roles");
   const bundlesEnabled = enabled.has("work.bundles");
   const approvalsEnabled = enabled.has("work.approvals");
   const employees = trpc.work.members.listEmployees.useQuery();
@@ -151,6 +152,12 @@ export default function WorkflowsPage() {
   const [taskDueDays, setTaskDueDays] = useState("7");
   const [projectTemplateName, setProjectTemplateName] = useState("");
   const [newProjectName, setNewProjectName] = useState("");
+  const [projectTemplateRoleNames, setProjectTemplateRoleNames] = useState<
+    Record<string, string>
+  >({});
+  const [templateRoleAssignments, setTemplateRoleAssignments] = useState<
+    Record<string, string>
+  >({});
   const createTaskTemplate = trpc.work.templates.createTask.useMutation({
     onSuccess: () => utils.work.templates.list.invalidate(),
   });
@@ -214,6 +221,23 @@ export default function WorkflowsPage() {
   });
 
   const sections = detail.data?.sections ?? [];
+  const projectAssignees = [
+    ...new Map(
+      (detail.data?.items ?? []).flatMap((item) =>
+        item.assigneeEmployeeId
+          ? [
+              [
+                item.assigneeEmployeeId,
+                {
+                  employeeId: item.assigneeEmployeeId,
+                  name: item.assigneeName ?? "Project role",
+                },
+              ] as const,
+            ]
+          : [],
+      ),
+    ).values(),
+  ];
   const error =
     createForm.error ??
     setFormAccess.error ??
@@ -926,6 +950,15 @@ export default function WorkflowsPage() {
                 captureProjectTemplate.mutate({
                   projectId,
                   name: projectTemplateName,
+                  roles: templateRolesEnabled
+                    ? projectAssignees.map((assignee) => ({
+                        employeeId: assignee.employeeId,
+                        name:
+                          projectTemplateRoleNames[
+                            assignee.employeeId
+                          ]?.trim() || assignee.name,
+                      }))
+                    : [],
                 });
               }}
             >
@@ -937,6 +970,39 @@ export default function WorkflowsPage() {
                 value={projectTemplateName}
                 onChange={(event) => setProjectTemplateName(event.target.value)}
               />
+              {templateRolesEnabled && projectAssignees.length ? (
+                <fieldset className="grid gap-2 rounded border border-sand p-3">
+                  <legend className="px-1 text-sm font-semibold">
+                    Task assignment roles
+                  </legend>
+                  <p className="text-xs text-muted">
+                    Name each placeholder. Choose the person when this template
+                    is used.
+                  </p>
+                  {projectAssignees.map((assignee) => (
+                    <label
+                      key={assignee.employeeId}
+                      className="grid gap-1 text-xs"
+                    >
+                      Tasks currently assigned to {assignee.name}
+                      <input
+                        aria-label={`Template role for ${assignee.name}`}
+                        className="rounded border border-sand px-2 py-1.5 text-sm"
+                        value={
+                          projectTemplateRoleNames[assignee.employeeId] ??
+                          assignee.name
+                        }
+                        onChange={(event) =>
+                          setProjectTemplateRoleNames((current) => ({
+                            ...current,
+                            [assignee.employeeId]: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  ))}
+                </fieldset>
+              ) : null}
               <button
                 className="rounded bg-ink px-3 py-1.5 text-white"
                 disabled={!projectTemplateName.trim()}
@@ -969,29 +1035,77 @@ export default function WorkflowsPage() {
                     Create task
                   </button>
                 ) : (
-                  <div className="mt-2 flex gap-2">
-                    <input
-                      aria-label={`New project name for ${template.name}`}
-                      className="min-w-0 flex-1 rounded border border-sand px-2 py-1 text-sm"
-                      placeholder="New project name"
-                      value={newProjectName}
-                      onChange={(event) =>
-                        setNewProjectName(event.target.value)
-                      }
-                    />
-                    <button
-                      className="rounded border border-sand px-3 py-1 text-sm"
-                      disabled={!newProjectName.trim()}
-                      onClick={() =>
-                        instantiateProject.mutate({
-                          templateId: template.templateId,
-                          name: newProjectName,
-                          referenceDate: new Date().toISOString().slice(0, 10),
-                        })
-                      }
-                    >
-                      Use
-                    </button>
+                  <div className="mt-2 grid gap-2">
+                    {templateRolesEnabled
+                      ? template.rolePlaceholders.map((role) => (
+                          <label
+                            key={role.roleId}
+                            className="grid gap-1 text-xs"
+                          >
+                            {role.name}
+                            <select
+                              aria-label={`${role.name} for ${template.name}`}
+                              className="rounded border border-sand px-2 py-1 text-sm"
+                              value={
+                                templateRoleAssignments[
+                                  `${template.templateId}:${role.roleId}`
+                                ] ?? ""
+                              }
+                              onChange={(event) =>
+                                setTemplateRoleAssignments((current) => ({
+                                  ...current,
+                                  [`${template.templateId}:${role.roleId}`]:
+                                    event.target.value,
+                                }))
+                              }
+                            >
+                              <option value="">Leave unassigned</option>
+                              {(employees.data ?? []).map((employee) => (
+                                <option
+                                  key={employee.employeeId}
+                                  value={employee.employeeId}
+                                >
+                                  {employee.displayLabel}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ))
+                      : null}
+                    <div className="flex gap-2">
+                      <input
+                        aria-label={`New project name for ${template.name}`}
+                        className="min-w-0 flex-1 rounded border border-sand px-2 py-1 text-sm"
+                        placeholder="New project name"
+                        value={newProjectName}
+                        onChange={(event) =>
+                          setNewProjectName(event.target.value)
+                        }
+                      />
+                      <button
+                        className="rounded border border-sand px-3 py-1 text-sm"
+                        disabled={!newProjectName.trim()}
+                        onClick={() =>
+                          instantiateProject.mutate({
+                            templateId: template.templateId,
+                            name: newProjectName,
+                            referenceDate: new Date()
+                              .toISOString()
+                              .slice(0, 10),
+                            roleAssignments: Object.fromEntries(
+                              template.rolePlaceholders.map((role) => [
+                                role.roleId,
+                                templateRoleAssignments[
+                                  `${template.templateId}:${role.roleId}`
+                                ] || null,
+                              ]),
+                            ),
+                          })
+                        }
+                      >
+                        Use
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

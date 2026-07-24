@@ -499,6 +499,16 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     defaultEnabled: true,
   }),
   feature({
+    key: "work.templates.roles",
+    name: "Project template roles",
+    description:
+      "Role placeholders that assign template tasks when a project is created.",
+    group: "Workflows",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
+  feature({
     key: "work.bundles",
     name: "Bundles",
     description:
