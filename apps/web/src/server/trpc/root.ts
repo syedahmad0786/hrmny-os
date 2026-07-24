@@ -59,6 +59,10 @@ import { shiftsTimesheetsRouter } from "./shifts-timesheets-router";
 import { benefitsReportingRouter } from "./benefits-reporting-router";
 import { aiCustomAppsRouter } from "./ai-custom-apps-router";
 import { digitalCardsRouter } from "./digital-cards-router";
+import { featureLabRouter } from "./feature-lab-router";
+import { listFeatureOverrides, resolveFeatureCatalog } from "../features";
+import { workManagementRouter } from "./work-management-router";
+import { asanaMigrationRouter } from "./asana-migration-router";
 import {
   briefsRouter as m4BriefsRouter,
   calendarsRouter as m4CalendarsRouter,
@@ -81,16 +85,28 @@ import {
 bootstrapGateRegistry();
 
 export const authRouter = router({
-  session: publicProcedure.query(({ ctx }) => ({
-    employeeId: ctx.employeeId,
-    roles: ctx.roles,
-    displayName: ctx.user?.displayName ?? "Anonymous",
-    email: ctx.user?.email ?? null,
-    canViewMargin: ctx.canViewMargin,
-    actorType: ctx.user?.actorType ?? null,
-    clientId: ctx.user?.clientId ?? null,
-    authMode: getAuthMode(),
-  })),
+  session: publicProcedure.query(async ({ ctx }) => {
+    const resolved = ctx.user
+      ? resolveFeatureCatalog(await listFeatureOverrides(), {
+          userId: ctx.user.employeeId,
+          clientId: ctx.user.clientId,
+          roles: ctx.user.roles,
+        })
+      : [];
+    return {
+      employeeId: ctx.employeeId,
+      roles: ctx.roles,
+      displayName: ctx.user?.displayName ?? "Anonymous",
+      email: ctx.user?.email ?? null,
+      canViewMargin: ctx.canViewMargin,
+      actorType: ctx.user?.actorType ?? null,
+      clientId: ctx.user?.clientId ?? null,
+      authMode: getAuthMode(),
+      enabledFeatureKeys: resolved
+        .filter((item) => item.enabled)
+        .map((item) => item.key),
+    };
+  }),
   /** Dev-only: list switchable personas for M1–M6 demo. */
   devUsers: publicProcedure.query(() =>
     getAuthMode() === "dev"
@@ -108,6 +124,7 @@ export const authRouter = router({
 });
 
 export const adminRouter = router({
+  features: featureLabRouter,
   roles: router({
     list: protectedProcedure.query(async () => {
       const db = getDb();
@@ -725,6 +742,8 @@ export const appRouter = router({
   benefits: benefitsReportingRouter,
   aiCustomApps: aiCustomAppsRouter,
   digitalCards: digitalCardsRouter,
+  work: workManagementRouter,
+  asanaMigration: asanaMigrationRouter,
   assets: assetsRouter,
   /** Legacy M3 demo-store deals (gates, BUAF, HITL). Prefer `crm.*` for durable CRM. */
   deals: dealsRouter,

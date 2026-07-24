@@ -6,6 +6,24 @@ export {
   type ComposioSendResult,
 } from "./composio";
 export {
+  createComposioLive,
+  ComposioApiError,
+  type ComposioConnectedAccount,
+  type ComposioLiveClient,
+} from "./composio/live";
+export {
+  createAsanaDirect,
+  createAsanaViaComposio,
+  type AsanaAdapter,
+  type AsanaAttachment,
+  type AsanaProject,
+  type AsanaSection,
+  type AsanaStory,
+  type AsanaTask,
+  type AsanaUser,
+  type AsanaWorkspace,
+} from "./asana";
+export {
   createXeroStub,
   createXeroMock,
   createXeroLive,

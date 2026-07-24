@@ -98,6 +98,7 @@ export const DEV_USERS: Record<string, SessionUser> = {
       "allow:invoice:*",
       "allow:convention:edit",
       "allow:convention:view",
+      "allow:admin:features",
     ],
     actorType: "staff",
     clientId: null,

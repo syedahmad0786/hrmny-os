@@ -687,6 +687,31 @@ export const connectionAccount = pgTable("connection_account", {
   ...timestamps,
 });
 
+/** Feature Lab: code-owned catalogue overrides by global/client/role/user scope. */
+export const featureOverride = pgTable(
+  "feature_override",
+  {
+    featureOverrideId: uuid("feature_override_id").defaultRandom().primaryKey(),
+    featureKey: text("feature_key").notNull(),
+    scopeType: text("scope_type").notNull(),
+    scopeKey: text("scope_key").notNull(),
+    enabled: boolean("enabled").notNull(),
+    reason: text("reason"),
+    updatedByEmployeeId: uuid("updated_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("feature_override_scope_uniq").on(
+      table.featureKey,
+      table.scopeType,
+      table.scopeKey,
+    ),
+    index("feature_override_scope_idx").on(table.scopeType, table.scopeKey),
+  ],
+);
+
 /** Product requests: idea/voice intake → editable PRD → approval → build. */
 export const featureRequest = pgTable("feature_request", {
   featureRequestId: uuid("feature_request_id").defaultRandom().primaryKey(),
