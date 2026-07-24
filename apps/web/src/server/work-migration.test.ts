@@ -617,4 +617,29 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/WHERE project_kind = 'personal'/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("source-scopes imported Asana My Tasks sections", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0045_asana_my_tasks_import.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0045_asana_my_tasks_import.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0045_asana_my_tasks_import.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(/ADD COLUMN IF NOT EXISTS source_platform/i);
+    expect(migration).toMatch(/work_my_tasks_section_source_uniq/i);
+    expect(migration).toMatch(/source_connection_external_id/i);
+    expect(migration).toMatch(/WHERE external_id IS NOT NULL/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

@@ -36,6 +36,13 @@ export type AsanaSection = {
   created_at?: string;
 };
 
+export type AsanaUserTaskList = {
+  gid: string;
+  name: string;
+  owner: AsanaUser;
+  workspace: AsanaWorkspace;
+};
+
 export type AsanaTask = {
   gid: string;
   name: string;
@@ -51,6 +58,7 @@ export type AsanaTask = {
   num_subtasks?: number;
   estimated_minutes?: number | null;
   assignee?: AsanaUser | null;
+  assignee_section?: { gid: string; name?: string } | null;
   parent?: { gid: string; name?: string } | null;
   memberships?: Array<{
     project: { gid: string; name?: string };
@@ -254,6 +262,11 @@ export interface AsanaAdapter {
   listProjectMemberships(projectGid: string): Promise<AsanaMembership[]>;
   listSections(projectGid: string): Promise<AsanaSection[]>;
   listProjectTasks(projectGid: string): Promise<AsanaTask[]>;
+  getUserTaskList(
+    userGid: string,
+    workspaceGid: string,
+  ): Promise<AsanaUserTaskList>;
+  listUserTaskListTasks(userTaskListGid: string): Promise<AsanaTask[]>;
   listSubtasks(taskGid: string): Promise<AsanaTask[]>;
   listStories(taskGid: string): Promise<AsanaStory[]>;
   listAttachments(taskGid: string): Promise<AsanaAttachment[]>;
@@ -297,6 +310,8 @@ const TASK_FIELDS = [
   "assignee.gid",
   "assignee.name",
   "assignee.email",
+  "assignee_section.gid",
+  "assignee_section.name",
   "parent.gid",
   "memberships.project.gid",
   "memberships.project.name",
@@ -497,6 +512,25 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
     listProjectTasks: (projectGid) =>
       list<AsanaTask>(
         `/projects/${encodeURIComponent(projectGid)}/tasks`,
+        new URLSearchParams({
+          completed_since: "1970-01-01T00:00:00.000Z",
+          opt_fields: TASK_FIELDS,
+        }),
+      ),
+    async getUserTaskList(userGid, workspaceGid) {
+      const response = await transport.get<AsanaSingle<AsanaUserTaskList>>(
+        `/users/${encodeURIComponent(userGid)}/user_task_list`,
+        new URLSearchParams({
+          workspace: workspaceGid,
+          opt_fields:
+            "gid,name,owner.gid,owner.name,owner.email,workspace.gid,workspace.name",
+        }),
+      );
+      return response.data;
+    },
+    listUserTaskListTasks: (userTaskListGid) =>
+      list<AsanaTask>(
+        `/user_task_lists/${encodeURIComponent(userTaskListGid)}/tasks`,
         new URLSearchParams({
           completed_since: "1970-01-01T00:00:00.000Z",
           opt_fields: TASK_FIELDS,

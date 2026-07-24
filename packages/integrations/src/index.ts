@@ -35,6 +35,7 @@ export {
   type AsanaTeamMembership,
   type AsanaTimeTrackingEntry,
   type AsanaUser,
+  type AsanaUserTaskList,
   type AsanaWebhook,
   type AsanaWebhookFilter,
   type AsanaWorkspace,

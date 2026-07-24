@@ -162,6 +162,8 @@ export type AsanaImportSummary = {
   projects: number;
   projectMemberships: number;
   sections: number;
+  myTaskSections: number;
+  myTasks: number;
   tasks: number;
   projectTaskLinks: number;
   dependencies: number;
@@ -411,6 +413,64 @@ export async function importAsanaWorkspace(input: {
         sectionIds.set(section.gid, String(row!.id));
       }
 
+      const myTasksEmployeeId = employeeForUser(scan.myTaskList.owner);
+      if (
+        !myTasksEmployeeId &&
+        (scan.myTaskSections.length > 0 || scan.myTasks.length > 0)
+      ) {
+        throw new Error(
+          "The connected Asana My Tasks owner must map to an active employee",
+        );
+      }
+      const myTaskSectionIds = new Map<string, string>();
+      for (const [position, section] of scan.myTaskSections.entries()) {
+        if (!myTasksEmployeeId) continue;
+        const [row] = await tx.execute(sql<{ id: string }>`
+          insert into public.work_my_tasks_section (
+            employee_id, name, position, source_platform, external_id,
+            source_workspace_external_id, source_connection_external_id
+          ) values (
+            ${myTasksEmployeeId}::uuid, ${limited(section.name, 120)},
+            ${position}, 'asana', ${section.gid}, ${input.workspaceGid},
+            ${input.connectedAccountId}
+          )
+          on conflict (
+            source_platform, source_connection_external_id, external_id
+          ) where external_id is not null
+          do update set employee_id = excluded.employee_id,
+            name = excluded.name, position = excluded.position,
+            source_workspace_external_id = excluded.source_workspace_external_id,
+            updated_at = now()
+          returning work_my_tasks_section_id as id
+        `);
+        myTaskSectionIds.set(section.gid, String(row!.id));
+      }
+
+      let personalProjectId: string | null = null;
+      if (myTasksEmployeeId) {
+        const [row] = await tx.execute(sql<{ id: string }>`
+          insert into public.work_project (
+            name, description, color, privacy, owner_employee_id,
+            created_by_employee_id, project_kind
+          ) values (
+            'Private tasks', 'Private tasks created from My Tasks.',
+            '#C7702E', 'private', ${myTasksEmployeeId}::uuid,
+            ${actorEmployeeId}::uuid, 'personal'
+          ) on conflict (owner_employee_id) where project_kind = 'personal'
+          do update set archived_at = null, updated_at = now()
+          returning work_project_id as id
+        `);
+        personalProjectId = String(row!.id);
+        await tx.execute(sql`
+          insert into public.work_project_member (
+            work_project_id, employee_id, access_level
+          ) values (
+            ${personalProjectId}::uuid, ${myTasksEmployeeId}::uuid, 'admin'
+          ) on conflict (work_project_id, employee_id) do update set
+            access_level = 'admin', updated_at = now()
+        `);
+      }
+
       const itemIds = new Map<string, string>();
       for (const task of scan.tasks) {
         const [row] = await tx.execute(sql<{ id: string }>`
@@ -423,7 +483,7 @@ export async function importAsanaWorkspace(input: {
           ) values (
             ${limited(task.name, 500)}, ${task.notes ?? ""},
             ${asanaItemType(task.resource_subtype)},
-            ${employeeFor(task.assignee?.email)}::uuid,
+            ${employeeForUser(task.assignee)}::uuid,
             ${actorEmployeeId}::uuid, ${task.start_on ?? null}::date,
             ${asanaDueAt(task)}::timestamptz, ${completedAt(task)}::timestamptz,
             ${task.estimated_minutes ?? null},
@@ -489,6 +549,50 @@ export async function importAsanaWorkspace(input: {
             updated_at = now()
         `);
         projectItemExternalIds.push(`${link.projectGid}:${link.taskGid}`);
+      }
+
+      const personalProjectItemExternalIds: string[] = [];
+      if (personalProjectId) {
+        for (const task of scan.myTasks) {
+          if (!task.projectless) continue;
+          const itemId = itemIds.get(task.taskGid);
+          if (!itemId) continue;
+          const externalId = `my-tasks:${task.taskGid}`;
+          await tx.execute(sql`
+            insert into public.work_project_item (
+              work_project_id, work_item_id, position, source_platform,
+              external_id
+            ) values (
+              ${personalProjectId}::uuid, ${itemId}::uuid, ${task.position},
+              'asana', ${externalId}
+            ) on conflict (work_project_id, work_item_id) do update set
+              position = excluded.position, source_platform = excluded.source_platform,
+              external_id = excluded.external_id, updated_at = now()
+          `);
+          personalProjectItemExternalIds.push(externalId);
+        }
+      }
+
+      const myTaskMembershipExternalIds: string[] = [];
+      if (myTasksEmployeeId) {
+        for (const task of scan.myTasks) {
+          const itemId = itemIds.get(task.taskGid);
+          const myTaskSectionId = task.sectionGid
+            ? myTaskSectionIds.get(task.sectionGid)
+            : null;
+          if (!itemId || !myTaskSectionId) continue;
+          await tx.execute(sql`
+            insert into public.work_my_tasks_membership (
+              employee_id, work_item_id, work_my_tasks_section_id, position
+            ) values (
+              ${myTasksEmployeeId}::uuid, ${itemId}::uuid,
+              ${myTaskSectionId}::uuid, ${task.position}
+            ) on conflict (employee_id, work_item_id) do update set
+              work_my_tasks_section_id = excluded.work_my_tasks_section_id,
+              position = excluded.position, updated_at = now()
+          `);
+          myTaskMembershipExternalIds.push(task.taskGid);
+        }
       }
 
       let dependencies = 0;
@@ -1063,6 +1167,40 @@ export async function importAsanaWorkspace(input: {
           and coalesce(link.external_id, '') <>
             all(${textArray(projectItemExternalIds)})
       `);
+      if (personalProjectId && myTasksEmployeeId) {
+        await tx.execute(sql`
+          delete from public.work_my_tasks_membership membership
+          using public.work_item item
+          where membership.work_item_id = item.work_item_id
+            and membership.employee_id = ${myTasksEmployeeId}::uuid
+            and item.source_platform = 'asana'
+            and item.source_workspace_external_id = ${input.workspaceGid}
+            and item.source_connection_external_id = ${input.connectedAccountId}
+            and coalesce(item.external_id, '') <>
+              all(${textArray(myTaskMembershipExternalIds)})
+        `);
+        await tx.execute(sql`
+          delete from public.work_my_tasks_section
+          where employee_id = ${myTasksEmployeeId}::uuid
+            and source_platform = 'asana'
+            and source_workspace_external_id = ${input.workspaceGid}
+            and source_connection_external_id = ${input.connectedAccountId}
+            and coalesce(external_id, '') <>
+              all(${textArray(scan.myTaskSections.map((section) => section.gid))})
+        `);
+        await tx.execute(sql`
+          delete from public.work_project_item link
+          using public.work_item item
+          where link.work_item_id = item.work_item_id
+            and link.work_project_id = ${personalProjectId}::uuid
+            and link.source_platform = 'asana'
+            and item.source_platform = 'asana'
+            and item.source_workspace_external_id = ${input.workspaceGid}
+            and item.source_connection_external_id = ${input.connectedAccountId}
+            and coalesce(link.external_id, '') <>
+              all(${textArray(personalProjectItemExternalIds)})
+        `);
+      }
       await tx.execute(sql`
         delete from public.work_item_dependency dependency
         using public.work_item item
@@ -1202,6 +1340,8 @@ export async function importAsanaWorkspace(input: {
         projects: projectIds.size,
         projectMemberships,
         sections: sectionIds.size,
+        myTaskSections: myTaskSectionIds.size,
+        myTasks: scan.myTasks.length,
         tasks: itemIds.size,
         projectTaskLinks: scan.projectTasks.length,
         dependencies,

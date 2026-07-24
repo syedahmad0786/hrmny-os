@@ -16,6 +16,7 @@ import type {
   AsanaTeamMembership,
   AsanaTimeTrackingEntry,
   AsanaUser,
+  AsanaUserTaskList,
 } from "@hrmny/integrations";
 
 export type AsanaScanDepth = "structure" | "full";
@@ -52,6 +53,14 @@ export type AsanaWorkspaceScan = {
     membership: AsanaMembership;
   }>;
   sections: Array<AsanaSection & { projectGid: string }>;
+  myTaskList: AsanaUserTaskList;
+  myTaskSections: AsanaSection[];
+  myTasks: Array<{
+    taskGid: string;
+    sectionGid: string | null;
+    position: number;
+    projectless: boolean;
+  }>;
   tasks: AsanaTask[];
   projectTasks: Array<{
     projectGid: string;
@@ -85,6 +94,9 @@ export type AsanaWorkspaceScan = {
     projects: number;
     projectMemberships: number;
     sections: number;
+    myTaskSections: number;
+    myTasks: number;
+    myTasksOnly: number;
     topLevelTasks: number;
     subtasks: number;
     tasks: number;
@@ -111,15 +123,27 @@ export async function scanAsanaWorkspace(
   workspaceGid: string,
   depth: AsanaScanDepth = "full",
 ): Promise<AsanaWorkspaceScan> {
-  const [users, teams, projects, goals, portfolios, projectTemplates] =
-    await Promise.all([
-      adapter.listUsers(workspaceGid),
-      adapter.listTeams(workspaceGid),
-      adapter.listProjects(workspaceGid),
-      adapter.listGoals(workspaceGid),
-      adapter.listPortfolios(workspaceGid),
-      adapter.listProjectTemplates(workspaceGid),
-    ]);
+  const [
+    users,
+    teams,
+    projects,
+    goals,
+    portfolios,
+    projectTemplates,
+    myTaskList,
+  ] = await Promise.all([
+    adapter.listUsers(workspaceGid),
+    adapter.listTeams(workspaceGid),
+    adapter.listProjects(workspaceGid),
+    adapter.listGoals(workspaceGid),
+    adapter.listPortfolios(workspaceGid),
+    adapter.listProjectTemplates(workspaceGid),
+    adapter.getUserTaskList("me", workspaceGid),
+  ]);
+  const [myTaskSections, myTaskValues] = await Promise.all([
+    adapter.listSections(myTaskList.gid),
+    adapter.listUserTaskListTasks(myTaskList.gid),
+  ]);
   const teamRows = await mapLimit(teams, 4, async (team) => ({
     teamGid: team.gid,
     memberships: await adapter.listTeamMemberships(team.gid),
@@ -154,6 +178,9 @@ export async function scanAsanaWorkspace(
       tasks.set(task.gid, task);
     }
   }
+  // The connected user's response is the only one allowed to include
+  // assignee_section, so keep it when the task is also in a project.
+  for (const task of myTaskValues) tasks.set(task.gid, task);
   const topLevelTaskIds = new Set(tasks.keys());
 
   const parents = [...tasks.values()].filter(
@@ -243,6 +270,9 @@ export async function scanAsanaWorkspace(
   }
 
   const selectedProjects = new Set(projects.map((project) => project.gid));
+  const projectTaskIds = new Set(
+    projectRows.flatMap((row) => row.tasks.map((task) => task.gid)),
+  );
   const projectTasks = new Map<
     string,
     { projectGid: string; taskGid: string; sectionGid: string | null }
@@ -300,6 +330,14 @@ export async function scanAsanaWorkspace(
         projectGid: row.projectGid,
       })),
     ),
+    myTaskList,
+    myTaskSections,
+    myTasks: myTaskValues.map((task, position) => ({
+      taskGid: task.gid,
+      sectionGid: task.assignee_section?.gid ?? null,
+      position,
+      projectless: !projectTaskIds.has(task.gid),
+    })),
     tasks: taskValues,
     projectTasks: [...projectTasks.values()],
     stories,
@@ -335,6 +373,10 @@ export async function scanAsanaWorkspace(
         0,
       ),
       sections: projectRows.reduce((sum, row) => sum + row.sections.length, 0),
+      myTaskSections: myTaskSections.length,
+      myTasks: myTaskValues.length,
+      myTasksOnly: myTaskValues.filter((task) => !projectTaskIds.has(task.gid))
+        .length,
       topLevelTasks: topLevelTaskIds.size,
       subtasks: tasks.size - topLevelTaskIds.size,
       tasks: tasks.size,
