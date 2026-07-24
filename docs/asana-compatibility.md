@@ -22,7 +22,7 @@ The connection audit found one connected account in the hrmny application:
 
 - Google Workspace — `developer@hrmny.co`
 
-It did not contain a Composio project key or a separately stored Asana account, so the claimed external Asana connection could not be verified from the application during the audit. A live Composio transport, Asana identity/workspace verification, read-only scan, and confirmed idempotent import are now implemented. The Composio project key must be saved in Connections (or supplied as `COMPOSIO_API_KEY`) before the application can observe the external account. Incremental sync remains disabled.
+It did not contain a Composio project key or a separately stored Asana account, so the claimed external Asana connection could not be verified from the application during the audit. A live Composio transport, Asana identity/workspace verification, read-only scan, confirmed idempotent import, and cursor-based recurring reconciliation are now implemented. The Composio project key must be saved in Connections (or supplied as `COMPOSIO_API_KEY`) before the application can observe the external account.
 
 ## Compatibility map
 
@@ -64,7 +64,7 @@ Feature Lab and hrmny RBAC are available. Project-level admin/editor/commenter/v
 
 ### Import, sync, and integrations
 
-The beta importer preserves projects, sections, tasks, nested subtasks, multi-home membership, dependencies, comments, followers, tags, attachments, and custom fields/values. It is idempotent using source/external identifiers, blocks on unmapped people by default, records a migration run, and writes atomically after an explicit confirmation. Teams, project memberships, time entries, goals, portfolios, templates, and status history remain migration gaps. Cutover still requires signed webhooks plus a cursor-based reconciliation job because webhook events are compact and may arrive late.
+The beta importer preserves projects, sections, tasks, nested subtasks, multi-home membership, dependencies, comments, followers, tags, attachments, and custom fields/values. It is idempotent using source/external identifiers, blocks on unmapped people by default, records a migration run, and writes atomically after an explicit confirmation. Workspace event cursors now run on a recurring job; changes or expired cursors trigger a full idempotent reconciliation, while explicit delete/removal events archive deleted work and remove project memberships. This follows Asana's guidance that event delivery needs a polling fallback. Teams, project memberships, time entries, goals, portfolios, templates, and status history remain migration gaps. Signed push webhooks remain planned; cursor reconciliation is the current cutover transport.
 
 ### AI parity
 
@@ -85,7 +85,7 @@ AI features remain planned until the provider performs real generation, sources 
 
 1. **Feature Lab foundation** — catalogue, inheritance, client/role/user controls, navigation/API enforcement, audit. Implemented.
 2. **Core work graph** — projects, permissions, sections, tasks, subtasks, dates, dependencies, comments, list/board. Implemented at first usable depth.
-3. **Asana connection and migration** — live Composio verification, read-only discovery, dry-run report, and idempotent core import implemented in beta; delta sync and cutover remain.
+3. **Asana connection and migration** — live Composio verification, read-only discovery, dry-run report, idempotent core import, workspace event cursors, recurring reconciliation, and destructive-event handling implemented in beta; signed push webhooks and non-core object migration remain.
 4. **Workflow depth** — custom fields, tags, files, followers, recurrence, forms, event rules, templates, bundles, and approvals implemented in beta; proofing, richer automation, and public intake remain.
 5. **Planning and reporting** — Calendar, Timeline, Files, My Tasks, Inbox, search, Gantt, goals, portfolios, statuses, dashboards, workload, capacity, budgets, and time are implemented in beta; richer cross-portfolio analytics remain.
 6. **Enterprise controls and integrations** — teams, guests, sharing, admin, SSO/SCIM, exports, webhooks, third-party apps.
@@ -105,3 +105,4 @@ AI features remain planned until the provider performs real generation, sources 
 - https://asana.com/product/ai/dash
 - https://developers.asana.com/reference/rest-api-reference
 - https://developers.asana.com/docs/webhooks-guide
+- https://developers.asana.com/reference/getworkspaceevents

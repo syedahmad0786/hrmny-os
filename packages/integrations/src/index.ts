@@ -16,6 +16,8 @@ export {
   createAsanaViaComposio,
   type AsanaAdapter,
   type AsanaAttachment,
+  type AsanaEvent,
+  type AsanaEventPage,
   type AsanaProject,
   type AsanaSection,
   type AsanaStory,

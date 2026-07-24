@@ -108,4 +108,33 @@ describe("Asana integration", () => {
       "completed_since=1970-01-01T00%3A00%3A00.000Z",
     );
   });
+
+  it("initializes and advances a workspace event cursor", async () => {
+    const fetchImpl = vi.fn(async (request: RequestInfo | URL) => {
+      const url = new URL(String(request));
+      if (!url.searchParams.has("sync")) return json({ sync: "first" }, 412);
+      return json({
+        data: [
+          {
+            resource: { gid: "t1", resource_type: "task" },
+            action: "changed",
+          },
+        ],
+        sync: "next",
+        has_more: false,
+      });
+    }) as unknown as typeof fetch;
+    const asana = createAsanaDirect({ accessToken: "token", fetchImpl });
+
+    await expect(asana.workspaceEvents("w1")).resolves.toMatchObject({
+      events: [],
+      sync: "first",
+      reset: true,
+    });
+    await expect(asana.workspaceEvents("w1", "first")).resolves.toMatchObject({
+      events: [expect.objectContaining({ action: "changed" })],
+      sync: "next",
+      reset: false,
+    });
+  });
 });

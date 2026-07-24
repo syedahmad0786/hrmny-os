@@ -169,6 +169,13 @@
       "when": 1784930400000,
       "tag": "0023_work_planning",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784934000000,
+      "tag": "0024_asana_sync",
+      "breakpoints": true
     }
   ]
 }

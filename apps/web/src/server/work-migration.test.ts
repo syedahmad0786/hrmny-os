@@ -45,4 +45,20 @@ describe("work migration compatibility", () => {
     );
     expect(migration).toMatch(/work_timer_employee_active_uniq/i);
   });
+
+  it("persists Asana event cursors for recurring reconciliation", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0024_asana_sync.sql"),
+      join(process.cwd(), "../../packages/db/migrations/0024_asana_sync.sql"),
+      join(__dirname, "../../../../packages/db/migrations/0024_asana_sync.sql"),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.asana_sync_state/i,
+    );
+    expect(migration).toMatch(/'dry_run', 'import', 'sync'/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

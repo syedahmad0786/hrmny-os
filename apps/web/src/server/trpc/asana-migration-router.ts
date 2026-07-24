@@ -4,6 +4,7 @@ import { z } from "zod";
 import { DEV_USERS } from "../auth/session";
 import { importAsanaWorkspace } from "../asana-import";
 import { scanAsanaWorkspace } from "../asana-migration";
+import { syncAsanaWorkspace } from "../asana-sync";
 import { getDb } from "../db";
 import { writeAudit } from "../m1-persistence";
 import { getVerifiedAsanaConnection } from "./connections-router";
@@ -174,5 +175,119 @@ export const asanaMigrationRouter = router({
         reason: "Confirmed idempotent Asana import",
       });
       return result;
+    }),
+
+  syncStatus: asanaAdminProcedure
+    .input(z.object({ workspaceGid: z.string().trim().min(1).max(120) }))
+    .query(async ({ ctx, input }) => {
+      await requireAsana(ctx.employeeId!);
+      const db = getDb();
+      if (!db)
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "A database connection is required for sync",
+        });
+      const rows = await db.execute<{
+        workspaceGid: string;
+        workspaceName: string;
+        status: "idle" | "running" | "error";
+        lastEventCount: number;
+        totalEventCount: string | number;
+        lastEventAt: Date | string | null;
+        lastSyncedAt: Date | string | null;
+        lastReconciledAt: Date | string | null;
+        lastError: string | null;
+      }>(sql`
+        select workspace_external_id as "workspaceGid",
+          workspace_name as "workspaceName", status,
+          last_event_count as "lastEventCount",
+          total_event_count as "totalEventCount", last_event_at as "lastEventAt",
+          last_synced_at as "lastSyncedAt",
+          last_reconciled_at as "lastReconciledAt", last_error as "lastError"
+        from public.asana_sync_state
+        where workspace_external_id = ${input.workspaceGid}
+      `);
+      const state = rows[0];
+      return state
+        ? {
+            ...state,
+            totalEventCount: Number(state.totalEventCount),
+            lastEventAt: state.lastEventAt
+              ? new Date(state.lastEventAt).toISOString()
+              : null,
+            lastSyncedAt: state.lastSyncedAt
+              ? new Date(state.lastSyncedAt).toISOString()
+              : null,
+            lastReconciledAt: state.lastReconciledAt
+              ? new Date(state.lastReconciledAt).toISOString()
+              : null,
+          }
+        : null;
+    }),
+
+  syncNow: asanaAdminProcedure
+    .input(z.object({ workspaceGid: z.string().trim().min(1).max(120) }))
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+      if (!db)
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "A database connection is required for sync",
+        });
+      const verified = await requireAsana(ctx.employeeId!);
+      const workspace = (await verified.adapter.listWorkspaces()).find(
+        (candidate) => candidate.gid === input.workspaceGid,
+      );
+      if (!workspace)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Asana workspace not found on this connection",
+        });
+      try {
+        const result = await syncAsanaWorkspace({
+          db,
+          adapter: verified.adapter,
+          workspaceGid: workspace.gid,
+          workspaceName: workspace.name,
+          connectedAccountId: verified.account.id,
+          actorEmployeeId: ctx.employeeId!,
+        });
+        await writeAudit({
+          actorEmployeeId: ctx.employeeId,
+          action: "asanaMigration.sync",
+          entityType: "asana_workspace",
+          entityId: null,
+          before: null,
+          after: {
+            workspaceGid: input.workspaceGid,
+            eventCount: result.eventCount,
+            reset: result.reset,
+            reconciled: result.reconciled,
+            runId: result.runId,
+          },
+          reason: "Cursor-based Asana reconciliation",
+        });
+        await db.execute(sql`
+          insert into public.scheduled_job (job_key, kind, run_at, payload)
+          values (
+            ${`asana-sync:${workspace.gid}`}, 'asana_sync',
+            now() + interval '5 minutes',
+            ${JSON.stringify({
+              workspaceGid: workspace.gid,
+              workspaceName: workspace.name,
+              actorEmployeeId: ctx.employeeId!,
+            })}::jsonb
+          ) on conflict (job_key) do update set
+            kind = excluded.kind, run_at = excluded.run_at,
+            payload = excluded.payload, status = 'pending', attempts = 0,
+            locked_at = null, completed_at = null, last_error = null,
+            updated_at = now()
+        `);
+        return result;
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("already running"))
+          throw new TRPCError({ code: "CONFLICT", message: error.message });
+        throw error;
+      }
     }),
 });

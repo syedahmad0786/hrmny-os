@@ -809,11 +809,11 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     key: "asana.sync",
     name: "Asana incremental sync",
     description:
-      "Webhook and cursor-based delta sync during migration and cutover.",
+      "Cursor-based change detection with idempotent reconciliation during cutover.",
     group: "Integrations",
     source: "asana",
-    availability: "planned",
-    defaultEnabled: false,
+    availability: "beta",
+    defaultEnabled: true,
   }),
   feature({
     key: "work.integrations.files",
@@ -1068,6 +1068,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["connections.", "integrations.connections"],
   ["asanaMigration.import", "asana.import"],
   ["asanaMigration.dryRun", "asana.import"],
+  ["asanaMigration.sync", "asana.sync"],
   ["asanaMigration.", "asana.connection"],
   ["featureRequests.", "requests.feature_intake"],
   ["coreHr.", "people.core_hr"],

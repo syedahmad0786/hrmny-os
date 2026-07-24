@@ -1,4 +1,4 @@
-import type { ComposioLiveClient } from "../composio/live";
+import { ComposioApiError, type ComposioLiveClient } from "../composio/live";
 
 export type AsanaWorkspace = {
   gid: string;
@@ -81,12 +81,43 @@ export type AsanaAttachment = {
   created_at?: string;
 };
 
+export type AsanaEvent = {
+  resource: { gid: string; resource_type?: string; name?: string };
+  parent?: { gid: string; resource_type?: string; name?: string } | null;
+  type?: string;
+  action: string;
+  created_at?: string;
+  change?: Record<string, unknown>;
+};
+
+export type AsanaEventPage = {
+  events: AsanaEvent[];
+  sync: string;
+  hasMore: boolean;
+  reset: boolean;
+};
+
 type AsanaPage<T> = {
   data: T[];
   next_page?: { offset?: string | null; uri?: string | null } | null;
 };
 
 type AsanaSingle<T> = { data: T };
+
+type AsanaEventsResponse = {
+  data?: AsanaEvent[];
+  sync?: string;
+  has_more?: boolean;
+};
+
+class AsanaApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly data: unknown,
+  ) {
+    super(`Asana request failed (${status})`);
+  }
+}
 
 export interface AsanaAdapter {
   me(): Promise<AsanaUser>;
@@ -98,6 +129,7 @@ export interface AsanaAdapter {
   listSubtasks(taskGid: string): Promise<AsanaTask[]>;
   listStories(taskGid: string): Promise<AsanaStory[]>;
   listAttachments(taskGid: string): Promise<AsanaAttachment[]>;
+  workspaceEvents(workspaceGid: string, sync?: string): Promise<AsanaEventPage>;
 }
 
 type AsanaTransport = {
@@ -159,7 +191,7 @@ function directTransport(input: {
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(`Asana request failed (${response.status})`);
+        throw new AsanaApiError(response.status, payload);
       }
       return payload as T;
     },
@@ -177,13 +209,19 @@ function composioTransport(input: {
         value,
         in: "query" as const,
       }));
-      const result = await input.client.proxy<T>({
-        connectedAccountId: input.connectedAccountId,
-        endpoint: `/api/1.0${path}`,
-        method: "GET",
-        parameters,
-      });
-      return result.data;
+      try {
+        const result = await input.client.proxy<T>({
+          connectedAccountId: input.connectedAccountId,
+          endpoint: `/api/1.0${path}`,
+          method: "GET",
+          parameters,
+        });
+        return result.data;
+      } catch (error) {
+        if (error instanceof ComposioApiError)
+          throw new AsanaApiError(error.status, error.data);
+        throw error;
+      }
     },
   };
 }
@@ -277,6 +315,35 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
             "gid,name,resource_subtype,download_url,permanent_url,view_url,created_at",
         }),
       ),
+    async workspaceEvents(workspaceGid, sync) {
+      const path = `/workspaces/${encodeURIComponent(workspaceGid)}/events`;
+      const query = new URLSearchParams();
+      if (sync) query.set("sync", sync);
+      try {
+        const response = await transport.get<AsanaEventsResponse>(path, query);
+        if (!response.sync)
+          throw new Error("Asana event response has no sync token");
+        return {
+          events: response.data ?? [],
+          sync: response.sync,
+          hasMore: Boolean(response.has_more),
+          reset: false,
+        };
+      } catch (error) {
+        if (error instanceof AsanaApiError && error.status === 412) {
+          const response = error.data as AsanaEventsResponse | null;
+          if (!response?.sync)
+            throw new Error("Asana did not return a replacement sync token");
+          return {
+            events: [],
+            sync: response.sync,
+            hasMore: false,
+            reset: true,
+          };
+        }
+        throw error;
+      }
+    },
   };
 }
 
