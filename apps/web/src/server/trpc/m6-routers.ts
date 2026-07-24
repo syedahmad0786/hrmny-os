@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import {
-  DEMO_CLIENT_ID,
-  getDemoStore,
-} from "../demo-store";
+import { getDemoStore } from "../demo-store";
 import { getAuthMode } from "../auth/session";
+import {
+  actOnPortalApproval,
+  portalAssetStoragePath,
+  portalClientName,
+  readPortalWorkspace,
+} from "../portal-data";
 import { driveSeam, listSeams, type SeamName } from "../seams";
 import {
   portalProcedure,
@@ -18,27 +21,6 @@ function requireClientId(ctx: { clientId?: string | null; user: { clientId: stri
   const id = ctx.clientId ?? ctx.user?.clientId;
   if (!id) throw new Error("FORBIDDEN: missing client_id");
   return id;
-}
-
-/** Strip any finance-shaped keys before portal responses leave the server. */
-function assertNoFinanceKeys(row: Record<string, unknown>): void {
-  const banned = [
-    "marginPct",
-    "margin",
-    "internalCost",
-    "fee",
-    "contractValue",
-    "deliveryCost",
-    "payroll",
-    "grossAmount",
-    "xeroInvoiceId",
-    "revenueToDate",
-  ];
-  for (const key of banned) {
-    if (key in row) {
-      throw new Error(`PORTAL_FINANCE_LEAK: ${key}`);
-    }
-  }
 }
 
 export const portalRouter = router({
@@ -131,14 +113,13 @@ export const portalRouter = router({
           via: "dev_persona" as const,
         };
       }),
-    session: portalProcedure.query(({ ctx }) => {
+    session: portalProcedure.query(async ({ ctx }) => {
       const clientId = requireClientId(ctx);
-      const client = getDemoStore().clients.get(clientId);
       return {
         clientId,
         displayName: ctx.user.displayName,
         email: ctx.user.email,
-        clientName: client?.name ?? "Client",
+        clientName: await portalClientName(clientId),
         actorType: "portal" as const,
         canViewMargin: false as const,
       };
@@ -146,66 +127,21 @@ export const portalRouter = router({
   }),
 
   briefs: router({
-    list: portalProcedure.query(({ ctx }) => {
-      const clientId = requireClientId(ctx);
-      const store = getDemoStore();
-      const taskIds = new Set(
-        [...store.tasks.values()]
-          .filter((t) => t.clientId === clientId)
-          .map((t) => t.taskId),
-      );
-      return [...store.briefs.values()]
-        .filter((b) => taskIds.has(b.taskId))
-        .map((b) => {
-          const row = {
-            briefId: b.briefId,
-            taskId: b.taskId,
-            lockedAt: b.lockedAt,
-            dorComplete: b.dorComplete,
-            missingRequiredCount: b.missingRequiredCount,
-          };
-          assertNoFinanceKeys(row);
-          return row;
-        });
-    }),
+    list: portalProcedure.query(async ({ ctx }) =>
+      (await readPortalWorkspace(requireClientId(ctx))).briefs,
+    ),
   }),
 
   tasks: router({
-    list: portalProcedure.query(({ ctx }) => {
-      const clientId = requireClientId(ctx);
-      return [...getDemoStore().tasks.values()]
-        .filter((t) => t.clientId === clientId)
-        .map((t) => {
-          const row = {
-            taskId: t.taskId,
-            title: t.title,
-            status: t.status,
-            taskType: t.taskType,
-            deadline: t.deadline,
-            priority: t.priority,
-          };
-          assertNoFinanceKeys(row);
-          return row;
-        });
-    }),
+    list: portalProcedure.query(async ({ ctx }) =>
+      (await readPortalWorkspace(requireClientId(ctx))).tasks,
+    ),
   }),
 
   assets: router({
-    list: portalProcedure.query(({ ctx }) => {
-      const clientId = requireClientId(ctx);
-      return [...getDemoStore().assets.values()]
-        .filter((a) => a.clientId === clientId)
-        .map((a) => {
-          const row = {
-            assetId: a.assetId,
-            title: a.title,
-            status: a.status,
-            versionCount: a.versions.length,
-          };
-          assertNoFinanceKeys(row);
-          return row;
-        });
-    }),
+    list: portalProcedure.query(async ({ ctx }) =>
+      (await readPortalWorkspace(requireClientId(ctx))).assets,
+    ),
     signedUrl: portalProcedure
       .input(
         z.object({
@@ -215,69 +151,30 @@ export const portalRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         const clientId = requireClientId(ctx);
-        const store = getDemoStore();
-        const asset = store.assets.get(input.assetId);
-        if (!asset || asset.clientId !== clientId) {
-          throw new Error("NOT_FOUND");
-        }
-        const allowed = ["client_review", "approved", "qc_passed", "delivered"];
-        if (!allowed.includes(asset.status) && !asset.qcPassed) {
-          return {
-            ok: false as const,
-            reason: "Asset not yet client-visible",
-          };
-        }
-        const version =
-          asset.versions.find((v) => v.assetVersionId === input.versionId) ??
-          asset.versions[asset.versions.length - 1];
-        if (!version) {
+        const storagePath = await portalAssetStoragePath(
+          clientId,
+          input.assetId,
+          input.versionId,
+        );
+        if (!storagePath) {
           return { ok: false as const, reason: "No versions uploaded" };
         }
         const ttl = Number(process.env.DAM_SIGNED_URL_TTL_SECONDS ?? 300);
-        const signed = await store.objectStore.signedUrl(version.storagePath, ttl);
+        const signed = await getDemoStore().objectStore.signedUrl(storagePath, ttl);
         return { ok: true as const, ...signed };
       }),
   }),
 
   deliveries: router({
-    list: portalProcedure.query(({ ctx }) => {
-      const clientId = requireClientId(ctx);
-      const store = getDemoStore();
-      const status = store.clientDeliveryStatus.get(clientId);
-      const tasks = [...store.tasks.values()].filter(
-        (t) => t.clientId === clientId,
-      );
-      const row = {
-        clientId,
-        deliveryStatus: status?.status ?? "unknown",
-        lastSeam: status?.lastSeam ?? null,
-        updatedAt: status?.updatedAt ?? null,
-        deliverables: tasks.map((t) => ({
-          taskId: t.taskId,
-          title: t.title,
-          status: t.status,
-        })),
-      };
-      assertNoFinanceKeys(row as unknown as Record<string, unknown>);
-      return [row];
-    }),
+    list: portalProcedure.query(async ({ ctx }) => [
+      (await readPortalWorkspace(requireClientId(ctx))).delivery,
+    ]),
   }),
 
   approvals: router({
-    list: portalProcedure.query(({ ctx }) => {
-      const clientId = requireClientId(ctx);
-      return [...getDemoStore().portalApprovals.values()]
-        .filter((a) => a.clientId === clientId)
-        .map((a) => ({
-          approvalId: a.approvalId,
-          title: a.title,
-          kind: a.kind,
-          status: a.status,
-          slaHours: a.slaHours,
-          entityId: a.entityId,
-          createdAt: a.createdAt,
-        }));
-    }),
+    list: portalProcedure.query(async ({ ctx }) =>
+      (await readPortalWorkspace(requireClientId(ctx))).approvals,
+    ),
     act: portalProcedure
       .input(
         z.object({
@@ -286,53 +183,35 @@ export const portalRouter = router({
           feedback: z.string().optional(),
         }),
       )
-      .mutation(({ input, ctx }) => {
-        const clientId = requireClientId(ctx);
-        const store = getDemoStore();
-        const item = store.portalApprovals.get(input.id);
-        if (!item || item.clientId !== clientId) {
-          throw new Error("NOT_FOUND");
-        }
-        item.status = input.action === "approve" ? "approved" : "rejected";
-        store.appendAudit({
-          actorEmployeeId: ctx.employeeId!,
-          action: "portal.approvals.act",
-          entityType: "portal_approval",
-          entityId: item.approvalId,
-          before: null,
-          after: { status: item.status, feedback: input.feedback ?? null },
-          reason: input.feedback ?? null,
-        });
-        return { ok: true as const, item };
-      }),
+      .mutation(({ input, ctx }) =>
+        actOnPortalApproval({
+          clientId: requireClientId(ctx),
+          approvalId: input.id,
+          action: input.action,
+          feedback: input.feedback,
+          actorPortalUserId: ctx.employeeId,
+        }),
+      ),
   }),
 
   reports: router({
     get: portalProcedure
       .input(z.object({ month: z.string().optional() }).optional())
-      .query(({ input, ctx }) => {
-        const clientId = requireClientId(ctx);
-        const store = getDemoStore();
-        const tasks = [...store.tasks.values()].filter(
-          (t) => t.clientId === clientId,
-        );
+      .query(async ({ input, ctx }) => {
+        const workspace = await readPortalWorkspace(requireClientId(ctx));
         const month = input?.month ?? new Date().toISOString().slice(0, 7);
-        const report = {
+        return {
           month,
-          clientId,
-          tasksCompleted: tasks.filter((t) =>
+          clientId: workspace.clientId,
+          tasksCompleted: workspace.tasks.filter((t) =>
             ["delivered", "client_review", "approved"].includes(t.status),
           ).length,
-          tasksOpen: tasks.filter(
-            (t) => !["delivered", "cancelled"].includes(t.status),
+          tasksOpen: workspace.tasks.filter(
+            (t) => !["delivered", "archived"].includes(t.status),
           ).length,
-          assetsVisible: [...store.assets.values()].filter(
-            (a) => a.clientId === clientId,
-          ).length,
+          assetsVisible: workspace.assets.length,
           note: "Campaign activity only — no revenue, cost, or margin",
         };
-        assertNoFinanceKeys(report);
-        return report;
       }),
   }),
 
@@ -421,13 +300,4 @@ export const dashboardsHubRouter = router({
   }),
 });
 
-export const m6DemoRouter = router({
-  reset: publicProcedure.mutation(() => {
-    getDemoStore().resetM6Demo();
-    return {
-      ok: true as const,
-      clientId: DEMO_CLIENT_ID,
-      note: "M6 seeded: Demo Co + Other Co; portal personas portal_a / portal_b",
-    };
-  }),
-});
+export const m6DemoRouter = router({});

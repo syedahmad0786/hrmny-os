@@ -1,10 +1,8 @@
 "use client";
 
-import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 
 export default function PortalHomePage() {
-  const reset = trpc.m6.reset.useMutation();
   const session = trpc.portal.auth.session.useQuery(undefined, { retry: false });
   const briefs = trpc.portal.briefs.list.useQuery(undefined, {
     enabled: Boolean(session.data?.clientId),
@@ -23,25 +21,15 @@ export default function PortalHomePage() {
     <main className="flex flex-col gap-8">
       <div>
         <p className="font-display text-sm uppercase tracking-[0.2em] text-ochre">
-          Milestone 6 · Client portal
+          Client workspace
         </p>
         <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight text-ink">
           {session.data?.clientName ?? "Your workspace"}
         </h1>
         <p className="mt-3 max-w-xl text-muted">
-          Read-only view of your briefs, tasks, assets, and delivery status.
-          Margin, payroll, and invoices are never available here.
+          Review briefs, tasks, assets, delivery status, and approvals. Margin,
+          payroll, and invoices are never available here.
         </p>
-      </div>
-
-      <div className="flex flex-wrap gap-3">
-        <Button
-          type="button"
-          onClick={() => reset.mutate()}
-          disabled={reset.isPending}
-        >
-          {reset.isPending ? "Seeding…" : "Reset M6 demo data"}
-        </Button>
       </div>
 
       {session.error && (

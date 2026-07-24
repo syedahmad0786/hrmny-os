@@ -9,6 +9,7 @@ import {
 } from "./demo-store";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 import { driveSeam } from "./seams";
+import { assertPortalSafe } from "./portal-data";
 
 function callerFor(role: string) {
   const user = resolveDevUser(role);
@@ -60,6 +61,36 @@ describe("M6 portal + seams", () => {
     const assets = await portalB.portal.assets.list();
     expect(assets.every((a) => a.title.includes("Other Co"))).toBe(true);
     expect(tasks.some((t) => t.title.includes("Launch reel"))).toBe(false);
+  });
+
+  it("partner preview persists an approval and audits the actor", async () => {
+    const partner = callerFor("partner");
+    const preview = await partner.clientPreview.workspace();
+    const approval = preview.approvals.find((item) => item.status === "pending");
+    expect(preview.clientName).toContain("Demo Co");
+    expect(approval).toBeDefined();
+
+    await partner.clientPreview.act({
+      id: approval!.approvalId,
+      action: "approve",
+    });
+
+    expect(getDemoStore().portalApprovals.get(approval!.approvalId)?.status).toBe(
+      "approved",
+    );
+    expect(getDemoStore().audits[0]).toMatchObject({
+      actorEmployeeId: resolveDevUser("partner").employeeId,
+      action: "portal.approvals.act",
+    });
+    await expect(callerFor("am").clientPreview.workspace()).rejects.toThrow(
+      /Partner or director/,
+    );
+  });
+
+  it("rejects nested finance fields from portal payloads", () => {
+    expect(() =>
+      assertPortalSafe({ delivery: { internal_cost: 100 } }),
+    ).toThrow(/PORTAL_FINANCE_LEAK/);
   });
 
   it("brief.lock seam spawns creative task; re-drive is idempotent", async () => {

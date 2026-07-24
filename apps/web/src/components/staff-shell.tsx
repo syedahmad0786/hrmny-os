@@ -86,9 +86,16 @@ const PRIMARY_NAV = [
     match: (p: string) => p === "/requests" || p.startsWith("/requests/"),
   },
   {
-    href: "/admin/features",
-    label: "Settings",
+    href: "/client-preview",
+    label: "Client Preview",
     index: "08",
+    features: ["portal.client"],
+    match: (p: string) => p.startsWith("/client-preview"),
+  },
+  {
+    href: "/admin/features",
+    label: "Admin",
+    index: "09",
     features: ["admin.feature_lab", "integrations.connections"],
     match: (p: string) =>
       p.startsWith("/settings") ||

@@ -1029,6 +1029,7 @@ const PAGE_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["/margin", "finance.workspace"],
   ["/requests", "requests.feature_intake"],
   ["/dashboards", "analytics.dashboards"],
+  ["/client-preview", "portal.client"],
   ["/portal", "portal.client"],
   ["/", "core.home"],
 ];
@@ -1087,6 +1088,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["assets.", "delivery.workspace"],
   ["invoices.", "finance.workspace"],
   ["vat.", "finance.workspace"],
+  ["clientPreview.", "portal.client"],
   ["portal.", "portal.client"],
 ];
 

@@ -6,6 +6,7 @@ import {
   createComposioStub,
   type AsanaAdapter,
   type ComposioConnectedAccount,
+  type ComposioLiveClient,
 } from "@hrmny/integrations";
 import { z } from "zod";
 import { getDb } from "../db";
@@ -14,7 +15,7 @@ import { router, staffProcedure } from "./trpc";
 import { randomUUID } from "node:crypto";
 
 const composio = createComposioStub();
-const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat", "composio"]);
+const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat"]);
 const oauthToolkit = z.enum([
   "gmail",
   "calendar",
@@ -74,13 +75,6 @@ export const CONNECTION_CATALOG = [
     note: "Gmail, Calendar, Drive, and Sheets via the existing Google SSO app.",
   },
   {
-    toolkit: "composio",
-    label: "Composio",
-    authType: "api_key",
-    ready: true,
-    note: "Secure bridge used to verify and read connected apps such as Asana.",
-  },
-  {
     toolkit: "asana",
     label: "Asana",
     authType: "managed",
@@ -123,7 +117,7 @@ function requireEmployeeId(employeeId: string | null): string {
 
 export async function getEmployeeIntegrationSecret(
   employeeId: string,
-  toolkit: "apollo" | "hunter" | "bayzat" | "composio",
+  toolkit: "apollo" | "hunter" | "bayzat",
 ): Promise<string | null> {
   const db = getDb();
   if (!db) return null;
@@ -153,6 +147,18 @@ export async function getEmployeeIntegrationSecret(
 }
 
 const ACTIVE_COMPOSIO_STATUSES = new Set(["ACTIVE", "CONNECTED", "SUCCESS"]);
+let systemComposio: ComposioLiveClient | undefined;
+
+function requireSystemComposio() {
+  const apiKey = process.env.COMPOSIO_API_KEY?.trim();
+  if (!apiKey) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "COMPOSIO_API_KEY is not configured",
+    });
+  }
+  return (systemComposio ??= createComposioLive({ apiKey }));
+}
 
 export type VerifiedAsanaConnection = {
   account: ComposioConnectedAccount;
@@ -161,14 +167,10 @@ export type VerifiedAsanaConnection = {
 };
 
 export async function getVerifiedAsanaConnection(
-  employeeId: string,
+  _employeeId: string,
 ): Promise<VerifiedAsanaConnection | null> {
-  const apiKey =
-    (await getEmployeeIntegrationSecret(employeeId, "composio")) ??
-    process.env.COMPOSIO_API_KEY?.trim();
-  if (!apiKey) return null;
-
-  const client = createComposioLive({ apiKey });
+  if (!process.env.COMPOSIO_API_KEY?.trim()) return null;
+  const client = requireSystemComposio();
   const accounts = await client.listConnectedAccounts({ toolkit: "asana" });
   const account = accounts.find(
     (candidate) =>
@@ -353,17 +355,6 @@ export const connectionsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const employeeId = requireEmployeeId(ctx.employeeId);
-      const composioAccounts =
-        input.toolkit === "composio"
-          ? await createComposioLive({ apiKey: input.apiKey })
-              .listConnectedAccounts()
-              .catch(() => {
-                throw new TRPCError({
-                  code: "BAD_REQUEST",
-                  message: "Composio rejected this project API key",
-                });
-              })
-          : null;
       const db = requireDb();
       const [existing] = await db
         .select()
@@ -405,12 +396,7 @@ export const connectionsRouter = router({
           authType: "api_key",
           label: input.toolkit,
           secretId,
-          externalConnectionId:
-            input.toolkit === "composio"
-              ? (composioAccounts?.find(
-                  (account) => account.toolkit.slug === "asana",
-                )?.user_id ?? `${composioAccounts?.length ?? 0} connected apps`)
-              : existing?.externalConnectionId,
+          externalConnectionId: existing?.externalConnectionId,
           status: "connected",
           lastTestedAt: new Date(),
           lastError: null,
@@ -477,6 +463,178 @@ export const connectionsRouter = router({
       workspaces,
     };
   }),
+
+  managedToolkits: staffProcedure
+    .input(
+      z
+        .object({
+          search: z.string().trim().max(80).default(""),
+          page: z.number().int().min(1).default(1),
+          pageSize: z.number().int().min(6).max(24).default(12),
+        })
+        .optional(),
+    )
+    .query(async ({ input }) => {
+      const search = input?.search.toLowerCase() ?? "";
+      const page = input?.page ?? 1;
+      const pageSize = input?.pageSize ?? 12;
+      const toolkits = (await requireSystemComposio().listManagedToolkits()).filter(
+        (toolkit) =>
+          !search ||
+          toolkit.name.toLowerCase().includes(search) ||
+          toolkit.slug.toLowerCase().includes(search) ||
+          toolkit.description?.toLowerCase().includes(search),
+      );
+      const offset = (page - 1) * pageSize;
+      return {
+        items: toolkits.slice(offset, offset + pageSize),
+        page,
+        pageCount: Math.max(1, Math.ceil(toolkits.length / pageSize)),
+        total: toolkits.length,
+      };
+    }),
+
+  managedAccounts: staffProcedure.query(async ({ ctx }) => {
+    const employeeId = requireEmployeeId(ctx.employeeId);
+    const db = requireDb();
+    const [remote, local] = await Promise.all([
+      requireSystemComposio().listUserConnectedAccounts(employeeId),
+      db
+        .select({
+          connectionAccountId: connectionAccount.connectionAccountId,
+          toolkit: connectionAccount.toolkit,
+          externalConnectionId: connectionAccount.externalConnectionId,
+          status: connectionAccount.status,
+        })
+        .from(connectionAccount)
+        .where(
+          and(
+            eq(connectionAccount.ownerEmployeeId, employeeId),
+            eq(connectionAccount.scope, "staff"),
+            sql`${connectionAccount.toolkit} like 'composio:%'`,
+          ),
+        ),
+    ]);
+    return local.map((account) => {
+      const current = remote.find(
+        (candidate) => candidate.id === account.externalConnectionId,
+      );
+      return {
+        connectionAccountId: account.connectionAccountId,
+        connectedAccountId: account.externalConnectionId,
+        toolkit: account.toolkit.slice("composio:".length),
+        status: current?.status ?? account.status,
+        statusReason: current?.status_reason ?? null,
+      };
+    });
+  }),
+
+  authorizeManaged: staffProcedure
+    .input(
+      z.object({
+        toolkit: z.string().trim().min(1).max(120).regex(/^[a-z0-9_-]+$/),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const employeeId = requireEmployeeId(ctx.employeeId);
+      const client = requireSystemComposio();
+      const toolkits = await client.listManagedToolkits();
+      if (!toolkits.some((toolkit) => toolkit.slug === input.toolkit)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This toolkit does not support Composio-managed authorization",
+        });
+      }
+      const db = requireDb();
+      const toolkitKey = `composio:${input.toolkit}`;
+      const [existing] = await db
+        .select({ id: connectionAccount.connectionAccountId })
+        .from(connectionAccount)
+        .where(
+          and(
+            eq(connectionAccount.ownerEmployeeId, employeeId),
+            eq(connectionAccount.scope, "staff"),
+            eq(connectionAccount.toolkit, toolkitKey),
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "This toolkit is already connected or awaiting authorization",
+        });
+      }
+
+      const request = await client.authorize(employeeId, input.toolkit);
+      try {
+        const [saved] = await db.transaction(async (tx) => {
+          const created = await tx
+            .insert(connectionAccount)
+            .values({
+              ownerEmployeeId: employeeId,
+              toolkit: toolkitKey,
+              scope: "staff",
+              authType: "composio_managed",
+              label: input.toolkit,
+              externalConnectionId: request.id,
+              status: "pending",
+            })
+            .returning();
+          await tx.insert(auditEvent).values({
+            actorEmployeeId: employeeId,
+            action: "connections.composio.authorize",
+            entityType: "connection_account",
+            entityId: created[0]!.connectionAccountId,
+            after: { toolkit: input.toolkit, status: "pending" },
+          });
+          return created;
+        });
+        return {
+          connectionAccountId: saved!.connectionAccountId,
+          redirectUrl: request.redirectUrl,
+        };
+      } catch (error) {
+        await client.disconnect(request.id).catch(() => undefined);
+        throw error;
+      }
+    }),
+
+  disconnectManaged: staffProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const employeeId = requireEmployeeId(ctx.employeeId);
+      const db = requireDb();
+      const [existing] = await db
+        .select()
+        .from(connectionAccount)
+        .where(
+          and(
+            eq(connectionAccount.connectionAccountId, input.id),
+            eq(connectionAccount.ownerEmployeeId, employeeId),
+            eq(connectionAccount.scope, "staff"),
+            sql`${connectionAccount.toolkit} like 'composio:%'`,
+          ),
+        )
+        .limit(1);
+      if (!existing?.externalConnectionId) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      await requireSystemComposio().disconnect(existing.externalConnectionId);
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(connectionAccount)
+          .where(eq(connectionAccount.connectionAccountId, existing.connectionAccountId));
+        await tx.insert(auditEvent).values({
+          actorEmployeeId: employeeId,
+          action: "connections.composio.disconnect",
+          entityType: "connection_account",
+          entityId: existing.connectionAccountId,
+          before: { toolkit: existing.toolkit, status: existing.status },
+          after: { status: "disconnected" },
+        });
+      });
+      return { ok: true as const };
+    }),
 
   saveGoogleWorkspace: staffProcedure
     .input(

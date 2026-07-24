@@ -9,6 +9,7 @@ export {
   createComposioLive,
   ComposioApiError,
   type ComposioConnectedAccount,
+  type ComposioManagedToolkit,
   type ComposioLiveClient,
 } from "./composio/live";
 export {

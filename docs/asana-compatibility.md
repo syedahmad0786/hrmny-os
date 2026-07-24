@@ -22,7 +22,7 @@ The connection audit found one connected account in the hrmny application:
 
 - Google Workspace — `developer@hrmny.co`
 
-It did not contain a Composio project key or a separately stored Asana account, so the claimed external Asana connection could not be verified from the application during the audit. A live Composio transport, Asana identity/workspace verification, read-only scan, and confirmed idempotent import are now implemented. The Composio project key must be saved in Connections (or supplied as `COMPOSIO_API_KEY`) before the application can observe the external account. Incremental sync remains disabled.
+It did not contain a Composio project key or a separately stored Asana account, so the claimed external Asana connection could not be verified from the application during the audit. A live Composio transport, Asana identity/workspace verification, read-only scan, and confirmed idempotent import are now implemented. The server-side `COMPOSIO_API_KEY` must be configured before the application can observe the external account. Incremental sync remains disabled.
 
 ## Compatibility map
 

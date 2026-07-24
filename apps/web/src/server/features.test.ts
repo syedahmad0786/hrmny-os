@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { FEATURE_BY_KEY, FEATURE_CATALOG } from "@/features/catalog";
+import {
+  FEATURE_BY_KEY,
+  FEATURE_CATALOG,
+  featureForPathname,
+  featureForTrpcPath,
+} from "@/features/catalog";
 import { resolveFeature, type FeatureOverride } from "./features";
 
 function override(
@@ -53,5 +58,10 @@ describe("Feature Lab resolution", () => {
     expect(new Set(FEATURE_CATALOG.map((item) => item.key)).size).toBe(
       FEATURE_CATALOG.length,
     );
+  });
+
+  it("gates client preview at both the page and API boundary", () => {
+    expect(featureForPathname("/client-preview")).toBe("portal.client");
+    expect(featureForTrpcPath("clientPreview.workspace")).toBe("portal.client");
   });
 });

@@ -607,6 +607,7 @@ export const auditEvent = pgTable("audit_event", {
   actorEmployeeId: uuid("actor_employee_id").references(
     () => employee.employeeId,
   ),
+  actorPortalUserId: uuid("actor_portal_user_id"),
   action: text("action").notNull(),
   entityType: text("entity_type").notNull(),
   entityId: uuid("entity_id"),

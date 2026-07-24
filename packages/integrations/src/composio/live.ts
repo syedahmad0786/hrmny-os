@@ -1,3 +1,4 @@
+import { Composio } from "@composio/core";
 import { z } from "zod";
 
 const connectedAccountSchema = z
@@ -30,6 +31,13 @@ const proxyResponseSchema = z
 
 export type ComposioConnectedAccount = z.infer<typeof connectedAccountSchema>;
 
+export type ComposioManagedToolkit = {
+  name: string;
+  slug: string;
+  description: string | null;
+  logo: string | null;
+};
+
 export class ComposioApiError extends Error {
   constructor(
     message: string,
@@ -41,6 +49,13 @@ export class ComposioApiError extends Error {
 }
 
 export type ComposioLiveClient = {
+  listManagedToolkits(): Promise<ComposioManagedToolkit[]>;
+  authorize(userId: string, toolkitSlug: string): Promise<{
+    id: string;
+    redirectUrl: string;
+  }>;
+  listUserConnectedAccounts(userId: string): Promise<ComposioConnectedAccount[]>;
+  disconnect(connectedAccountId: string): Promise<void>;
   listConnectedAccounts(input?: {
     toolkit?: string;
     statuses?: readonly string[];
@@ -70,6 +85,7 @@ export function createComposioLive(input: {
     input.baseUrl ?? "https://backend.composio.dev/api/v3.1"
   ).replace(/\/$/, "");
   const fetchImpl = input.fetchImpl ?? fetch;
+  const sdk = new Composio({ apiKey });
 
   async function request(path: string, init?: RequestInit) {
     const response = await fetchImpl(`${baseUrl}${path}`, {
@@ -93,6 +109,64 @@ export function createComposioLive(input: {
   }
 
   return {
+    async listManagedToolkits() {
+      const toolkits = await sdk.toolkits.get({
+        managedBy: "composio",
+        sortBy: "alphabetically",
+        limit: 1000,
+      });
+      return toolkits
+        .filter((toolkit) => toolkit.composioManagedAuthSchemes?.length)
+        .map((toolkit) => ({
+          name: toolkit.name,
+          slug: toolkit.slug,
+          description: toolkit.meta.description ?? null,
+          logo: toolkit.meta.logo ?? null,
+        }));
+    },
+
+    async authorize(userId, toolkitSlug) {
+      const request = await sdk.toolkits.authorize(userId, toolkitSlug);
+      if (!request.redirectUrl) {
+        throw new Error("Composio did not return an authorization URL");
+      }
+      return {
+        id: request.id,
+        redirectUrl: request.redirectUrl,
+      };
+    },
+
+    async listUserConnectedAccounts(userId) {
+      const accounts: ComposioConnectedAccount[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await sdk.connectedAccounts.list({
+          userIds: [userId],
+          accountType: "ALL",
+          cursor,
+          limit: 100,
+        });
+        accounts.push(
+          ...page.items.map((account) => ({
+            id: account.id,
+            status: account.status,
+            toolkit: account.toolkit,
+            user_id: userId,
+            created_at: account.createdAt,
+            updated_at: account.updatedAt,
+            is_disabled: account.isDisabled,
+            status_reason: account.statusReason,
+          })),
+        );
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      return accounts;
+    },
+
+    async disconnect(connectedAccountId) {
+      await sdk.connectedAccounts.delete(connectedAccountId);
+    },
+
     async listConnectedAccounts(filters = {}) {
       const items: ComposioConnectedAccount[] = [];
       let cursor: string | undefined;

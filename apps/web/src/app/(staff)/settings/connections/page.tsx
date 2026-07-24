@@ -27,6 +27,25 @@ export default function ConnectionsPage() {
   const disconnect = trpc.connections.disconnect.useMutation({
     onSuccess: () => void utils.connections.list.invalidate(),
   });
+  const [toolSearch, setToolSearch] = useState("");
+  const [toolPage, setToolPage] = useState(1);
+  const managedToolkits = trpc.connections.managedToolkits.useQuery(
+    { search: toolSearch, page: toolPage, pageSize: 12 },
+    { retry: false },
+  );
+  const managedAccounts = trpc.connections.managedAccounts.useQuery(undefined, {
+    retry: false,
+    refetchInterval: 3_000,
+  });
+  const authorizeManaged = trpc.connections.authorizeManaged.useMutation({
+    onSuccess: (result) => {
+      setRedirect(result.redirectUrl);
+      void utils.connections.managedAccounts.invalidate();
+    },
+  });
+  const disconnectManaged = trpc.connections.disconnectManaged.useMutation({
+    onSuccess: () => void utils.connections.managedAccounts.invalidate(),
+  });
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [redirect, setRedirect] = useState<string | null>(null);
 
@@ -57,11 +76,19 @@ export default function ConnectionsPage() {
       <div>
         <h1 className="font-display text-3xl font-semibold">Connections</h1>
         <p className="mt-2 text-muted">
-          Connect, replace, or remove tools here. API keys are encrypted in
-          Supabase Vault and are never returned to the browser.
+          Business credentials stay encrypted in Supabase Vault. Personal tools
+          use Composio-hosted authorization and are never exposed to the browser.
         </p>
       </div>
 
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
+          Direct business connections
+        </p>
+        <p className="mt-1 text-sm text-muted">
+          Workspace and business API keys managed directly by hrmny OS.
+        </p>
+      </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {(list.data ?? []).map((item) => {
           const verifiedAsana =
@@ -133,7 +160,7 @@ export default function ConnectionsPage() {
                     onClick={() => {
                       saveKey.mutate({
                         toolkit: item.toolkit as
-                          "apollo" | "hunter" | "bayzat" | "composio",
+                          "apollo" | "hunter" | "bayzat",
                         apiKey: keys[item.toolkit]!,
                       });
                       setKeys((current) => ({
@@ -188,6 +215,109 @@ export default function ConnectionsPage() {
         })}
       </div>
 
+      <section className="rounded-xl border border-sand bg-white/70 p-5">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
+              Personal tools via Composio
+            </p>
+            <h2 className="mt-1 font-display text-2xl text-ink">
+              Connect your own apps
+            </h2>
+            <p className="mt-1 text-sm text-muted">
+              Connect, verify, or disconnect only. hrmny OS will not read or act in
+              these tools from this screen.
+            </p>
+          </div>
+          <input
+            className="w-full rounded border border-sand bg-white px-3 py-2 text-sm sm:w-72"
+            type="search"
+            placeholder="Search tools"
+            value={toolSearch}
+            onChange={(event) => {
+              setToolSearch(event.target.value);
+              setToolPage(1);
+            }}
+          />
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {(managedToolkits.data?.items ?? []).map((toolkit) => {
+            const account = managedAccounts.data?.find(
+              (candidate) => candidate.toolkit === toolkit.slug,
+            );
+            return (
+              <div key={toolkit.slug} className="rounded-lg border border-sand p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-medium text-ink">{toolkit.name}</h3>
+                    <p className="mt-1 line-clamp-2 text-xs text-muted">
+                      {toolkit.description ?? toolkit.slug}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-cream px-2 py-1 text-[10px] font-semibold uppercase text-muted">
+                    {account?.status.toLowerCase() ?? "available"}
+                  </span>
+                </div>
+                {account ? (
+                  <Button
+                    className="mt-4"
+                    type="button"
+                    variant="ghost"
+                    disabled={disconnectManaged.isPending}
+                    onClick={() =>
+                      disconnectManaged.mutate({ id: account.connectionAccountId })
+                    }
+                  >
+                    Disconnect
+                  </Button>
+                ) : (
+                  <Button
+                    className="mt-4"
+                    type="button"
+                    variant="ghost"
+                    disabled={authorizeManaged.isPending}
+                    onClick={() =>
+                      authorizeManaged.mutate({ toolkit: toolkit.slug })
+                    }
+                  >
+                    Connect
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {managedToolkits.isLoading ? (
+          <p className="mt-4 text-sm text-muted">Loading available tools…</p>
+        ) : managedToolkits.data?.items.length === 0 ? (
+          <p className="mt-4 text-sm text-muted">No managed tools match that search.</p>
+        ) : null}
+
+        <div className="mt-5 flex items-center justify-between gap-3 text-sm">
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={toolPage <= 1}
+            onClick={() => setToolPage((current) => current - 1)}
+          >
+            Previous
+          </Button>
+          <span className="text-muted">
+            Page {managedToolkits.data?.page ?? toolPage} of {managedToolkits.data?.pageCount ?? 1}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={toolPage >= (managedToolkits.data?.pageCount ?? 1)}
+            onClick={() => setToolPage((current) => current + 1)}
+          >
+            Next
+          </Button>
+        </div>
+      </section>
+
       {redirect ? (
         <p className="rounded-lg border border-sand bg-white/70 p-4 text-sm">
           Authorization ready:{" "}
@@ -199,14 +329,22 @@ export default function ConnectionsPage() {
       {saveKey.error ||
       disconnect.error ||
       startOAuth.error ||
-      asanaStatus.error ? (
+      asanaStatus.error ||
+      managedToolkits.error ||
+      managedAccounts.error ||
+      authorizeManaged.error ||
+      disconnectManaged.error ? (
         <p className="text-sm text-red-700">
           {
             (
               saveKey.error ??
               disconnect.error ??
               startOAuth.error ??
-              asanaStatus.error
+              asanaStatus.error ??
+              managedToolkits.error ??
+              managedAccounts.error ??
+              authorizeManaged.error ??
+              disconnectManaged.error
             )?.message
           }
         </p>

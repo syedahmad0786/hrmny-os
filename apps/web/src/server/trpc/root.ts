@@ -16,7 +16,6 @@ import { randomUUID } from "node:crypto";
 import { bootstrapGateRegistry } from "@hrmny/gate";
 import { getDemoStore } from "../demo-store";
 import { getDb } from "../db";
-import { getBuildStatus } from "../build-status";
 import { DEV_USERS, getAuthMode } from "../auth/session";
 import {
   emitHealthSignal,
@@ -63,6 +62,8 @@ import { featureLabRouter } from "./feature-lab-router";
 import { listFeatureOverrides, resolveFeatureCatalog } from "../features";
 import { workManagementRouter } from "./work-management-router";
 import { asanaMigrationRouter } from "./asana-migration-router";
+import { clientPreviewRouter } from "./client-preview-router";
+import { opsRouter } from "./ops-router";
 import {
   briefsRouter as m4BriefsRouter,
   calendarsRouter as m4CalendarsRouter,
@@ -723,10 +724,6 @@ export const vatRouter = m5VatRouter;
 
 export const portalRouter = m6PortalRouter;
 
-export const opsRouter = router({
-  buildStatus: publicProcedure.query(() => getBuildStatus()),
-});
-
 export const appRouter = router({
   auth: authRouter,
   admin: adminRouter,
@@ -744,6 +741,7 @@ export const appRouter = router({
   digitalCards: digitalCardsRouter,
   work: workManagementRouter,
   asanaMigration: asanaMigrationRouter,
+  clientPreview: clientPreviewRouter,
   assets: assetsRouter,
   /** Legacy M3 demo-store deals (gates, BUAF, HITL). Prefer `crm.*` for durable CRM. */
   deals: dealsRouter,
