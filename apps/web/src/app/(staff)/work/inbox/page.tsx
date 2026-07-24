@@ -6,8 +6,18 @@ import { trpc } from "@/lib/trpc";
 
 export default function WorkInboxPage() {
   const utils = trpc.useUtils();
+  const session = trpc.auth.session.useQuery();
+  const filtersEnabled = new Set(session.data?.enabledFeatureKeys ?? []).has(
+    "work.inbox.message_status_filters",
+  );
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const inbox = trpc.work.personal.inbox.useQuery({ unreadOnly });
+  const [kinds, setKinds] = useState<
+    Array<"tasks" | "messages" | "status_updates">
+  >(["tasks", "messages", "status_updates"]);
+  const inbox = trpc.work.personal.inbox.useQuery({
+    unreadOnly,
+    kinds: filtersEnabled ? kinds : undefined,
+  });
   const mark = trpc.work.personal.markNotification.useMutation({
     onSuccess: () => utils.work.personal.inbox.invalidate(),
   });
@@ -26,14 +36,35 @@ export default function WorkInboxPage() {
             access.
           </p>
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={unreadOnly}
-            onChange={(event) => setUnreadOnly(event.target.checked)}
-          />
-          Unread only
-        </label>
+        <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
+          {filtersEnabled
+            ? (["tasks", "messages", "status_updates"] as const).map((kind) => (
+                <label key={kind} className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={kinds.includes(kind)}
+                    onChange={(event) =>
+                      setKinds((current) => {
+                        const next = event.target.checked
+                          ? [...new Set([...current, kind])]
+                          : current.filter((value) => value !== kind);
+                        return next.length ? next : current;
+                      })
+                    }
+                  />
+                  {kind.replaceAll("_", " ")}
+                </label>
+              ))
+            : null}
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={unreadOnly}
+              onChange={(event) => setUnreadOnly(event.target.checked)}
+            />
+            Unread only
+          </label>
+        </div>
       </header>
       <section className="overflow-hidden rounded-xl border border-sand bg-white/70">
         {(inbox.data ?? []).map((notification) => (

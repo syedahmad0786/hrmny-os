@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { WorkNav } from "@/components/work-nav";
+import { WorkLikeButton } from "@/components/work-like-button";
 
 type View = "list" | "board" | "calendar" | "timeline" | "files";
 
@@ -891,6 +892,12 @@ export default function WorkPage() {
                   <p className="mt-1 text-xs text-muted">
                     {detail.data?.project.name}
                   </p>
+                  <div className="mt-2">
+                    <WorkLikeButton
+                      targetType="item"
+                      targetId={selectedItem.itemId}
+                    />
+                  </div>
                 </div>
               </div>
               <button
@@ -1365,19 +1372,25 @@ export default function WorkPage() {
                       >
                         📎 {attachment.name}
                       </button>
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          aria-label={`Remove ${attachment.name}`}
-                          onClick={() =>
-                            removeAttachment.mutate({
-                              attachmentId: attachment.attachmentId,
-                            })
-                          }
-                        >
-                          ×
-                        </button>
-                      ) : null}
+                      <div className="flex items-center gap-2">
+                        <WorkLikeButton
+                          targetType="attachment"
+                          targetId={attachment.attachmentId}
+                        />
+                        {canEdit ? (
+                          <button
+                            type="button"
+                            aria-label={`Remove ${attachment.name}`}
+                            onClick={() =>
+                              removeAttachment.mutate({
+                                attachmentId: attachment.attachmentId,
+                              })
+                            }
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1581,6 +1594,12 @@ export default function WorkPage() {
                       <p className="mt-2 whitespace-pre-wrap text-sm">
                         {entry.body}
                       </p>
+                      <div className="mt-2">
+                        <WorkLikeButton
+                          targetType="comment"
+                          targetId={entry.commentId}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>

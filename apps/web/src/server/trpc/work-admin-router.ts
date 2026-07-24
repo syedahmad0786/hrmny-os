@@ -76,6 +76,7 @@ type DemoTeam = {
   name: string;
   description: string;
   privacy: "public" | "request" | "private";
+  messageSendPermission: "admins" | "members";
   members: Map<string, "admin" | "member">;
   projectIds: Set<string>;
   createdAt: string;
@@ -152,6 +153,10 @@ const WORK_EXPORT_TABLES = [
   "work_team",
   "work_team_member",
   "work_team_project",
+  "work_message",
+  "work_message_comment",
+  "work_message_follower",
+  "work_like",
   "work_project",
   "work_project_member",
   "work_project_guest",
@@ -283,6 +288,7 @@ export const workAdminRouter = router({
           name: team.name,
           description: team.description,
           privacy: team.privacy,
+          messageSendPermission: team.messageSendPermission,
           createdAt: team.createdAt,
           members: [...team.members].map(([employeeId, role]) => ({
             employeeId,
@@ -306,9 +312,11 @@ export const workAdminRouter = router({
           name: string;
           description: string;
           privacy: "public" | "request" | "private";
+          messageSendPermission: "admins" | "members";
           createdAt: Date | string;
         }>(sql`
           select work_team_id as "teamId", name, description, privacy,
+            message_send_permission as "messageSendPermission",
             created_at as "createdAt"
           from public.work_team where archived_at is null order by lower(name)
         `),
@@ -365,6 +373,7 @@ export const workAdminRouter = router({
           name: string;
           description: string;
           privacy: "public" | "request" | "private";
+          messageSendPermission: "admins" | "members";
           createdAt: string;
         };
         if (!db) {
@@ -373,6 +382,7 @@ export const workAdminRouter = router({
             name: input.name,
             description: input.description,
             privacy,
+            messageSendPermission: "members",
             createdAt: new Date().toISOString(),
           };
           demoTeams.set(team.teamId, {
@@ -387,12 +397,14 @@ export const workAdminRouter = router({
               name: string;
               description: string;
               privacy: "public" | "request" | "private";
+              messageSendPermission: "admins" | "members";
               createdAt: Date | string;
             }>(sql`
               insert into public.work_team (
                 name, description, privacy, created_by_employee_id
               ) values (${input.name}, ${input.description}, ${privacy}, ${employeeId}::uuid)
               returning work_team_id as "teamId", name, description, privacy,
+                message_send_permission as "messageSendPermission",
                 created_at as "createdAt"
             `);
             const created = rows[0]!;
@@ -411,6 +423,39 @@ export const workAdminRouter = router({
           privacy: team.privacy,
         });
         return team;
+      }),
+
+    setMessagePermission: workAdminProcedure
+      .input(
+        z.object({
+          teamId: uuid,
+          permission: z.enum(["admins", "members"]),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx.employeeId);
+        const db = getDb();
+        if (!db) {
+          const team = demoTeams.get(input.teamId);
+          if (!team) throw new TRPCError({ code: "NOT_FOUND" });
+          team.messageSendPermission = input.permission;
+        } else {
+          const rows = await db.execute(sql`
+            update public.work_team
+            set message_send_permission = ${input.permission}, updated_at = now()
+            where work_team_id = ${input.teamId}::uuid and archived_at is null
+            returning work_team_id
+          `);
+          if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        await audit(
+          employeeId,
+          "work.team.messagePermission.set",
+          "work_team",
+          input.teamId,
+          { permission: input.permission },
+        );
+        return { ok: true as const };
       }),
 
     update: workAdminProcedure
