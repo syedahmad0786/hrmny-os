@@ -17,6 +17,43 @@ CREATE TABLE IF NOT EXISTS public.work_project (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Upgrade the earlier delivery work_project table in place. Production already
+-- has that table, while fresh databases use the definition above.
+ALTER TABLE public.work_project
+  ADD COLUMN IF NOT EXISTS color text NOT NULL DEFAULT '#C7702E'
+    CHECK (color ~ '^#[0-9A-Fa-f]{6}$'),
+  ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'organization'
+    CHECK (privacy IN ('organization', 'private')),
+  ADD COLUMN IF NOT EXISTS owner_employee_id uuid
+    REFERENCES public.employee(employee_id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS source_platform text NOT NULL DEFAULT 'native'
+    CHECK (source_platform IN ('native', 'asana')),
+  ADD COLUMN IF NOT EXISTS external_id text,
+  ADD COLUMN IF NOT EXISTS archived_at timestamptz;
+
+UPDATE public.work_project
+SET description = ''
+WHERE description IS NULL;
+
+ALTER TABLE public.work_project
+  ALTER COLUMN description SET DEFAULT '',
+  ALTER COLUMN description SET NOT NULL;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'work_project'
+      AND column_name = 'code'
+  ) THEN
+    ALTER TABLE public.work_project
+      ALTER COLUMN code SET DEFAULT
+        ('work-' || substr(gen_random_uuid()::text, 1, 8));
+  END IF;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS work_project_source_external_uniq
   ON public.work_project (source_platform, external_id)
   WHERE external_id IS NOT NULL;
