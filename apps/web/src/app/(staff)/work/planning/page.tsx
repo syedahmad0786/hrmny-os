@@ -9,7 +9,10 @@ import {
   type WorkMentionOption,
 } from "@/components/work-rich-text";
 import { trpc } from "@/lib/trpc";
-import { countReportBuckets } from "@/server/work-planning";
+import {
+  countReportBuckets,
+  matchesMetadataReportFilters,
+} from "@/server/work-planning";
 
 type ReportType = "tasks" | "projects" | "goals" | "portfolios";
 type MetadataGroup =
@@ -24,6 +27,8 @@ type MetadataGroup =
   | "portfolio_health"
   | "portfolio_owner"
   | "portfolio_privacy";
+type ReportHealth = "on_track" | "at_risk" | "off_track" | "complete";
+type GoalStatus = "on_track" | "at_risk" | "off_track" | "achieved" | "dropped";
 
 const metadataGroups: Record<
   Exclude<ReportType, "tasks">,
@@ -47,19 +52,87 @@ const metadataGroups: Record<
     { value: "portfolio_privacy", label: "Privacy" },
   ],
 };
+const healthOptions = [
+  { value: "on_track", label: "On track" },
+  { value: "at_risk", label: "At risk" },
+  { value: "off_track", label: "Off track" },
+  { value: "complete", label: "Complete" },
+];
+const privacyOptions = [
+  { value: "organization", label: "Organization" },
+  { value: "private", label: "Private" },
+];
+
+function ReportFilterSelect({
+  label,
+  allLabel,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  allLabel: string;
+  value: string;
+  options: readonly { value: string; label: string }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-xs text-muted">
+      {label}
+      <select
+        className="rounded border border-sand px-3 py-2 text-sm text-ink"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">{allLabel}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 function readable(value: string) {
   const text = value.replaceAll("_", " ");
   return `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
 }
 
+function goalTimePeriod(dueDate: string | null) {
+  if (!dueDate) return "No time period";
+  const date = new Date(`${dueDate}T00:00:00Z`);
+  return `Q${Math.floor(date.getUTCMonth() / 3) + 1} ${date.getUTCFullYear()}`;
+}
+
+function reportOwners(
+  rows: readonly {
+    ownerEmployeeId: string | null;
+    ownerName?: string | null;
+  }[],
+) {
+  return [
+    ...new Map(
+      rows.flatMap((row) =>
+        row.ownerEmployeeId
+          ? [[row.ownerEmployeeId, row.ownerName ?? "Member"] as const]
+          : [],
+      ),
+    ),
+  ]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function availableMetadataGroups(
   reportType: Exclude<ReportType, "tasks">,
   statusEnabled: boolean,
 ) {
-  return reportType === "projects" && !statusEnabled
-    ? metadataGroups.projects.filter(
-        (option) => option.value !== "project_health",
+  return !statusEnabled &&
+    (reportType === "projects" || reportType === "portfolios")
+    ? metadataGroups[reportType].filter(
+        (option) => !option.value.endsWith("_health"),
       )
     : metadataGroups[reportType];
 }
@@ -91,6 +164,24 @@ export default function PlanningPage() {
   const [chartReportType, setChartReportType] = useState<ReportType>("tasks");
   const [metadataGroup, setMetadataGroup] =
     useState<MetadataGroup>("project_health");
+  const [projectFilters, setProjectFilters] = useState({
+    ownerEmployeeId: "",
+    status: "" as "" | ReportHealth,
+    privacy: "" as "" | "organization" | "private",
+    sourcePlatform: "" as "" | "native" | "asana",
+  });
+  const [goalFilters, setGoalFilters] = useState({
+    ownerEmployeeId: "",
+    status: "" as "" | GoalStatus,
+    scope: "" as "" | "company" | "team" | "individual",
+    timePeriod: "",
+    includeSubgoals: true,
+  });
+  const [portfolioFilters, setPortfolioFilters] = useState({
+    ownerEmployeeId: "",
+    status: "" as "" | ReportHealth,
+    privacy: "" as "" | "organization" | "private",
+  });
   const employees = trpc.work.members.listEmployees.useQuery({
     projectId: projectId || undefined,
   });
@@ -153,6 +244,14 @@ export default function PlanningPage() {
   const timeEnabled = enabled.has("work.time_tracking");
   const ganttEnabled = enabled.has("work.views.gantt");
   const richTextEnabled = enabled.has("work.rich_text");
+  useEffect(() => {
+    if (!statusEnabled) {
+      if (projectFilters.status)
+        setProjectFilters((current) => ({ ...current, status: "" }));
+      if (portfolioFilters.status)
+        setPortfolioFilters((current) => ({ ...current, status: "" }));
+    }
+  }, [portfolioFilters.status, projectFilters.status, statusEnabled]);
   const goals = trpc.work.goals.list.useQuery(undefined, {
     enabled: goalsEnabled,
   });
@@ -268,7 +367,16 @@ export default function PlanningPage() {
       );
       const scoped = (projects.data ?? []).filter(
         (project) =>
-          !portfolio || portfolio.projectIds.includes(project.projectId),
+          (!portfolio || portfolio.projectIds.includes(project.projectId)) &&
+          matchesMetadataReportFilters(
+            {
+              ownerEmployeeId: project.ownerEmployeeId,
+              status: project.health,
+              privacy: project.privacy,
+              sourcePlatform: project.sourcePlatform,
+            },
+            projectFilters,
+          ),
       );
       return countReportBuckets(
         scoped.map((project) =>
@@ -286,31 +394,56 @@ export default function PlanningPage() {
     }
     if (chartReportType === "goals")
       return countReportBuckets(
-        (goals.data ?? []).map((goal) => {
-          if (metadataGroup === "goal_status") return readable(goal.status);
-          if (metadataGroup === "goal_owner")
-            return goal.ownerName ?? "Unassigned";
-          if (metadataGroup === "goal_scope") return readable(goal.scope);
-          if (!goal.dueDate) return "No time period";
-          const date = new Date(`${goal.dueDate}T00:00:00Z`);
-          return `Q${Math.floor(date.getUTCMonth() / 3) + 1} ${date.getUTCFullYear()}`;
-        }),
+        (goals.data ?? [])
+          .filter((goal) =>
+            matchesMetadataReportFilters(
+              {
+                ownerEmployeeId: goal.ownerEmployeeId,
+                status: goal.status,
+                scope: goal.scope,
+                timePeriod: goalTimePeriod(goal.dueDate),
+                parentId: goal.parentGoalId,
+              },
+              goalFilters,
+            ),
+          )
+          .map((goal) => {
+            if (metadataGroup === "goal_status") return readable(goal.status);
+            if (metadataGroup === "goal_owner")
+              return goal.ownerName ?? "Unassigned";
+            if (metadataGroup === "goal_scope") return readable(goal.scope);
+            return goalTimePeriod(goal.dueDate);
+          }),
       );
     return countReportBuckets(
-      (portfolios.data ?? []).map((portfolio) =>
-        metadataGroup === "portfolio_health"
-          ? readable(portfolio.health)
-          : metadataGroup === "portfolio_owner"
-            ? (portfolio.ownerName ?? "Unassigned")
-            : readable(portfolio.privacy),
-      ),
+      (portfolios.data ?? [])
+        .filter((portfolio) =>
+          matchesMetadataReportFilters(
+            {
+              ownerEmployeeId: portfolio.ownerEmployeeId,
+              status: portfolio.health,
+              privacy: portfolio.privacy,
+            },
+            portfolioFilters,
+          ),
+        )
+        .map((portfolio) =>
+          metadataGroup === "portfolio_health"
+            ? readable(portfolio.health)
+            : metadataGroup === "portfolio_owner"
+              ? (portfolio.ownerName ?? "Unassigned")
+              : readable(portfolio.privacy),
+        ),
     );
   }, [
     chartPortfolioId,
     chartReportType,
+    goalFilters,
     goals.data,
     metadataGroup,
+    portfolioFilters,
     portfolios.data,
+    projectFilters,
     projects.data,
   ]);
   const chartData =
@@ -491,6 +624,51 @@ export default function PlanningPage() {
       setChartPortfolioId(savedPortfolioId ?? "");
       setChartStyle(config.chartStyle as typeof chartStyle);
       setMetadataGroup(saved.groupBy as MetadataGroup);
+      const ownerEmployeeId =
+        typeof saved.ownerEmployeeId === "string" ? saved.ownerEmployeeId : "";
+      const health = ["on_track", "at_risk", "off_track", "complete"].includes(
+        String(saved.status),
+      )
+        ? (saved.status as ReportHealth)
+        : "";
+      const privacy = ["organization", "private"].includes(
+        String(saved.privacy),
+      )
+        ? (saved.privacy as "organization" | "private")
+        : "";
+      if (reportType === "projects") {
+        setProjectFilters({
+          ownerEmployeeId,
+          status: health,
+          privacy,
+          sourcePlatform: ["native", "asana"].includes(
+            String(saved.sourcePlatform),
+          )
+            ? (saved.sourcePlatform as "native" | "asana")
+            : "",
+        });
+      } else if (reportType === "goals") {
+        setGoalFilters({
+          ownerEmployeeId,
+          status: [
+            "on_track",
+            "at_risk",
+            "off_track",
+            "achieved",
+            "dropped",
+          ].includes(String(saved.status))
+            ? (saved.status as GoalStatus)
+            : "",
+          scope: ["company", "team", "individual"].includes(String(saved.scope))
+            ? (saved.scope as "company" | "team" | "individual")
+            : "",
+          timePeriod:
+            typeof saved.timePeriod === "string" ? saved.timePeriod : "",
+          includeSubgoals: saved.includeSubgoals !== false,
+        });
+      } else {
+        setPortfolioFilters({ ownerEmployeeId, status: health, privacy });
+      }
       return;
     }
     if (
@@ -690,7 +868,33 @@ export default function PlanningPage() {
                         ? { portfolioId: chartPortfolioId }
                         : {}),
                       chartStyle,
-                      spec: { groupBy: metadataGroup },
+                      spec: {
+                        groupBy: metadataGroup,
+                        ...(chartReportType === "projects"
+                          ? {
+                              ownerEmployeeId:
+                                projectFilters.ownerEmployeeId || null,
+                              status: projectFilters.status || null,
+                              privacy: projectFilters.privacy || null,
+                              sourcePlatform:
+                                projectFilters.sourcePlatform || null,
+                            }
+                          : chartReportType === "goals"
+                            ? {
+                                ownerEmployeeId:
+                                  goalFilters.ownerEmployeeId || null,
+                                status: goalFilters.status || null,
+                                scope: goalFilters.scope || null,
+                                timePeriod: goalFilters.timePeriod || null,
+                                includeSubgoals: goalFilters.includeSubgoals,
+                              }
+                            : {
+                                ownerEmployeeId:
+                                  portfolioFilters.ownerEmployeeId || null,
+                                status: portfolioFilters.status || null,
+                                privacy: portfolioFilters.privacy || null,
+                              }),
+                      },
                     },
                   });
                 else
@@ -897,6 +1101,185 @@ export default function PlanningPage() {
                     ))}
                   </select>
                 </label>
+              ) : null}
+              {chartReportType === "projects" ? (
+                <>
+                  <ReportFilterSelect
+                    label="Owner"
+                    allLabel="All owners"
+                    value={projectFilters.ownerEmployeeId}
+                    options={reportOwners(projects.data ?? [])}
+                    onChange={(ownerEmployeeId) =>
+                      setProjectFilters((current) => ({
+                        ...current,
+                        ownerEmployeeId,
+                      }))
+                    }
+                  />
+                  {statusEnabled ? (
+                    <ReportFilterSelect
+                      label="Health"
+                      allLabel="All health"
+                      value={projectFilters.status}
+                      options={healthOptions}
+                      onChange={(status) =>
+                        setProjectFilters((current) => ({
+                          ...current,
+                          status: status as "" | ReportHealth,
+                        }))
+                      }
+                    />
+                  ) : null}
+                  <ReportFilterSelect
+                    label="Privacy"
+                    allLabel="All privacy"
+                    value={projectFilters.privacy}
+                    options={privacyOptions}
+                    onChange={(privacy) =>
+                      setProjectFilters((current) => ({
+                        ...current,
+                        privacy: privacy as "" | "organization" | "private",
+                      }))
+                    }
+                  />
+                  <ReportFilterSelect
+                    label="Source"
+                    allLabel="All sources"
+                    value={projectFilters.sourcePlatform}
+                    options={[
+                      { value: "native", label: "hrmny" },
+                      { value: "asana", label: "Asana" },
+                    ]}
+                    onChange={(sourcePlatform) =>
+                      setProjectFilters((current) => ({
+                        ...current,
+                        sourcePlatform: sourcePlatform as
+                          "" | "native" | "asana",
+                      }))
+                    }
+                  />
+                </>
+              ) : chartReportType === "goals" ? (
+                <>
+                  <ReportFilterSelect
+                    label="Owner"
+                    allLabel="All owners"
+                    value={goalFilters.ownerEmployeeId}
+                    options={reportOwners(goals.data ?? [])}
+                    onChange={(ownerEmployeeId) =>
+                      setGoalFilters((current) => ({
+                        ...current,
+                        ownerEmployeeId,
+                      }))
+                    }
+                  />
+                  <ReportFilterSelect
+                    label="Status"
+                    allLabel="All statuses"
+                    value={goalFilters.status}
+                    options={[
+                      ...healthOptions.slice(0, 3),
+                      { value: "achieved", label: "Achieved" },
+                      { value: "dropped", label: "Dropped" },
+                    ]}
+                    onChange={(status) =>
+                      setGoalFilters((current) => ({
+                        ...current,
+                        status: status as "" | GoalStatus,
+                      }))
+                    }
+                  />
+                  <ReportFilterSelect
+                    label="Scope"
+                    allLabel="All goal types"
+                    value={goalFilters.scope}
+                    options={[
+                      { value: "company", label: "Company" },
+                      { value: "team", label: "Team" },
+                      { value: "individual", label: "Individual" },
+                    ]}
+                    onChange={(scope) =>
+                      setGoalFilters((current) => ({
+                        ...current,
+                        scope: scope as "" | "company" | "team" | "individual",
+                      }))
+                    }
+                  />
+                  <ReportFilterSelect
+                    label="Time period"
+                    allLabel="All time periods"
+                    value={goalFilters.timePeriod}
+                    options={[
+                      ...new Set(
+                        (goals.data ?? [])
+                          .map((goal) => goalTimePeriod(goal.dueDate))
+                          .filter((period) => period !== "No time period"),
+                      ),
+                    ]
+                      .sort()
+                      .map((period) => ({ value: period, label: period }))}
+                    onChange={(timePeriod) =>
+                      setGoalFilters((current) => ({
+                        ...current,
+                        timePeriod,
+                      }))
+                    }
+                  />
+                  <label className="flex items-end gap-2 pb-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={goalFilters.includeSubgoals}
+                      onChange={(event) =>
+                        setGoalFilters((current) => ({
+                          ...current,
+                          includeSubgoals: event.target.checked,
+                        }))
+                      }
+                    />
+                    Include sub-goals
+                  </label>
+                </>
+              ) : chartReportType === "portfolios" ? (
+                <>
+                  <ReportFilterSelect
+                    label="Owner"
+                    allLabel="All owners"
+                    value={portfolioFilters.ownerEmployeeId}
+                    options={reportOwners(portfolios.data ?? [])}
+                    onChange={(ownerEmployeeId) =>
+                      setPortfolioFilters((current) => ({
+                        ...current,
+                        ownerEmployeeId,
+                      }))
+                    }
+                  />
+                  {statusEnabled ? (
+                    <ReportFilterSelect
+                      label="Health"
+                      allLabel="All health"
+                      value={portfolioFilters.status}
+                      options={healthOptions}
+                      onChange={(status) =>
+                        setPortfolioFilters((current) => ({
+                          ...current,
+                          status: status as "" | ReportHealth,
+                        }))
+                      }
+                    />
+                  ) : null}
+                  <ReportFilterSelect
+                    label="Privacy"
+                    allLabel="All privacy"
+                    value={portfolioFilters.privacy}
+                    options={privacyOptions}
+                    onChange={(privacy) =>
+                      setPortfolioFilters((current) => ({
+                        ...current,
+                        privacy: privacy as "" | "organization" | "private",
+                      }))
+                    }
+                  />
+                </>
               ) : null}
               {chartReportType === "tasks" ? (
                 <>

@@ -5,6 +5,7 @@ import {
   capacityUtilization,
   countReportBuckets,
   criticalPath,
+  matchesMetadataReportFilters,
   splitTimerByUtcDay,
   weightedProgress,
 } from "./work-planning";
@@ -123,5 +124,26 @@ describe("work planning calculations", () => {
       ],
       total: 3,
     });
+    expect(
+      matchesMetadataReportFilters(
+        {
+          ownerEmployeeId: "owner",
+          status: "on_track",
+          privacy: "organization",
+          parentId: "parent",
+        },
+        { ownerEmployeeId: "owner", status: "on_track" },
+      ),
+    ).toBe(true);
+    expect(
+      matchesMetadataReportFilters(
+        {
+          ownerEmployeeId: "owner",
+          status: "on_track",
+          parentId: "parent",
+        },
+        { includeSubgoals: false },
+      ),
+    ).toBe(false);
   });
 });
