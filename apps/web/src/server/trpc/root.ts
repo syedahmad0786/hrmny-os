@@ -50,6 +50,15 @@ import { ticketsRouter } from "./tickets-router";
 import { automationRouter } from "./automation-router";
 import { connectionsRouter } from "./connections-router";
 import { featureRequestsRouter } from "./feature-requests-router";
+import { coreHrRouter } from "./core-hr-router";
+import { hrOperationsRouter } from "./hr-operations-router";
+import { talentRouter } from "./talent-router";
+import { payrollV2Router } from "./payroll-v2-router";
+import { workplaceRouter } from "./workplace-router";
+import { shiftsTimesheetsRouter } from "./shifts-timesheets-router";
+import { benefitsReportingRouter } from "./benefits-reporting-router";
+import { aiCustomAppsRouter } from "./ai-custom-apps-router";
+import { digitalCardsRouter } from "./digital-cards-router";
 import {
   briefsRouter as m4BriefsRouter,
   calendarsRouter as m4CalendarsRouter,
@@ -707,6 +716,15 @@ export const appRouter = router({
   conventions: conventionsRouter,
   connections: connectionsRouter,
   featureRequests: featureRequestsRouter,
+  coreHr: coreHrRouter,
+  hrOperations: hrOperationsRouter,
+  talent: talentRouter,
+  workforcePayroll: payrollV2Router,
+  workplace: workplaceRouter,
+  shiftsTimesheets: shiftsTimesheetsRouter,
+  benefits: benefitsReportingRouter,
+  aiCustomApps: aiCustomAppsRouter,
+  digitalCards: digitalCardsRouter,
   assets: assetsRouter,
   /** Legacy M3 demo-store deals (gates, BUAF, HITL). Prefer `crm.*` for durable CRM. */
   deals: dealsRouter,

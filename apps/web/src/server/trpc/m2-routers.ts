@@ -1,23 +1,33 @@
 import { randomUUID } from "node:crypto";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import {
-  InvoiceProposeSchema,
-  type InvoiceProposePayload,
-} from "@hrmny/ai";
+import { InvoiceProposeSchema, type InvoiceProposePayload } from "@hrmny/ai";
 import {
   bootstrapGateRegistry,
   transition,
   type ActorContext,
   type EntitySnapshot,
 } from "@hrmny/gate";
-import {
-  DEMO_EMPLOYEE_ID,
-  getDemoStore,
-  vatOnAmount,
-} from "../demo-store";
+import { DEMO_EMPLOYEE_ID, getDemoStore, vatOnAmount } from "../demo-store";
 import { protectedProcedure, router } from "./trpc";
 
 bootstrapGateRegistry();
+
+const HR_ADMIN_ROLES = ["partner", "director", "hr"] as const;
+const PAYROLL_VIEW_ROLES = ["partner", "director", "finance", "hr"] as const;
+
+function requireAnyRole(
+  roles: string[],
+  allowed: readonly string[],
+  operation: string,
+) {
+  if (!roles.some((role) => allowed.includes(role))) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Not authorized to ${operation}`,
+    });
+  }
+}
 
 function actorFromCtx(ctx: {
   employeeId: string | null;
@@ -37,7 +47,11 @@ async function runTransition(
   state: string,
   data: Record<string, unknown>,
   input: { to: string; from?: string; payload?: Record<string, unknown> },
-  ctx: { employeeId: string | null; roles: string[]; user: { permissions: string[] } | null },
+  ctx: {
+    employeeId: string | null;
+    roles: string[];
+    user: { permissions: string[] } | null;
+  },
   apply: (to: string, payload?: Record<string, unknown>) => void,
 ) {
   const store = getDemoStore();
@@ -49,7 +63,11 @@ async function runTransition(
       ),
     apply: async ({ request }) => {
       apply(request.to, request.payload);
-      return { ...entity, state: request.to, data: { ...data, ...request.payload } };
+      return {
+        ...entity,
+        state: request.to,
+        data: { ...data, ...request.payload },
+      };
     },
     audit: async (event) => {
       const row = store.appendAudit({
@@ -149,13 +167,10 @@ export const invoicesRouter = router({
       const merged = {
         ...base,
         ...input.edits,
-        trn:
-          input.edits?.trn !== undefined
-            ? input.edits.trn
-            : base.trn,
+        trn: input.edits?.trn !== undefined ? input.edits.trn : base.trn,
         trnStatus:
-          (input.edits?.trn === null ||
-            (input.edits?.trn === undefined && base.trnStatus === "unknown_held"))
+          input.edits?.trn === null ||
+          (input.edits?.trn === undefined && base.trnStatus === "unknown_held")
             ? ("unknown_held" as const)
             : ("known" as const),
       };
@@ -186,7 +201,8 @@ export const invoicesRouter = router({
         createdAt: new Date().toISOString(),
       };
       store.invoices.set(invoiceId, invoice);
-      proposal.status = input.decision === "edit_approve" ? "edited" : "approved";
+      proposal.status =
+        input.decision === "edit_approve" ? "edited" : "approved";
       proposal.invoiceId = invoiceId;
       proposal.payload = { ...merged };
       store.appendAudit({
@@ -216,7 +232,9 @@ export const invoicesRouter = router({
       const store = getDemoStore();
       const client = store.clients.get(input.clientId);
       if (!client) throw new Error("NOT_FOUND");
-      const amountNum = Number(input.amount ?? client.fee ?? client.contractValue);
+      const amountNum = Number(
+        input.amount ?? client.fee ?? client.contractValue,
+      );
       const invoiceId = randomUUID();
       const invoice = {
         invoiceId,
@@ -445,7 +463,10 @@ export const employeesRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => {
+    .query(({ input, ctx }) => {
+      if (input.id !== ctx.employeeId) {
+        requireAnyRole(ctx.roles, HR_ADMIN_ROLES, "view another employee");
+      }
       const store = getDemoStore();
       const emp = store.employees.get(input.id);
       if (!emp) return null;
@@ -459,6 +480,7 @@ export const employeesRouter = router({
   acceptOffer: protectedProcedure
     .input(z.object({ id: z.string().uuid().default(DEMO_EMPLOYEE_ID) }))
     .mutation(async ({ input, ctx }) => {
+      requireAnyRole(ctx.roles, HR_ADMIN_ROLES, "accept employee offers");
       const store = getDemoStore();
       const emp = store.employees.get(input.id);
       if (!emp) throw new Error("NOT_FOUND");
@@ -498,6 +520,7 @@ export const employeesRouter = router({
         }),
       )
       .mutation(async ({ input, ctx }) => {
+        requireAnyRole(ctx.roles, HR_ADMIN_ROLES, "change employee lifecycle");
         const store = getDemoStore();
         const emp = store.employees.get(input.id);
         if (!emp) throw new Error("NOT_FOUND");
@@ -524,6 +547,7 @@ export const employeesRouter = router({
 
   /** Job stub: escalate overdue probation / lifecycle misses. */
   runEscalationJob: protectedProcedure.mutation(({ ctx }) => {
+    requireAnyRole(ctx.roles, HR_ADMIN_ROLES, "run HR escalations");
     const store = getDemoStore();
     const now = Date.now();
     const fired: unknown[] = [];
@@ -532,9 +556,7 @@ export const employeesRouter = router({
         emp.lifecycleStatus === "probation" ||
         (emp.lifecycleStatus === "hire_packet" && emp.probationDueAt)
       ) {
-        const due = emp.probationDueAt
-          ? Date.parse(emp.probationDueAt)
-          : null;
+        const due = emp.probationDueAt ? Date.parse(emp.probationDueAt) : null;
         if (due !== null && due < now && !emp.escalatedAt) {
           emp.escalatedAt = new Date().toISOString();
           const esc = store.pushEscalation(
@@ -558,11 +580,15 @@ export const employeesRouter = router({
     return { fired, count: fired.length };
   }),
 
-  escalations: protectedProcedure.query(() => getDemoStore().escalations),
+  escalations: protectedProcedure.query(({ ctx }) => {
+    requireAnyRole(ctx.roles, HR_ADMIN_ROLES, "view HR escalations");
+    return getDemoStore().escalations;
+  }),
 
   importBayzatCsv: protectedProcedure
     .input(z.object({ csvText: z.string().min(1) }))
     .mutation(async ({ input, ctx }) => {
+      requireAnyRole(ctx.roles, HR_ADMIN_ROLES, "import employee records");
       const store = getDemoStore();
       const rows = await store.bayzat.importCsv(input.csvText);
       store.bayzatMirror = await store.bayzat.listEmployees();
@@ -583,7 +609,10 @@ export const employeesRouter = router({
       return { imported: rows.length, mirror: store.bayzatMirror };
     }),
 
-  bayzatMirror: protectedProcedure.query(() => getDemoStore().bayzatMirror),
+  bayzatMirror: protectedProcedure.query(({ ctx }) => {
+    requireAnyRole(ctx.roles, PAYROLL_VIEW_ROLES, "view payroll source data");
+    return getDemoStore().bayzatMirror;
+  }),
 
   performanceReview: protectedProcedure
     .input(
@@ -594,6 +623,7 @@ export const employeesRouter = router({
       }),
     )
     .mutation(({ input, ctx }) => {
+      requireAnyRole(ctx.roles, HR_ADMIN_ROLES, "record performance reviews");
       const store = getDemoStore();
       const emp = store.employees.get(input.id);
       if (!emp) throw new Error("NOT_FOUND");
@@ -622,9 +652,10 @@ export const employeesRouter = router({
 });
 
 export const requisitionsRouter = router({
-  list: protectedProcedure.query(() => [
-    ...getDemoStore().requisitions.values(),
-  ]),
+  list: protectedProcedure.query(({ ctx }) => {
+    requireAnyRole(ctx.roles, HR_ADMIN_ROLES, "view requisitions");
+    return [...getDemoStore().requisitions.values()];
+  }),
 
   create: protectedProcedure
     .input(
@@ -634,6 +665,7 @@ export const requisitionsRouter = router({
       }),
     )
     .mutation(({ input, ctx }) => {
+      requireAnyRole(ctx.roles, HR_ADMIN_ROLES, "create requisitions");
       const store = getDemoStore();
       const requisitionId = randomUUID();
       const row = {
@@ -652,6 +684,11 @@ export const requisitionsRouter = router({
   approve: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(({ input, ctx }) => {
+      requireAnyRole(
+        ctx.roles,
+        ["partner", "director"],
+        "approve requisitions",
+      );
       const store = getDemoStore();
       const row = store.requisitions.get(input.id);
       if (!row) throw new Error("NOT_FOUND");
@@ -676,13 +713,15 @@ export const requisitionsRouter = router({
 /** Payroll Module E — draft from Bayzat → HR confirm → Director approve → JE (never disburse). */
 export const payrollRouter = router({
   runs: router({
-    list: protectedProcedure.query(() => [
-      ...getDemoStore().payrollRuns.values(),
-    ]),
+    list: protectedProcedure.query(({ ctx }) => {
+      requireAnyRole(ctx.roles, PAYROLL_VIEW_ROLES, "view payroll runs");
+      return [...getDemoStore().payrollRuns.values()];
+    }),
 
     draft: protectedProcedure
       .input(z.object({ period: z.string().min(1) }))
       .mutation(({ input, ctx }) => {
+        requireAnyRole(ctx.roles, ["finance", "hr"], "draft payroll");
         const store = getDemoStore();
         const { lines, totalGross } = store.buildPayrollLinesFromMirror();
         const payrollRunId = randomUUID();
@@ -719,7 +758,10 @@ export const payrollRouter = router({
 
     get: protectedProcedure
       .input(z.object({ id: z.string().uuid() }))
-      .query(({ input }) => getDemoStore().payrollRuns.get(input.id) ?? null),
+      .query(({ input, ctx }) => {
+        requireAnyRole(ctx.roles, PAYROLL_VIEW_ROLES, "view payroll runs");
+        return getDemoStore().payrollRuns.get(input.id) ?? null;
+      }),
 
     confirm: protectedProcedure
       .input(
@@ -729,6 +771,7 @@ export const payrollRouter = router({
         }),
       )
       .mutation(async ({ input, ctx }) => {
+        requireAnyRole(ctx.roles, ["finance", "hr"], "confirm payroll");
         const store = getDemoStore();
         const run = store.payrollRuns.get(input.id);
         if (!run) throw new Error("NOT_FOUND");
@@ -751,6 +794,7 @@ export const payrollRouter = router({
     approve: protectedProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
+        requireAnyRole(ctx.roles, ["partner", "director"], "approve payroll");
         const store = getDemoStore();
         const run = store.payrollRuns.get(input.id);
         if (!run) throw new Error("NOT_FOUND");
@@ -778,6 +822,11 @@ export const payrollRouter = router({
         }),
       )
       .mutation(async ({ input, ctx }) => {
+        requireAnyRole(
+          ctx.roles,
+          ["partner", "director", "finance"],
+          "post payroll journals",
+        );
         const store = getDemoStore();
         const run = store.payrollRuns.get(input.id);
         if (!run) throw new Error("NOT_FOUND");
@@ -819,13 +868,16 @@ export const payrollRouter = router({
 });
 
 export const dashboardsHrRouter = router({
-  hrLifecycle: protectedProcedure.query(() => {
+  hrLifecycle: protectedProcedure.query(({ ctx }) => {
+    requireAnyRole(ctx.roles, HR_ADMIN_ROLES, "view HR dashboards");
     const store = getDemoStore();
     const byPhase: Record<string, number> = {};
     for (const emp of store.employees.values()) {
       byPhase[emp.lifecycleStatus] = (byPhase[emp.lifecycleStatus] ?? 0) + 1;
     }
-    const risk = [...store.employees.values()].filter((e) => e.escalatedAt).length;
+    const risk = [...store.employees.values()].filter(
+      (e) => e.escalatedAt,
+    ).length;
     return {
       byPhase,
       overdue: store.escalations.length,

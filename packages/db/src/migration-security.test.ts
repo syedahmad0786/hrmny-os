@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -50,19 +50,34 @@ describe("production migration security", () => {
       entries: Array<{ idx: number; tag: string }>;
     };
 
-    expect(journal.entries.map(({ tag }) => tag)).toEqual([
-      "0000_early_morph",
-      "0001_v_client_margin",
-      "0002_crm_entities",
-      "0003_pgvector_memory",
-      "0004_tickets",
-      "0005_lock_down_data_api",
-      "0006_connectors_feature_requests",
-      "0007_m1_production_hardening",
-      "0008_employee_directory",
-    ]);
-    expect(journal.entries.map(({ idx }) => idx)).toEqual([
-      0, 1, 2, 3, 4, 5, 6, 7, 8,
-    ]);
+    const migrationTags = readdirSync(migrationsDirectory)
+      .filter(
+        (name) => /^\d{4}_.+\.sql$/.test(name) && name !== "0000_clean.sql",
+      )
+      .sort()
+      .map((name) => name.slice(0, -4));
+
+    expect(journal.entries.map(({ tag }) => tag)).toEqual(migrationTags);
+    expect(journal.entries.map(({ idx }) => idx)).toEqual(
+      migrationTags.map((_, index) => index),
+    );
+  });
+
+  it("locks every post-M1 module away from the browser Data API", () => {
+    const migrations = readdirSync(migrationsDirectory)
+      .filter((name) => /^00(?:0[9]|[1-9]\d)_.+\.sql$/.test(name))
+      .sort();
+    for (const name of migrations) {
+      const migration = readMigration(name);
+      for (const table of createdTables(migration)) {
+        expect(migration, `${name} does not list ${table}`).toContain(
+          `'${table}'`,
+        );
+      }
+      expect(migration, name).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+      expect(migration, name).toMatch(/FROM PUBLIC/i);
+      expect(migration, name).toMatch(/FROM anon/i);
+      expect(migration, name).toMatch(/FROM authenticated/i);
+    }
   });
 });

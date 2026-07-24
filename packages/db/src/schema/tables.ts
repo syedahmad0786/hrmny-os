@@ -117,6 +117,157 @@ export const permissionPolicy = pgTable("permission_policy", {
   ...timestamps,
 });
 
+/** HR: leave rules configured by HR. */
+export const leavePolicy = pgTable("leave_policy", {
+  leavePolicyId: uuid("leave_policy_id").defaultRandom().primaryKey(),
+  name: text("name").notNull().unique(),
+  leaveType: text("leave_type").notNull(),
+  annualDays: numeric("annual_days", { precision: 5, scale: 2 })
+    .default("0")
+    .notNull(),
+  maxCarryoverDays: numeric("max_carryover_days", { precision: 5, scale: 2 })
+    .default("0")
+    .notNull(),
+  isPaid: boolean("is_paid").default(true).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  ...timestamps,
+});
+
+/** HR: annual entitlement; usage is derived from approved leave requests. */
+export const leaveBalance = pgTable(
+  "leave_balance",
+  {
+    leaveBalanceId: uuid("leave_balance_id").defaultRandom().primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    leavePolicyId: uuid("leave_policy_id")
+      .notNull()
+      .references(() => leavePolicy.leavePolicyId),
+    year: integer("year").notNull(),
+    entitledDays: numeric("entitled_days", { precision: 5, scale: 2 })
+      .default("0")
+      .notNull(),
+    carriedOverDays: numeric("carried_over_days", { precision: 5, scale: 2 })
+      .default("0")
+      .notNull(),
+    adjustmentDays: numeric("adjustment_days", { precision: 5, scale: 2 })
+      .default("0")
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("leave_balance_employee_policy_year_uniq").on(
+      table.employeeId,
+      table.leavePolicyId,
+      table.year,
+    ),
+    index("leave_balance_employee_year_idx").on(table.employeeId, table.year),
+  ],
+);
+
+/** HR: employee leave request with manager decision. */
+export const leaveRequest = pgTable(
+  "leave_request",
+  {
+    leaveRequestId: uuid("leave_request_id").defaultRandom().primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    leavePolicyId: uuid("leave_policy_id")
+      .notNull()
+      .references(() => leavePolicy.leavePolicyId),
+    startDate: date("start_date").notNull(),
+    endDate: date("end_date").notNull(),
+    portion: text("portion").default("full").notNull(),
+    days: numeric("days", { precision: 5, scale: 2 }).notNull(),
+    reason: text("reason"),
+    status: text("status").default("pending").notNull(),
+    decidedByEmployeeId: uuid("decided_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    decisionNote: text("decision_note"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("leave_request_employee_start_idx").on(
+      table.employeeId,
+      table.startDate,
+    ),
+    index("leave_request_status_start_idx").on(table.status, table.startDate),
+    index("leave_request_policy_idx").on(table.leavePolicyId),
+  ],
+);
+
+/** HR: one clock record per employee and Dubai work date. */
+export const attendanceRecord = pgTable(
+  "attendance_record",
+  {
+    attendanceRecordId: uuid("attendance_record_id")
+      .defaultRandom()
+      .primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    workDate: date("work_date").notNull(),
+    clockInAt: timestamp("clock_in_at", { withTimezone: true }).notNull(),
+    clockOutAt: timestamp("clock_out_at", { withTimezone: true }),
+    source: text("source").default("web").notNull(),
+    note: text("note"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("attendance_record_employee_date_uniq").on(
+      table.employeeId,
+      table.workDate,
+    ),
+    index("attendance_record_work_date_idx").on(table.workDate),
+  ],
+);
+
+/** HR: employee-proposed attendance replacement awaiting approval. */
+export const attendanceCorrectionRequest = pgTable(
+  "attendance_correction_request",
+  {
+    attendanceCorrectionRequestId: uuid("attendance_correction_request_id")
+      .defaultRandom()
+      .primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    attendanceRecordId: uuid("attendance_record_id").references(
+      () => attendanceRecord.attendanceRecordId,
+    ),
+    workDate: date("work_date").notNull(),
+    requestedClockInAt: timestamp("requested_clock_in_at", {
+      withTimezone: true,
+    }).notNull(),
+    requestedClockOutAt: timestamp("requested_clock_out_at", {
+      withTimezone: true,
+    }).notNull(),
+    reason: text("reason").notNull(),
+    status: text("status").default("pending").notNull(),
+    decidedByEmployeeId: uuid("decided_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    decisionNote: text("decision_note"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("attendance_correction_employee_date_idx").on(
+      table.employeeId,
+      table.workDate,
+    ),
+    index("attendance_correction_status_date_idx").on(
+      table.status,
+      table.workDate,
+    ),
+    index("attendance_correction_record_idx").on(table.attendanceRecordId),
+  ],
+);
+
 /** CRM: company / account (pre-win and post-win directory) */
 export const company = pgTable("company", {
   companyId: uuid("company_id").defaultRandom().primaryKey(),
@@ -677,3 +828,282 @@ export const ticketComment = pgTable("ticket_comment", {
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   ...timestamps,
 });
+
+/** HR/payroll: effective-dated employee compensation source. */
+export const salaryPackage = pgTable(
+  "salary_package",
+  {
+    salaryPackageId: uuid("salary_package_id").defaultRandom().primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    effectiveFrom: date("effective_from").notNull(),
+    effectiveTo: date("effective_to"),
+    currency: text("currency").default("AED").notNull(),
+    basicMonthly: numeric("basic_monthly", {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    housingMonthly: numeric("housing_monthly", { precision: 14, scale: 2 })
+      .default("0")
+      .notNull(),
+    transportMonthly: numeric("transport_monthly", { precision: 14, scale: 2 })
+      .default("0")
+      .notNull(),
+    otherAllowanceMonthly: numeric("other_allowance_monthly", {
+      precision: 14,
+      scale: 2,
+    })
+      .default("0")
+      .notNull(),
+    bankIban: text("bank_iban"),
+    bankRoutingCode: text("bank_routing_code"),
+    mohrePersonId: text("mohre_person_id"),
+    wpsAgentId: text("wps_agent_id"),
+    createdByEmployeeId: uuid("created_by_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("salary_package_employee_effective_uniq").on(
+      table.employeeId,
+      table.effectiveFrom,
+    ),
+    index("salary_package_employee_date_idx").on(
+      table.employeeId,
+      table.effectiveFrom,
+    ),
+  ],
+);
+
+/** HR/payroll: immutable run header after maker/checker approval. */
+export const payrollRun = pgTable(
+  "payroll_run",
+  {
+    payrollRunId: uuid("payroll_run_id").defaultRandom().primaryKey(),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    runNumber: integer("run_number").default(1).notNull(),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    status: text("status").default("draft").notNull(),
+    currency: text("currency").default("AED").notNull(),
+    calculationRuleVersion: text("calculation_rule_version").notNull(),
+    totalGross: numeric("total_gross", { precision: 16, scale: 2 })
+      .default("0")
+      .notNull(),
+    totalReimbursements: numeric("total_reimbursements", {
+      precision: 16,
+      scale: 2,
+    })
+      .default("0")
+      .notNull(),
+    totalDeductions: numeric("total_deductions", { precision: 16, scale: 2 })
+      .default("0")
+      .notNull(),
+    totalNet: numeric("total_net", { precision: 16, scale: 2 })
+      .default("0")
+      .notNull(),
+    createdByEmployeeId: uuid("created_by_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    confirmedByEmployeeId: uuid("confirmed_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    approvedByEmployeeId: uuid("approved_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    postedByEmployeeId: uuid("posted_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    xeroJournalId: text("xero_journal_id"),
+    wpsStatus: text("wps_status").default("not_generated").notNull(),
+    wpsPayload: jsonb("wps_payload")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("payroll_run_period_number_uniq").on(
+      table.periodStart,
+      table.periodEnd,
+      table.runNumber,
+    ),
+    index("payroll_run_period_idx").on(table.periodStart, table.periodEnd),
+  ],
+);
+
+/** HR/payroll: calculation snapshot used by payslips, WPS and reconciliation. */
+export const payrollLine = pgTable(
+  "payroll_line",
+  {
+    payrollLineId: uuid("payroll_line_id").defaultRandom().primaryKey(),
+    payrollRunId: uuid("payroll_run_id")
+      .notNull()
+      .references(() => payrollRun.payrollRunId),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    salaryPackageId: uuid("salary_package_id")
+      .notNull()
+      .references(() => salaryPackage.salaryPackageId),
+    paidDays: integer("paid_days").notNull(),
+    calendarDays: integer("calendar_days").notNull(),
+    basicAmount: numeric("basic_amount", { precision: 14, scale: 2 })
+      .default("0")
+      .notNull(),
+    housingAmount: numeric("housing_amount", { precision: 14, scale: 2 })
+      .default("0")
+      .notNull(),
+    transportAmount: numeric("transport_amount", { precision: 14, scale: 2 })
+      .default("0")
+      .notNull(),
+    otherAllowanceAmount: numeric("other_allowance_amount", {
+      precision: 14,
+      scale: 2,
+    })
+      .default("0")
+      .notNull(),
+    overtimeAmount: numeric("overtime_amount", { precision: 14, scale: 2 })
+      .default("0")
+      .notNull(),
+    bonusAmount: numeric("bonus_amount", { precision: 14, scale: 2 })
+      .default("0")
+      .notNull(),
+    expenseReimbursement: numeric("expense_reimbursement", {
+      precision: 14,
+      scale: 2,
+    })
+      .default("0")
+      .notNull(),
+    deductionsAmount: numeric("deductions_amount", { precision: 14, scale: 2 })
+      .default("0")
+      .notNull(),
+    loanDeduction: numeric("loan_deduction", { precision: 14, scale: 2 })
+      .default("0")
+      .notNull(),
+    grossAmount: numeric("gross_amount", { precision: 14, scale: 2 }).notNull(),
+    netAmount: numeric("net_amount", { precision: 14, scale: 2 }).notNull(),
+    currency: text("currency").default("AED").notNull(),
+    calculationSnapshot: jsonb("calculation_snapshot")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("payroll_line_run_employee_uniq").on(
+      table.payrollRunId,
+      table.employeeId,
+    ),
+    index("payroll_line_employee_idx").on(table.employeeId, table.payrollRunId),
+  ],
+);
+
+export const employeeExpense = pgTable(
+  "employee_expense",
+  {
+    employeeExpenseId: uuid("employee_expense_id").defaultRandom().primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    submittedByEmployeeId: uuid("submitted_by_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    expenseDate: date("expense_date").notNull(),
+    category: text("category").notNull(),
+    description: text("description").notNull(),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    currency: text("currency").default("AED").notNull(),
+    receiptAssetId: uuid("receipt_asset_id").references(() => asset.assetId),
+    status: text("status").default("pending").notNull(),
+    approvedByEmployeeId: uuid("approved_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    reimbursedPayrollRunId: uuid("reimbursed_payroll_run_id").references(
+      () => payrollRun.payrollRunId,
+    ),
+    ...timestamps,
+  },
+  (table) => [
+    index("employee_expense_employee_date_idx").on(
+      table.employeeId,
+      table.expenseDate,
+    ),
+    index("employee_expense_status_idx").on(table.status, table.expenseDate),
+  ],
+);
+
+export const employeeLoan = pgTable(
+  "employee_loan",
+  {
+    employeeLoanId: uuid("employee_loan_id").defaultRandom().primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    requestedByEmployeeId: uuid("requested_by_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    purpose: text("purpose").notNull(),
+    principalAmount: numeric("principal_amount", {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    outstandingAmount: numeric("outstanding_amount", {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    instalmentAmount: numeric("instalment_amount", {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    currency: text("currency").default("AED").notNull(),
+    firstDeductionPeriod: date("first_deduction_period"),
+    status: text("status").default("pending").notNull(),
+    approvedByEmployeeId: uuid("approved_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    ...timestamps,
+  },
+  (table) => [
+    index("employee_loan_employee_status_idx").on(
+      table.employeeId,
+      table.status,
+    ),
+  ],
+);
+
+export const payslip = pgTable(
+  "payslip",
+  {
+    payslipId: uuid("payslip_id").defaultRandom().primaryKey(),
+    payrollRunId: uuid("payroll_run_id")
+      .notNull()
+      .references(() => payrollRun.payrollRunId),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    language: text("language").default("en").notNull(),
+    storagePath: text("storage_path").notNull(),
+    checksum: text("checksum").notNull(),
+    generatedAt: timestamp("generated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("payslip_run_employee_language_uniq").on(
+      table.payrollRunId,
+      table.employeeId,
+      table.language,
+    ),
+  ],
+);

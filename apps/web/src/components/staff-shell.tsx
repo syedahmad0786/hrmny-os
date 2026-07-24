@@ -35,13 +35,22 @@ const PRIMARY_NAV = [
       ),
   },
   {
-    href: "/hr",
-    label: "Ops / HR",
+    href: "/people",
+    label: "People / HR",
     index: "05",
     match: (p: string) =>
-      ["/hr", "/payroll", "/roles"].some(
-        (h) => p === h || p.startsWith(`${h}/`),
-      ),
+      [
+        "/people",
+        "/time",
+        "/talent",
+        "/benefits",
+        "/work-schedule",
+        "/workplace",
+        "/workforce-payroll",
+        "/hr",
+        "/payroll",
+        "/roles",
+      ].some((h) => p === h || p.startsWith(`${h}/`)),
   },
   {
     href: "/requests",

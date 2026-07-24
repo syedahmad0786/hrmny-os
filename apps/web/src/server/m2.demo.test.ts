@@ -3,7 +3,9 @@ import { createCaller } from "./trpc/root";
 import { getDemoStore } from "./demo-store";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 
-function callerFor(role: "partner" | "am" | "finance" | "hr" | "director") {
+function callerFor(
+  role: "partner" | "am" | "finance" | "hr" | "director" | "traffic",
+) {
   const user = resolveDevUser(role);
   return createCaller({
     user,
@@ -108,8 +110,9 @@ bz-9,Sam Lee,sam@hrmny.local,Ops
     const confirmed = await hr.payroll.runs.confirm({ id: draft.payrollRunId });
     expect(confirmed.result.ok).toBe(true);
 
-    const samePerson = await hr.payroll.runs.approve({ id: draft.payrollRunId });
-    expect(samePerson.result.ok).toBe(false);
+    await expect(
+      hr.payroll.runs.approve({ id: draft.payrollRunId }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     const approved = await partner.payroll.runs.approve({
       id: draft.payrollRunId,
@@ -125,5 +128,18 @@ bz-9,Sam Lee,sam@hrmny.local,Ops
     const posted = await partner.payroll.runs.post({ id: draft.payrollRunId });
     expect(posted.result.ok).toBe(true);
     expect(posted.run.xeroJournalId).toMatch(/^mock-xero-je-/);
+  });
+
+  it("blocks ordinary staff from HR administration and payroll data", async () => {
+    const staff = callerFor("traffic");
+
+    await expect(staff.payroll.runs.list()).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(
+      staff.employees.importBayzatCsv({
+        csvText: "external_id,display_name,email\n1,Test,test@hrmny.co",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

@@ -73,10 +73,9 @@ describe("M5 money loop", () => {
     });
     expect(confirmed.result.ok).toBe(true);
 
-    const samePerson = await hr.payroll.runs.approve({
-      id: draft.payrollRunId,
-    });
-    expect(samePerson.result.ok).toBe(false);
+    await expect(
+      hr.payroll.runs.approve({ id: draft.payrollRunId }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     const approved = await director.payroll.runs.approve({
       id: draft.payrollRunId,
