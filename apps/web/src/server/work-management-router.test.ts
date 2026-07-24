@@ -3,6 +3,7 @@ import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 import { clearDemoFeatureOverrides, setFeatureOverride } from "./features";
 import { createCaller } from "./trpc/root";
 import {
+  customFieldAccessLevel,
   getDemoWork,
   isProofableAttachment,
 } from "./trpc/work-management-router";
@@ -41,6 +42,26 @@ function anonymousCaller() {
 
 describe("work management", () => {
   beforeEach(() => clearDemoFeatureOverrides());
+
+  it("fails closed for private imported custom fields", () => {
+    const field = {
+      sourcePlatform: "asana" as const,
+      privacySetting: "private" as const,
+      defaultAccessLevel: "user" as const,
+      sourceConnectionExternalId: "ca1",
+      externalId: "cf1",
+    };
+    expect(customFieldAccessLevel(field, new Map())).toBe("none");
+    expect(
+      customFieldAccessLevel(field, new Map([["ca1:cf1", "editor"]])),
+    ).toBe("editor");
+    expect(
+      customFieldAccessLevel(
+        { ...field, privacySetting: "public" },
+        new Map(),
+      ),
+    ).toBe("user");
+  });
 
   it("organizes My Tasks in private governed sections", async () => {
     const caller = partnerCaller();

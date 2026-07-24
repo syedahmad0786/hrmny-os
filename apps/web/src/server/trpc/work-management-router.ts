@@ -55,6 +55,7 @@ import {
 
 type AccessLevel = "admin" | "editor" | "commenter" | "viewer";
 type CustomTaskTypeAccessLevel = "admin" | "editor" | "user" | "none";
+type CustomFieldAccessLevel = "admin" | "editor" | "user" | "none";
 type WorkObjectCustomField = {
   objectCustomFieldValueId: string;
   targetType: "project" | "portfolio" | "goal";
@@ -67,6 +68,10 @@ type WorkObjectCustomField = {
   displayValue: string | null;
   sourcePlatform: "native" | "asana";
   fieldExternalId: string | null;
+  privacySetting?: "private" | "public" | "public_with_guests";
+  defaultAccessLevel?: Exclude<CustomFieldAccessLevel, "none">;
+  sourceConnectionExternalId?: string | null;
+  isValueReadOnly?: boolean;
 };
 type WorkProject = {
   projectId: string;
@@ -136,6 +141,10 @@ type WorkCustomField = {
   position: number;
   sourcePlatform?: "native" | "asana";
   externalId?: string | null;
+  privacySetting?: "private" | "public" | "public_with_guests";
+  defaultAccessLevel?: Exclude<CustomFieldAccessLevel, "none">;
+  sourceConnectionExternalId?: string | null;
+  isValueReadOnly?: boolean;
 };
 type WorkCustomTaskStatusOption = {
   statusOptionId: string;
@@ -1307,6 +1316,75 @@ const customTaskTypeAccessRank: Record<CustomTaskTypeAccessLevel, number> = {
   editor: 2,
   admin: 3,
 };
+
+const customFieldAccessRank: Record<CustomFieldAccessLevel, number> = {
+  none: 0,
+  user: 1,
+  editor: 2,
+  admin: 3,
+};
+
+type CustomFieldSecurity = {
+  sourcePlatform?: "native" | "asana";
+  privacySetting?: "private" | "public" | "public_with_guests";
+  defaultAccessLevel?: Exclude<CustomFieldAccessLevel, "none">;
+  sourceConnectionExternalId?: string | null;
+  externalId?: string | null;
+  fieldExternalId?: string | null;
+};
+
+const customFieldSecurityKey = (field: CustomFieldSecurity) => {
+  const externalId = field.fieldExternalId ?? field.externalId;
+  return field.sourceConnectionExternalId && externalId
+    ? `${field.sourceConnectionExternalId}:${externalId}`
+    : null;
+};
+
+export function customFieldAccessLevel(
+  field: CustomFieldSecurity,
+  memberships: ReadonlyMap<string, Exclude<CustomFieldAccessLevel, "none">>,
+): CustomFieldAccessLevel {
+  if (field.sourcePlatform !== "asana") return "user";
+  const explicit = memberships.get(customFieldSecurityKey(field) ?? "");
+  return field.privacySetting === "private"
+    ? (explicit ?? "none")
+    : (explicit ?? field.defaultAccessLevel ?? "user");
+}
+
+async function customFieldMembershipAccess(ctx: TrpcContext) {
+  const db = getDb();
+  const memberships = new Map<
+    string,
+    Exclude<CustomFieldAccessLevel, "none">
+  >();
+  if (!db) return memberships;
+  const rows = await db.execute<{
+    sourceConnectionExternalId: string;
+    fieldExternalId: string;
+    accessLevel: Exclude<CustomFieldAccessLevel, "none">;
+  }>(sql`
+    select access.source_connection_external_id as "sourceConnectionExternalId",
+      access.field_external_id as "fieldExternalId",
+      access.access_level as "accessLevel"
+    from public.work_custom_field_member access
+    where (
+      (access.member_type = 'employee'
+        and access.employee_id = ${actor(ctx)}::uuid)
+      or (access.member_type = 'team' and exists (
+        select 1 from public.work_team_member team_member
+        where team_member.work_team_id = access.work_team_id
+          and team_member.employee_id = ${actor(ctx)}::uuid
+      ))
+    )
+  `);
+  for (const row of rows) {
+    const key = `${row.sourceConnectionExternalId}:${row.fieldExternalId}`;
+    const current = memberships.get(key) ?? "none";
+    if (customFieldAccessRank[row.accessLevel] > customFieldAccessRank[current])
+      memberships.set(key, row.accessLevel);
+  }
+  return memberships;
+}
 
 export async function customTaskTypeAccess(
   ctx: TrpcContext,
@@ -3163,20 +3241,33 @@ async function requireProjectCustomField(
 ) {
   await requireScopedFeature(ctx, "work.custom_fields", projectId);
   const db = getDb();
+  const memberships = await customFieldMembershipAccess(ctx);
   const field = !db
     ? getDemoWork().customFields.get(customFieldId)
     : (
-        await db.execute<{ customFieldId: string; projectId: string }>(sql`
+        await db.execute<WorkCustomField>(sql`
           select work_custom_field_id as "customFieldId",
-            work_project_id as "projectId"
+            work_project_id as "projectId", name,
+            field_type as "fieldType", options,
+            is_required as "isRequired", position,
+            source_platform as "sourcePlatform", external_id as "externalId",
+            privacy_setting as "privacySetting",
+            default_access_level as "defaultAccessLevel",
+            source_connection_external_id as "sourceConnectionExternalId",
+            is_value_read_only as "isValueReadOnly"
           from public.work_custom_field
           where work_custom_field_id = ${customFieldId}::uuid
             and work_project_id = ${projectId}::uuid
           limit 1
         `)
       )[0];
-  if (!field || field.projectId !== projectId)
+  if (
+    !field ||
+    field.projectId !== projectId ||
+    customFieldAccessLevel(field, memberships) === "none"
+  )
     throw new TRPCError({ code: "NOT_FOUND" });
+  return field;
 }
 
 type NumericReportField = {
@@ -3209,6 +3300,7 @@ async function numericReportFields(
   ).flatMap(({ projectId, enabled }) => (enabled ? [projectId] : []));
   if (!enabledProjectIds.length) return [];
   const db = getDb();
+  const memberships = await customFieldMembershipAccess(ctx);
   const fields: WorkCustomField[] = !db
     ? [...getDemoWork().customFields.values()].filter(
         (field) =>
@@ -3219,14 +3311,20 @@ async function numericReportFields(
         select work_custom_field_id as "customFieldId",
           work_project_id as "projectId", name, field_type as "fieldType",
           options, is_required as "isRequired", position,
-          source_platform as "sourcePlatform", external_id as "externalId"
+          source_platform as "sourcePlatform", external_id as "externalId",
+          privacy_setting as "privacySetting",
+          default_access_level as "defaultAccessLevel",
+          source_connection_external_id as "sourceConnectionExternalId",
+          is_value_read_only as "isValueReadOnly"
         from public.work_custom_field
         where work_project_id = any(${enabledProjectIds}::uuid[])
           and field_type = 'number'
         order by lower(name), work_custom_field_id
       `);
   const grouped = new Map<string, NumericReportField>();
-  for (const field of fields) {
+  for (const field of fields.filter(
+    (candidate) => customFieldAccessLevel(candidate, memberships) !== "none",
+  )) {
     const key =
       field.sourcePlatform === "asana" && field.externalId
         ? `asana:${field.externalId}`
@@ -3485,17 +3583,20 @@ async function allReportingProjectIds(ctx: TrpcContext) {
 }
 
 async function objectCustomFieldsByTarget(
+  ctx: TrpcContext,
   targetType: "project" | "portfolio" | "goal",
   targetIds: string[],
 ) {
   const byTarget = new Map<string, WorkObjectCustomField[]>();
   if (!targetIds.length) return byTarget;
   const db = getDb();
+  const memberships = await customFieldMembershipAccess(ctx);
   if (!db) {
     for (const field of getDemoWork().objectCustomFields.values()) {
       if (
         field.targetType !== targetType ||
-        !targetIds.includes(field.targetId)
+        !targetIds.includes(field.targetId) ||
+        customFieldAccessLevel(field, memberships) === "none"
       )
         continue;
       const fields = byTarget.get(field.targetId) ?? [];
@@ -3514,6 +3615,10 @@ async function objectCustomFieldsByTarget(
     displayValue: string | null;
     sourcePlatform: "native" | "asana";
     fieldExternalId: string | null;
+    privacySetting: "private" | "public" | "public_with_guests";
+    defaultAccessLevel: Exclude<CustomFieldAccessLevel, "none">;
+    sourceConnectionExternalId: string | null;
+    isValueReadOnly: boolean;
   }>(
     targetType === "project"
       ? sql`
@@ -3521,7 +3626,11 @@ async function objectCustomFieldsByTarget(
             work_project_id as "targetId", name, field_type as "fieldType",
             options, value, display_value as "displayValue",
             source_platform as "sourcePlatform",
-            field_external_id as "fieldExternalId"
+            field_external_id as "fieldExternalId",
+            privacy_setting as "privacySetting",
+            default_access_level as "defaultAccessLevel",
+            source_connection_external_id as "sourceConnectionExternalId",
+            is_value_read_only as "isValueReadOnly"
           from public.work_object_custom_field_value
           where work_project_id = any(${targetIds}::uuid[])
           order by lower(name), created_at
@@ -3532,7 +3641,11 @@ async function objectCustomFieldsByTarget(
             work_portfolio_id as "targetId", name, field_type as "fieldType",
             options, value, display_value as "displayValue",
             source_platform as "sourcePlatform",
-            field_external_id as "fieldExternalId"
+            field_external_id as "fieldExternalId",
+            privacy_setting as "privacySetting",
+            default_access_level as "defaultAccessLevel",
+            source_connection_external_id as "sourceConnectionExternalId",
+            is_value_read_only as "isValueReadOnly"
           from public.work_object_custom_field_value
           where work_portfolio_id = any(${targetIds}::uuid[])
           order by lower(name), created_at
@@ -3542,13 +3655,18 @@ async function objectCustomFieldsByTarget(
             work_goal_id as "targetId", name, field_type as "fieldType",
             options, value, display_value as "displayValue",
             source_platform as "sourcePlatform",
-            field_external_id as "fieldExternalId"
+            field_external_id as "fieldExternalId",
+            privacy_setting as "privacySetting",
+            default_access_level as "defaultAccessLevel",
+            source_connection_external_id as "sourceConnectionExternalId",
+            is_value_read_only as "isValueReadOnly"
           from public.work_object_custom_field_value
           where work_goal_id = any(${targetIds}::uuid[])
           order by lower(name), created_at
         `,
   );
   for (const row of rows) {
+    if (customFieldAccessLevel(row, memberships) === "none") continue;
     const fields = byTarget.get(row.targetId) ?? [];
     fields.push({
       ...row,
@@ -4193,9 +4311,11 @@ export async function runScheduledWorkRuleJob(input: unknown) {
 }
 
 async function captureBundleBlueprint(
+  ctx: TrpcContext,
   projectId: string,
 ): Promise<z.infer<typeof bundleBlueprintSchema>> {
   const db = getDb();
+  const memberships = await customFieldMembershipAccess(ctx);
   if (!db) {
     const store = getDemoWork();
     return {
@@ -4209,7 +4329,11 @@ async function captureBundleBlueprint(
           .map((section) => [section.sectionId, section.name]),
       ),
       customFields: [...store.customFields.values()]
-        .filter((field) => field.projectId === projectId)
+        .filter(
+          (field) =>
+            field.projectId === projectId &&
+            customFieldAccessLevel(field, memberships) !== "none",
+        )
         .sort((a, b) => a.position - b.position)
         .map(({ name, fieldType, options, isRequired }) => ({
           name,
@@ -4272,9 +4396,12 @@ async function captureBundleBlueprint(
         fieldType: WorkCustomFieldType;
         options: unknown;
         isRequired: boolean;
-      }>(sql`
+      } & CustomFieldSecurity>(sql`
       select name, field_type as "fieldType", options,
-        is_required as "isRequired"
+        is_required as "isRequired", source_platform as "sourcePlatform",
+        external_id as "externalId", privacy_setting as "privacySetting",
+        default_access_level as "defaultAccessLevel",
+        source_connection_external_id as "sourceConnectionExternalId"
       from public.work_custom_field
       where work_project_id = ${projectId}::uuid order by position
     `),
@@ -4358,14 +4485,18 @@ async function captureBundleBlueprint(
         `)
       ).map((section) => [section.sectionId, section.name]),
     ),
-    customFields: customFields.map((field) => ({
-      ...field,
-      options: Array.isArray(field.options)
-        ? field.options.filter(
-            (value): value is string => typeof value === "string",
-          )
-        : [],
-    })),
+    customFields: customFields
+      .filter((field) => customFieldAccessLevel(field, memberships) !== "none")
+      .map((field) => ({
+        name: field.name,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        options: Array.isArray(field.options)
+          ? field.options.filter(
+              (value): value is string => typeof value === "string",
+            )
+          : [],
+      })),
     customTaskTypes: [...customTaskTypes.values()],
     rules: rules.flatMap((rule) => {
       const branches = z.array(ruleBranchSchema).safeParse(rule.branches);
@@ -4751,6 +4882,7 @@ export const workManagementRouter = router({
           (project) => project.projectKind !== "personal",
         );
         const fields = await objectCustomFieldsByTarget(
+          ctx,
           "project",
           projects.map((project) => project.projectId),
         );
@@ -4819,6 +4951,7 @@ export const workManagementRouter = router({
         order by lower(project.name)
       `);
       const fields = await objectCustomFieldsByTarget(
+        ctx,
         "project",
         rows.map((project) => project.projectId),
       );
@@ -7584,28 +7717,42 @@ export const workManagementRouter = router({
       .query(async ({ input, ctx }) => {
         await requireProjectAccess(ctx, input.projectId);
         const db = getDb();
+        const memberships = await customFieldMembershipAccess(ctx);
         if (!db)
           return [...getDemoWork().customFields.values()]
-            .filter((field) => field.projectId === input.projectId)
+            .filter(
+              (field) =>
+                field.projectId === input.projectId &&
+                customFieldAccessLevel(field, memberships) !== "none",
+            )
             .sort((a, b) => a.position - b.position);
         const rows = await db.execute<
           WorkCustomField & { options: unknown }
         >(sql`
           select work_custom_field_id as "customFieldId",
             work_project_id as "projectId", name, field_type as "fieldType",
-            options, is_required as "isRequired", position
+            options, is_required as "isRequired", position,
+            source_platform as "sourcePlatform", external_id as "externalId",
+            privacy_setting as "privacySetting",
+            default_access_level as "defaultAccessLevel",
+            source_connection_external_id as "sourceConnectionExternalId",
+            is_value_read_only as "isValueReadOnly"
           from public.work_custom_field
           where work_project_id = ${input.projectId}::uuid
           order by position, created_at
         `);
-        return rows.map((row) => ({
-          ...row,
-          options: Array.isArray(row.options)
-            ? row.options.filter(
-                (value): value is string => typeof value === "string",
-              )
-            : [],
-        }));
+        return rows
+          .filter(
+            (row) => customFieldAccessLevel(row, memberships) !== "none",
+          )
+          .map((row) => ({
+            ...row,
+            options: Array.isArray(row.options)
+              ? row.options.filter(
+                  (value): value is string => typeof value === "string",
+                )
+              : [],
+          }));
       }),
     create: staffProcedure
       .input(
@@ -7689,8 +7836,10 @@ export const workManagementRouter = router({
       .query(async ({ input, ctx }) => {
         await requireItemAccess(ctx, input.itemId);
         const db = getDb();
+        const memberships = await customFieldMembershipAccess(ctx);
         if (!db) {
           return [...getDemoWork().customFields.values()].flatMap((field) => {
+            if (customFieldAccessLevel(field, memberships) === "none") return [];
             const key = `${input.itemId}:${field.customFieldId}`;
             return getDemoWork().customFieldValues.has(key)
               ? [
@@ -7702,11 +7851,25 @@ export const workManagementRouter = router({
               : [];
           });
         }
-        return db.execute<{ customFieldId: string; value: unknown }>(sql`
-          select work_custom_field_id as "customFieldId", value
-          from public.work_custom_field_value
-          where work_item_id = ${input.itemId}::uuid
+        const rows = await db.execute<
+          { customFieldId: string; value: unknown } & CustomFieldSecurity
+        >(sql`
+          select value.work_custom_field_id as "customFieldId", value.value,
+            field.source_platform as "sourcePlatform",
+            field.external_id as "externalId",
+            field.privacy_setting as "privacySetting",
+            field.default_access_level as "defaultAccessLevel",
+            field.source_connection_external_id as "sourceConnectionExternalId"
+          from public.work_custom_field_value value
+          join public.work_custom_field field
+            on field.work_custom_field_id = value.work_custom_field_id
+          where value.work_item_id = ${input.itemId}::uuid
         `);
+        return rows.flatMap((row) =>
+          customFieldAccessLevel(row, memberships) === "none"
+            ? []
+            : [{ customFieldId: row.customFieldId, value: row.value }],
+        );
       }),
     setValue: staffProcedure
       .input(
@@ -7715,12 +7878,21 @@ export const workManagementRouter = router({
       .mutation(async ({ input, ctx }) => {
         await requireItemAccess(ctx, input.itemId, "editor");
         const db = getDb();
+        const memberships = await customFieldMembershipAccess(ctx);
         if (!db) {
           const field = getDemoWork().customFields.get(input.customFieldId);
-          if (!field)
+          if (
+            !field ||
+            customFieldAccessLevel(field, memberships) === "none"
+          )
             throw new TRPCError({
               code: "NOT_FOUND",
               message: "Field not found",
+            });
+          if (field.isValueReadOnly)
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "Field values are read-only",
             });
           let value: unknown;
           try {
@@ -7745,8 +7917,14 @@ export const workManagementRouter = router({
         const [field] = await db.execute<{
           fieldType: WorkCustomFieldType;
           options: unknown;
-        }>(sql`
-          select field_type as "fieldType", options
+        } & CustomFieldSecurity & { isValueReadOnly: boolean }>(sql`
+          select field_type as "fieldType", options,
+            field.source_platform as "sourcePlatform",
+            field.external_id as "externalId",
+            field.privacy_setting as "privacySetting",
+            field.default_access_level as "defaultAccessLevel",
+            field.source_connection_external_id as "sourceConnectionExternalId",
+            field.is_value_read_only as "isValueReadOnly"
           from public.work_custom_field field
           where field.work_custom_field_id = ${input.customFieldId}::uuid
             and exists (
@@ -7756,10 +7934,15 @@ export const workManagementRouter = router({
             )
           limit 1
         `);
-        if (!field)
+        if (!field || customFieldAccessLevel(field, memberships) === "none")
           throw new TRPCError({
             code: "NOT_FOUND",
             message: "Field not found",
+          });
+        if (field.isValueReadOnly)
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Field values are read-only",
           });
         const options = Array.isArray(field.options)
           ? field.options.filter(
@@ -10721,7 +10904,7 @@ export const workManagementRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         await requireProjectAccess(ctx, input.projectId, "admin");
-        const blueprint = await captureBundleBlueprint(input.projectId);
+        const blueprint = await captureBundleBlueprint(ctx, input.projectId);
         await requireBundleCustomTaskTypeAccess(
           ctx,
           input.projectId,
@@ -10799,7 +10982,10 @@ export const workManagementRouter = router({
             code: "FORBIDDEN",
             message: "Only the bundle owner can publish",
           });
-        const blueprint = await captureBundleBlueprint(input.sourceProjectId);
+        const blueprint = await captureBundleBlueprint(
+          ctx,
+          input.sourceProjectId,
+        );
         await requireBundleCustomTaskTypeAccess(
           ctx,
           input.sourceProjectId,
@@ -11563,6 +11749,7 @@ export const workManagementRouter = router({
           `);
       const [customFields, showCustomFields] = await Promise.all([
         objectCustomFieldsByTarget(
+          ctx,
           "goal",
           goals.map((goal) => goal.goalId),
         ),
@@ -11852,6 +12039,7 @@ export const workManagementRouter = router({
           `);
       const [customFields, showCustomFields] = await Promise.all([
         objectCustomFieldsByTarget(
+          ctx,
           "portfolio",
           portfolios.map((portfolio) => portfolio.portfolioId),
         ),

@@ -19,6 +19,7 @@ const COUNT_LABELS: Record<string, string> = {
   multiHomedTasks: "Multi-homed tasks",
   tags: "Tags",
   customFields: "Custom fields",
+  customFieldMemberships: "Custom field memberships",
   objectCustomFieldValues: "Project, goal & portfolio field values",
   stories: "Activity stories",
   comments: "Comments",

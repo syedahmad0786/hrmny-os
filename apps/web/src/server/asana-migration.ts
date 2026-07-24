@@ -1,6 +1,7 @@
 import type {
   AsanaAdapter,
   AsanaAttachment,
+  AsanaCustomField,
   AsanaCustomType,
   AsanaGoal,
   AsanaGoalRelationship,
@@ -69,6 +70,10 @@ export type AsanaWorkspaceScan = {
     sectionGid: string | null;
   }>;
   customTaskTypes: AsanaCustomType[];
+  customFieldMemberships: Array<{
+    customFieldGid: string;
+    membership: AsanaMembership;
+  }>;
   customTaskTypeMemberships: Array<{
     customTaskTypeGid: string;
     membership: AsanaMembership;
@@ -114,6 +119,7 @@ export type AsanaWorkspaceScan = {
     multiHomedTasks: number;
     tags: number;
     customFields: number;
+    customFieldMemberships: number;
     objectCustomFieldValues: number;
     customTaskTypes: number;
     customTaskTypeMemberships: number;
@@ -307,28 +313,43 @@ export async function scanAsanaWorkspace(
   }
 
   const tags = new Set<string>();
-  const customFields = new Set<string>();
+  const customFields = new Map<string, AsanaCustomField>();
+  const addCustomField = (field: AsanaCustomField) =>
+    customFields.set(field.gid, {
+      ...(customFields.get(field.gid) ?? {}),
+      ...field,
+    });
   for (const task of tasks.values()) {
     for (const tag of task.tags ?? []) tags.add(tag.gid);
-    for (const field of task.custom_fields ?? []) customFields.add(field.gid);
+    for (const field of task.custom_fields ?? []) addCustomField(field);
   }
   for (const project of projects) {
     for (const setting of project.custom_field_settings ?? [])
-      customFields.add(setting.custom_field.gid);
+      addCustomField(setting.custom_field);
     for (const field of project.custom_fields ?? [])
-      customFields.add(field.gid);
+      addCustomField(field);
   }
   for (const portfolio of portfolios) {
     for (const setting of portfolio.custom_field_settings ?? [])
-      customFields.add(setting.custom_field.gid);
+      addCustomField(setting.custom_field);
     for (const field of portfolio.custom_fields ?? [])
-      customFields.add(field.gid);
+      addCustomField(field);
   }
   for (const goal of goals) {
     for (const setting of goal.custom_field_settings ?? [])
-      customFields.add(setting.custom_field.gid);
-    for (const field of goal.custom_fields ?? []) customFields.add(field.gid);
+      addCustomField(setting.custom_field);
+    for (const field of goal.custom_fields ?? []) addCustomField(field);
   }
+  const customFieldMembershipRows = await mapLimit(
+    [...customFields.values()],
+    4,
+    async (field) => ({
+      customFieldGid: field.gid,
+      memberships: adapter.listCustomFieldMemberships
+        ? await adapter.listCustomFieldMemberships(field.gid)
+        : [],
+    }),
+  );
 
   const selectedProjects = new Set(projects.map((project) => project.gid));
   const projectTaskIds = new Set(
@@ -402,6 +423,12 @@ export async function scanAsanaWorkspace(
     tasks: taskValues,
     projectTasks: [...projectTasks.values()],
     customTaskTypes: [...customTaskTypes.values()],
+    customFieldMemberships: customFieldMembershipRows.flatMap((row) =>
+      row.memberships.map((membership) => ({
+        customFieldGid: row.customFieldGid,
+        membership,
+      })),
+    ),
     customTaskTypeMemberships: customTaskTypeMembershipRows.flatMap((row) =>
       row.memberships.map((membership) => ({
         customTaskTypeGid: row.customTaskTypeGid,
@@ -460,6 +487,10 @@ export async function scanAsanaWorkspace(
       ).length,
       tags: tags.size,
       customFields: customFields.size,
+      customFieldMemberships: customFieldMembershipRows.reduce(
+        (sum, row) => sum + row.memberships.length,
+        0,
+      ),
       objectCustomFieldValues:
         projects.reduce(
           (sum, project) => sum + (project.custom_fields?.length ?? 0),

@@ -730,4 +730,33 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/created_by_employee_id, 'admin'/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("stores and locks imported custom field memberships", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0054_work_custom_field_access.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0054_work_custom_field_access.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0054_work_custom_field_access.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(/privacy_setting/i);
+    expect(migration).toMatch(/default_access_level/i);
+    expect(migration).toMatch(/is_value_read_only/i);
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_custom_field_member/i,
+    );
+    expect(migration).toMatch(/member_type = 'employee'/i);
+    expect(migration).toMatch(/member_type = 'team'/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

@@ -299,6 +299,7 @@ export interface AsanaAdapter {
   listTeams(workspaceGid: string): Promise<AsanaTeam[]>;
   listTeamMemberships(teamGid: string): Promise<AsanaTeamMembership[]>;
   listProjectMemberships(projectGid: string): Promise<AsanaMembership[]>;
+  listCustomFieldMemberships?(customFieldGid: string): Promise<AsanaMembership[]>;
   listCustomTypeMemberships?(customTypeGid: string): Promise<AsanaMembership[]>;
   listSections(projectGid: string): Promise<AsanaSection[]>;
   listProjectTasks(projectGid: string): Promise<AsanaTask[]>;
@@ -610,6 +611,15 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         "/memberships",
         new URLSearchParams({
           parent: projectGid,
+          opt_fields:
+            "gid,resource_subtype,parent.gid,parent.name,parent.resource_type,member.gid,member.name,member.email,member.resource_type,access_level",
+        }),
+      ),
+    listCustomFieldMemberships: (customFieldGid) =>
+      list<AsanaMembership>(
+        "/memberships",
+        new URLSearchParams({
+          parent: customFieldGid,
           opt_fields:
             "gid,resource_subtype,parent.gid,parent.name,parent.resource_type,member.gid,member.name,member.email,member.resource_type,access_level",
         }),

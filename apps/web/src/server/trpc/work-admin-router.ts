@@ -184,6 +184,7 @@ const WORK_EXPORT_TABLES = [
   "work_custom_task_status_option",
   "work_project_custom_task_type",
   "work_custom_field",
+  "work_custom_field_member",
   "work_custom_field_value",
   "work_form",
   "work_form_submission",
