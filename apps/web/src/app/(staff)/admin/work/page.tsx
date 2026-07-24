@@ -11,6 +11,7 @@ type Tab =
   | "members"
   | "roles"
   | "identity"
+  | "sandboxes"
   | "api"
   | "ai"
   | "exports";
@@ -61,6 +62,9 @@ export default function WorkAdminPage() {
   const identity = trpc.workAdmin.identity.get.useQuery(undefined, {
     enabled: enabled.has("work.sso_scim"),
   });
+  const sandboxes = trpc.workAdmin.sandboxes.get.useQuery(undefined, {
+    enabled: enabled.has("work.sandboxes"),
+  });
   const apiWebhooks = trpc.workAdmin.apiWebhooks.get.useQuery(undefined, {
     enabled: enabled.has("work.api_webhooks"),
   });
@@ -76,6 +80,7 @@ export default function WorkAdminPage() {
     ["members", "Members", "work.view_only"],
     ["roles", "Roles", "work.custom_rbac"],
     ["identity", "SSO & SCIM", "work.sso_scim"],
+    ["sandboxes", "Sandbox", "work.sandboxes"],
     ["api", "API & webhooks", "work.api_webhooks"],
     ["ai", "AI governance", "work.ai.any"],
     ["exports", "Exports", "work.data_export"],
@@ -219,6 +224,12 @@ export default function WorkAdminPage() {
           refresh={() => utils.workAdmin.identity.get.invalidate()}
         />
       ) : null}
+      {tab === "sandboxes" && enabled.has("work.sandboxes") ? (
+        <SandboxesPanel
+          configuration={sandboxes.data}
+          refresh={() => utils.workAdmin.sandboxes.get.invalidate()}
+        />
+      ) : null}
       {tab === "api" && enabled.has("work.api_webhooks") ? (
         <ApiWebhooksPanel
           configuration={apiWebhooks.data}
@@ -240,6 +251,202 @@ export default function WorkAdminPage() {
         />
       ) : null}
     </main>
+  );
+}
+
+function SandboxesPanel({
+  configuration,
+  refresh,
+}: {
+  configuration:
+    | {
+        environmentKind: "production" | "sandbox";
+        configurationReady: boolean;
+        configuredBaseUrl: string | null;
+        sandbox: {
+          sandboxId: string;
+          name: string;
+          environmentId: string;
+          baseUrl: string;
+          status: "active" | "unreachable" | "deleted";
+          settingsCopiedAt: string | null;
+          lastVerifiedAt: string | null;
+          deletedAt: string | null;
+          createdAt: string;
+        } | null;
+      }
+    | undefined;
+  refresh: () => Promise<unknown>;
+}) {
+  const [name, setName] = useState("hrmny Work sandbox");
+  const [confirmation, setConfirmation] = useState("");
+  const activate = trpc.workAdmin.sandboxes.activate.useMutation({
+    onSuccess: refresh,
+  });
+  const verify = trpc.workAdmin.sandboxes.verify.useMutation({
+    onSuccess: refresh,
+  });
+  const remove = trpc.workAdmin.sandboxes.delete.useMutation({
+    onSuccess: async () => {
+      setConfirmation("");
+      await refresh();
+    },
+  });
+  const sandbox = configuration?.sandbox;
+  const active = sandbox && sandbox.status !== "deleted";
+  const error = activate.error ?? verify.error ?? remove.error;
+
+  return (
+    <section className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+      <div className={cardClass}>
+        <p className="text-xs font-bold uppercase tracking-[0.12em] text-muted">
+          Separate environment
+        </p>
+        <h2 className="mt-1 font-display text-xl font-semibold">
+          Work sandbox
+        </h2>
+        <p className="mt-2 text-sm text-muted">
+          The sandbox uses another application deployment and database. Global
+          Feature Lab, role, and organization settings are copied; production
+          work and connections are never copied.
+        </p>
+        {!configuration?.configurationReady ? (
+          <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
+            Configure the sandbox deployment URL and verification token before
+            activating this feature.
+          </p>
+        ) : null}
+        {configuration?.environmentKind === "sandbox" ? (
+          <p className="mt-4 rounded-lg border border-sand bg-fog p-3 text-sm">
+            You are already inside the sandbox. Return to production to manage
+            its lifecycle.
+          </p>
+        ) : null}
+        {!active && configuration?.environmentKind === "production" ? (
+          <form
+            className="mt-4 space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              activate.mutate({ name });
+            }}
+          >
+            <label className="text-sm">
+              <span className="mb-1 block font-medium">Sandbox name</span>
+              <input
+                className={inputClass}
+                value={name}
+                maxLength={120}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </label>
+            <button
+              className="rounded-lg bg-ink px-4 py-2 text-sm text-white disabled:opacity-50"
+              type="submit"
+              disabled={
+                activate.isPending ||
+                !configuration.configurationReady ||
+                !name.trim()
+              }
+            >
+              {activate.isPending
+                ? "Verifying and activating…"
+                : "Activate sandbox"}
+            </button>
+          </form>
+        ) : null}
+        {error ? (
+          <p className="mt-3 text-sm text-[var(--hrmny-danger)]">
+            {error.message}
+          </p>
+        ) : null}
+      </div>
+
+      <div className={cardClass}>
+        {active ? (
+          <>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="font-display text-xl font-semibold">
+                  {sandbox.name}
+                </h2>
+                <p className="mt-1 text-sm text-muted">
+                  {sandbox.environmentId} · {sandbox.status}
+                </p>
+              </div>
+              <a
+                className="rounded-lg bg-ochre px-4 py-2 text-sm text-white"
+                href={sandbox.baseUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open sandbox
+              </a>
+            </div>
+            <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-muted">Settings copied</dt>
+                <dd>
+                  {sandbox.settingsCopiedAt
+                    ? new Date(sandbox.settingsCopiedAt).toLocaleString()
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted">Isolation last verified</dt>
+                <dd>
+                  {sandbox.lastVerifiedAt
+                    ? new Date(sandbox.lastVerifiedAt).toLocaleString()
+                    : "—"}
+                </dd>
+              </div>
+            </dl>
+            <button
+              className="mt-5 rounded-lg border border-sand px-4 py-2 text-sm"
+              type="button"
+              disabled={verify.isPending}
+              onClick={() => verify.mutate()}
+            >
+              {verify.isPending ? "Verifying…" : "Verify isolation"}
+            </button>
+            <div className="mt-6 border-t border-sand pt-5">
+              <h3 className="font-semibold text-[var(--hrmny-danger)]">
+                Delete sandbox
+              </h3>
+              <p className="mt-1 text-sm text-muted">
+                This permanently clears the separate sandbox database. It cannot
+                affect production because the server re-verifies both
+                environment and database identities first.
+              </p>
+              <label className="mt-3 block text-sm">
+                <span className="mb-1 block font-medium">
+                  Type DELETE SANDBOX to confirm
+                </span>
+                <input
+                  className={inputClass}
+                  value={confirmation}
+                  onChange={(event) => setConfirmation(event.target.value)}
+                />
+              </label>
+              <button
+                className="mt-3 rounded-lg bg-[var(--hrmny-danger)] px-4 py-2 text-sm text-white disabled:opacity-50"
+                type="button"
+                disabled={remove.isPending || confirmation !== "DELETE SANDBOX"}
+                onClick={() =>
+                  remove.mutate({ confirmation: "DELETE SANDBOX" })
+                }
+              >
+                {remove.isPending ? "Deleting…" : "Delete sandbox"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="flex min-h-48 items-center justify-center text-center text-sm text-muted">
+            No active sandbox. Activation only succeeds after the target proves
+            it is a migrated sandbox on a different database.
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

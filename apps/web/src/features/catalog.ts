@@ -772,7 +772,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Isolated environments for testing workflows and administration.",
     group: "Admin & Security",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
   feature({
@@ -1084,6 +1084,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["workAdmin.rbac.", "work.custom_rbac"],
   ["workAdmin.identity.", "work.sso_scim"],
   ["workAdmin.apiWebhooks.", "work.api_webhooks"],
+  ["workAdmin.sandboxes.", "work.sandboxes"],
   ["workAdmin.export.audit", "work.audit_export"],
   ["workAdmin.export.organization", "work.data_export"],
   ["workAdmin.", "work.admin_console"],
