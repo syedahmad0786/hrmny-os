@@ -628,6 +628,7 @@ export default function PlanningPage() {
   const goalsEnabled = enabled.has("work.goals");
   const portfoliosEnabled = enabled.has("work.portfolios");
   const statusEnabled = enabled.has("work.status_updates");
+  const statusTemplatesEnabled = enabled.has("work.status_update_templates");
   const reportingEnabled = enabled.has("work.reporting_dashboards");
   const customFieldsEnabled = enabled.has("work.custom_fields");
   const teamsEnabled = enabled.has("work.teams");
@@ -740,6 +741,10 @@ export default function PlanningPage() {
   const statusUpdates = trpc.work.statusUpdates.list.useQuery(
     { targetType: "project", targetId: projectId },
     { enabled: Boolean(projectId && statusEnabled) },
+  );
+  const statusTemplates = trpc.work.statusTemplates.list.useQuery(
+    { projectId },
+    { enabled: Boolean(projectId && statusTemplatesEnabled) },
   );
   const report = trpc.work.reporting.summary.useQuery(
     { projectId },
@@ -1141,6 +1146,8 @@ export default function PlanningPage() {
 
   const [statusTitle, setStatusTitle] = useState("");
   const [statusBody, setStatusBody] = useState("");
+  const [statusTemplateName, setStatusTemplateName] = useState("");
+  const [selectedStatusTemplateId, setSelectedStatusTemplateId] = useState("");
   const [health, setHealth] = useState<
     "on_track" | "at_risk" | "off_track" | "complete"
   >("on_track");
@@ -1149,6 +1156,22 @@ export default function PlanningPage() {
       setStatusTitle("");
       setStatusBody("");
       await utils.work.statusUpdates.list.invalidate();
+    },
+  });
+  const createStatusTemplate = trpc.work.statusTemplates.create.useMutation({
+    onSuccess: async (template) => {
+      setSelectedStatusTemplateId(template.templateId);
+      await utils.work.statusTemplates.list.invalidate();
+    },
+  });
+  const updateStatusTemplate = trpc.work.statusTemplates.update.useMutation({
+    onSuccess: () => utils.work.statusTemplates.list.invalidate(),
+  });
+  const archiveStatusTemplate = trpc.work.statusTemplates.archive.useMutation({
+    onSuccess: async () => {
+      setSelectedStatusTemplateId("");
+      setStatusTemplateName("");
+      await utils.work.statusTemplates.list.invalidate();
     },
   });
 
@@ -2776,6 +2799,90 @@ export default function PlanningPage() {
       {statusEnabled && projectId ? (
         <section className="rounded-xl border border-sand bg-white/70 p-5">
           <h2 className="font-display text-xl">Status updates</h2>
+          {statusTemplatesEnabled ? (
+            <div className="mt-3 grid gap-2 rounded-lg border border-sand bg-cream/40 p-3 md:grid-cols-[1fr_1fr_auto_auto]">
+              <select
+                aria-label="Status update template"
+                className="rounded border border-sand bg-white px-3 py-2 text-sm"
+                value={selectedStatusTemplateId}
+                onChange={(event) => {
+                  const template = (statusTemplates.data ?? []).find(
+                    (candidate) => candidate.templateId === event.target.value,
+                  );
+                  setSelectedStatusTemplateId(event.target.value);
+                  if (!template) return;
+                  setStatusTemplateName(template.name);
+                  setStatusTitle(template.blueprint.title);
+                  setStatusBody(template.blueprint.body);
+                  setHealth(template.blueprint.health);
+                }}
+              >
+                <option value="">Choose template…</option>
+                {(statusTemplates.data ?? []).map((template) => (
+                  <option key={template.templateId} value={template.templateId}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                aria-label="Status template name"
+                className="rounded border border-sand bg-white px-3 py-2 text-sm"
+                placeholder="Template name"
+                value={statusTemplateName}
+                onChange={(event) => setStatusTemplateName(event.target.value)}
+              />
+              <button
+                type="button"
+                className="rounded border border-sand bg-white px-3 py-2 text-sm"
+                disabled={!statusTemplateName.trim() || !statusTitle.trim()}
+                onClick={() => {
+                  const selected = (statusTemplates.data ?? []).find(
+                    (template) =>
+                      template.templateId === selectedStatusTemplateId,
+                  );
+                  const input = {
+                    name: statusTemplateName,
+                    blueprint: {
+                      title: statusTitle,
+                      body: statusBody,
+                      health,
+                      progress: report.data?.progress ?? null,
+                    },
+                  };
+                  if (selected?.ownedByMe)
+                    updateStatusTemplate.mutate({
+                      templateId: selected.templateId,
+                      ...input,
+                    });
+                  else createStatusTemplate.mutate({ projectId, ...input });
+                }}
+              >
+                {(statusTemplates.data ?? []).find(
+                  (template) =>
+                    template.templateId === selectedStatusTemplateId,
+                )?.ownedByMe
+                  ? "Update template"
+                  : "Save new template"}
+              </button>
+              {(statusTemplates.data ?? []).find(
+                (template) => template.templateId === selectedStatusTemplateId,
+              )?.ownedByMe ? (
+                <button
+                  type="button"
+                  className="rounded border border-red-200 bg-white px-3 py-2 text-sm text-red-700"
+                  onClick={() =>
+                    archiveStatusTemplate.mutate({
+                      templateId: selectedStatusTemplateId,
+                    })
+                  }
+                >
+                  Remove
+                </button>
+              ) : (
+                <span />
+              )}
+            </div>
+          ) : null}
           <form
             className="mt-3 grid gap-2 md:grid-cols-[1fr_2fr_auto_auto] md:items-end"
             onSubmit={(event) => {
@@ -2784,7 +2891,13 @@ export default function PlanningPage() {
                 targetType: "project",
                 targetId: projectId,
                 health,
-                progress: report.data?.progress ?? null,
+                progress:
+                  (statusTemplates.data ?? []).find(
+                    (template) =>
+                      template.templateId === selectedStatusTemplateId,
+                  )?.blueprint.progress ??
+                  report.data?.progress ??
+                  null,
                 title: statusTitle,
                 body: statusBody,
               });
@@ -2862,6 +2975,21 @@ export default function PlanningPage() {
                     targetType="status_update"
                     targetId={update.statusUpdateId}
                   />
+                  {statusTemplatesEnabled ? (
+                    <button
+                      type="button"
+                      className="ml-2 rounded-full border border-sand px-2.5 py-1 text-xs text-muted"
+                      onClick={() => {
+                        setSelectedStatusTemplateId("");
+                        setStatusTemplateName(`${update.title} template`);
+                        setStatusTitle(update.title);
+                        setStatusBody(update.body);
+                        setHealth(update.health);
+                      }}
+                    >
+                      Save as template
+                    </button>
+                  ) : null}
                 </div>
               </article>
             ))}

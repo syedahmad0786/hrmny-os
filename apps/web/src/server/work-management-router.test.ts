@@ -1934,6 +1934,87 @@ describe("work management", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("manages client-scoped status update templates", async () => {
+    const caller = partnerCaller();
+    const project = await caller.work.projects.create({
+      name: `Status templates ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const template = await caller.work.statusTemplates.create({
+      projectId: project.projectId,
+      name: "Weekly delivery",
+      blueprint: {
+        title: "Weekly update",
+        body: "Highlights\n\nRisks\n\nNext steps",
+        health: "on_track",
+        progress: 25,
+      },
+    });
+    expect(
+      await caller.work.statusTemplates.list({ projectId: project.projectId }),
+    ).toContainEqual(
+      expect.objectContaining({
+        templateId: template.templateId,
+        ownedByMe: true,
+      }),
+    );
+    await caller.work.statusTemplates.update({
+      templateId: template.templateId,
+      name: "Friday delivery",
+      blueprint: {
+        title: "Friday update",
+        body: "Done\n\nBlocked\n\nNext",
+        health: "at_risk",
+        progress: 50,
+      },
+    });
+    expect(
+      await caller.work.statusTemplates.list({ projectId: project.projectId }),
+    ).toContainEqual(
+      expect.objectContaining({
+        name: "Friday delivery",
+        blueprint: expect.objectContaining({ health: "at_risk" }),
+      }),
+    );
+    await caller.admin.features.setOverride({
+      featureKey: "work.status_updates",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "status updates paused",
+    });
+    await expect(
+      caller.work.statusTemplates.list({ projectId: project.projectId }),
+    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.status_updates" });
+    await expect(
+      caller.work.statusTemplates.update({
+        templateId: template.templateId,
+        name: "Blocked update",
+        blueprint: {
+          title: "Blocked",
+          body: "",
+          health: "off_track",
+          progress: null,
+        },
+      }),
+    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.status_updates" });
+    await caller.admin.features.setOverride({
+      featureKey: "work.status_updates",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: true,
+      reason: "status updates resumed",
+    });
+    await caller.work.statusTemplates.archive({
+      templateId: template.templateId,
+    });
+    expect(
+      await caller.work.statusTemplates.list({ projectId: project.projectId }),
+    ).toEqual([]);
+  });
+
   it("removes form email receipts when Feature Lab disables them", async () => {
     const owner = partnerCaller();
     const publicUser = anonymousCaller();
