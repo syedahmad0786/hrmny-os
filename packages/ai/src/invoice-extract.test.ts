@@ -37,6 +37,18 @@ describe("live provider transport", () => {
       expect(JSON.parse(String(init?.body))).toMatchObject({
         model: "test/model",
         response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Return JSON" },
+              {
+                type: "image_url",
+                image_url: { url: "data:image/png;base64,iVBORw==" },
+              },
+            ],
+          },
+        ],
       });
       return new Response(
         JSON.stringify({
@@ -58,6 +70,7 @@ describe("live provider transport", () => {
         messages: [{ role: "user", content: "Return JSON" }],
         schema: z.object({ ok: z.literal(true) }),
         task: "generic",
+        images: [{ mediaType: "image/png", dataBase64: "iVBORw==" }],
       });
       expect(result.object).toEqual({ ok: true });
       expect(result.inputTokens).toBe(12);

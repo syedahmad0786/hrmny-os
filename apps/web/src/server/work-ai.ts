@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createProvider } from "@hrmny/ai";
+import { createProvider, type LLMImageInput } from "@hrmny/ai";
 import { sql } from "@hrmny/db";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -323,6 +323,7 @@ const sourceSchema = z.object({
     "goal",
     "portfolio",
     "inbox",
+    "image",
     "external_file",
   ]),
   label: z.string().trim().min(1).max(300),
@@ -553,6 +554,7 @@ async function buildContext(
   projectIds: readonly string[],
   itemId: string | null,
   externalSources: readonly WorkAiContextSource[],
+  includeImages: boolean,
   statusTarget: {
     targetType: "project" | "portfolio" | "goal";
     targetId: string;
@@ -597,21 +599,24 @@ async function buildContext(
   }
   for (const projectId of ids.slice(0, 10)) {
     const project = await requireProjectAccess(ctx, projectId);
-    if (
-      !(await featureEnabled("work.projects", {
-        userId: ctx.employeeId,
-        clientId: project.clientId,
-        roles: ctx.roles,
-      }))
-    )
+    const featureScope = {
+      userId: ctx.employeeId,
+      clientId: project.clientId,
+      roles: ctx.roles,
+    };
+    if (!(await featureEnabled("work.projects", featureScope)))
       throw new TRPCError({ code: "NOT_FOUND" });
+    if (
+      includeImages &&
+      !(await featureEnabled("work.attachments", featureScope))
+    )
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "FEATURE_DISABLED:work.attachments",
+      });
     const customTaskTypesEnabled = await featureEnabled(
       "work.custom_task_types",
-      {
-        userId: ctx.employeeId,
-        clientId: project.clientId,
-        roles: ctx.roles,
-      },
+      featureScope,
     );
     sources.push({
       id: projectId,
@@ -1318,6 +1323,7 @@ export async function generateWorkAi(input: {
   aiCondition?: string | null;
   allowedActionTypes?: readonly WorkAiAction["type"][];
   externalSources?: readonly WorkAiContextSource[];
+  images?: readonly LLMImageInput[];
   statusTarget?: {
     targetType: "project" | "portfolio" | "goal";
     targetId: string;
@@ -1333,6 +1339,7 @@ export async function generateWorkAi(input: {
     input.projectIds,
     input.itemId,
     input.externalSources ?? [],
+    Boolean(input.images?.length),
     input.statusTarget ?? null,
   );
   const runId = randomUUID();
@@ -1390,6 +1397,7 @@ export async function generateWorkAi(input: {
                 content: `Capability: ${input.kind}\nRequest: ${input.requestText}\nAllowed source IDs: ${context.sources.map((source) => source.id).join(", ")}\nReference JSON string: ${JSON.stringify(input.referenceText?.slice(0, 50_000) ?? "")}\nContext JSON records:\n${context.text}`,
               },
             ],
+            images: [...(input.images ?? [])],
           });
     const parsed = workAiResultSchema.parse(generated.object);
     const result = safeResult(

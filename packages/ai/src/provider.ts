@@ -8,11 +8,17 @@ export type LLMMessage = {
   content: string;
 };
 
+export type LLMImageInput = {
+  mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  dataBase64: string;
+};
+
 export type LLMGenerateOptions = {
   model?: string;
   messages: LLMMessage[];
   schema?: ZodTypeAny;
   temperature?: number;
+  images?: LLMImageInput[];
   /** Optional task hint for mock structured outputs. */
   task?: "invoice_extract" | "generic";
 };
@@ -71,6 +77,67 @@ function extractUserText(messages: LLMMessage[]): string {
     .filter((m) => m.role === "user")
     .map((m) => m.content)
     .join("\n");
+}
+
+function lastUserIndex(messages: LLMMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index--)
+    if (messages[index]?.role === "user") return index;
+  return -1;
+}
+
+function openRouterMessages(options: LLMGenerateOptions) {
+  const index = lastUserIndex(options.messages);
+  return options.messages.map((message, messageIndex) =>
+    messageIndex === index && options.images?.length
+      ? {
+          ...message,
+          content: [
+            { type: "text", text: message.content },
+            ...options.images.map((image) => ({
+              type: "image_url",
+              image_url: {
+                url: `data:${image.mediaType};base64,${image.dataBase64}`,
+              },
+            })),
+          ],
+        }
+      : message,
+  );
+}
+
+function anthropicMessages(options: LLMGenerateOptions) {
+  const messages = options.messages.filter(
+    (message) => message.role !== "system",
+  );
+  const index = lastUserIndex(messages);
+  return messages.map((message, messageIndex) =>
+    messageIndex === index && options.images?.length
+      ? {
+          ...message,
+          content: [
+            { type: "text", text: message.content },
+            ...options.images.map((image) => ({
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: image.mediaType,
+                data: image.dataBase64,
+              },
+            })),
+          ],
+        }
+      : message,
+  );
+}
+
+function ollamaMessages(options: LLMGenerateOptions) {
+  const index = lastUserIndex(options.messages);
+  return options.messages.map((message, messageIndex) => ({
+    ...message,
+    ...(messageIndex === index && options.images?.length
+      ? { images: options.images.map((image) => image.dataBase64) }
+      : {}),
+  }));
 }
 
 /** Mock provider returns structured invoice propose payloads for HITL demos. */
@@ -162,7 +229,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
             },
             body: JSON.stringify({
               model: activeModel,
-              messages: options.messages,
+              messages: openRouterMessages(options),
               temperature: options.temperature ?? 0.2,
               stream: false,
               ...(options.schema
@@ -195,9 +262,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
           .filter((message) => message.role === "system")
           .map((message) => message.content)
           .join("\n\n");
-        const messages = options.messages.filter(
-          (message) => message.role !== "system",
-        );
+        const messages = anthropicMessages(options);
         const response = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           signal,
@@ -244,7 +309,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           model: activeModel,
-          messages: options.messages,
+          messages: ollamaMessages(options),
           stream: false,
           ...(options.schema ? { format: "json" } : {}),
           options: { temperature: options.temperature ?? 0.2 },
