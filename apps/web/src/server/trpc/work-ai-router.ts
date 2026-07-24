@@ -254,21 +254,25 @@ export const workAiRouter = router({
           ),
         ];
         const visibleProjects = await work.projects.list();
-        const eligibleProjects = images.length
-          ? (
-              await Promise.all(
-                visibleProjects.map(async (project) =>
-                  (await featureEnabled("work.attachments", {
-                    userId: ctx.employeeId,
-                    clientId: project.clientId,
-                    roles: ctx.roles,
-                  }))
-                    ? project
-                    : null,
-                ),
-              )
-            ).filter((project) => project !== null)
-          : visibleProjects;
+        const eligibleProjects = (
+          await Promise.all(
+            visibleProjects.map(async (project) => {
+              const featureScope = {
+                userId: ctx.employeeId,
+                clientId: project.clientId,
+                roles: ctx.roles,
+              };
+              return (await featureEnabled(
+                featureKeyForWorkAiKind(input.kind),
+                featureScope,
+              )) &&
+                (!images.length ||
+                  (await featureEnabled("work.attachments", featureScope)))
+                ? project
+                : null;
+            }),
+          )
+        ).filter((project) => project !== null);
         const projects = eligibleProjects
           .map((project) => ({
             project,
@@ -288,21 +292,41 @@ export const workAiRouter = router({
         for (const { project } of projects)
           if (!projectIds.includes(project.projectId) && projectIds.length < 10)
             projectIds.push(project.projectId);
-        // ponytail: the prompt window holds 100 project summaries; add indexed retrieval when larger workspaces appear.
-        for (const { project } of projects.slice(0, 100))
-          externalSources.push({
-            id: project.projectId,
-            type: "project",
-            label: project.name,
-            content: JSON.stringify({
+        const countBy = (value: (typeof projects)[number]["project"]) => ({
+          health: value.health ?? "unset",
+          privacy: value.privacy,
+          source: value.sourcePlatform ?? "native",
+        });
+        const counts = {
+          health: {} as Record<string, number>,
+          privacy: {} as Record<string, number>,
+          source: {} as Record<string, number>,
+        };
+        for (const { project } of projects)
+          for (const [group, value] of Object.entries(countBy(project)))
+            counts[group as keyof typeof counts][value] =
+              (counts[group as keyof typeof counts][value] ?? 0) + 1;
+        // ponytail: every visible project is ranked and counted; keep 100 lexical summaries until synonym misses justify embeddings.
+        externalSources.push({
+          id: "workspace:projects",
+          type: "external_file",
+          label: "Workspace project overview",
+          content: JSON.stringify({
+            totalProjects: projects.length,
+            matchingProjects: projects.filter(({ score }) => score > 0).length,
+            counts,
+            relevantProjects: projects.slice(0, 100).map(({ project }) => ({
+              projectId: project.projectId,
+              name: project.name,
               description: project.description.slice(0, 300),
               health: project.health,
               startDate: project.startDate,
               dueDate: project.dueDate,
               privacy: project.privacy,
               sourcePlatform: project.sourcePlatform,
-            }),
-          });
+            })),
+          }),
+        });
       }
       return generateWorkAi({
         ...generation,

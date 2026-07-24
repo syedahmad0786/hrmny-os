@@ -551,6 +551,7 @@ export async function requireWorkAiFeature(ctx: TrpcContext, kind: WorkAiKind) {
 
 async function buildContext(
   ctx: TrpcContext,
+  kind: WorkAiKind,
   projectIds: readonly string[],
   itemId: string | null,
   externalSources: readonly WorkAiContextSource[],
@@ -604,7 +605,10 @@ async function buildContext(
       clientId: project.clientId,
       roles: ctx.roles,
     };
-    if (!(await featureEnabled("work.projects", featureScope)))
+    if (
+      !(await featureEnabled("work.projects", featureScope)) ||
+      !(await featureEnabled(featureForKind[kind], featureScope))
+    )
       throw new TRPCError({ code: "NOT_FOUND" });
     if (
       includeImages &&
@@ -1340,6 +1344,7 @@ export async function generateWorkAi(input: {
   await enforceLimits(employeeId, policy);
   const context = await buildContext(
     input.ctx,
+    input.kind,
     input.projectIds,
     input.itemId,
     input.externalSources ?? [],

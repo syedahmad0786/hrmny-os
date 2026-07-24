@@ -197,7 +197,7 @@ describe("governed Work AI", () => {
       enabled: true,
       reason: "test",
     });
-    const unrelated = await caller.work.projects.create({
+    await caller.work.projects.create({
       name: `Alphabetical ${crypto.randomUUID()}`,
       description: "Unrelated work",
       privacy: "private",
@@ -209,6 +209,29 @@ describe("governed Work AI", () => {
       privacy: "private",
       color: "#C7702E",
     });
+    const blocked = await caller.work.projects.create({
+      name: `Venus confidential ${crypto.randomUUID()}`,
+      description: "Restricted mission",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const clientId = resolveDevUser("portal_a").clientId!;
+    getDemoWork().projects.get(blocked.projectId)!.clientId = clientId;
+    await caller.admin.features.setOverride({
+      featureKey: "work.ai.smart_chat",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.workAi.generate({
+        kind: "smart_chat",
+        requestText: "Summarize the restricted mission",
+        projectIds: [blocked.projectId],
+        itemId: null,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
     const run = await caller.workAi.generate({
       kind: "smart_chat",
       requestText: "Create a task for the Mars launch",
@@ -218,9 +241,12 @@ describe("governed Work AI", () => {
     });
     expect(run.result?.sources).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ id: "workspace:projects" }),
         expect.objectContaining({ id: relevant.projectId }),
-        expect.objectContaining({ id: unrelated.projectId }),
       ]),
+    );
+    expect(run.result?.sources).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: blocked.projectId })]),
     );
     expect(run.result?.actions[0]).toMatchObject({
       type: "create_task",
