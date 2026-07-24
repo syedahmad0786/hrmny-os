@@ -264,5 +264,41 @@ describe("work planning calculations", () => {
         },
       ),
     ).toBe(false);
+    const customFieldRow = {
+      ownerEmployeeId: "owner",
+      customFields: [
+        {
+          key: "asana:markets",
+          value: ["UAE", "KSA"],
+          displayValue: "UAE, KSA",
+        },
+        {
+          key: "asana:budget",
+          value: 250,
+          displayValue: "250",
+        },
+      ],
+    };
+    expect(
+      matchesMetadataReportFilters(customFieldRow, {
+        customFieldKey: "asana:markets",
+        customFieldOperator: "is",
+        customFieldValue: "KSA",
+      }),
+    ).toBe(true);
+    expect(
+      matchesMetadataReportFilters(customFieldRow, {
+        customFieldKey: "asana:budget",
+        customFieldOperator: "greater_than",
+        customFieldValue: "200",
+      }),
+    ).toBe(true);
+    expect(
+      matchesMetadataReportFilters(customFieldRow, {
+        customFieldKey: "asana:missing",
+        customFieldOperator: "is_empty",
+        customFieldValue: null,
+      }),
+    ).toBe(true);
   });
 });

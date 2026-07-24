@@ -39,7 +39,19 @@ describe("Asana migration scan", () => {
         },
       ]),
       listProjects: vi.fn().mockResolvedValue([
-        { gid: "p1", name: "One" },
+        {
+          gid: "p1",
+          name: "One",
+          custom_field_settings: [
+            {
+              gid: "setting1",
+              custom_field: { gid: "cf1", name: "Priority" },
+            },
+          ],
+          custom_fields: [
+            { gid: "portfolio-field", name: "Risk", display_value: "High" },
+          ],
+        },
         { gid: "p2", name: "Two" },
       ]),
       listProjectMemberships: vi.fn().mockResolvedValue([
@@ -106,7 +118,15 @@ describe("Asana migration scan", () => {
       listAttachments: vi
         .fn()
         .mockResolvedValue([{ gid: "file1", name: "brief.pdf" }]),
-      listGoals: vi.fn().mockResolvedValue([{ gid: "g1", name: "Grow" }]),
+      listGoals: vi.fn().mockResolvedValue([
+        {
+          gid: "g1",
+          name: "Grow",
+          custom_fields: [
+            { gid: "goal-region", name: "Region", display_value: "UAE" },
+          ],
+        },
+      ]),
       listGoalRelationships: vi.fn().mockResolvedValue([
         {
           gid: "gr1",
@@ -114,9 +134,19 @@ describe("Asana migration scan", () => {
           supporting_resource: { gid: "p1", resource_type: "project" },
         },
       ]),
-      listPortfolios: vi
-        .fn()
-        .mockResolvedValue([{ gid: "pf1", name: "Roadmap" }]),
+      listPortfolios: vi.fn().mockResolvedValue([
+        {
+          gid: "pf1",
+          name: "Roadmap",
+          custom_fields: [
+            {
+              gid: "portfolio-health",
+              name: "Executive health",
+              display_value: "Green",
+            },
+          ],
+        },
+      ]),
       listPortfolioItems: vi
         .fn()
         .mockResolvedValue([{ gid: "p1", name: "One" }]),
@@ -161,6 +191,8 @@ describe("Asana migration scan", () => {
       tasks: 4,
       projectTaskLinks: 2,
       multiHomedTasks: 1,
+      customFields: 4,
+      objectCustomFieldValues: 3,
       customTaskTypes: 1,
       customTaskTypeMemberships: 1,
       customTaskStatuses: 2,

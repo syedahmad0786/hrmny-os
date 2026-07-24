@@ -114,6 +114,7 @@ export type AsanaWorkspaceScan = {
     multiHomedTasks: number;
     tags: number;
     customFields: number;
+    objectCustomFieldValues: number;
     customTaskTypes: number;
     customTaskTypeMemberships: number;
     customTaskStatuses: number;
@@ -311,6 +312,23 @@ export async function scanAsanaWorkspace(
     for (const tag of task.tags ?? []) tags.add(tag.gid);
     for (const field of task.custom_fields ?? []) customFields.add(field.gid);
   }
+  for (const project of projects) {
+    for (const setting of project.custom_field_settings ?? [])
+      customFields.add(setting.custom_field.gid);
+    for (const field of project.custom_fields ?? [])
+      customFields.add(field.gid);
+  }
+  for (const portfolio of portfolios) {
+    for (const setting of portfolio.custom_field_settings ?? [])
+      customFields.add(setting.custom_field.gid);
+    for (const field of portfolio.custom_fields ?? [])
+      customFields.add(field.gid);
+  }
+  for (const goal of goals) {
+    for (const setting of goal.custom_field_settings ?? [])
+      customFields.add(setting.custom_field.gid);
+    for (const field of goal.custom_fields ?? []) customFields.add(field.gid);
+  }
 
   const selectedProjects = new Set(projects.map((project) => project.gid));
   const projectTaskIds = new Set(
@@ -442,6 +460,16 @@ export async function scanAsanaWorkspace(
       ).length,
       tags: tags.size,
       customFields: customFields.size,
+      objectCustomFieldValues:
+        projects.reduce(
+          (sum, project) => sum + (project.custom_fields?.length ?? 0),
+          0,
+        ) +
+        portfolios.reduce(
+          (sum, portfolio) => sum + (portfolio.custom_fields?.length ?? 0),
+          0,
+        ) +
+        goals.reduce((sum, goal) => sum + (goal.custom_fields?.length ?? 0), 0),
       customTaskTypes: customTaskTypes.size,
       customTaskTypeMemberships: customTaskTypeMembershipRows.reduce(
         (sum, row) => sum + row.memberships.length,

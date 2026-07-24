@@ -15,6 +15,25 @@ export type AsanaUser = {
   workspaces?: AsanaWorkspace[];
 };
 
+export type AsanaCustomField = Record<string, unknown> & {
+  gid: string;
+  name: string;
+  resource_subtype?: string;
+  type?: string;
+  enum_options?: Array<{
+    gid: string;
+    name: string;
+    enabled?: boolean;
+    color?: string;
+  }>;
+};
+
+export type AsanaCustomFieldSetting = {
+  gid: string;
+  is_important?: boolean;
+  custom_field: AsanaCustomField;
+};
+
 export type AsanaProject = {
   gid: string;
   name: string;
@@ -28,6 +47,8 @@ export type AsanaProject = {
   due_on?: string | null;
   created_at?: string;
   modified_at?: string;
+  custom_field_settings?: AsanaCustomFieldSetting[];
+  custom_fields?: AsanaCustomField[];
 };
 
 export type AsanaSection = {
@@ -81,9 +102,7 @@ export type AsanaTask = {
   dependencies?: Array<{ gid: string; name?: string }>;
   followers?: AsanaUser[];
   tags?: Array<{ gid: string; name: string; color?: string }>;
-  custom_fields?: Array<
-    Record<string, unknown> & { gid: string; name: string }
-  >;
+  custom_fields?: AsanaCustomField[];
   custom_type?: { gid: string; name?: string } | null;
   custom_type_status_option?: { gid: string; name?: string } | null;
 };
@@ -134,6 +153,8 @@ export type AsanaGoal = {
   } | null;
   created_at?: string;
   modified_at?: string;
+  custom_field_settings?: AsanaCustomFieldSetting[];
+  custom_fields?: AsanaCustomField[];
 };
 
 export type AsanaGoalRelationship = {
@@ -159,6 +180,8 @@ export type AsanaPortfolio = {
   public?: boolean;
   privacy_setting?: string;
   created_at?: string;
+  custom_field_settings?: AsanaCustomFieldSetting[];
+  custom_fields?: AsanaCustomField[];
 };
 
 export type AsanaProjectTemplate = Record<string, unknown> & {
@@ -312,6 +335,53 @@ type AsanaTransport = {
   delete(path: string): Promise<void>;
 };
 
+const CUSTOM_FIELD_FIELDS = [
+  "gid",
+  "name",
+  "resource_subtype",
+  "type",
+  "representation_type",
+  "description",
+  "precision",
+  "format",
+  "currency_code",
+  "custom_label",
+  "custom_label_position",
+  "is_global_to_workspace",
+  "is_formula_field",
+  "is_value_read_only",
+  "privacy_setting",
+  "default_access_level",
+  "display_value",
+  "number_value",
+  "text_value",
+  "date_value.date",
+  "date_value.date_time",
+  "enum_options.gid",
+  "enum_options.name",
+  "enum_options.enabled",
+  "enum_options.color",
+  "enum_value.gid",
+  "enum_value.name",
+  "multi_enum_values.gid",
+  "multi_enum_values.name",
+  "people_value.gid",
+  "people_value.name",
+  "people_value.email",
+  "reference_value.gid",
+  "reference_value.name",
+  "reference_value.resource_type",
+] as const;
+
+const customFieldFields = (prefix: string) =>
+  CUSTOM_FIELD_FIELDS.map((field) => `${prefix}.${field}`);
+
+const customFieldSettingFields = (prefix: string) => [
+  `${prefix}.gid`,
+  `${prefix}.is_important`,
+  ...customFieldFields(`${prefix}.custom_field`),
+];
+
 const TASK_FIELDS = [
   "gid",
   "name",
@@ -344,7 +414,7 @@ const TASK_FIELDS = [
   "tags.gid",
   "tags.name",
   "tags.color",
-  "custom_fields",
+  ...customFieldFields("custom_fields"),
   "custom_type.gid",
   "custom_type.name",
   "custom_type_status_option.gid",
@@ -490,8 +560,25 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         new URLSearchParams({
           workspace: workspaceGid,
           archived: String(archived),
-          opt_fields:
-            "gid,name,notes,archived,color,privacy_setting,owner.gid,owner.name,owner.email,team.gid,team.name,start_on,due_on,created_at,modified_at",
+          opt_fields: [
+            "gid",
+            "name",
+            "notes",
+            "archived",
+            "color",
+            "privacy_setting",
+            "owner.gid",
+            "owner.name",
+            "owner.email",
+            "team.gid",
+            "team.name",
+            "start_on",
+            "due_on",
+            "created_at",
+            "modified_at",
+            ...customFieldSettingFields("custom_field_settings"),
+            ...customFieldFields("custom_fields"),
+          ].join(","),
         });
       const pages = await Promise.all([
         list<AsanaProject>("/projects", projectQuery(false)),
@@ -613,8 +700,31 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         "/goals",
         new URLSearchParams({
           workspace: workspaceGid,
-          opt_fields:
-            "gid,name,notes,html_notes,start_on,due_on,is_workspace_level,team.gid,team.name,owner.gid,owner.name,owner.email,status,privacy_setting,metric.initial_number_value,metric.target_number_value,metric.current_number_value,metric.current_display_value,metric.progress_source,created_at,modified_at",
+          opt_fields: [
+            "gid",
+            "name",
+            "notes",
+            "html_notes",
+            "start_on",
+            "due_on",
+            "is_workspace_level",
+            "team.gid",
+            "team.name",
+            "owner.gid",
+            "owner.name",
+            "owner.email",
+            "status",
+            "privacy_setting",
+            "metric.initial_number_value",
+            "metric.target_number_value",
+            "metric.current_number_value",
+            "metric.current_display_value",
+            "metric.progress_source",
+            "created_at",
+            "modified_at",
+            ...customFieldSettingFields("custom_field_settings"),
+            ...customFieldFields("custom_fields"),
+          ].join(","),
         }),
       ),
     listGoalRelationships: (goalGid) =>
@@ -631,8 +741,22 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         "/portfolios",
         new URLSearchParams({
           workspace: workspaceGid,
-          opt_fields:
-            "gid,name,archived,color,start_on,due_on,owner.gid,owner.name,owner.email,public,privacy_setting,created_at",
+          opt_fields: [
+            "gid",
+            "name",
+            "archived",
+            "color",
+            "start_on",
+            "due_on",
+            "owner.gid",
+            "owner.name",
+            "owner.email",
+            "public",
+            "privacy_setting",
+            "created_at",
+            ...customFieldSettingFields("custom_field_settings"),
+            ...customFieldFields("custom_fields"),
+          ].join(","),
         }),
       ),
     listPortfolioItems: (portfolioGid) =>

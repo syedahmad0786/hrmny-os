@@ -2422,6 +2422,61 @@ describe("work management", () => {
       portfolioId: portfolio.portfolioId,
       projectId: secondProject.projectId,
     });
+    getDemoWork().objectCustomFields.set("project-risk", {
+      objectCustomFieldValueId: "project-risk",
+      targetType: "project",
+      targetId: project.projectId,
+      key: "asana:risk",
+      name: "Risk",
+      fieldType: "single_select",
+      options: ["High", "Low"],
+      value: "High",
+      displayValue: "High",
+      sourcePlatform: "asana",
+      fieldExternalId: "risk",
+    });
+    getDemoWork().projects.get(project.projectId)!.teamIds = [
+      "a0000000-0000-4000-8000-000000000002",
+    ];
+    getDemoWork().objectCustomFields.set("support-risk", {
+      objectCustomFieldValueId: "support-risk",
+      targetType: "project",
+      targetId: secondProject.projectId,
+      key: "asana:risk",
+      name: "Risk",
+      fieldType: "single_select",
+      options: ["High", "Low"],
+      value: "Low",
+      displayValue: "Low",
+      sourcePlatform: "asana",
+      fieldExternalId: "risk",
+    });
+    getDemoWork().objectCustomFields.set("portfolio-health", {
+      objectCustomFieldValueId: "portfolio-health",
+      targetType: "portfolio",
+      targetId: portfolio.portfolioId,
+      key: "asana:executive-health",
+      name: "Executive health",
+      fieldType: "single_select",
+      options: ["Green", "Amber", "Red"],
+      value: "Green",
+      displayValue: "Green",
+      sourcePlatform: "asana",
+      fieldExternalId: "executive-health",
+    });
+    getDemoWork().objectCustomFields.set("goal-region", {
+      objectCustomFieldValueId: "goal-region",
+      targetType: "goal",
+      targetId: goal.goalId,
+      key: "asana:goal-region",
+      name: "Goal region",
+      fieldType: "single_select",
+      options: ["UAE", "KSA"],
+      value: "UAE",
+      displayValue: "UAE",
+      sourcePlatform: "asana",
+      fieldExternalId: "goal-region",
+    });
 
     await caller.work.statusUpdates.create({
       targetType: "project",
@@ -2544,6 +2599,9 @@ describe("work management", () => {
           dateField: "created",
           dateFrom: "2026-01-01",
           dateTo: "2026-12-31",
+          customFieldKey: "asana:risk",
+          customFieldOperator: "is",
+          customFieldValue: "High",
         },
       },
     });
@@ -2563,6 +2621,9 @@ describe("work management", () => {
           dateField: "due",
           dateFrom: "2026-07-01",
           dateTo: "2026-07-31",
+          customFieldKey: "asana:goal-region",
+          customFieldOperator: "is",
+          customFieldValue: "UAE",
         },
       },
     });
@@ -2580,9 +2641,17 @@ describe("work management", () => {
           dateField: "created",
           dateFrom: "2026-01-01",
           dateTo: "2026-12-31",
+          customFieldKey: "asana:executive-health",
+          customFieldOperator: "is",
+          customFieldValue: "Green",
         },
       },
     });
+    expect(
+      await caller.work.reporting.renderDashboard({
+        dashboardId: projectReportDashboard.dashboardId,
+      }),
+    ).toMatchObject({ widgets: [{ chart: { total: 1 } }] });
     expect(await caller.work.reporting.dashboards()).toEqual(
       expect.arrayContaining([
         projectReportDashboard,
@@ -2697,6 +2766,20 @@ describe("work management", () => {
         },
       }),
     ).rejects.toThrow("Filter does not match the report type");
+    await expect(
+      caller.work.reporting.saveDashboard({
+        name: "Incomplete object field filter",
+        config: {
+          reportType: "projects",
+          chartStyle: "bar",
+          spec: {
+            groupBy: "project_owner",
+            customFieldKey: "asana:risk",
+            customFieldOperator: "is",
+          },
+        },
+      }),
+    ).rejects.toThrow("Choose a complete custom-field filter");
     await expect(
       caller.work.reporting.saveDashboard({
         name: "Invalid report dates",
@@ -2994,11 +3077,19 @@ describe("work management", () => {
       enabled: false,
       reason: "client disabled custom fields",
     });
+    expect(
+      (await caller.work.projects.list()).find(
+        (candidate) => candidate.projectId === project.projectId,
+      )?.customFields,
+    ).toEqual([]);
     expect(await caller.work.reporting.dashboards()).not.toContainEqual(
       customFieldDashboard,
     );
     expect(await caller.work.reporting.dashboards()).not.toContainEqual(
       numericDashboard,
+    );
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      projectReportDashboard,
     );
     await expect(
       caller.work.reporting.chart({

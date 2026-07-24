@@ -211,6 +211,68 @@ export function countReportBuckets(labels: readonly string[]) {
   return { data, total: labels.length };
 }
 
+type MetadataCustomFieldOperator =
+  | "is"
+  | "is_not"
+  | "contains"
+  | "not_contains"
+  | "is_empty"
+  | "is_not_empty"
+  | "greater_than"
+  | "less_than";
+
+function metadataCustomFieldValues(value: unknown): Array<string | number> {
+  if (Array.isArray(value))
+    return value.flatMap((item) =>
+      typeof item === "string" || typeof item === "number" ? [item] : [],
+    );
+  return typeof value === "string" || typeof value === "number" ? [value] : [];
+}
+
+function matchesMetadataCustomField(
+  fields:
+    | readonly {
+        key: string;
+        value: unknown;
+        displayValue?: string | null;
+      }[]
+    | undefined,
+  key: string | null | undefined,
+  operator: MetadataCustomFieldOperator | null | undefined,
+  expected: string | null | undefined,
+) {
+  if (!key) return true;
+  const field = fields?.find((candidate) => candidate.key === key);
+  const values = field ? metadataCustomFieldValues(field.value) : [];
+  const empty =
+    !field ||
+    (!values.length && !(field.displayValue ?? "").trim()) ||
+    values.every((value) => String(value).trim() === "");
+  if (operator === "is_empty") return empty;
+  if (operator === "is_not_empty") return !empty;
+  if (empty || !operator || expected == null) return false;
+  const normalizedExpected = expected.trim().toLocaleLowerCase();
+  const normalizedValues = values.map((value) =>
+    String(value).trim().toLocaleLowerCase(),
+  );
+  const equal = normalizedValues.some((value) => value === normalizedExpected);
+  const contains = normalizedValues.some((value) =>
+    value.includes(normalizedExpected),
+  );
+  if (operator === "is") return equal;
+  if (operator === "is_not") return !equal;
+  if (operator === "contains") return contains;
+  if (operator === "not_contains") return !contains;
+  const actual = values[0];
+  const actualNumber = Number(actual);
+  const expectedNumber = Number(expected);
+  const comparison =
+    Number.isFinite(actualNumber) && Number.isFinite(expectedNumber)
+      ? actualNumber - expectedNumber
+      : String(actual).localeCompare(expected);
+  return operator === "greater_than" ? comparison > 0 : comparison < 0;
+}
+
 export function matchesMetadataReportFilters(
   row: {
     objectId?: string;
@@ -225,6 +287,11 @@ export function matchesMetadataReportFilters(
     createdAt?: string | null;
     startDate?: string | null;
     dueDate?: string | null;
+    customFields?: readonly {
+      key: string;
+      value: unknown;
+      displayValue?: string | null;
+    }[];
   },
   filters: {
     objectIds?: readonly string[];
@@ -239,6 +306,9 @@ export function matchesMetadataReportFilters(
     dateField?: "created" | "start" | "due" | null;
     dateFrom?: string | null;
     dateTo?: string | null;
+    customFieldKey?: string | null;
+    customFieldOperator?: MetadataCustomFieldOperator | null;
+    customFieldValue?: string | null;
   },
 ) {
   const reportDate = filters.dateField
@@ -265,6 +335,12 @@ export function matchesMetadataReportFilters(
     (!filters.dateFrom ||
       Boolean(reportDate && reportDate >= filters.dateFrom)) &&
     (!filters.dateTo || Boolean(reportDate && reportDate <= filters.dateTo)) &&
+    matchesMetadataCustomField(
+      row.customFields,
+      filters.customFieldKey,
+      filters.customFieldOperator,
+      filters.customFieldValue,
+    ) &&
     (filters.includeSubgoals !== false || !row.parentId)
   );
 }

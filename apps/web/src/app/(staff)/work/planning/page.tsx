@@ -35,6 +35,26 @@ type ReportDateFilterValue = {
   dateFrom: string;
   dateTo: string;
 };
+type MetadataCustomFieldOperator =
+  | "is"
+  | "is_not"
+  | "contains"
+  | "not_contains"
+  | "is_empty"
+  | "is_not_empty"
+  | "greater_than"
+  | "less_than";
+type ReportObjectCustomField = {
+  key: string;
+  name: string;
+  fieldType: string;
+  options: string[];
+};
+type ReportCustomFieldFilterValue = {
+  customFieldKey: string;
+  customFieldOperator: MetadataCustomFieldOperator;
+  customFieldValue: string;
+};
 
 const metadataGroups: Record<
   Exclude<ReportType, "tasks">,
@@ -196,6 +216,137 @@ function ReportDateFilters({
           onChange={(event) => onChange({ dateTo: event.target.value })}
         />
       </label>
+    </>
+  );
+}
+
+function reportObjectCustomFields(
+  rows: readonly { customFields?: readonly ReportObjectCustomField[] }[],
+) {
+  const fields = new Map<string, ReportObjectCustomField>();
+  for (const row of rows)
+    for (const field of row.customFields ?? []) {
+      const current = fields.get(field.key);
+      fields.set(field.key, {
+        ...field,
+        options: [...new Set([...(current?.options ?? []), ...field.options])],
+      });
+    }
+  return [...fields.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function customFieldFilterConfig(value: ReportCustomFieldFilterValue) {
+  if (!value.customFieldKey) return {};
+  return {
+    customFieldKey: value.customFieldKey,
+    customFieldOperator: value.customFieldOperator,
+    customFieldValue: ["is_empty", "is_not_empty"].includes(
+      value.customFieldOperator,
+    )
+      ? null
+      : value.customFieldValue || null,
+  };
+}
+
+function ReportCustomFieldFilters({
+  fields,
+  value,
+  onChange,
+}: {
+  fields: readonly ReportObjectCustomField[];
+  value: ReportCustomFieldFilterValue;
+  onChange: (value: Partial<ReportCustomFieldFilterValue>) => void;
+}) {
+  if (!fields.length) return null;
+  const field = fields.find(
+    (candidate) => candidate.key === value.customFieldKey,
+  );
+  const needsValue = !["is_empty", "is_not_empty"].includes(
+    value.customFieldOperator,
+  );
+  const operatorOptions = [
+    { value: "is", label: "Is" },
+    { value: "is_not", label: "Is not" },
+    ...(field?.fieldType === "text"
+      ? [
+          { value: "contains", label: "Contains" },
+          { value: "not_contains", label: "Does not contain" },
+        ]
+      : []),
+    ...(field && ["number", "date"].includes(field.fieldType)
+      ? [
+          { value: "greater_than", label: "Greater than / after" },
+          { value: "less_than", label: "Less than / before" },
+        ]
+      : []),
+    { value: "is_empty", label: "Is empty" },
+    { value: "is_not_empty", label: "Is not empty" },
+  ] as const;
+  return (
+    <>
+      <ReportFilterSelect
+        label="Custom field"
+        allLabel="Any custom field"
+        value={value.customFieldKey}
+        options={fields.map((field) => ({
+          value: field.key,
+          label: field.name,
+        }))}
+        onChange={(customFieldKey) =>
+          onChange({ customFieldKey, customFieldValue: "" })
+        }
+      />
+      {field ? (
+        <ReportFilterSelect
+          label="Field condition"
+          allLabel="Choose condition"
+          value={value.customFieldOperator}
+          options={operatorOptions}
+          onChange={(customFieldOperator) =>
+            onChange({
+              customFieldOperator:
+                customFieldOperator as MetadataCustomFieldOperator,
+              customFieldValue: "",
+            })
+          }
+        />
+      ) : null}
+      {field && needsValue ? (
+        <label className="grid gap-1 text-xs text-muted">
+          Field value
+          {field.options.length ? (
+            <select
+              className="rounded border border-sand px-3 py-2 text-sm text-ink"
+              value={value.customFieldValue}
+              onChange={(event) =>
+                onChange({ customFieldValue: event.target.value })
+              }
+            >
+              <option value="">Choose value</option>
+              {field.options.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className="rounded border border-sand px-3 py-2 text-sm text-ink"
+              type={
+                field.fieldType === "number"
+                  ? "number"
+                  : field.fieldType === "date"
+                    ? "date"
+                    : "text"
+              }
+              value={value.customFieldValue}
+              onChange={(event) =>
+                onChange({ customFieldValue: event.target.value })
+              }
+            />
+          )}
+        </label>
+      ) : null}
     </>
   );
 }
@@ -382,6 +533,9 @@ export default function PlanningPage() {
     dateField: "due" as ReportDateField,
     dateFrom: "",
     dateTo: "",
+    customFieldKey: "",
+    customFieldOperator: "is" as MetadataCustomFieldOperator,
+    customFieldValue: "",
   });
   const [goalFilters, setGoalFilters] = useState({
     objectIds: [] as string[],
@@ -393,6 +547,9 @@ export default function PlanningPage() {
     dateField: "due" as ReportDateField,
     dateFrom: "",
     dateTo: "",
+    customFieldKey: "",
+    customFieldOperator: "is" as MetadataCustomFieldOperator,
+    customFieldValue: "",
   });
   const [portfolioFilters, setPortfolioFilters] = useState({
     objectIds: [] as string[],
@@ -402,6 +559,9 @@ export default function PlanningPage() {
     dateField: "created" as ReportDateField,
     dateFrom: "",
     dateTo: "",
+    customFieldKey: "",
+    customFieldOperator: "is" as MetadataCustomFieldOperator,
+    customFieldValue: "",
   });
   const employees = trpc.work.members.listEmployees.useQuery({
     projectId: projectId || undefined,
@@ -523,6 +683,60 @@ export default function PlanningPage() {
   const portfolios = trpc.work.portfolios.list.useQuery(undefined, {
     enabled: portfoliosEnabled,
   });
+  const projectObjectFields = useMemo(
+    () => reportObjectCustomFields(projects.data ?? []),
+    [projects.data],
+  );
+  const portfolioObjectFields = useMemo(
+    () => reportObjectCustomFields(portfolios.data ?? []),
+    [portfolios.data],
+  );
+  const goalObjectFields = useMemo(
+    () => reportObjectCustomFields(goals.data ?? []),
+    [goals.data],
+  );
+  useEffect(() => {
+    if (
+      projectFilters.customFieldKey &&
+      !projectObjectFields.some(
+        (field) => field.key === projectFilters.customFieldKey,
+      )
+    )
+      setProjectFilters((current) => ({
+        ...current,
+        customFieldKey: "",
+        customFieldValue: "",
+      }));
+    if (
+      portfolioFilters.customFieldKey &&
+      !portfolioObjectFields.some(
+        (field) => field.key === portfolioFilters.customFieldKey,
+      )
+    )
+      setPortfolioFilters((current) => ({
+        ...current,
+        customFieldKey: "",
+        customFieldValue: "",
+      }));
+    if (
+      goalFilters.customFieldKey &&
+      !goalObjectFields.some(
+        (field) => field.key === goalFilters.customFieldKey,
+      )
+    )
+      setGoalFilters((current) => ({
+        ...current,
+        customFieldKey: "",
+        customFieldValue: "",
+      }));
+  }, [
+    goalFilters.customFieldKey,
+    goalObjectFields,
+    portfolioFilters.customFieldKey,
+    portfolioObjectFields,
+    projectFilters.customFieldKey,
+    projectObjectFields,
+  ]);
   const statusUpdates = trpc.work.statusUpdates.list.useQuery(
     { targetType: "project", targetId: projectId },
     { enabled: Boolean(projectId && statusEnabled) },
@@ -711,6 +925,7 @@ export default function PlanningPage() {
               createdAt: project.createdAt,
               startDate: project.startDate,
               dueDate: project.dueDate,
+              customFields: project.customFields,
             },
             projectFilters,
           ),
@@ -744,6 +959,7 @@ export default function PlanningPage() {
                 createdAt: goal.createdAt,
                 startDate: goal.startDate,
                 dueDate: goal.dueDate,
+                customFields: goal.customFields,
               },
               goalFilters,
             ),
@@ -766,6 +982,7 @@ export default function PlanningPage() {
               status: portfolio.health,
               privacy: portfolio.privacy,
               createdAt: portfolio.createdAt,
+              customFields: portfolio.customFields,
             },
             portfolioFilters,
           ),
@@ -807,6 +1024,20 @@ export default function PlanningPage() {
           : portfolios.isPending;
   const displayedMetric =
     chartReportType === "tasks" ? chartMetric : "task_count";
+  const metadataCustomFieldFilter =
+    chartReportType === "projects"
+      ? projectFilters
+      : chartReportType === "goals"
+        ? goalFilters
+        : chartReportType === "portfolios"
+          ? portfolioFilters
+          : null;
+  const metadataCustomFieldFilterValid =
+    !metadataCustomFieldFilter?.customFieldKey ||
+    ["is_empty", "is_not_empty"].includes(
+      metadataCustomFieldFilter.customFieldOperator,
+    ) ||
+    Boolean(metadataCustomFieldFilter.customFieldValue.trim());
   const dashboards = trpc.work.reporting.dashboards.useQuery(undefined, {
     enabled: reportingEnabled,
   });
@@ -1005,6 +1236,24 @@ export default function PlanningPage() {
           : "due";
       const dateFrom = typeof saved.dateFrom === "string" ? saved.dateFrom : "";
       const dateTo = typeof saved.dateTo === "string" ? saved.dateTo : "";
+      const customFieldKey =
+        typeof saved.customFieldKey === "string" ? saved.customFieldKey : "";
+      const customFieldOperator = [
+        "is",
+        "is_not",
+        "contains",
+        "not_contains",
+        "is_empty",
+        "is_not_empty",
+        "greater_than",
+        "less_than",
+      ].includes(String(saved.customFieldOperator))
+        ? (saved.customFieldOperator as MetadataCustomFieldOperator)
+        : "is";
+      const customFieldValue =
+        typeof saved.customFieldValue === "string"
+          ? saved.customFieldValue
+          : "";
       if (reportType === "projects") {
         setProjectFilters({
           objectIds,
@@ -1020,6 +1269,9 @@ export default function PlanningPage() {
           dateField: savedDateField,
           dateFrom,
           dateTo,
+          customFieldKey,
+          customFieldOperator,
+          customFieldValue,
         });
       } else if (reportType === "goals") {
         setGoalFilters({
@@ -1043,6 +1295,9 @@ export default function PlanningPage() {
           dateField: savedDateField,
           dateFrom,
           dateTo,
+          customFieldKey,
+          customFieldOperator,
+          customFieldValue,
         });
       } else {
         setPortfolioFilters({
@@ -1053,6 +1308,9 @@ export default function PlanningPage() {
           dateField: "created",
           dateFrom,
           dateTo,
+          customFieldKey,
+          customFieldOperator,
+          customFieldValue,
         });
       }
       return;
@@ -1306,6 +1564,7 @@ export default function PlanningPage() {
                               dateField: projectFilters.dateField,
                               dateFrom: projectFilters.dateFrom || null,
                               dateTo: projectFilters.dateTo || null,
+                              ...customFieldFilterConfig(projectFilters),
                             }
                           : chartReportType === "goals"
                             ? {
@@ -1319,6 +1578,7 @@ export default function PlanningPage() {
                                 dateField: goalFilters.dateField,
                                 dateFrom: goalFilters.dateFrom || null,
                                 dateTo: goalFilters.dateTo || null,
+                                ...customFieldFilterConfig(goalFilters),
                               }
                             : {
                                 objectIds: portfolioFilters.objectIds,
@@ -1329,6 +1589,7 @@ export default function PlanningPage() {
                                 dateField: portfolioFilters.dateField,
                                 dateFrom: portfolioFilters.dateFrom || null,
                                 dateTo: portfolioFilters.dateTo || null,
+                                ...customFieldFilterConfig(portfolioFilters),
                               }),
                       },
                     },
@@ -1361,7 +1622,8 @@ export default function PlanningPage() {
                 className="rounded bg-ink px-3 py-2 text-sm text-white"
                 disabled={
                   !dashboardName.trim() ||
-                  (numericFieldMetric && !numericFieldSelected)
+                  (numericFieldMetric && !numericFieldSelected) ||
+                  !metadataCustomFieldFilterValid
                 }
               >
                 Save view
@@ -1654,6 +1916,16 @@ export default function PlanningPage() {
                       }))
                     }
                   />
+                  <ReportCustomFieldFilters
+                    fields={projectObjectFields}
+                    value={projectFilters}
+                    onChange={(value) =>
+                      setProjectFilters((current) => ({
+                        ...current,
+                        ...value,
+                      }))
+                    }
+                  />
                 </>
               ) : chartReportType === "goals" ? (
                 <>
@@ -1762,6 +2034,16 @@ export default function PlanningPage() {
                       }))
                     }
                   />
+                  <ReportCustomFieldFilters
+                    fields={goalObjectFields}
+                    value={goalFilters}
+                    onChange={(value) =>
+                      setGoalFilters((current) => ({
+                        ...current,
+                        ...value,
+                      }))
+                    }
+                  />
                 </>
               ) : chartReportType === "portfolios" ? (
                 <>
@@ -1819,6 +2101,16 @@ export default function PlanningPage() {
                   />
                   <ReportDateFilters
                     fields={[{ value: "created", label: "Created" }]}
+                    value={portfolioFilters}
+                    onChange={(value) =>
+                      setPortfolioFilters((current) => ({
+                        ...current,
+                        ...value,
+                      }))
+                    }
+                  />
+                  <ReportCustomFieldFilters
+                    fields={portfolioObjectFields}
                     value={portfolioFilters}
                     onChange={(value) =>
                       setPortfolioFilters((current) => ({
