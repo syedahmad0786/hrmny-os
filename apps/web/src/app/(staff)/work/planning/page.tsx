@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { WorkNav } from "@/components/work-nav";
+import { WorkLikeButton } from "@/components/work-like-button";
 import { trpc } from "@/lib/trpc";
 
 function monday() {
@@ -523,6 +524,12 @@ export default function PlanningPage() {
                   </span>
                 </div>
                 <p className="mt-1 text-sm text-muted">{update.body}</p>
+                <div className="mt-2">
+                  <WorkLikeButton
+                    targetType="status_update"
+                    targetId={update.statusUpdateId}
+                  />
+                </div>
               </article>
             ))}
           </div>

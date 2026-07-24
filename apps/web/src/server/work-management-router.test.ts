@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 import { clearDemoFeatureOverrides } from "./features";
 import { createCaller } from "./trpc/root";
+import { getDemoWork } from "./trpc/work-management-router";
 
 function partnerCaller() {
   const user = resolveDevUser("partner");
@@ -66,6 +67,192 @@ describe("work management", () => {
     expect(
       await caller.work.comments.list({ itemId: first.itemId }),
     ).toContainEqual(comment);
+  });
+
+  it("runs governed messages, replies, reactions, and Inbox filters", async () => {
+    const caller = partnerCaller();
+    const project = await caller.work.projects.create({
+      name: `Communications ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const message = await caller.work.messages.create({
+      projectId: project.projectId,
+      subject: "Weekly update",
+      body: "Delivery remains on track.",
+      isAnnouncement: true,
+    });
+    const reply = await caller.work.messages.comment({
+      messageId: message.messageId,
+      body: "Acknowledged",
+    });
+    await caller.work.likes.set({
+      targetType: "message",
+      targetId: message.messageId,
+      liked: true,
+    });
+    await caller.work.likes.set({
+      targetType: "message_comment",
+      targetId: reply.messageCommentId,
+      liked: true,
+    });
+    expect(
+      await caller.work.messages.list({ projectId: project.projectId }),
+    ).toContainEqual(
+      expect.objectContaining({
+        messageId: message.messageId,
+        commentCount: 1,
+        likeCount: 1,
+        likedByMe: true,
+      }),
+    );
+    expect(
+      await caller.work.messages.comments({ messageId: message.messageId }),
+    ).toContainEqual(
+      expect.objectContaining({
+        messageCommentId: reply.messageCommentId,
+        likeCount: 1,
+        likedByMe: true,
+      }),
+    );
+    await expect(
+      caller.work.messages.list({ teamId: crypto.randomUUID() }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    const notificationId = crypto.randomUUID();
+    getDemoWork().notifications.set(notificationId, {
+      notificationId,
+      recipientEmployeeId: resolveDevUser("partner").employeeId,
+      itemId: null,
+      projectId: project.projectId,
+      messageId: message.messageId,
+      eventType: "message",
+      message: "New project message",
+      readAt: null,
+      createdAt: new Date().toISOString(),
+    });
+    expect(
+      await caller.work.personal.inbox({ kinds: ["messages"] }),
+    ).toContainEqual(expect.objectContaining({ notificationId }));
+
+    const detail = await caller.work.projects.get({
+      projectId: project.projectId,
+    });
+    const task = await caller.work.tasks.create({
+      projectId: project.projectId,
+      sectionId: detail.sections[0]!.sectionId,
+      title: "Discuss launch",
+      description: "",
+    });
+    const taskComment = await caller.work.comments.create({
+      itemId: task.itemId,
+      body: "Please review",
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.comments",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.work.likes.summary({
+        targetType: "comment",
+        targetId: taskComment.commentId,
+      }),
+    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.comments" });
+
+    await caller.admin.features.setOverride({
+      featureKey: "work.likes",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.work.likes.summary({
+        targetType: "message",
+        targetId: message.messageId,
+      }),
+    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.likes" });
+    await caller.admin.features.setOverride({
+      featureKey: "work.inbox.message_status_filters",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.work.personal.inbox({ kinds: ["messages"] }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.inbox.message_status_filters",
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.project_messages",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.work.messages.list({ projectId: project.projectId }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.project_messages",
+    });
+    expect(await caller.work.personal.inbox({})).not.toContainEqual(
+      expect.objectContaining({ notificationId }),
+    );
+  });
+
+  it("applies the client Feature Lab scope to project status updates", async () => {
+    const caller = partnerCaller();
+    const project = await caller.work.projects.create({
+      name: `Client status ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const clientId = resolveDevUser("portal_a").clientId!;
+    getDemoWork().projects.get(project.projectId)!.clientId = clientId;
+    await caller.work.statusUpdates.create({
+      targetType: "project",
+      targetId: project.projectId,
+      health: "on_track",
+      progress: 20,
+      title: "Started",
+      body: "",
+    });
+    const notificationId = crypto.randomUUID();
+    getDemoWork().notifications.set(notificationId, {
+      notificationId,
+      recipientEmployeeId: resolveDevUser("partner").employeeId,
+      itemId: null,
+      projectId: project.projectId,
+      messageId: null,
+      eventType: "status_update",
+      message: "Client status update",
+      readAt: null,
+      createdAt: new Date().toISOString(),
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.status_updates",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.work.statusUpdates.list({
+        targetType: "project",
+        targetId: project.projectId,
+      }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.status_updates",
+    });
+    expect(await caller.work.personal.inbox({})).not.toContainEqual(
+      expect.objectContaining({ notificationId }),
+    );
   });
 
   it("enforces a Feature Lab switch at the API boundary", async () => {

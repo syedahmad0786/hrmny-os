@@ -7,6 +7,11 @@ import { trpc } from "@/lib/trpc";
 const ITEMS = [
   { href: "/work", label: "Projects", features: ["work.projects"] },
   { href: "/work/my-tasks", label: "My tasks", features: ["work.my_tasks"] },
+  {
+    href: "/work/messages",
+    label: "Messages",
+    features: ["work.project_messages"],
+  },
   { href: "/work/inbox", label: "Inbox", features: ["work.inbox"] },
   { href: "/work/search", label: "Search", features: ["work.search"] },
   {

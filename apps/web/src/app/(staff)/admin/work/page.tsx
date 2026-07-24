@@ -189,6 +189,9 @@ export default function WorkAdminPage() {
           teams={teams.data ?? []}
           employees={directory.data?.employees ?? []}
           projects={directory.data?.projects ?? []}
+          messagePermissionsEnabled={enabled.has(
+            "work.team_message_permissions",
+          )}
           refresh={() => utils.workAdmin.teams.list.invalidate()}
         />
       ) : null}
@@ -603,11 +606,13 @@ function TeamsPanel({
   teams,
   employees,
   projects,
+  messagePermissionsEnabled,
   refresh,
 }: {
   teams: any[];
   employees: any[];
   projects: any[];
+  messagePermissionsEnabled: boolean;
   refresh: () => Promise<unknown>;
 }) {
   const [name, setName] = useState("");
@@ -626,6 +631,10 @@ function TeamsPanel({
   const setProject = trpc.workAdmin.teams.setProject.useMutation({
     onSuccess: refresh,
   });
+  const setMessagePermission =
+    trpc.workAdmin.teams.setMessagePermission.useMutation({
+      onSuccess: refresh,
+    });
   const archive = trpc.workAdmin.teams.archive.useMutation({
     onSuccess: refresh,
   });
@@ -675,6 +684,25 @@ function TeamsPanel({
                   {team.privacy} · {team.members.length} members ·{" "}
                   {team.projects.length} projects
                 </p>
+                {messagePermissionsEnabled ? (
+                  <label className="mt-2 block text-xs text-muted">
+                    Who can send team messages
+                    <select
+                      className="ml-2 rounded border border-sand bg-white px-2 py-1"
+                      value={team.messageSendPermission}
+                      onChange={(event) =>
+                        setMessagePermission.mutate({
+                          teamId: team.teamId,
+                          permission: event.target.value as
+                            "admins" | "members",
+                        })
+                      }
+                    >
+                      <option value="members">All members</option>
+                      <option value="admins">Admins only</option>
+                    </select>
+                  </label>
+                ) : null}
               </div>
               <button
                 type="button"

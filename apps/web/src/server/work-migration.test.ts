@@ -423,4 +423,40 @@ describe("work migration compatibility", () => {
       /trigger_type = 'scheduled' AND schedule_minutes IS NOT NULL/i,
     );
   });
+
+  it("adds scoped messages, replies, followers, and one-target reactions", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0038_work_messages_likes.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0038_work_messages_likes.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0038_work_messages_likes.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    for (const table of [
+      "work_message",
+      "work_message_comment",
+      "work_message_follower",
+      "work_like",
+    ])
+      expect(migration).toMatch(
+        new RegExp(`CREATE TABLE IF NOT EXISTS public\\.${table}`, "i"),
+      );
+    expect(migration).toMatch(
+      /CHECK \(num_nonnulls\(work_project_id, work_team_id\) = 1\)/i,
+    );
+    expect(migration).toMatch(/work_message_comment_id uuid/i);
+    expect(migration).toContain("'message'");
+    expect(migration).toContain("'status_update'");
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

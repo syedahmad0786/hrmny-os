@@ -69,10 +69,17 @@ describe("Work governance", () => {
       projectId: project.projectId,
       included: true,
     });
+    await admin.workAdmin.teams.setMessagePermission({
+      teamId: team.teamId,
+      permission: "admins",
+    });
     expect((await admin.workAdmin.teams.list())[0]?.projects).toContainEqual({
       projectId: project.projectId,
       name: project.name,
       accessLevel: "editor",
+    });
+    expect((await admin.workAdmin.teams.list())[0]).toMatchObject({
+      messageSendPermission: "admins",
     });
 
     const am = resolveDevUser("am");

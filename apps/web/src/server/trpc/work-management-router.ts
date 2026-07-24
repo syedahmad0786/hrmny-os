@@ -109,11 +109,44 @@ type WorkNotification = {
   notificationId: string;
   itemId: string | null;
   projectId: string | null;
+  messageId: string | null;
   eventType: string;
   message: string;
   readAt: string | null;
   createdAt: string;
 };
+type WorkMessage = {
+  messageId: string;
+  projectId: string | null;
+  teamId: string | null;
+  subject: string;
+  body: string;
+  isAnnouncement: boolean;
+  createdByEmployeeId: string;
+  authorName: string;
+  createdAt: string;
+  commentCount: number;
+  likeCount: number;
+  likedByMe: boolean;
+  following: boolean;
+};
+type WorkMessageComment = {
+  messageCommentId: string;
+  messageId: string;
+  authorEmployeeId: string;
+  authorName: string;
+  body: string;
+  createdAt: string;
+  likeCount: number;
+  likedByMe: boolean;
+};
+type WorkLikeTarget =
+  | "item"
+  | "comment"
+  | "attachment"
+  | "status_update"
+  | "message"
+  | "message_comment";
 type WorkSavedSearch = {
   savedSearchId: string;
   ownerEmployeeId: string;
@@ -287,6 +320,9 @@ type DemoWork = {
     string,
     WorkNotification & { recipientEmployeeId: string }
   >;
+  messages: Map<string, WorkMessage>;
+  messageComments: Map<string, WorkMessageComment>;
+  likes: Map<string, Set<string>>;
   savedSearches: Map<string, WorkSavedSearch>;
   forms: Map<string, WorkForm>;
   formSubmissions: Map<
@@ -398,6 +434,9 @@ export function getDemoWork(): DemoWork {
     customFieldValues: new Map(),
     attachments: new Map(),
     notifications: new Map(),
+    messages: new Map(),
+    messageComments: new Map(),
+    likes: new Map(),
     savedSearches: new Map(),
     forms: new Map(),
     formSubmissions: new Map(),
@@ -429,6 +468,23 @@ const accessRank: Record<AccessLevel, number> = {
 };
 const uuid = z.string().uuid();
 const nullableUuid = uuid.nullable();
+const messageScopeSchema = z
+  .object({ projectId: uuid.optional(), teamId: uuid.optional() })
+  .refine(
+    (value) =>
+      Number(Boolean(value.projectId)) + Number(Boolean(value.teamId)) === 1,
+    {
+      message: "Choose one project or team",
+    },
+  );
+const likeTargetTypeSchema = z.enum([
+  "item",
+  "comment",
+  "attachment",
+  "status_update",
+  "message",
+  "message_comment",
+]);
 const workRuleTriggerSchema = z.enum([
   "task_added",
   "task_completed",
@@ -804,6 +860,196 @@ async function requireItemInProject(
     });
 }
 
+type WorkMessageScope = { projectId: string | null; teamId: string | null };
+
+async function requireMessageScope(
+  ctx: TrpcContext,
+  scope: WorkMessageScope,
+  mode: "view" | "post" | "comment" = "view",
+) {
+  await requireScopedFeature(ctx, "work.project_messages", scope.projectId);
+  if (scope.projectId) {
+    await requireProjectAccess(
+      ctx,
+      scope.projectId,
+      mode === "view" ? "viewer" : "commenter",
+    );
+    return;
+  }
+  if (!scope.teamId) throw new TRPCError({ code: "BAD_REQUEST" });
+  const db = getDb();
+  if (!db) throw new TRPCError({ code: "NOT_FOUND" });
+  const [team] = await db.execute<{
+    privacy: "public" | "request" | "private";
+    role: "admin" | "member" | null;
+    messageSendPermission: "admins" | "members";
+  }>(sql`
+    select team.privacy, membership.role,
+      team.message_send_permission as "messageSendPermission"
+    from public.work_team team
+    left join public.work_team_member membership
+      on membership.work_team_id = team.work_team_id
+      and membership.employee_id = ${actor(ctx)}::uuid
+    where team.work_team_id = ${scope.teamId}::uuid
+      and team.archived_at is null
+  `);
+  if (!team || (mode === "view" && team.privacy !== "public" && !team.role))
+    throw new TRPCError({ code: "NOT_FOUND" });
+  if (mode === "comment" && !team.role)
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Team membership required",
+    });
+  if (
+    mode === "post" &&
+    (!team.role ||
+      (team.messageSendPermission === "admins" && team.role !== "admin"))
+  )
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Team message permission denied",
+    });
+}
+
+async function messageScopeById(
+  ctx: TrpcContext,
+  messageId: string,
+  mode: "view" | "post" | "comment" = "view",
+): Promise<WorkMessageScope> {
+  const db = getDb();
+  const scope = !db
+    ? (() => {
+        const message = getDemoWork().messages.get(messageId);
+        return message
+          ? { projectId: message.projectId, teamId: message.teamId }
+          : null;
+      })()
+    : (
+        await db.execute<WorkMessageScope>(sql`
+          select work_project_id as "projectId", work_team_id as "teamId"
+          from public.work_message
+          where work_message_id = ${messageId}::uuid and archived_at is null
+        `)
+      )[0];
+  if (!scope) throw new TRPCError({ code: "NOT_FOUND" });
+  await requireMessageScope(ctx, scope, mode);
+  return scope;
+}
+
+async function requireLikeTargetAccess(
+  ctx: TrpcContext,
+  targetType: WorkLikeTarget,
+  targetId: string,
+  write: boolean,
+): Promise<string | null> {
+  const minimum = write ? "commenter" : "viewer";
+  if (targetType === "item") {
+    const item = await requireItemAccess(ctx, targetId, minimum);
+    return item.projectId;
+  }
+  const db = getDb();
+  if (!db) {
+    const store = getDemoWork();
+    if (targetType === "comment") {
+      const comment = store.comments.get(targetId);
+      if (!comment) throw new TRPCError({ code: "NOT_FOUND" });
+      return (await requireItemAccess(ctx, comment.itemId, minimum)).projectId;
+    } else if (targetType === "attachment") {
+      const attachment = store.attachments.get(targetId);
+      if (!attachment) throw new TRPCError({ code: "NOT_FOUND" });
+      return (await requireItemAccess(ctx, attachment.itemId, minimum))
+        .projectId;
+    } else if (targetType === "status_update") {
+      const update = store.statusUpdates.get(targetId);
+      if (!update) throw new TRPCError({ code: "NOT_FOUND" });
+      if (update.projectId)
+        await requireProjectAccess(ctx, update.projectId, minimum);
+      else if (update.portfolioId)
+        await requirePortfolioAccess(ctx, update.portfolioId);
+      else await requireGoalAccess(ctx, update.goalId!);
+      return update.projectId;
+    } else if (targetType === "message") {
+      return (await messageScopeById(ctx, targetId, write ? "comment" : "view"))
+        .projectId;
+    } else {
+      const comment = store.messageComments.get(targetId);
+      if (!comment) throw new TRPCError({ code: "NOT_FOUND" });
+      return (
+        await messageScopeById(
+          ctx,
+          comment.messageId,
+          write ? "comment" : "view",
+        )
+      ).projectId;
+    }
+  }
+  if (targetType === "comment" || targetType === "attachment") {
+    const table =
+      targetType === "comment"
+        ? sql`public.work_comment`
+        : sql`public.work_attachment`;
+    const idColumn =
+      targetType === "comment" ? sql`work_comment_id` : sql`work_attachment_id`;
+    const [row] = await db.execute<{ itemId: string }>(sql`
+      select work_item_id as "itemId" from ${table}
+      where ${idColumn} = ${targetId}::uuid
+    `);
+    if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    return (await requireItemAccess(ctx, row.itemId, minimum)).projectId;
+  }
+  if (targetType === "status_update") {
+    const [update] = await db.execute<{
+      projectId: string | null;
+      portfolioId: string | null;
+      goalId: string | null;
+    }>(sql`
+      select work_project_id as "projectId",
+        work_portfolio_id as "portfolioId", work_goal_id as "goalId"
+      from public.work_status_update
+      where work_status_update_id = ${targetId}::uuid
+    `);
+    if (!update) throw new TRPCError({ code: "NOT_FOUND" });
+    if (update.projectId)
+      await requireProjectAccess(ctx, update.projectId, minimum);
+    else if (update.portfolioId)
+      await requirePortfolioAccess(ctx, update.portfolioId);
+    else await requireGoalAccess(ctx, update.goalId!);
+    return update.projectId;
+  }
+  if (targetType === "message") {
+    return (await messageScopeById(ctx, targetId, write ? "comment" : "view"))
+      .projectId;
+  }
+  const [comment] = await db.execute<{ messageId: string }>(sql`
+    select work_message_id as "messageId"
+    from public.work_message_comment
+    where work_message_comment_id = ${targetId}::uuid and deleted_at is null
+  `);
+  if (!comment) throw new TRPCError({ code: "NOT_FOUND" });
+  return (
+    await messageScopeById(ctx, comment.messageId, write ? "comment" : "view")
+  ).projectId;
+}
+
+async function requireLikeFeatures(
+  ctx: TrpcContext,
+  targetType: WorkLikeTarget,
+  projectId: string | null,
+) {
+  const targetFeature =
+    targetType === "item"
+      ? "work.tasks"
+      : targetType === "comment"
+        ? "work.comments"
+        : targetType === "attachment"
+          ? "work.attachments"
+          : targetType === "status_update"
+            ? "work.status_updates"
+            : "work.project_messages";
+  await requireScopedFeature(ctx, targetFeature, projectId);
+  await requireScopedFeature(ctx, "work.likes", projectId);
+}
+
 function canManageOwned(
   ctx: TrpcContext,
   ownerEmployeeId: string | null,
@@ -1137,6 +1383,7 @@ async function notifyItem(
         recipientEmployeeId,
         itemId,
         projectId: item?.projectId ?? null,
+        messageId: null,
         eventType,
         message,
         readAt: null,
@@ -1164,6 +1411,47 @@ async function notifyItem(
       select follower.employee_id
       from public.work_item_follower follower
       where follower.work_item_id = ${itemId}::uuid
+    ) recipient
+    where recipient.employee_id is not null
+      and recipient.employee_id <> ${employeeId}::uuid
+  `);
+}
+
+async function notifyStatusUpdate(ctx: TrpcContext, update: WorkStatusUpdate) {
+  const employeeId = actor(ctx);
+  const db = getDb();
+  if (!db) return;
+  await db.execute(sql`
+    insert into public.work_notification (
+      recipient_employee_id, actor_employee_id, work_project_id,
+      event_type, message, payload
+    )
+    select distinct recipient.employee_id, ${employeeId}::uuid,
+      ${update.projectId}::uuid, 'status_update',
+      ${`Status update: ${update.title}`},
+      jsonb_build_object('statusUpdateId', ${update.statusUpdateId}::text)
+    from (
+      select member.employee_id
+      from public.work_project_member member
+      where member.work_project_id = ${update.projectId}::uuid
+      union
+      select team_member.employee_id
+      from public.work_team_project team_project
+      join public.work_team_member team_member
+        on team_member.work_team_id = team_project.work_team_id
+      where team_project.work_project_id = ${update.projectId}::uuid
+      union
+      select project.owner_employee_id
+      from public.work_project project
+      where project.work_project_id = ${update.projectId}::uuid
+      union
+      select portfolio.owner_employee_id
+      from public.work_portfolio portfolio
+      where portfolio.work_portfolio_id = ${update.portfolioId}::uuid
+      union
+      select goal.owner_employee_id
+      from public.work_goal goal
+      where goal.work_goal_id = ${update.goalId}::uuid
     ) recipient
     where recipient.employee_id is not null
       and recipient.employee_id <> ${employeeId}::uuid
@@ -1608,6 +1896,87 @@ async function projectClientId(projectId: string): Promise<string | null> {
     where work_project_id = ${projectId}::uuid and archived_at is null
   `);
   return project?.clientId ?? null;
+}
+
+async function requireScopedFeature(
+  ctx: TrpcContext,
+  featureKey: string,
+  projectId: string | null,
+) {
+  if (
+    !(await featureEnabled(featureKey, {
+      userId: ctx.employeeId,
+      clientId: projectId ? await projectClientId(projectId) : ctx.clientId,
+      roles: ctx.roles,
+    }))
+  )
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `FEATURE_DISABLED:${featureKey}`,
+    });
+}
+
+function notificationFeatureKey(eventType: string) {
+  if (eventType === "message") return "work.project_messages";
+  if (eventType === "status_update") return "work.status_updates";
+  if (eventType === "commented") return "work.comments";
+  if (eventType === "followed") return "work.followers";
+  return "work.tasks";
+}
+
+async function notificationFeatureEnabled(
+  ctx: TrpcContext,
+  eventType: string,
+  projectId: string | null,
+  featureClientId?: string | null,
+  cache?: Map<string, Promise<boolean>>,
+) {
+  const featureKey = notificationFeatureKey(eventType);
+  const clientId =
+    featureClientId !== undefined
+      ? featureClientId
+      : projectId
+        ? await projectClientId(projectId)
+        : ctx.clientId;
+  const cacheKey = `${featureKey}:${clientId ?? ""}`;
+  const cached = cache?.get(cacheKey);
+  if (cached) return cached;
+  const result = featureEnabled(featureKey, {
+    userId: ctx.employeeId,
+    clientId,
+    roles: ctx.roles,
+  });
+  cache?.set(cacheKey, result);
+  return result;
+}
+
+async function visibleDemoNotification(
+  ctx: TrpcContext,
+  notification: WorkNotification,
+  featureCache: Map<string, Promise<boolean>>,
+) {
+  try {
+    if (notification.messageId)
+      await messageScopeById(ctx, notification.messageId);
+    else if (notification.itemId)
+      await requireItemAccess(ctx, notification.itemId);
+    else if (notification.projectId)
+      await requireProjectAccess(ctx, notification.projectId);
+    return notificationFeatureEnabled(
+      ctx,
+      notification.eventType,
+      notification.projectId,
+      undefined,
+      featureCache,
+    );
+  } catch (error) {
+    if (
+      error instanceof TRPCError &&
+      (error.code === "NOT_FOUND" || error.code === "FORBIDDEN")
+    )
+      return false;
+    throw error;
+  }
 }
 
 function ruleTriggerFeatureKey(
@@ -2978,6 +3347,455 @@ export const workManagementRouter = router({
       }),
   }),
 
+  messages: router({
+    teams: staffProcedure.query(async ({ ctx }) => {
+      const employeeId = actor(ctx);
+      const db = getDb();
+      if (!db) return [];
+      return db.execute<{
+        teamId: string;
+        name: string;
+        messageSendPermission: "admins" | "members";
+        role: "admin" | "member" | null;
+        canPost: boolean;
+      }>(sql`
+        select team.work_team_id as "teamId", team.name,
+          team.message_send_permission as "messageSendPermission",
+          membership.role,
+          (membership.role is not null and (
+            team.message_send_permission = 'members'
+            or membership.role = 'admin'
+          )) as "canPost"
+        from public.work_team team
+        left join public.work_team_member membership
+          on membership.work_team_id = team.work_team_id
+          and membership.employee_id = ${employeeId}::uuid
+        where team.archived_at is null
+          and (team.privacy = 'public' or membership.employee_id is not null)
+        order by lower(team.name)
+      `);
+    }),
+    list: staffProcedure
+      .input(messageScopeSchema)
+      .query(async ({ input, ctx }) => {
+        const scope = {
+          projectId: input.projectId ?? null,
+          teamId: input.teamId ?? null,
+        };
+        await requireMessageScope(ctx, scope);
+        const employeeId = actor(ctx);
+        const db = getDb();
+        if (!db) {
+          const store = getDemoWork();
+          return [...store.messages.values()]
+            .filter(
+              (message) =>
+                message.projectId === scope.projectId &&
+                message.teamId === scope.teamId,
+            )
+            .map((message) => {
+              const people = store.likes.get(`message:${message.messageId}`);
+              return {
+                ...message,
+                likeCount: people?.size ?? 0,
+                likedByMe: people?.has(employeeId) ?? false,
+              };
+            })
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        }
+        const rows = await db.execute<
+          Omit<WorkMessage, "createdAt"> & { createdAt: Date | string }
+        >(sql`
+          select message.work_message_id as "messageId",
+            message.work_project_id as "projectId",
+            message.work_team_id as "teamId", message.subject, message.body,
+            message.is_announcement as "isAnnouncement",
+            message.created_by_employee_id as "createdByEmployeeId",
+            author.display_name as "authorName", message.created_at as "createdAt",
+            (select count(*)::int from public.work_message_comment comment
+              where comment.work_message_id = message.work_message_id
+                and comment.deleted_at is null) as "commentCount",
+            (select count(*)::int from public.work_like reaction
+              where reaction.work_message_id = message.work_message_id) as "likeCount",
+            exists(select 1 from public.work_like reaction
+              where reaction.work_message_id = message.work_message_id
+                and reaction.employee_id = ${employeeId}::uuid) as "likedByMe",
+            exists(select 1 from public.work_message_follower follower
+              where follower.work_message_id = message.work_message_id
+                and follower.employee_id = ${employeeId}::uuid) as following
+          from public.work_message message
+          join public.employee author
+            on author.employee_id = message.created_by_employee_id
+          where message.archived_at is null
+            and (${scope.projectId}::uuid is null
+              or message.work_project_id = ${scope.projectId}::uuid)
+            and (${scope.teamId}::uuid is null
+              or message.work_team_id = ${scope.teamId}::uuid)
+          order by message.created_at desc
+          limit 200
+        `);
+        return rows.map((row) => ({
+          ...row,
+          createdAt: new Date(row.createdAt).toISOString(),
+        }));
+      }),
+    create: staffProcedure
+      .input(
+        messageScopeSchema.and(
+          z.object({
+            subject: z.string().trim().min(1).max(300),
+            body: z.string().trim().max(50_000).default(""),
+            isAnnouncement: z.boolean().default(false),
+          }),
+        ),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        const scope = {
+          projectId: input.projectId ?? null,
+          teamId: input.teamId ?? null,
+        };
+        await requireMessageScope(ctx, scope, "post");
+        const message: WorkMessage = {
+          messageId: randomUUID(),
+          ...scope,
+          subject: input.subject,
+          body: input.body,
+          isAnnouncement: input.isAnnouncement,
+          createdByEmployeeId: employeeId,
+          authorName: ctx.user?.displayName ?? "You",
+          createdAt: new Date().toISOString(),
+          commentCount: 0,
+          likeCount: 0,
+          likedByMe: false,
+          following: true,
+        };
+        const db = getDb();
+        if (!db) getDemoWork().messages.set(message.messageId, message);
+        else
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              insert into public.work_message (
+                work_message_id, work_project_id, work_team_id, subject, body,
+                is_announcement, created_by_employee_id
+              ) values (
+                ${message.messageId}::uuid, ${scope.projectId}::uuid,
+                ${scope.teamId}::uuid, ${message.subject}, ${message.body},
+                ${message.isAnnouncement}, ${employeeId}::uuid
+              )
+            `);
+            await tx.execute(sql`
+              insert into public.work_message_follower (work_message_id, employee_id)
+              values (${message.messageId}::uuid, ${employeeId}::uuid)
+              on conflict do nothing
+            `);
+            await tx.execute(sql`
+              insert into public.work_notification (
+                recipient_employee_id, actor_employee_id, work_project_id,
+                work_message_id, event_type, message, payload
+              )
+              select distinct recipient.employee_id, ${employeeId}::uuid,
+                ${scope.projectId}::uuid, ${message.messageId}::uuid, 'message',
+                ${`New message: ${message.subject}`},
+                jsonb_build_object('messageId', ${message.messageId}::text)
+              from (
+                select member.employee_id
+                from public.work_project_member member
+                where member.work_project_id = ${scope.projectId}::uuid
+                union
+                select team_member.employee_id
+                from public.work_team_project team_project
+                join public.work_team_member team_member
+                  on team_member.work_team_id = team_project.work_team_id
+                where team_project.work_project_id = ${scope.projectId}::uuid
+                union
+                select project.owner_employee_id
+                from public.work_project project
+                where project.work_project_id = ${scope.projectId}::uuid
+                union
+                select project.created_by_employee_id
+                from public.work_project project
+                where project.work_project_id = ${scope.projectId}::uuid
+                union
+                select team_member.employee_id
+                from public.work_team_member team_member
+                where team_member.work_team_id = ${scope.teamId}::uuid
+              ) recipient
+              where recipient.employee_id is not null
+                and recipient.employee_id <> ${employeeId}::uuid
+            `);
+          });
+        await audit(
+          ctx,
+          "work.message.create",
+          "work_message",
+          message.messageId,
+          {
+            ...scope,
+            isAnnouncement: message.isAnnouncement,
+          },
+        );
+        return message;
+      }),
+    comments: staffProcedure
+      .input(z.object({ messageId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await messageScopeById(ctx, input.messageId);
+        const employeeId = actor(ctx);
+        const db = getDb();
+        if (!db) {
+          const store = getDemoWork();
+          return [...store.messageComments.values()]
+            .filter((comment) => comment.messageId === input.messageId)
+            .map((comment) => {
+              const people = store.likes.get(
+                `message_comment:${comment.messageCommentId}`,
+              );
+              return {
+                ...comment,
+                likeCount: people?.size ?? 0,
+                likedByMe: people?.has(employeeId) ?? false,
+              };
+            })
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        }
+        const rows = await db.execute<
+          Omit<WorkMessageComment, "createdAt"> & {
+            createdAt: Date | string;
+          }
+        >(sql`
+          select comment.work_message_comment_id as "messageCommentId",
+            comment.work_message_id as "messageId",
+            comment.author_employee_id as "authorEmployeeId",
+            author.display_name as "authorName", comment.body,
+            comment.created_at as "createdAt",
+            (select count(*)::int from public.work_like reaction
+              where reaction.work_message_comment_id = comment.work_message_comment_id)
+              as "likeCount",
+            exists(select 1 from public.work_like reaction
+              where reaction.work_message_comment_id = comment.work_message_comment_id
+                and reaction.employee_id = ${employeeId}::uuid) as "likedByMe"
+          from public.work_message_comment comment
+          join public.employee author on author.employee_id = comment.author_employee_id
+          where comment.work_message_id = ${input.messageId}::uuid
+            and comment.deleted_at is null
+          order by comment.created_at
+        `);
+        return rows.map((row) => ({
+          ...row,
+          createdAt: new Date(row.createdAt).toISOString(),
+        }));
+      }),
+    comment: staffProcedure
+      .input(
+        z.object({
+          messageId: uuid,
+          body: z.string().trim().min(1).max(20_000),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await messageScopeById(ctx, input.messageId, "comment");
+        const employeeId = actor(ctx);
+        const comment: WorkMessageComment = {
+          messageCommentId: randomUUID(),
+          messageId: input.messageId,
+          authorEmployeeId: employeeId,
+          authorName: ctx.user?.displayName ?? "You",
+          body: input.body,
+          createdAt: new Date().toISOString(),
+          likeCount: 0,
+          likedByMe: false,
+        };
+        const db = getDb();
+        if (!db) {
+          const store = getDemoWork();
+          store.messageComments.set(comment.messageCommentId, comment);
+          const message = store.messages.get(input.messageId)!;
+          message.commentCount += 1;
+          message.following = true;
+        } else
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              insert into public.work_message_comment (
+                work_message_comment_id, work_message_id, author_employee_id, body
+              ) values (
+                ${comment.messageCommentId}::uuid, ${input.messageId}::uuid,
+                ${employeeId}::uuid, ${comment.body}
+              )
+            `);
+            await tx.execute(sql`
+              insert into public.work_message_follower (work_message_id, employee_id)
+              values (${input.messageId}::uuid, ${employeeId}::uuid)
+              on conflict do nothing
+            `);
+            await tx.execute(sql`
+              insert into public.work_notification (
+                recipient_employee_id, actor_employee_id, work_project_id,
+                work_message_id, event_type, message, payload
+              )
+              select distinct recipient.employee_id, ${employeeId}::uuid,
+                message.work_project_id, message.work_message_id, 'message',
+                ${"New reply to a message"},
+                jsonb_build_object('messageId', message.work_message_id::text)
+              from public.work_message message
+              cross join lateral (
+                select follower.employee_id
+                from public.work_message_follower follower
+                where follower.work_message_id = message.work_message_id
+                union select message.created_by_employee_id
+              ) recipient
+              where message.work_message_id = ${input.messageId}::uuid
+                and recipient.employee_id <> ${employeeId}::uuid
+            `);
+          });
+        await audit(
+          ctx,
+          "work.message.comment",
+          "work_message_comment",
+          comment.messageCommentId,
+          { messageId: input.messageId },
+        );
+        return comment;
+      }),
+    setFollowing: staffProcedure
+      .input(z.object({ messageId: uuid, following: z.boolean() }))
+      .mutation(async ({ input, ctx }) => {
+        await messageScopeById(ctx, input.messageId);
+        const employeeId = actor(ctx);
+        const db = getDb();
+        if (!db)
+          getDemoWork().messages.get(input.messageId)!.following =
+            input.following;
+        else if (input.following)
+          await db.execute(sql`
+            insert into public.work_message_follower (work_message_id, employee_id)
+            values (${input.messageId}::uuid, ${employeeId}::uuid)
+            on conflict do nothing
+          `);
+        else
+          await db.execute(sql`
+            delete from public.work_message_follower
+            where work_message_id = ${input.messageId}::uuid
+              and employee_id = ${employeeId}::uuid
+          `);
+        return { ok: true as const };
+      }),
+  }),
+
+  likes: router({
+    summary: staffProcedure
+      .input(z.object({ targetType: likeTargetTypeSchema, targetId: uuid }))
+      .query(async ({ input, ctx }) => {
+        const projectId = await requireLikeTargetAccess(
+          ctx,
+          input.targetType,
+          input.targetId,
+          false,
+        );
+        await requireLikeFeatures(ctx, input.targetType, projectId);
+        const employeeId = actor(ctx);
+        const db = getDb();
+        const key = `${input.targetType}:${input.targetId}`;
+        if (!db) {
+          const people = [...(getDemoWork().likes.get(key) ?? [])];
+          return {
+            count: people.length,
+            likedByMe: people.includes(employeeId),
+            people: people.map((id) => ({
+              employeeId: id,
+              displayName:
+                id === employeeId ? (ctx.user?.displayName ?? "You") : "Member",
+            })),
+          };
+        }
+        const column =
+          input.targetType === "item"
+            ? sql`reaction.work_item_id`
+            : input.targetType === "comment"
+              ? sql`reaction.work_comment_id`
+              : input.targetType === "attachment"
+                ? sql`reaction.work_attachment_id`
+                : input.targetType === "status_update"
+                  ? sql`reaction.work_status_update_id`
+                  : input.targetType === "message"
+                    ? sql`reaction.work_message_id`
+                    : sql`reaction.work_message_comment_id`;
+        const people = await db.execute<{
+          employeeId: string;
+          displayName: string;
+        }>(sql`
+          select reaction.employee_id as "employeeId",
+            employee.display_name as "displayName"
+          from public.work_like reaction
+          join public.employee employee on employee.employee_id = reaction.employee_id
+          where ${column} = ${input.targetId}::uuid
+          order by lower(employee.display_name)
+        `);
+        return {
+          count: people.length,
+          likedByMe: people.some((person) => person.employeeId === employeeId),
+          people,
+        };
+      }),
+    set: staffProcedure
+      .input(
+        z.object({
+          targetType: likeTargetTypeSchema,
+          targetId: uuid,
+          liked: z.boolean(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const projectId = await requireLikeTargetAccess(
+          ctx,
+          input.targetType,
+          input.targetId,
+          true,
+        );
+        await requireLikeFeatures(ctx, input.targetType, projectId);
+        const employeeId = actor(ctx);
+        const db = getDb();
+        const key = `${input.targetType}:${input.targetId}`;
+        if (!db) {
+          const people = getDemoWork().likes.get(key) ?? new Set<string>();
+          if (input.liked) people.add(employeeId);
+          else people.delete(employeeId);
+          getDemoWork().likes.set(key, people);
+        } else {
+          const column =
+            input.targetType === "item"
+              ? sql`work_item_id`
+              : input.targetType === "comment"
+                ? sql`work_comment_id`
+                : input.targetType === "attachment"
+                  ? sql`work_attachment_id`
+                  : input.targetType === "status_update"
+                    ? sql`work_status_update_id`
+                    : input.targetType === "message"
+                      ? sql`work_message_id`
+                      : sql`work_message_comment_id`;
+          if (input.liked)
+            await db.execute(sql`
+              insert into public.work_like (employee_id, ${column})
+              values (${employeeId}::uuid, ${input.targetId}::uuid)
+              on conflict do nothing
+            `);
+          else
+            await db.execute(sql`
+              delete from public.work_like
+              where employee_id = ${employeeId}::uuid
+                and ${column} = ${input.targetId}::uuid
+            `);
+        }
+        await audit(ctx, "work.like.set", "work_like", input.targetId, {
+          targetType: input.targetType,
+          targetId: input.targetId,
+          liked: input.liked,
+        });
+        return { liked: input.liked };
+      }),
+  }),
+
   tags: router({
     list: staffProcedure
       .input(z.object({ projectId: uuid }))
@@ -3650,33 +4468,127 @@ export const workManagementRouter = router({
         }));
       }),
     inbox: staffProcedure
-      .input(z.object({ unreadOnly: z.boolean().default(false) }).optional())
+      .input(
+        z
+          .object({
+            unreadOnly: z.boolean().default(false),
+            kinds: z
+              .array(z.enum(["tasks", "messages", "status_updates"]))
+              .min(1)
+              .max(3)
+              .optional(),
+          })
+          .optional(),
+      )
       .query(async ({ input, ctx }) => {
         const employeeId = actor(ctx);
+        if (input?.kinds)
+          await requireScopedFeature(
+            ctx,
+            "work.inbox.message_status_filters",
+            null,
+          );
+        const kinds = input?.kinds ?? ["tasks", "messages", "status_updates"];
+        const taskEvents = kinds.includes("tasks");
+        const messageEvents = kinds.includes("messages");
+        const statusEvents = kinds.includes("status_updates");
+        const visibleKind = (notification: WorkNotification) =>
+          notification.eventType === "message"
+            ? messageEvents
+            : notification.eventType === "status_update"
+              ? statusEvents
+              : taskEvents;
+        const featureCache = new Map<string, Promise<boolean>>();
         const db = getDb();
-        if (!db)
-          return [...getDemoWork().notifications.values()]
-            .filter(
-              (notification) =>
-                notification.recipientEmployeeId === employeeId &&
-                (!input?.unreadOnly || !notification.readAt),
-            )
+        if (!db) {
+          const candidates = [...getDemoWork().notifications.values()].filter(
+            (notification) =>
+              notification.recipientEmployeeId === employeeId &&
+              (!input?.unreadOnly || !notification.readAt) &&
+              visibleKind(notification),
+          );
+          const visibility = await Promise.all(
+            candidates.map((notification) =>
+              visibleDemoNotification(ctx, notification, featureCache),
+            ),
+          );
+          return candidates
+            .filter((_, index) => visibility[index])
             .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        }
         const rows = await db.execute<
           WorkNotification & {
             createdAt: Date | string;
             readAt: Date | string | null;
+            featureClientId: string | null;
           }
         >(sql`
           select notification.work_notification_id as "notificationId",
             notification.work_item_id as "itemId",
             notification.work_project_id as "projectId",
+            notification.work_message_id as "messageId",
             notification.event_type as "eventType", notification.message,
-            notification.read_at as "readAt", notification.created_at as "createdAt"
+            notification.read_at as "readAt", notification.created_at as "createdAt",
+            notification_project.client_id as "featureClientId"
           from public.work_notification notification
+          left join public.work_project notification_project
+            on notification_project.work_project_id = notification.work_project_id
           where notification.recipient_employee_id = ${employeeId}::uuid
             and notification.dismissed_at is null
             and (${input?.unreadOnly ?? false} = false or notification.read_at is null)
+            and (
+              (${taskEvents} and notification.event_type not in ('message', 'status_update'))
+              or (${messageEvents} and notification.event_type = 'message')
+              or (${statusEvents} and notification.event_type = 'status_update')
+            )
+            and (
+              notification.work_project_id is null
+              or exists (
+                select 1 from public.work_project project
+                left join public.work_project_member member
+                  on member.work_project_id = project.work_project_id
+                  and member.employee_id = ${employeeId}::uuid
+                left join lateral (
+                  select 1 as allowed
+                  from public.work_team_project team_project
+                  join public.work_team_member team_member
+                    on team_member.work_team_id = team_project.work_team_id
+                  where team_project.work_project_id = project.work_project_id
+                    and team_member.employee_id = ${employeeId}::uuid
+                  limit 1
+                ) team_access on true
+                where project.work_project_id = notification.work_project_id
+                  and project.archived_at is null
+                  and (
+                    project.privacy = 'organization'
+                    or project.created_by_employee_id = ${employeeId}::uuid
+                    or project.owner_employee_id = ${employeeId}::uuid
+                    or member.employee_id is not null
+                    or team_access.allowed is not null
+                  )
+              )
+            )
+            and (
+              notification.work_message_id is null
+              or exists (
+                select 1 from public.work_message message
+                left join public.work_team team
+                  on team.work_team_id = message.work_team_id
+                left join public.work_team_member team_member
+                  on team_member.work_team_id = message.work_team_id
+                  and team_member.employee_id = ${employeeId}::uuid
+                where message.work_message_id = notification.work_message_id
+                  and message.archived_at is null
+                  and (
+                    (message.work_project_id is not null
+                      and message.work_project_id = notification.work_project_id)
+                    or (message.work_team_id is not null
+                      and team.archived_at is null
+                      and (team.privacy = 'public'
+                        or team_member.employee_id is not null))
+                  )
+              )
+            )
             and (
               notification.work_item_id is null
               or exists (
@@ -3700,11 +4612,33 @@ export const workManagementRouter = router({
           order by notification.created_at desc
           limit 200
         `);
-        return rows.map((row) => ({
-          ...row,
-          readAt: iso(row.readAt),
-          createdAt: new Date(row.createdAt).toISOString(),
-        }));
+        const visibility = await Promise.all(
+          rows.map((row) =>
+            notificationFeatureEnabled(
+              ctx,
+              row.eventType,
+              row.projectId,
+              row.featureClientId,
+              featureCache,
+            ),
+          ),
+        );
+        return rows.flatMap((row, index) =>
+          visibility[index]
+            ? [
+                {
+                  notificationId: row.notificationId,
+                  itemId: row.itemId,
+                  projectId: row.projectId,
+                  messageId: row.messageId,
+                  eventType: row.eventType,
+                  message: row.message,
+                  readAt: iso(row.readAt),
+                  createdAt: new Date(row.createdAt).toISOString(),
+                },
+              ]
+            : [],
+        );
       }),
     markNotification: staffProcedure
       .input(
@@ -6064,9 +6998,14 @@ export const workManagementRouter = router({
         }),
       )
       .query(async ({ input, ctx }) => {
-        if (input.targetType === "project")
+        if (input.targetType === "project") {
+          await requireScopedFeature(
+            ctx,
+            "work.status_updates",
+            input.targetId,
+          );
           await requireProjectAccess(ctx, input.targetId);
-        else if (input.targetType === "portfolio")
+        } else if (input.targetType === "portfolio")
           await requirePortfolioAccess(ctx, input.targetId);
         else await requireGoalAccess(ctx, input.targetId);
         const db = getDb();
@@ -6108,9 +7047,14 @@ export const workManagementRouter = router({
         }),
       )
       .mutation(async ({ input, ctx }) => {
-        if (input.targetType === "project")
+        if (input.targetType === "project") {
+          await requireScopedFeature(
+            ctx,
+            "work.status_updates",
+            input.targetId,
+          );
           await requireProjectAccess(ctx, input.targetId, "editor");
-        else if (input.targetType === "portfolio")
+        } else if (input.targetType === "portfolio")
           await requirePortfolioAccess(ctx, input.targetId, true);
         else await requireGoalAccess(ctx, input.targetId, true);
         const update: WorkStatusUpdate = {
@@ -6139,6 +7083,7 @@ export const workManagementRouter = router({
               ${update.createdByEmployeeId}::uuid
             )
           `);
+        await notifyStatusUpdate(ctx, update);
         await audit(
           ctx,
           "work.status.create",
