@@ -39,16 +39,16 @@ It did not contain a Composio project key or a separately stored Asana account, 
 | Multi-home tasks                             | `work_project_item`                            | Beta                               |
 | Dependencies                                 | `work_item_dependency`                         | Available                          |
 | Comments                                     | `work_comment`                                 | Available                          |
-| Followers                                    | `work_item_follower`                           | Import beta; workflow planned      |
-| Tags                                         | `work_tag`, `work_item_tag`                    | Import beta; workflow planned      |
-| Custom fields                                | `work_custom_field`, `work_custom_field_value` | Import beta; workflow planned      |
-| Attachments                                  | `work_attachment`                              | Import beta; workflow planned      |
-| Recurring tasks                              | `work_item.recurrence`                         | Planned                            |
+| Followers                                    | `work_item_follower`                           | Beta                               |
+| Tags                                         | `work_tag`, `work_item_tag`                    | Beta                               |
+| Custom fields                                | `work_custom_field`, `work_custom_field_value` | Beta                               |
+| Attachments                                  | `work_attachment`                              | Beta                               |
+| Recurring tasks                              | `work_item.recurrence`                         | Beta                               |
 | Likes and proofing                           | Future activity/proof model                    | Planned                            |
 
 ### Views and personal work
 
-List and board views use the same tasks and sections. Calendar, Timeline, Gantt, Files, Inbox, saved search, and the complete My Tasks workflow remain planned. The existing web application is responsive and installable, but offline work mutation is not yet parity-complete.
+List, board, monthly Calendar, date-range Timeline, and Files views use the same project data and are available in beta. My Tasks, Inbox, full-text search, and saved searches are also beta. Gantt, advanced personal sections/focus controls, weekly Calendar, and offline work mutation remain planned.
 
 ### Intake, automation, and standardisation
 
@@ -86,8 +86,8 @@ AI features remain planned until the provider performs real generation, sources 
 1. **Feature Lab foundation** — catalogue, inheritance, client/role/user controls, navigation/API enforcement, audit. Implemented.
 2. **Core work graph** — projects, permissions, sections, tasks, subtasks, dates, dependencies, comments, list/board. Implemented at first usable depth.
 3. **Asana connection and migration** — live Composio verification, read-only discovery, dry-run report, and idempotent core import implemented in beta; delta sync and cutover remain.
-4. **Workflow depth** — custom fields, tags, files, followers, forms, rules, templates, bundles, approvals, recurrence, time.
-5. **Planning and reporting** — remaining views, My Tasks, Inbox, search, goals, portfolios, statuses, dashboards, workload, capacity.
+4. **Workflow depth** — custom fields, tags, files, followers, and recurrence implemented in beta; forms, rules, templates, bundles, approvals, and time remain.
+5. **Planning and reporting** — Calendar, Timeline, Files, My Tasks, Inbox, and search implemented in beta; Gantt, goals, portfolios, statuses, dashboards, workload, and capacity remain.
 6. **Enterprise controls and integrations** — teams, guests, sharing, admin, SSO/SCIM, exports, webhooks, third-party apps.
 7. **AI** — smart assists first, then AI Studio, Teammates/Skills, and the Dash equivalent, all using the same Feature Lab and permission resolver.
 

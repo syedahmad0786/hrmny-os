@@ -89,4 +89,68 @@ describe("work management", () => {
       message: "FEATURE_DISABLED:work.comments",
     });
   });
+
+  it("keeps task metadata when generating a recurring occurrence", async () => {
+    const caller = partnerCaller();
+    const project = await caller.work.projects.create({
+      name: "Recurring operations",
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const sectionId = (
+      await caller.work.projects.get({ projectId: project.projectId })
+    ).sections[0]!.sectionId;
+    const task = await caller.work.tasks.create({
+      projectId: project.projectId,
+      sectionId,
+      title: "Monthly check",
+      description: "",
+      dueAt: "2026-01-31T12:00:00.000Z",
+    });
+    const tag = await caller.work.tags.create({
+      projectId: project.projectId,
+      name: `Operations ${project.projectId}`,
+    });
+    await caller.work.tags.setForTask({
+      itemId: task.itemId,
+      tagIds: [tag.tagId],
+    });
+    const field = await caller.work.customFields.create({
+      projectId: project.projectId,
+      name: "Region",
+      fieldType: "single_select",
+      options: ["UAE", "KSA"],
+      isRequired: false,
+    });
+    await caller.work.customFields.setValue({
+      itemId: task.itemId,
+      customFieldId: field.customFieldId,
+      value: "UAE",
+    });
+    await caller.work.followers.follow({ itemId: task.itemId });
+    await caller.work.recurrence.set({
+      itemId: task.itemId,
+      recurrence: { frequency: "monthly", interval: 1 },
+    });
+
+    const completed = await caller.work.tasks.complete({
+      itemId: task.itemId,
+      completed: true,
+    });
+    expect(completed.generatedItemId).toBeTruthy();
+    const nextId = completed.generatedItemId!;
+    expect(await caller.work.tags.forTask({ itemId: nextId })).toContainEqual(
+      tag,
+    );
+    expect(
+      await caller.work.customFields.values({ itemId: nextId }),
+    ).toContainEqual({
+      customFieldId: field.customFieldId,
+      value: "UAE",
+    });
+    expect(await caller.work.followers.list({ itemId: nextId })).toHaveLength(
+      1,
+    );
+  });
 });
