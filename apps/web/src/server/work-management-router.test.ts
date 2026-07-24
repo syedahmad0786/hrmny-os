@@ -379,6 +379,86 @@ describe("work management", () => {
     ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.subtasks" });
   });
 
+  it("manages multiple governed out-of-office periods and away labels", async () => {
+    const caller = partnerCaller();
+    const date = (days: number) =>
+      new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+    const active = await caller.work.outOfOffice.create({
+      startDate: date(-1),
+      endDate: date(1),
+      note: "Annual leave",
+    });
+    const upcoming = await caller.work.outOfOffice.create({
+      startDate: date(5),
+      endDate: date(6),
+      note: "Conference",
+    });
+    const past = await caller.work.outOfOffice.create({
+      startDate: date(-6),
+      endDate: date(-5),
+      note: "Returned",
+    });
+
+    expect(await caller.work.outOfOffice.list()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          outOfOfficeId: active.outOfOfficeId,
+          status: "active",
+        }),
+        expect.objectContaining({
+          outOfOfficeId: upcoming.outOfOfficeId,
+          status: "upcoming",
+        }),
+        expect.objectContaining({
+          outOfOfficeId: past.outOfOfficeId,
+          status: "past",
+        }),
+      ]),
+    );
+    expect(
+      await caller.work.outOfOffice.update({
+        outOfOfficeId: upcoming.outOfOfficeId,
+        startDate: date(5),
+        endDate: date(7),
+        note: "Updated conference",
+      }),
+    ).toMatchObject({ endDate: date(7), note: "Updated conference" });
+    expect((await caller.work.members.listEmployees())[0]).toMatchObject({
+      outOfOfficeUntil: active.endDate,
+      outOfOfficeNote: "Annual leave",
+      displayLabel: expect.stringContaining("Away through"),
+    });
+    await caller.work.outOfOffice.remove({
+      outOfOfficeId: past.outOfOfficeId,
+    });
+    expect(await caller.work.outOfOffice.list()).not.toContainEqual(
+      expect.objectContaining({ outOfOfficeId: past.outOfOfficeId }),
+    );
+    await expect(
+      caller.work.outOfOffice.create({
+        startDate: date(2),
+        endDate: date(1),
+        note: "Invalid",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    await caller.admin.features.setOverride({
+      featureKey: "work.out_of_office",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(caller.work.outOfOffice.list()).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.out_of_office",
+    });
+    expect((await caller.work.members.listEmployees())[0]).toMatchObject({
+      outOfOfficeUntil: null,
+      outOfOfficeNote: null,
+      displayLabel: "Dev Partner",
+    });
+  });
+
   it("enforces a Feature Lab switch at the API boundary", async () => {
     const caller = partnerCaller();
     const project = (await caller.work.projects.list())[0]!;

@@ -281,6 +281,13 @@
       "when": 1784988000000,
       "tag": "0039_work_proofing",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1784991600000,
+      "tag": "0040_work_out_of_office",
+      "breakpoints": true
     }
   ]
 }

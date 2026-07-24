@@ -9,7 +9,11 @@ type Attachment = {
   contentType: string | null;
 };
 
-type Employee = { employeeId: string; displayName: string };
+type Employee = {
+  employeeId: string;
+  displayName: string;
+  displayLabel: string;
+};
 
 export function WorkProofingDialog({
   attachment,
@@ -217,7 +221,7 @@ export function WorkProofingDialog({
                 <option value="">Unassigned</option>
                 {employees.map((employee) => (
                   <option key={employee.employeeId} value={employee.employeeId}>
-                    {employee.displayName}
+                    {employee.displayLabel}
                   </option>
                 ))}
               </select>
@@ -276,7 +280,12 @@ export function WorkProofingDialog({
                       {annotation.pageNumber
                         ? `Page ${annotation.pageNumber} · `
                         : ""}
-                      {annotation.assigneeName ?? "Unassigned"}
+                      {employees.find(
+                        (employee) =>
+                          employee.employeeId === annotation.assigneeEmployeeId,
+                      )?.displayLabel ??
+                        annotation.assigneeName ??
+                        "Unassigned"}
                       {annotation.dueAt
                         ? ` · Due ${annotation.dueAt.slice(0, 10)}`
                         : ""}

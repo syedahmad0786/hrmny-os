@@ -628,8 +628,8 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Availability windows that inform assignments and collaboration.",
     group: "Personal productivity",
     source: "asana",
-    availability: "planned",
-    defaultEnabled: false,
+    availability: "beta",
+    defaultEnabled: true,
   }),
   feature({
     key: "work.accessibility",
@@ -1155,6 +1155,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["work.messages.", "work.project_messages"],
   ["work.likes.", "work.likes"],
   ["work.proofing.", "work.proofing"],
+  ["work.outOfOffice.", "work.out_of_office"],
   ["work.tags.", "work.tags"],
   ["work.customFields.", "work.custom_fields"],
   ["work.attachments.", "work.attachments"],

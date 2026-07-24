@@ -95,6 +95,16 @@ export default function WorkPage() {
   );
   const selectedItem =
     detail.data?.items.find((item) => item.itemId === selectedItemId) ?? null;
+  const employeeById = useMemo(
+    () =>
+      new Map(
+        (employees.data ?? []).map((employee) => [
+          employee.employeeId,
+          employee,
+        ]),
+      ),
+    [employees.data],
+  );
   const commentsEnabled =
     session.data?.enabledFeatureKeys.includes("work.comments") ?? false;
   const dependenciesEnabled =
@@ -382,7 +392,9 @@ export default function WorkPage() {
           </div>
         </div>
         <span className="truncate text-xs text-muted">
-          {item.assigneeName ?? "Unassigned"}
+          {employeeById.get(item.assigneeEmployeeId ?? "")?.displayLabel ??
+            item.assigneeName ??
+            "Unassigned"}
         </span>
         <span className="text-xs text-muted">
           {item.dueAt
@@ -599,7 +611,13 @@ export default function WorkPage() {
                                 {item.title}
                               </p>
                               <div className="mt-3 flex items-center justify-between text-[10px] text-muted">
-                                <span>{item.assigneeName ?? "Unassigned"}</span>
+                                <span>
+                                  {employeeById.get(
+                                    item.assigneeEmployeeId ?? "",
+                                  )?.displayLabel ??
+                                    item.assigneeName ??
+                                    "Unassigned"}
+                                </span>
                                 <span>
                                   {item.dueAt
                                     ? new Date(item.dueAt).toLocaleDateString()
@@ -953,7 +971,7 @@ export default function WorkPage() {
                       key={employee.employeeId}
                       value={employee.employeeId}
                     >
-                      {employee.displayName}
+                      {employee.displayLabel}
                     </option>
                   ))}
                 </select>
@@ -1225,7 +1243,7 @@ export default function WorkPage() {
                             {(field.fieldType === "people"
                               ? (employees.data ?? []).map((employee) => ({
                                   value: employee.employeeId,
-                                  label: employee.displayName,
+                                  label: employee.displayLabel,
                                 }))
                               : field.options.map((option) => ({
                                   value: option,
