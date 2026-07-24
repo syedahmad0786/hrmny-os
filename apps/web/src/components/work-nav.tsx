@@ -5,10 +5,21 @@ import { usePathname } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 
 const ITEMS = [
-  { href: "/work", label: "Projects", feature: "work.projects" },
-  { href: "/work/my-tasks", label: "My tasks", feature: "work.my_tasks" },
-  { href: "/work/inbox", label: "Inbox", feature: "work.inbox" },
-  { href: "/work/search", label: "Search", feature: "work.search" },
+  { href: "/work", label: "Projects", features: ["work.projects"] },
+  { href: "/work/my-tasks", label: "My tasks", features: ["work.my_tasks"] },
+  { href: "/work/inbox", label: "Inbox", features: ["work.inbox"] },
+  { href: "/work/search", label: "Search", features: ["work.search"] },
+  {
+    href: "/work/workflows",
+    label: "Workflows",
+    features: [
+      "work.forms",
+      "work.rules",
+      "work.templates",
+      "work.bundles",
+      "work.approvals",
+    ],
+  },
 ] as const;
 
 export function WorkNav() {
@@ -17,7 +28,9 @@ export function WorkNav() {
   const enabled = new Set(session.data?.enabledFeatureKeys ?? []);
   return (
     <nav className="flex flex-wrap gap-2" aria-label="Work sections">
-      {ITEMS.filter((item) => enabled.has(item.feature)).map((item) => (
+      {ITEMS.filter((item) =>
+        item.features.some((feature) => enabled.has(feature)),
+      ).map((item) => (
         <Link
           key={item.href}
           href={item.href}
