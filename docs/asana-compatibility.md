@@ -28,23 +28,23 @@ It did not contain a Composio project key or a separately stored Asana account, 
 
 ### Work graph and task management
 
-| Asana capability                             | hrmny model                                    | Status                             |
-| -------------------------------------------- | ---------------------------------------------- | ---------------------------------- |
-| Projects                                     | `work_project`                                 | Available                          |
-| Project members and object roles             | `work_project_member`                          | Beta                               |
-| Sections / board columns                     | `work_section`                                 | Available                          |
-| Tasks, assignee, dates, priority, completion | `work_item`                                    | Available                          |
-| Subtasks                                     | `work_item.parent_work_item_id`                | Available                          |
-| Milestones and approvals                     | `work_item.item_type`                          | Milestones beta; approvals planned |
-| Multi-home tasks                             | `work_project_item`                            | Beta                               |
-| Dependencies                                 | `work_item_dependency`                         | Available                          |
-| Comments                                     | `work_comment`                                 | Available                          |
-| Followers                                    | `work_item_follower`                           | Beta                               |
-| Tags                                         | `work_tag`, `work_item_tag`                    | Beta                               |
-| Custom fields                                | `work_custom_field`, `work_custom_field_value` | Beta                               |
-| Attachments                                  | `work_attachment`                              | Beta                               |
-| Recurring tasks                              | `work_item.recurrence`                         | Beta                               |
-| Likes and proofing                           | Future activity/proof model                    | Planned                            |
+| Asana capability                             | hrmny model                                    | Status    |
+| -------------------------------------------- | ---------------------------------------------- | --------- |
+| Projects                                     | `work_project`                                 | Available |
+| Project members and object roles             | `work_project_member`                          | Beta      |
+| Sections / board columns                     | `work_section`                                 | Available |
+| Tasks, assignee, dates, priority, completion | `work_item`                                    | Available |
+| Subtasks                                     | `work_item.parent_work_item_id`                | Available |
+| Milestones and approvals                     | `work_item.item_type`                          | Beta      |
+| Multi-home tasks                             | `work_project_item`                            | Beta      |
+| Dependencies                                 | `work_item_dependency`                         | Available |
+| Comments                                     | `work_comment`                                 | Available |
+| Followers                                    | `work_item_follower`                           | Beta      |
+| Tags                                         | `work_tag`, `work_item_tag`                    | Beta      |
+| Custom fields                                | `work_custom_field`, `work_custom_field_value` | Beta      |
+| Attachments                                  | `work_attachment`                              | Beta      |
+| Recurring tasks                              | `work_item.recurrence`                         | Beta      |
+| Likes and proofing                           | Future activity/proof model                    | Planned   |
 
 ### Views and personal work
 
@@ -52,7 +52,7 @@ List, board, monthly Calendar, date-range Timeline, and Files views use the same
 
 ### Intake, automation, and standardisation
 
-Forms, branching rules, task/project templates, bundles, approval workflows, and rule execution history remain planned. Bundles must version and distribute sections, fields, rules, and task templates together, including draft/publish, scoped distribution, and bulk project updates.
+Forms, conditional form questions, task-creating submissions, event rules with conditions/branches/actions, rule execution history, task/project templates with relative dates, versioned bundles, and approval decisions are available in beta. Forms currently require an authenticated hrmny user; public external form links, attachment questions, template role placeholders, scheduled rule triggers, external rule actions, and automatic bundle rollout remain planned.
 
 ### Goals, portfolios, reporting, and resources
 
@@ -86,7 +86,7 @@ AI features remain planned until the provider performs real generation, sources 
 1. **Feature Lab foundation** — catalogue, inheritance, client/role/user controls, navigation/API enforcement, audit. Implemented.
 2. **Core work graph** — projects, permissions, sections, tasks, subtasks, dates, dependencies, comments, list/board. Implemented at first usable depth.
 3. **Asana connection and migration** — live Composio verification, read-only discovery, dry-run report, and idempotent core import implemented in beta; delta sync and cutover remain.
-4. **Workflow depth** — custom fields, tags, files, followers, and recurrence implemented in beta; forms, rules, templates, bundles, approvals, and time remain.
+4. **Workflow depth** — custom fields, tags, files, followers, recurrence, forms, event rules, templates, bundles, and approvals implemented in beta; proofing, richer automation, public intake, and time remain.
 5. **Planning and reporting** — Calendar, Timeline, Files, My Tasks, Inbox, and search implemented in beta; Gantt, goals, portfolios, statuses, dashboards, workload, and capacity remain.
 6. **Enterprise controls and integrations** — teams, guests, sharing, admin, SSO/SCIM, exports, webhooks, third-party apps.
 7. **AI** — smart assists first, then AI Studio, Teammates/Skills, and the Dash equivalent, all using the same Feature Lab and permission resolver.

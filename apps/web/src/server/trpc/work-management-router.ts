@@ -12,6 +12,14 @@ import {
   type WorkCustomFieldType,
   type WorkRecurrence,
 } from "../work-daily";
+import {
+  normalizeFormAnswers,
+  relativeDate,
+  ruleBranchMatches,
+  type WorkFormQuestion,
+  type WorkRuleAction,
+  type WorkRuleBranch,
+} from "../work-workflows";
 import { router, staffProcedure, type TrpcContext } from "./trpc";
 
 type AccessLevel = "admin" | "editor" | "commenter" | "viewer";
@@ -93,6 +101,67 @@ type WorkSavedSearch = {
   name: string;
   query: Record<string, unknown>;
 };
+type WorkForm = {
+  formId: string;
+  projectId: string;
+  sectionId: string | null;
+  name: string;
+  description: string;
+  titleQuestionKey: string;
+  questions: WorkFormQuestion[];
+  defaultAssigneeEmployeeId: string | null;
+  confirmationMessage: string;
+  isActive: boolean;
+};
+type WorkRule = {
+  ruleId: string;
+  projectId: string;
+  name: string;
+  triggerType:
+    | "task_added"
+    | "task_completed"
+    | "task_moved"
+    | "priority_changed"
+    | "due_date_set"
+    | "approval_decided";
+  branches: WorkRuleBranch[];
+  isEnabled: boolean;
+};
+type WorkRuleRun = {
+  ruleRunId: string;
+  ruleId: string;
+  itemId: string;
+  triggerType: WorkRule["triggerType"];
+  status: "succeeded" | "skipped" | "failed";
+  output: Record<string, unknown>;
+  errorMessage: string | null;
+  createdAt: string;
+};
+type WorkTemplate = {
+  templateId: string;
+  projectId: string | null;
+  name: string;
+  templateType: "task" | "project";
+  blueprint: Record<string, unknown>;
+  createdByEmployeeId: string;
+};
+type WorkBundle = {
+  bundleId: string;
+  name: string;
+  description: string;
+  visibility: "organization" | "limited";
+  version: number;
+  blueprint: Record<string, unknown>;
+  createdByEmployeeId: string;
+};
+type WorkApprovalDecision = {
+  decisionId: string;
+  itemId: string;
+  decision: "approved" | "changes_requested" | "rejected";
+  note: string;
+  decidedByEmployeeId: string;
+  decidedAt: string;
+};
 
 type DemoWork = {
   projects: Map<string, WorkProject>;
@@ -111,6 +180,17 @@ type DemoWork = {
     WorkNotification & { recipientEmployeeId: string }
   >;
   savedSearches: Map<string, WorkSavedSearch>;
+  forms: Map<string, WorkForm>;
+  formSubmissions: Map<
+    string,
+    { formId: string; itemId: string; answers: Record<string, unknown> }
+  >;
+  rules: Map<string, WorkRule>;
+  ruleRuns: Map<string, WorkRuleRun>;
+  templates: Map<string, WorkTemplate>;
+  bundles: Map<string, WorkBundle>;
+  projectBundles: Map<string, { version: number; appliedAt: string }>;
+  approvalDecisions: Map<string, WorkApprovalDecision[]>;
 };
 
 const DEMO_PROJECT_ID = "a1000000-0000-4000-8000-000000000001";
@@ -197,6 +277,14 @@ function getDemoWork(): DemoWork {
     attachments: new Map(),
     notifications: new Map(),
     savedSearches: new Map(),
+    forms: new Map(),
+    formSubmissions: new Map(),
+    rules: new Map(),
+    ruleRuns: new Map(),
+    templates: new Map(),
+    bundles: new Map(),
+    projectBundles: new Map(),
+    approvalDecisions: new Map(),
   };
   return demoWork;
 }
@@ -213,6 +301,152 @@ const recurrenceSchema = z.object({
   frequency: z.enum(["daily", "weekly", "monthly", "yearly"]),
   interval: z.number().int().min(1).max(365),
   endDate: z.string().date().optional(),
+});
+const formQuestionSchema = z.object({
+  key: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+  label: z.string().trim().min(1).max(200),
+  type: z.enum([
+    "text",
+    "textarea",
+    "single_select",
+    "multi_select",
+    "date",
+    "number",
+    "checkbox",
+  ]),
+  required: z.boolean().default(false),
+  options: z.array(z.string().trim().min(1).max(120)).max(100).default([]),
+  showWhen: z
+    .object({
+      key: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+      equals: z.union([z.string().max(200), z.boolean()]),
+    })
+    .optional(),
+});
+const ruleConditionSchema = z.object({
+  field: z.enum(["title", "priority", "completed", "sectionId", "itemType"]),
+  operator: z.enum([
+    "equals",
+    "not_equals",
+    "contains",
+    "is_empty",
+    "is_not_empty",
+  ]),
+  value: z.union([z.string().max(500), z.boolean(), z.null()]).optional(),
+});
+const ruleActionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("set_priority"),
+    value: z.enum(["low", "medium", "high", "urgent"]).nullable(),
+  }),
+  z.object({ type: z.literal("move_section"), sectionId: uuid }),
+  z.object({ type: z.literal("assign"), employeeId: nullableUuid }),
+  z.object({ type: z.literal("complete") }),
+  z.object({ type: z.literal("add_tag"), tagId: uuid }),
+  z.object({
+    type: z.literal("create_subtask"),
+    title: z.string().trim().min(1).max(500),
+    dueInDays: z.number().int().min(-3650).max(3650).optional(),
+  }),
+]);
+const ruleBranchSchema = z.object({
+  mode: z.enum(["all", "any"]),
+  conditions: z.array(ruleConditionSchema).max(20),
+  actions: z.array(ruleActionSchema).min(1).max(20),
+});
+const taskTemplateBlueprintSchema = z.object({
+  title: z.string().trim().min(1).max(500),
+  description: z.string().trim().max(20_000).default(""),
+  itemType: z.enum(["task", "milestone", "approval"]).default("task"),
+  priority: z
+    .enum(["low", "medium", "high", "urgent"])
+    .nullable()
+    .default(null),
+  assigneeEmployeeId: nullableUuid.optional(),
+  dueInDays: z.number().int().min(-3650).max(3650).optional(),
+  subtasks: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1).max(500),
+        description: z.string().trim().max(20_000).default(""),
+        dueInDays: z.number().int().min(-3650).max(3650).optional(),
+      }),
+    )
+    .max(100)
+    .default([]),
+});
+const projectTemplateBlueprintSchema = z.object({
+  description: z.string().max(20_000).default(""),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  privacy: z.enum(["organization", "private"]),
+  sections: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(120),
+        position: z.number().int().min(0).max(100_000),
+      }),
+    )
+    .max(200),
+  tasks: z
+    .array(
+      z.object({
+        title: z.string().trim().min(1).max(500),
+        description: z.string().max(20_000).default(""),
+        itemType: z.enum(["task", "milestone", "approval"]),
+        priority: z.enum(["low", "medium", "high", "urgent"]).nullable(),
+        sectionName: z.string().max(120).nullable(),
+        dueOffsetDays: z.number().int().min(-3650).max(3650).nullable(),
+      }),
+    )
+    .max(5000),
+});
+const bundleBlueprintSchema = z.object({
+  sections: z
+    .array(z.object({ name: z.string().trim().min(1).max(120) }))
+    .max(200),
+  sectionRefs: z.record(uuid, z.string().trim().min(1).max(120)),
+  customFields: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(120),
+        fieldType: z.enum([
+          "text",
+          "number",
+          "date",
+          "boolean",
+          "single_select",
+          "multi_select",
+          "people",
+        ]),
+        options: z.array(z.string().max(120)).max(100),
+        isRequired: z.boolean(),
+      }),
+    )
+    .max(200),
+  rules: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(160),
+        triggerType: z.enum([
+          "task_added",
+          "task_completed",
+          "task_moved",
+          "priority_changed",
+          "due_date_set",
+          "approval_decided",
+        ]),
+        branches: z.array(ruleBranchSchema).min(1).max(20),
+      }),
+    )
+    .max(200),
+  taskTemplates: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(160),
+        blueprint: taskTemplateBlueprintSchema,
+      }),
+    )
+    .max(200),
 });
 
 function actor(ctx: TrpcContext): string {
@@ -236,6 +470,30 @@ async function audit(
     after,
     reason: null,
   });
+}
+
+async function requireWorkTypeFeature(
+  ctx: TrpcContext,
+  itemType: WorkItem["itemType"],
+) {
+  const featureKey =
+    itemType === "approval"
+      ? "work.approvals"
+      : itemType === "milestone"
+        ? "work.milestones"
+        : null;
+  if (
+    featureKey &&
+    !(await featureEnabled(featureKey, {
+      userId: ctx.employeeId,
+      roles: ctx.roles,
+    }))
+  ) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `FEATURE_DISABLED:${featureKey}`,
+    });
+  }
 }
 
 async function requireProjectAccess(
@@ -519,6 +777,478 @@ async function generateNextOccurrence(
     `);
     return generatedId;
   });
+}
+
+async function ruleSnapshot(
+  itemId: string,
+  projectId?: string,
+): Promise<WorkItem> {
+  const db = getDb();
+  if (!db) {
+    const item = getDemoWork().items.get(itemId);
+    if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+    return item;
+  }
+  const [item] = await db.execute<WorkItem>(sql`
+    select item.work_item_id as "itemId",
+      item.parent_work_item_id as "parentItemId", item.title,
+      item.description, item.item_type as "itemType", item.priority,
+      item.assignee_employee_id as "assigneeEmployeeId",
+      null::text as "assigneeName", item.start_date as "startDate",
+      item.due_at as "dueAt", item.completed_at as "completedAt",
+      membership.work_section_id as "sectionId", membership.position,
+      membership.work_project_id as "projectId", item.recurrence
+    from public.work_item item
+    join public.work_project_item membership
+      on membership.work_item_id = item.work_item_id
+    where item.work_item_id = ${itemId}::uuid
+      and (${projectId ?? null}::uuid is null
+        or membership.work_project_id = ${projectId ?? null}::uuid)
+    order by membership.created_at
+    limit 1
+  `);
+  if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+  return item;
+}
+
+async function executeRuleAction(
+  ctx: TrpcContext,
+  projectId: string,
+  itemId: string,
+  action: WorkRuleAction,
+) {
+  const db = getDb();
+  if (!db) {
+    const store = getDemoWork();
+    const item = store.items.get(itemId);
+    if (!item) throw new Error("Task not found");
+    if (action.type === "set_priority") item.priority = action.value;
+    else if (action.type === "move_section") {
+      const section = store.sections.get(action.sectionId);
+      if (section?.projectId !== projectId)
+        throw new Error("Section not found");
+      item.sectionId = action.sectionId;
+    } else if (action.type === "assign") {
+      if (
+        action.employeeId &&
+        action.employeeId !== "c0000000-0000-4000-8000-000000000001"
+      ) {
+        throw new Error("Employee not found");
+      }
+      item.assigneeEmployeeId = action.employeeId;
+      item.assigneeName = action.employeeId ? "Dev Partner" : null;
+    } else if (action.type === "complete") {
+      item.completedAt = new Date().toISOString();
+    } else if (action.type === "add_tag") {
+      if (!store.tags.has(action.tagId)) throw new Error("Tag not found");
+      const tags = store.itemTags.get(itemId) ?? new Set<string>();
+      tags.add(action.tagId);
+      store.itemTags.set(itemId, tags);
+    } else {
+      const subtaskId = randomUUID();
+      store.items.set(subtaskId, {
+        ...item,
+        itemId: subtaskId,
+        parentItemId: itemId,
+        title: action.title,
+        description: "",
+        dueAt:
+          action.dueInDays === undefined
+            ? null
+            : relativeDate(action.dueInDays),
+        completedAt: null,
+        recurrence: null,
+      });
+    }
+    if (action.type === "complete") {
+      const enabled = await featureEnabled("work.recurring_tasks", {
+        userId: ctx.employeeId,
+        roles: ctx.roles,
+      });
+      if (enabled) await generateNextOccurrence(ctx, itemId);
+    }
+    await notifyItem(
+      ctx,
+      itemId,
+      action.type === "assign"
+        ? "assigned"
+        : action.type === "complete"
+          ? "completed"
+          : "updated",
+      `Rule action: ${action.type.replaceAll("_", " ")}`,
+    );
+    return;
+  }
+
+  if (action.type === "set_priority") {
+    await db.execute(sql`
+      update public.work_item set priority = ${action.value}, updated_at = now()
+      where work_item_id = ${itemId}::uuid
+    `);
+  } else if (action.type === "move_section") {
+    const changed = await db.execute(sql`
+      update public.work_project_item membership
+      set work_section_id = section.work_section_id
+      from public.work_section section
+      where membership.work_item_id = ${itemId}::uuid
+        and membership.work_project_id = ${projectId}::uuid
+        and section.work_section_id = ${action.sectionId}::uuid
+        and section.work_project_id = membership.work_project_id
+      returning membership.work_project_item_id
+    `);
+    if (!changed[0]) throw new Error("Section not found");
+  } else if (action.type === "assign") {
+    if (action.employeeId) {
+      const employee = await db.execute(sql`
+        select 1 from public.employee
+        where employee_id = ${action.employeeId}::uuid and is_active = true
+      `);
+      if (!employee[0]) throw new Error("Employee not found");
+    }
+    await db.execute(sql`
+      update public.work_item
+      set assignee_employee_id = ${action.employeeId}::uuid, updated_at = now()
+      where work_item_id = ${itemId}::uuid
+    `);
+  } else if (action.type === "complete") {
+    await db.execute(sql`
+      update public.work_item set completed_at = now(), updated_at = now()
+      where work_item_id = ${itemId}::uuid
+    `);
+  } else if (action.type === "add_tag") {
+    const inserted = await db.execute(sql`
+      insert into public.work_item_tag (work_item_id, work_tag_id)
+      select ${itemId}::uuid, tag.work_tag_id
+      from public.work_tag tag
+      where tag.work_tag_id = ${action.tagId}::uuid
+      on conflict (work_item_id, work_tag_id) do nothing
+      returning work_item_tag_id
+    `);
+    if (!inserted[0]) {
+      const exists = await db.execute(sql`
+        select 1 from public.work_item_tag
+        where work_item_id = ${itemId}::uuid
+          and work_tag_id = ${action.tagId}::uuid
+      `);
+      if (!exists[0]) throw new Error("Tag not found");
+    }
+  } else {
+    const [created] = await db.execute<{ id: string }>(sql`
+      insert into public.work_item (
+        parent_work_item_id, title, description, item_type,
+        created_by_employee_id, due_at
+      ) values (
+        ${itemId}::uuid, ${action.title}, '', 'task', ${actor(ctx)}::uuid,
+        ${action.dueInDays === undefined ? null : relativeDate(action.dueInDays)}::timestamptz
+      ) returning work_item_id as id
+    `);
+    await db.execute(sql`
+      insert into public.work_project_item (
+        work_project_id, work_item_id, work_section_id, position
+      ) select ${projectId}::uuid, ${created!.id}::uuid,
+        membership.work_section_id,
+        (select coalesce(max(position), -1) + 1 from public.work_project_item
+         where work_project_id = ${projectId}::uuid)
+      from public.work_project_item membership
+      where membership.work_project_id = ${projectId}::uuid
+        and membership.work_item_id = ${itemId}::uuid
+    `);
+  }
+  if (action.type === "complete") {
+    const enabled = await featureEnabled("work.recurring_tasks", {
+      userId: ctx.employeeId,
+      roles: ctx.roles,
+    });
+    if (enabled) await generateNextOccurrence(ctx, itemId);
+  }
+  await notifyItem(
+    ctx,
+    itemId,
+    action.type === "assign"
+      ? "assigned"
+      : action.type === "complete"
+        ? "completed"
+        : "updated",
+    `Rule action: ${action.type.replaceAll("_", " ")}`,
+  );
+}
+
+async function validateRuleActions(
+  projectId: string,
+  actions: readonly WorkRuleAction[],
+) {
+  const db = getDb();
+  if (!db) {
+    const store = getDemoWork();
+    for (const action of actions) {
+      if (
+        action.type === "move_section" &&
+        store.sections.get(action.sectionId)?.projectId !== projectId
+      )
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Section not found",
+        });
+      if (action.type === "add_tag" && !store.tags.has(action.tagId))
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Tag not found" });
+      if (
+        action.type === "assign" &&
+        action.employeeId &&
+        action.employeeId !== "c0000000-0000-4000-8000-000000000001"
+      )
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Employee not found",
+        });
+    }
+    return;
+  }
+  for (const action of actions) {
+    if (action.type === "move_section") {
+      const rows = await db.execute(sql`
+        select 1 from public.work_section
+        where work_section_id = ${action.sectionId}::uuid
+          and work_project_id = ${projectId}::uuid
+      `);
+      if (!rows[0])
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Section not found",
+        });
+    } else if (action.type === "add_tag") {
+      const rows = await db.execute(
+        sql`select 1 from public.work_tag where work_tag_id = ${action.tagId}::uuid`,
+      );
+      if (!rows[0])
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Tag not found" });
+    } else if (action.type === "assign" && action.employeeId) {
+      const rows = await db.execute(sql`
+        select 1 from public.employee
+        where employee_id = ${action.employeeId}::uuid and is_active = true
+      `);
+      if (!rows[0])
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Employee not found",
+        });
+    }
+  }
+}
+
+async function recordRuleRun(
+  rule: WorkRule,
+  itemId: string,
+  status: WorkRuleRun["status"],
+  output: Record<string, unknown>,
+  errorMessage: string | null,
+) {
+  const run: WorkRuleRun = {
+    ruleRunId: randomUUID(),
+    ruleId: rule.ruleId,
+    itemId,
+    triggerType: rule.triggerType,
+    status,
+    output,
+    errorMessage,
+    createdAt: new Date().toISOString(),
+  };
+  const db = getDb();
+  if (!db) getDemoWork().ruleRuns.set(run.ruleRunId, run);
+  else
+    await db.execute(sql`
+      insert into public.work_rule_run (
+        work_rule_run_id, work_rule_id, work_item_id, trigger_type,
+        status, output, error_message
+      ) values (
+        ${run.ruleRunId}::uuid, ${rule.ruleId}::uuid, ${itemId}::uuid,
+        ${rule.triggerType}, ${status}, ${JSON.stringify(output)}::jsonb,
+        ${errorMessage}
+      )
+    `);
+}
+
+async function runProjectRules(
+  ctx: TrpcContext,
+  projectId: string,
+  itemId: string,
+  triggerType: WorkRule["triggerType"],
+) {
+  if (
+    !(await featureEnabled("work.rules", {
+      userId: ctx.employeeId,
+      roles: ctx.roles,
+    }))
+  ) {
+    return;
+  }
+  const db = getDb();
+  const rules = !db
+    ? [...getDemoWork().rules.values()].filter(
+        (rule) =>
+          rule.projectId === projectId &&
+          rule.triggerType === triggerType &&
+          rule.isEnabled,
+      )
+    : await db.execute<WorkRule & { branches: unknown }>(sql`
+        select work_rule_id as "ruleId", work_project_id as "projectId",
+          name, trigger_type as "triggerType", branches,
+          is_enabled as "isEnabled"
+        from public.work_rule
+        where work_project_id = ${projectId}::uuid
+          and trigger_type = ${triggerType} and is_enabled = true
+        order by created_at
+      `);
+  const item = await ruleSnapshot(itemId, projectId);
+  const snapshot = {
+    title: item.title,
+    priority: item.priority,
+    completed: Boolean(item.completedAt),
+    sectionId: item.sectionId,
+    itemType: item.itemType,
+  };
+  for (const candidate of rules) {
+    const parsed = z.array(ruleBranchSchema).safeParse(candidate.branches);
+    const rule = { ...candidate, branches: parsed.success ? parsed.data : [] };
+    const branch = rule.branches.find((value) =>
+      ruleBranchMatches(value, snapshot),
+    );
+    if (!branch) {
+      await recordRuleRun(rule, itemId, "skipped", {}, null);
+      continue;
+    }
+    try {
+      for (const action of branch.actions)
+        await executeRuleAction(ctx, projectId, itemId, action);
+      await recordRuleRun(
+        rule,
+        itemId,
+        "succeeded",
+        { actions: branch.actions.length },
+        null,
+      );
+    } catch (error) {
+      await recordRuleRun(
+        rule,
+        itemId,
+        "failed",
+        {},
+        error instanceof Error ? error.message : "Rule failed",
+      );
+    }
+  }
+}
+
+async function captureBundleBlueprint(
+  projectId: string,
+): Promise<z.infer<typeof bundleBlueprintSchema>> {
+  const db = getDb();
+  if (!db) {
+    const store = getDemoWork();
+    return {
+      sections: [...store.sections.values()]
+        .filter((section) => section.projectId === projectId)
+        .sort((a, b) => a.position - b.position)
+        .map(({ name }) => ({ name })),
+      sectionRefs: Object.fromEntries(
+        [...store.sections.values()]
+          .filter((section) => section.projectId === projectId)
+          .map((section) => [section.sectionId, section.name]),
+      ),
+      customFields: [...store.customFields.values()]
+        .filter((field) => field.projectId === projectId)
+        .sort((a, b) => a.position - b.position)
+        .map(({ name, fieldType, options, isRequired }) => ({
+          name,
+          fieldType,
+          options,
+          isRequired,
+        })),
+      rules: [...store.rules.values()]
+        .filter((rule) => rule.projectId === projectId)
+        .map(({ name, triggerType, branches }) => ({
+          name,
+          triggerType,
+          branches,
+        })),
+      taskTemplates: [...store.templates.values()]
+        .filter(
+          (template) =>
+            template.projectId === projectId &&
+            template.templateType === "task",
+        )
+        .flatMap((template) => {
+          const parsed = taskTemplateBlueprintSchema.safeParse(
+            template.blueprint,
+          );
+          return parsed.success
+            ? [{ name: template.name, blueprint: parsed.data }]
+            : [];
+        }),
+    };
+  }
+  const [sections, customFields, rules, templates] = await Promise.all([
+    db.execute<{ name: string }>(sql`
+      select name from public.work_section
+      where work_project_id = ${projectId}::uuid order by position
+    `),
+    db.execute<{
+      name: string;
+      fieldType: WorkCustomFieldType;
+      options: unknown;
+      isRequired: boolean;
+    }>(sql`
+      select name, field_type as "fieldType", options,
+        is_required as "isRequired"
+      from public.work_custom_field
+      where work_project_id = ${projectId}::uuid order by position
+    `),
+    db.execute<{
+      name: string;
+      triggerType: WorkRule["triggerType"];
+      branches: unknown;
+    }>(sql`
+      select name, trigger_type as "triggerType", branches
+      from public.work_rule
+      where work_project_id = ${projectId}::uuid order by created_at
+    `),
+    db.execute<{ name: string; blueprint: unknown }>(sql`
+      select name, blueprint from public.work_template
+      where work_project_id = ${projectId}::uuid
+        and template_type = 'task' and archived_at is null
+      order by created_at
+    `),
+  ]);
+  return {
+    sections,
+    sectionRefs: Object.fromEntries(
+      (
+        await db.execute<{ sectionId: string; name: string }>(sql`
+          select work_section_id as "sectionId", name
+          from public.work_section where work_project_id = ${projectId}::uuid
+        `)
+      ).map((section) => [section.sectionId, section.name]),
+    ),
+    customFields: customFields.map((field) => ({
+      ...field,
+      options: Array.isArray(field.options)
+        ? field.options.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : [],
+    })),
+    rules: rules.flatMap((rule) => {
+      const branches = z.array(ruleBranchSchema).safeParse(rule.branches);
+      return branches.success ? [{ ...rule, branches: branches.data }] : [];
+    }),
+    taskTemplates: templates.flatMap((template) => {
+      const blueprint = taskTemplateBlueprintSchema.safeParse(
+        template.blueprint,
+      );
+      return blueprint.success
+        ? [{ name: template.name, blueprint: blueprint.data }]
+        : [];
+    }),
+  };
 }
 
 export const workManagementRouter = router({
@@ -826,6 +1556,7 @@ export const workManagementRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         const employeeId = actor(ctx);
+        await requireWorkTypeFeature(ctx, input.itemType);
         await requireProjectAccess(ctx, input.projectId, "editor");
         if (input.parentItemId)
           await requireItemAccess(ctx, input.parentItemId, "editor");
@@ -927,6 +1658,7 @@ export const workManagementRouter = router({
             `Assigned: ${item.title}`,
           );
         }
+        await runProjectRules(ctx, input.projectId, item.itemId, "task_added");
         return item;
       }),
 
@@ -946,7 +1678,7 @@ export const workManagementRouter = router({
         }),
       )
       .mutation(async ({ input, ctx }) => {
-        await requireItemAccess(ctx, input.itemId, "editor");
+        const access = await requireItemAccess(ctx, input.itemId, "editor");
         const db = getDb();
         if (!db) {
           const item = getDemoWork().items.get(input.itemId)!;
@@ -980,6 +1712,20 @@ export const workManagementRouter = router({
             "updated",
             "A followed task was updated",
           );
+          if (input.priority !== undefined)
+            await runProjectRules(
+              ctx,
+              access.projectId,
+              input.itemId,
+              "priority_changed",
+            );
+          if (input.dueAt)
+            await runProjectRules(
+              ctx,
+              access.projectId,
+              input.itemId,
+              "due_date_set",
+            );
           return item;
         }
         const rows = await db.execute<WorkItem>(sql`
@@ -1008,13 +1754,41 @@ export const workManagementRouter = router({
           "updated",
           "A followed task was updated",
         );
+        if (input.priority !== undefined)
+          await runProjectRules(
+            ctx,
+            access.projectId,
+            input.itemId,
+            "priority_changed",
+          );
+        if (input.dueAt)
+          await runProjectRules(
+            ctx,
+            access.projectId,
+            input.itemId,
+            "due_date_set",
+          );
         return rows[0];
       }),
 
     complete: staffProcedure
       .input(z.object({ itemId: uuid, completed: z.boolean() }))
       .mutation(async ({ input, ctx }) => {
-        await requireItemAccess(ctx, input.itemId, "editor");
+        const access = await requireItemAccess(ctx, input.itemId, "editor");
+        const current = await ruleSnapshot(input.itemId);
+        if (
+          input.completed &&
+          current.itemType === "approval" &&
+          (await featureEnabled("work.approvals", {
+            userId: ctx.employeeId,
+            roles: ctx.roles,
+          }))
+        ) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Choose Approve, Request changes, or Reject",
+          });
+        }
         const db = getDb();
         if (!db)
           getDemoWork().items.get(input.itemId)!.completedAt = input.completed
@@ -1044,6 +1818,13 @@ export const workManagementRouter = router({
             ? "A followed task was completed"
             : "A task was reopened",
         );
+        if (input.completed)
+          await runProjectRules(
+            ctx,
+            access.projectId,
+            input.itemId,
+            "task_completed",
+          );
         return {
           ok: true as const,
           completedAt: input.completed ? new Date().toISOString() : null,
@@ -1080,6 +1861,7 @@ export const workManagementRouter = router({
           sectionId: input.sectionId,
           position: input.position,
         });
+        await runProjectRules(ctx, input.projectId, input.itemId, "task_moved");
         return { ok: true as const };
       }),
 
@@ -1110,6 +1892,7 @@ export const workManagementRouter = router({
         await audit(ctx, "work.task.multiHome", "work_item", input.itemId, {
           projectId: input.projectId,
         });
+        await runProjectRules(ctx, input.projectId, input.itemId, "task_added");
         return { ok: true as const };
       }),
   }),
@@ -2239,6 +3022,1586 @@ export const workManagementRouter = router({
           `);
           if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
         }
+        return { ok: true as const };
+      }),
+  }),
+
+  forms: router({
+    list: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        if (!db)
+          return [...getDemoWork().forms.values()].filter(
+            (form) => form.projectId === input.projectId,
+          );
+        const rows = await db.execute<WorkForm & { questions: unknown }>(sql`
+          select work_form_id as "formId", work_project_id as "projectId",
+            work_section_id as "sectionId", name, description,
+            title_question_key as "titleQuestionKey", questions,
+            default_assignee_employee_id as "defaultAssigneeEmployeeId",
+            confirmation_message as "confirmationMessage", is_active as "isActive"
+          from public.work_form
+          where work_project_id = ${input.projectId}::uuid
+          order by lower(name)
+        `);
+        return rows.map((form) => {
+          const questions = z
+            .array(formQuestionSchema)
+            .safeParse(form.questions);
+          return {
+            ...form,
+            questions: questions.success ? questions.data : [],
+          };
+        });
+      }),
+    create: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          sectionId: nullableUuid.optional(),
+          name: z.string().trim().min(1).max(160),
+          description: z.string().trim().max(5000).default(""),
+          titleQuestionKey: z
+            .string()
+            .regex(/^[a-z][a-z0-9_]{0,63}$/)
+            .default("title"),
+          questions: z.array(formQuestionSchema).min(1).max(100),
+          defaultAssigneeEmployeeId: nullableUuid.optional(),
+          confirmationMessage: z
+            .string()
+            .trim()
+            .min(1)
+            .max(1000)
+            .default("Your request was submitted."),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        const keys = new Set(input.questions.map((question) => question.key));
+        if (keys.size !== input.questions.length)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Question keys must be unique",
+          });
+        const titleQuestion = input.questions.find(
+          (question) => question.key === input.titleQuestionKey,
+        );
+        if (
+          !titleQuestion ||
+          !["text", "textarea"].includes(titleQuestion.type)
+        )
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "The task title must map to a text question",
+          });
+        for (const question of input.questions) {
+          if (
+            ["single_select", "multi_select"].includes(question.type) &&
+            !question.options.length
+          )
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `${question.label} needs at least one option`,
+            });
+          if (question.showWhen && !keys.has(question.showWhen.key))
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `${question.label} has an unknown branch question`,
+            });
+        }
+        const form: WorkForm = {
+          formId: randomUUID(),
+          projectId: input.projectId,
+          sectionId: input.sectionId ?? null,
+          name: input.name,
+          description: input.description,
+          titleQuestionKey: input.titleQuestionKey,
+          questions: input.questions,
+          defaultAssigneeEmployeeId: input.defaultAssigneeEmployeeId ?? null,
+          confirmationMessage: input.confirmationMessage,
+          isActive: true,
+        };
+        const db = getDb();
+        if (!db) {
+          if (
+            form.defaultAssigneeEmployeeId &&
+            form.defaultAssigneeEmployeeId !==
+              "c0000000-0000-4000-8000-000000000001"
+          )
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Employee not found",
+            });
+          getDemoWork().forms.set(form.formId, form);
+        } else {
+          if (form.sectionId) {
+            const section = await db.execute(sql`
+              select 1 from public.work_section
+              where work_section_id = ${form.sectionId}::uuid
+                and work_project_id = ${form.projectId}::uuid
+            `);
+            if (!section[0])
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Section not found",
+              });
+          }
+          if (form.defaultAssigneeEmployeeId) {
+            const employee = await db.execute(sql`
+              select 1 from public.employee
+              where employee_id = ${form.defaultAssigneeEmployeeId}::uuid
+                and is_active = true
+            `);
+            if (!employee[0])
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Employee not found",
+              });
+          }
+          await db.execute(sql`
+            insert into public.work_form (
+              work_form_id, work_project_id, work_section_id, name, description,
+              title_question_key, questions, default_assignee_employee_id,
+              confirmation_message, created_by_employee_id
+            ) values (
+              ${form.formId}::uuid, ${form.projectId}::uuid, ${form.sectionId}::uuid,
+              ${form.name}, ${form.description}, ${form.titleQuestionKey},
+              ${JSON.stringify(form.questions)}::jsonb,
+              ${form.defaultAssigneeEmployeeId}::uuid, ${form.confirmationMessage},
+              ${actor(ctx)}::uuid
+            )
+          `);
+        }
+        await audit(ctx, "work.form.create", "work_form", form.formId, {
+          projectId: form.projectId,
+          questions: form.questions.length,
+        });
+        return form;
+      }),
+    setActive: staffProcedure
+      .input(z.object({ formId: uuid, active: z.boolean() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = getDb();
+        const form = !db
+          ? getDemoWork().forms.get(input.formId)
+          : (
+              await db.execute<{ projectId: string }>(sql`
+                select work_project_id as "projectId" from public.work_form
+                where work_form_id = ${input.formId}::uuid
+              `)
+            )[0];
+        if (!form) throw new TRPCError({ code: "NOT_FOUND" });
+        await requireProjectAccess(ctx, form.projectId, "editor");
+        if (!db) getDemoWork().forms.get(input.formId)!.isActive = input.active;
+        else
+          await db.execute(sql`
+            update public.work_form set is_active = ${input.active}, updated_at = now()
+            where work_form_id = ${input.formId}::uuid
+          `);
+        await audit(ctx, "work.form.active", "work_form", input.formId, {
+          active: input.active,
+        });
+        return { ok: true as const };
+      }),
+    submit: staffProcedure
+      .input(
+        z.object({
+          formId: uuid,
+          answers: z.record(z.string().max(64), z.unknown()),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = getDb();
+        const raw = !db
+          ? getDemoWork().forms.get(input.formId)
+          : (
+              await db.execute<WorkForm & { questions: unknown }>(sql`
+                select work_form_id as "formId", work_project_id as "projectId",
+                  work_section_id as "sectionId", name, description,
+                  title_question_key as "titleQuestionKey", questions,
+                  default_assignee_employee_id as "defaultAssigneeEmployeeId",
+                  confirmation_message as "confirmationMessage", is_active as "isActive"
+                from public.work_form where work_form_id = ${input.formId}::uuid
+              `)
+            )[0];
+        if (!raw) throw new TRPCError({ code: "NOT_FOUND" });
+        await requireProjectAccess(ctx, raw.projectId);
+        const parsed = z.array(formQuestionSchema).safeParse(raw.questions);
+        if (!raw.isActive || !parsed.success)
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Form is unavailable",
+          });
+        let answers: Record<string, unknown>;
+        try {
+          answers = normalizeFormAnswers(parsed.data, input.answers);
+        } catch (error) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              error instanceof Error ? error.message : "Answers are invalid",
+          });
+        }
+        const title = answers[raw.titleQuestionKey];
+        if (typeof title !== "string" || !title.trim())
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Task title is required",
+          });
+        const description = parsed.data
+          .flatMap((question) =>
+            answers[question.key] === undefined
+              ? []
+              : [
+                  `${question.label}: ${Array.isArray(answers[question.key]) ? (answers[question.key] as unknown[]).join(", ") : String(answers[question.key])}`,
+                ],
+          )
+          .join("\n");
+        const itemId = randomUUID();
+        const submissionId = randomUUID();
+        if (!db) {
+          getDemoWork().items.set(itemId, {
+            itemId,
+            parentItemId: null,
+            title: title.trim(),
+            description,
+            itemType: "task",
+            priority: null,
+            assigneeEmployeeId: raw.defaultAssigneeEmployeeId,
+            assigneeName: raw.defaultAssigneeEmployeeId
+              ? "Assigned user"
+              : null,
+            startDate: null,
+            dueAt: null,
+            completedAt: null,
+            sectionId: raw.sectionId,
+            position: [...getDemoWork().items.values()].filter(
+              (item) => item.projectId === raw.projectId,
+            ).length,
+            projectId: raw.projectId,
+            recurrence: null,
+          });
+          getDemoWork().formSubmissions.set(submissionId, {
+            formId: raw.formId,
+            itemId,
+            answers,
+          });
+        } else {
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              insert into public.work_item (
+                work_item_id, title, description, item_type,
+                assignee_employee_id, created_by_employee_id
+              ) values (
+                ${itemId}::uuid, ${title.trim()}, ${description}, 'task',
+                ${raw.defaultAssigneeEmployeeId}::uuid, ${actor(ctx)}::uuid
+              )
+            `);
+            await tx.execute(sql`
+              insert into public.work_project_item (
+                work_project_id, work_item_id, work_section_id, position
+              ) values (
+                ${raw.projectId}::uuid, ${itemId}::uuid, ${raw.sectionId}::uuid,
+                (select coalesce(max(position), -1) + 1 from public.work_project_item
+                 where work_project_id = ${raw.projectId}::uuid)
+              )
+            `);
+            await tx.execute(sql`
+              insert into public.work_form_submission (
+                work_form_submission_id, work_form_id, submitted_by_employee_id,
+                answers, work_item_id
+              ) values (
+                ${submissionId}::uuid, ${raw.formId}::uuid, ${actor(ctx)}::uuid,
+                ${JSON.stringify(answers)}::jsonb, ${itemId}::uuid
+              )
+            `);
+          });
+        }
+        await audit(
+          ctx,
+          "work.form.submit",
+          "work_form_submission",
+          submissionId,
+          {
+            formId: raw.formId,
+            itemId,
+          },
+        );
+        if (raw.defaultAssigneeEmployeeId)
+          await notifyItem(
+            ctx,
+            itemId,
+            "assigned",
+            `Assigned: ${title.trim()}`,
+          );
+        await runProjectRules(ctx, raw.projectId, itemId, "task_added");
+        return { submissionId, itemId, message: raw.confirmationMessage };
+      }),
+  }),
+
+  rules: router({
+    list: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        if (!db)
+          return [...getDemoWork().rules.values()].filter(
+            (rule) => rule.projectId === input.projectId,
+          );
+        const rows = await db.execute<WorkRule & { branches: unknown }>(sql`
+          select work_rule_id as "ruleId", work_project_id as "projectId",
+            name, trigger_type as "triggerType", branches,
+            is_enabled as "isEnabled"
+          from public.work_rule
+          where work_project_id = ${input.projectId}::uuid
+          order by lower(name)
+        `);
+        return rows.map((rule) => {
+          const branches = z.array(ruleBranchSchema).safeParse(rule.branches);
+          return { ...rule, branches: branches.success ? branches.data : [] };
+        });
+      }),
+    create: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          name: z.string().trim().min(1).max(160),
+          triggerType: z.enum([
+            "task_added",
+            "task_completed",
+            "task_moved",
+            "priority_changed",
+            "due_date_set",
+            "approval_decided",
+          ]),
+          branches: z.array(ruleBranchSchema).min(1).max(20),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        for (const branch of input.branches) {
+          await validateRuleActions(input.projectId, branch.actions);
+          const sectionConditions = branch.conditions.flatMap((condition) =>
+            condition.field === "sectionId" &&
+            typeof condition.value === "string"
+              ? [condition.value]
+              : [],
+          );
+          for (const sectionId of sectionConditions) {
+            if (!uuid.safeParse(sectionId).success)
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Section condition is invalid",
+              });
+            await validateRuleActions(input.projectId, [
+              { type: "move_section", sectionId },
+            ]);
+          }
+        }
+        const rule: WorkRule = {
+          ruleId: randomUUID(),
+          projectId: input.projectId,
+          name: input.name,
+          triggerType: input.triggerType,
+          branches: input.branches,
+          isEnabled: true,
+        };
+        const db = getDb();
+        if (!db) getDemoWork().rules.set(rule.ruleId, rule);
+        else
+          await db.execute(sql`
+            insert into public.work_rule (
+              work_rule_id, work_project_id, name, trigger_type, branches,
+              owner_employee_id
+            ) values (
+              ${rule.ruleId}::uuid, ${rule.projectId}::uuid, ${rule.name},
+              ${rule.triggerType}, ${JSON.stringify(rule.branches)}::jsonb,
+              ${actor(ctx)}::uuid
+            )
+          `);
+        await audit(ctx, "work.rule.create", "work_rule", rule.ruleId, {
+          projectId: rule.projectId,
+          triggerType: rule.triggerType,
+          branches: rule.branches.length,
+        });
+        return rule;
+      }),
+    setEnabled: staffProcedure
+      .input(z.object({ ruleId: uuid, enabled: z.boolean() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = getDb();
+        const rule = !db
+          ? getDemoWork().rules.get(input.ruleId)
+          : (
+              await db.execute<{ projectId: string }>(sql`
+                select work_project_id as "projectId" from public.work_rule
+                where work_rule_id = ${input.ruleId}::uuid
+              `)
+            )[0];
+        if (!rule) throw new TRPCError({ code: "NOT_FOUND" });
+        await requireProjectAccess(ctx, rule.projectId, "editor");
+        if (!db)
+          getDemoWork().rules.get(input.ruleId)!.isEnabled = input.enabled;
+        else
+          await db.execute(sql`
+            update public.work_rule set is_enabled = ${input.enabled}, updated_at = now()
+            where work_rule_id = ${input.ruleId}::uuid
+          `);
+        await audit(ctx, "work.rule.enabled", "work_rule", input.ruleId, {
+          enabled: input.enabled,
+        });
+        return { ok: true as const };
+      }),
+    runs: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          limit: z.number().int().min(1).max(200).default(50),
+        }),
+      )
+      .query(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        if (!db) {
+          const ruleIds = new Set(
+            [...getDemoWork().rules.values()]
+              .filter((rule) => rule.projectId === input.projectId)
+              .map((rule) => rule.ruleId),
+          );
+          return [...getDemoWork().ruleRuns.values()]
+            .filter((run) => ruleIds.has(run.ruleId))
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+            .slice(0, input.limit);
+        }
+        const rows = await db.execute<
+          WorkRuleRun & { createdAt: Date | string }
+        >(sql`
+          select run.work_rule_run_id as "ruleRunId",
+            run.work_rule_id as "ruleId", run.work_item_id as "itemId",
+            run.trigger_type as "triggerType", run.status, run.output,
+            run.error_message as "errorMessage", run.created_at as "createdAt"
+          from public.work_rule_run run
+          join public.work_rule rule on rule.work_rule_id = run.work_rule_id
+          where rule.work_project_id = ${input.projectId}::uuid
+          order by run.created_at desc limit ${input.limit}
+        `);
+        return rows.map((run) => ({
+          ...run,
+          createdAt: new Date(run.createdAt).toISOString(),
+        }));
+      }),
+  }),
+
+  templates: router({
+    list: staffProcedure
+      .input(z.object({ projectId: uuid.optional() }).optional())
+      .query(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        if (input?.projectId) await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        if (!db)
+          return [...getDemoWork().templates.values()].filter(
+            (template) =>
+              (template.templateType === "project" &&
+                template.createdByEmployeeId === employeeId) ||
+              template.projectId === input?.projectId,
+          );
+        return db.execute<WorkTemplate>(sql`
+          select work_template_id as "templateId",
+            work_project_id as "projectId", name,
+            template_type as "templateType", blueprint,
+            created_by_employee_id as "createdByEmployeeId"
+          from public.work_template
+          where archived_at is null
+            and ((template_type = 'project'
+                and created_by_employee_id = ${employeeId}::uuid)
+              or work_project_id = ${input?.projectId ?? null}::uuid)
+          order by template_type, lower(name)
+        `);
+      }),
+    createTask: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          name: z.string().trim().min(1).max(160),
+          blueprint: taskTemplateBlueprintSchema,
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        await requireWorkTypeFeature(ctx, input.blueprint.itemType);
+        if (input.blueprint.assigneeEmployeeId)
+          await validateRuleActions(input.projectId, [
+            { type: "assign", employeeId: input.blueprint.assigneeEmployeeId },
+          ]);
+        const template: WorkTemplate = {
+          templateId: randomUUID(),
+          projectId: input.projectId,
+          name: input.name,
+          templateType: "task",
+          blueprint: input.blueprint,
+          createdByEmployeeId: actor(ctx),
+        };
+        const db = getDb();
+        if (!db) getDemoWork().templates.set(template.templateId, template);
+        else
+          await db.execute(sql`
+            insert into public.work_template (
+              work_template_id, work_project_id, name, template_type,
+              blueprint, created_by_employee_id
+            ) values (
+              ${template.templateId}::uuid, ${template.projectId}::uuid,
+              ${template.name}, 'task', ${JSON.stringify(template.blueprint)}::jsonb,
+              ${actor(ctx)}::uuid
+            )
+          `);
+        await audit(
+          ctx,
+          "work.template.create",
+          "work_template",
+          template.templateId,
+          {
+            projectId: template.projectId,
+            templateType: "task",
+          },
+        );
+        return template;
+      }),
+    captureProject: staffProcedure
+      .input(
+        z.object({ projectId: uuid, name: z.string().trim().min(1).max(160) }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const project = await requireProjectAccess(
+          ctx,
+          input.projectId,
+          "editor",
+        );
+        const db = getDb();
+        let blueprint: z.infer<typeof projectTemplateBlueprintSchema>;
+        if (!db) {
+          const store = getDemoWork();
+          const sections = [...store.sections.values()]
+            .filter((section) => section.projectId === input.projectId)
+            .sort((a, b) => a.position - b.position);
+          const sectionNames = new Map(
+            sections.map((section) => [section.sectionId, section.name]),
+          );
+          blueprint = {
+            description: project.description,
+            color: project.color,
+            privacy: project.privacy,
+            sections: sections.map(({ name, position }) => ({
+              name,
+              position,
+            })),
+            tasks: [...store.items.values()]
+              .filter(
+                (item) =>
+                  item.projectId === input.projectId && !item.parentItemId,
+              )
+              .map((item) => ({
+                title: item.title,
+                description: item.description,
+                itemType: item.itemType,
+                priority: item.priority,
+                sectionName: item.sectionId
+                  ? (sectionNames.get(item.sectionId) ?? null)
+                  : null,
+                dueOffsetDays: item.dueAt
+                  ? Math.round(
+                      (new Date(item.dueAt).getTime() - Date.now()) /
+                        86_400_000,
+                    )
+                  : null,
+              })),
+          };
+        } else {
+          const sections = await db.execute<WorkSection>(sql`
+            select work_section_id as "sectionId", work_project_id as "projectId",
+              name, position from public.work_section
+            where work_project_id = ${input.projectId}::uuid order by position
+          `);
+          const tasks = await db.execute<{
+            title: string;
+            description: string;
+            itemType: WorkItem["itemType"];
+            priority: WorkItem["priority"];
+            sectionName: string | null;
+            dueAt: Date | string | null;
+          }>(sql`
+            select item.title, item.description, item.item_type as "itemType",
+              item.priority, section.name as "sectionName", item.due_at as "dueAt"
+            from public.work_project_item membership
+            join public.work_item item on item.work_item_id = membership.work_item_id
+            left join public.work_section section
+              on section.work_section_id = membership.work_section_id
+            where membership.work_project_id = ${input.projectId}::uuid
+              and item.parent_work_item_id is null and item.archived_at is null
+            order by membership.position, item.created_at
+          `);
+          blueprint = {
+            description: project.description,
+            color: project.color,
+            privacy: project.privacy,
+            sections: sections.map(({ name, position }) => ({
+              name,
+              position,
+            })),
+            tasks: tasks.map((task) => ({
+              title: task.title,
+              description: task.description,
+              itemType: task.itemType,
+              priority: task.priority,
+              sectionName: task.sectionName,
+              dueOffsetDays: task.dueAt
+                ? Math.round(
+                    (new Date(task.dueAt).getTime() - Date.now()) / 86_400_000,
+                  )
+                : null,
+            })),
+          };
+        }
+        const template: WorkTemplate = {
+          templateId: randomUUID(),
+          projectId: null,
+          name: input.name,
+          templateType: "project",
+          blueprint,
+          createdByEmployeeId: actor(ctx),
+        };
+        if (!db) getDemoWork().templates.set(template.templateId, template);
+        else
+          await db.execute(sql`
+            insert into public.work_template (
+              work_template_id, name, template_type, blueprint,
+              created_by_employee_id
+            ) values (
+              ${template.templateId}::uuid, ${template.name}, 'project',
+              ${JSON.stringify(blueprint)}::jsonb, ${actor(ctx)}::uuid
+            )
+          `);
+        await audit(
+          ctx,
+          "work.template.capture",
+          "work_template",
+          template.templateId,
+          {
+            sourceProjectId: input.projectId,
+            tasks: blueprint.tasks.length,
+          },
+        );
+        return template;
+      }),
+    instantiateTask: staffProcedure
+      .input(
+        z.object({
+          templateId: uuid,
+          projectId: uuid,
+          sectionId: nullableUuid.optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        const db = getDb();
+        const template = !db
+          ? getDemoWork().templates.get(input.templateId)
+          : (
+              await db.execute<WorkTemplate>(sql`
+                select work_template_id as "templateId",
+                  work_project_id as "projectId", name,
+                  template_type as "templateType", blueprint,
+                  created_by_employee_id as "createdByEmployeeId"
+                from public.work_template
+                where work_template_id = ${input.templateId}::uuid
+                  and archived_at is null
+              `)
+            )[0];
+        if (!template || template.templateType !== "task")
+          throw new TRPCError({ code: "NOT_FOUND" });
+        if (template.projectId !== input.projectId)
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Template belongs to another project",
+          });
+        const parsed = taskTemplateBlueprintSchema.safeParse(
+          template.blueprint,
+        );
+        if (!parsed.success)
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Template is invalid",
+          });
+        await requireWorkTypeFeature(ctx, parsed.data.itemType);
+        const itemId = randomUUID();
+        const dueAt =
+          parsed.data.dueInDays === undefined
+            ? null
+            : relativeDate(parsed.data.dueInDays);
+        if (!db) {
+          const store = getDemoWork();
+          const parent: WorkItem = {
+            itemId,
+            parentItemId: null,
+            title: parsed.data.title,
+            description: parsed.data.description,
+            itemType: parsed.data.itemType,
+            priority: parsed.data.priority,
+            assigneeEmployeeId: parsed.data.assigneeEmployeeId ?? null,
+            assigneeName: parsed.data.assigneeEmployeeId
+              ? "Assigned user"
+              : null,
+            startDate: null,
+            dueAt,
+            completedAt: null,
+            sectionId: input.sectionId ?? null,
+            position: [...store.items.values()].filter(
+              (item) => item.projectId === input.projectId,
+            ).length,
+            projectId: input.projectId,
+            recurrence: null,
+          };
+          store.items.set(itemId, parent);
+          parsed.data.subtasks.forEach((subtask, index) => {
+            const subtaskId = randomUUID();
+            store.items.set(subtaskId, {
+              ...parent,
+              itemId: subtaskId,
+              parentItemId: itemId,
+              title: subtask.title,
+              description: subtask.description,
+              dueAt:
+                subtask.dueInDays === undefined
+                  ? null
+                  : relativeDate(subtask.dueInDays),
+              position: index,
+            });
+          });
+        } else {
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              insert into public.work_item (
+                work_item_id, title, description, item_type, priority,
+                assignee_employee_id, created_by_employee_id, due_at
+              ) values (
+                ${itemId}::uuid, ${parsed.data.title}, ${parsed.data.description},
+                ${parsed.data.itemType}, ${parsed.data.priority},
+                ${parsed.data.assigneeEmployeeId ?? null}::uuid,
+                ${actor(ctx)}::uuid, ${dueAt}::timestamptz
+              )
+            `);
+            await tx.execute(sql`
+              insert into public.work_project_item (
+                work_project_id, work_item_id, work_section_id, position
+              ) values (
+                ${input.projectId}::uuid, ${itemId}::uuid,
+                ${input.sectionId ?? null}::uuid,
+                (select coalesce(max(position), -1) + 1 from public.work_project_item
+                 where work_project_id = ${input.projectId}::uuid)
+              )
+            `);
+            for (const subtask of parsed.data.subtasks) {
+              const subtaskId = randomUUID();
+              await tx.execute(sql`
+                insert into public.work_item (
+                  work_item_id, parent_work_item_id, title, description,
+                  item_type, created_by_employee_id, due_at
+                ) values (
+                  ${subtaskId}::uuid, ${itemId}::uuid, ${subtask.title},
+                  ${subtask.description}, 'task', ${actor(ctx)}::uuid,
+                  ${subtask.dueInDays === undefined ? null : relativeDate(subtask.dueInDays)}::timestamptz
+                )
+              `);
+              await tx.execute(sql`
+                insert into public.work_project_item (
+                  work_project_id, work_item_id, work_section_id, position
+                ) values (
+                  ${input.projectId}::uuid, ${subtaskId}::uuid,
+                  ${input.sectionId ?? null}::uuid,
+                  (select coalesce(max(position), -1) + 1 from public.work_project_item
+                   where work_project_id = ${input.projectId}::uuid)
+                )
+              `);
+            }
+          });
+        }
+        await audit(ctx, "work.template.instantiate", "work_item", itemId, {
+          templateId: template.templateId,
+          projectId: input.projectId,
+        });
+        await runProjectRules(ctx, input.projectId, itemId, "task_added");
+        return { itemId };
+      }),
+    instantiateProject: staffProcedure
+      .input(
+        z.object({
+          templateId: uuid,
+          name: z.string().trim().min(1).max(160),
+          referenceDate: z.string().date(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = getDb();
+        const template = !db
+          ? getDemoWork().templates.get(input.templateId)
+          : (
+              await db.execute<WorkTemplate>(sql`
+                select work_template_id as "templateId", null::uuid as "projectId",
+                  name, template_type as "templateType", blueprint,
+                  created_by_employee_id as "createdByEmployeeId"
+                from public.work_template
+                where work_template_id = ${input.templateId}::uuid
+                  and template_type = 'project' and archived_at is null
+                  and created_by_employee_id = ${actor(ctx)}::uuid
+              `)
+            )[0];
+        if (
+          !template ||
+          template.templateType !== "project" ||
+          template.createdByEmployeeId !== actor(ctx)
+        )
+          throw new TRPCError({ code: "NOT_FOUND" });
+        const parsed = projectTemplateBlueprintSchema.safeParse(
+          template.blueprint,
+        );
+        if (!parsed.success)
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Template is invalid",
+          });
+        for (const task of parsed.data.tasks)
+          await requireWorkTypeFeature(ctx, task.itemType);
+        const projectId = randomUUID();
+        const baseDate = new Date(`${input.referenceDate}T12:00:00Z`);
+        if (!db) {
+          const store = getDemoWork();
+          store.projects.set(projectId, {
+            projectId,
+            name: input.name,
+            description: parsed.data.description,
+            color: parsed.data.color,
+            privacy: parsed.data.privacy,
+            clientId: null,
+            ownerEmployeeId: actor(ctx),
+            sourcePlatform: "native",
+            accessLevel: "admin",
+            createdAt: new Date().toISOString(),
+          });
+          const sectionIds = new Map<string, string>();
+          for (const section of parsed.data.sections) {
+            const sectionId = randomUUID();
+            sectionIds.set(section.name, sectionId);
+            store.sections.set(sectionId, { sectionId, projectId, ...section });
+          }
+          parsed.data.tasks.forEach((task, position) => {
+            const itemId = randomUUID();
+            store.items.set(itemId, {
+              itemId,
+              parentItemId: null,
+              title: task.title,
+              description: task.description,
+              itemType: task.itemType,
+              priority: task.priority,
+              assigneeEmployeeId: null,
+              assigneeName: null,
+              startDate: null,
+              dueAt:
+                task.dueOffsetDays === null
+                  ? null
+                  : relativeDate(task.dueOffsetDays, baseDate),
+              completedAt: null,
+              sectionId: task.sectionName
+                ? (sectionIds.get(task.sectionName) ?? null)
+                : null,
+              position,
+              projectId,
+              recurrence: null,
+            });
+          });
+        } else {
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              insert into public.work_project (
+                work_project_id, name, description, color, privacy,
+                owner_employee_id, created_by_employee_id
+              ) values (
+                ${projectId}::uuid, ${input.name}, ${parsed.data.description},
+                ${parsed.data.color}, ${parsed.data.privacy}, ${actor(ctx)}::uuid,
+                ${actor(ctx)}::uuid
+              )
+            `);
+            await tx.execute(sql`
+              insert into public.work_project_member (
+                work_project_id, employee_id, access_level
+              ) values (${projectId}::uuid, ${actor(ctx)}::uuid, 'admin')
+            `);
+            const sectionIds = new Map<string, string>();
+            for (const section of parsed.data.sections) {
+              const sectionId = randomUUID();
+              sectionIds.set(section.name, sectionId);
+              await tx.execute(sql`
+                insert into public.work_section (
+                  work_section_id, work_project_id, name, position
+                ) values (
+                  ${sectionId}::uuid, ${projectId}::uuid,
+                  ${section.name}, ${section.position}
+                )
+              `);
+            }
+            for (const [position, task] of parsed.data.tasks.entries()) {
+              const itemId = randomUUID();
+              await tx.execute(sql`
+                insert into public.work_item (
+                  work_item_id, title, description, item_type, priority,
+                  created_by_employee_id, due_at
+                ) values (
+                  ${itemId}::uuid, ${task.title}, ${task.description},
+                  ${task.itemType}, ${task.priority}, ${actor(ctx)}::uuid,
+                  ${task.dueOffsetDays === null ? null : relativeDate(task.dueOffsetDays, baseDate)}::timestamptz
+                )
+              `);
+              await tx.execute(sql`
+                insert into public.work_project_item (
+                  work_project_id, work_item_id, work_section_id, position
+                ) values (
+                  ${projectId}::uuid, ${itemId}::uuid,
+                  ${task.sectionName ? (sectionIds.get(task.sectionName) ?? null) : null}::uuid,
+                  ${position}
+                )
+              `);
+            }
+          });
+        }
+        await audit(ctx, "work.template.project", "work_project", projectId, {
+          templateId: template.templateId,
+          tasks: parsed.data.tasks.length,
+        });
+        return { projectId };
+      }),
+  }),
+
+  bundles: router({
+    list: staffProcedure.query(async ({ ctx }) => {
+      const employeeId = actor(ctx);
+      const db = getDb();
+      if (!db)
+        return [...getDemoWork().bundles.values()].filter(
+          (bundle) =>
+            bundle.visibility === "organization" ||
+            bundle.createdByEmployeeId === employeeId,
+        );
+      const rows = await db.execute<WorkBundle & { blueprint: unknown }>(sql`
+        select bundle.work_bundle_id as "bundleId", bundle.name,
+          bundle.description, bundle.visibility,
+          bundle.created_by_employee_id as "createdByEmployeeId",
+          latest.version, latest.blueprint
+        from public.work_bundle bundle
+        join lateral (
+          select version, blueprint from public.work_bundle_version
+          where work_bundle_id = bundle.work_bundle_id
+          order by version desc limit 1
+        ) latest on true
+        where bundle.archived_at is null
+          and (bundle.visibility = 'organization'
+            or bundle.created_by_employee_id = ${employeeId}::uuid)
+        order by lower(bundle.name)
+      `);
+      return rows.flatMap((bundle) => {
+        const blueprint = bundleBlueprintSchema.safeParse(bundle.blueprint);
+        return blueprint.success
+          ? [{ ...bundle, blueprint: blueprint.data }]
+          : [];
+      });
+    }),
+    capture: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          name: z.string().trim().min(1).max(160),
+          description: z.string().trim().max(5000).default(""),
+          visibility: z
+            .enum(["organization", "limited"])
+            .default("organization"),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId, "admin");
+        const blueprint = await captureBundleBlueprint(input.projectId);
+        const bundle: WorkBundle = {
+          bundleId: randomUUID(),
+          name: input.name,
+          description: input.description,
+          visibility: input.visibility,
+          version: 1,
+          blueprint,
+          createdByEmployeeId: actor(ctx),
+        };
+        const db = getDb();
+        if (!db) getDemoWork().bundles.set(bundle.bundleId, bundle);
+        else
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              insert into public.work_bundle (
+                work_bundle_id, name, description, visibility,
+                created_by_employee_id
+              ) values (
+                ${bundle.bundleId}::uuid, ${bundle.name}, ${bundle.description},
+                ${bundle.visibility}, ${bundle.createdByEmployeeId}::uuid
+              )
+            `);
+            await tx.execute(sql`
+              insert into public.work_bundle_version (
+                work_bundle_id, version, blueprint, published_by_employee_id
+              ) values (
+                ${bundle.bundleId}::uuid, 1,
+                ${JSON.stringify(blueprint)}::jsonb, ${actor(ctx)}::uuid
+              )
+            `);
+          });
+        await audit(
+          ctx,
+          "work.bundle.capture",
+          "work_bundle",
+          bundle.bundleId,
+          {
+            projectId: input.projectId,
+            version: 1,
+          },
+        );
+        return bundle;
+      }),
+    publish: staffProcedure
+      .input(z.object({ bundleId: uuid, sourceProjectId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.sourceProjectId, "admin");
+        const employeeId = actor(ctx);
+        const db = getDb();
+        const bundle = !db
+          ? getDemoWork().bundles.get(input.bundleId)
+          : (
+              await db.execute<{
+                createdByEmployeeId: string;
+                version: number;
+              }>(sql`
+                select bundle.created_by_employee_id as "createdByEmployeeId",
+                  coalesce(max(version.version), 0)::int as version
+                from public.work_bundle bundle
+                left join public.work_bundle_version version
+                  on version.work_bundle_id = bundle.work_bundle_id
+                where bundle.work_bundle_id = ${input.bundleId}::uuid
+                  and bundle.archived_at is null
+                group by bundle.created_by_employee_id
+              `)
+            )[0];
+        if (!bundle) throw new TRPCError({ code: "NOT_FOUND" });
+        if (bundle.createdByEmployeeId !== employeeId)
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Only the bundle owner can publish",
+          });
+        const blueprint = await captureBundleBlueprint(input.sourceProjectId);
+        const version = bundle.version + 1;
+        if (!db) {
+          Object.assign(getDemoWork().bundles.get(input.bundleId)!, {
+            version,
+            blueprint,
+          });
+        } else {
+          await db.execute(sql`
+            insert into public.work_bundle_version (
+              work_bundle_id, version, blueprint, published_by_employee_id
+            ) values (
+              ${input.bundleId}::uuid, ${version},
+              ${JSON.stringify(blueprint)}::jsonb, ${employeeId}::uuid
+            )
+          `);
+          await db.execute(sql`
+            update public.work_bundle set updated_at = now()
+            where work_bundle_id = ${input.bundleId}::uuid
+          `);
+        }
+        await audit(ctx, "work.bundle.publish", "work_bundle", input.bundleId, {
+          sourceProjectId: input.sourceProjectId,
+          version,
+        });
+        return { bundleId: input.bundleId, version };
+      }),
+    applyToProject: staffProcedure
+      .input(z.object({ bundleId: uuid, projectId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        const employeeId = actor(ctx);
+        const db = getDb();
+        const raw = !db
+          ? getDemoWork().bundles.get(input.bundleId)
+          : (
+              await db.execute<WorkBundle & { blueprint: unknown }>(sql`
+                select bundle.work_bundle_id as "bundleId", bundle.name,
+                  bundle.description, bundle.visibility,
+                  bundle.created_by_employee_id as "createdByEmployeeId",
+                  latest.version, latest.blueprint
+                from public.work_bundle bundle
+                join lateral (
+                  select version, blueprint from public.work_bundle_version
+                  where work_bundle_id = bundle.work_bundle_id
+                  order by version desc limit 1
+                ) latest on true
+                where bundle.work_bundle_id = ${input.bundleId}::uuid
+                  and bundle.archived_at is null
+                  and (bundle.visibility = 'organization'
+                    or bundle.created_by_employee_id = ${employeeId}::uuid)
+              `)
+            )[0];
+        if (!raw) throw new TRPCError({ code: "NOT_FOUND" });
+        const parsed = bundleBlueprintSchema.safeParse(raw.blueprint);
+        if (!parsed.success)
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Bundle is invalid",
+          });
+        const store = getDemoWork();
+        const key = `${input.projectId}:${input.bundleId}`;
+        if (!db) {
+          const applied = [...store.projectBundles.keys()].filter((candidate) =>
+            candidate.startsWith(`${input.projectId}:`),
+          );
+          if (!store.projectBundles.has(key) && applied.length >= 5)
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "A project can use up to five bundles",
+            });
+          const sectionIds = new Map(
+            [...store.sections.values()]
+              .filter((section) => section.projectId === input.projectId)
+              .map((section) => [
+                section.name.toLowerCase(),
+                section.sectionId,
+              ]),
+          );
+          for (const section of parsed.data.sections) {
+            if (sectionIds.has(section.name.toLowerCase())) continue;
+            const sectionId = randomUUID();
+            sectionIds.set(section.name.toLowerCase(), sectionId);
+            store.sections.set(sectionId, {
+              sectionId,
+              projectId: input.projectId,
+              name: section.name,
+              position: sectionIds.size - 1,
+            });
+          }
+          const remapBranches = (branches: WorkRuleBranch[]) =>
+            branches.map((branch) => ({
+              ...branch,
+              conditions: branch.conditions.map((condition) => {
+                if (
+                  condition.field !== "sectionId" ||
+                  typeof condition.value !== "string"
+                )
+                  return condition;
+                const name = parsed.data.sectionRefs[condition.value];
+                const value = name ? sectionIds.get(name.toLowerCase()) : null;
+                if (!value)
+                  throw new TRPCError({
+                    code: "BAD_REQUEST",
+                    message: "Bundle section is missing",
+                  });
+                return { ...condition, value };
+              }),
+              actions: branch.actions.map((action) => {
+                if (action.type !== "move_section") return action;
+                const name = parsed.data.sectionRefs[action.sectionId];
+                const sectionId = name
+                  ? sectionIds.get(name.toLowerCase())
+                  : null;
+                if (!sectionId)
+                  throw new TRPCError({
+                    code: "BAD_REQUEST",
+                    message: "Bundle section is missing",
+                  });
+                return { ...action, sectionId };
+              }),
+            }));
+          for (const field of parsed.data.customFields) {
+            if (
+              [...store.customFields.values()].some(
+                (candidate) =>
+                  candidate.projectId === input.projectId &&
+                  candidate.name.toLowerCase() === field.name.toLowerCase(),
+              )
+            )
+              continue;
+            const customFieldId = randomUUID();
+            store.customFields.set(customFieldId, {
+              customFieldId,
+              projectId: input.projectId,
+              ...field,
+              position: [...store.customFields.values()].filter(
+                (candidate) => candidate.projectId === input.projectId,
+              ).length,
+            });
+          }
+          for (const rule of parsed.data.rules) {
+            if (
+              [...store.rules.values()].some(
+                (candidate) =>
+                  candidate.projectId === input.projectId &&
+                  candidate.name.toLowerCase() === rule.name.toLowerCase(),
+              )
+            )
+              continue;
+            const ruleId = randomUUID();
+            store.rules.set(ruleId, {
+              ruleId,
+              projectId: input.projectId,
+              ...rule,
+              branches: remapBranches(rule.branches),
+              isEnabled: true,
+            });
+          }
+          for (const template of parsed.data.taskTemplates) {
+            if (
+              [...store.templates.values()].some(
+                (candidate) =>
+                  candidate.projectId === input.projectId &&
+                  candidate.name.toLowerCase() === template.name.toLowerCase(),
+              )
+            )
+              continue;
+            const templateId = randomUUID();
+            store.templates.set(templateId, {
+              templateId,
+              projectId: input.projectId,
+              templateType: "task",
+              ...template,
+              createdByEmployeeId: employeeId,
+            });
+          }
+          store.projectBundles.set(key, {
+            version: raw.version,
+            appliedAt: new Date().toISOString(),
+          });
+        } else {
+          await db.transaction(async (tx) => {
+            const applied = await tx.execute<{ count: number }>(sql`
+              select count(*)::int as count from public.work_project_bundle
+              where work_project_id = ${input.projectId}::uuid
+                and work_bundle_id <> ${input.bundleId}::uuid
+            `);
+            if ((applied[0]?.count ?? 0) >= 5)
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "A project can use up to five bundles",
+              });
+            const existingSections = await tx.execute<{
+              sectionId: string;
+              name: string;
+            }>(sql`
+              select work_section_id as "sectionId", name
+              from public.work_section where work_project_id = ${input.projectId}::uuid
+            `);
+            const sectionIds = new Map(
+              existingSections.map((section) => [
+                section.name.toLowerCase(),
+                section.sectionId,
+              ]),
+            );
+            for (const section of parsed.data.sections) {
+              if (sectionIds.has(section.name.toLowerCase())) continue;
+              const sectionId = randomUUID();
+              sectionIds.set(section.name.toLowerCase(), sectionId);
+              await tx.execute(sql`
+                insert into public.work_section (
+                  work_section_id, work_project_id, name, position
+                ) values (
+                  ${sectionId}::uuid, ${input.projectId}::uuid, ${section.name},
+                  (select coalesce(max(position), -1) + 1 from public.work_section
+                   where work_project_id = ${input.projectId}::uuid)
+                )
+              `);
+            }
+            const remapBranches = (branches: WorkRuleBranch[]) =>
+              branches.map((branch) => ({
+                ...branch,
+                conditions: branch.conditions.map((condition) => {
+                  if (
+                    condition.field !== "sectionId" ||
+                    typeof condition.value !== "string"
+                  )
+                    return condition;
+                  const name = parsed.data.sectionRefs[condition.value];
+                  const value = name
+                    ? sectionIds.get(name.toLowerCase())
+                    : null;
+                  if (!value)
+                    throw new TRPCError({
+                      code: "BAD_REQUEST",
+                      message: "Bundle section is missing",
+                    });
+                  return { ...condition, value };
+                }),
+                actions: branch.actions.map((action) => {
+                  if (action.type !== "move_section") return action;
+                  const name = parsed.data.sectionRefs[action.sectionId];
+                  const sectionId = name
+                    ? sectionIds.get(name.toLowerCase())
+                    : null;
+                  if (!sectionId)
+                    throw new TRPCError({
+                      code: "BAD_REQUEST",
+                      message: "Bundle section is missing",
+                    });
+                  return { ...action, sectionId };
+                }),
+              }));
+            for (const field of parsed.data.customFields) {
+              await tx.execute(sql`
+                insert into public.work_custom_field (
+                  work_project_id, name, field_type, options, is_required, position
+                ) select ${input.projectId}::uuid, ${field.name}, ${field.fieldType},
+                  ${JSON.stringify(field.options)}::jsonb, ${field.isRequired},
+                  (select coalesce(max(position), -1) + 1 from public.work_custom_field
+                   where work_project_id = ${input.projectId}::uuid)
+                where not exists (
+                  select 1 from public.work_custom_field
+                  where work_project_id = ${input.projectId}::uuid
+                    and lower(name) = lower(${field.name})
+                )
+              `);
+            }
+            for (const rule of parsed.data.rules) {
+              const branches = remapBranches(rule.branches);
+              await tx.execute(sql`
+                insert into public.work_rule (
+                  work_project_id, name, trigger_type, branches, owner_employee_id
+                ) values (
+                  ${input.projectId}::uuid, ${rule.name}, ${rule.triggerType},
+                  ${JSON.stringify(branches)}::jsonb, ${employeeId}::uuid
+                ) on conflict (work_project_id, name) do update
+                  set trigger_type = excluded.trigger_type,
+                    branches = excluded.branches, updated_at = now()
+              `);
+            }
+            for (const template of parsed.data.taskTemplates) {
+              await tx.execute(sql`
+                insert into public.work_template (
+                  work_project_id, name, template_type, blueprint,
+                  created_by_employee_id
+                ) select ${input.projectId}::uuid, ${template.name}, 'task',
+                  ${JSON.stringify(template.blueprint)}::jsonb, ${employeeId}::uuid
+                where not exists (
+                  select 1 from public.work_template
+                  where work_project_id = ${input.projectId}::uuid
+                    and template_type = 'task' and archived_at is null
+                    and lower(name) = lower(${template.name})
+                )
+              `);
+            }
+            await tx.execute(sql`
+              insert into public.work_project_bundle (
+                work_project_id, work_bundle_id, applied_version,
+                applied_by_employee_id
+              ) values (
+                ${input.projectId}::uuid, ${input.bundleId}::uuid, ${raw.version},
+                ${employeeId}::uuid
+              ) on conflict (work_project_id, work_bundle_id) do update
+                set applied_version = excluded.applied_version,
+                  applied_by_employee_id = excluded.applied_by_employee_id,
+                  applied_at = now()
+            `);
+          });
+        }
+        await audit(ctx, "work.bundle.apply", "work_project", input.projectId, {
+          bundleId: input.bundleId,
+          version: raw.version,
+        });
+        return {
+          projectId: input.projectId,
+          bundleId: input.bundleId,
+          version: raw.version,
+        };
+      }),
+  }),
+
+  approvals: router({
+    list: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        if (!db)
+          return [...getDemoWork().items.values()]
+            .filter(
+              (item) =>
+                item.projectId === input.projectId &&
+                item.itemType === "approval",
+            )
+            .map((item) => ({
+              ...item,
+              decision:
+                getDemoWork().approvalDecisions.get(item.itemId)?.at(-1) ??
+                null,
+            }));
+        const rows = await db.execute<
+          WorkItem & {
+            decisionId: string | null;
+            decision: WorkApprovalDecision["decision"] | null;
+            note: string | null;
+            decidedByEmployeeId: string | null;
+            decidedAt: Date | string | null;
+          }
+        >(sql`
+          select item.work_item_id as "itemId",
+            item.parent_work_item_id as "parentItemId", item.title,
+            item.description, item.item_type as "itemType", item.priority,
+            item.assignee_employee_id as "assigneeEmployeeId",
+            assignee.display_name as "assigneeName", item.start_date as "startDate",
+            item.due_at as "dueAt", item.completed_at as "completedAt",
+            membership.work_section_id as "sectionId", membership.position,
+            membership.work_project_id as "projectId", item.recurrence,
+            decision.work_approval_decision_id as "decisionId",
+            decision.decision, decision.note,
+            decision.decided_by_employee_id as "decidedByEmployeeId",
+            decision.decided_at as "decidedAt"
+          from public.work_project_item membership
+          join public.work_item item on item.work_item_id = membership.work_item_id
+          left join public.employee assignee on assignee.employee_id = item.assignee_employee_id
+          left join lateral (
+            select * from public.work_approval_decision
+            where work_item_id = item.work_item_id
+            order by decided_at desc limit 1
+          ) decision on true
+          where membership.work_project_id = ${input.projectId}::uuid
+            and item.item_type = 'approval' and item.archived_at is null
+          order by item.completed_at nulls first, item.due_at nulls last
+        `);
+        return rows.map((item) => ({
+          ...item,
+          dueAt: iso(item.dueAt),
+          completedAt: iso(item.completedAt),
+          decision: item.decisionId
+            ? {
+                decisionId: item.decisionId,
+                itemId: item.itemId,
+                decision: item.decision!,
+                note: item.note ?? "",
+                decidedByEmployeeId: item.decidedByEmployeeId!,
+                decidedAt: iso(item.decidedAt)!,
+              }
+            : null,
+        }));
+      }),
+    convert: staffProcedure
+      .input(z.object({ itemId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireItemAccess(ctx, input.itemId, "editor");
+        const db = getDb();
+        if (!db) {
+          const item = getDemoWork().items.get(input.itemId)!;
+          item.itemType = "approval";
+          item.completedAt = null;
+        } else
+          await db.execute(sql`
+            update public.work_item
+            set item_type = 'approval', completed_at = null, updated_at = now()
+            where work_item_id = ${input.itemId}::uuid
+          `);
+        await audit(ctx, "work.approval.convert", "work_item", input.itemId, {
+          itemType: "approval",
+        });
+        return { itemId: input.itemId, itemType: "approval" as const };
+      }),
+    decide: staffProcedure
+      .input(
+        z.object({
+          itemId: uuid,
+          decision: z.enum(["approved", "changes_requested", "rejected"]),
+          note: z.string().trim().max(10_000).default(""),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const access = await requireItemAccess(ctx, input.itemId, "editor");
+        const item = await ruleSnapshot(input.itemId);
+        if (item.itemType !== "approval")
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Task is not an approval",
+          });
+        const decision: WorkApprovalDecision = {
+          decisionId: randomUUID(),
+          itemId: input.itemId,
+          decision: input.decision,
+          note: input.note,
+          decidedByEmployeeId: actor(ctx),
+          decidedAt: new Date().toISOString(),
+        };
+        const db = getDb();
+        if (!db) {
+          const decisions =
+            getDemoWork().approvalDecisions.get(input.itemId) ?? [];
+          decisions.push(decision);
+          getDemoWork().approvalDecisions.set(input.itemId, decisions);
+          getDemoWork().items.get(input.itemId)!.completedAt =
+            decision.decidedAt;
+        } else
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              insert into public.work_approval_decision (
+                work_approval_decision_id, work_item_id, decision, note,
+                decided_by_employee_id
+              ) values (
+                ${decision.decisionId}::uuid, ${decision.itemId}::uuid,
+                ${decision.decision}, ${decision.note},
+                ${decision.decidedByEmployeeId}::uuid
+              )
+            `);
+            await tx.execute(sql`
+              update public.work_item
+              set completed_at = now(), updated_at = now()
+              where work_item_id = ${input.itemId}::uuid
+                and item_type = 'approval'
+            `);
+          });
+        await audit(ctx, "work.approval.decide", "work_item", input.itemId, {
+          decision: input.decision,
+          decisionId: decision.decisionId,
+        });
+        await notifyItem(
+          ctx,
+          input.itemId,
+          "completed",
+          `Approval ${input.decision.replaceAll("_", " ")}`,
+        );
+        await runProjectRules(
+          ctx,
+          access.projectId,
+          input.itemId,
+          "approval_decided",
+        );
+        return decision;
+      }),
+    reopen: staffProcedure
+      .input(z.object({ itemId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireItemAccess(ctx, input.itemId, "editor");
+        const item = await ruleSnapshot(input.itemId);
+        if (item.itemType !== "approval")
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Task is not an approval",
+          });
+        const db = getDb();
+        if (!db) getDemoWork().items.get(input.itemId)!.completedAt = null;
+        else
+          await db.execute(sql`
+            update public.work_item set completed_at = null, updated_at = now()
+            where work_item_id = ${input.itemId}::uuid
+          `);
+        await audit(ctx, "work.approval.reopen", "work_item", input.itemId, {
+          pending: true,
+        });
         return { ok: true as const };
       }),
   }),

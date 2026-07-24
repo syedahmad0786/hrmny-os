@@ -155,6 +155,13 @@
       "when": 1784923200000,
       "tag": "0021_work_daily",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1784926800000,
+      "tag": "0022_work_workflows",
+      "breakpoints": true
     }
   ]
 }
