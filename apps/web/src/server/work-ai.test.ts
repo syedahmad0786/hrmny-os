@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 import { clearDemoFeatureOverrides } from "./features";
 import { clearDemoWorkAi } from "./work-ai";
+import { getDemoWork } from "./trpc/work-management-router";
 import { createCaller } from "./trpc/root";
 
 function partnerCaller() {
@@ -90,6 +91,109 @@ describe("governed Work AI", () => {
       code: "FORBIDDEN",
       message: "FEATURE_DISABLED:work.ai.smart_status",
     });
+  });
+
+  it("summarizes a permitted portfolio and Inbox", async () => {
+    const caller = partnerCaller();
+    await caller.admin.features.setOverride({
+      featureKey: "work.ai.smart_summaries",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: true,
+      reason: "test",
+    });
+    const project = await caller.work.projects.create({
+      name: `Summary project ${crypto.randomUUID()}`,
+      description: "Portfolio evidence",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const portfolio = await caller.work.portfolios.create({
+      name: `Summary portfolio ${crypto.randomUUID()}`,
+      description: "Executive roll-up",
+      privacy: "private",
+    });
+    await caller.work.portfolios.addProject({
+      portfolioId: portfolio.portfolioId,
+      projectId: project.projectId,
+    });
+    const notificationId = crypto.randomUUID();
+    getDemoWork().notifications.set(notificationId, {
+      notificationId,
+      recipientEmployeeId: resolveDevUser("partner").employeeId,
+      itemId: null,
+      projectId: project.projectId,
+      messageId: null,
+      eventType: "assigned",
+      message: "Review the portfolio risk",
+      readAt: null,
+      createdAt: new Date().toISOString(),
+    });
+
+    const run = await caller.workAi.generate({
+      kind: "smart_summaries",
+      requestText: "Summarize this portfolio and my Inbox",
+      projectIds: [],
+      itemId: null,
+      summaryPortfolioId: portfolio.portfolioId,
+      includeInbox: true,
+    });
+    expect(run.result?.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: portfolio.portfolioId }),
+        expect.objectContaining({
+          id: `inbox:${resolveDevUser("partner").employeeId}`,
+        }),
+        expect.objectContaining({ id: project.projectId }),
+      ]),
+    );
+
+    await caller.admin.features.setOverride({
+      featureKey: "work.inbox",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.workAi.generate({
+        kind: "smart_summaries",
+        requestText: "Summarize my Inbox",
+        projectIds: [],
+        itemId: null,
+        includeInbox: true,
+      }),
+    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.inbox" });
+
+    const clientId = resolveDevUser("portal_a").clientId!;
+    getDemoWork().projects.get(project.projectId)!.clientId = clientId;
+    await caller.admin.features.setOverride({
+      featureKey: "work.projects",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "test",
+    });
+    const filteredPortfolio = await caller.workAi.generate({
+      kind: "smart_summaries",
+      requestText: "Summarize the portfolio",
+      projectIds: [],
+      itemId: null,
+      summaryPortfolioId: portfolio.portfolioId,
+    });
+    expect(filteredPortfolio.result?.sources).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: project.projectId }),
+      ]),
+    );
+    await expect(
+      caller.workAi.generate({
+        kind: "smart_summaries",
+        requestText: "Summarize the hidden project",
+        projectIds: [project.projectId],
+        itemId: null,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("drafts and applies portfolio and goal status updates", async () => {
