@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { WorkNav } from "@/components/work-nav";
 import {
   dueAtFromDateKey,
@@ -8,6 +8,7 @@ import {
   localDateKey,
   movePersonalCalendarAnchor,
   personalCalendarDateKeys,
+  startOfWeek,
   type PersonalCalendarMode,
 } from "@/lib/work-personal";
 import { trpc } from "@/lib/trpc";
@@ -24,6 +25,7 @@ export default function MyTasksPage() {
   const session = trpc.auth.session.useQuery();
   const enabled = new Set(session.data?.enabledFeatureKeys ?? []);
   const sectionsEnabled = enabled.has("work.my_tasks.sections");
+  const focusEnabled = enabled.has("work.my_tasks.focus");
   const boardEnabled = sectionsEnabled && enabled.has("work.views.board");
   const calendarEnabled =
     enabled.has("work.views.calendar") &&
@@ -41,6 +43,12 @@ export default function MyTasksPage() {
     localDateKey(new Date()),
   );
   const [showWeekends, setShowWeekends] = useState(true);
+  const [weeklyFocus, setWeeklyFocus] = useState("");
+  const [focusItemId, setFocusItemId] = useState("");
+  const [focusSeconds, setFocusSeconds] = useState(25 * 60);
+  const [focusRunning, setFocusRunning] = useState(false);
+  const today = localDateKey(new Date());
+  const weekStart = startOfWeek(today);
   const tasks = trpc.work.personal.myTasks.useQuery({
     query: query || undefined,
     includeCompleted,
@@ -49,6 +57,26 @@ export default function MyTasksPage() {
   const sections = trpc.work.personal.myTaskSections.list.useQuery(undefined, {
     enabled: sectionsEnabled,
   });
+  const focus = trpc.work.personal.focus.get.useQuery(
+    { weekStart },
+    { enabled: focusEnabled },
+  );
+  useEffect(() => {
+    if (focus.data) setWeeklyFocus(focus.data.focusText);
+  }, [focus.data]);
+  useEffect(() => {
+    if (!focusRunning) return;
+    const timer = window.setInterval(
+      () =>
+        setFocusSeconds((seconds) => {
+          if (seconds > 1) return seconds - 1;
+          setFocusRunning(false);
+          return 0;
+        }),
+      1000,
+    );
+    return () => window.clearInterval(timer);
+  }, [focusRunning]);
   const refresh = () => {
     void utils.work.personal.myTasks.invalidate();
     void utils.work.personal.myTaskSections.list.invalidate();
@@ -73,7 +101,9 @@ export default function MyTasksPage() {
   const moveTask = trpc.work.personal.myTaskSections.moveTask.useMutation({
     onSuccess: refresh,
   });
-  const today = localDateKey(new Date());
+  const saveFocus = trpc.work.personal.focus.save.useMutation({
+    onSuccess: () => utils.work.personal.focus.get.invalidate({ weekStart }),
+  });
   const weekEnd = personalCalendarDateKeys(today, "week", true).at(-1)!;
   const sectionNames = new Map(
     (sections.data ?? []).map((section) => [section.sectionId, section.name]),
@@ -146,7 +176,9 @@ export default function MyTasksPage() {
     renameSection.error ??
     removeSection.error ??
     reorderSections.error ??
-    moveTask.error;
+    moveTask.error ??
+    focus.error ??
+    saveFocus.error;
   const schedule = (itemId: string, dateKey: string) =>
     updateTask.mutate({
       itemId,
@@ -228,6 +260,89 @@ export default function MyTasksPage() {
           Organize your assigned work privately across every project.
         </p>
       </header>
+
+      {focusEnabled ? (
+        <section className="grid gap-4 rounded-xl border border-sand bg-white/70 p-4 lg:grid-cols-2">
+          <div>
+            <label className="text-sm font-semibold" htmlFor="weekly-focus">
+              This week&apos;s focus
+            </label>
+            <div className="mt-2 flex gap-2">
+              <input
+                id="weekly-focus"
+                className="min-w-0 flex-1 rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+                maxLength={500}
+                placeholder="What matters most this week?"
+                value={weeklyFocus}
+                onChange={(event) => setWeeklyFocus(event.target.value)}
+              />
+              <button
+                type="button"
+                className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+                disabled={saveFocus.isPending}
+                onClick={() =>
+                  saveFocus.mutate({ weekStart, focusText: weeklyFocus })
+                }
+              >
+                Save
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="text-sm font-semibold" htmlFor="focus-task">
+              25-minute focus timer
+            </label>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                id="focus-task"
+                className="min-w-56 flex-1 rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+                value={focusItemId}
+                onChange={(event) => setFocusItemId(event.target.value)}
+              >
+                <option value="">Choose a task</option>
+                {(tasks.data ?? [])
+                  .filter((task) => !task.completedAt)
+                  .map((task) => (
+                    <option key={task.itemId} value={task.itemId}>
+                      {task.title}
+                    </option>
+                  ))}
+              </select>
+              <strong
+                className="min-w-16 text-center tabular-nums"
+                aria-live="polite"
+              >
+                {String(Math.floor(focusSeconds / 60)).padStart(2, "0")}:
+                {String(focusSeconds % 60).padStart(2, "0")}
+              </strong>
+              <button
+                type="button"
+                className="rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white"
+                disabled={!focusItemId || focusSeconds === 0}
+                onClick={() => setFocusRunning((running) => !running)}
+              >
+                {focusRunning ? "Pause" : "Focus"}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+                onClick={() => {
+                  setFocusRunning(false);
+                  setFocusSeconds(25 * 60);
+                }}
+              >
+                Reset
+              </button>
+            </div>
+            {focusRunning ? (
+              <p className="mt-2 text-xs text-muted">
+                Focus session active. Finish the task or pause the timer when
+                interrupted.
+              </p>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       <section className="flex flex-wrap gap-3 rounded-xl border border-sand bg-white/70 p-3">
         <input
