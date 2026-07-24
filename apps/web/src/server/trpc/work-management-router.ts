@@ -29,7 +29,9 @@ import {
 import {
   buildWorkReportChart,
   capacityUtilization,
+  countReportBuckets,
   criticalPath,
+  matchesMetadataReportFilters,
   splitTimerByUtcDay,
   weightedProgress,
   type WorkReportChartRow,
@@ -413,6 +415,18 @@ type WorkDashboard = {
   visibility: "private" | "organization";
   viewerEmployeeIds: string[];
   currentAccess: "admin" | "viewer";
+};
+type RenderedDashboardWidget = {
+  title: string;
+  reportType: "tasks" | "projects" | "goals" | "portfolios";
+  chartStyle: "bar" | "donut" | "number";
+  metric: WorkReportChartSpec["metric"];
+  chart: { data: { label: string; value: number }[]; total: number };
+};
+type RenderedDashboard = {
+  dashboardId: string;
+  name: string;
+  widgets: RenderedDashboardWidget[];
 };
 type WorkBaseline = {
   baselineId: string;
@@ -1153,8 +1167,9 @@ const metadataReportSpecSchema = z
         message: "Date through must be on or after date from",
       });
   });
-const dashboardConfigSchema = z
+const dashboardWidgetConfigSchema = z
   .object({
+    title: z.string().trim().min(1).max(160).optional(),
     reportType: z.enum(["tasks", "projects", "goals", "portfolios"]).optional(),
     projectId: uuid.optional(),
     portfolioId: uuid.optional(),
@@ -1226,6 +1241,12 @@ const dashboardConfigSchema = z
         message: "Filter does not match the report type",
       });
   });
+const dashboardConfigSchema = z.union([
+  z.object({
+    widgets: z.array(dashboardWidgetConfigSchema).min(2).max(20),
+  }),
+  dashboardWidgetConfigSchema,
+]);
 
 function actor(ctx: TrpcContext): string {
   if (!ctx.employeeId) throw new TRPCError({ code: "UNAUTHORIZED" });
@@ -3193,6 +3214,16 @@ async function requireDashboardAccess(
   ctx: TrpcContext,
   config: Record<string, unknown>,
 ) {
+  if (Array.isArray(config.widgets)) {
+    if (config.widgets.length < 2 || config.widgets.length > 20)
+      throw new TRPCError({ code: "NOT_FOUND" });
+    for (const raw of config.widgets) {
+      const widget = dashboardWidgetConfigSchema.safeParse(raw);
+      if (!widget.success) throw new TRPCError({ code: "NOT_FOUND" });
+      await requireDashboardAccess(ctx, widget.data);
+    }
+    return "dashboard";
+  }
   const reportType =
     config.reportType === "projects" ||
     config.reportType === "goals" ||
@@ -3514,6 +3545,139 @@ async function reportRowsForProjects(
         actualMinutes: Number(item.actualMinutes),
       }));
   return rows;
+}
+
+function reportReadable(value: string) {
+  const text = value.replaceAll("_", " ");
+  return `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
+}
+
+function reportGoalTimePeriod(dueDate: string | null) {
+  if (!dueDate) return "No time period";
+  const date = new Date(`${dueDate}T00:00:00Z`);
+  return `Q${Math.floor(date.getUTCMonth() / 3) + 1} ${date.getUTCFullYear()}`;
+}
+
+async function renderDashboardWidget(
+  ctx: TrpcContext,
+  widget: z.infer<typeof dashboardWidgetConfigSchema>,
+): Promise<RenderedDashboardWidget> {
+  const caller = createCallerFactory(workManagementRouter)(ctx);
+  const reportType = widget.reportType ?? "tasks";
+  const spec = widget.spec;
+  if (!spec) throw new TRPCError({ code: "NOT_FOUND" });
+  if (reportType === "tasks") {
+    if (!("metric" in spec)) throw new TRPCError({ code: "NOT_FOUND" });
+    const chart = widget.projectId
+      ? await caller.reporting.chart({ projectId: widget.projectId, spec })
+      : await caller.reporting.portfolioChart({
+          portfolioId: widget.portfolioId!,
+          spec,
+        });
+    return {
+      title: widget.title ?? "Task report",
+      reportType,
+      chartStyle: widget.chartStyle ?? "bar",
+      metric: spec.metric,
+      chart,
+    };
+  }
+  if ("metric" in spec) throw new TRPCError({ code: "NOT_FOUND" });
+  let labels: string[];
+  if (reportType === "projects") {
+    const [projects, portfolios] = await Promise.all([
+      caller.projects.list(),
+      widget.portfolioId ? caller.portfolios.list() : Promise.resolve([]),
+    ]);
+    const portfolio = portfolios.find(
+      (candidate) => candidate.portfolioId === widget.portfolioId,
+    );
+    labels = projects
+      .filter(
+        (project) =>
+          (!portfolio || portfolio.projectIds.includes(project.projectId)) &&
+          matchesMetadataReportFilters(
+            {
+              objectId: project.projectId,
+              ownerEmployeeId: project.ownerEmployeeId,
+              status: project.health,
+              privacy: project.privacy,
+              sourcePlatform: project.sourcePlatform,
+              teamIds: project.teamIds,
+              createdAt: project.createdAt,
+              startDate: project.startDate,
+              dueDate: project.dueDate,
+            },
+            spec,
+          ),
+      )
+      .map((project) =>
+        spec.groupBy === "project_health"
+          ? project.health
+            ? reportReadable(project.health)
+            : "Health unavailable"
+          : spec.groupBy === "project_owner"
+            ? (project.ownerName ?? "Unassigned")
+            : spec.groupBy === "project_privacy"
+              ? reportReadable(project.privacy)
+              : reportReadable(project.sourcePlatform),
+      );
+  } else if (reportType === "goals") {
+    labels = (await caller.goals.list())
+      .filter((goal) =>
+        matchesMetadataReportFilters(
+          {
+            objectId: goal.goalId,
+            ownerEmployeeId: goal.ownerEmployeeId,
+            status: goal.status,
+            scope: goal.scope,
+            timePeriod: reportGoalTimePeriod(goal.dueDate),
+            parentId: goal.parentGoalId,
+            createdAt: goal.createdAt,
+            startDate: goal.startDate,
+            dueDate: goal.dueDate,
+          },
+          spec,
+        ),
+      )
+      .map((goal) =>
+        spec.groupBy === "goal_status"
+          ? reportReadable(goal.status)
+          : spec.groupBy === "goal_owner"
+            ? (goal.ownerName ?? "Unassigned")
+            : spec.groupBy === "goal_scope"
+              ? reportReadable(goal.scope)
+              : reportGoalTimePeriod(goal.dueDate),
+      );
+  } else {
+    labels = (await caller.portfolios.list())
+      .filter((portfolio) =>
+        matchesMetadataReportFilters(
+          {
+            objectId: portfolio.portfolioId,
+            ownerEmployeeId: portfolio.ownerEmployeeId,
+            status: portfolio.health,
+            privacy: portfolio.privacy,
+            createdAt: portfolio.createdAt,
+          },
+          spec,
+        ),
+      )
+      .map((portfolio) =>
+        spec.groupBy === "portfolio_health"
+          ? reportReadable(portfolio.health)
+          : spec.groupBy === "portfolio_owner"
+            ? (portfolio.ownerName ?? "Unassigned")
+            : reportReadable(portfolio.privacy),
+      );
+  }
+  return {
+    title: widget.title ?? `${reportReadable(reportType)} report`,
+    reportType,
+    chartStyle: widget.chartStyle ?? "bar",
+    metric: "task_count" as const,
+    chart: countReportBuckets(labels),
+  };
 }
 
 function notificationFeatureKey(eventType: string) {
@@ -11884,6 +12048,19 @@ export const workManagementRouter = router({
       }
       return visible;
     }),
+    combineDashboards: staffProcedure
+      .input(
+        z.object({
+          name: z.string().trim().min(1).max(160),
+          dashboardIds: z.array(uuid).min(2).max(20),
+        }),
+      )
+      .mutation(({ input, ctx }) => combineReportingDashboards(ctx, input)),
+    renderDashboard: staffProcedure
+      .input(z.object({ dashboardId: uuid }))
+      .query(({ input, ctx }) =>
+        renderReportingDashboard(ctx, input.dashboardId),
+      ),
     saveDashboard: staffProcedure
       .input(
         z.object({
@@ -13278,6 +13455,63 @@ export const workManagementRouter = router({
       }),
   }),
 });
+
+async function combineReportingDashboards(
+  ctx: TrpcContext,
+  input: { name: string; dashboardIds: string[] },
+): Promise<WorkDashboard> {
+  const dashboardIds = [...new Set(input.dashboardIds)];
+  if (dashboardIds.length < 2)
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Choose at least two different views",
+    });
+  const caller = createCallerFactory(workManagementRouter)(ctx);
+  const available = await caller.reporting.dashboards();
+  const widgets = dashboardIds.map((dashboardId) => {
+    const dashboard = available.find(
+      (candidate) => candidate.dashboardId === dashboardId,
+    );
+    if (!dashboard || Array.isArray(dashboard.config.widgets))
+      throw new TRPCError({ code: "NOT_FOUND" });
+    const config = dashboardWidgetConfigSchema.safeParse(dashboard.config);
+    if (!config.success) throw new TRPCError({ code: "NOT_FOUND" });
+    return { ...config.data, title: dashboard.name };
+  });
+  return caller.reporting.saveDashboard({
+    name: input.name,
+    config: { widgets },
+  });
+}
+
+async function renderReportingDashboard(
+  ctx: TrpcContext,
+  dashboardId: string,
+): Promise<RenderedDashboard> {
+  const caller = createCallerFactory(workManagementRouter)(ctx);
+  const dashboard = (await caller.reporting.dashboards()).find(
+    (candidate) => candidate.dashboardId === dashboardId,
+  );
+  if (!dashboard) throw new TRPCError({ code: "NOT_FOUND" });
+  const parsed = dashboardConfigSchema.safeParse(dashboard.config);
+  if (!parsed.success) throw new TRPCError({ code: "NOT_FOUND" });
+  const widgets = Array.isArray(
+    (parsed.data as Record<string, unknown>).widgets,
+  )
+    ? (
+        parsed.data as {
+          widgets: z.infer<typeof dashboardWidgetConfigSchema>[];
+        }
+      ).widgets
+    : [parsed.data as z.infer<typeof dashboardWidgetConfigSchema>];
+  return {
+    dashboardId: dashboard.dashboardId,
+    name: dashboard.name,
+    widgets: await Promise.all(
+      widgets.map((widget) => renderDashboardWidget(ctx, widget)),
+    ),
+  };
+}
 
 type BundleRolloutResult = {
   installedProjectCount: number;

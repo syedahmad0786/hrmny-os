@@ -2590,6 +2590,32 @@ describe("work management", () => {
         portfolioReportDashboard,
       ]),
     );
+    const mixedDashboard = await caller.work.reporting.combineDashboards({
+      name: "Strategy command center",
+      dashboardIds: [
+        portfolioDashboard.dashboardId,
+        projectReportDashboard.dashboardId,
+        goalReportDashboard.dashboardId,
+        portfolioReportDashboard.dashboardId,
+      ],
+    });
+    expect(mixedDashboard.config).toMatchObject({
+      widgets: [
+        { title: "Portfolio delivery" },
+        { title: "Visible project health", reportType: "projects" },
+        { title: "Goal health", reportType: "goals" },
+        { title: "Portfolio health", reportType: "portfolios" },
+      ],
+    });
+    await expect(
+      caller.work.reporting.combineDashboards({
+        name: "Duplicate views",
+        dashboardIds: [
+          projectReportDashboard.dashboardId,
+          projectReportDashboard.dashboardId,
+        ],
+      }),
+    ).rejects.toThrow("Choose at least two different views");
     await caller.admin.features.setOverride({
       featureKey: "work.teams",
       scopeType: "global",
@@ -2599,6 +2625,9 @@ describe("work management", () => {
     });
     expect(await caller.work.reporting.dashboards()).not.toContainEqual(
       projectReportDashboard,
+    );
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      mixedDashboard,
     );
     await caller.admin.features.setOverride({
       featureKey: "work.teams",
@@ -2632,6 +2661,19 @@ describe("work management", () => {
       reason: "restore client team reporting",
     });
     getDemoWork().projects.get(project.projectId)!.clientId = null;
+    expect(
+      await caller.work.reporting.renderDashboard({
+        dashboardId: mixedDashboard.dashboardId,
+      }),
+    ).toMatchObject({
+      name: "Strategy command center",
+      widgets: [
+        { title: "Portfolio delivery", reportType: "tasks" },
+        { title: "Visible project health", reportType: "projects" },
+        { title: "Goal health", reportType: "goals" },
+        { title: "Portfolio health", reportType: "portfolios" },
+      ],
+    });
     await expect(
       caller.work.reporting.saveDashboard({
         name: "Invalid mixed report",
