@@ -160,6 +160,8 @@ const WORK_EXPORT_TABLES = [
   "work_proof_annotation",
   "work_out_of_office",
   "work_accessibility_preference",
+  "work_my_tasks_section",
+  "work_my_tasks_membership",
   "work_project",
   "work_project_member",
   "work_project_guest",

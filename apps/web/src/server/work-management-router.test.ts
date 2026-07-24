@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
-import { clearDemoFeatureOverrides } from "./features";
+import { clearDemoFeatureOverrides, setFeatureOverride } from "./features";
 import { createCaller } from "./trpc/root";
 import {
   getDemoWork,
@@ -20,6 +20,104 @@ function partnerCaller() {
 
 describe("work management", () => {
   beforeEach(() => clearDemoFeatureOverrides());
+
+  it("organizes My Tasks in private governed sections", async () => {
+    const caller = partnerCaller();
+    const user = resolveDevUser("partner");
+    const project = await caller.work.projects.create({
+      name: `My Tasks ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const detail = await caller.work.projects.get({
+      projectId: project.projectId,
+    });
+    const task = await caller.work.tasks.create({
+      projectId: project.projectId,
+      sectionId: detail.sections[0]!.sectionId,
+      title: "Private personal workflow",
+      description: "",
+      assigneeEmployeeId: user.employeeId,
+    });
+    const first = await caller.work.personal.myTaskSections.create({
+      name: `Today ${Date.now()}`,
+    });
+    const second = await caller.work.personal.myTaskSections.create({
+      name: `Later ${Date.now()}`,
+    });
+    const all = await caller.work.personal.myTaskSections.list();
+    await caller.work.personal.myTaskSections.reorder({
+      sectionIds: [
+        second.sectionId,
+        first.sectionId,
+        ...all
+          .filter(
+            (section) =>
+              section.sectionId !== first.sectionId &&
+              section.sectionId !== second.sectionId,
+          )
+          .map((section) => section.sectionId),
+      ],
+    });
+    await caller.work.personal.myTaskSections.moveTask({
+      itemId: task.itemId,
+      sectionId: first.sectionId,
+      position: 2,
+    });
+    expect(
+      (await caller.work.personal.myTasks({ includeCompleted: false })).find(
+        (item) => item.itemId === task.itemId,
+      ),
+    ).toMatchObject({
+      projectName: project.name,
+      personalSectionId: first.sectionId,
+      personalPosition: 2,
+    });
+    await caller.work.tasks.update({
+      itemId: task.itemId,
+      assigneeEmployeeId: null,
+    });
+    expect(
+      [...getDemoWork().myTasksMemberships.values()].some(
+        (membership) => membership.itemId === task.itemId,
+      ),
+    ).toBe(false);
+    await caller.work.tasks.update({
+      itemId: task.itemId,
+      assigneeEmployeeId: user.employeeId,
+    });
+    await caller.work.personal.myTaskSections.moveTask({
+      itemId: task.itemId,
+      sectionId: first.sectionId,
+      position: 0,
+    });
+    await caller.work.personal.myTaskSections.remove({
+      sectionId: first.sectionId,
+    });
+    await caller.work.personal.myTaskSections.remove({
+      sectionId: second.sectionId,
+    });
+    expect(
+      (await caller.work.personal.myTasks({ includeCompleted: false })).find(
+        (item) => item.itemId === task.itemId,
+      )?.personalSectionId,
+    ).toBeNull();
+
+    await setFeatureOverride({
+      featureKey: "work.my_tasks.sections",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      updatedByEmployeeId: user.employeeId,
+    });
+    await expect(
+      caller.work.personal.myTaskSections.list(),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.my_tasks.sections",
+    });
+  });
 
   it("creates a project graph with task, subtask, dependency, and comment", async () => {
     const caller = partnerCaller();

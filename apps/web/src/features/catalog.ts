@@ -545,6 +545,16 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     defaultEnabled: true,
   }),
   feature({
+    key: "work.views.calendar.week",
+    name: "Weekly calendar view",
+    description:
+      "Seven-day and monthly personal scheduling with weekends and unscheduled work.",
+    group: "Views",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
+  feature({
     key: "work.views.timeline",
     name: "Timeline view",
     description:
@@ -582,6 +592,17 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     source: "asana",
     availability: "beta",
     defaultEnabled: true,
+  }),
+  feature({
+    key: "work.my_tasks.sections",
+    name: "My Tasks sections",
+    description:
+      "Private custom sections, ordering, grouping, and board organization.",
+    group: "Personal productivity",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+    route: "/work/my-tasks",
   }),
   feature({
     key: "work.inbox",
@@ -1307,6 +1328,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["work.customFields.", "work.custom_fields"],
   ["work.attachments.", "work.attachments"],
   ["work.recurrence.", "work.recurring_tasks"],
+  ["work.personal.myTaskSections.", "work.my_tasks.sections"],
   ["work.personal.myTasks", "work.my_tasks"],
   ["work.personal.inbox", "work.inbox"],
   ["work.personal.markNotification", "work.inbox"],

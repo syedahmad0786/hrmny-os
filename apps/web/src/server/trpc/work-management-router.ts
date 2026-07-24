@@ -132,6 +132,19 @@ type WorkAccessibilityPreference = {
   reducedMotion: boolean;
   updatedAt: string;
 };
+type WorkMyTasksSection = {
+  sectionId: string;
+  employeeId: string;
+  name: string;
+  position: number;
+  createdAt: string;
+};
+type WorkMyTasksMembership = {
+  employeeId: string;
+  itemId: string;
+  sectionId: string;
+  position: number;
+};
 type WorkNotification = {
   notificationId: string;
   itemId: string | null;
@@ -346,6 +359,8 @@ type DemoWork = {
   proofAnnotations: Map<string, WorkProofAnnotation>;
   outOfOffice: Map<string, WorkOutOfOffice>;
   accessibility: Map<string, WorkAccessibilityPreference>;
+  myTasksSections: Map<string, WorkMyTasksSection>;
+  myTasksMemberships: Map<string, WorkMyTasksMembership>;
   notifications: Map<
     string,
     WorkNotification & { recipientEmployeeId: string }
@@ -380,6 +395,8 @@ type DemoWork = {
 const DEMO_PROJECT_ID = "a1000000-0000-4000-8000-000000000001";
 const DEMO_SECTION_TODO = "a2000000-0000-4000-8000-000000000001";
 const DEMO_SECTION_DOING = "a2000000-0000-4000-8000-000000000002";
+const myTasksMembershipKey = (employeeId: string, itemId: string) =>
+  `${employeeId}:${itemId}`;
 let demoWork: DemoWork | undefined;
 
 export function getDemoWork(): DemoWork {
@@ -466,6 +483,8 @@ export function getDemoWork(): DemoWork {
     proofAnnotations: new Map(),
     outOfOffice: new Map(),
     accessibility: new Map(),
+    myTasksSections: new Map(),
+    myTasksMemberships: new Map(),
     notifications: new Map(),
     messages: new Map(),
     messageComments: new Map(),
@@ -3034,7 +3053,9 @@ export const workManagementRouter = router({
           await requireWorkFeature(ctx, "work.time_tracking");
         const db = getDb();
         if (!db) {
-          const item = getDemoWork().items.get(input.itemId)!;
+          const store = getDemoWork();
+          const item = store.items.get(input.itemId)!;
+          const previousAssigneeEmployeeId = item.assigneeEmployeeId;
           Object.assign(item, {
             ...(input.title !== undefined ? { title: input.title } : {}),
             ...(input.description !== undefined
@@ -3059,6 +3080,13 @@ export const workManagementRouter = router({
               ? { estimatedMinutes: input.estimatedMinutes }
               : {}),
           });
+          if (
+            input.assigneeEmployeeId !== undefined &&
+            input.assigneeEmployeeId !== previousAssigneeEmployeeId
+          )
+            for (const [key, membership] of store.myTasksMemberships)
+              if (membership.itemId === input.itemId)
+                store.myTasksMemberships.delete(key);
           await audit(ctx, "work.task.update", "work_item", input.itemId, {
             fields: Object.keys(input).filter((key) => key !== "itemId"),
           });
@@ -4843,6 +4871,332 @@ export const workManagementRouter = router({
   }),
 
   personal: router({
+    myTaskSections: router({
+      list: staffProcedure.query(async ({ ctx }) => {
+        const employeeId = actor(ctx);
+        await requireWorkFeature(ctx, "work.my_tasks.sections");
+        const db = getDb();
+        if (!db)
+          return [...getDemoWork().myTasksSections.values()]
+            .filter((section) => section.employeeId === employeeId)
+            .sort(
+              (a, b) =>
+                a.position - b.position ||
+                a.createdAt.localeCompare(b.createdAt),
+            );
+        const rows = await db.execute<
+          WorkMyTasksSection & { createdAt: Date | string }
+        >(sql`
+          select work_my_tasks_section_id as "sectionId",
+            employee_id as "employeeId", name, position,
+            created_at as "createdAt"
+          from public.work_my_tasks_section
+          where employee_id = ${employeeId}::uuid
+          order by position, created_at
+        `);
+        return rows.map((row) => ({
+          ...row,
+          createdAt: iso(row.createdAt)!,
+        }));
+      }),
+
+      create: staffProcedure
+        .input(z.object({ name: z.string().trim().min(1).max(120) }))
+        .mutation(async ({ input, ctx }) => {
+          const employeeId = actor(ctx);
+          await requireWorkFeature(ctx, "work.my_tasks.sections");
+          const db = getDb();
+          let section: WorkMyTasksSection;
+          if (!db) {
+            const store = getDemoWork();
+            if (
+              [...store.myTasksSections.values()].some(
+                (candidate) =>
+                  candidate.employeeId === employeeId &&
+                  candidate.name.toLowerCase() === input.name.toLowerCase(),
+              )
+            )
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "A My Tasks section already uses that name",
+              });
+            section = {
+              sectionId: randomUUID(),
+              employeeId,
+              name: input.name,
+              position: [...store.myTasksSections.values()].filter(
+                (candidate) => candidate.employeeId === employeeId,
+              ).length,
+              createdAt: new Date().toISOString(),
+            };
+            store.myTasksSections.set(section.sectionId, section);
+          } else {
+            const duplicate = await db.execute(sql`
+              select 1 from public.work_my_tasks_section
+              where employee_id = ${employeeId}::uuid
+                and lower(name) = lower(${input.name}) limit 1
+            `);
+            if (duplicate[0])
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "A My Tasks section already uses that name",
+              });
+            const rows = await db.execute<
+              WorkMyTasksSection & { createdAt: Date | string }
+            >(sql`
+              insert into public.work_my_tasks_section (
+                employee_id, name, position
+              ) values (
+                ${employeeId}::uuid, ${input.name},
+                (select coalesce(max(position), -1) + 1
+                  from public.work_my_tasks_section
+                  where employee_id = ${employeeId}::uuid)
+              ) returning work_my_tasks_section_id as "sectionId",
+                employee_id as "employeeId", name, position,
+                created_at as "createdAt"
+            `);
+            section = {
+              ...rows[0]!,
+              createdAt: iso(rows[0]!.createdAt)!,
+            };
+          }
+          await audit(
+            ctx,
+            "work.my_tasks.section.create",
+            "work_my_tasks_section",
+            section.sectionId,
+            { name: section.name },
+          );
+          return section;
+        }),
+
+      rename: staffProcedure
+        .input(
+          z.object({
+            sectionId: uuid,
+            name: z.string().trim().min(1).max(120),
+          }),
+        )
+        .mutation(async ({ input, ctx }) => {
+          const employeeId = actor(ctx);
+          await requireWorkFeature(ctx, "work.my_tasks.sections");
+          const db = getDb();
+          if (!db) {
+            const store = getDemoWork();
+            const section = store.myTasksSections.get(input.sectionId);
+            if (!section || section.employeeId !== employeeId)
+              throw new TRPCError({ code: "NOT_FOUND" });
+            if (
+              [...store.myTasksSections.values()].some(
+                (candidate) =>
+                  candidate.sectionId !== input.sectionId &&
+                  candidate.employeeId === employeeId &&
+                  candidate.name.toLowerCase() === input.name.toLowerCase(),
+              )
+            )
+              throw new TRPCError({ code: "CONFLICT" });
+            section.name = input.name;
+          } else {
+            const rows = await db.execute<{ sectionId: string }>(sql`
+              update public.work_my_tasks_section set
+                name = ${input.name}, updated_at = now()
+              where work_my_tasks_section_id = ${input.sectionId}::uuid
+                and employee_id = ${employeeId}::uuid
+                and not exists (
+                  select 1 from public.work_my_tasks_section duplicate
+                  where duplicate.employee_id = ${employeeId}::uuid
+                    and duplicate.work_my_tasks_section_id <> ${input.sectionId}::uuid
+                    and lower(duplicate.name) = lower(${input.name})
+                )
+              returning work_my_tasks_section_id as "sectionId"
+            `);
+            if (!rows[0])
+              throw new TRPCError({
+                code: "NOT_FOUND",
+                message: "Section was not found or that name is already used",
+              });
+          }
+          await audit(
+            ctx,
+            "work.my_tasks.section.rename",
+            "work_my_tasks_section",
+            input.sectionId,
+            { name: input.name },
+          );
+          return { sectionId: input.sectionId, name: input.name };
+        }),
+
+      remove: staffProcedure
+        .input(z.object({ sectionId: uuid }))
+        .mutation(async ({ input, ctx }) => {
+          const employeeId = actor(ctx);
+          await requireWorkFeature(ctx, "work.my_tasks.sections");
+          const db = getDb();
+          if (!db) {
+            const store = getDemoWork();
+            const section = store.myTasksSections.get(input.sectionId);
+            if (!section || section.employeeId !== employeeId)
+              throw new TRPCError({ code: "NOT_FOUND" });
+            store.myTasksSections.delete(input.sectionId);
+            for (const [key, membership] of store.myTasksMemberships)
+              if (membership.sectionId === input.sectionId)
+                store.myTasksMemberships.delete(key);
+          } else {
+            const rows = await db.execute<{ sectionId: string }>(sql`
+              delete from public.work_my_tasks_section
+              where work_my_tasks_section_id = ${input.sectionId}::uuid
+                and employee_id = ${employeeId}::uuid
+              returning work_my_tasks_section_id as "sectionId"
+            `);
+            if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
+          }
+          await audit(
+            ctx,
+            "work.my_tasks.section.remove",
+            "work_my_tasks_section",
+            input.sectionId,
+            { movedToRecentlyAssigned: true },
+          );
+          return { ok: true as const };
+        }),
+
+      reorder: staffProcedure
+        .input(
+          z.object({
+            sectionIds: z
+              .array(uuid)
+              .min(1)
+              .max(100)
+              .refine((ids) => new Set(ids).size === ids.length),
+          }),
+        )
+        .mutation(async ({ input, ctx }) => {
+          const employeeId = actor(ctx);
+          await requireWorkFeature(ctx, "work.my_tasks.sections");
+          const db = getDb();
+          if (!db) {
+            const owned = [...getDemoWork().myTasksSections.values()]
+              .filter((section) => section.employeeId === employeeId)
+              .map((section) => section.sectionId)
+              .sort();
+            if (owned.join() !== [...input.sectionIds].sort().join())
+              throw new TRPCError({ code: "BAD_REQUEST" });
+            input.sectionIds.forEach((sectionId, position) => {
+              getDemoWork().myTasksSections.get(sectionId)!.position = position;
+            });
+          } else {
+            await db.transaction(async (tx) => {
+              const owned = await tx.execute<{ sectionId: string }>(sql`
+                select work_my_tasks_section_id as "sectionId"
+                from public.work_my_tasks_section
+                where employee_id = ${employeeId}::uuid
+              `);
+              if (
+                owned
+                  .map((row) => row.sectionId)
+                  .sort()
+                  .join() !== [...input.sectionIds].sort().join()
+              )
+                throw new TRPCError({ code: "BAD_REQUEST" });
+              for (const [position, sectionId] of input.sectionIds.entries())
+                await tx.execute(sql`
+                  update public.work_my_tasks_section
+                  set position = ${position}, updated_at = now()
+                  where work_my_tasks_section_id = ${sectionId}::uuid
+                    and employee_id = ${employeeId}::uuid
+                `);
+            });
+          }
+          await audit(
+            ctx,
+            "work.my_tasks.section.reorder",
+            "work_my_tasks_section",
+            input.sectionIds[0]!,
+            { sectionIds: input.sectionIds },
+          );
+          return { ok: true as const };
+        }),
+
+      moveTask: staffProcedure
+        .input(
+          z.object({
+            itemId: uuid,
+            sectionId: nullableUuid,
+            position: z.number().int().min(0).max(1_000_000).default(0),
+          }),
+        )
+        .mutation(async ({ input, ctx }) => {
+          const employeeId = actor(ctx);
+          await requireWorkFeature(ctx, "work.my_tasks.sections");
+          await requireItemAccess(ctx, input.itemId);
+          const db = getDb();
+          if (!db) {
+            const store = getDemoWork();
+            const item = store.items.get(input.itemId)!;
+            if (item.assigneeEmployeeId !== employeeId)
+              throw new TRPCError({ code: "FORBIDDEN" });
+            if (input.sectionId) {
+              const section = store.myTasksSections.get(input.sectionId);
+              if (!section || section.employeeId !== employeeId)
+                throw new TRPCError({ code: "NOT_FOUND" });
+              store.myTasksMemberships.set(
+                myTasksMembershipKey(employeeId, input.itemId),
+                {
+                  employeeId,
+                  itemId: input.itemId,
+                  sectionId: input.sectionId,
+                  position: input.position,
+                },
+              );
+            } else {
+              store.myTasksMemberships.delete(
+                myTasksMembershipKey(employeeId, input.itemId),
+              );
+            }
+          } else {
+            const assigned = await db.execute(sql`
+              select 1 from public.work_item
+              where work_item_id = ${input.itemId}::uuid
+                and assignee_employee_id = ${employeeId}::uuid
+                and archived_at is null limit 1
+            `);
+            if (!assigned[0]) throw new TRPCError({ code: "FORBIDDEN" });
+            if (input.sectionId) {
+              const section = await db.execute(sql`
+                select 1 from public.work_my_tasks_section
+                where work_my_tasks_section_id = ${input.sectionId}::uuid
+                  and employee_id = ${employeeId}::uuid limit 1
+              `);
+              if (!section[0]) throw new TRPCError({ code: "NOT_FOUND" });
+              await db.execute(sql`
+                insert into public.work_my_tasks_membership (
+                  employee_id, work_item_id, work_my_tasks_section_id, position
+                ) values (
+                  ${employeeId}::uuid, ${input.itemId}::uuid,
+                  ${input.sectionId}::uuid, ${input.position}
+                ) on conflict (employee_id, work_item_id) do update set
+                  work_my_tasks_section_id = excluded.work_my_tasks_section_id,
+                  position = excluded.position, updated_at = now()
+              `);
+            } else {
+              await db.execute(sql`
+                delete from public.work_my_tasks_membership
+                where employee_id = ${employeeId}::uuid
+                  and work_item_id = ${input.itemId}::uuid
+              `);
+            }
+          }
+          await audit(
+            ctx,
+            "work.my_tasks.task.move",
+            "work_item",
+            input.itemId,
+            { sectionId: input.sectionId, position: input.position },
+          );
+          return { ok: true as const };
+        }),
+    }),
+
     myTasks: staffProcedure
       .input(
         z
@@ -4855,46 +5209,89 @@ export const workManagementRouter = router({
       .query(async ({ input, ctx }) => {
         const employeeId = actor(ctx);
         const db = getDb();
-        if (!db)
-          return [...getDemoWork().items.values()].filter(
-            (item) =>
-              item.assigneeEmployeeId === employeeId &&
-              (input?.includeCompleted || !item.completedAt) &&
-              (!input?.query ||
-                item.title.toLowerCase().includes(input.query.toLowerCase())),
-          );
+        if (!db) {
+          const store = getDemoWork();
+          return [...store.items.values()]
+            .filter(
+              (item) =>
+                item.assigneeEmployeeId === employeeId &&
+                (input?.includeCompleted || !item.completedAt) &&
+                (!input?.query ||
+                  item.title.toLowerCase().includes(input.query.toLowerCase())),
+            )
+            .map((item) => {
+              const membership = store.myTasksMemberships.get(
+                myTasksMembershipKey(employeeId, item.itemId),
+              );
+              return {
+                ...item,
+                projectName: store.projects.get(item.projectId)?.name ?? "Work",
+                personalSectionId: membership?.sectionId ?? null,
+                personalPosition: membership?.position ?? 0,
+              };
+            });
+        }
         const pattern = `%${input?.query ?? ""}%`;
-        const rows = await db.execute<WorkItem & { projectName: string }>(sql`
+        const rows = await db.execute<
+          WorkItem & {
+            projectName: string;
+            personalSectionId: string | null;
+            personalPosition: number;
+          }
+        >(sql`
           select item.work_item_id as "itemId",
             item.parent_work_item_id as "parentItemId", item.title,
             item.description, item.item_type as "itemType", item.priority,
             item.assignee_employee_id as "assigneeEmployeeId",
             assignee.display_name as "assigneeName", item.start_date as "startDate",
             item.due_at as "dueAt", item.completed_at as "completedAt",
-            project_item.work_section_id as "sectionId", project_item.position,
-            project.work_project_id as "projectId", project.name as "projectName",
+            chosen."sectionId", chosen.position,
+            chosen."projectId", chosen."projectName",
+            personal.work_my_tasks_section_id as "personalSectionId",
+            coalesce(personal.position, 0) as "personalPosition",
             item.recurrence
           from public.work_item item
-          join public.work_project_item project_item
-            on project_item.work_item_id = item.work_item_id
-          join public.work_project project
-            on project.work_project_id = project_item.work_project_id
-          left join public.work_project_member member
-            on member.work_project_id = project.work_project_id
-            and member.employee_id = ${employeeId}::uuid
+          join lateral (
+            select project_item.work_section_id as "sectionId",
+              project_item.position,
+              project.work_project_id as "projectId",
+              project.name as "projectName"
+            from public.work_project_item project_item
+            join public.work_project project
+              on project.work_project_id = project_item.work_project_id
+            where project_item.work_item_id = item.work_item_id
+              and project.archived_at is null
+              and (
+                project.privacy = 'organization'
+                or project.created_by_employee_id = ${employeeId}::uuid
+                or project.owner_employee_id = ${employeeId}::uuid
+                or exists (
+                  select 1 from public.work_project_member member
+                  where member.work_project_id = project.work_project_id
+                    and member.employee_id = ${employeeId}::uuid
+                )
+                or exists (
+                  select 1 from public.work_team_project team_project
+                  join public.work_team_member team_member
+                    on team_member.work_team_id = team_project.work_team_id
+                  where team_project.work_project_id = project.work_project_id
+                    and team_member.employee_id = ${employeeId}::uuid
+                )
+              )
+            order by project_item.created_at, lower(project.name)
+            limit 1
+          ) chosen on true
+          left join public.work_my_tasks_membership personal
+            on personal.work_item_id = item.work_item_id
+            and personal.employee_id = ${employeeId}::uuid
           left join public.employee assignee
             on assignee.employee_id = item.assignee_employee_id
           where item.assignee_employee_id = ${employeeId}::uuid
-            and item.archived_at is null and project.archived_at is null
+            and item.archived_at is null
             and (${input?.includeCompleted ?? false} or item.completed_at is null)
             and lower(item.title) like lower(${pattern})
-            and (
-              project.privacy = 'organization'
-              or project.created_by_employee_id = ${employeeId}::uuid
-              or project.owner_employee_id = ${employeeId}::uuid
-              or member.employee_id is not null
-            )
-          order by item.completed_at nulls first, item.due_at nulls last, lower(item.title)
+          order by item.completed_at nulls first, personal.position,
+            item.due_at nulls last, lower(item.title)
         `);
         return rows.map((item) => ({
           ...item,

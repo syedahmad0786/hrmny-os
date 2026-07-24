@@ -533,4 +533,35 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/reduced_motion boolean/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("stores private My Tasks sections and clears them on reassignment", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0042_work_my_tasks.sql"),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0042_work_my_tasks.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0042_work_my_tasks.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_my_tasks_section/i,
+    );
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_my_tasks_membership/i,
+    );
+    expect(migration).toMatch(
+      /FOREIGN KEY \(work_my_tasks_section_id, employee_id\)/i,
+    );
+    expect(migration).toMatch(
+      /AFTER UPDATE OF assignee_employee_id ON public\.work_item/i,
+    );
+    expect(migration).toMatch(/DELETE FROM public\.work_my_tasks_membership/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });
