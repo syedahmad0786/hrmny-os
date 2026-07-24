@@ -2359,6 +2359,35 @@ describe("work management", () => {
         })
       ).csv,
     ).toContain('"Deliver plan"');
+    expect(
+      await caller.work.reporting.chart({
+        projectId: project.projectId,
+        spec: {
+          groupBy: "completion",
+          metric: "estimated_minutes",
+          completion: "all",
+          dueFrom: "2026-07-20",
+          dueTo: "2026-07-31",
+          includeSubtasks: false,
+        },
+      }),
+    ).toEqual({
+      data: [{ label: "Complete", value: 480 }],
+      total: 480,
+    });
+    await expect(
+      caller.work.reporting.chart({
+        projectId: project.projectId,
+        spec: {
+          groupBy: "completion",
+          metric: "task_count",
+          completion: "all",
+          dueFrom: "2026-07-31",
+          dueTo: "2026-07-20",
+          includeSubtasks: true,
+        },
+      }),
+    ).rejects.toThrow("Due through must be on or after due from");
 
     const budget = await caller.work.budgets.update({
       projectId: project.projectId,
@@ -2372,6 +2401,33 @@ describe("work management", () => {
       config: { projectId: project.projectId },
     });
     expect(await caller.work.reporting.dashboards()).toContainEqual(dashboard);
+    const reportingClientId = resolveDevUser("portal_b").clientId!;
+    getDemoWork().projects.get(project.projectId)!.clientId = reportingClientId;
+    await caller.admin.features.setOverride({
+      featureKey: "work.reporting_dashboards",
+      scopeType: "client",
+      scopeKey: reportingClientId,
+      enabled: false,
+      reason: "client disabled reporting",
+    });
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      dashboard,
+    );
+    await expect(
+      caller.work.reporting.chart({
+        projectId: project.projectId,
+        spec: {
+          groupBy: "completion",
+          metric: "task_count",
+          completion: "all",
+          dueFrom: null,
+          dueTo: null,
+          includeSubtasks: true,
+        },
+      }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.reporting_dashboards",
+    });
     await caller.work.time.remove({ timeEntryId: logged.timeEntryId });
     expect(
       await caller.work.time.list({ projectId: project.projectId }),

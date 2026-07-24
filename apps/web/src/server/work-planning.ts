@@ -45,6 +45,75 @@ export function budgetSummary(
   };
 }
 
+export type WorkReportChartSpec = {
+  groupBy: "completion" | "assignee" | "priority" | "section" | "task_type";
+  metric: "task_count" | "estimated_minutes" | "actual_minutes";
+  completion: "all" | "complete" | "incomplete";
+  dueFrom: string | null;
+  dueTo: string | null;
+  includeSubtasks: boolean;
+};
+
+export type WorkReportChartRow = {
+  itemId: string;
+  parentItemId: string | null;
+  itemType: "task" | "milestone" | "approval";
+  priority: "low" | "medium" | "high" | "urgent" | null;
+  assigneeName: string | null;
+  sectionName: string | null;
+  dueAt: string | null;
+  completedAt: string | null;
+  estimatedMinutes: number | null;
+  actualMinutes: number;
+};
+
+export function buildWorkReportChart(
+  rows: readonly WorkReportChartRow[],
+  spec: WorkReportChartSpec,
+) {
+  const buckets = new Map<string, number>();
+  for (const row of rows) {
+    if (!spec.includeSubtasks && row.parentItemId) continue;
+    if (spec.completion === "complete" && !row.completedAt) continue;
+    if (spec.completion === "incomplete" && row.completedAt) continue;
+    const dueDate = row.dueAt?.slice(0, 10) ?? null;
+    if (spec.dueFrom && (!dueDate || dueDate < spec.dueFrom)) continue;
+    if (spec.dueTo && (!dueDate || dueDate > spec.dueTo)) continue;
+    const label =
+      spec.groupBy === "completion"
+        ? row.completedAt
+          ? "Complete"
+          : "Incomplete"
+        : spec.groupBy === "assignee"
+          ? (row.assigneeName ?? "Unassigned")
+          : spec.groupBy === "priority"
+            ? row.priority
+              ? `${row.priority[0]!.toUpperCase()}${row.priority.slice(1)}`
+              : "No priority"
+            : spec.groupBy === "section"
+              ? (row.sectionName ?? "No section")
+              : row.itemType === "task"
+                ? "Task"
+                : row.itemType === "milestone"
+                  ? "Milestone"
+                  : "Approval";
+    const value =
+      spec.metric === "task_count"
+        ? 1
+        : spec.metric === "estimated_minutes"
+          ? (row.estimatedMinutes ?? 0)
+          : row.actualMinutes;
+    buckets.set(label, (buckets.get(label) ?? 0) + value);
+  }
+  const data = [...buckets.entries()]
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  return {
+    data,
+    total: data.reduce((sum, bucket) => sum + bucket.value, 0),
+  };
+}
+
 export function criticalPath(
   items: readonly {
     itemId: string;

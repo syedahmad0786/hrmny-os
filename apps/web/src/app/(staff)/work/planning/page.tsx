@@ -21,6 +21,12 @@ function hours(minutes: number) {
   return `${Math.round((minutes / 60) * 10) / 10}h`;
 }
 
+const chartColors = ["#C7702E", "#315C4C", "#D9A441", "#547AA5", "#8B5E83"];
+
+function chartValue(metric: string, value: number) {
+  return metric === "task_count" ? value.toLocaleString() : hours(value);
+}
+
 export default function PlanningPage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
@@ -31,6 +37,21 @@ export default function PlanningPage() {
     projectId: projectId || undefined,
   });
   const [weekStart, setWeekStart] = useState(monday);
+  const [chartStyle, setChartStyle] = useState<"bar" | "donut" | "number">(
+    "bar",
+  );
+  const [chartGroupBy, setChartGroupBy] = useState<
+    "completion" | "assignee" | "priority" | "section" | "task_type"
+  >("completion");
+  const [chartMetric, setChartMetric] = useState<
+    "task_count" | "estimated_minutes" | "actual_minutes"
+  >("task_count");
+  const [chartCompletion, setChartCompletion] = useState<
+    "all" | "complete" | "incomplete"
+  >("all");
+  const [chartDueFrom, setChartDueFrom] = useState("");
+  const [chartDueTo, setChartDueTo] = useState("");
+  const [chartIncludeSubtasks, setChartIncludeSubtasks] = useState(true);
   useEffect(() => {
     if (!projectId && projects.data?.[0])
       setProjectId(projects.data[0].projectId);
@@ -80,6 +101,31 @@ export default function PlanningPage() {
     { projectId },
     { enabled: Boolean(projectId && reportingEnabled) },
   );
+  const chart = trpc.work.reporting.chart.useQuery(
+    {
+      projectId,
+      spec: {
+        groupBy: chartGroupBy,
+        metric: chartMetric,
+        completion: chartCompletion,
+        dueFrom: chartDueFrom || null,
+        dueTo: chartDueTo || null,
+        includeSubtasks: chartIncludeSubtasks,
+      },
+    },
+    { enabled: Boolean(projectId && reportingEnabled) },
+  );
+  const donutBackground = useMemo(() => {
+    if (!chart.data?.total) return "#F0E9DE";
+    let offset = 0;
+    return `conic-gradient(${chart.data.data
+      .map((bucket, index) => {
+        const start = offset;
+        offset += (bucket.value / chart.data!.total) * 100;
+        return `${chartColors[index % chartColors.length]} ${start}% ${offset}%`;
+      })
+      .join(", ")})`;
+  }, [chart.data]);
   const dashboards = trpc.work.reporting.dashboards.useQuery(undefined, {
     enabled: reportingEnabled,
   });
@@ -180,6 +226,38 @@ export default function PlanningPage() {
       await utils.work.reporting.dashboards.invalidate();
     },
   });
+  const deleteDashboard = trpc.work.reporting.deleteDashboard.useMutation({
+    onSuccess: () => utils.work.reporting.dashboards.invalidate(),
+  });
+  const loadDashboard = (config: Record<string, unknown>) => {
+    const spec = config.spec;
+    if (
+      typeof config.projectId !== "string" ||
+      !["bar", "donut", "number"].includes(String(config.chartStyle)) ||
+      !spec ||
+      typeof spec !== "object"
+    )
+      return;
+    const saved = spec as Record<string, unknown>;
+    if (
+      !["completion", "assignee", "priority", "section", "task_type"].includes(
+        String(saved.groupBy),
+      ) ||
+      !["task_count", "estimated_minutes", "actual_minutes"].includes(
+        String(saved.metric),
+      ) ||
+      !["all", "complete", "incomplete"].includes(String(saved.completion))
+    )
+      return;
+    setProjectId(config.projectId);
+    setChartStyle(config.chartStyle as typeof chartStyle);
+    setChartGroupBy(saved.groupBy as typeof chartGroupBy);
+    setChartMetric(saved.metric as typeof chartMetric);
+    setChartCompletion(saved.completion as typeof chartCompletion);
+    setChartDueFrom(typeof saved.dueFrom === "string" ? saved.dueFrom : "");
+    setChartDueTo(typeof saved.dueTo === "string" ? saved.dueTo : "");
+    setChartIncludeSubtasks(saved.includeSubtasks !== false);
+  };
 
   const [budgetAmount, setBudgetAmount] = useState("");
   const [hourlyRate, setHourlyRate] = useState("");
@@ -251,6 +329,7 @@ export default function PlanningPage() {
     createPortfolio.error,
     addPortfolioProject.error,
     createStatus.error,
+    deleteDashboard.error,
     saveDashboard.error,
     updateBudget.error,
     upsertAllocation.error,
@@ -313,7 +392,19 @@ export default function PlanningPage() {
                 event.preventDefault();
                 saveDashboard.mutate({
                   name: dashboardName,
-                  config: { projectId, view: "overview" },
+                  config: {
+                    projectId,
+                    view: "chart",
+                    chartStyle,
+                    spec: {
+                      groupBy: chartGroupBy,
+                      metric: chartMetric,
+                      completion: chartCompletion,
+                      dueFrom: chartDueFrom || null,
+                      dueTo: chartDueTo || null,
+                      includeSubtasks: chartIncludeSubtasks,
+                    },
+                  },
                 });
               }}
             >
@@ -372,11 +463,203 @@ export default function PlanningPage() {
               </article>
             ))}
           </div>
+          <div className="mt-5 border-t border-sand pt-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="grid gap-1 text-xs text-muted">
+                Chart style
+                <select
+                  className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                  value={chartStyle}
+                  onChange={(event) =>
+                    setChartStyle(
+                      event.target.value as "bar" | "donut" | "number",
+                    )
+                  }
+                >
+                  <option value="bar">Bar</option>
+                  <option value="donut">Donut</option>
+                  <option value="number">Number</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs text-muted">
+                Group by
+                <select
+                  className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                  value={chartGroupBy}
+                  onChange={(event) =>
+                    setChartGroupBy(event.target.value as typeof chartGroupBy)
+                  }
+                >
+                  <option value="completion">Completion</option>
+                  <option value="assignee">Assignee</option>
+                  <option value="priority">Priority</option>
+                  <option value="section">Section</option>
+                  <option value="task_type">Task type</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs text-muted">
+                Measure
+                <select
+                  className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                  value={chartMetric}
+                  onChange={(event) =>
+                    setChartMetric(event.target.value as typeof chartMetric)
+                  }
+                >
+                  <option value="task_count">Task count</option>
+                  <option value="estimated_minutes">Estimated time</option>
+                  <option value="actual_minutes">Actual time</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs text-muted">
+                Completion
+                <select
+                  className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                  value={chartCompletion}
+                  onChange={(event) =>
+                    setChartCompletion(
+                      event.target.value as typeof chartCompletion,
+                    )
+                  }
+                >
+                  <option value="all">All tasks</option>
+                  <option value="incomplete">Incomplete</option>
+                  <option value="complete">Complete</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs text-muted">
+                Due from
+                <input
+                  className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                  type="date"
+                  value={chartDueFrom}
+                  onChange={(event) => setChartDueFrom(event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1 text-xs text-muted">
+                Due through
+                <input
+                  className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                  type="date"
+                  value={chartDueTo}
+                  onChange={(event) => setChartDueTo(event.target.value)}
+                />
+              </label>
+              <label className="flex items-end gap-2 pb-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={chartIncludeSubtasks}
+                  onChange={(event) =>
+                    setChartIncludeSubtasks(event.target.checked)
+                  }
+                />
+                Include subtasks
+              </label>
+            </div>
+            {chart.error ? (
+              <p className="mt-4 text-sm text-red-700">{chart.error.message}</p>
+            ) : chart.isPending ? (
+              <p className="mt-4 text-sm text-muted">Updating chart…</p>
+            ) : !chart.data?.data.length ? (
+              <p className="mt-4 text-sm text-muted">
+                No work matches these filters.
+              </p>
+            ) : chartStyle === "number" ? (
+              <div className="mt-5 rounded-lg border border-sand bg-white p-5 text-center">
+                <p className="text-xs uppercase tracking-wide text-muted">
+                  Total
+                </p>
+                <p className="mt-1 text-4xl font-semibold">
+                  {chartValue(chartMetric, chart.data.total)}
+                </p>
+              </div>
+            ) : chartStyle === "donut" ? (
+              <div className="mt-5 flex flex-wrap items-center gap-6">
+                <div
+                  aria-label="Donut chart"
+                  className="grid h-40 w-40 place-items-center rounded-full"
+                  style={{ background: donutBackground }}
+                >
+                  <div className="grid h-24 w-24 place-items-center rounded-full bg-white text-center">
+                    <span className="font-semibold">
+                      {chartValue(chartMetric, chart.data.total)}
+                    </span>
+                  </div>
+                </div>
+                <div className="grid gap-2 text-sm">
+                  {chart.data.data.map((bucket, index) => (
+                    <div key={bucket.label} className="flex items-center gap-2">
+                      <span
+                        className="h-3 w-3 rounded-full"
+                        style={{
+                          background: chartColors[index % chartColors.length],
+                        }}
+                      />
+                      <span className="min-w-32">{bucket.label}</span>
+                      <strong>{chartValue(chartMetric, bucket.value)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-5 grid gap-3">
+                {chart.data.data.map((bucket) => (
+                  <div key={bucket.label}>
+                    <div className="mb-1 flex justify-between gap-3 text-sm">
+                      <span>{bucket.label}</span>
+                      <strong>{chartValue(chartMetric, bucket.value)}</strong>
+                    </div>
+                    <div className="h-3 overflow-hidden rounded-full bg-sand/60">
+                      <div
+                        className="h-full rounded-full bg-clay"
+                        style={{
+                          width: `${Math.max(
+                            2,
+                            (bucket.value /
+                              Math.max(
+                                ...chart.data.data.map((item) => item.value),
+                                1,
+                              )) *
+                              100,
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           {(dashboards.data ?? []).length ? (
-            <p className="mt-3 text-xs text-muted">
-              Saved views:{" "}
-              {(dashboards.data ?? []).map((item) => item.name).join(", ")}
-            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-muted">Saved views:</span>
+              {(dashboards.data ?? []).map((item) => (
+                <span
+                  key={item.dashboardId}
+                  className="inline-flex overflow-hidden rounded border border-sand"
+                >
+                  <button
+                    type="button"
+                    className="bg-white px-2 py-1"
+                    onClick={() => loadDashboard(item.config)}
+                  >
+                    {item.name}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${item.name}`}
+                    className="border-l border-sand px-2 py-1 text-muted"
+                    onClick={() =>
+                      deleteDashboard.mutate({
+                        dashboardId: item.dashboardId,
+                      })
+                    }
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
           ) : null}
         </section>
       ) : null}
