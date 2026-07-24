@@ -4052,7 +4052,7 @@ export const workManagementRouter = router({
             on project_item.work_item_id = item_tag.work_item_id
           where project_item.work_project_id = ${input.projectId}::uuid
              or project_item.work_project_id is null
-          order by lower(tag.name)
+          order by tag.name
         `);
       }),
     create: staffProcedure
