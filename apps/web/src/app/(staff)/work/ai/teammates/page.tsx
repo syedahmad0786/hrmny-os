@@ -24,6 +24,7 @@ const actionTypes = [
   ["create_milestone", "Create milestones"],
   ["attach_file", "Attach linked files"],
   ["schedule_follow_up", "Schedule follow-ups"],
+  ["create_external_file", "Create a Google Doc or Sheet"],
 ] as const;
 type ActionType = (typeof actionTypes)[number][0];
 const card = "rounded-xl border border-sand bg-white/80 p-5";
@@ -70,6 +71,9 @@ export default function WorkAiTeammatesPage() {
   const [allowedActionTypes, setAllowedActionTypes] = useState<ActionType[]>([
     "create_comment",
   ]);
+  const [allowedConnectedApps, setAllowedConnectedApps] = useState<
+    "google_workspace"[]
+  >([]);
   const [model, setModel] = useState("");
   const [shareEmployeeId, setShareEmployeeId] = useState("");
   const [memberLevel, setMemberLevel] = useState<"owner" | "editor" | "user">(
@@ -99,6 +103,7 @@ export default function WorkAiTeammatesPage() {
     setRoleDescription(selected.roleDescription);
     setInstructions(selected.instructions);
     setAllowedActionTypes(selected.allowedActionTypes);
+    setAllowedConnectedApps(selected.allowedConnectedApps);
     setModel(selected.model ?? "");
   }, [selected]);
 
@@ -168,6 +173,7 @@ export default function WorkAiTeammatesPage() {
     roleDescription,
     instructions,
     allowedActionTypes,
+    allowedConnectedApps,
     model: model.trim() || null,
   });
   const error =
@@ -191,6 +197,7 @@ export default function WorkAiTeammatesPage() {
     setRoleDescription("");
     setInstructions("");
     setAllowedActionTypes(["create_comment"]);
+    setAllowedConnectedApps([]);
     setModel("");
   }
 
@@ -336,6 +343,35 @@ export default function WorkAiTeammatesPage() {
                     </label>
                   ))}
                 </div>
+              </fieldset>
+              <fieldset className="md:col-span-2">
+                <legend className="text-sm font-medium">Connected data</legend>
+                <p className="mt-1 text-xs text-muted">
+                  The teammate can search only through the running user&apos;s
+                  own connection. Creating a file still needs approval. Older
+                  Google connections may need to be reconnected for Drive search
+                  permission.
+                </p>
+                <label className="mt-2 flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    disabled={!canEdit || !enabled.has("work.ai.connectors")}
+                    checked={allowedConnectedApps.includes("google_workspace")}
+                    onChange={() =>
+                      setAllowedConnectedApps((current) =>
+                        current.includes("google_workspace")
+                          ? []
+                          : ["google_workspace"],
+                      )
+                    }
+                  />
+                  Google Workspace (Drive, Docs, and Sheets)
+                </label>
+                {!enabled.has("work.ai.connectors") ? (
+                  <p className="mt-1 text-xs text-muted">
+                    Enable AI connectors in Feature Lab to grant access.
+                  </p>
+                ) : null}
               </fieldset>
             </div>
             <div className="mt-5 flex flex-wrap gap-2">

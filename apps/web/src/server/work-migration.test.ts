@@ -278,4 +278,28 @@ describe("work migration compatibility", () => {
       expect(migration).toContain(`'${action}'`);
     expect(migration).toMatch(/'cancelled'/i);
   });
+
+  it("adds explicitly granted AI Teammate connected data", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0033_work_ai_connected_data.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0033_work_ai_connected_data.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0033_work_ai_connected_data.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(/allowed_connected_apps text\[\]/i);
+    expect(migration).toContain("'google_workspace'");
+    expect(migration).toContain("'create_external_file'");
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });
