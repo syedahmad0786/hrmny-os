@@ -43,6 +43,20 @@ export type AsanaUserTaskList = {
   workspace: AsanaWorkspace;
 };
 
+export type AsanaCustomTypeStatusOption = {
+  gid: string;
+  name: string;
+  color?: string;
+  completion_state: "incomplete" | "complete";
+  enabled?: boolean;
+};
+
+export type AsanaCustomType = {
+  gid: string;
+  name: string;
+  status_options: AsanaCustomTypeStatusOption[];
+};
+
 export type AsanaTask = {
   gid: string;
   name: string;
@@ -70,6 +84,8 @@ export type AsanaTask = {
   custom_fields?: Array<
     Record<string, unknown> & { gid: string; name: string }
   >;
+  custom_type?: { gid: string; name?: string } | null;
+  custom_type_status_option?: { gid: string; name?: string } | null;
 };
 
 export type AsanaTeam = {
@@ -262,6 +278,8 @@ export interface AsanaAdapter {
   listProjectMemberships(projectGid: string): Promise<AsanaMembership[]>;
   listSections(projectGid: string): Promise<AsanaSection[]>;
   listProjectTasks(projectGid: string): Promise<AsanaTask[]>;
+  listCustomTypes(projectGid: string): Promise<AsanaCustomType[]>;
+  getCustomType(customTypeGid: string): Promise<AsanaCustomType>;
   getUserTaskList(
     userGid: string,
     workspaceGid: string,
@@ -326,6 +344,10 @@ const TASK_FIELDS = [
   "tags.name",
   "tags.color",
   "custom_fields",
+  "custom_type.gid",
+  "custom_type.name",
+  "custom_type_status_option.gid",
+  "custom_type_status_option.name",
 ].join(",");
 
 function directTransport(input: {
@@ -517,6 +539,25 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
           opt_fields: TASK_FIELDS,
         }),
       ),
+    listCustomTypes: (projectGid) =>
+      list<AsanaCustomType>(
+        "/custom_types",
+        new URLSearchParams({
+          project: projectGid,
+          opt_fields:
+            "gid,name,status_options.gid,status_options.name,status_options.color,status_options.completion_state,status_options.enabled",
+        }),
+      ),
+    async getCustomType(customTypeGid) {
+      const response = await transport.get<AsanaSingle<AsanaCustomType>>(
+        `/custom_types/${encodeURIComponent(customTypeGid)}`,
+        new URLSearchParams({
+          opt_fields:
+            "gid,name,status_options.gid,status_options.name,status_options.color,status_options.completion_state,status_options.enabled",
+        }),
+      );
+      return response.data;
+    },
     async getUserTaskList(userGid, workspaceGid) {
       const response = await transport.get<AsanaSingle<AsanaUserTaskList>>(
         `/users/${encodeURIComponent(userGid)}/user_task_list`,

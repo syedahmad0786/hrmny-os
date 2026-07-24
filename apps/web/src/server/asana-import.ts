@@ -169,6 +169,9 @@ export type AsanaImportSummary = {
   dependencies: number;
   followers: number;
   tags: number;
+  customTaskTypes: number;
+  customTaskStatuses: number;
+  projectCustomTaskTypes: number;
   customFieldValues: number;
   comments: number;
   attachments: number;
@@ -471,13 +474,126 @@ export async function importAsanaWorkspace(input: {
         `);
       }
 
+      const customTaskTypeIds = new Map<string, string>();
+      const customTaskStatusIds = new Map<string, string>();
+      const customTaskTypeExternalIds: string[] = [];
+      const customTaskStatusExternalIds: string[] = [];
+      const projectCustomTaskTypeExternalIds: string[] = [];
+      const projectGidsByCustomType = new Map<string, string[]>();
+      for (const link of scan.projectCustomTaskTypes) {
+        const gids = projectGidsByCustomType.get(link.customTaskTypeGid) ?? [];
+        gids.push(link.projectGid);
+        projectGidsByCustomType.set(link.customTaskTypeGid, gids);
+      }
+      for (const type of scan.customTaskTypes) {
+        const linkedProjectGids = projectGidsByCustomType.get(type.gid) ?? [];
+        const usedByProjectlessTask = scan.tasks.some(
+          (task) =>
+            task.custom_type?.gid === type.gid &&
+            scan.myTasks.some(
+              (myTask) => myTask.taskGid === task.gid && myTask.projectless,
+            ),
+        );
+        const ownerProjectId =
+          projectIds.get(linkedProjectGids[0] ?? "") ??
+          (usedByProjectlessTask ? personalProjectId : null);
+        const [row] = await tx.execute(sql<{ id: string }>`
+          insert into public.work_custom_task_type (
+            owner_work_project_id, name, created_by_employee_id,
+            source_platform, external_id, source_workspace_external_id,
+            source_connection_external_id, source_data
+          ) values (
+            ${ownerProjectId}::uuid, ${limited(type.name, 120)},
+            ${actorEmployeeId}::uuid, 'asana', ${type.gid},
+            ${input.workspaceGid}, ${input.connectedAccountId},
+            ${JSON.stringify(type)}::jsonb
+          ) on conflict (
+            source_platform, source_connection_external_id, external_id
+          ) where external_id is not null
+          do update set owner_work_project_id = excluded.owner_work_project_id,
+            name = excluded.name, source_data = excluded.source_data,
+            archived_at = null, updated_at = now()
+          returning work_custom_task_type_id as id
+        `);
+        customTaskTypeIds.set(type.gid, String(row!.id));
+        customTaskTypeExternalIds.push(type.gid);
+        for (const [position, status] of type.status_options.entries()) {
+          const [statusRow] = await tx.execute(sql<{ id: string }>`
+            insert into public.work_custom_task_status_option (
+              work_custom_task_type_id, name, color, completion_state,
+              enabled, position, source_platform, external_id
+            ) values (
+              ${row!.id}::uuid, ${limited(status.name, 120)},
+              ${asanaColor(status.color)}, ${status.completion_state},
+              ${status.enabled !== false}, ${position}, 'asana', ${status.gid}
+            ) on conflict (source_platform, external_id)
+              where external_id is not null
+            do update set work_custom_task_type_id = excluded.work_custom_task_type_id,
+              name = excluded.name, color = excluded.color,
+              completion_state = excluded.completion_state,
+              enabled = excluded.enabled, position = excluded.position,
+              updated_at = now()
+            returning work_custom_task_status_option_id as id
+          `);
+          customTaskStatusIds.set(status.gid, String(statusRow!.id));
+          customTaskStatusExternalIds.push(status.gid);
+        }
+      }
+      for (const link of scan.projectCustomTaskTypes) {
+        const projectId = projectIds.get(link.projectGid);
+        const typeId = customTaskTypeIds.get(link.customTaskTypeGid);
+        if (!projectId || !typeId) continue;
+        const externalId = `${link.projectGid}:${link.customTaskTypeGid}`;
+        await tx.execute(sql`
+          insert into public.work_project_custom_task_type (
+            work_project_id, work_custom_task_type_id, source_platform, external_id
+          ) values (
+            ${projectId}::uuid, ${typeId}::uuid, 'asana', ${externalId}
+          ) on conflict (work_project_id, work_custom_task_type_id) do update set
+            source_platform = excluded.source_platform,
+            external_id = excluded.external_id, updated_at = now()
+        `);
+        projectCustomTaskTypeExternalIds.push(externalId);
+      }
+      if (personalProjectId) {
+        for (const type of scan.customTaskTypes) {
+          const usedByProjectlessTask = scan.tasks.some(
+            (task) =>
+              task.custom_type?.gid === type.gid &&
+              scan.myTasks.some(
+                (myTask) => myTask.taskGid === task.gid && myTask.projectless,
+              ),
+          );
+          const typeId = customTaskTypeIds.get(type.gid);
+          if (!usedByProjectlessTask || !typeId) continue;
+          const externalId = `my-tasks:${type.gid}`;
+          await tx.execute(sql`
+            insert into public.work_project_custom_task_type (
+              work_project_id, work_custom_task_type_id, source_platform, external_id
+            ) values (
+              ${personalProjectId}::uuid, ${typeId}::uuid, 'asana', ${externalId}
+            ) on conflict (work_project_id, work_custom_task_type_id) do update set
+              source_platform = excluded.source_platform,
+              external_id = excluded.external_id, updated_at = now()
+          `);
+          projectCustomTaskTypeExternalIds.push(externalId);
+        }
+      }
+
       const itemIds = new Map<string, string>();
       for (const task of scan.tasks) {
+        const customTaskTypeId = task.custom_type?.gid
+          ? customTaskTypeIds.get(task.custom_type.gid)
+          : null;
+        const customTaskStatusId = task.custom_type_status_option?.gid
+          ? customTaskStatusIds.get(task.custom_type_status_option.gid)
+          : null;
         const [row] = await tx.execute(sql<{ id: string }>`
           insert into public.work_item (
             title, description, item_type, assignee_employee_id,
             created_by_employee_id, start_date, due_at, completed_at,
-            estimated_minutes,
+            estimated_minutes, work_custom_task_type_id,
+            work_custom_task_status_option_id,
             source_platform, external_id, source_workspace_external_id,
             source_connection_external_id
           ) values (
@@ -487,6 +603,8 @@ export async function importAsanaWorkspace(input: {
             ${actorEmployeeId}::uuid, ${task.start_on ?? null}::date,
             ${asanaDueAt(task)}::timestamptz, ${completedAt(task)}::timestamptz,
             ${task.estimated_minutes ?? null},
+            ${customTaskTypeId && customTaskStatusId ? customTaskTypeId : null}::uuid,
+            ${customTaskTypeId && customTaskStatusId ? customTaskStatusId : null}::uuid,
             'asana', ${task.gid}, ${input.workspaceGid},
             ${input.connectedAccountId}
           )
@@ -501,6 +619,8 @@ export async function importAsanaWorkspace(input: {
             due_at = excluded.due_at,
             completed_at = excluded.completed_at,
             estimated_minutes = excluded.estimated_minutes,
+            work_custom_task_type_id = excluded.work_custom_task_type_id,
+            work_custom_task_status_option_id = excluded.work_custom_task_status_option_id,
             source_workspace_external_id = excluded.source_workspace_external_id,
             source_connection_external_id = excluded.source_connection_external_id,
             archived_at = null,
@@ -1079,6 +1199,7 @@ export async function importAsanaWorkspace(input: {
         ["work_goal", goalExternalIds],
         ["work_portfolio", portfolioExternalIds],
         ["work_template", templateExternalIds],
+        ["work_custom_task_type", customTaskTypeExternalIds],
       ] as const) {
         await tx.execute(sql`
           update public.${sql.raw(table)}
@@ -1166,6 +1287,29 @@ export async function importAsanaWorkspace(input: {
           and link.source_platform = 'asana'
           and coalesce(link.external_id, '') <>
             all(${textArray(projectItemExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_project_custom_task_type association
+        using public.work_custom_task_type type
+        where association.work_custom_task_type_id = type.work_custom_task_type_id
+          and type.source_platform = 'asana'
+          and type.source_workspace_external_id = ${input.workspaceGid}
+          and type.source_connection_external_id = ${input.connectedAccountId}
+          and association.source_platform = 'asana'
+          and coalesce(association.external_id, '') <>
+            all(${textArray(projectCustomTaskTypeExternalIds)})
+      `);
+      await tx.execute(sql`
+        update public.work_custom_task_status_option status set enabled = false,
+          updated_at = now()
+        from public.work_custom_task_type type
+        where status.work_custom_task_type_id = type.work_custom_task_type_id
+          and type.source_platform = 'asana'
+          and type.source_workspace_external_id = ${input.workspaceGid}
+          and type.source_connection_external_id = ${input.connectedAccountId}
+          and status.source_platform = 'asana'
+          and coalesce(status.external_id, '') <>
+            all(${textArray(customTaskStatusExternalIds)})
       `);
       if (personalProjectId && myTasksEmployeeId) {
         await tx.execute(sql`
@@ -1347,6 +1491,9 @@ export async function importAsanaWorkspace(input: {
         dependencies,
         followers,
         tags,
+        customTaskTypes: customTaskTypeIds.size,
+        customTaskStatuses: customTaskStatusIds.size,
+        projectCustomTaskTypes: projectCustomTaskTypeExternalIds.length,
         customFieldValues,
         comments,
         attachments,

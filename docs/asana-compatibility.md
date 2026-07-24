@@ -16,7 +16,7 @@ A capability is only marked **available** when all of these are true:
 
 Database tables without a usable workflow do not count as parity. The code-owned catalogue at `apps/web/src/features/catalog.ts` is the live status register; **planned** features cannot be switched on.
 
-Current catalogue verdict: all 122 recorded capabilities have a usable surface; 32 are marked available and 90 remain beta. Nothing is still labelled planned, but beta is not a claim of production acceptance. The 100% goal remains open until the live Composio/Asana account is verified, provider auth configs are exercised, and client acceptance confirms the beta workflows at production scale.
+Current catalogue verdict: all 123 recorded capabilities have a usable surface; 32 are marked available and 91 remain beta. Nothing is still labelled planned, but beta is not a claim of production acceptance. The 100% goal remains open until the live Composio/Asana account is verified, provider auth configs are exercised, and client acceptance confirms the beta workflows at production scale.
 
 ## Connection finding
 
@@ -44,6 +44,7 @@ The integration audit found no separately stored Asana account and confirmed tha
 | Followers                                    | `work_item_follower`                           | Beta      |
 | Tags                                         | `work_tag`, `work_item_tag`                    | Beta      |
 | Custom fields                                | `work_custom_field`, `work_custom_field_value` | Beta      |
+| Custom task types and statuses               | `work_custom_task_type`, status/project links  | Beta      |
 | Attachments                                  | `work_attachment`                              | Beta      |
 | Recurring tasks                              | `work_item.recurrence`                         | Beta      |
 | Likes                                        | `work_like`                                    | Beta      |
@@ -55,7 +56,7 @@ List, board, monthly Calendar, date-range Timeline, Files, and Gantt views use t
 
 ### Intake, automation, and standardisation
 
-Forms, conditional form questions, task-creating submissions, event and scheduled rules with conditions/branches/actions, collaborator-added triggers, rule execution history, task/project templates with relative dates, versioned bundles, and approval decisions are available in beta. Forms currently require an authenticated hrmny user; public external form links, attachment questions, template role placeholders, arbitrary external rule actions, and automatic bundle rollout are not production-accepted.
+Forms, conditional form questions, task-creating submissions, event and scheduled rules with conditions/branches/actions, collaborator-added triggers, rule execution history, task/project templates with relative dates, versioned bundles, and approval decisions are available in beta. Shared custom task types can be created with multiple incomplete and complete statuses, attached across projects, selected as a project default, assigned per task, and used to filter, sort, or group work. Choosing a complete status completes the task; reopening selects the first enabled incomplete status. Definitions, project availability, task assignments, disabled statuses, and My Tasks-only usage are source-reconciled from Asana. Forms currently require an authenticated hrmny user; public external form links, attachment questions, template role placeholders, arbitrary external rule actions, and automatic bundle rollout are not production-accepted.
 
 ### Goals, portfolios, reporting, and resources
 
@@ -69,7 +70,7 @@ Sandbox infrastructure is intentionally provisioned outside the application so d
 
 ### Import, sync, and integrations
 
-The beta importer preserves projects and their dates, sections, tasks, estimates, nested subtasks, multi-home membership, dependencies, comments, followers, tags, attachments, custom fields/values, teams and administrators, user/team project access, time entries, goals and weighted supporting work, sub-goals, portfolios and their project ordering, project/task templates, complete project/portfolio/goal status history, and the connected identity's My Tasks-only tasks, personal sections, and ordering. My Tasks-only work is attached to that employee's existing hidden private project so normal task permissions and actions continue to apply without exposing the container in project selectors. Source, workspace, and connected-account identifiers make every object and relationship idempotent. A successful full re-run also removes or archives Asana-owned records and relationships that disappeared from that connection while leaving native hrmny rows untouched; this includes memberships, project/task links, personal section placement, dependencies, followers, tags, custom-field values, comments, attachments, goal links, portfolio projects, statuses, and time entries. Source records are retained for fields that do not yet have a first-class hrmny control. The import blocks on unmapped people by default, records a migration run, and writes atomically after explicit confirmation. A regular Asana OAuth/PAT connection can only list portfolios owned by that connected user; importing every workspace portfolio requires an Asana service account. Connections authorized before the added team, membership, goal, portfolio, template, status, and time-entry scopes may need to be reconnected.
+The beta importer preserves projects and their dates, sections, tasks, estimates, nested subtasks, multi-home membership, dependencies, comments, followers, tags, attachments, custom fields/values, custom task types/statuses and project sharing, teams and administrators, user/team project access, time entries, goals and weighted supporting work, sub-goals, portfolios and their project ordering, project/task templates, complete project/portfolio/goal status history, and the connected identity's My Tasks-only tasks, personal sections, and ordering. My Tasks-only work is attached to that employee's existing hidden private project so normal task permissions and actions continue to apply without exposing the container in project selectors. Source, workspace, and connected-account identifiers make every object and relationship idempotent. A successful full re-run also removes or archives Asana-owned records and relationships that disappeared from that connection while leaving native hrmny rows untouched; this includes memberships, project/task links, custom-type project links and statuses, personal section placement, dependencies, followers, tags, custom-field values, comments, attachments, goal links, portfolio projects, status updates, and time entries. Source records are retained for fields that do not yet have a first-class hrmny control. The import blocks on unmapped people by default, records a migration run, and writes atomically after explicit confirmation. A regular Asana OAuth/PAT connection can only list portfolios owned by that connected user; importing every workspace portfolio requires an Asana service account. Connections authorized before the added team, membership, goal, portfolio, template, status, and time-entry scopes may need to be reconnected.
 
 The Connections page now discovers the signed-in employee's real Composio connected accounts and the project's enabled auth configs. It can create official Composio connect links and revoke only accounts owned by that employee. Cloud-file, communication, and enterprise families each have a Feature Lab parent switch, and every provider has its own global/client/role/user switch: Google Drive, OneDrive, Dropbox, Box, Adobe, Gmail, Outlook, Slack, Microsoft Teams, Zoom, Salesforce, Jira, Power BI, and ServiceNow. The organization connected-app policy is an additional hard boundary. Missing auth configs are shown as setup requirements rather than simulated connections; Power BI deliberately depends on a project-defined Composio auth config because no managed toolkit was verified in the public catalogue.
 
@@ -110,6 +111,7 @@ AI Teammates now have synthetic employee identities, owner/editor/user sharing, 
 - https://help.asana.com/s/article/maximize-productivity-with-my-tasks
 - https://help.asana.com/s/article/views-in-my-tasks
 - https://help.asana.com/s/article/sections
+- https://help.asana.com/s/article/custom-task-types
 - https://help.asana.com/s/article/calendar-view
 - https://help.asana.com/s/article/asana-desktop-app
 - https://help.asana.com/s/article/asana-sandboxes
@@ -134,6 +136,8 @@ AI Teammates now have synthetic employee identities, owner/editor/user sharing, 
 - https://developers.asana.com/reference/getusertasklistforuser
 - https://developers.asana.com/reference/gettasksforusertasklist
 - https://developers.asana.com/reference/tasks
+- https://developers.asana.com/reference/custom-types
+- https://developers.asana.com/reference/getcustomtypes
 - https://docs.composio.dev/reference/api-reference/auth-configs/getAuthConfigs
 - https://docs.composio.dev/reference/api-reference/connected-accounts/postConnectedAccountsLink
 - https://docs.composio.dev/reference/api-reference/connected-accounts/deleteConnectedAccountsByNanoid

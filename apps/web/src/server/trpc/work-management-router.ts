@@ -77,6 +77,8 @@ type WorkItem = {
   projectId: string;
   recurrence?: WorkRecurrence | null;
   estimatedMinutes?: number | null;
+  customTaskTypeId?: string | null;
+  customTaskStatusOptionId?: string | null;
 };
 type WorkComment = {
   commentId: string;
@@ -96,6 +98,28 @@ type WorkCustomField = {
   options: string[];
   isRequired: boolean;
   position: number;
+};
+type WorkCustomTaskStatusOption = {
+  statusOptionId: string;
+  customTaskTypeId: string;
+  name: string;
+  color: string;
+  completionState: "incomplete" | "complete";
+  enabled: boolean;
+  position: number;
+};
+type WorkCustomTaskType = {
+  customTaskTypeId: string;
+  ownerProjectId: string | null;
+  name: string;
+  icon: string;
+  sourcePlatform: "native" | "asana";
+  statuses: WorkCustomTaskStatusOption[];
+};
+type WorkProjectCustomTaskType = {
+  projectId: string;
+  customTaskTypeId: string;
+  isDefault: boolean;
 };
 type WorkAttachment = {
   attachmentId: string;
@@ -362,6 +386,8 @@ type DemoWork = {
   itemTags: Map<string, Set<string>>;
   customFields: Map<string, WorkCustomField>;
   customFieldValues: Map<string, unknown>;
+  customTaskTypes: Map<string, WorkCustomTaskType>;
+  projectCustomTaskTypes: Map<string, WorkProjectCustomTaskType>;
   attachments: Map<string, WorkAttachment>;
   proofAnnotations: Map<string, WorkProofAnnotation>;
   outOfOffice: Map<string, WorkOutOfOffice>;
@@ -405,6 +431,10 @@ const DEMO_SECTION_TODO = "a2000000-0000-4000-8000-000000000001";
 const DEMO_SECTION_DOING = "a2000000-0000-4000-8000-000000000002";
 const myTasksMembershipKey = (employeeId: string, itemId: string) =>
   `${employeeId}:${itemId}`;
+const customTaskTypeProjectKey = (
+  projectId: string,
+  customTaskTypeId: string,
+) => `${projectId}:${customTaskTypeId}`;
 let demoWork: DemoWork | undefined;
 
 export function getDemoWork(): DemoWork {
@@ -487,6 +517,8 @@ export function getDemoWork(): DemoWork {
     itemTags: new Map(),
     customFields: new Map(),
     customFieldValues: new Map(),
+    customTaskTypes: new Map(),
+    projectCustomTaskTypes: new Map(),
     attachments: new Map(),
     proofAnnotations: new Map(),
     outOfOffice: new Map(),
@@ -521,6 +553,60 @@ export function getDemoWork(): DemoWork {
   return demoWork;
 }
 
+function validateCustomTaskStatuses(
+  statuses: Array<z.infer<typeof customTaskStatusInput>>,
+) {
+  if (
+    new Set(statuses.map((status) => status.name.toLowerCase())).size !==
+    statuses.length
+  )
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Custom task status names must be unique",
+    });
+  if (!statuses.some((status) => status.completionState === "incomplete"))
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Add at least one incomplete status",
+    });
+  if (!statuses.some((status) => status.completionState === "complete"))
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Add at least one complete status",
+    });
+}
+
+function applyDemoDefaultCustomTaskType(item: WorkItem) {
+  const store = getDemoWork();
+  const association = [...store.projectCustomTaskTypes.values()].find(
+    (candidate) =>
+      candidate.projectId === item.projectId && candidate.isDefault,
+  );
+  const type = association
+    ? store.customTaskTypes.get(association.customTaskTypeId)
+    : null;
+  const status = type?.statuses.find(
+    (candidate) =>
+      candidate.enabled && candidate.completionState === "incomplete",
+  );
+  if (type && status && item.itemType === "task") {
+    item.customTaskTypeId = type.customTaskTypeId;
+    item.customTaskStatusOptionId = status.statusOptionId;
+  }
+}
+
+function syncDemoCustomTaskCompletion(item: WorkItem, completed: boolean) {
+  if (!item.customTaskTypeId) return;
+  const status = getDemoWork()
+    .customTaskTypes.get(item.customTaskTypeId)
+    ?.statuses.find(
+      (candidate) =>
+        candidate.enabled &&
+        candidate.completionState === (completed ? "complete" : "incomplete"),
+    );
+  if (status) item.customTaskStatusOptionId = status.statusOptionId;
+}
+
 const accessRank: Record<AccessLevel, number> = {
   viewer: 0,
   commenter: 1,
@@ -529,6 +615,12 @@ const accessRank: Record<AccessLevel, number> = {
 };
 const uuid = z.string().uuid();
 const nullableUuid = uuid.nullable();
+const customTaskStatusInput = z.object({
+  statusOptionId: uuid.optional(),
+  name: z.string().trim().min(1).max(120),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  completionState: z.enum(["incomplete", "complete"]),
+});
 const messageScopeSchema = z
   .object({ projectId: uuid.optional(), teamId: uuid.optional() })
   .refine(
@@ -1686,6 +1778,7 @@ async function generateNextOccurrence(
       dueAt,
       completedAt: null,
     };
+    syncDemoCustomTaskCompletion(generated, false);
     store.items.set(generated.itemId, generated);
     store.followers.set(
       generated.itemId,
@@ -1719,15 +1812,26 @@ async function generateNextOccurrence(
       startDate: string | null;
       dueAt: Date | string | null;
       recurrence: unknown;
+      customTaskTypeId: string | null;
+      nextCustomTaskStatusOptionId: string | null;
     }>(sql`
       select title, description, item_type as "itemType", priority,
         assignee_employee_id as "assigneeEmployeeId",
         created_by_employee_id as "createdByEmployeeId",
         parent_work_item_id as "parentItemId", start_date as "startDate",
-        due_at as "dueAt", recurrence
-      from public.work_item
-      where work_item_id = ${itemId}::uuid and archived_at is null
-      for update
+        due_at as "dueAt", recurrence,
+        item.work_custom_task_type_id as "customTaskTypeId",
+        next_status.work_custom_task_status_option_id as "nextCustomTaskStatusOptionId"
+      from public.work_item item
+      left join lateral (
+        select status.work_custom_task_status_option_id
+        from public.work_custom_task_status_option status
+        where status.work_custom_task_type_id = item.work_custom_task_type_id
+          and status.enabled and status.completion_state = 'incomplete'
+        order by status.position, status.created_at limit 1
+      ) next_status on true
+      where item.work_item_id = ${itemId}::uuid and item.archived_at is null
+      for update of item
     `);
     const parsed = recurrenceSchema.safeParse(source?.recurrence);
     if (!source || !parsed.success) return null;
@@ -1746,7 +1850,8 @@ async function generateNextOccurrence(
       insert into public.work_item (
         parent_work_item_id, title, description, item_type, priority,
         assignee_employee_id, created_by_employee_id, start_date, due_at,
-        recurrence
+        recurrence, work_custom_task_type_id,
+        work_custom_task_status_option_id
       ) values (
         ${source.parentItemId}::uuid, ${source.title}, ${source.description},
         ${source.itemType}, ${source.priority}, ${source.assigneeEmployeeId}::uuid,
@@ -1756,7 +1861,9 @@ async function generateNextOccurrence(
           then ${source.startDate}::date + (${dueAt}::date - ${source.dueAt}::date)
           else null
         end,
-        ${dueAt}::timestamptz, ${JSON.stringify(parsed.data)}::jsonb
+        ${dueAt}::timestamptz, ${JSON.stringify(parsed.data)}::jsonb,
+        ${source.nextCustomTaskStatusOptionId ? source.customTaskTypeId : null}::uuid,
+        ${source.nextCustomTaskStatusOptionId}::uuid
       )
       returning work_item_id as id
     `);
@@ -2951,6 +3058,7 @@ export const workManagementRouter = router({
             recurrence: null,
             estimatedMinutes: input.estimatedMinutes ?? null,
           };
+          applyDemoDefaultCustomTaskType(item);
           store.items.set(item.itemId, item);
         } else {
           item = await db.transaction(async (tx) => {
@@ -3230,11 +3338,11 @@ export const workManagementRouter = router({
           });
         }
         const db = getDb();
-        if (!db)
-          getDemoWork().items.get(input.itemId)!.completedAt = input.completed
-            ? new Date().toISOString()
-            : null;
-        else
+        if (!db) {
+          const item = getDemoWork().items.get(input.itemId)!;
+          item.completedAt = input.completed ? new Date().toISOString() : null;
+          syncDemoCustomTaskCompletion(item, input.completed);
+        } else
           await db.execute(
             sql`update public.work_item set completed_at = ${input.completed ? new Date() : null}, updated_at = now() where work_item_id = ${input.itemId}::uuid`,
           );
@@ -4150,6 +4258,501 @@ export const workManagementRouter = router({
           where item_tag.work_item_id = ${input.itemId}::uuid
           order by lower(tag.name)
         `);
+      }),
+  }),
+
+  customTaskTypes: router({
+    list: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireWorkFeature(ctx, "work.custom_task_types");
+        await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        if (!db) {
+          const store = getDemoWork();
+          return [...store.projectCustomTaskTypes.values()]
+            .filter((association) => association.projectId === input.projectId)
+            .flatMap((association) => {
+              const type = store.customTaskTypes.get(
+                association.customTaskTypeId,
+              );
+              return type
+                ? [{ ...type, isDefault: association.isDefault }]
+                : [];
+            })
+            .sort((a, b) => a.name.localeCompare(b.name));
+        }
+        const rows = await db.execute<{
+          customTaskTypeId: string;
+          ownerProjectId: string | null;
+          name: string;
+          icon: string;
+          sourcePlatform: "native" | "asana";
+          isDefault: boolean;
+          statusOptionId: string;
+          statusName: string;
+          statusColor: string;
+          completionState: "incomplete" | "complete";
+          enabled: boolean;
+          position: number;
+        }>(sql`
+          select type.work_custom_task_type_id as "customTaskTypeId",
+            type.owner_work_project_id as "ownerProjectId", type.name, type.icon,
+            type.source_platform as "sourcePlatform", association.is_default as "isDefault",
+            status.work_custom_task_status_option_id as "statusOptionId",
+            status.name as "statusName", status.color as "statusColor",
+            status.completion_state as "completionState", status.enabled, status.position
+          from public.work_project_custom_task_type association
+          join public.work_custom_task_type type
+            on type.work_custom_task_type_id = association.work_custom_task_type_id
+          join public.work_custom_task_status_option status
+            on status.work_custom_task_type_id = type.work_custom_task_type_id
+          where association.work_project_id = ${input.projectId}::uuid
+            and type.archived_at is null
+          order by lower(type.name), status.position, status.created_at
+        `);
+        const types = new Map<
+          string,
+          WorkCustomTaskType & { isDefault: boolean }
+        >();
+        for (const row of rows) {
+          const type = types.get(row.customTaskTypeId) ?? {
+            customTaskTypeId: row.customTaskTypeId,
+            ownerProjectId: row.ownerProjectId,
+            name: row.name,
+            icon: row.icon,
+            sourcePlatform: row.sourcePlatform,
+            isDefault: row.isDefault,
+            statuses: [],
+          };
+          type.statuses.push({
+            statusOptionId: row.statusOptionId,
+            customTaskTypeId: row.customTaskTypeId,
+            name: row.statusName,
+            color: row.statusColor,
+            completionState: row.completionState,
+            enabled: row.enabled,
+            position: row.position,
+          });
+          types.set(row.customTaskTypeId, type);
+        }
+        return [...types.values()];
+      }),
+
+    assignments: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireWorkFeature(ctx, "work.custom_task_types");
+        await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        if (!db) {
+          const store = getDemoWork();
+          return [...store.items.values()]
+            .filter((item) => item.projectId === input.projectId)
+            .map((item) => {
+              const type = item.customTaskTypeId
+                ? store.customTaskTypes.get(item.customTaskTypeId)
+                : null;
+              const status = type?.statuses.find(
+                (candidate) =>
+                  candidate.statusOptionId === item.customTaskStatusOptionId,
+              );
+              return {
+                itemId: item.itemId,
+                customTaskTypeId: type?.customTaskTypeId ?? null,
+                statusOptionId: status?.statusOptionId ?? null,
+                typeName: type?.name ?? null,
+                typeIcon: type?.icon ?? null,
+                statusName: status?.name ?? null,
+                statusColor: status?.color ?? null,
+                completionState: status?.completionState ?? null,
+              };
+            });
+        }
+        return db.execute<{
+          itemId: string;
+          customTaskTypeId: string | null;
+          statusOptionId: string | null;
+          typeName: string | null;
+          typeIcon: string | null;
+          statusName: string | null;
+          statusColor: string | null;
+          completionState: "incomplete" | "complete" | null;
+        }>(sql`
+          select item.work_item_id as "itemId",
+            item.work_custom_task_type_id as "customTaskTypeId",
+            item.work_custom_task_status_option_id as "statusOptionId",
+            type.name as "typeName", type.icon as "typeIcon",
+            status.name as "statusName", status.color as "statusColor",
+            status.completion_state as "completionState"
+          from public.work_project_item membership
+          join public.work_item item on item.work_item_id = membership.work_item_id
+          left join public.work_custom_task_type type
+            on type.work_custom_task_type_id = item.work_custom_task_type_id
+          left join public.work_custom_task_status_option status
+            on status.work_custom_task_status_option_id = item.work_custom_task_status_option_id
+          where membership.work_project_id = ${input.projectId}::uuid
+            and item.archived_at is null
+        `);
+      }),
+
+    create: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          name: z.string().trim().min(1).max(120),
+          icon: z.string().trim().min(1).max(16).default("◆"),
+          statuses: z.array(customTaskStatusInput).min(2).max(20),
+          isDefault: z.boolean().default(false),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireWorkFeature(ctx, "work.custom_task_types");
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        validateCustomTaskStatuses(input.statuses);
+        const db = getDb();
+        let type: WorkCustomTaskType & { isDefault: boolean };
+        if (!db) {
+          const store = getDemoWork();
+          if (input.isDefault)
+            for (const association of store.projectCustomTaskTypes.values())
+              if (association.projectId === input.projectId)
+                association.isDefault = false;
+          const customTaskTypeId = randomUUID();
+          type = {
+            customTaskTypeId,
+            ownerProjectId: input.projectId,
+            name: input.name,
+            icon: input.icon,
+            sourcePlatform: "native",
+            isDefault: input.isDefault,
+            statuses: input.statuses.map((status, position) => ({
+              statusOptionId: status.statusOptionId ?? randomUUID(),
+              customTaskTypeId,
+              name: status.name,
+              color: status.color,
+              completionState: status.completionState,
+              enabled: true,
+              position,
+            })),
+          };
+          store.customTaskTypes.set(customTaskTypeId, type);
+          store.projectCustomTaskTypes.set(
+            customTaskTypeProjectKey(input.projectId, customTaskTypeId),
+            {
+              projectId: input.projectId,
+              customTaskTypeId,
+              isDefault: input.isDefault,
+            },
+          );
+        } else {
+          type = await db.transaction(async (tx) => {
+            if (input.isDefault)
+              await tx.execute(sql`
+                update public.work_project_custom_task_type set is_default = false,
+                  updated_at = now()
+                where work_project_id = ${input.projectId}::uuid and is_default
+              `);
+            const [created] = await tx.execute<{
+              customTaskTypeId: string;
+              ownerProjectId: string;
+              name: string;
+              icon: string;
+              sourcePlatform: "native";
+            }>(sql`
+              insert into public.work_custom_task_type (
+                owner_work_project_id, name, icon, created_by_employee_id
+              ) values (
+                ${input.projectId}::uuid, ${input.name}, ${input.icon}, ${actor(ctx)}::uuid
+              ) returning work_custom_task_type_id as "customTaskTypeId",
+                owner_work_project_id as "ownerProjectId", name, icon,
+                source_platform as "sourcePlatform"
+            `);
+            await tx.execute(sql`
+              insert into public.work_project_custom_task_type (
+                work_project_id, work_custom_task_type_id, is_default
+              ) values (
+                ${input.projectId}::uuid, ${created!.customTaskTypeId}::uuid,
+                ${input.isDefault}
+              )
+            `);
+            const statuses: WorkCustomTaskStatusOption[] = [];
+            for (const [position, status] of input.statuses.entries()) {
+              const [createdStatus] =
+                await tx.execute<WorkCustomTaskStatusOption>(sql`
+                  insert into public.work_custom_task_status_option (
+                    work_custom_task_type_id, name, color, completion_state, position
+                  ) values (
+                    ${created!.customTaskTypeId}::uuid, ${status.name}, ${status.color},
+                    ${status.completionState}, ${position}
+                  ) returning work_custom_task_status_option_id as "statusOptionId",
+                    work_custom_task_type_id as "customTaskTypeId", name, color,
+                    completion_state as "completionState", enabled, position
+                `);
+              statuses.push(createdStatus!);
+            }
+            return { ...created!, isDefault: input.isDefault, statuses };
+          });
+        }
+        await audit(
+          ctx,
+          "work.customTaskType.create",
+          "work_custom_task_type",
+          type.customTaskTypeId,
+          { projectId: input.projectId, name: input.name },
+        );
+        return type;
+      }),
+
+    share: staffProcedure
+      .input(
+        z.object({
+          sourceProjectId: uuid,
+          targetProjectId: uuid,
+          customTaskTypeId: uuid,
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireWorkFeature(ctx, "work.custom_task_types");
+        await requireProjectAccess(ctx, input.sourceProjectId, "editor");
+        await requireProjectAccess(ctx, input.targetProjectId, "editor");
+        const db = getDb();
+        if (!db) {
+          const store = getDemoWork();
+          if (
+            !store.projectCustomTaskTypes.has(
+              customTaskTypeProjectKey(
+                input.sourceProjectId,
+                input.customTaskTypeId,
+              ),
+            )
+          )
+            throw new TRPCError({ code: "NOT_FOUND" });
+          store.projectCustomTaskTypes.set(
+            customTaskTypeProjectKey(
+              input.targetProjectId,
+              input.customTaskTypeId,
+            ),
+            {
+              projectId: input.targetProjectId,
+              customTaskTypeId: input.customTaskTypeId,
+              isDefault: false,
+            },
+          );
+        } else {
+          const source = await db.execute(sql`
+            select 1 from public.work_project_custom_task_type
+            where work_project_id = ${input.sourceProjectId}::uuid
+              and work_custom_task_type_id = ${input.customTaskTypeId}::uuid limit 1
+          `);
+          if (!source[0]) throw new TRPCError({ code: "NOT_FOUND" });
+          await db.execute(sql`
+            insert into public.work_project_custom_task_type (
+              work_project_id, work_custom_task_type_id
+            ) values (${input.targetProjectId}::uuid, ${input.customTaskTypeId}::uuid)
+            on conflict (work_project_id, work_custom_task_type_id) do nothing
+          `);
+        }
+        await audit(
+          ctx,
+          "work.customTaskType.share",
+          "work_custom_task_type",
+          input.customTaskTypeId,
+          {
+            sourceProjectId: input.sourceProjectId,
+            targetProjectId: input.targetProjectId,
+          },
+        );
+        return { ok: true as const };
+      }),
+
+    setDefault: staffProcedure
+      .input(z.object({ projectId: uuid, customTaskTypeId: nullableUuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireWorkFeature(ctx, "work.custom_task_types");
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        const db = getDb();
+        if (!db) {
+          const store = getDemoWork();
+          const selected = input.customTaskTypeId
+            ? store.projectCustomTaskTypes.get(
+                customTaskTypeProjectKey(
+                  input.projectId,
+                  input.customTaskTypeId,
+                ),
+              )
+            : null;
+          if (input.customTaskTypeId && !selected)
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Custom task type is not available in this project",
+            });
+          for (const association of store.projectCustomTaskTypes.values())
+            if (association.projectId === input.projectId)
+              association.isDefault =
+                association.customTaskTypeId === input.customTaskTypeId;
+        } else {
+          await db.transaction(async (tx) => {
+            if (input.customTaskTypeId) {
+              const selected = await tx.execute(sql`
+                select 1 from public.work_project_custom_task_type
+                where work_project_id = ${input.projectId}::uuid
+                  and work_custom_task_type_id = ${input.customTaskTypeId}::uuid limit 1
+              `);
+              if (!selected[0])
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: "Custom task type is not available in this project",
+                });
+            }
+            await tx.execute(sql`
+              update public.work_project_custom_task_type
+              set is_default = false, updated_at = now()
+              where work_project_id = ${input.projectId}::uuid and is_default
+            `);
+            if (input.customTaskTypeId)
+              await tx.execute(sql`
+                update public.work_project_custom_task_type
+                set is_default = true, updated_at = now()
+                where work_project_id = ${input.projectId}::uuid
+                  and work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+              `);
+          });
+        }
+        await audit(
+          ctx,
+          "work.customTaskType.setDefault",
+          "work_project",
+          input.projectId,
+          { customTaskTypeId: input.customTaskTypeId },
+        );
+        return { ok: true as const };
+      }),
+
+    setForTask: staffProcedure
+      .input(
+        z
+          .object({
+            projectId: uuid,
+            itemId: uuid,
+            customTaskTypeId: nullableUuid,
+            statusOptionId: nullableUuid,
+          })
+          .refine(
+            (value) =>
+              Boolean(value.customTaskTypeId) === Boolean(value.statusOptionId),
+            { message: "Choose both a custom task type and status" },
+          ),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireWorkFeature(ctx, "work.custom_task_types");
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        await requireItemInProject(ctx, input.itemId, input.projectId);
+        const db = getDb();
+        let completedAt: string | null = null;
+        if (!db) {
+          const store = getDemoWork();
+          const item = store.items.get(input.itemId)!;
+          if (item.itemType !== "task")
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Custom task types can only be applied to tasks",
+            });
+          if (!input.customTaskTypeId) {
+            item.customTaskTypeId = null;
+            item.customTaskStatusOptionId = null;
+          } else {
+            const association = store.projectCustomTaskTypes.get(
+              customTaskTypeProjectKey(input.projectId, input.customTaskTypeId),
+            );
+            const status = store.customTaskTypes
+              .get(input.customTaskTypeId)
+              ?.statuses.find(
+                (candidate) =>
+                  candidate.statusOptionId === input.statusOptionId &&
+                  candidate.enabled,
+              );
+            if (!association || !status)
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Custom task type or status is not available",
+              });
+            item.customTaskTypeId = input.customTaskTypeId;
+            item.customTaskStatusOptionId = status.statusOptionId;
+            item.completedAt =
+              status.completionState === "complete"
+                ? (item.completedAt ?? new Date().toISOString())
+                : null;
+          }
+          completedAt = item.completedAt;
+        } else if (!input.customTaskTypeId) {
+          const [updated] = await db.execute<{
+            completedAt: Date | string | null;
+          }>(sql`
+            update public.work_item set work_custom_task_type_id = null,
+              work_custom_task_status_option_id = null, updated_at = now()
+            where work_item_id = ${input.itemId}::uuid and item_type = 'task'
+            returning completed_at as "completedAt"
+          `);
+          if (!updated)
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Custom task types can only be applied to tasks",
+            });
+          completedAt = iso(updated.completedAt);
+        } else {
+          const [updated] = await db.execute<{
+            completedAt: Date | string | null;
+          }>(sql`
+            update public.work_item item set
+              work_custom_task_type_id = ${input.customTaskTypeId}::uuid,
+              work_custom_task_status_option_id = ${input.statusOptionId}::uuid,
+              completed_at = case
+                when selected.completion_state = 'complete'
+                  then coalesce(item.completed_at, now())
+                when selected.completion_state = 'incomplete' then null
+                else item.completed_at
+              end,
+              updated_at = now()
+            from (
+              select status.completion_state
+              from public.work_project_custom_task_type association
+              join public.work_custom_task_status_option status
+                on status.work_custom_task_type_id = association.work_custom_task_type_id
+                and status.work_custom_task_status_option_id = ${input.statusOptionId}::uuid
+                and status.enabled
+              where association.work_project_id = ${input.projectId}::uuid
+                and association.work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+            ) selected
+            where item.work_item_id = ${input.itemId}::uuid
+              and item.item_type = 'task'
+            returning item.completed_at as "completedAt"
+          `);
+          if (!updated)
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Custom task type or status is not available",
+            });
+          completedAt = iso(updated.completedAt);
+        }
+        await audit(
+          ctx,
+          "work.customTaskType.assign",
+          "work_item",
+          input.itemId,
+          {
+            projectId: input.projectId,
+            customTaskTypeId: input.customTaskTypeId,
+            statusOptionId: input.statusOptionId,
+          },
+        );
+        await notifyItem(
+          ctx,
+          input.itemId,
+          "updated",
+          "A task type or status was updated",
+        );
+        return { ok: true as const, completedAt };
       }),
   }),
 

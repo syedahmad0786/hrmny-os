@@ -1,6 +1,7 @@
 import type {
   AsanaAdapter,
   AsanaAttachment,
+  AsanaCustomType,
   AsanaGoal,
   AsanaGoalRelationship,
   AsanaMembership,
@@ -67,6 +68,11 @@ export type AsanaWorkspaceScan = {
     taskGid: string;
     sectionGid: string | null;
   }>;
+  customTaskTypes: AsanaCustomType[];
+  projectCustomTaskTypes: Array<{
+    projectGid: string;
+    customTaskTypeGid: string;
+  }>;
   stories: Array<{ taskGid: string; story: AsanaStory }> | null;
   attachments: Array<{ taskGid: string; attachment: AsanaAttachment }> | null;
   timeTrackingEntries: Array<{
@@ -104,6 +110,9 @@ export type AsanaWorkspaceScan = {
     multiHomedTasks: number;
     tags: number;
     customFields: number;
+    customTaskTypes: number;
+    customTaskStatuses: number;
+    projectCustomTaskTypes: number;
     stories: number | null;
     comments: number | null;
     attachments: number | null;
@@ -149,18 +158,21 @@ export async function scanAsanaWorkspace(
     memberships: await adapter.listTeamMemberships(team.gid),
   }));
   const projectRows = await mapLimit(projects, 4, async (project) => {
-    const [sections, tasks, memberships, taskTemplates] = await Promise.all([
-      adapter.listSections(project.gid),
-      adapter.listProjectTasks(project.gid),
-      adapter.listProjectMemberships(project.gid),
-      adapter.listTaskTemplates(project.gid),
-    ]);
+    const [sections, tasks, memberships, taskTemplates, customTaskTypes] =
+      await Promise.all([
+        adapter.listSections(project.gid),
+        adapter.listProjectTasks(project.gid),
+        adapter.listProjectMemberships(project.gid),
+        adapter.listTaskTemplates(project.gid),
+        adapter.listCustomTypes(project.gid),
+      ]);
     return {
       projectGid: project.gid,
       sections,
       tasks,
       memberships,
       taskTemplates,
+      customTaskTypes,
     };
   });
   const goalRows = await mapLimit(goals, 4, async (goal) => ({
@@ -208,6 +220,22 @@ export async function scanAsanaWorkspace(
   }
 
   const taskValues = [...tasks.values()];
+  const customTaskTypes = new Map<string, AsanaCustomType>();
+  for (const row of projectRows)
+    for (const type of row.customTaskTypes) customTaskTypes.set(type.gid, type);
+  const missingCustomTaskTypeGids = [
+    ...new Set(
+      taskValues.flatMap((task) =>
+        task.custom_type && !customTaskTypes.has(task.custom_type.gid)
+          ? [task.custom_type.gid]
+          : [],
+      ),
+    ),
+  ];
+  for (const type of await mapLimit(missingCustomTaskTypeGids, 4, (gid) =>
+    adapter.getCustomType(gid),
+  ))
+    customTaskTypes.set(type.gid, type);
   let stories: Array<{ taskGid: string; story: AsanaStory }> | null = null;
   let attachments: Array<{
     taskGid: string;
@@ -340,6 +368,13 @@ export async function scanAsanaWorkspace(
     })),
     tasks: taskValues,
     projectTasks: [...projectTasks.values()],
+    customTaskTypes: [...customTaskTypes.values()],
+    projectCustomTaskTypes: projectRows.flatMap((row) =>
+      row.customTaskTypes.map((type) => ({
+        projectGid: row.projectGid,
+        customTaskTypeGid: type.gid,
+      })),
+    ),
     stories,
     attachments,
     timeTrackingEntries,
@@ -386,6 +421,15 @@ export async function scanAsanaWorkspace(
       ).length,
       tags: tags.size,
       customFields: customFields.size,
+      customTaskTypes: customTaskTypes.size,
+      customTaskStatuses: [...customTaskTypes.values()].reduce(
+        (sum, type) => sum + type.status_options.length,
+        0,
+      ),
+      projectCustomTaskTypes: projectRows.reduce(
+        (sum, row) => sum + row.customTaskTypes.length,
+        0,
+      ),
       stories: stories?.length ?? null,
       comments:
         stories?.filter(

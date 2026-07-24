@@ -786,6 +786,113 @@ describe("work management", () => {
     });
   });
 
+  it("governs shared custom task types and completion-aware statuses", async () => {
+    const caller = partnerCaller();
+    const source = await caller.work.projects.create({
+      name: `Custom type source ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const target = await caller.work.projects.create({
+      name: `Custom type target ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const type = await caller.work.customTaskTypes.create({
+      projectId: source.projectId,
+      name: "Request",
+      icon: "◆",
+      isDefault: true,
+      statuses: [
+        {
+          name: "Backlog",
+          color: "#6B7280",
+          completionState: "incomplete",
+        },
+        {
+          name: "In progress",
+          color: "#C7702E",
+          completionState: "incomplete",
+        },
+        {
+          name: "Resolved",
+          color: "#2E7D5B",
+          completionState: "complete",
+        },
+      ],
+    });
+    const task = await caller.work.tasks.create({
+      projectId: source.projectId,
+      title: "Handle request",
+      description: "",
+    });
+    expect(
+      await caller.work.customTaskTypes.assignments({
+        projectId: source.projectId,
+      }),
+    ).toContainEqual(
+      expect.objectContaining({
+        itemId: task.itemId,
+        customTaskTypeId: type.customTaskTypeId,
+        statusName: "Backlog",
+      }),
+    );
+
+    const completeStatus = type.statuses.find(
+      (status) => status.completionState === "complete",
+    )!;
+    await caller.work.customTaskTypes.setForTask({
+      projectId: source.projectId,
+      itemId: task.itemId,
+      customTaskTypeId: type.customTaskTypeId,
+      statusOptionId: completeStatus.statusOptionId,
+    });
+    expect(
+      (
+        await caller.work.projects.get({ projectId: source.projectId })
+      ).items.find((item) => item.itemId === task.itemId)?.completedAt,
+    ).toBeTruthy();
+    await caller.work.tasks.complete({ itemId: task.itemId, completed: false });
+    expect(
+      await caller.work.customTaskTypes.assignments({
+        projectId: source.projectId,
+      }),
+    ).toContainEqual(
+      expect.objectContaining({
+        itemId: task.itemId,
+        statusName: "Backlog",
+        completionState: "incomplete",
+      }),
+    );
+
+    await caller.work.customTaskTypes.share({
+      sourceProjectId: source.projectId,
+      targetProjectId: target.projectId,
+      customTaskTypeId: type.customTaskTypeId,
+    });
+    await expect(
+      caller.work.customTaskTypes.list({ projectId: target.projectId }),
+    ).resolves.toContainEqual(
+      expect.objectContaining({ customTaskTypeId: type.customTaskTypeId }),
+    );
+
+    await caller.admin.features.setOverride({
+      featureKey: "work.custom_task_types",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.work.customTaskTypes.list({ projectId: source.projectId }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.custom_task_types",
+    });
+  });
+
   it("keeps task metadata when generating a recurring occurrence", async () => {
     const caller = partnerCaller();
     const project = await caller.work.projects.create({
