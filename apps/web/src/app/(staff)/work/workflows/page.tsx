@@ -1,10 +1,29 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { WorkNav } from "@/components/work-nav";
 import { trpc } from "@/lib/trpc";
 
 type Answers = Record<string, Record<string, unknown>>;
+
+function fileAnswer(file: File) {
+  return new Promise<{
+    fileName: string;
+    contentType: string;
+    contentBase64: string;
+  }>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.onload = () =>
+      resolve({
+        fileName: file.name,
+        contentType: file.type || "application/octet-stream",
+        contentBase64: String(reader.result).split(",")[1] ?? "",
+      });
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function WorkflowsPage() {
   const utils = trpc.useUtils();
@@ -25,6 +44,7 @@ export default function WorkflowsPage() {
       [],
   );
   const formsEnabled = enabled.has("work.forms");
+  const publicFormsEnabled = enabled.has("work.forms.public");
   const rulesEnabled = enabled.has("work.rules");
   const scheduledRulesEnabled = enabled.has("work.rules.scheduled");
   const collaboratorRulesEnabled = enabled.has(
@@ -69,15 +89,20 @@ export default function WorkflowsPage() {
 
   const [formName, setFormName] = useState("");
   const [formQuestions, setFormQuestions] = useState("");
+  const [formAccessLevel, setFormAccessLevel] = useState<
+    "organization" | "anyone"
+  >("organization");
+  const [formAttachment, setFormAttachment] = useState(false);
   const [answers, setAnswers] = useState<Answers>({});
   const createForm = trpc.work.forms.create.useMutation({
     onSuccess: async () => {
       setFormName("");
       setFormQuestions("");
+      setFormAttachment(false);
       await utils.work.forms.list.invalidate();
     },
   });
-  const setFormActive = trpc.work.forms.setActive.useMutation({
+  const setFormAccess = trpc.work.forms.setAccess.useMutation({
     onSuccess: () => utils.work.forms.list.invalidate(),
   });
   const submitForm = trpc.work.forms.submit.useMutation({
@@ -191,6 +216,7 @@ export default function WorkflowsPage() {
   const sections = detail.data?.sections ?? [];
   const error =
     createForm.error ??
+    setFormAccess.error ??
     submitForm.error ??
     createRule.error ??
     createTaskTemplate.error ??
@@ -239,7 +265,7 @@ export default function WorkflowsPage() {
             Every submission becomes a task in this project.
           </p>
           <form
-            className="mt-4 grid gap-2 md:grid-cols-[1fr_2fr_auto]"
+            className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-[1fr_2fr_auto_auto_auto]"
             onSubmit={(event) => {
               event.preventDefault();
               const extra = formQuestions
@@ -267,8 +293,23 @@ export default function WorkflowsPage() {
                     options: [],
                   },
                   ...extra,
+                  ...(formAttachment
+                    ? [
+                        {
+                          key: "attachments",
+                          label: "Attachments",
+                          type: "attachment" as const,
+                          required: false,
+                          options: [],
+                          multiple: true,
+                        },
+                      ]
+                    : []),
                 ],
                 confirmationMessage: "Your request was submitted.",
+                accessLevel: publicFormsEnabled
+                  ? formAccessLevel
+                  : "organization",
               });
             }}
           >
@@ -286,6 +327,29 @@ export default function WorkflowsPage() {
               value={formQuestions}
               onChange={(event) => setFormQuestions(event.target.value)}
             />
+            <select
+              aria-label="Form access"
+              className="rounded border border-sand px-3 py-2"
+              value={publicFormsEnabled ? formAccessLevel : "organization"}
+              onChange={(event) =>
+                setFormAccessLevel(
+                  event.target.value as "organization" | "anyone",
+                )
+              }
+            >
+              <option value="organization">Organization only</option>
+              <option value="anyone" disabled={!publicFormsEnabled}>
+                Anyone with link
+              </option>
+            </select>
+            <label className="flex items-center gap-2 rounded border border-sand px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={formAttachment}
+                onChange={(event) => setFormAttachment(event.target.checked)}
+              />
+              File upload
+            </label>
             <button
               className="rounded bg-ink px-4 py-2 text-white"
               disabled={!projectId || !formName.trim()}
@@ -303,19 +367,34 @@ export default function WorkflowsPage() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <h3 className="font-semibold">{form.name}</h3>
-                    <button
-                      type="button"
+                    <select
+                      aria-label={`${form.name} access`}
                       className="rounded-full border border-sand px-2 py-1 text-xs"
-                      onClick={() =>
-                        setFormActive.mutate({
+                      value={form.accessLevel}
+                      onChange={(event) =>
+                        setFormAccess.mutate({
                           formId: form.formId,
-                          active: !form.isActive,
+                          accessLevel: event.target.value as
+                            "organization" | "anyone" | "deactivated",
                         })
                       }
                     >
-                      {form.isActive ? "Active" : "Paused"}
-                    </button>
+                      <option value="organization">Organization only</option>
+                      <option value="anyone" disabled={!publicFormsEnabled}>
+                        Anyone with link
+                      </option>
+                      <option value="deactivated">Deactivated</option>
+                    </select>
                   </div>
+                  {form.accessLevel === "anyone" && publicFormsEnabled ? (
+                    <Link
+                      className="mt-2 inline-block text-xs font-semibold text-ochre underline"
+                      href={`/forms/${form.formId}`}
+                      target="_blank"
+                    >
+                      Open public form
+                    </Link>
+                  ) : null}
                   {form.isActive ? (
                     <form
                       className="mt-3 space-y-2"
@@ -375,6 +454,63 @@ export default function WorkflowsPage() {
                                   <option key={option}>{option}</option>
                                 ))}
                               </select>
+                            ) : question.type === "multi_select" ? (
+                              <select
+                                className="mt-1 min-h-24 w-full rounded border border-sand px-2 py-1.5"
+                                multiple
+                                value={
+                                  (formAnswers[question.key] as
+                                    string[] | undefined) ?? []
+                                }
+                                onChange={(event) =>
+                                  setAnswers((current) => ({
+                                    ...current,
+                                    [form.formId]: {
+                                      ...formAnswers,
+                                      [question.key]: [
+                                        ...event.target.selectedOptions,
+                                      ].map((option) => option.value),
+                                    },
+                                  }))
+                                }
+                              >
+                                {question.options.map((option) => (
+                                  <option key={option}>{option}</option>
+                                ))}
+                              </select>
+                            ) : question.type === "attachment" ? (
+                              <input
+                                className="mt-1 w-full rounded border border-sand px-2 py-1.5"
+                                type="file"
+                                multiple={question.multiple}
+                                onChange={async (event) => {
+                                  const files = [...(event.target.files ?? [])];
+                                  const encoded = await Promise.all(
+                                    files.map(fileAnswer),
+                                  );
+                                  setAnswers((current) => ({
+                                    ...current,
+                                    [form.formId]: {
+                                      ...formAnswers,
+                                      [question.key]: encoded,
+                                    },
+                                  }));
+                                }}
+                              />
+                            ) : question.type === "textarea" ? (
+                              <textarea
+                                className="mt-1 min-h-24 w-full rounded border border-sand px-2 py-1.5"
+                                value={String(formAnswers[question.key] ?? "")}
+                                onChange={(event) =>
+                                  setAnswers((current) => ({
+                                    ...current,
+                                    [form.formId]: {
+                                      ...formAnswers,
+                                      [question.key]: event.target.value,
+                                    },
+                                  }))
+                                }
+                              />
                             ) : (
                               <input
                                 className="mt-1 w-full rounded border border-sand px-2 py-1.5"

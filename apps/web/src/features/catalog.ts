@@ -450,6 +450,16 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     defaultEnabled: true,
   }),
   feature({
+    key: "work.forms.public",
+    name: "Public forms",
+    description:
+      "Unauthenticated form links and file intake with client-level controls.",
+    group: "Workflows",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
+  feature({
     key: "work.rules",
     name: "Rules",
     description: "Trigger, condition, branch, and action workflow automation.",
@@ -1372,6 +1382,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["work.personal.savedSearches", "work.saved_searches"],
   ["work.personal.saveSearch", "work.saved_searches"],
   ["work.personal.deleteSearch", "work.saved_searches"],
+  ["work.forms.public", "work.forms.public"],
   ["work.forms.", "work.forms"],
   ["work.rules.", "work.rules"],
   ["work.templates.", "work.templates"],
