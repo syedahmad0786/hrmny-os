@@ -590,4 +590,31 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/length\(focus_text\) <= 500/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("marks one hidden personal task project per employee", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0044_work_personal_projects.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0044_work_personal_projects.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0044_work_personal_projects.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(/ADD COLUMN IF NOT EXISTS project_kind/i);
+    expect(migration).toMatch(/'standard', 'personal'/i);
+    expect(migration).toMatch(
+      /UNIQUE INDEX IF NOT EXISTS work_project_personal_owner_uniq/i,
+    );
+    expect(migration).toMatch(/WHERE project_kind = 'personal'/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });
