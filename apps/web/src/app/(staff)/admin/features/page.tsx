@@ -135,6 +135,12 @@ export default function FeatureLabPage() {
           </Link>
           <Link
             className="rounded-full border border-sand bg-white px-4 py-2"
+            href="/admin/work"
+          >
+            Work admin
+          </Link>
+          <Link
+            className="rounded-full border border-sand bg-white px-4 py-2"
             href="/settings/connections"
           >
             Connections

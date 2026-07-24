@@ -42,6 +42,7 @@ export class ComposioApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly data?: unknown,
   ) {
     super(message);
     this.name = "ComposioApiError";
@@ -216,6 +217,7 @@ export function createComposioLive(input: {
         throw new ComposioApiError(
           `Connected service rejected the request (${result.status})`,
           result.status,
+          result.data,
         );
       }
       return {

@@ -13,6 +13,7 @@ import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
 import { router, staffProcedure } from "./trpc";
 import { randomUUID } from "node:crypto";
+import { isWorkConnectedAppAllowed } from "../work-governance";
 
 const composio = createComposioStub();
 const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat"]);
@@ -115,10 +116,20 @@ function requireEmployeeId(employeeId: string | null): string {
   return employeeId;
 }
 
+async function requireAllowedApp(toolkit: string) {
+  if (!(await isWorkConnectedAppAllowed(toolkit))) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `${toolkit} is blocked by the organization connected-app policy`,
+    });
+  }
+}
+
 export async function getEmployeeIntegrationSecret(
   employeeId: string,
   toolkit: "apollo" | "hunter" | "bayzat",
 ): Promise<string | null> {
+  if (!(await isWorkConnectedAppAllowed(toolkit))) return null;
   const db = getDb();
   if (!db) return null;
   const [row] = await db
@@ -169,6 +180,11 @@ export type VerifiedAsanaConnection = {
 export async function getVerifiedAsanaConnection(
   _employeeId: string,
 ): Promise<VerifiedAsanaConnection | null> {
+  if (
+    !(await isWorkConnectedAppAllowed("asana")) ||
+    !(await isWorkConnectedAppAllowed("composio"))
+  )
+    return null;
   if (!process.env.COMPOSIO_API_KEY?.trim()) return null;
   const client = requireSystemComposio();
   const accounts = await client.listConnectedAccounts({ toolkit: "asana" });
@@ -191,6 +207,7 @@ export async function getVerifiedAsanaConnection(
 export async function getGoogleWorkspaceAccessToken(
   employeeId: string,
 ): Promise<string | null> {
+  if (!(await isWorkConnectedAppAllowed("google_workspace"))) return null;
   const db = getDb();
   if (!db) return null;
   const [row] = await db
@@ -293,6 +310,17 @@ export const connectionsRouter = router({
     )
     .query(async ({ ctx }) => {
       const employeeId = requireEmployeeId(ctx.employeeId);
+      const allowed = new Map(
+        await Promise.all(
+          CONNECTION_CATALOG.map(
+            async (item) =>
+              [
+                item.toolkit,
+                await isWorkConnectedAppAllowed(item.toolkit),
+              ] as const,
+          ),
+        ),
+      );
       const db = getDb();
       if (!db) {
         const existing = getDemoStore().connections;
@@ -302,6 +330,7 @@ export const connectionsRouter = router({
           );
           return {
             ...item,
+            allowed: allowed.get(item.toolkit) ?? false,
             connectionAccountId: row?.connectionAccountId ?? null,
             scope: row?.scope ?? "staff",
             status: row?.status ?? "disconnected",
@@ -335,6 +364,7 @@ export const connectionsRouter = router({
         );
         return {
           ...item,
+          allowed: allowed.get(item.toolkit) ?? false,
           connectionAccountId: row?.connectionAccountId ?? null,
           scope: "staff" as const,
           status: row?.status ?? "disconnected",
@@ -355,6 +385,7 @@ export const connectionsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const employeeId = requireEmployeeId(ctx.employeeId);
+      await requireAllowedApp(input.toolkit);
       const db = requireDb();
       const [existing] = await db
         .select()
@@ -475,6 +506,7 @@ export const connectionsRouter = router({
         .optional(),
     )
     .query(async ({ input }) => {
+      await requireAllowedApp("composio");
       const search = input?.search.toLowerCase() ?? "";
       const page = input?.page ?? 1;
       const pageSize = input?.pageSize ?? 12;
@@ -487,7 +519,12 @@ export const connectionsRouter = router({
       );
       const offset = (page - 1) * pageSize;
       return {
-        items: toolkits.slice(offset, offset + pageSize),
+        items: await Promise.all(
+          toolkits.slice(offset, offset + pageSize).map(async (toolkit) => ({
+            ...toolkit,
+            allowed: await isWorkConnectedAppAllowed(toolkit.slug),
+          })),
+        ),
         page,
         pageCount: Math.max(1, Math.ceil(toolkits.length / pageSize)),
         total: toolkits.length,
@@ -496,6 +533,7 @@ export const connectionsRouter = router({
 
   managedAccounts: staffProcedure.query(async ({ ctx }) => {
     const employeeId = requireEmployeeId(ctx.employeeId);
+    await requireAllowedApp("composio");
     const db = requireDb();
     const [remote, local] = await Promise.all([
       requireSystemComposio().listUserConnectedAccounts(employeeId),
@@ -537,6 +575,8 @@ export const connectionsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const employeeId = requireEmployeeId(ctx.employeeId);
+      await requireAllowedApp("composio");
+      await requireAllowedApp(input.toolkit);
       const client = requireSystemComposio();
       const toolkits = await client.listManagedToolkits();
       if (!toolkits.some((toolkit) => toolkit.slug === input.toolkit)) {
@@ -645,6 +685,7 @@ export const connectionsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const employeeId = requireEmployeeId(ctx.employeeId);
+      await requireAllowedApp("google_workspace");
       const profileResponse = await fetch(
         "https://www.googleapis.com/oauth2/v3/userinfo",
         { headers: { authorization: `Bearer ${input.accessToken}` } },
@@ -755,6 +796,7 @@ export const connectionsRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      await requireAllowedApp(input.toolkit);
       const redirectUri =
         input.redirectUri ??
         `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/settings/connections/callback`;
@@ -835,14 +877,16 @@ export const connectionsRouter = router({
 
   status: staffProcedure
     .input(z.object({ toolkit: z.string() }))
-    .query(({ input, ctx }) =>
-      composio.status(input.toolkit, requireEmployeeId(ctx.employeeId)),
-    ),
+    .query(async ({ input, ctx }) => {
+      await requireAllowedApp(input.toolkit);
+      return composio.status(input.toolkit, requireEmployeeId(ctx.employeeId));
+    }),
 
   /** Local/demo OAuth callback. Production callbacks must exchange real provider tokens. */
   completeOAuth: staffProcedure
     .input(z.object({ toolkit: oauthToolkit }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      await requireAllowedApp(input.toolkit);
       if (getDb()) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
@@ -879,7 +923,8 @@ export const connectionsRouter = router({
       return row;
     }),
 
-  canvaListDesigns: staffProcedure.query(({ ctx }) => {
+  canvaListDesigns: staffProcedure.query(async ({ ctx }) => {
+    await requireAllowedApp("canva");
     const store = getDemoStore();
     const canva = store.connections.find(
       (row) => row.toolkit === "canva" && row.status === "connected",

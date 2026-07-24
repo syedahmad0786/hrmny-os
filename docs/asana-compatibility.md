@@ -22,7 +22,7 @@ The connection audit found one connected account in the hrmny application:
 
 - Google Workspace — `developer@hrmny.co`
 
-It did not contain a Composio project key or a separately stored Asana account, so the claimed external Asana connection could not be verified from the application during the audit. A live Composio transport, Asana identity/workspace verification, read-only scan, and confirmed idempotent import are now implemented. The server-side `COMPOSIO_API_KEY` must be configured before the application can observe the external account. Incremental sync remains disabled.
+It did not contain a Composio project key or a separately stored Asana account, so the claimed external Asana connection could not be verified from the application during the audit. A live Composio transport, Asana identity/workspace verification, read-only scan, confirmed idempotent import, and cursor-based recurring reconciliation are now implemented. The server-side `COMPOSIO_API_KEY` must be configured before the application can observe the external account.
 
 ## Compatibility map
 
@@ -48,7 +48,7 @@ It did not contain a Composio project key or a separately stored Asana account, 
 
 ### Views and personal work
 
-List, board, monthly Calendar, date-range Timeline, and Files views use the same project data and are available in beta. My Tasks, Inbox, full-text search, and saved searches are also beta. Gantt, advanced personal sections/focus controls, weekly Calendar, and offline work mutation remain planned.
+List, board, monthly Calendar, date-range Timeline, Files, and Gantt views use the same project data and are available in beta. Gantt includes dependencies, critical-path calculation, captured baselines, and schedule variance. My Tasks, Inbox, full-text search, and saved searches are also beta. Advanced personal sections/focus controls, weekly Calendar, and offline work mutation remain planned.
 
 ### Intake, automation, and standardisation
 
@@ -56,15 +56,15 @@ Forms, conditional form questions, task-creating submissions, event rules with c
 
 ### Goals, portfolios, reporting, and resources
 
-Goals, sub-goals, contributing work, portfolios, status updates, reporting dashboards, Workload, capacity planning, budgets, and time tracking remain planned. Existing hrmny operational dashboards are not counted as Asana parity until they operate on the work graph and respect work-object permissions.
+Goals, sub-goals, weighted contributing projects/tasks, portfolio progress and health, structured status updates, live and saved reporting dashboards, CSV export, weekly Workload, capacity allocations, project budgets/cost forecasts, task estimates, manual time entries, and single-user timers are available in beta. They operate on the shared work graph and enforce work-object permissions. Portfolio-wide workload, richer report chart/group/filter builders, goal history, and multi-rate cost models remain planned.
 
 ### Enterprise administration
 
-Feature Lab and hrmny RBAC are available. Project-level admin/editor/commenter/viewer access is beta. Guest collaboration, view-only licensing, team privacy, domain defaults, SSO/SCIM, sandbox management, graph export, app governance, and a full Asana-style admin console remain planned. The existing append-only audit trail is reused.
+Feature Lab and editable hrmny RBAC are available. Project-level admin/editor/commenter/viewer access, teams with privacy/members/projects, explicit guest project sharing, portal viewer/commenter access, workspace view-only licenses, domain and sharing defaults, enforced connected-app policy, session defaults, full Work graph backup, audit CSV export, the organization admin console, SAML SSO enforcement, and SCIM 2.0 Users/Groups provisioning are beta. External guest work is served only from the portal API boundary, and workspace view-only licenses deny every Work mutation server-side. The connected-app boundary blocks credential storage, OAuth starts, secret reads, smoke tests, Asana verification, imports, sync, and webhook registration when apps are disabled; approved-only mode fails closed for toolkits outside the curated catalogue. SSO enforcement uses a Supabase-registered SAML provider, governed domains, and explicit break-glass accounts. SCIM uses expiring/revocable bearer tokens stored only as hashes, supports discovery plus create/read/replace/patch/deactivate flows, audits writes, and is denied immediately when Feature Lab disables `work.sso_scim` globally, for the token owner, or for the owner's role. Sandbox environments remain planned. The existing append-only audit trail is reused and records both guest and identity-provisioning changes.
 
 ### Import, sync, and integrations
 
-The beta importer preserves projects, sections, tasks, nested subtasks, multi-home membership, dependencies, comments, followers, tags, attachments, and custom fields/values. It is idempotent using source/external identifiers, blocks on unmapped people by default, records a migration run, and writes atomically after an explicit confirmation. Teams, project memberships, time entries, goals, portfolios, templates, and status history remain migration gaps. Cutover still requires signed webhooks plus a cursor-based reconciliation job because webhook events are compact and may arrive late.
+The beta importer preserves projects, sections, tasks, nested subtasks, multi-home membership, dependencies, comments, followers, tags, attachments, and custom fields/values. It is idempotent using source/external identifiers, blocks on unmapped people by default, records a migration run, and writes atomically after an explicit confirmation. Workspace event cursors run on a recurring job; changes or expired cursors trigger a full idempotent reconciliation, while explicit delete/removal events archive deleted work and remove project memberships. Signed Asana webhooks can now be registered for the workspace and every active project through the live Composio transport. The callback completes Asana's secret handshake, stores the secret in Vault, verifies every raw payload with SHA-256 HMAC, deduplicates receipts, and wakes the same reconciliation job. New and archived projects are reconciled automatically after structural changes. Cursor polling remains active because Asana documents webhook delivery as at-most-once and recommends a polling fallback. Enabling webhooks requires a public HTTPS `NEXT_PUBLIC_APP_URL` and webhook scopes on the connected Asana authorization. Teams, project memberships, time entries, goals, portfolios, templates, and status history remain migration gaps.
 
 ### AI parity
 
@@ -85,10 +85,10 @@ AI features remain planned until the provider performs real generation, sources 
 
 1. **Feature Lab foundation** — catalogue, inheritance, client/role/user controls, navigation/API enforcement, audit. Implemented.
 2. **Core work graph** — projects, permissions, sections, tasks, subtasks, dates, dependencies, comments, list/board. Implemented at first usable depth.
-3. **Asana connection and migration** — live Composio verification, read-only discovery, dry-run report, and idempotent core import implemented in beta; delta sync and cutover remain.
-4. **Workflow depth** — custom fields, tags, files, followers, recurrence, forms, event rules, templates, bundles, and approvals implemented in beta; proofing, richer automation, public intake, and time remain.
-5. **Planning and reporting** — Calendar, Timeline, Files, My Tasks, Inbox, and search implemented in beta; Gantt, goals, portfolios, statuses, dashboards, workload, and capacity remain.
-6. **Enterprise controls and integrations** — teams, guests, sharing, admin, SSO/SCIM, exports, webhooks, third-party apps.
+3. **Asana connection and migration** — live Composio verification, read-only discovery, dry-run report, idempotent core import, workspace event cursors, signed project/workspace webhooks, recurring reconciliation, and destructive-event handling implemented in beta; non-core object migration remains.
+4. **Workflow depth** — custom fields, tags, files, followers, recurrence, forms, event rules, templates, bundles, and approvals implemented in beta; proofing, richer automation, and public intake remain.
+5. **Planning and reporting** — Calendar, Timeline, Files, My Tasks, Inbox, search, Gantt, goals, portfolios, statuses, dashboards, workload, capacity, budgets, and time are implemented in beta; richer cross-portfolio analytics remain.
+6. **Enterprise controls and integrations** — teams, guests, view-only licensing, sharing defaults, editable RBAC, admin console, audit export, graph backup, SAML SSO enforcement, SCIM Users/Groups provisioning, and signed Asana webhook ingestion implemented in beta; sandboxes, the general Work API/webhook surface, and additional third-party apps remain.
 7. **AI** — smart assists first, then AI Studio, Teammates/Skills, and the Dash equivalent, all using the same Feature Lab and permission resolver.
 
 ## Primary references
@@ -105,3 +105,7 @@ AI features remain planned until the provider performs real generation, sources 
 - https://asana.com/product/ai/dash
 - https://developers.asana.com/reference/rest-api-reference
 - https://developers.asana.com/docs/webhooks-guide
+- https://developers.asana.com/reference/getworkspaceevents
+- https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml
+- https://www.rfc-editor.org/info/rfc7643/
+- https://www.rfc-editor.org/info/rfc7644/

@@ -61,6 +61,8 @@ import { digitalCardsRouter } from "./digital-cards-router";
 import { featureLabRouter } from "./feature-lab-router";
 import { listFeatureOverrides, resolveFeatureCatalog } from "../features";
 import { workManagementRouter } from "./work-management-router";
+import { workAdminRouter } from "./work-admin-router";
+import { workAiRouter } from "./work-ai-router";
 import { asanaMigrationRouter } from "./asana-migration-router";
 import { clientPreviewRouter } from "./client-preview-router";
 import { opsRouter } from "./ops-router";
@@ -740,6 +742,8 @@ export const appRouter = router({
   aiCustomApps: aiCustomAppsRouter,
   digitalCards: digitalCardsRouter,
   work: workManagementRouter,
+  workAdmin: workAdminRouter,
+  workAi: workAiRouter,
   asanaMigration: asanaMigrationRouter,
   clientPreview: clientPreviewRouter,
   assets: assetsRouter,

@@ -58,6 +58,7 @@ export async function importAsanaWorkspace(input: {
   workspaceGid: string;
   workspaceName: string;
   actorEmployeeId: string;
+  mode?: "import" | "sync";
 }): Promise<{ runId: string; summary: AsanaImportSummary }> {
   const { db, scan, actorEmployeeId } = input;
   const [run] = await db.execute(sql<{ run_id: string }>`
@@ -65,7 +66,8 @@ export async function importAsanaWorkspace(input: {
       source_platform, workspace_external_id, workspace_name, mode, status,
       requested_by_employee_id
     ) values (
-      'asana', ${input.workspaceGid}, ${input.workspaceName}, 'import', 'running',
+      'asana', ${input.workspaceGid}, ${input.workspaceName},
+      ${input.mode ?? "import"}, 'running',
       ${actorEmployeeId}::uuid
     )
     returning work_migration_run_id as run_id

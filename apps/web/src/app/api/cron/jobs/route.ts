@@ -2,6 +2,12 @@ import { eq, scheduledJob, sql } from "@hrmny/db";
 import { z } from "zod";
 import { getDb } from "@/server/db";
 import { emitHealthSignal } from "@/server/m1-persistence";
+import { featureEnabled } from "@/server/features";
+import { syncAsanaWorkspace } from "@/server/asana-sync";
+import { getVerifiedAsanaConnection } from "@/server/trpc/connections-router";
+import { refreshAsanaWebhooksIfEnabled } from "@/server/asana-webhooks";
+import { deliverPendingWorkWebhooks } from "@/server/work-api";
+import { cleanupExpiredWorkAiRuns } from "@/server/work-ai";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +15,11 @@ const HealthJobSchema = z.object({
   signalKey: z.string().min(1).max(120),
   severity: z.enum(["info", "warn", "critical"]),
   payload: z.record(z.unknown()).default({}),
+});
+const AsanaSyncJobSchema = z.object({
+  workspaceGid: z.string().min(1).max(120),
+  workspaceName: z.string().min(1).max(300),
+  actorEmployeeId: z.string().uuid(),
 });
 
 type ClaimedJob = {
@@ -53,21 +64,70 @@ export async function GET(request: Request) {
   let failed = 0;
   for (const job of claimed) {
     try {
-      if (job.kind !== "health_signal") {
+      let result: Record<string, unknown> = { ok: true };
+      let recurring = false;
+      if (job.kind === "health_signal") {
+        const payload = HealthJobSchema.parse(job.payload);
+        await emitHealthSignal(
+          payload.signalKey,
+          payload.severity,
+          payload.payload,
+        );
+      } else if (job.kind === "asana_sync") {
+        const payload = AsanaSyncJobSchema.parse(job.payload);
+        const roles = await db.execute<{ key: string }>(sql`
+          select role.key from public.employee_role membership
+          join public.role role on role.role_id = membership.role_id
+          where membership.employee_id = ${payload.actorEmployeeId}::uuid
+        `);
+        const enabled = await featureEnabled("asana.sync", {
+          userId: payload.actorEmployeeId,
+          roles: roles.map((role) => role.key),
+        });
+        if (enabled) {
+          const verified = await getVerifiedAsanaConnection(
+            payload.actorEmployeeId,
+          );
+          if (!verified) throw new Error("Asana connection is unavailable");
+          const synced = await syncAsanaWorkspace({
+            db,
+            adapter: verified.adapter,
+            workspaceGid: payload.workspaceGid,
+            workspaceName: payload.workspaceName,
+            connectedAccountId: verified.account.id,
+            actorEmployeeId: payload.actorEmployeeId,
+          });
+          const webhookRefresh = synced.reconciled
+            ? await refreshAsanaWebhooksIfEnabled({
+                adapter: verified.adapter,
+                connectedAccountId: verified.account.id,
+                workspace: {
+                  gid: payload.workspaceGid,
+                  name: payload.workspaceName,
+                },
+                employeeId: payload.actorEmployeeId,
+              }).catch((error) => ({
+                error:
+                  error instanceof Error
+                    ? error.message.slice(0, 500)
+                    : "Webhook refresh failed",
+              }))
+            : null;
+          result = { ...synced, webhookRefresh };
+          recurring = true;
+        } else result = { ok: true, disabled: true };
+      } else {
         throw new Error(`Unsupported job kind: ${job.kind}`);
       }
-      const payload = HealthJobSchema.parse(job.payload);
-      await emitHealthSignal(
-        payload.signalKey,
-        payload.severity,
-        payload.payload,
-      );
       await db
         .update(scheduledJob)
         .set({
-          status: "completed",
-          completedAt: new Date(),
-          result: { ok: true },
+          status: recurring ? "pending" : "completed",
+          runAt: recurring ? new Date(Date.now() + 5 * 60_000) : new Date(),
+          attempts: recurring ? 0 : job.attempts,
+          lockedAt: null,
+          completedAt: recurring ? null : new Date(),
+          result,
           lastError: null,
           updatedAt: new Date(),
         })
@@ -99,5 +159,15 @@ export async function GET(request: Request) {
       delayedJobs: Number(lag!.count),
     });
   }
-  return Response.json({ claimed: claimed.length, completed, failed });
+  const [workWebhooks, expiredAiRuns] = await Promise.all([
+    deliverPendingWorkWebhooks(),
+    cleanupExpiredWorkAiRuns(),
+  ]);
+  return Response.json({
+    claimed: claimed.length,
+    completed,
+    failed,
+    workWebhooks,
+    expiredAiRuns,
+  });
 }

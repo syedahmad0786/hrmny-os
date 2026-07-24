@@ -162,6 +162,55 @@
       "when": 1784926800000,
       "tag": "0022_work_workflows",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784930400000,
+      "tag": "0023_work_planning",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784934000000,
+      "tag": "0024_asana_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784937600000,
+      "tag": "0025_work_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1784941200000,
+      "tag": "0026_work_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1784944800000,
+      "tag": "0027_asana_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1784948400000,
+      "tag": "0028_work_api_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1784952000000,
+      "tag": "0029_work_ai",
+      "breakpoints": true
     }
   ]
 }

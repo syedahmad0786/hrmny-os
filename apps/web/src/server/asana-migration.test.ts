@@ -27,6 +27,9 @@ describe("Asana migration scan", () => {
       listAttachments: vi
         .fn()
         .mockResolvedValue([{ gid: "file1", name: "brief.pdf" }]),
+      workspaceEvents: vi.fn(),
+      createWebhook: vi.fn(),
+      deleteWebhook: vi.fn(),
     };
 
     const result = await scanAsanaWorkspace(adapter, "w1", "full");

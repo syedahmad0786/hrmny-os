@@ -17,11 +17,15 @@ export {
   createAsanaViaComposio,
   type AsanaAdapter,
   type AsanaAttachment,
+  type AsanaEvent,
+  type AsanaEventPage,
   type AsanaProject,
   type AsanaSection,
   type AsanaStory,
   type AsanaTask,
   type AsanaUser,
+  type AsanaWebhook,
+  type AsanaWebhookFilter,
   type AsanaWorkspace,
 } from "./asana";
 export {

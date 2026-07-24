@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
 import { featureEnabled } from "../features";
+import { getWorkOrganizationPolicy } from "../work-governance";
 import { writeAudit } from "../m1-persistence";
 import {
   nextRecurrenceDate,
@@ -20,6 +21,14 @@ import {
   type WorkRuleAction,
   type WorkRuleBranch,
 } from "../work-workflows";
+import {
+  budgetSummary,
+  capacityUtilization,
+  criticalPath,
+  splitTimerByUtcDay,
+  weightedProgress,
+} from "../work-planning";
+import { validateDailyMinutes } from "../shifts-timesheets";
 import { router, staffProcedure, type TrpcContext } from "./trpc";
 
 type AccessLevel = "admin" | "editor" | "commenter" | "viewer";
@@ -33,6 +42,9 @@ type WorkProject = {
   ownerEmployeeId: string | null;
   sourcePlatform: "native" | "asana";
   accessLevel: AccessLevel;
+  budgetAmount?: number | null;
+  budgetCurrency?: string;
+  hourlyCostRate?: number | null;
   createdAt: string;
 };
 type WorkSection = {
@@ -57,11 +69,13 @@ type WorkItem = {
   position: number;
   projectId: string;
   recurrence?: WorkRecurrence | null;
+  estimatedMinutes?: number | null;
 };
 type WorkComment = {
   commentId: string;
   itemId: string;
-  authorEmployeeId: string;
+  authorEmployeeId: string | null;
+  authorPortalUserId?: string | null;
   authorName: string;
   body: string;
   createdAt: string;
@@ -162,6 +176,92 @@ type WorkApprovalDecision = {
   decidedByEmployeeId: string;
   decidedAt: string;
 };
+type WorkGoal = {
+  goalId: string;
+  parentGoalId: string | null;
+  name: string;
+  description: string;
+  scope: "company" | "team" | "individual";
+  ownerEmployeeId: string | null;
+  status: "on_track" | "at_risk" | "off_track" | "achieved" | "dropped";
+  progress: number;
+  startDate: string | null;
+  dueDate: string | null;
+  privacy: "organization" | "private";
+  createdByEmployeeId: string;
+  createdAt: string;
+};
+type WorkGoalLink = {
+  goalLinkId: string;
+  goalId: string;
+  projectId: string | null;
+  itemId: string | null;
+  weight: number;
+};
+type WorkPortfolio = {
+  portfolioId: string;
+  name: string;
+  description: string;
+  color: string;
+  privacy: "organization" | "private";
+  ownerEmployeeId: string | null;
+  createdByEmployeeId: string;
+  createdAt: string;
+};
+type WorkStatusUpdate = {
+  statusUpdateId: string;
+  projectId: string | null;
+  portfolioId: string | null;
+  goalId: string | null;
+  health: "on_track" | "at_risk" | "off_track" | "complete";
+  progress: number | null;
+  title: string;
+  body: string;
+  createdByEmployeeId: string;
+  createdAt: string;
+};
+type WorkCapacityAllocation = {
+  allocationId: string;
+  employeeId: string;
+  projectId: string;
+  weekStart: string;
+  allocatedMinutes: number;
+  roleName: string | null;
+};
+type WorkTimer = {
+  timerId: string;
+  employeeId: string;
+  projectId: string;
+  itemId: string | null;
+  description: string | null;
+  startedAt: string;
+  stoppedAt: string | null;
+};
+type WorkTimeEntry = {
+  timeEntryId: string;
+  employeeId: string;
+  projectId: string;
+  itemId: string | null;
+  workDate: string;
+  minutes: number;
+  isBillable: boolean;
+  description: string | null;
+  status: "draft" | "submitted" | "approved" | "rejected";
+};
+type WorkDashboard = {
+  dashboardId: string;
+  ownerEmployeeId: string;
+  name: string;
+  config: Record<string, unknown>;
+};
+type WorkBaseline = {
+  baselineId: string;
+  projectId: string;
+  itemId: string;
+  startDate: string | null;
+  dueAt: string | null;
+  capturedAt: string;
+};
 
 type DemoWork = {
   projects: Map<string, WorkProject>;
@@ -191,6 +291,16 @@ type DemoWork = {
   bundles: Map<string, WorkBundle>;
   projectBundles: Map<string, { version: number; appliedAt: string }>;
   approvalDecisions: Map<string, WorkApprovalDecision[]>;
+  goals: Map<string, WorkGoal>;
+  goalLinks: Map<string, WorkGoalLink>;
+  portfolios: Map<string, WorkPortfolio>;
+  portfolioProjects: Map<string, Set<string>>;
+  statusUpdates: Map<string, WorkStatusUpdate>;
+  allocations: Map<string, WorkCapacityAllocation>;
+  timers: Map<string, WorkTimer>;
+  timeEntries: Map<string, WorkTimeEntry>;
+  dashboards: Map<string, WorkDashboard>;
+  baselines: Map<string, WorkBaseline>;
 };
 
 const DEMO_PROJECT_ID = "a1000000-0000-4000-8000-000000000001";
@@ -198,7 +308,7 @@ const DEMO_SECTION_TODO = "a2000000-0000-4000-8000-000000000001";
 const DEMO_SECTION_DOING = "a2000000-0000-4000-8000-000000000002";
 let demoWork: DemoWork | undefined;
 
-function getDemoWork(): DemoWork {
+export function getDemoWork(): DemoWork {
   if (demoWork) return demoWork;
   const createdAt = new Date().toISOString();
   const projects = new Map<string, WorkProject>([
@@ -215,6 +325,9 @@ function getDemoWork(): DemoWork {
         ownerEmployeeId: "c0000000-0000-4000-8000-000000000001",
         sourcePlatform: "native",
         accessLevel: "admin",
+        budgetAmount: 25_000,
+        budgetCurrency: "AED",
+        hourlyCostRate: 200,
         createdAt,
       },
     ],
@@ -260,6 +373,7 @@ function getDemoWork(): DemoWork {
         sectionId: DEMO_SECTION_TODO,
         position: 0,
         projectId: DEMO_PROJECT_ID,
+        estimatedMinutes: 480,
       },
     ],
   ]);
@@ -285,6 +399,16 @@ function getDemoWork(): DemoWork {
     bundles: new Map(),
     projectBundles: new Map(),
     approvalDecisions: new Map(),
+    goals: new Map(),
+    goalLinks: new Map(),
+    portfolios: new Map(),
+    portfolioProjects: new Map(),
+    statusUpdates: new Map(),
+    allocations: new Map(),
+    timers: new Map(),
+    timeEntries: new Map(),
+    dashboards: new Map(),
+    baselines: new Map(),
   };
   return demoWork;
 }
@@ -496,7 +620,21 @@ async function requireWorkTypeFeature(
   }
 }
 
-async function requireProjectAccess(
+async function requireWorkFeature(ctx: TrpcContext, featureKey: string) {
+  if (
+    !(await featureEnabled(featureKey, {
+      userId: ctx.employeeId,
+      clientId: ctx.clientId,
+      roles: ctx.roles,
+    }))
+  )
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `FEATURE_DISABLED:${featureKey}`,
+    });
+}
+
+export async function requireProjectAccess(
   ctx: TrpcContext,
   projectId: string,
   minimum: AccessLevel = "viewer",
@@ -518,6 +656,7 @@ async function requireProjectAccess(
         when project.created_by_employee_id = ${employeeId}::uuid
           or project.owner_employee_id = ${employeeId}::uuid then 'admin'
         when member.access_level is not null then member.access_level
+        when team_access.access_level is not null then team_access.access_level
         else 'viewer'
       end as "accessLevel",
       project.created_at as "createdAt"
@@ -525,6 +664,17 @@ async function requireProjectAccess(
     left join public.work_project_member member
       on member.work_project_id = project.work_project_id
       and member.employee_id = ${employeeId}::uuid
+    left join lateral (
+      select team_project.access_level
+      from public.work_team_project team_project
+      join public.work_team_member team_member
+        on team_member.work_team_id = team_project.work_team_id
+      where team_project.work_project_id = project.work_project_id
+        and team_member.employee_id = ${employeeId}::uuid
+      order by case team_project.access_level
+        when 'editor' then 3 when 'commenter' then 2 else 1 end desc
+      limit 1
+    ) team_access on true
     where project.work_project_id = ${projectId}::uuid
       and project.archived_at is null
       and (
@@ -532,6 +682,7 @@ async function requireProjectAccess(
         or project.created_by_employee_id = ${employeeId}::uuid
         or project.owner_employee_id = ${employeeId}::uuid
         or member.employee_id is not null
+        or team_access.access_level is not null
       )
     limit 1
   `);
@@ -546,7 +697,7 @@ async function requireProjectAccess(
   return { ...project, createdAt: new Date(project.createdAt).toISOString() };
 }
 
-async function requireItemAccess(
+export async function requireItemAccess(
   ctx: TrpcContext,
   itemId: string,
   minimum: AccessLevel = "viewer",
@@ -574,6 +725,336 @@ async function requireItemAccess(
     }
   }
   throw new TRPCError({ code: "NOT_FOUND" });
+}
+
+async function requireItemInProject(
+  ctx: TrpcContext,
+  itemId: string,
+  projectId: string,
+) {
+  await requireItemAccess(ctx, itemId);
+  const db = getDb();
+  const belongs = !db
+    ? getDemoWork().items.get(itemId)?.projectId === projectId
+    : Boolean(
+        (
+          await db.execute(sql`
+            select 1 from public.work_project_item
+            where work_item_id = ${itemId}::uuid
+              and work_project_id = ${projectId}::uuid limit 1
+          `)
+        )[0],
+      );
+  if (!belongs)
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Task does not belong to the selected project",
+    });
+}
+
+function canManageOwned(
+  ctx: TrpcContext,
+  ownerEmployeeId: string | null,
+  createdByEmployeeId: string,
+) {
+  const employeeId = actor(ctx);
+  return employeeId === ownerEmployeeId || employeeId === createdByEmployeeId;
+}
+
+async function requireGoalAccess(
+  ctx: TrpcContext,
+  goalId: string,
+  manage = false,
+): Promise<WorkGoal> {
+  const employeeId = actor(ctx);
+  const db = getDb();
+  let goal: WorkGoal | undefined;
+  if (!db) goal = getDemoWork().goals.get(goalId);
+  else {
+    const rows = await db.execute<WorkGoal & { progress: string | number }>(sql`
+      select work_goal_id as "goalId", parent_work_goal_id as "parentGoalId",
+        name, description, scope, owner_employee_id as "ownerEmployeeId",
+        status, progress, start_date::text as "startDate", due_date::text as "dueDate",
+        privacy, created_by_employee_id as "createdByEmployeeId",
+        created_at as "createdAt"
+      from public.work_goal where work_goal_id = ${goalId}::uuid
+        and archived_at is null
+    `);
+    const row = rows[0];
+    if (row)
+      goal = {
+        ...row,
+        progress: Number(row.progress),
+        createdAt: new Date(row.createdAt).toISOString(),
+      };
+  }
+  if (
+    !goal ||
+    (goal.privacy === "private" &&
+      !canManageOwned(ctx, goal.ownerEmployeeId, goal.createdByEmployeeId))
+  ) {
+    throw new TRPCError({ code: "NOT_FOUND" });
+  }
+  if (
+    manage &&
+    !canManageOwned(ctx, goal.ownerEmployeeId, goal.createdByEmployeeId)
+  ) {
+    throw new TRPCError({ code: "FORBIDDEN" });
+  }
+  return goal;
+}
+
+async function requirePortfolioAccess(
+  ctx: TrpcContext,
+  portfolioId: string,
+  manage = false,
+): Promise<WorkPortfolio> {
+  const db = getDb();
+  let portfolio: WorkPortfolio | undefined;
+  if (!db) portfolio = getDemoWork().portfolios.get(portfolioId);
+  else {
+    const rows = await db.execute<WorkPortfolio>(sql`
+      select work_portfolio_id as "portfolioId", name, description, color,
+        privacy, owner_employee_id as "ownerEmployeeId",
+        created_by_employee_id as "createdByEmployeeId", created_at as "createdAt"
+      from public.work_portfolio
+      where work_portfolio_id = ${portfolioId}::uuid and archived_at is null
+    `);
+    const row = rows[0];
+    if (row)
+      portfolio = {
+        ...row,
+        createdAt: new Date(row.createdAt).toISOString(),
+      };
+  }
+  if (
+    !portfolio ||
+    (portfolio.privacy === "private" &&
+      !canManageOwned(
+        ctx,
+        portfolio.ownerEmployeeId,
+        portfolio.createdByEmployeeId,
+      ))
+  ) {
+    throw new TRPCError({ code: "NOT_FOUND" });
+  }
+  if (
+    manage &&
+    !canManageOwned(
+      ctx,
+      portfolio.ownerEmployeeId,
+      portfolio.createdByEmployeeId,
+    )
+  ) {
+    throw new TRPCError({ code: "FORBIDDEN" });
+  }
+  return portfolio;
+}
+
+async function goalProgress(goal: WorkGoal): Promise<number> {
+  const db = getDb();
+  if (!db) {
+    const store = getDemoWork();
+    const linked = [...store.goalLinks.values()]
+      .filter((link) => link.goalId === goal.goalId)
+      .flatMap((link) => {
+        if (link.itemId) {
+          const item = store.items.get(link.itemId);
+          return item
+            ? [{ progress: item.completedAt ? 100 : 0, weight: link.weight }]
+            : [];
+        }
+        const items = [...store.items.values()].filter(
+          (item) => item.projectId === link.projectId,
+        );
+        return [
+          {
+            progress: items.length
+              ? (items.filter((item) => item.completedAt).length /
+                  items.length) *
+                100
+              : 0,
+            weight: link.weight,
+          },
+        ];
+      });
+    linked.push(
+      ...[...store.goals.values()]
+        .filter((item) => item.parentGoalId === goal.goalId)
+        .map((item) => ({ progress: item.progress, weight: 1 })),
+    );
+    return weightedProgress(
+      linked,
+      goal.status === "achieved" ? 100 : goal.progress,
+    );
+  }
+  const contributions = await db.execute<{
+    progress: string | number;
+    weight: string | number;
+  }>(sql`
+    select link.weight,
+      case
+        when link.work_item_id is not null then
+          case when item.completed_at is null then 0 else 100 end
+        else coalesce((
+          select 100.0 * count(*) filter (where project_item.completed_at is not null)
+            / nullif(count(*), 0)
+          from public.work_project_item membership
+          join public.work_item project_item
+            on project_item.work_item_id = membership.work_item_id
+          where membership.work_project_id = link.work_project_id
+            and project_item.archived_at is null
+        ), 0)
+      end as progress
+    from public.work_goal_link link
+    left join public.work_item item on item.work_item_id = link.work_item_id
+    where link.work_goal_id = ${goal.goalId}::uuid
+    union all
+    select 1 as weight, progress from public.work_goal
+    where parent_work_goal_id = ${goal.goalId}::uuid and archived_at is null
+  `);
+  return weightedProgress(
+    contributions.map((item) => ({
+      progress: Number(item.progress),
+      weight: Number(item.weight),
+    })),
+    goal.status === "achieved" ? 100 : goal.progress,
+  );
+}
+
+async function projectProgress(projectId: string): Promise<number> {
+  const db = getDb();
+  if (!db) {
+    const items = [...getDemoWork().items.values()].filter(
+      (item) => item.projectId === projectId,
+    );
+    return items.length
+      ? Math.round(
+          (items.filter((item) => item.completedAt).length / items.length) *
+            100,
+        )
+      : 0;
+  }
+  const row = (
+    await db.execute<{ progress: string | number }>(sql`
+      select coalesce(
+        100.0 * count(*) filter (where item.completed_at is not null)
+          / nullif(count(*), 0), 0
+      ) as progress
+      from public.work_project_item membership
+      join public.work_item item on item.work_item_id = membership.work_item_id
+      where membership.work_project_id = ${projectId}::uuid
+        and item.archived_at is null
+    `)
+  )[0];
+  return Math.round(Number(row?.progress ?? 0) * 100) / 100;
+}
+
+async function projectPlanningSummary(ctx: TrpcContext, projectId: string) {
+  const project = await requireProjectAccess(ctx, projectId);
+  const db = getDb();
+  if (!db) {
+    const store = getDemoWork();
+    const items = [...store.items.values()].filter(
+      (item) => item.projectId === projectId,
+    );
+    const actualMinutes = [...store.timeEntries.values()]
+      .filter((entry) => entry.projectId === projectId)
+      .reduce((sum, entry) => sum + entry.minutes, 0);
+    const remainingEstimatedMinutes = items
+      .filter((item) => !item.completedAt)
+      .reduce((sum, item) => sum + (item.estimatedMinutes ?? 0), 0);
+    return {
+      projectId,
+      name: project.name,
+      progress: await projectProgress(projectId),
+      totalTasks: items.length,
+      completedTasks: items.filter((item) => item.completedAt).length,
+      overdueTasks: items.filter(
+        (item) =>
+          !item.completedAt && item.dueAt && new Date(item.dueAt) < new Date(),
+      ).length,
+      unassignedTasks: items.filter((item) => !item.assigneeEmployeeId).length,
+      actualMinutes,
+      remainingEstimatedMinutes,
+      budgetAmount: project.budgetAmount ?? null,
+      budgetCurrency: project.budgetCurrency ?? "AED",
+      hourlyCostRate: project.hourlyCostRate ?? null,
+      ...budgetSummary(
+        project.budgetAmount ?? null,
+        project.hourlyCostRate ?? null,
+        actualMinutes,
+        remainingEstimatedMinutes,
+      ),
+    };
+  }
+  const [settings, metrics] = await Promise.all([
+    db.execute<{
+      budgetAmount: string | number | null;
+      budgetCurrency: string;
+      hourlyCostRate: string | number | null;
+    }>(sql`
+      select budget_amount as "budgetAmount", budget_currency as "budgetCurrency",
+        hourly_cost_rate as "hourlyCostRate"
+      from public.work_project where work_project_id = ${projectId}::uuid
+    `),
+    db.execute<{
+      totalTasks: number;
+      completedTasks: number;
+      overdueTasks: number;
+      unassignedTasks: number;
+      remainingEstimatedMinutes: number;
+      actualMinutes: number;
+    }>(sql`
+      select count(distinct item.work_item_id)::int as "totalTasks",
+        count(distinct item.work_item_id) filter (
+          where item.completed_at is not null
+        )::int as "completedTasks",
+        count(distinct item.work_item_id) filter (
+          where item.completed_at is null and item.due_at < now()
+        )::int as "overdueTasks",
+        count(distinct item.work_item_id) filter (
+          where item.assignee_employee_id is null
+        )::int as "unassignedTasks",
+        coalesce(sum(item.estimated_minutes) filter (
+          where item.completed_at is null
+        ), 0)::int as "remainingEstimatedMinutes",
+        coalesce((select sum(entry.minutes) from public.time_entry entry
+          where entry.work_project_id = ${projectId}::uuid), 0)::int as "actualMinutes"
+      from public.work_project_item membership
+      join public.work_item item on item.work_item_id = membership.work_item_id
+      where membership.work_project_id = ${projectId}::uuid
+        and item.archived_at is null
+    `),
+  ]);
+  const setting = settings[0]!;
+  const metric = metrics[0] ?? {
+    totalTasks: 0,
+    completedTasks: 0,
+    overdueTasks: 0,
+    unassignedTasks: 0,
+    remainingEstimatedMinutes: 0,
+    actualMinutes: 0,
+  };
+  const budgetAmount =
+    setting.budgetAmount === null ? null : Number(setting.budgetAmount);
+  const hourlyCostRate =
+    setting.hourlyCostRate === null ? null : Number(setting.hourlyCostRate);
+  return {
+    projectId,
+    name: project.name,
+    progress: await projectProgress(projectId),
+    ...metric,
+    budgetAmount,
+    budgetCurrency: setting.budgetCurrency,
+    hourlyCostRate,
+    ...budgetSummary(
+      budgetAmount,
+      hourlyCostRate,
+      metric.actualMinutes,
+      metric.remainingEstimatedMinutes,
+    ),
+  };
 }
 
 function iso(value: Date | string | null): string | null {
@@ -1267,6 +1748,7 @@ export const workManagementRouter = router({
             when project.created_by_employee_id = ${employeeId}::uuid
               or project.owner_employee_id = ${employeeId}::uuid then 'admin'
             when member.access_level is not null then member.access_level
+            when team_access.access_level is not null then team_access.access_level
             else 'viewer'
           end as "accessLevel",
           project.created_at as "createdAt"
@@ -1274,12 +1756,24 @@ export const workManagementRouter = router({
         left join public.work_project_member member
           on member.work_project_id = project.work_project_id
           and member.employee_id = ${employeeId}::uuid
+        left join lateral (
+          select team_project.access_level
+          from public.work_team_project team_project
+          join public.work_team_member team_member
+            on team_member.work_team_id = team_project.work_team_id
+          where team_project.work_project_id = project.work_project_id
+            and team_member.employee_id = ${employeeId}::uuid
+          order by case team_project.access_level
+            when 'editor' then 3 when 'commenter' then 2 else 1 end desc
+          limit 1
+        ) team_access on true
         where project.archived_at is null
           and (
             project.privacy = 'organization'
             or project.created_by_employee_id = ${employeeId}::uuid
             or project.owner_employee_id = ${employeeId}::uuid
             or member.employee_id is not null
+            or team_access.access_level is not null
           )
         order by lower(project.name)
       `);
@@ -1295,11 +1789,13 @@ export const workManagementRouter = router({
         const project = await requireProjectAccess(ctx, input.projectId);
         const db = getDb();
         const subject = { userId: ctx.employeeId, roles: ctx.roles };
-        const [showSections, showTasks, showDependencies] = await Promise.all([
-          featureEnabled("work.sections", subject),
-          featureEnabled("work.tasks", subject),
-          featureEnabled("work.dependencies", subject),
-        ]);
+        const [showSections, showTasks, showDependencies, showTime] =
+          await Promise.all([
+            featureEnabled("work.sections", subject),
+            featureEnabled("work.tasks", subject),
+            featureEnabled("work.dependencies", subject),
+            featureEnabled("work.time_tracking", subject),
+          ]);
         if (!db) {
           const store = getDemoWork();
           return {
@@ -1312,6 +1808,10 @@ export const workManagementRouter = router({
             items: showTasks
               ? [...store.items.values()]
                   .filter((item) => item.projectId === input.projectId)
+                  .map((item) => ({
+                    ...item,
+                    estimatedMinutes: showTime ? item.estimatedMinutes : null,
+                  }))
                   .sort((a, b) => a.position - b.position)
               : [],
             dependencies: showDependencies
@@ -1345,7 +1845,7 @@ export const workManagementRouter = router({
               select item.work_item_id as "itemId",
                 item.parent_work_item_id as "parentItemId", item.title,
                 item.description, item.item_type as "itemType", item.priority,
-                item.recurrence,
+                item.recurrence, item.estimated_minutes as "estimatedMinutes",
                 item.assignee_employee_id as "assigneeEmployeeId",
                 assignee.display_name as "assigneeName", item.start_date as "startDate",
                 item.due_at as "dueAt", item.completed_at as "completedAt",
@@ -1375,6 +1875,7 @@ export const workManagementRouter = router({
           sections,
           items: items.map((item) => ({
             ...item,
+            estimatedMinutes: showTime ? item.estimatedMinutes : null,
             startDate: item.startDate ? String(item.startDate) : null,
             dueAt: iso(item.dueAt),
             completedAt: iso(item.completedAt),
@@ -1388,7 +1889,7 @@ export const workManagementRouter = router({
         z.object({
           name: z.string().trim().min(1).max(160),
           description: z.string().trim().max(20_000).default(""),
-          privacy: z.enum(["organization", "private"]).default("organization"),
+          privacy: z.enum(["organization", "private"]).optional(),
           clientId: nullableUuid.optional(),
           color: z
             .string()
@@ -1399,6 +1900,9 @@ export const workManagementRouter = router({
       .mutation(async ({ input, ctx }) => {
         const employeeId = actor(ctx);
         const db = getDb();
+        const privacy =
+          input.privacy ??
+          (await getWorkOrganizationPolicy()).defaultProjectPrivacy;
         let project: WorkProject;
         if (!db) {
           project = {
@@ -1406,7 +1910,7 @@ export const workManagementRouter = router({
             name: input.name,
             description: input.description,
             color: input.color,
-            privacy: input.privacy,
+            privacy,
             clientId: input.clientId ?? null,
             ownerEmployeeId: employeeId,
             sourcePlatform: "native",
@@ -1435,7 +1939,7 @@ export const workManagementRouter = router({
                 name, description, color, privacy, client_id,
                 owner_employee_id, created_by_employee_id
               ) values (
-                ${input.name}, ${input.description}, ${input.color}, ${input.privacy},
+                ${input.name}, ${input.description}, ${input.color}, ${privacy},
                 ${input.clientId ?? null}::uuid, ${employeeId}::uuid, ${employeeId}::uuid
               )
               returning work_project_id as "projectId", name, description, color,
@@ -1536,6 +2040,60 @@ export const workManagementRouter = router({
   }),
 
   tasks: router({
+    get: staffProcedure
+      .input(z.object({ itemId: uuid }))
+      .query(async ({ input, ctx }) => {
+        const access = await requireItemAccess(ctx, input.itemId);
+        const showTime = await featureEnabled("work.time_tracking", {
+          userId: ctx.employeeId,
+          clientId: ctx.clientId,
+          roles: ctx.roles,
+        });
+        const db = getDb();
+        if (!db) {
+          const item = getDemoWork().items.get(input.itemId)!;
+          await requireWorkTypeFeature(ctx, item.itemType);
+          return {
+            ...item,
+            estimatedMinutes: showTime ? item.estimatedMinutes : null,
+          };
+        }
+        const rows = await db.execute<
+          WorkItem & {
+            dueAt: Date | string | null;
+            completedAt: Date | string | null;
+          }
+        >(sql`
+          select item.work_item_id as "itemId",
+            item.parent_work_item_id as "parentItemId", item.title,
+            item.description, item.item_type as "itemType", item.priority,
+            item.recurrence, item.estimated_minutes as "estimatedMinutes",
+            item.assignee_employee_id as "assigneeEmployeeId",
+            assignee.display_name as "assigneeName", item.start_date as "startDate",
+            item.due_at as "dueAt", item.completed_at as "completedAt",
+            membership.work_section_id as "sectionId", membership.position,
+            membership.work_project_id as "projectId"
+          from public.work_item item
+          join public.work_project_item membership
+            on membership.work_item_id = item.work_item_id
+            and membership.work_project_id = ${access.projectId}::uuid
+          left join public.employee assignee
+            on assignee.employee_id = item.assignee_employee_id
+          where item.work_item_id = ${input.itemId}::uuid
+            and item.archived_at is null limit 1
+        `);
+        const item = rows[0];
+        if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+        await requireWorkTypeFeature(ctx, item.itemType);
+        return {
+          ...item,
+          estimatedMinutes: showTime ? item.estimatedMinutes : null,
+          startDate: item.startDate ? String(item.startDate) : null,
+          dueAt: iso(item.dueAt),
+          completedAt: iso(item.completedAt),
+        };
+      }),
+
     create: staffProcedure
       .input(
         z.object({
@@ -1552,11 +2110,20 @@ export const workManagementRouter = router({
           assigneeEmployeeId: nullableUuid.optional(),
           startDate: z.string().date().nullable().optional(),
           dueAt: z.string().datetime().nullable().optional(),
+          estimatedMinutes: z
+            .number()
+            .int()
+            .min(1)
+            .max(1_000_000)
+            .nullable()
+            .optional(),
         }),
       )
       .mutation(async ({ input, ctx }) => {
         const employeeId = actor(ctx);
         await requireWorkTypeFeature(ctx, input.itemType);
+        if (input.estimatedMinutes !== undefined)
+          await requireWorkFeature(ctx, "work.time_tracking");
         await requireProjectAccess(ctx, input.projectId, "editor");
         if (input.parentItemId)
           await requireItemAccess(ctx, input.parentItemId, "editor");
@@ -1582,6 +2149,7 @@ export const workManagementRouter = router({
             ).length,
             projectId: input.projectId,
             recurrence: null,
+            estimatedMinutes: input.estimatedMinutes ?? null,
           };
           store.items.set(item.itemId, item);
         } else {
@@ -1603,15 +2171,17 @@ export const workManagementRouter = router({
               insert into public.work_item (
                 parent_work_item_id, title, description, item_type, priority,
                 assignee_employee_id, created_by_employee_id, start_date, due_at
+                , estimated_minutes
               ) values (
                 ${input.parentItemId ?? null}::uuid, ${input.title}, ${input.description},
                 ${input.itemType}, ${input.priority ?? null},
                 ${input.assigneeEmployeeId ?? null}::uuid, ${employeeId}::uuid,
                 ${input.startDate ?? null}::date, ${input.dueAt ?? null}::timestamptz
+                , ${input.estimatedMinutes ?? null}
               )
               returning work_item_id as "itemId", parent_work_item_id as "parentItemId",
                 title, description, item_type as "itemType", priority,
-                recurrence,
+                recurrence, estimated_minutes as "estimatedMinutes",
                 assignee_employee_id as "assigneeEmployeeId", start_date as "startDate",
                 due_at as "dueAt", completed_at as "completedAt"
             `);
@@ -1675,10 +2245,19 @@ export const workManagementRouter = router({
           assigneeEmployeeId: nullableUuid.optional(),
           startDate: z.string().date().nullable().optional(),
           dueAt: z.string().datetime().nullable().optional(),
+          estimatedMinutes: z
+            .number()
+            .int()
+            .min(1)
+            .max(1_000_000)
+            .nullable()
+            .optional(),
         }),
       )
       .mutation(async ({ input, ctx }) => {
         const access = await requireItemAccess(ctx, input.itemId, "editor");
+        if (input.estimatedMinutes !== undefined)
+          await requireWorkFeature(ctx, "work.time_tracking");
         const db = getDb();
         if (!db) {
           const item = getDemoWork().items.get(input.itemId)!;
@@ -1702,6 +2281,9 @@ export const workManagementRouter = router({
               ? { startDate: input.startDate }
               : {}),
             ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
+            ...(input.estimatedMinutes !== undefined
+              ? { estimatedMinutes: input.estimatedMinutes }
+              : {}),
           });
           await audit(ctx, "work.task.update", "work_item", input.itemId, {
             fields: Object.keys(input).filter((key) => key !== "itemId"),
@@ -1736,11 +2318,12 @@ export const workManagementRouter = router({
             assignee_employee_id = case when ${input.assigneeEmployeeId !== undefined} then ${input.assigneeEmployeeId ?? null}::uuid else assignee_employee_id end,
             start_date = case when ${input.startDate !== undefined} then ${input.startDate ?? null}::date else start_date end,
             due_at = case when ${input.dueAt !== undefined} then ${input.dueAt ?? null}::timestamptz else due_at end,
+            estimated_minutes = case when ${input.estimatedMinutes !== undefined} then ${input.estimatedMinutes ?? null} else estimated_minutes end,
             updated_at = now()
           where work_item_id = ${input.itemId}::uuid and archived_at is null
           returning work_item_id as "itemId", parent_work_item_id as "parentItemId",
             title, description, item_type as "itemType", priority,
-            recurrence,
+            recurrence, estimated_minutes as "estimatedMinutes",
             assignee_employee_id as "assigneeEmployeeId", start_date as "startDate",
             due_at as "dueAt", completed_at as "completedAt"
         `);
@@ -1769,6 +2352,23 @@ export const workManagementRouter = router({
             "due_date_set",
           );
         return rows[0];
+      }),
+
+    archive: staffProcedure
+      .input(z.object({ itemId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireItemAccess(ctx, input.itemId, "editor");
+        const db = getDb();
+        if (!db) getDemoWork().items.delete(input.itemId);
+        else
+          await db.execute(sql`
+            update public.work_item set archived_at = now(), updated_at = now()
+            where work_item_id = ${input.itemId}::uuid and archived_at is null
+          `);
+        await audit(ctx, "work.task.archive", "work_item", input.itemId, {
+          archived: true,
+        });
+        return { ok: true as const };
       }),
 
     complete: staffProcedure
@@ -1911,10 +2511,14 @@ export const workManagementRouter = router({
           WorkComment & { createdAt: Date | string }
         >(sql`
         select comment.work_comment_id as "commentId", comment.work_item_id as "itemId",
-          comment.author_employee_id as "authorEmployeeId", author.display_name as "authorName",
+          comment.author_employee_id as "authorEmployeeId",
+          comment.author_portal_user_id as "authorPortalUserId",
+          coalesce(author.display_name, portal_author.display_name, 'Unknown') as "authorName",
           comment.body, comment.created_at as "createdAt"
         from public.work_comment comment
-        join public.employee author on author.employee_id = comment.author_employee_id
+        left join public.employee author on author.employee_id = comment.author_employee_id
+        left join public.client_portal_user portal_author
+          on portal_author.client_portal_user_id = comment.author_portal_user_id
         where comment.work_item_id = ${input.itemId}::uuid and comment.deleted_at is null
         order by comment.created_at
       `);
@@ -4603,6 +5207,1473 @@ export const workManagementRouter = router({
           pending: true,
         });
         return { ok: true as const };
+      }),
+  }),
+
+  goals: router({
+    list: staffProcedure.query(async ({ ctx }) => {
+      const employeeId = actor(ctx);
+      const db = getDb();
+      const goals = !db
+        ? [...getDemoWork().goals.values()].filter(
+            (goal) =>
+              goal.privacy === "organization" ||
+              canManageOwned(
+                ctx,
+                goal.ownerEmployeeId,
+                goal.createdByEmployeeId,
+              ),
+          )
+        : await db.execute<WorkGoal & { progress: string | number }>(sql`
+            select work_goal_id as "goalId",
+              parent_work_goal_id as "parentGoalId", name, description, scope,
+              owner_employee_id as "ownerEmployeeId", status, progress,
+              start_date::text as "startDate", due_date::text as "dueDate", privacy,
+              created_by_employee_id as "createdByEmployeeId", created_at as "createdAt"
+            from public.work_goal
+            where archived_at is null and (
+              privacy = 'organization' or owner_employee_id = ${employeeId}::uuid
+              or created_by_employee_id = ${employeeId}::uuid
+            )
+            order by due_date nulls last, lower(name)
+          `);
+      return Promise.all(
+        goals.map(async (goal) => ({
+          ...goal,
+          progress: await goalProgress({
+            ...goal,
+            progress: Number(goal.progress),
+            createdAt: new Date(goal.createdAt).toISOString(),
+          }),
+          createdAt: new Date(goal.createdAt).toISOString(),
+        })),
+      );
+    }),
+    create: staffProcedure
+      .input(
+        z.object({
+          parentGoalId: nullableUuid.optional(),
+          name: z.string().trim().min(1).max(300),
+          description: z.string().trim().max(20_000).default(""),
+          scope: z.enum(["company", "team", "individual"]).default("company"),
+          ownerEmployeeId: nullableUuid.optional(),
+          status: z
+            .enum(["on_track", "at_risk", "off_track", "achieved", "dropped"])
+            .default("on_track"),
+          progress: z.number().min(0).max(100).default(0),
+          startDate: z.string().date().nullable().optional(),
+          dueDate: z.string().date().nullable().optional(),
+          privacy: z.enum(["organization", "private"]).default("organization"),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (input.parentGoalId)
+          await requireGoalAccess(ctx, input.parentGoalId, true);
+        if (input.startDate && input.dueDate && input.dueDate < input.startDate)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Due date must be after the start date",
+          });
+        const employeeId = actor(ctx);
+        const goal: WorkGoal = {
+          goalId: randomUUID(),
+          parentGoalId: input.parentGoalId ?? null,
+          name: input.name,
+          description: input.description,
+          scope: input.scope,
+          ownerEmployeeId: input.ownerEmployeeId ?? employeeId,
+          status: input.status,
+          progress: input.status === "achieved" ? 100 : input.progress,
+          startDate: input.startDate ?? null,
+          dueDate: input.dueDate ?? null,
+          privacy: input.privacy,
+          createdByEmployeeId: employeeId,
+          createdAt: new Date().toISOString(),
+        };
+        const db = getDb();
+        if (!db) getDemoWork().goals.set(goal.goalId, goal);
+        else
+          await db.execute(sql`
+            insert into public.work_goal (
+              work_goal_id, parent_work_goal_id, name, description, scope,
+              owner_employee_id, status, progress, start_date, due_date, privacy,
+              created_by_employee_id
+            ) values (
+              ${goal.goalId}::uuid, ${goal.parentGoalId}::uuid, ${goal.name},
+              ${goal.description}, ${goal.scope}, ${goal.ownerEmployeeId}::uuid,
+              ${goal.status}, ${goal.progress}, ${goal.startDate}::date,
+              ${goal.dueDate}::date, ${goal.privacy}, ${employeeId}::uuid
+            )
+          `);
+        await audit(ctx, "work.goal.create", "work_goal", goal.goalId, {
+          name: goal.name,
+          scope: goal.scope,
+        });
+        return goal;
+      }),
+    update: staffProcedure
+      .input(
+        z.object({
+          goalId: uuid,
+          name: z.string().trim().min(1).max(300),
+          description: z.string().trim().max(20_000),
+          scope: z.enum(["company", "team", "individual"]),
+          ownerEmployeeId: nullableUuid,
+          status: z.enum([
+            "on_track",
+            "at_risk",
+            "off_track",
+            "achieved",
+            "dropped",
+          ]),
+          progress: z.number().min(0).max(100),
+          startDate: z.string().date().nullable(),
+          dueDate: z.string().date().nullable(),
+          privacy: z.enum(["organization", "private"]),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const current = await requireGoalAccess(ctx, input.goalId, true);
+        if (input.startDate && input.dueDate && input.dueDate < input.startDate)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Invalid date range",
+          });
+        const goal = {
+          ...current,
+          ...input,
+          progress: input.status === "achieved" ? 100 : input.progress,
+        };
+        const db = getDb();
+        if (!db) getDemoWork().goals.set(goal.goalId, goal);
+        else
+          await db.execute(sql`
+            update public.work_goal set name = ${goal.name},
+              description = ${goal.description}, scope = ${goal.scope},
+              owner_employee_id = ${goal.ownerEmployeeId}::uuid,
+              status = ${goal.status}, progress = ${goal.progress},
+              start_date = ${goal.startDate}::date, due_date = ${goal.dueDate}::date,
+              privacy = ${goal.privacy}, updated_at = now()
+            where work_goal_id = ${goal.goalId}::uuid
+          `);
+        await audit(ctx, "work.goal.update", "work_goal", goal.goalId, {
+          status: goal.status,
+          progress: goal.progress,
+        });
+        return { ...goal, progress: await goalProgress(goal) };
+      }),
+    links: staffProcedure
+      .input(z.object({ goalId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireGoalAccess(ctx, input.goalId);
+        const db = getDb();
+        if (!db)
+          return [...getDemoWork().goalLinks.values()].filter(
+            (link) => link.goalId === input.goalId,
+          );
+        const rows = await db.execute<
+          WorkGoalLink & { weight: string | number }
+        >(sql`
+          select work_goal_link_id as "goalLinkId", work_goal_id as "goalId",
+            work_project_id as "projectId", work_item_id as "itemId", weight
+          from public.work_goal_link where work_goal_id = ${input.goalId}::uuid
+        `);
+        return rows.map((row) => ({ ...row, weight: Number(row.weight) }));
+      }),
+    link: staffProcedure
+      .input(
+        z.object({
+          goalId: uuid,
+          target: z.discriminatedUnion("type", [
+            z.object({ type: z.literal("project"), id: uuid }),
+            z.object({ type: z.literal("item"), id: uuid }),
+          ]),
+          weight: z.number().positive().max(10_000).default(1),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireGoalAccess(ctx, input.goalId, true);
+        if (input.target.type === "project")
+          await requireProjectAccess(ctx, input.target.id);
+        else await requireItemAccess(ctx, input.target.id);
+        const link: WorkGoalLink = {
+          goalLinkId: randomUUID(),
+          goalId: input.goalId,
+          projectId: input.target.type === "project" ? input.target.id : null,
+          itemId: input.target.type === "item" ? input.target.id : null,
+          weight: input.weight,
+        };
+        const db = getDb();
+        if (!db) {
+          const existing = [...getDemoWork().goalLinks.values()].find(
+            (item) =>
+              item.goalId === link.goalId &&
+              item.projectId === link.projectId &&
+              item.itemId === link.itemId,
+          );
+          if (existing) {
+            existing.weight = link.weight;
+            return existing;
+          }
+          getDemoWork().goalLinks.set(link.goalLinkId, link);
+        } else
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              delete from public.work_goal_link
+              where work_goal_id = ${link.goalId}::uuid
+                and work_project_id is not distinct from ${link.projectId}::uuid
+                and work_item_id is not distinct from ${link.itemId}::uuid
+            `);
+            await tx.execute(sql`
+              insert into public.work_goal_link (
+                work_goal_link_id, work_goal_id, work_project_id, work_item_id, weight
+              ) values (
+                ${link.goalLinkId}::uuid, ${link.goalId}::uuid,
+                ${link.projectId}::uuid, ${link.itemId}::uuid, ${link.weight}
+              )
+            `);
+          });
+        await audit(ctx, "work.goal.link", "work_goal", input.goalId, {
+          target: input.target,
+          weight: input.weight,
+        });
+        return link;
+      }),
+    unlink: staffProcedure
+      .input(z.object({ goalId: uuid, goalLinkId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireGoalAccess(ctx, input.goalId, true);
+        const db = getDb();
+        if (!db) {
+          const link = getDemoWork().goalLinks.get(input.goalLinkId);
+          if (!link || link.goalId !== input.goalId)
+            throw new TRPCError({ code: "NOT_FOUND" });
+          getDemoWork().goalLinks.delete(input.goalLinkId);
+        } else
+          await db.execute(sql`
+            delete from public.work_goal_link
+            where work_goal_link_id = ${input.goalLinkId}::uuid
+              and work_goal_id = ${input.goalId}::uuid
+          `);
+        return { ok: true as const };
+      }),
+    archive: staffProcedure
+      .input(z.object({ goalId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireGoalAccess(ctx, input.goalId, true);
+        const db = getDb();
+        if (!db) getDemoWork().goals.delete(input.goalId);
+        else
+          await db.execute(sql`
+            update public.work_goal set archived_at = now(), updated_at = now()
+            where work_goal_id = ${input.goalId}::uuid
+          `);
+        await audit(ctx, "work.goal.archive", "work_goal", input.goalId, {
+          archived: true,
+        });
+        return { ok: true as const };
+      }),
+  }),
+
+  portfolios: router({
+    list: staffProcedure.query(async ({ ctx }) => {
+      const employeeId = actor(ctx);
+      const db = getDb();
+      const portfolios = !db
+        ? [...getDemoWork().portfolios.values()].filter(
+            (item) =>
+              item.privacy === "organization" ||
+              canManageOwned(
+                ctx,
+                item.ownerEmployeeId,
+                item.createdByEmployeeId,
+              ),
+          )
+        : await db.execute<WorkPortfolio>(sql`
+            select work_portfolio_id as "portfolioId", name, description, color,
+              privacy, owner_employee_id as "ownerEmployeeId",
+              created_by_employee_id as "createdByEmployeeId", created_at as "createdAt"
+            from public.work_portfolio where archived_at is null and (
+              privacy = 'organization' or owner_employee_id = ${employeeId}::uuid
+              or created_by_employee_id = ${employeeId}::uuid
+            ) order by lower(name)
+          `);
+      return Promise.all(
+        portfolios.map(async (portfolio) => {
+          const projectIds = !db
+            ? [
+                ...(getDemoWork().portfolioProjects.get(
+                  portfolio.portfolioId,
+                ) ?? []),
+              ]
+            : (
+                await db.execute<{ projectId: string }>(sql`
+                  select work_project_id as "projectId"
+                  from public.work_portfolio_project
+                  where work_portfolio_id = ${portfolio.portfolioId}::uuid
+                  order by position
+                `)
+              ).map((item) => item.projectId);
+          const accessible: string[] = [];
+          for (const projectId of projectIds) {
+            try {
+              await requireProjectAccess(ctx, projectId);
+              accessible.push(projectId);
+            } catch (error) {
+              if (!(error instanceof TRPCError)) throw error;
+            }
+          }
+          const progresses = await Promise.all(accessible.map(projectProgress));
+          const progress = progresses.length
+            ? Math.round(
+                (progresses.reduce((sum, value) => sum + value, 0) /
+                  progresses.length) *
+                  100,
+              ) / 100
+            : 0;
+          const latest = !db
+            ? [...getDemoWork().statusUpdates.values()]
+                .filter((item) => item.portfolioId === portfolio.portfolioId)
+                .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+            : (
+                await db.execute<{ health: WorkStatusUpdate["health"] }>(sql`
+                  select health from public.work_status_update
+                  where work_portfolio_id = ${portfolio.portfolioId}::uuid
+                  order by created_at desc limit 1
+                `)
+              )[0];
+          return {
+            ...portfolio,
+            createdAt: new Date(portfolio.createdAt).toISOString(),
+            projectIds: accessible,
+            progress,
+            health:
+              latest?.health ?? (progress === 100 ? "complete" : "on_track"),
+          };
+        }),
+      );
+    }),
+    create: staffProcedure
+      .input(
+        z.object({
+          name: z.string().trim().min(1).max(200),
+          description: z.string().trim().max(20_000).default(""),
+          color: z
+            .string()
+            .regex(/^#[0-9A-Fa-f]{6}$/)
+            .default("#C7702E"),
+          privacy: z.enum(["organization", "private"]).default("organization"),
+          ownerEmployeeId: nullableUuid.optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        const portfolio: WorkPortfolio = {
+          portfolioId: randomUUID(),
+          name: input.name,
+          description: input.description,
+          color: input.color,
+          privacy: input.privacy,
+          ownerEmployeeId: input.ownerEmployeeId ?? employeeId,
+          createdByEmployeeId: employeeId,
+          createdAt: new Date().toISOString(),
+        };
+        const db = getDb();
+        if (!db) {
+          getDemoWork().portfolios.set(portfolio.portfolioId, portfolio);
+          getDemoWork().portfolioProjects.set(portfolio.portfolioId, new Set());
+        } else
+          await db.execute(sql`
+            insert into public.work_portfolio (
+              work_portfolio_id, name, description, color, privacy,
+              owner_employee_id, created_by_employee_id
+            ) values (
+              ${portfolio.portfolioId}::uuid, ${portfolio.name},
+              ${portfolio.description}, ${portfolio.color}, ${portfolio.privacy},
+              ${portfolio.ownerEmployeeId}::uuid, ${employeeId}::uuid
+            )
+          `);
+        await audit(
+          ctx,
+          "work.portfolio.create",
+          "work_portfolio",
+          portfolio.portfolioId,
+          {
+            name: portfolio.name,
+          },
+        );
+        return portfolio;
+      }),
+    addProject: staffProcedure
+      .input(z.object({ portfolioId: uuid, projectId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requirePortfolioAccess(ctx, input.portfolioId, true);
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        const db = getDb();
+        if (!db)
+          (
+            getDemoWork().portfolioProjects.get(input.portfolioId) ?? new Set()
+          ).add(input.projectId);
+        else
+          await db.execute(sql`
+            insert into public.work_portfolio_project (
+              work_portfolio_id, work_project_id, position
+            ) values (
+              ${input.portfolioId}::uuid, ${input.projectId}::uuid,
+              (select count(*) from public.work_portfolio_project
+               where work_portfolio_id = ${input.portfolioId}::uuid)
+            ) on conflict do nothing
+          `);
+        await audit(
+          ctx,
+          "work.portfolio.project.add",
+          "work_portfolio",
+          input.portfolioId,
+          {
+            projectId: input.projectId,
+          },
+        );
+        return { ok: true as const };
+      }),
+    removeProject: staffProcedure
+      .input(z.object({ portfolioId: uuid, projectId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requirePortfolioAccess(ctx, input.portfolioId, true);
+        const db = getDb();
+        if (!db)
+          getDemoWork()
+            .portfolioProjects.get(input.portfolioId)
+            ?.delete(input.projectId);
+        else
+          await db.execute(sql`
+            delete from public.work_portfolio_project
+            where work_portfolio_id = ${input.portfolioId}::uuid
+              and work_project_id = ${input.projectId}::uuid
+          `);
+        return { ok: true as const };
+      }),
+    archive: staffProcedure
+      .input(z.object({ portfolioId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requirePortfolioAccess(ctx, input.portfolioId, true);
+        const db = getDb();
+        if (!db) getDemoWork().portfolios.delete(input.portfolioId);
+        else
+          await db.execute(sql`
+            update public.work_portfolio set archived_at = now(), updated_at = now()
+            where work_portfolio_id = ${input.portfolioId}::uuid
+          `);
+        await audit(
+          ctx,
+          "work.portfolio.archive",
+          "work_portfolio",
+          input.portfolioId,
+          { archived: true },
+        );
+        return { ok: true as const };
+      }),
+  }),
+
+  statusUpdates: router({
+    list: staffProcedure
+      .input(
+        z.object({
+          targetType: z.enum(["project", "portfolio", "goal"]),
+          targetId: uuid,
+        }),
+      )
+      .query(async ({ input, ctx }) => {
+        if (input.targetType === "project")
+          await requireProjectAccess(ctx, input.targetId);
+        else if (input.targetType === "portfolio")
+          await requirePortfolioAccess(ctx, input.targetId);
+        else await requireGoalAccess(ctx, input.targetId);
+        const db = getDb();
+        if (!db)
+          return [...getDemoWork().statusUpdates.values()]
+            .filter((item) => item[`${input.targetType}Id`] === input.targetId)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        const target =
+          input.targetType === "project"
+            ? sql`work_project_id`
+            : input.targetType === "portfolio"
+              ? sql`work_portfolio_id`
+              : sql`work_goal_id`;
+        const rows = await db.execute<
+          WorkStatusUpdate & { progress: string | number | null }
+        >(sql`
+          select work_status_update_id as "statusUpdateId",
+            work_project_id as "projectId", work_portfolio_id as "portfolioId",
+            work_goal_id as "goalId", health, progress, title, body,
+            created_by_employee_id as "createdByEmployeeId", created_at as "createdAt"
+          from public.work_status_update where ${target} = ${input.targetId}::uuid
+          order by created_at desc
+        `);
+        return rows.map((row) => ({
+          ...row,
+          progress: row.progress === null ? null : Number(row.progress),
+          createdAt: new Date(row.createdAt).toISOString(),
+        }));
+      }),
+    create: staffProcedure
+      .input(
+        z.object({
+          targetType: z.enum(["project", "portfolio", "goal"]),
+          targetId: uuid,
+          health: z.enum(["on_track", "at_risk", "off_track", "complete"]),
+          progress: z.number().min(0).max(100).nullable().default(null),
+          title: z.string().trim().min(1).max(300),
+          body: z.string().trim().max(50_000).default(""),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (input.targetType === "project")
+          await requireProjectAccess(ctx, input.targetId, "editor");
+        else if (input.targetType === "portfolio")
+          await requirePortfolioAccess(ctx, input.targetId, true);
+        else await requireGoalAccess(ctx, input.targetId, true);
+        const update: WorkStatusUpdate = {
+          statusUpdateId: randomUUID(),
+          projectId: input.targetType === "project" ? input.targetId : null,
+          portfolioId: input.targetType === "portfolio" ? input.targetId : null,
+          goalId: input.targetType === "goal" ? input.targetId : null,
+          health: input.health,
+          progress: input.progress,
+          title: input.title,
+          body: input.body,
+          createdByEmployeeId: actor(ctx),
+          createdAt: new Date().toISOString(),
+        };
+        const db = getDb();
+        if (!db) getDemoWork().statusUpdates.set(update.statusUpdateId, update);
+        else
+          await db.execute(sql`
+            insert into public.work_status_update (
+              work_status_update_id, work_project_id, work_portfolio_id,
+              work_goal_id, health, progress, title, body, created_by_employee_id
+            ) values (
+              ${update.statusUpdateId}::uuid, ${update.projectId}::uuid,
+              ${update.portfolioId}::uuid, ${update.goalId}::uuid,
+              ${update.health}, ${update.progress}, ${update.title}, ${update.body},
+              ${update.createdByEmployeeId}::uuid
+            )
+          `);
+        await audit(
+          ctx,
+          "work.status.create",
+          "work_status_update",
+          update.statusUpdateId,
+          {
+            targetType: input.targetType,
+            targetId: input.targetId,
+            health: input.health,
+          },
+        );
+        return update;
+      }),
+  }),
+
+  reporting: router({
+    summary: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(({ input, ctx }) => projectPlanningSummary(ctx, input.projectId)),
+    dashboards: staffProcedure.query(async ({ ctx }) => {
+      const employeeId = actor(ctx);
+      const db = getDb();
+      if (!db)
+        return [...getDemoWork().dashboards.values()].filter(
+          (item) => item.ownerEmployeeId === employeeId,
+        );
+      return db.execute<WorkDashboard>(sql`
+        select work_reporting_dashboard_id as "dashboardId",
+          owner_employee_id as "ownerEmployeeId", name, config
+        from public.work_reporting_dashboard
+        where owner_employee_id = ${employeeId}::uuid order by lower(name)
+      `);
+    }),
+    saveDashboard: staffProcedure
+      .input(
+        z.object({
+          dashboardId: uuid.optional(),
+          name: z.string().trim().min(1).max(160),
+          config: z.record(z.string(), z.unknown()),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        const dashboard: WorkDashboard = {
+          dashboardId: input.dashboardId ?? randomUUID(),
+          ownerEmployeeId: employeeId,
+          name: input.name,
+          config: input.config,
+        };
+        const db = getDb();
+        if (!db) {
+          const existing = getDemoWork().dashboards.get(dashboard.dashboardId);
+          if (existing && existing.ownerEmployeeId !== employeeId)
+            throw new TRPCError({ code: "NOT_FOUND" });
+          getDemoWork().dashboards.set(dashboard.dashboardId, dashboard);
+        } else
+          await db.execute(sql`
+            insert into public.work_reporting_dashboard (
+              work_reporting_dashboard_id, owner_employee_id, name, config
+            ) values (
+              ${dashboard.dashboardId}::uuid, ${employeeId}::uuid,
+              ${dashboard.name}, ${JSON.stringify(dashboard.config)}::jsonb
+            ) on conflict (work_reporting_dashboard_id) do update
+              set name = excluded.name, config = excluded.config, updated_at = now()
+              where work_reporting_dashboard.owner_employee_id = ${employeeId}::uuid
+          `);
+        await audit(
+          ctx,
+          "work.dashboard.save",
+          "work_reporting_dashboard",
+          dashboard.dashboardId,
+          {
+            name: dashboard.name,
+          },
+        );
+        return dashboard;
+      }),
+    deleteDashboard: staffProcedure
+      .input(z.object({ dashboardId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        const db = getDb();
+        if (!db) {
+          const dashboard = getDemoWork().dashboards.get(input.dashboardId);
+          if (!dashboard || dashboard.ownerEmployeeId !== employeeId)
+            throw new TRPCError({ code: "NOT_FOUND" });
+          getDemoWork().dashboards.delete(input.dashboardId);
+        } else
+          await db.execute(sql`
+            delete from public.work_reporting_dashboard
+            where work_reporting_dashboard_id = ${input.dashboardId}::uuid
+              and owner_employee_id = ${employeeId}::uuid
+          `);
+        return { ok: true as const };
+      }),
+    exportProject: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        const rows = !db
+          ? [...getDemoWork().items.values()]
+              .filter((item) => item.projectId === input.projectId)
+              .map((item) => ({
+                title: item.title,
+                assignee: item.assigneeName,
+                due: item.dueAt?.slice(0, 10) ?? null,
+                completed: item.completedAt ? "yes" : "no",
+                estimatedMinutes: item.estimatedMinutes ?? null,
+              }))
+          : await db.execute<{
+              title: string;
+              assignee: string | null;
+              due: string | null;
+              completed: string;
+              estimatedMinutes: number | null;
+            }>(sql`
+              select item.title, employee.display_name as assignee,
+                item.due_at::date::text as due,
+                case when item.completed_at is null then 'no' else 'yes' end as completed,
+                item.estimated_minutes as "estimatedMinutes"
+              from public.work_project_item membership
+              join public.work_item item on item.work_item_id = membership.work_item_id
+              left join public.employee employee
+                on employee.employee_id = item.assignee_employee_id
+              where membership.work_project_id = ${input.projectId}::uuid
+                and item.archived_at is null order by membership.position
+            `);
+        const escape = (value: unknown) =>
+          `"${String(value ?? "").replaceAll('"', '""')}"`;
+        return {
+          fileName: `work-report-${input.projectId}.csv`,
+          contentType: "text/csv;charset=utf-8",
+          csv: [
+            ["Task", "Assignee", "Due", "Completed", "Estimated minutes"],
+            ...rows.map((item) => [
+              item.title,
+              item.assignee,
+              item.due,
+              item.completed,
+              item.estimatedMinutes,
+            ]),
+          ]
+            .map((row) => row.map(escape).join(","))
+            .join("\n"),
+        };
+      }),
+  }),
+
+  workload: router({
+    list: staffProcedure
+      .input(z.object({ projectId: uuid, weekStart: z.string().date() }))
+      .query(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        if (!db) {
+          const allocations = [...getDemoWork().allocations.values()].filter(
+            (item) =>
+              item.projectId === input.projectId &&
+              item.weekStart === input.weekStart,
+          );
+          const employeeId = actor(ctx);
+          const allocatedMinutes = allocations
+            .filter((item) => item.employeeId === employeeId)
+            .reduce((sum, item) => sum + item.allocatedMinutes, 0);
+          const assignedMinutes = [...getDemoWork().items.values()]
+            .filter(
+              (item) =>
+                item.projectId === input.projectId &&
+                item.assigneeEmployeeId === employeeId &&
+                !item.completedAt,
+            )
+            .reduce((sum, item) => sum + (item.estimatedMinutes ?? 0), 0);
+          return [
+            {
+              employeeId,
+              displayName: "Dev Partner",
+              capacityHours: 40,
+              allocatedMinutes,
+              assignedMinutes,
+              actualMinutes: [...getDemoWork().timeEntries.values()]
+                .filter(
+                  (item) =>
+                    item.employeeId === employeeId &&
+                    item.projectId === input.projectId &&
+                    item.workDate >= input.weekStart &&
+                    item.workDate <
+                      relativeDate(
+                        7,
+                        new Date(`${input.weekStart}T00:00:00Z`),
+                      ).slice(0, 10),
+                )
+                .reduce((sum, item) => sum + item.minutes, 0),
+              utilization: capacityUtilization(
+                Math.max(allocatedMinutes, assignedMinutes),
+                40,
+              ),
+              allocations,
+            },
+          ];
+        }
+        const rows = await db.execute<{
+          employeeId: string;
+          displayName: string;
+          capacityHours: string | number | null;
+          allocatedMinutes: number;
+          assignedMinutes: number;
+          actualMinutes: number;
+        }>(sql`
+          select employee.employee_id as "employeeId",
+            employee.display_name as "displayName",
+            employee.capacity_hours_per_week as "capacityHours",
+            coalesce((select sum(allocation.allocated_minutes)
+              from public.work_capacity_allocation allocation
+              where allocation.employee_id = employee.employee_id
+                and allocation.work_project_id = ${input.projectId}::uuid
+                and allocation.week_start = ${input.weekStart}::date), 0)::int
+              as "allocatedMinutes",
+            coalesce((select sum(item.estimated_minutes)
+              from public.work_project_item membership
+              join public.work_item item
+                on item.work_item_id = membership.work_item_id
+              where membership.work_project_id = ${input.projectId}::uuid
+                and item.assignee_employee_id = employee.employee_id
+                and item.completed_at is null
+                and item.due_at >= ${input.weekStart}::date
+                and item.due_at < ${input.weekStart}::date + interval '7 days'), 0)::int
+              as "assignedMinutes",
+            coalesce((select sum(entry.minutes) from public.time_entry entry
+              where entry.employee_id = employee.employee_id
+                and entry.work_project_id = ${input.projectId}::uuid
+                and entry.work_date >= ${input.weekStart}::date
+                and entry.work_date < ${input.weekStart}::date + 7), 0)::int
+              as "actualMinutes"
+          from public.employee employee where employee.is_active = true
+          order by lower(employee.display_name)
+        `);
+        return rows.map((row) => ({
+          ...row,
+          capacityHours: Number(row.capacityHours ?? 40),
+          utilization: capacityUtilization(
+            Math.max(row.allocatedMinutes, row.assignedMinutes),
+            Number(row.capacityHours ?? 40),
+          ),
+        }));
+      }),
+    upsert: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          employeeId: uuid,
+          weekStart: z.string().date(),
+          allocatedMinutes: z.number().int().min(0).max(10_080),
+          roleName: z.string().trim().max(160).nullable().default(null),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        if (new Date(`${input.weekStart}T00:00:00Z`).getUTCDay() !== 1)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Capacity weeks start on Monday",
+          });
+        const allocation: WorkCapacityAllocation = {
+          allocationId: randomUUID(),
+          ...input,
+        };
+        const db = getDb();
+        if (!db) {
+          const existing = [...getDemoWork().allocations.values()].find(
+            (item) =>
+              item.employeeId === input.employeeId &&
+              item.projectId === input.projectId &&
+              item.weekStart === input.weekStart,
+          );
+          if (existing) Object.assign(existing, input);
+          else
+            getDemoWork().allocations.set(allocation.allocationId, allocation);
+        } else {
+          const rows = await db.execute<{ allocationId: string }>(sql`
+            insert into public.work_capacity_allocation (
+              employee_id, work_project_id, week_start, allocated_minutes,
+              role_name, created_by_employee_id
+            ) values (
+              ${input.employeeId}::uuid, ${input.projectId}::uuid,
+              ${input.weekStart}::date, ${input.allocatedMinutes},
+              ${input.roleName}, ${actor(ctx)}::uuid
+            ) on conflict (employee_id, work_project_id, week_start) do update
+              set allocated_minutes = excluded.allocated_minutes,
+                role_name = excluded.role_name, updated_at = now()
+            returning work_capacity_allocation_id as "allocationId"
+          `);
+          allocation.allocationId = rows[0]!.allocationId;
+        }
+        await audit(
+          ctx,
+          "work.capacity.upsert",
+          "work_capacity_allocation",
+          allocation.allocationId,
+          {
+            projectId: input.projectId,
+            employeeId: input.employeeId,
+            allocatedMinutes: input.allocatedMinutes,
+          },
+        );
+        return allocation;
+      }),
+  }),
+
+  budgets: router({
+    summary: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(({ input, ctx }) => projectPlanningSummary(ctx, input.projectId)),
+    update: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          budgetAmount: z.number().min(0).nullable(),
+          budgetCurrency: z.string().regex(/^[A-Z]{3}$/),
+          hourlyCostRate: z.number().min(0).nullable(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const project = await requireProjectAccess(
+          ctx,
+          input.projectId,
+          "admin",
+        );
+        const db = getDb();
+        if (!db) {
+          Object.assign(project, input);
+          getDemoWork().projects.set(project.projectId, project);
+        } else
+          await db.execute(sql`
+            update public.work_project set budget_amount = ${input.budgetAmount},
+              budget_currency = ${input.budgetCurrency},
+              hourly_cost_rate = ${input.hourlyCostRate}, updated_at = now()
+            where work_project_id = ${input.projectId}::uuid
+          `);
+        await audit(
+          ctx,
+          "work.budget.update",
+          "work_project",
+          input.projectId,
+          {
+            budgetAmount: input.budgetAmount,
+            budgetCurrency: input.budgetCurrency,
+            hourlyCostRate: input.hourlyCostRate,
+          },
+        );
+        return projectPlanningSummary(ctx, input.projectId);
+      }),
+  }),
+
+  time: router({
+    list: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid.optional(),
+          from: z.string().date().optional(),
+          to: z.string().date().optional(),
+        }),
+      )
+      .query(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        if (input.projectId) await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        if (!db)
+          return [...getDemoWork().timeEntries.values()]
+            .filter(
+              (entry) =>
+                entry.employeeId === employeeId &&
+                (!input.projectId || entry.projectId === input.projectId) &&
+                (!input.from || entry.workDate >= input.from) &&
+                (!input.to || entry.workDate <= input.to),
+            )
+            .sort((a, b) => b.workDate.localeCompare(a.workDate));
+        return db.execute<WorkTimeEntry>(sql`
+          select time_entry_id as "timeEntryId", employee_id as "employeeId",
+            work_project_id as "projectId", work_item_id as "itemId",
+            work_date::text as "workDate", minutes, is_billable as "isBillable",
+            description, status from public.time_entry
+          where employee_id = ${employeeId}::uuid
+            and (${input.projectId ?? null}::uuid is null
+              or work_project_id = ${input.projectId ?? null}::uuid)
+            and (${input.from ?? null}::date is null
+              or work_date >= ${input.from ?? null}::date)
+            and (${input.to ?? null}::date is null
+              or work_date <= ${input.to ?? null}::date)
+          order by work_date desc, created_at desc
+        `);
+      }),
+    log: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          itemId: nullableUuid.optional(),
+          workDate: z.string().date(),
+          minutes: z.number().int().min(1).max(1_440),
+          isBillable: z.boolean().default(false),
+          description: z.string().trim().max(5_000).nullable().default(null),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        await requireProjectAccess(ctx, input.projectId, "commenter");
+        if (input.itemId)
+          await requireItemInProject(ctx, input.itemId, input.projectId);
+        const entry: WorkTimeEntry = {
+          timeEntryId: randomUUID(),
+          employeeId,
+          projectId: input.projectId,
+          itemId: input.itemId ?? null,
+          workDate: input.workDate,
+          minutes: input.minutes,
+          isBillable: input.isBillable,
+          description: input.description,
+          status: "draft",
+        };
+        const db = getDb();
+        if (!db) {
+          const current = [...getDemoWork().timeEntries.values()]
+            .filter(
+              (item) =>
+                item.employeeId === employeeId &&
+                item.workDate === input.workDate,
+            )
+            .reduce((sum, item) => sum + item.minutes, 0);
+          try {
+            validateDailyMinutes(current, input.minutes);
+          } catch {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "Daily time cannot exceed 24 hours",
+            });
+          }
+          getDemoWork().timeEntries.set(entry.timeEntryId, entry);
+        } else
+          await db.transaction(async (tx) => {
+            await tx.execute(
+              sql`select pg_advisory_xact_lock(hashtext(${`${employeeId}:${input.workDate}`}))`,
+            );
+            const current = Number(
+              (
+                await tx.execute<{ minutes: number }>(sql`
+                  select coalesce(sum(minutes), 0)::int as minutes
+                  from public.time_entry
+                  where employee_id = ${employeeId}::uuid
+                    and work_date = ${input.workDate}::date
+                `)
+              )[0]?.minutes ?? 0,
+            );
+            try {
+              validateDailyMinutes(current, input.minutes);
+            } catch {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "Daily time cannot exceed 24 hours",
+              });
+            }
+            await tx.execute(sql`
+              insert into public.time_entry (
+                time_entry_id, employee_id, work_project_id, work_item_id,
+                work_date, minutes, is_billable, description, created_by_employee_id
+              ) values (
+                ${entry.timeEntryId}::uuid, ${employeeId}::uuid,
+                ${entry.projectId}::uuid, ${entry.itemId}::uuid,
+                ${entry.workDate}::date, ${entry.minutes}, ${entry.isBillable},
+                ${entry.description}, ${employeeId}::uuid
+              )
+            `);
+          });
+        await audit(ctx, "work.time.log", "time_entry", entry.timeEntryId, {
+          projectId: entry.projectId,
+          minutes: entry.minutes,
+        });
+        return entry;
+      }),
+    remove: staffProcedure
+      .input(z.object({ timeEntryId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        const db = getDb();
+        if (!db) {
+          const entry = getDemoWork().timeEntries.get(input.timeEntryId);
+          if (
+            !entry ||
+            entry.employeeId !== employeeId ||
+            !["draft", "rejected"].includes(entry.status)
+          )
+            throw new TRPCError({ code: "FORBIDDEN" });
+          getDemoWork().timeEntries.delete(input.timeEntryId);
+        } else {
+          const rows = await db.execute<{
+            employeeId: string;
+            status: string;
+          }>(sql`
+            select employee_id as "employeeId", status from public.time_entry
+            where time_entry_id = ${input.timeEntryId}::uuid
+          `);
+          const entry = rows[0];
+          if (
+            !entry ||
+            entry.employeeId !== employeeId ||
+            !["draft", "rejected"].includes(entry.status)
+          )
+            throw new TRPCError({ code: "FORBIDDEN" });
+          await db.execute(sql`
+            delete from public.time_entry
+            where time_entry_id = ${input.timeEntryId}::uuid
+          `);
+        }
+        await audit(
+          ctx,
+          "work.time.remove",
+          "time_entry",
+          input.timeEntryId,
+          {},
+        );
+        return { ok: true as const };
+      }),
+    activeTimer: staffProcedure.query(async ({ ctx }) => {
+      const employeeId = actor(ctx);
+      const db = getDb();
+      if (!db)
+        return (
+          [...getDemoWork().timers.values()].find(
+            (timer) => timer.employeeId === employeeId && !timer.stoppedAt,
+          ) ?? null
+        );
+      const rows = await db.execute<WorkTimer>(sql`
+        select work_timer_id as "timerId", employee_id as "employeeId",
+          work_project_id as "projectId", work_item_id as "itemId", description,
+          started_at as "startedAt", stopped_at as "stoppedAt"
+        from public.work_timer where employee_id = ${employeeId}::uuid
+          and stopped_at is null limit 1
+      `);
+      return rows[0]
+        ? {
+            ...rows[0],
+            startedAt: new Date(rows[0].startedAt).toISOString(),
+            stoppedAt: iso(rows[0].stoppedAt),
+          }
+        : null;
+    }),
+    startTimer: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          itemId: nullableUuid.optional(),
+          description: z.string().trim().max(5_000).nullable().default(null),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        await requireProjectAccess(ctx, input.projectId, "commenter");
+        if (input.itemId)
+          await requireItemInProject(ctx, input.itemId, input.projectId);
+        const timer: WorkTimer = {
+          timerId: randomUUID(),
+          employeeId,
+          projectId: input.projectId,
+          itemId: input.itemId ?? null,
+          description: input.description,
+          startedAt: new Date().toISOString(),
+          stoppedAt: null,
+        };
+        const db = getDb();
+        if (!db) {
+          if (
+            [...getDemoWork().timers.values()].some(
+              (item) => item.employeeId === employeeId && !item.stoppedAt,
+            )
+          )
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "Stop the active timer first",
+            });
+          getDemoWork().timers.set(timer.timerId, timer);
+        } else {
+          const existing = await db.execute(sql`
+            select 1 from public.work_timer where employee_id = ${employeeId}::uuid
+              and stopped_at is null limit 1
+          `);
+          if (existing[0])
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "Stop the active timer first",
+            });
+          await db.execute(sql`
+            insert into public.work_timer (
+              work_timer_id, employee_id, work_project_id, work_item_id,
+              description, started_at
+            ) values (
+              ${timer.timerId}::uuid, ${employeeId}::uuid,
+              ${timer.projectId}::uuid, ${timer.itemId}::uuid,
+              ${timer.description}, ${timer.startedAt}::timestamptz
+            )
+          `);
+        }
+        return timer;
+      }),
+    stopTimer: staffProcedure
+      .input(
+        z.object({ timerId: uuid, isBillable: z.boolean().default(false) }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        const stoppedAt = new Date().toISOString();
+        const db = getDb();
+        if (!db) {
+          const timer = getDemoWork().timers.get(input.timerId);
+          if (!timer || timer.employeeId !== employeeId || timer.stoppedAt)
+            throw new TRPCError({ code: "NOT_FOUND" });
+          let chunks: ReturnType<typeof splitTimerByUtcDay>;
+          try {
+            chunks = splitTimerByUtcDay(timer.startedAt, stoppedAt);
+            for (const chunk of chunks) {
+              const existing = [...getDemoWork().timeEntries.values()]
+                .filter(
+                  (entry) =>
+                    entry.employeeId === employeeId &&
+                    entry.workDate === chunk.workDate,
+                )
+                .reduce((sum, entry) => sum + entry.minutes, 0);
+              validateDailyMinutes(existing, chunk.minutes);
+            }
+          } catch (error) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message:
+                error instanceof Error ? error.message : "Timer is invalid",
+            });
+          }
+          timer.stoppedAt = stoppedAt;
+          const entries = chunks.map((chunk) => {
+            const entry: WorkTimeEntry = {
+              timeEntryId: randomUUID(),
+              employeeId,
+              projectId: timer.projectId,
+              itemId: timer.itemId,
+              workDate: chunk.workDate,
+              minutes: chunk.minutes,
+              isBillable: input.isBillable,
+              description: timer.description,
+              status: "draft",
+            };
+            getDemoWork().timeEntries.set(entry.timeEntryId, entry);
+            return entry;
+          });
+          await audit(ctx, "work.timer.stop", "work_timer", input.timerId, {
+            minutes: entries.reduce((sum, entry) => sum + entry.minutes, 0),
+          });
+          return { timer, entries };
+        }
+        const result = await db.transaction(async (tx) => {
+          const timers = await tx.execute<WorkTimer>(sql`
+            select work_timer_id as "timerId", employee_id as "employeeId",
+              work_project_id as "projectId", work_item_id as "itemId", description,
+              started_at as "startedAt", stopped_at as "stoppedAt"
+            from public.work_timer where work_timer_id = ${input.timerId}::uuid
+              and employee_id = ${employeeId}::uuid and stopped_at is null
+            for update
+          `);
+          const timer = timers[0];
+          if (!timer) throw new TRPCError({ code: "NOT_FOUND" });
+          let chunks: ReturnType<typeof splitTimerByUtcDay>;
+          try {
+            chunks = splitTimerByUtcDay(timer.startedAt, stoppedAt);
+          } catch (error) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message:
+                error instanceof Error ? error.message : "Timer is invalid",
+            });
+          }
+          for (const chunk of chunks) {
+            await tx.execute(
+              sql`select pg_advisory_xact_lock(hashtext(${`${employeeId}:${chunk.workDate}`}))`,
+            );
+            const current = Number(
+              (
+                await tx.execute<{ minutes: number }>(sql`
+                  select coalesce(sum(minutes), 0)::int as minutes
+                  from public.time_entry where employee_id = ${employeeId}::uuid
+                    and work_date = ${chunk.workDate}::date
+                `)
+              )[0]?.minutes ?? 0,
+            );
+            try {
+              validateDailyMinutes(current, chunk.minutes);
+            } catch {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: `Time on ${chunk.workDate} would exceed 24 hours`,
+              });
+            }
+          }
+          await tx.execute(sql`
+            update public.work_timer set stopped_at = ${stoppedAt}::timestamptz
+            where work_timer_id = ${input.timerId}::uuid
+          `);
+          const entries: WorkTimeEntry[] = [];
+          for (const chunk of chunks) {
+            const entry: WorkTimeEntry = {
+              timeEntryId: randomUUID(),
+              employeeId,
+              projectId: timer.projectId,
+              itemId: timer.itemId,
+              workDate: chunk.workDate,
+              minutes: chunk.minutes,
+              isBillable: input.isBillable,
+              description: timer.description,
+              status: "draft",
+            };
+            await tx.execute(sql`
+              insert into public.time_entry (
+                time_entry_id, employee_id, work_project_id, work_item_id,
+                work_date, minutes, is_billable, description, created_by_employee_id
+              ) values (
+                ${entry.timeEntryId}::uuid, ${employeeId}::uuid,
+                ${entry.projectId}::uuid, ${entry.itemId}::uuid,
+                ${entry.workDate}::date, ${entry.minutes}, ${entry.isBillable},
+                ${entry.description}, ${employeeId}::uuid
+              )
+            `);
+            entries.push(entry);
+          }
+          return {
+            timer: { ...timer, stoppedAt },
+            entries,
+          };
+        });
+        await audit(ctx, "work.timer.stop", "work_timer", input.timerId, {
+          minutes: result.entries.reduce(
+            (sum, entry) => sum + entry.minutes,
+            0,
+          ),
+        });
+        return result;
+      }),
+    discardTimer: staffProcedure
+      .input(z.object({ timerId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        const db = getDb();
+        if (!db) {
+          const timer = getDemoWork().timers.get(input.timerId);
+          if (!timer || timer.employeeId !== employeeId || timer.stoppedAt)
+            throw new TRPCError({ code: "NOT_FOUND" });
+          getDemoWork().timers.delete(input.timerId);
+        } else
+          await db.execute(sql`
+            delete from public.work_timer where work_timer_id = ${input.timerId}::uuid
+              and employee_id = ${employeeId}::uuid and stopped_at is null
+          `);
+        await audit(ctx, "work.timer.discard", "work_timer", input.timerId, {});
+        return { ok: true as const };
+      }),
+  }),
+
+  gantt: router({
+    get: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        const items = !db
+          ? [...getDemoWork().items.values()].filter(
+              (item) => item.projectId === input.projectId,
+            )
+          : await db.execute<WorkItem>(sql`
+              select item.work_item_id as "itemId",
+                item.parent_work_item_id as "parentItemId", item.title,
+                item.description, item.item_type as "itemType", item.priority,
+                item.assignee_employee_id as "assigneeEmployeeId",
+                assignee.display_name as "assigneeName", item.start_date::text as "startDate",
+                item.due_at as "dueAt", item.completed_at as "completedAt",
+                membership.work_section_id as "sectionId", membership.position,
+                membership.work_project_id as "projectId", item.recurrence,
+                item.estimated_minutes as "estimatedMinutes"
+              from public.work_project_item membership
+              join public.work_item item on item.work_item_id = membership.work_item_id
+              left join public.employee assignee
+                on assignee.employee_id = item.assignee_employee_id
+              where membership.work_project_id = ${input.projectId}::uuid
+                and item.archived_at is null order by membership.position
+            `);
+        const dependencies = !db
+          ? [...getDemoWork().dependencies.entries()].flatMap(
+              ([itemId, values]) =>
+                items.some((item) => item.itemId === itemId)
+                  ? [...values].map((dependsOnItemId) => ({
+                      itemId,
+                      dependsOnItemId,
+                    }))
+                  : [],
+            )
+          : await db.execute<{ itemId: string; dependsOnItemId: string }>(sql`
+              select dependency.work_item_id as "itemId",
+                dependency.depends_on_work_item_id as "dependsOnItemId"
+              from public.work_item_dependency dependency
+              join public.work_project_item membership
+                on membership.work_item_id = dependency.work_item_id
+              where membership.work_project_id = ${input.projectId}::uuid
+            `);
+        const baselines = !db
+          ? [...getDemoWork().baselines.values()].filter(
+              (item) => item.projectId === input.projectId,
+            )
+          : await db.execute<WorkBaseline>(sql`
+              select work_item_baseline_id as "baselineId",
+                work_project_id as "projectId", work_item_id as "itemId",
+                baseline_start_date::text as "startDate", baseline_due_at as "dueAt",
+                captured_at as "capturedAt" from public.work_item_baseline
+              where work_project_id = ${input.projectId}::uuid
+            `);
+        const baselineByItem = new Map(
+          baselines.map((item) => [item.itemId, item]),
+        );
+        const criticalItemIds = criticalPath(
+          items.map((item) => ({
+            itemId: item.itemId,
+            durationMinutes:
+              item.estimatedMinutes ??
+              (item.startDate && item.dueAt
+                ? Math.max(
+                    1,
+                    Math.ceil(
+                      (new Date(item.dueAt).getTime() -
+                        new Date(`${item.startDate}T00:00:00Z`).getTime()) /
+                        60_000,
+                    ),
+                  )
+                : 480),
+            dependencies: dependencies
+              .filter((edge) => edge.itemId === item.itemId)
+              .map((edge) => edge.dependsOnItemId),
+          })),
+        );
+        return {
+          items: items.map((item) => {
+            const baseline = baselineByItem.get(item.itemId);
+            return {
+              ...item,
+              dueAt: iso(item.dueAt),
+              completedAt: iso(item.completedAt),
+              baseline: baseline ?? null,
+              scheduleVarianceDays:
+                baseline?.dueAt && item.dueAt
+                  ? Math.round(
+                      (new Date(item.dueAt).getTime() -
+                        new Date(baseline.dueAt).getTime()) /
+                        86_400_000,
+                    )
+                  : null,
+            };
+          }),
+          dependencies,
+          criticalItemIds,
+        };
+      }),
+    captureBaseline: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        const employeeId = actor(ctx);
+        const capturedAt = new Date().toISOString();
+        const db = getDb();
+        if (!db) {
+          const store = getDemoWork();
+          for (const [id, baseline] of store.baselines)
+            if (baseline.projectId === input.projectId)
+              store.baselines.delete(id);
+          for (const item of store.items.values()) {
+            if (item.projectId !== input.projectId) continue;
+            const baseline: WorkBaseline = {
+              baselineId: randomUUID(),
+              projectId: input.projectId,
+              itemId: item.itemId,
+              startDate: item.startDate,
+              dueAt: item.dueAt,
+              capturedAt,
+            };
+            store.baselines.set(baseline.baselineId, baseline);
+          }
+        } else
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              delete from public.work_item_baseline
+              where work_project_id = ${input.projectId}::uuid
+            `);
+            await tx.execute(sql`
+              insert into public.work_item_baseline (
+                work_project_id, work_item_id, baseline_start_date,
+                baseline_due_at, captured_by_employee_id, captured_at
+              ) select membership.work_project_id, item.work_item_id,
+                item.start_date, item.due_at, ${employeeId}::uuid,
+                ${capturedAt}::timestamptz
+              from public.work_project_item membership
+              join public.work_item item
+                on item.work_item_id = membership.work_item_id
+              where membership.work_project_id = ${input.projectId}::uuid
+                and item.archived_at is null
+            `);
+          });
+        await audit(
+          ctx,
+          "work.gantt.baseline",
+          "work_project",
+          input.projectId,
+          {
+            capturedAt,
+          },
+        );
+        return { ok: true as const, capturedAt };
       }),
   }),
 

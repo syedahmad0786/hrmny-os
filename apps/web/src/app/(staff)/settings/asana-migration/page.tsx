@@ -23,6 +23,9 @@ const COUNT_LABELS: Record<string, string> = {
 
 export default function AsanaMigrationPage() {
   const utils = trpc.useUtils();
+  const session = trpc.auth.session.useQuery();
+  const syncEnabled =
+    session.data?.enabledFeatureKeys.includes("asana.sync") ?? false;
   const status = trpc.asanaMigration.status.useQuery(undefined, {
     retry: false,
   });
@@ -34,6 +37,32 @@ export default function AsanaMigrationPage() {
   const importWorkspace = trpc.asanaMigration.import.useMutation({
     onSuccess: async () => {
       await utils.work.projects.invalidate();
+    },
+  });
+  const syncStatus = trpc.asanaMigration.syncStatus.useQuery(
+    { workspaceGid },
+    { enabled: Boolean(syncEnabled && workspaceGid), retry: false },
+  );
+  const syncNow = trpc.asanaMigration.syncNow.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.asanaMigration.syncStatus.invalidate(),
+        utils.work.projects.invalidate(),
+      ]);
+    },
+  });
+  const webhookStatus = trpc.asanaMigration.syncWebhookStatus.useQuery(
+    { workspaceGid },
+    { enabled: Boolean(syncEnabled && workspaceGid), retry: false },
+  );
+  const enableWebhooks = trpc.asanaMigration.syncWebhookEnable.useMutation({
+    onSuccess: async () => {
+      await utils.asanaMigration.syncWebhookStatus.invalidate();
+    },
+  });
+  const disableWebhooks = trpc.asanaMigration.syncWebhookDisable.useMutation({
+    onSuccess: async () => {
+      await utils.asanaMigration.syncWebhookStatus.invalidate();
     },
   });
 
@@ -135,6 +164,118 @@ export default function AsanaMigrationPage() {
               </p>
             </div>
           </section>
+
+          {syncEnabled ? (
+            <section className="rounded-lg border border-sand bg-white/70 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="font-display text-xl">Keep changes in sync</h2>
+                  <p className="mt-1 max-w-2xl text-sm text-muted">
+                    Checks Asana&apos;s change cursor, then safely reconciles
+                    the complete workspace when anything changed or a cursor
+                    expired.
+                  </p>
+                  {syncStatus.data ? (
+                    <p className="mt-2 text-xs text-muted">
+                      {syncStatus.data.status === "error"
+                        ? `Needs attention: ${syncStatus.data.lastError}`
+                        : syncStatus.data.lastSyncedAt
+                          ? `Last checked ${new Date(syncStatus.data.lastSyncedAt).toLocaleString()} · ${syncStatus.data.totalEventCount} events observed`
+                          : "Ready to initialize"}
+                    </p>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  disabled={!workspaceGid || syncNow.isPending}
+                  onClick={() => syncNow.mutate({ workspaceGid })}
+                >
+                  {syncNow.isPending
+                    ? "Syncing…"
+                    : syncStatus.data
+                      ? "Sync now"
+                      : "Initialize sync"}
+                </Button>
+              </div>
+              {syncNow.data ? (
+                <p className="mt-3 text-sm font-medium text-emerald-800">
+                  Checked {syncNow.data.eventCount} events
+                  {syncNow.data.reconciled
+                    ? " and reconciled the workspace."
+                    : "; everything was already current."}
+                </p>
+              ) : null}
+              {syncNow.error ? (
+                <p className="mt-3 text-sm text-red-800">
+                  {syncNow.error.message}
+                </p>
+              ) : null}
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-sand pt-4">
+                <div>
+                  <h3 className="font-medium">Signed push updates</h3>
+                  <p className="mt-1 max-w-2xl text-xs text-muted">
+                    Creates one verified webhook for the workspace and each
+                    current project. Push events wake the same safe
+                    reconciliation job; cursor polling remains the fallback.
+                  </p>
+                  {webhookStatus.data ? (
+                    <p className="mt-2 text-xs text-muted">
+                      {webhookStatus.data.active} active
+                      {webhookStatus.data.errors
+                        ? ` · ${webhookStatus.data.errors} need attention`
+                        : ""}
+                    </p>
+                  ) : null}
+                </div>
+                {webhookStatus.data?.active ? (
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={enableWebhooks.isPending}
+                      onClick={() => enableWebhooks.mutate({ workspaceGid })}
+                    >
+                      {enableWebhooks.isPending
+                        ? "Refreshing…"
+                        : "Refresh projects"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={disableWebhooks.isPending}
+                      onClick={() => disableWebhooks.mutate({ workspaceGid })}
+                    >
+                      {disableWebhooks.isPending
+                        ? "Disabling…"
+                        : "Disable push updates"}
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={!workspaceGid || enableWebhooks.isPending}
+                    onClick={() => enableWebhooks.mutate({ workspaceGid })}
+                  >
+                    {enableWebhooks.isPending
+                      ? "Registering projects…"
+                      : "Enable push updates"}
+                  </Button>
+                )}
+              </div>
+              {enableWebhooks.data?.failures.length ? (
+                <p className="mt-3 text-sm text-amber-800">
+                  {enableWebhooks.data.failures.length} webhook registrations
+                  need retry. Active registrations were kept.
+                </p>
+              ) : null}
+              {enableWebhooks.error || disableWebhooks.error ? (
+                <p className="mt-3 text-sm text-red-800">
+                  {(enableWebhooks.error ?? disableWebhooks.error)?.message}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
 
           {dryRun.error ? (
             <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">

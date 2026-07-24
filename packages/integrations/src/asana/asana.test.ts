@@ -108,4 +108,68 @@ describe("Asana integration", () => {
       "completed_since=1970-01-01T00%3A00%3A00.000Z",
     );
   });
+
+  it("initializes and advances a workspace event cursor", async () => {
+    const fetchImpl = vi.fn(async (request: RequestInfo | URL) => {
+      const url = new URL(String(request));
+      if (!url.searchParams.has("sync")) return json({ sync: "first" }, 412);
+      return json({
+        data: [
+          {
+            resource: { gid: "t1", resource_type: "task" },
+            action: "changed",
+          },
+        ],
+        sync: "next",
+        has_more: false,
+      });
+    }) as unknown as typeof fetch;
+    const asana = createAsanaDirect({ accessToken: "token", fetchImpl });
+
+    await expect(asana.workspaceEvents("w1")).resolves.toMatchObject({
+      events: [],
+      sync: "first",
+      reset: true,
+    });
+    await expect(asana.workspaceEvents("w1", "first")).resolves.toMatchObject({
+      events: [expect.objectContaining({ action: "changed" })],
+      sync: "next",
+      reset: false,
+    });
+  });
+
+  it("registers and removes a signed Asana webhook", async () => {
+    const fetchMock = vi.fn(
+      async (_request: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "DELETE") return json({ data: {} });
+        expect(JSON.parse(String(init?.body))).toEqual({
+          data: {
+            resource: "w1",
+            target: "https://portal.hrmny.com/api/asana/webhooks/token",
+            filters: [{ resource_type: "project", action: "added" }],
+          },
+        });
+        return json({
+          data: {
+            gid: "hook-1",
+            active: true,
+            target: "https://portal.hrmny.com/api/asana/webhooks/token",
+            resource: { gid: "w1", resource_type: "workspace" },
+          },
+        });
+      },
+    );
+    const fetchImpl = fetchMock as unknown as typeof fetch;
+    const asana = createAsanaDirect({ accessToken: "token", fetchImpl });
+
+    await expect(
+      asana.createWebhook(
+        "w1",
+        "https://portal.hrmny.com/api/asana/webhooks/token",
+        [{ resource_type: "project", action: "added" }],
+      ),
+    ).resolves.toMatchObject({ gid: "hook-1", active: true });
+    await asana.deleteWebhook("hook-1");
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "DELETE" });
+  });
 });

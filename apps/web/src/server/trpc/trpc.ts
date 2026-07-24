@@ -12,6 +12,7 @@ import {
 import { emitHealthSignal } from "../m1-persistence";
 import { featureForTrpcPath } from "@/features/catalog";
 import { featureEnabled } from "../features";
+import { isWorkViewOnlyMember } from "../work-governance";
 
 export type TrpcContext = {
   user: SessionUser | null;
@@ -148,7 +149,26 @@ const requireStaff = t.middleware(async ({ ctx, next, path }) => {
   return next({ ctx });
 });
 
-export const staffProcedure = protectedProcedure.use(requireStaff);
+const requireWorkWriteLicense = t.middleware(
+  async ({ ctx, next, path, type }) => {
+    if (
+      type === "mutation" &&
+      path.startsWith("work.") &&
+      (await isWorkViewOnlyMember(ctx.employeeId))
+    ) {
+      await recordAuthDenied(path, "work_view_only", ctx.employeeId);
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "FORBIDDEN: Work access is view-only",
+      });
+    }
+    return next({ ctx });
+  },
+);
+
+export const staffProcedure = protectedProcedure
+  .use(requireStaff)
+  .use(requireWorkWriteLicense);
 
 /** Portal-only — requires bound clientId (app-layer RLS scope). */
 const requirePortal = t.middleware(async ({ ctx, next, path }) => {

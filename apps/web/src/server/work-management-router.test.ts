@@ -316,4 +316,178 @@ describe("work management", () => {
       )?.decision?.decision,
     ).toBe("approved");
   });
+
+  it("connects goals, portfolios, reporting, resources, time, budgets, and Gantt", async () => {
+    const caller = partnerCaller();
+    const project = await caller.work.projects.create({
+      name: "Planning pilot",
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const task = await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Deliver plan",
+      description: "",
+      startDate: "2026-07-20",
+      dueAt: "2026-07-24T12:00:00.000Z",
+      estimatedMinutes: 480,
+    });
+    const goal = await caller.work.goals.create({
+      name: "Ship the planning pilot",
+      description: "",
+      dueDate: "2026-07-31",
+    });
+    await caller.work.goals.link({
+      goalId: goal.goalId,
+      target: { type: "project", id: project.projectId },
+      weight: 1,
+    });
+    expect(
+      (await caller.work.goals.list()).find(
+        (item) => item.goalId === goal.goalId,
+      )?.progress,
+    ).toBe(0);
+    await caller.work.tasks.complete({ itemId: task.itemId, completed: true });
+    expect(
+      (await caller.work.goals.list()).find(
+        (item) => item.goalId === goal.goalId,
+      )?.progress,
+    ).toBe(100);
+
+    const portfolio = await caller.work.portfolios.create({
+      name: "Strategic delivery",
+      description: "",
+    });
+    await caller.work.portfolios.addProject({
+      portfolioId: portfolio.portfolioId,
+      projectId: project.projectId,
+    });
+    expect(
+      (await caller.work.portfolios.list()).find(
+        (item) => item.portfolioId === portfolio.portfolioId,
+      ),
+    ).toMatchObject({ progress: 100, health: "complete" });
+
+    await caller.work.statusUpdates.create({
+      targetType: "project",
+      targetId: project.projectId,
+      health: "complete",
+      progress: 100,
+      title: "Planning shipped",
+      body: "Ready for use",
+    });
+    expect(
+      await caller.work.statusUpdates.list({
+        targetType: "project",
+        targetId: project.projectId,
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: "Planning shipped" }),
+      ]),
+    );
+
+    const employeeId = resolveDevUser("partner").employeeId;
+    await caller.work.workload.upsert({
+      projectId: project.projectId,
+      employeeId,
+      weekStart: "2026-07-20",
+      allocatedMinutes: 2_400,
+      roleName: null,
+    });
+    expect(
+      await caller.work.workload.list({
+        projectId: project.projectId,
+        weekStart: "2026-07-20",
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ allocatedMinutes: 2_400, utilization: 100 }),
+      ]),
+    );
+
+    const logged = await caller.work.time.log({
+      projectId: project.projectId,
+      itemId: task.itemId,
+      workDate: "2028-07-24",
+      minutes: 120,
+      isBillable: false,
+      description: "Planning",
+    });
+    const active = await caller.work.time.startTimer({
+      projectId: project.projectId,
+      itemId: task.itemId,
+      description: "Review",
+    });
+    await caller.work.time.discardTimer({ timerId: active.timerId });
+    expect(
+      await caller.work.time.list({ projectId: project.projectId }),
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ minutes: 120 })]),
+    );
+    expect(
+      (
+        await caller.work.reporting.exportProject({
+          projectId: project.projectId,
+        })
+      ).csv,
+    ).toContain('"Deliver plan"');
+
+    const budget = await caller.work.budgets.update({
+      projectId: project.projectId,
+      budgetAmount: 1_000,
+      budgetCurrency: "AED",
+      hourlyCostRate: 100,
+    });
+    expect(budget).toMatchObject({ actualCost: 200, variance: 800 });
+    const dashboard = await caller.work.reporting.saveDashboard({
+      name: "Planning view",
+      config: { projectId: project.projectId },
+    });
+    expect(await caller.work.reporting.dashboards()).toContainEqual(dashboard);
+    await caller.work.time.remove({ timeEntryId: logged.timeEntryId });
+    expect(
+      await caller.work.time.list({ projectId: project.projectId }),
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ timeEntryId: logged.timeEntryId }),
+      ]),
+    );
+
+    await caller.work.gantt.captureBaseline({ projectId: project.projectId });
+    expect(
+      (await caller.work.gantt.get({ projectId: project.projectId })).items[0]
+        ?.baseline,
+    ).toBeTruthy();
+
+    await caller.admin.features.setOverride({
+      featureKey: "work.goals",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(caller.work.goals.list()).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.goals",
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.capacity_planning",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.work.workload.upsert({
+        projectId: project.projectId,
+        employeeId,
+        weekStart: "2026-07-27",
+        allocatedMinutes: 60,
+        roleName: null,
+      }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.capacity_planning",
+    });
+  });
 });

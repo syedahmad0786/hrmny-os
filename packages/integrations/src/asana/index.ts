@@ -1,4 +1,4 @@
-import type { ComposioLiveClient } from "../composio/live";
+import { ComposioApiError, type ComposioLiveClient } from "../composio/live";
 
 export type AsanaWorkspace = {
   gid: string;
@@ -81,12 +81,55 @@ export type AsanaAttachment = {
   created_at?: string;
 };
 
+export type AsanaEvent = {
+  resource: { gid: string; resource_type?: string; name?: string };
+  parent?: { gid: string; resource_type?: string; name?: string } | null;
+  type?: string;
+  action: string;
+  created_at?: string;
+  change?: Record<string, unknown>;
+};
+
+export type AsanaEventPage = {
+  events: AsanaEvent[];
+  sync: string;
+  hasMore: boolean;
+  reset: boolean;
+};
+
+export type AsanaWebhook = {
+  gid: string;
+  active: boolean;
+  target: string;
+  resource: { gid: string; resource_type?: string; name?: string };
+};
+
+export type AsanaWebhookFilter = {
+  resource_type: string;
+  action: "added" | "changed" | "deleted" | "removed" | "undeleted";
+};
+
 type AsanaPage<T> = {
   data: T[];
   next_page?: { offset?: string | null; uri?: string | null } | null;
 };
 
 type AsanaSingle<T> = { data: T };
+
+type AsanaEventsResponse = {
+  data?: AsanaEvent[];
+  sync?: string;
+  has_more?: boolean;
+};
+
+class AsanaApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly data: unknown,
+  ) {
+    super(`Asana request failed (${status})`);
+  }
+}
 
 export interface AsanaAdapter {
   me(): Promise<AsanaUser>;
@@ -98,10 +141,19 @@ export interface AsanaAdapter {
   listSubtasks(taskGid: string): Promise<AsanaTask[]>;
   listStories(taskGid: string): Promise<AsanaStory[]>;
   listAttachments(taskGid: string): Promise<AsanaAttachment[]>;
+  workspaceEvents(workspaceGid: string, sync?: string): Promise<AsanaEventPage>;
+  createWebhook(
+    resourceGid: string,
+    target: string,
+    filters?: readonly AsanaWebhookFilter[],
+  ): Promise<AsanaWebhook>;
+  deleteWebhook(webhookGid: string): Promise<void>;
 }
 
 type AsanaTransport = {
   get<T>(path: string, query?: URLSearchParams): Promise<T>;
+  post<T>(path: string, body: Record<string, unknown>): Promise<T>;
+  delete(path: string): Promise<void>;
 };
 
 const TASK_FIELDS = [
@@ -148,21 +200,32 @@ function directTransport(input: {
     "",
   );
   const fetchImpl = input.fetchImpl ?? fetch;
+  async function request<T>(
+    path: string,
+    method: "GET" | "POST" | "DELETE",
+    query?: URLSearchParams,
+    body?: Record<string, unknown>,
+  ) {
+    const url = `${baseUrl}${path}${query ? `?${query}` : ""}`;
+    const response = await fetchImpl(url, {
+      method,
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${token}`,
+        ...(body ? { "content-type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new AsanaApiError(response.status, payload);
+    return payload as T;
+  }
   return {
-    async get<T>(path: string, query?: URLSearchParams) {
-      const url = `${baseUrl}${path}${query ? `?${query}` : ""}`;
-      const response = await fetchImpl(url, {
-        headers: {
-          accept: "application/json",
-          authorization: `Bearer ${token}`,
-        },
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(`Asana request failed (${response.status})`);
-      }
-      return payload as T;
-    },
+    get: <T>(path: string, query?: URLSearchParams) =>
+      request<T>(path, "GET", query),
+    post: <T>(path: string, body: Record<string, unknown>) =>
+      request<T>(path, "POST", undefined, body),
+    delete: (path: string) => request<void>(path, "DELETE"),
   };
 }
 
@@ -177,13 +240,47 @@ function composioTransport(input: {
         value,
         in: "query" as const,
       }));
-      const result = await input.client.proxy<T>({
-        connectedAccountId: input.connectedAccountId,
-        endpoint: `/api/1.0${path}`,
-        method: "GET",
-        parameters,
-      });
-      return result.data;
+      try {
+        const result = await input.client.proxy<T>({
+          connectedAccountId: input.connectedAccountId,
+          endpoint: `/api/1.0${path}`,
+          method: "GET",
+          parameters,
+        });
+        return result.data;
+      } catch (error) {
+        if (error instanceof ComposioApiError)
+          throw new AsanaApiError(error.status, error.data);
+        throw error;
+      }
+    },
+    async post<T>(path: string, body: Record<string, unknown>) {
+      try {
+        const result = await input.client.proxy<T>({
+          connectedAccountId: input.connectedAccountId,
+          endpoint: `/api/1.0${path}`,
+          method: "POST",
+          body,
+        });
+        return result.data;
+      } catch (error) {
+        if (error instanceof ComposioApiError)
+          throw new AsanaApiError(error.status, error.data);
+        throw error;
+      }
+    },
+    async delete(path: string) {
+      try {
+        await input.client.proxy({
+          connectedAccountId: input.connectedAccountId,
+          endpoint: `/api/1.0${path}`,
+          method: "DELETE",
+        });
+      } catch (error) {
+        if (error instanceof ComposioApiError)
+          throw new AsanaApiError(error.status, error.data);
+        throw error;
+      }
     },
   };
 }
@@ -277,6 +374,51 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
             "gid,name,resource_subtype,download_url,permanent_url,view_url,created_at",
         }),
       ),
+    async workspaceEvents(workspaceGid, sync) {
+      const path = `/workspaces/${encodeURIComponent(workspaceGid)}/events`;
+      const query = new URLSearchParams();
+      if (sync) query.set("sync", sync);
+      try {
+        const response = await transport.get<AsanaEventsResponse>(path, query);
+        if (!response.sync)
+          throw new Error("Asana event response has no sync token");
+        return {
+          events: response.data ?? [],
+          sync: response.sync,
+          hasMore: Boolean(response.has_more),
+          reset: false,
+        };
+      } catch (error) {
+        if (error instanceof AsanaApiError && error.status === 412) {
+          const response = error.data as AsanaEventsResponse | null;
+          if (!response?.sync)
+            throw new Error("Asana did not return a replacement sync token");
+          return {
+            events: [],
+            sync: response.sync,
+            hasMore: false,
+            reset: true,
+          };
+        }
+        throw error;
+      }
+    },
+    async createWebhook(resourceGid, target, filters = []) {
+      const response = await transport.post<AsanaSingle<AsanaWebhook>>(
+        "/webhooks",
+        {
+          data: {
+            resource: resourceGid,
+            target,
+            ...(filters.length ? { filters } : {}),
+          },
+        },
+      );
+      return response.data;
+    },
+    async deleteWebhook(webhookGid) {
+      await transport.delete(`/webhooks/${encodeURIComponent(webhookGid)}`);
+    },
   };
 }
 
