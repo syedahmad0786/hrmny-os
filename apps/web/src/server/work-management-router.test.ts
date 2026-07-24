@@ -317,6 +317,124 @@ describe("work management", () => {
     ).toBe("approved");
   });
 
+  it("runs collaborator rules and validates scheduled rule cadence", async () => {
+    const caller = partnerCaller();
+    const project = await caller.work.projects.create({
+      name: `Rule triggers ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const section = (
+      await caller.work.projects.get({ projectId: project.projectId })
+    ).sections[0]!;
+    const task = await caller.work.tasks.create({
+      projectId: project.projectId,
+      sectionId: section.sectionId,
+      title: "Invite reviewer",
+      description: "",
+    });
+    await expect(
+      caller.work.rules.create({
+        projectId: project.projectId,
+        name: "Invalid schedule",
+        triggerType: "scheduled",
+        scheduleMinutes: null,
+        branches: [
+          { mode: "all", conditions: [], actions: [{ type: "complete" }] },
+        ],
+      }),
+    ).rejects.toThrow();
+    const scheduled = await caller.work.rules.create({
+      projectId: project.projectId,
+      name: "Daily sweep",
+      triggerType: "scheduled",
+      scheduleMinutes: 1440,
+      branches: [
+        {
+          mode: "all",
+          conditions: [
+            { field: "completed", operator: "equals", value: false },
+          ],
+          actions: [{ type: "set_priority", value: "high" }],
+        },
+      ],
+    });
+    expect(scheduled.scheduleMinutes).toBe(1440);
+    await caller.admin.features.setOverride({
+      featureKey: "work.rules.scheduled",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.work.rules.create({
+        projectId: project.projectId,
+        name: "Disabled schedule",
+        triggerType: "scheduled",
+        scheduleMinutes: 60,
+        branches: [
+          { mode: "all", conditions: [], actions: [{ type: "complete" }] },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.rules.scheduled",
+    });
+    expect(
+      await caller.work.rules.list({ projectId: project.projectId }),
+    ).not.toContainEqual(expect.objectContaining({ ruleId: scheduled.ruleId }));
+    await caller.work.rules.create({
+      projectId: project.projectId,
+      name: "Escalate when shared",
+      triggerType: "collaborator_added",
+      branches: [
+        {
+          mode: "all",
+          conditions: [],
+          actions: [{ type: "set_priority", value: "urgent" }],
+        },
+      ],
+    });
+    await caller.work.followers.follow({ itemId: task.itemId });
+    const detail = await caller.work.projects.get({
+      projectId: project.projectId,
+    });
+    expect(
+      detail.items.find((item) => item.itemId === task.itemId)?.priority,
+    ).toBe("urgent");
+    expect(
+      await caller.work.rules.runs({ projectId: project.projectId, limit: 20 }),
+    ).toContainEqual(
+      expect.objectContaining({ triggerType: "collaborator_added" }),
+    );
+    const disabledTask = await caller.work.tasks.create({
+      projectId: project.projectId,
+      sectionId: section.sectionId,
+      title: "Do not escalate",
+      description: "",
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.rules.collaborator_trigger",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await caller.work.followers.follow({ itemId: disabledTask.itemId });
+    expect(
+      (
+        await caller.work.projects.get({ projectId: project.projectId })
+      ).items.find((item) => item.itemId === disabledTask.itemId)?.priority,
+    ).toBeNull();
+    expect(
+      await caller.work.rules.runs({ projectId: project.projectId, limit: 20 }),
+    ).not.toContainEqual(
+      expect.objectContaining({ triggerType: "collaborator_added" }),
+    );
+  });
+
   it("connects goals, portfolios, reporting, resources, time, budgets, and Gantt", async () => {
     const caller = partnerCaller();
     const project = await caller.work.projects.create({

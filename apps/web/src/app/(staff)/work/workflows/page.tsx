@@ -12,6 +12,10 @@ export default function WorkflowsPage() {
   const enabled = new Set(session.data?.enabledFeatureKeys ?? []);
   const formsEnabled = enabled.has("work.forms");
   const rulesEnabled = enabled.has("work.rules");
+  const scheduledRulesEnabled = enabled.has("work.rules.scheduled");
+  const collaboratorRulesEnabled = enabled.has(
+    "work.rules.collaborator_trigger",
+  );
   const templatesEnabled = enabled.has("work.templates");
   const bundlesEnabled = enabled.has("work.bundles");
   const approvalsEnabled = enabled.has("work.approvals");
@@ -76,8 +80,16 @@ export default function WorkflowsPage() {
 
   const [ruleName, setRuleName] = useState("");
   const [triggerType, setTriggerType] = useState<
-    "task_added" | "task_completed" | "task_moved"
+    | "task_added"
+    | "task_completed"
+    | "task_moved"
+    | "priority_changed"
+    | "due_date_set"
+    | "approval_decided"
+    | "collaborator_added"
+    | "scheduled"
   >("task_added");
+  const [scheduleMinutes, setScheduleMinutes] = useState("1440");
   const [conditionPriority, setConditionPriority] = useState("");
   const [actionType, setActionType] = useState<
     "set_priority" | "move_section" | "assign" | "complete" | "add_tag"
@@ -404,6 +416,8 @@ export default function WorkflowsPage() {
                 projectId,
                 name: ruleName,
                 triggerType,
+                scheduleMinutes:
+                  triggerType === "scheduled" ? Number(scheduleMinutes) : null,
                 branches: [
                   {
                     mode: "all",
@@ -440,7 +454,27 @@ export default function WorkflowsPage() {
               <option value="task_added">Task added</option>
               <option value="task_completed">Task completed</option>
               <option value="task_moved">Task moved</option>
+              <option value="priority_changed">Priority changed</option>
+              <option value="due_date_set">Due date set</option>
+              <option value="approval_decided">Approval decided</option>
+              {collaboratorRulesEnabled ? (
+                <option value="collaborator_added">Collaborator added</option>
+              ) : null}
+              {scheduledRulesEnabled ? (
+                <option value="scheduled">On a schedule</option>
+              ) : null}
             </select>
+            {triggerType === "scheduled" ? (
+              <input
+                aria-label="Schedule interval in minutes"
+                className="rounded border border-sand px-2 py-1.5"
+                type="number"
+                min={15}
+                max={525600}
+                value={scheduleMinutes}
+                onChange={(event) => setScheduleMinutes(event.target.value)}
+              />
+            ) : null}
             <select
               aria-label="Rule priority condition"
               className="rounded border border-sand px-2 py-1.5"
@@ -527,6 +561,10 @@ export default function WorkflowsPage() {
               className="rounded bg-ink px-3 py-1.5 text-white"
               disabled={
                 !ruleName.trim() ||
+                (triggerType === "scheduled" &&
+                  (!Number.isInteger(Number(scheduleMinutes)) ||
+                    Number(scheduleMinutes) < 15 ||
+                    Number(scheduleMinutes) > 525600)) ||
                 (["move_section", "add_tag"].includes(actionType) &&
                   !actionValue)
               }
@@ -544,6 +582,9 @@ export default function WorkflowsPage() {
                   <span>
                     <strong>{rule.name}</strong> ·{" "}
                     {rule.triggerType.replaceAll("_", " ")}
+                    {rule.scheduleMinutes
+                      ? ` · every ${rule.scheduleMinutes} minutes`
+                      : ""}
                   </span>
                   <button
                     className="rounded-full border border-sand px-2 py-1 text-xs"
