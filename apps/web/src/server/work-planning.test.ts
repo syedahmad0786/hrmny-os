@@ -128,6 +128,39 @@ describe("work planning calculations", () => {
       ],
       total: 2,
     });
+    expect(
+      buildWorkReportChart(
+        [
+          {
+            itemId: "subtask",
+            parentItemId: "parent",
+            itemType: "task",
+            priority: "urgent",
+            assigneeEmployeeId: "owner",
+            assigneeName: "Aisha",
+            sectionName: null,
+            projectName: "Launch",
+            dueAt: null,
+            completedAt: null,
+            estimatedMinutes: 30,
+            actualMinutes: 0,
+          },
+        ],
+        {
+          groupBy: "assignee",
+          metric: "task_count",
+          completion: "all",
+          dueFrom: null,
+          dueTo: null,
+          includeSubtasks: true,
+          customFieldId: null,
+          assigneeEmployeeId: "owner",
+          priority: "urgent",
+          itemType: "task",
+          subtasks: "only",
+        },
+      ),
+    ).toEqual({ data: [{ label: "Aisha", value: 1 }], total: 1 });
     expect(countReportBuckets(["On track", "At risk", "On track"])).toEqual({
       data: [
         { label: "On track", value: 2 },

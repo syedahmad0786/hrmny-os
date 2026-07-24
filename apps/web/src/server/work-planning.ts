@@ -60,13 +60,19 @@ export type WorkReportChartSpec = {
   dueTo: string | null;
   includeSubtasks: boolean;
   customFieldId: string | null;
+  assigneeEmployeeId?: string | null;
+  priority?: "low" | "medium" | "high" | "urgent" | null;
+  itemType?: "task" | "milestone" | "approval" | null;
+  subtasks?: "all" | "exclude" | "only";
 };
 
 export type WorkReportChartRow = {
   itemId: string;
+  projectId?: string;
   parentItemId: string | null;
   itemType: "task" | "milestone" | "approval";
   priority: "low" | "medium" | "high" | "urgent" | null;
+  assigneeEmployeeId?: string | null;
   assigneeName: string | null;
   sectionName: string | null;
   projectName: string;
@@ -83,7 +89,17 @@ export function buildWorkReportChart(
 ) {
   const buckets = new Map<string, number>();
   for (const row of rows) {
-    if (!spec.includeSubtasks && row.parentItemId) continue;
+    const subtasks =
+      spec.subtasks ?? (spec.includeSubtasks ? "all" : "exclude");
+    if (subtasks === "exclude" && row.parentItemId) continue;
+    if (subtasks === "only" && !row.parentItemId) continue;
+    if (
+      spec.assigneeEmployeeId &&
+      row.assigneeEmployeeId !== spec.assigneeEmployeeId
+    )
+      continue;
+    if (spec.priority && row.priority !== spec.priority) continue;
+    if (spec.itemType && row.itemType !== spec.itemType) continue;
     if (spec.completion === "complete" && !row.completedAt) continue;
     if (spec.completion === "incomplete" && row.completedAt) continue;
     const dueDate = row.dueAt?.slice(0, 10) ?? null;
