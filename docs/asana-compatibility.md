@@ -64,7 +64,9 @@ Feature Lab and editable hrmny RBAC are available. Project-level admin/editor/co
 
 ### Import, sync, and integrations
 
-The beta importer preserves projects, sections, tasks, nested subtasks, multi-home membership, dependencies, comments, followers, tags, attachments, and custom fields/values. It is idempotent using source/external identifiers, blocks on unmapped people by default, records a migration run, and writes atomically after an explicit confirmation. Workspace event cursors run on a recurring job; changes or expired cursors trigger a full idempotent reconciliation, while explicit delete/removal events archive deleted work and remove project memberships. Signed Asana webhooks can now be registered for the workspace and every active project through the live Composio transport. The callback completes Asana's secret handshake, stores the secret in Vault, verifies every raw payload with SHA-256 HMAC, deduplicates receipts, and wakes the same reconciliation job. New and archived projects are reconciled automatically after structural changes. Cursor polling remains active because Asana documents webhook delivery as at-most-once and recommends a polling fallback. Enabling webhooks requires a public HTTPS `NEXT_PUBLIC_APP_URL` and webhook scopes on the connected Asana authorization. Teams, project memberships, time entries, goals, portfolios, templates, and status history remain migration gaps.
+The beta importer preserves projects and their dates, sections, tasks, estimates, nested subtasks, multi-home membership, dependencies, comments, followers, tags, attachments, custom fields/values, teams and administrators, user/team project access, time entries, goals and weighted supporting work, sub-goals, portfolios and their project ordering, project/task templates, and complete project/portfolio/goal status history. Source identifiers make every extended object idempotent; source records are retained for fields that do not yet have a first-class hrmny control. The import blocks on unmapped people by default, records a migration run, and writes atomically after explicit confirmation. A regular Asana OAuth/PAT connection can only list portfolios owned by that connected user; importing every workspace portfolio requires an Asana service account. Connections authorized before the added team, membership, goal, portfolio, template, status, and time-entry scopes may need to be reconnected.
+
+Workspace event cursors run on a recurring job; changes or expired cursors trigger a full idempotent reconciliation, while explicit delete/removal events archive deleted core work and remove task/project memberships. Signed Asana webhooks can be registered for the workspace and every active project through the live Composio transport. The callback completes Asana's secret handshake, stores the secret in Vault, verifies every raw payload with SHA-256 HMAC, deduplicates receipts, and wakes the same reconciliation job. New and archived projects are reconciled automatically after structural changes. Cursor polling remains active because Asana documents webhook delivery as at-most-once and recommends a polling fallback. Enabling webhooks requires a public HTTPS `NEXT_PUBLIC_APP_URL` and webhook scopes on the connected Asana authorization. Removal reconciliation for the newly added teams, goals, portfolios, templates, status updates, and time entries remains a sync gap; re-runs update or add those records but do not yet remove a record that disappeared upstream.
 
 ### AI parity
 
@@ -87,7 +89,7 @@ AI Teammates now have synthetic employee identities, owner/editor/user sharing, 
 
 1. **Feature Lab foundation** — catalogue, inheritance, client/role/user controls, navigation/API enforcement, audit. Implemented.
 2. **Core work graph** — projects, permissions, sections, tasks, subtasks, dates, dependencies, comments, list/board. Implemented at first usable depth.
-3. **Asana connection and migration** — live Composio verification, read-only discovery, dry-run report, idempotent core import, workspace event cursors, signed project/workspace webhooks, recurring reconciliation, and destructive-event handling implemented in beta; non-core object migration remains.
+3. **Asana connection and migration** — live Composio verification, read-only discovery, dry-run report, idempotent core and planning/governance import, workspace event cursors, signed project/workspace webhooks, recurring reconciliation, and core destructive-event handling implemented in beta; extended-object removal reconciliation remains.
 4. **Workflow depth** — custom fields, tags, files, followers, recurrence, forms, event rules, templates, bundles, and approvals implemented in beta; proofing, richer automation, and public intake remain.
 5. **Planning and reporting** — Calendar, Timeline, Files, My Tasks, Inbox, search, Gantt, goals, portfolios, statuses, dashboards, workload, capacity, budgets, and time are implemented in beta; richer cross-portfolio analytics remain.
 6. **Enterprise controls and integrations** — teams, guests, view-only licensing, sharing defaults, editable RBAC, admin console, audit export, graph backup, scoped Work API/outbound webhooks, Work MCP, SAML SSO enforcement, SCIM Users/Groups provisioning, and signed Asana webhook ingestion implemented in beta; isolated sandboxes and additional third-party apps remain.
@@ -108,6 +110,14 @@ AI Teammates now have synthetic employee identities, owner/editor/user sharing, 
 - https://developers.asana.com/reference/rest-api-reference
 - https://developers.asana.com/docs/webhooks-guide
 - https://developers.asana.com/reference/getworkspaceevents
+- https://developers.asana.com/reference/getteamsforworkspace
+- https://developers.asana.com/reference/getmemberships
+- https://developers.asana.com/reference/getgoals
+- https://developers.asana.com/reference/getportfolios
+- https://developers.asana.com/reference/getprojecttemplates
+- https://developers.asana.com/reference/gettasktemplates
+- https://developers.asana.com/reference/getstatusesforobject
+- https://developers.asana.com/reference/gettimetrackingentriesfortask
 - https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml
 - https://www.rfc-editor.org/info/rfc7643/
 - https://www.rfc-editor.org/info/rfc7644/

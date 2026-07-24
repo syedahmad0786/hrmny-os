@@ -302,4 +302,37 @@ describe("work migration compatibility", () => {
     expect(migration).toContain("'create_external_file'");
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("adds idempotent extended Asana planning and governance import fields", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0034_asana_extended_import.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0034_asana_extended_import.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0034_asana_extended_import.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    for (const table of [
+      "work_goal",
+      "work_goal_link",
+      "work_portfolio",
+      "work_status_update",
+      "work_template",
+      "time_entry",
+    ]) {
+      expect(migration).toMatch(new RegExp(`${table}[^;]+external_id`, "i"));
+    }
+    expect(migration).toContain("'partial'");
+    expect(migration).toContain("'on_hold'");
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });
