@@ -206,7 +206,16 @@ export default function PlanningPage() {
   >("all");
   const [chartDueFrom, setChartDueFrom] = useState("");
   const [chartDueTo, setChartDueTo] = useState("");
-  const [chartIncludeSubtasks, setChartIncludeSubtasks] = useState(true);
+  const [chartAssigneeId, setChartAssigneeId] = useState("");
+  const [chartPriority, setChartPriority] = useState<
+    "" | "low" | "medium" | "high" | "urgent"
+  >("");
+  const [chartItemType, setChartItemType] = useState<
+    "" | "task" | "milestone" | "approval"
+  >("");
+  const [chartSubtasks, setChartSubtasks] = useState<
+    "all" | "exclude" | "only"
+  >("all");
   const [chartCustomFieldId, setChartCustomFieldId] = useState("");
   useEffect(() => {
     if (!projectId && projects.data?.[0])
@@ -252,6 +261,17 @@ export default function PlanningPage() {
         setPortfolioFilters((current) => ({ ...current, status: "" }));
     }
   }, [portfolioFilters.status, projectFilters.status, statusEnabled]);
+  useEffect(() => {
+    if (
+      (chartItemType === "milestone" && !enabled.has("work.milestones")) ||
+      (chartItemType === "approval" && !enabled.has("work.approvals"))
+    )
+      setChartItemType("");
+  }, [chartItemType, enabled]);
+  useEffect(() => {
+    if (!timeEnabled && chartMetric !== "task_count")
+      setChartMetric("task_count");
+  }, [chartMetric, timeEnabled]);
   const goals = trpc.work.goals.list.useQuery(undefined, {
     enabled: goalsEnabled,
   });
@@ -322,8 +342,12 @@ export default function PlanningPage() {
         completion: chartCompletion,
         dueFrom: chartDueFrom || null,
         dueTo: chartDueTo || null,
-        includeSubtasks: chartIncludeSubtasks,
+        includeSubtasks: chartSubtasks !== "exclude",
         customFieldId: chartCustomFieldId || null,
+        assigneeEmployeeId: chartAssigneeId || null,
+        priority: chartPriority || null,
+        itemType: chartItemType || null,
+        subtasks: chartSubtasks,
       },
     },
     {
@@ -345,8 +369,12 @@ export default function PlanningPage() {
         completion: chartCompletion,
         dueFrom: chartDueFrom || null,
         dueTo: chartDueTo || null,
-        includeSubtasks: chartIncludeSubtasks,
+        includeSubtasks: chartSubtasks !== "exclude",
         customFieldId: null,
+        assigneeEmployeeId: chartAssigneeId || null,
+        priority: chartPriority || null,
+        itemType: chartItemType || null,
+        subtasks: chartSubtasks,
       },
     },
     {
@@ -698,7 +726,28 @@ export default function PlanningPage() {
     setChartCompletion(saved.completion as typeof chartCompletion);
     setChartDueFrom(typeof saved.dueFrom === "string" ? saved.dueFrom : "");
     setChartDueTo(typeof saved.dueTo === "string" ? saved.dueTo : "");
-    setChartIncludeSubtasks(saved.includeSubtasks !== false);
+    setChartAssigneeId(
+      typeof saved.assigneeEmployeeId === "string"
+        ? saved.assigneeEmployeeId
+        : "",
+    );
+    setChartPriority(
+      ["low", "medium", "high", "urgent"].includes(String(saved.priority))
+        ? (saved.priority as typeof chartPriority)
+        : "",
+    );
+    setChartItemType(
+      ["task", "milestone", "approval"].includes(String(saved.itemType))
+        ? (saved.itemType as typeof chartItemType)
+        : "",
+    );
+    setChartSubtasks(
+      ["all", "exclude", "only"].includes(String(saved.subtasks))
+        ? (saved.subtasks as typeof chartSubtasks)
+        : saved.includeSubtasks === false
+          ? "exclude"
+          : "all",
+    );
     setChartCustomFieldId(
       typeof saved.customFieldId === "string" ? saved.customFieldId : "",
     );
@@ -913,8 +962,12 @@ export default function PlanningPage() {
                         completion: chartCompletion,
                         dueFrom: chartDueFrom || null,
                         dueTo: chartDueTo || null,
-                        includeSubtasks: chartIncludeSubtasks,
+                        includeSubtasks: chartSubtasks !== "exclude",
                         customFieldId: chartCustomFieldId || null,
+                        assigneeEmployeeId: chartAssigneeId || null,
+                        priority: chartPriority || null,
+                        itemType: chartItemType || null,
+                        subtasks: chartSubtasks,
                       },
                     },
                   });
@@ -1293,8 +1346,14 @@ export default function PlanningPage() {
                       }
                     >
                       <option value="task_count">Task count</option>
-                      <option value="estimated_minutes">Estimated time</option>
-                      <option value="actual_minutes">Actual time</option>
+                      {timeEnabled ? (
+                        <>
+                          <option value="estimated_minutes">
+                            Estimated time
+                          </option>
+                          <option value="actual_minutes">Actual time</option>
+                        </>
+                      ) : null}
                     </select>
                   </label>
                   <label className="grid gap-1 text-xs text-muted">
@@ -1331,16 +1390,61 @@ export default function PlanningPage() {
                       onChange={(event) => setChartDueTo(event.target.value)}
                     />
                   </label>
-                  <label className="flex items-end gap-2 pb-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={chartIncludeSubtasks}
-                      onChange={(event) =>
-                        setChartIncludeSubtasks(event.target.checked)
-                      }
-                    />
-                    Include subtasks
-                  </label>
+                  <ReportFilterSelect
+                    label="Assignee"
+                    allLabel="All assignees"
+                    value={chartAssigneeId}
+                    options={(employees.data ?? []).map((employee) => ({
+                      value: employee.employeeId,
+                      label: employee.displayName,
+                    }))}
+                    onChange={setChartAssigneeId}
+                  />
+                  <ReportFilterSelect
+                    label="Priority"
+                    allLabel="All priorities"
+                    value={chartPriority}
+                    options={[
+                      { value: "low", label: "Low" },
+                      { value: "medium", label: "Medium" },
+                      { value: "high", label: "High" },
+                      { value: "urgent", label: "Urgent" },
+                    ]}
+                    onChange={(priority) =>
+                      setChartPriority(priority as typeof chartPriority)
+                    }
+                  />
+                  <ReportFilterSelect
+                    label="Work type"
+                    allLabel="All work types"
+                    value={chartItemType}
+                    options={[
+                      { value: "task", label: "Task" },
+                      ...(enabled.has("work.milestones")
+                        ? [{ value: "milestone", label: "Milestone" }]
+                        : []),
+                      ...(enabled.has("work.approvals")
+                        ? [{ value: "approval", label: "Approval" }]
+                        : []),
+                    ]}
+                    onChange={(itemType) =>
+                      setChartItemType(itemType as typeof chartItemType)
+                    }
+                  />
+                  <ReportFilterSelect
+                    label="Subtasks"
+                    allLabel="All levels"
+                    value={chartSubtasks === "all" ? "" : chartSubtasks}
+                    options={[
+                      { value: "exclude", label: "Exclude subtasks" },
+                      { value: "only", label: "Only subtasks" },
+                    ]}
+                    onChange={(subtasks) =>
+                      setChartSubtasks(
+                        subtasks ? (subtasks as "exclude" | "only") : "all",
+                      )
+                    }
+                  />
                 </>
               ) : null}
             </div>

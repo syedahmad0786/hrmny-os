@@ -2197,6 +2197,133 @@ describe("work management", () => {
     });
   });
 
+  it("filters task reports and removes disabled work types", async () => {
+    const caller = partnerCaller();
+    const employeeId = resolveDevUser("partner").employeeId;
+    const project = await caller.work.projects.create({
+      name: "Filtered reporting",
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const parent = await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Parent task",
+      description: "",
+      priority: "urgent",
+      assigneeEmployeeId: employeeId,
+    });
+    await caller.work.tasks.create({
+      projectId: project.projectId,
+      parentItemId: parent.itemId,
+      title: "Urgent subtask",
+      description: "",
+      priority: "urgent",
+      assigneeEmployeeId: employeeId,
+    });
+    await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Launch milestone",
+      description: "",
+      itemType: "milestone",
+      priority: "urgent",
+      assigneeEmployeeId: employeeId,
+    });
+    const baseSpec = {
+      metric: "task_count" as const,
+      completion: "all" as const,
+      dueFrom: null,
+      dueTo: null,
+      includeSubtasks: true,
+      customFieldId: null,
+      assigneeEmployeeId: employeeId,
+      priority: "urgent" as const,
+    };
+    expect(
+      await caller.work.reporting.chart({
+        projectId: project.projectId,
+        spec: {
+          ...baseSpec,
+          groupBy: "task_type",
+          itemType: "task",
+          subtasks: "only",
+        },
+      }),
+    ).toEqual({ data: [{ label: "Task", value: 1 }], total: 1 });
+    const dashboard = await caller.work.reporting.saveDashboard({
+      name: "Milestone report",
+      config: {
+        projectId: project.projectId,
+        chartStyle: "bar",
+        spec: {
+          ...baseSpec,
+          groupBy: "task_type",
+          itemType: "milestone",
+          subtasks: "all",
+        },
+      },
+    });
+    const timeDashboard = await caller.work.reporting.saveDashboard({
+      name: "Estimated work report",
+      config: {
+        projectId: project.projectId,
+        chartStyle: "number",
+        spec: {
+          ...baseSpec,
+          groupBy: "completion",
+          metric: "estimated_minutes",
+          itemType: "task",
+          subtasks: "all",
+        },
+      },
+    });
+    const clientId = resolveDevUser("portal_a").clientId!;
+    getDemoWork().projects.get(project.projectId)!.clientId = clientId;
+    await caller.admin.features.setOverride({
+      featureKey: "work.milestones",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "client disabled milestones",
+    });
+    expect(
+      await caller.work.reporting.chart({
+        projectId: project.projectId,
+        spec: {
+          ...baseSpec,
+          groupBy: "task_type",
+          itemType: null,
+          subtasks: "all",
+        },
+      }),
+    ).toEqual({ data: [{ label: "Task", value: 2 }], total: 2 });
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      dashboard,
+    );
+    await caller.admin.features.setOverride({
+      featureKey: "work.time_tracking",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "client disabled time tracking",
+    });
+    expect(
+      await caller.work.reporting.chart({
+        projectId: project.projectId,
+        spec: {
+          ...baseSpec,
+          groupBy: "completion",
+          metric: "estimated_minutes",
+          itemType: "task",
+          subtasks: "all",
+        },
+      }),
+    ).toEqual({ data: [], total: 0 });
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      timeDashboard,
+    );
+  });
+
   it("connects goals, portfolios, reporting, resources, time, budgets, and Gantt", async () => {
     const caller = partnerCaller();
     const project = await caller.work.projects.create({

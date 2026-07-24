@@ -1051,6 +1051,10 @@ const reportChartSpecSchema = z
     dueTo: z.string().date().nullable(),
     includeSubtasks: z.boolean(),
     customFieldId: nullableUuid,
+    assigneeEmployeeId: nullableUuid.optional(),
+    priority: z.enum(["low", "medium", "high", "urgent"]).nullable().optional(),
+    itemType: z.enum(["task", "milestone", "approval"]).nullable().optional(),
+    subtasks: z.enum(["all", "exclude", "only"]).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.dueFrom && value.dueTo && value.dueFrom > value.dueTo)
@@ -3114,6 +3118,22 @@ async function requireDashboardAccess(
       throw new TRPCError({ code: "NOT_FOUND" });
     await requireProjectCustomField(ctx, projectId, customFieldId);
   }
+  if (
+    reportType === "tasks" &&
+    typeof projectId === "string" &&
+    spec &&
+    typeof spec === "object"
+  ) {
+    const itemType = (spec as Record<string, unknown>).itemType;
+    if (itemType === "milestone" || itemType === "approval")
+      await requireScopedFeature(ctx, `work.${itemType}s`, projectId);
+    if (
+      ["estimated_minutes", "actual_minutes"].includes(
+        String((spec as Record<string, unknown>).metric),
+      )
+    )
+      await requireScopedFeature(ctx, "work.time_tracking", projectId);
+  }
   return projectId ?? portfolioId ?? reportType;
 }
 
@@ -3147,51 +3167,101 @@ async function portfolioReportingProjectIds(
 }
 
 async function reportRowsForProjects(
+  ctx: TrpcContext,
   projectIds: string[],
   spec: WorkReportChartSpec,
 ): Promise<WorkReportChartRow[]> {
   if (!projectIds.length) return [];
+  const available = new Map<
+    string,
+    {
+      tasks: boolean;
+      milestones: boolean;
+      approvals: boolean;
+      timeTracking: boolean;
+    }
+  >();
+  await Promise.all(
+    projectIds.map(async (projectId) => {
+      const scope = {
+        userId: ctx.employeeId,
+        clientId: await projectClientId(projectId),
+        roles: ctx.roles,
+      };
+      const tasks = await featureEnabled("work.tasks", scope);
+      available.set(projectId, {
+        tasks,
+        milestones: tasks && (await featureEnabled("work.milestones", scope)),
+        approvals: tasks && (await featureEnabled("work.approvals", scope)),
+        timeTracking:
+          tasks && (await featureEnabled("work.time_tracking", scope)),
+      });
+    }),
+  );
+  const enabledProjectIds = (
+    key: "tasks" | "milestones" | "approvals" | "timeTracking",
+  ) => projectIds.filter((projectId) => available.get(projectId)?.[key]);
+  const taskProjectIds = enabledProjectIds("tasks");
+  const milestoneProjectIds = enabledProjectIds("milestones");
+  const approvalProjectIds = enabledProjectIds("approvals");
+  const timeProjectIds = enabledProjectIds("timeTracking");
   const db = getDb();
-  if (!db) {
-    const store = getDemoWork();
-    return [...store.items.values()]
-      .filter((item) => projectIds.includes(item.projectId))
-      .map((item) => ({
-        itemId: item.itemId,
-        parentItemId: item.parentItemId,
-        itemType: item.itemType,
-        priority: item.priority,
-        assigneeName: item.assigneeName,
-        sectionName: item.sectionId
-          ? (store.sections.get(item.sectionId)?.name ?? null)
-          : null,
-        projectName: store.projects.get(item.projectId)?.name ?? "Project",
-        dueAt: item.dueAt,
-        completedAt: item.completedAt,
-        estimatedMinutes: item.estimatedMinutes ?? null,
-        actualMinutes: [...store.timeEntries.values()]
-          .filter(
-            (entry) =>
-              projectIds.includes(entry.projectId) &&
-              entry.itemId === item.itemId,
-          )
-          .reduce((sum, entry) => sum + entry.minutes, 0),
-        customFieldValue: spec.customFieldId
-          ? store.customFieldValues.get(`${item.itemId}:${spec.customFieldId}`)
-          : undefined,
-      }));
-  }
-  return (
-    await db.execute<
-      Omit<WorkReportChartRow, "dueAt" | "completedAt"> & {
-        dueAt: Date | string | null;
-        completedAt: Date | string | null;
-      }
-    >(sql`
+  const rows: WorkReportChartRow[] = !db
+    ? (() => {
+        const store = getDemoWork();
+        return [...store.items.values()]
+          .filter((item) => {
+            const enabled = available.get(item.projectId);
+            return (
+              enabled?.tasks === true &&
+              (spec.metric === "task_count" || enabled.timeTracking) &&
+              (item.itemType === "task" ||
+                (item.itemType === "milestone" && enabled.milestones) ||
+                (item.itemType === "approval" && enabled.approvals))
+            );
+          })
+          .map((item) => ({
+            itemId: item.itemId,
+            projectId: item.projectId,
+            parentItemId: item.parentItemId,
+            itemType: item.itemType,
+            priority: item.priority,
+            assigneeEmployeeId: item.assigneeEmployeeId,
+            assigneeName: item.assigneeName,
+            sectionName: item.sectionId
+              ? (store.sections.get(item.sectionId)?.name ?? null)
+              : null,
+            projectName: store.projects.get(item.projectId)?.name ?? "Project",
+            dueAt: item.dueAt,
+            completedAt: item.completedAt,
+            estimatedMinutes: item.estimatedMinutes ?? null,
+            actualMinutes: [...store.timeEntries.values()]
+              .filter(
+                (entry) =>
+                  timeProjectIds.includes(entry.projectId) &&
+                  entry.itemId === item.itemId,
+              )
+              .reduce((sum, entry) => sum + entry.minutes, 0),
+            customFieldValue: spec.customFieldId
+              ? store.customFieldValues.get(
+                  `${item.itemId}:${spec.customFieldId}`,
+                )
+              : undefined,
+          }));
+      })()
+    : (
+        await db.execute<
+          Omit<WorkReportChartRow, "dueAt" | "completedAt"> & {
+            dueAt: Date | string | null;
+            completedAt: Date | string | null;
+          }
+        >(sql`
       select distinct on (item.work_item_id)
         item.work_item_id as "itemId",
+        membership.work_project_id as "projectId",
         item.parent_work_item_id as "parentItemId",
         item.item_type as "itemType", item.priority,
+        item.assignee_employee_id as "assigneeEmployeeId",
         employee.display_name as "assigneeName",
         section.name as "sectionName", project.name as "projectName",
         item.due_at as "dueAt", item.completed_at as "completedAt",
@@ -3199,7 +3269,7 @@ async function reportRowsForProjects(
         custom_value.value as "customFieldValue",
         coalesce((select sum(entry.minutes)
           from public.time_entry entry
-          where entry.work_project_id = any(${projectIds}::uuid[])
+          where entry.work_project_id = any(${timeProjectIds}::uuid[])
             and entry.work_item_id = item.work_item_id), 0)::int
           as "actualMinutes"
       from public.work_project_item membership
@@ -3216,16 +3286,27 @@ async function reportRowsForProjects(
         and custom_value.work_custom_field_id = ${spec.customFieldId}::uuid
       where membership.work_project_id = any(${projectIds}::uuid[])
         and item.archived_at is null
+        and (${spec.metric === "task_count"}
+          or membership.work_project_id = any(${timeProjectIds}::uuid[]))
+        and (
+          (item.item_type = 'task'
+            and membership.work_project_id = any(${taskProjectIds}::uuid[]))
+          or (item.item_type = 'milestone'
+            and membership.work_project_id = any(${milestoneProjectIds}::uuid[]))
+          or (item.item_type = 'approval'
+            and membership.work_project_id = any(${approvalProjectIds}::uuid[]))
+        )
       order by item.work_item_id,
         array_position(${projectIds}::uuid[], membership.work_project_id)
     `)
-  ).map((item) => ({
-    ...item,
-    dueAt: iso(item.dueAt),
-    completedAt: iso(item.completedAt),
-    estimatedMinutes: Number(item.estimatedMinutes ?? 0),
-    actualMinutes: Number(item.actualMinutes),
-  }));
+      ).map((item) => ({
+        ...item,
+        dueAt: iso(item.dueAt),
+        completedAt: iso(item.completedAt),
+        estimatedMinutes: Number(item.estimatedMinutes ?? 0),
+        actualMinutes: Number(item.actualMinutes),
+      }));
+  return rows;
 }
 
 function notificationFeatureKey(eventType: string) {
@@ -11455,7 +11536,11 @@ export const workManagementRouter = router({
             input.projectId,
             input.spec.customFieldId!,
           );
-        const rows = await reportRowsForProjects([input.projectId], input.spec);
+        const rows = await reportRowsForProjects(
+          ctx,
+          [input.projectId],
+          input.spec,
+        );
         return buildWorkReportChart(rows, input.spec);
       }),
     portfolioChart: staffProcedure
@@ -11471,7 +11556,7 @@ export const workManagementRouter = router({
           input.portfolioId,
         );
         return buildWorkReportChart(
-          await reportRowsForProjects(projectIds, input.spec),
+          await reportRowsForProjects(ctx, projectIds, input.spec),
           input.spec,
         );
       }),
