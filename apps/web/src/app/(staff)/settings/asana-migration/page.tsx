@@ -7,7 +7,10 @@ import { trpc } from "@/lib/trpc";
 
 const COUNT_LABELS: Record<string, string> = {
   users: "People",
+  teams: "Teams",
+  teamMemberships: "Team memberships",
   projects: "Projects",
+  projectMemberships: "Project memberships",
   sections: "Sections",
   topLevelTasks: "Top-level tasks",
   subtasks: "Subtasks",
@@ -19,6 +22,14 @@ const COUNT_LABELS: Record<string, string> = {
   stories: "Activity stories",
   comments: "Comments",
   attachments: "Attachments",
+  timeTrackingEntries: "Time entries",
+  goals: "Goals",
+  goalRelationships: "Goal relationships",
+  portfolios: "Portfolios",
+  portfolioItems: "Portfolio projects",
+  projectTemplates: "Project templates",
+  taskTemplates: "Task templates",
+  statusUpdates: "Status updates",
 };
 
 export default function AsanaMigrationPage() {

@@ -1,5 +1,9 @@
 import { sql, type Db } from "@hrmny/db";
-import type { AsanaTask } from "@hrmny/integrations";
+import type {
+  AsanaGoal,
+  AsanaStatusUpdate,
+  AsanaTask,
+} from "@hrmny/integrations";
 import type { AsanaWorkspaceScan } from "./asana-migration";
 
 type WorkItemType = "task" | "milestone" | "approval";
@@ -39,8 +43,115 @@ function limited(value: string, length: number): string {
   return value.trim().slice(0, length) || "Untitled";
 }
 
+const ASANA_COLORS: Record<string, string> = {
+  "dark-blue": "#2A5CAA",
+  "dark-brown": "#765548",
+  "dark-green": "#2E7D5B",
+  "dark-orange": "#B85C24",
+  "dark-pink": "#A83E78",
+  "dark-purple": "#6B4AA5",
+  "dark-red": "#A83A3A",
+  "dark-teal": "#237C7C",
+  "dark-warm-gray": "#68615D",
+  "light-blue": "#5B8DEF",
+  "light-brown": "#A98274",
+  "light-green": "#5DAE78",
+  "light-orange": "#E59A4A",
+  "light-pink": "#D979A8",
+  "light-purple": "#9674D4",
+  "light-red": "#D96B6B",
+  "light-teal": "#55AFAF",
+  "light-warm-gray": "#9B938E",
+};
+
+export function asanaColor(color?: string): string {
+  return color ? (ASANA_COLORS[color] ?? "#C7702E") : "#C7702E";
+}
+
+export function asanaGoalStatus(status?: string): string {
+  return (
+    {
+      green: "on_track",
+      yellow: "at_risk",
+      red: "off_track",
+    }[status ?? ""] ??
+    ([
+      "on_track",
+      "at_risk",
+      "off_track",
+      "achieved",
+      "partial",
+      "missed",
+      "dropped",
+    ].includes(status ?? "")
+      ? status!
+      : "on_track")
+  );
+}
+
+export function asanaGoalProgress(goal: AsanaGoal): number {
+  const initial = goal.metric?.initial_number_value;
+  const target = goal.metric?.target_number_value;
+  const current = goal.metric?.current_number_value;
+  if (
+    typeof initial !== "number" ||
+    typeof target !== "number" ||
+    typeof current !== "number" ||
+    initial === target
+  ) {
+    return goal.status === "achieved" ? 100 : 0;
+  }
+  return Math.min(
+    100,
+    Math.max(0, ((current - initial) / (target - initial)) * 100),
+  );
+}
+
+function asanaStatusHealth(status: AsanaStatusUpdate): string {
+  const value = status.status_type;
+  if (
+    [
+      "on_track",
+      "at_risk",
+      "off_track",
+      "on_hold",
+      "complete",
+      "achieved",
+      "partial",
+      "missed",
+      "dropped",
+    ].includes(value ?? "")
+  ) {
+    return value!;
+  }
+  return asanaGoalStatus(value);
+}
+
+function privateInAsana(value?: string): "private" | "organization" {
+  return value?.includes("private") || value === "members_only"
+    ? "private"
+    : "organization";
+}
+
+function teamPrivacy(value?: string): "public" | "request" | "private" {
+  if (value === "public") return "public";
+  if (value === "secret" || value === "private") return "private";
+  return "request";
+}
+
+function accessLevel(
+  value?: string,
+): "admin" | "editor" | "commenter" | "viewer" {
+  return value === "admin" || value === "commenter" || value === "viewer"
+    ? value
+    : "editor";
+}
+
 export type AsanaImportSummary = {
+  teams: number;
+  teamMemberships: number;
   projects: number;
+  projectMemberships: number;
   sections: number;
   tasks: number;
   projectTaskLinks: number;
@@ -50,6 +161,13 @@ export type AsanaImportSummary = {
   customFieldValues: number;
   comments: number;
   attachments: number;
+  timeTrackingEntries: number;
+  goals: number;
+  goalRelationships: number;
+  portfolios: number;
+  portfolioItems: number;
+  templates: number;
+  statusUpdates: number;
 };
 
 export async function importAsanaWorkspace(input: {
@@ -90,32 +208,133 @@ export async function importAsanaWorkspace(input: {
       );
       const employeeFor = (email?: string) =>
         email ? (employees.get(email.toLowerCase()) ?? null) : null;
+      const employeeByAsanaGid = new Map(
+        scan.users
+          .map((user) => [user.gid, employeeFor(user.email)] as const)
+          .filter((entry): entry is readonly [string, string] =>
+            Boolean(entry[1]),
+          ),
+      );
+      const employeeForUser = (
+        user?: { gid?: string; email?: string } | null,
+      ) =>
+        employeeFor(user?.email) ??
+        (user?.gid ? (employeeByAsanaGid.get(user.gid) ?? null) : null);
+
+      const teamIds = new Map<string, string>();
+      for (const team of scan.teams) {
+        const [row] = await tx.execute(sql<{ id: string }>`
+          insert into public.work_team (
+            name, description, privacy, source_platform, external_id,
+            created_by_employee_id
+          ) values (
+            ${limited(team.name, 160)},
+            ${team.description ?? team.html_description ?? ""},
+            ${teamPrivacy(team.visibility)}, 'asana', ${team.gid},
+            ${actorEmployeeId}::uuid
+          )
+          on conflict (source_platform, external_id)
+            where external_id is not null
+          do update set name = excluded.name, description = excluded.description,
+            privacy = excluded.privacy, archived_at = null, updated_at = now()
+          returning work_team_id as id
+        `);
+        teamIds.set(team.gid, String(row!.id));
+      }
+
+      let teamMemberships = 0;
+      for (const entry of scan.teamMemberships) {
+        const teamId = teamIds.get(entry.teamGid);
+        const employeeId = employeeForUser(entry.membership.user);
+        if (!teamId || !employeeId) continue;
+        await tx.execute(sql`
+          insert into public.work_team_member (work_team_id, employee_id, role)
+          values (
+            ${teamId}::uuid, ${employeeId}::uuid,
+            ${entry.membership.is_admin ? "admin" : "member"}
+          )
+          on conflict (work_team_id, employee_id) do update set
+            role = excluded.role, updated_at = now()
+        `);
+        teamMemberships++;
+      }
 
       const projectIds = new Map<string, string>();
       for (const project of scan.projects) {
         const [row] = await tx.execute(sql<{ id: string }>`
           insert into public.work_project (
-            name, description, privacy, owner_employee_id,
+            name, description, color, privacy, owner_employee_id,
             created_by_employee_id, source_platform, external_id, archived_at
+            , start_date, due_date
           ) values (
-            ${limited(project.name, 160)}, ${project.notes ?? ""},
-            ${project.privacy_setting?.includes("private") ? "private" : "organization"},
-            ${employeeFor(project.owner?.email)}::uuid,
+            ${limited(project.name, 160)}, ${project.notes ?? ""}, ${asanaColor(project.color)},
+            ${privateInAsana(project.privacy_setting)},
+            ${employeeForUser(project.owner)}::uuid,
             ${actorEmployeeId}::uuid, 'asana', ${project.gid},
-            ${project.archived ? (project.modified_at ?? project.created_at ?? new Date().toISOString()) : null}::timestamptz
+            ${project.archived ? (project.modified_at ?? project.created_at ?? new Date().toISOString()) : null}::timestamptz,
+            ${project.start_on ?? null}::date, ${project.due_on ?? null}::date
           )
           on conflict (source_platform, external_id)
             where external_id is not null
           do update set
             name = excluded.name,
             description = excluded.description,
+            color = excluded.color,
             privacy = excluded.privacy,
             owner_employee_id = excluded.owner_employee_id,
             archived_at = excluded.archived_at,
+            start_date = excluded.start_date,
+            due_date = excluded.due_date,
             updated_at = now()
           returning work_project_id as id
         `);
         projectIds.set(project.gid, String(row!.id));
+      }
+
+      let projectMemberships = 0;
+      for (const project of scan.projects) {
+        const teamId = project.team?.gid ? teamIds.get(project.team.gid) : null;
+        const projectId = projectIds.get(project.gid);
+        if (!teamId || !projectId) continue;
+        await tx.execute(sql`
+          insert into public.work_team_project (
+            work_team_id, work_project_id, access_level
+          ) values (${teamId}::uuid, ${projectId}::uuid, 'editor')
+          on conflict (work_team_id, work_project_id) do nothing
+        `);
+      }
+      for (const entry of scan.projectMemberships) {
+        const projectId = projectIds.get(entry.projectGid);
+        if (!projectId) continue;
+        const level = accessLevel(entry.membership.access_level);
+        if (
+          entry.membership.member.resource_type === "team" ||
+          teamIds.has(entry.membership.member.gid)
+        ) {
+          const teamId = teamIds.get(entry.membership.member.gid);
+          if (!teamId) continue;
+          await tx.execute(sql`
+            insert into public.work_team_project (
+              work_team_id, work_project_id, access_level
+            ) values (
+              ${teamId}::uuid, ${projectId}::uuid,
+              ${level === "admin" ? "editor" : level}
+            )
+            on conflict (work_team_id, work_project_id) do update set
+              access_level = excluded.access_level
+          `);
+        } else {
+          const employeeId = employeeForUser(entry.membership.member);
+          if (!employeeId) continue;
+          await tx.execute(sql`
+            insert into public.work_project_member (
+              work_project_id, employee_id, access_level
+            ) values (${projectId}::uuid, ${employeeId}::uuid, ${level})
+            on conflict (work_project_id, employee_id) do update set
+              access_level = excluded.access_level, updated_at = now()
+          `);
+        }
+        projectMemberships++;
       }
 
       const sectionIds = new Map<string, string>();
@@ -145,6 +364,7 @@ export async function importAsanaWorkspace(input: {
           insert into public.work_item (
             title, description, item_type, assignee_employee_id,
             created_by_employee_id, start_date, due_at, completed_at,
+            estimated_minutes,
             source_platform, external_id
           ) values (
             ${limited(task.name, 500)}, ${task.notes ?? ""},
@@ -152,6 +372,7 @@ export async function importAsanaWorkspace(input: {
             ${employeeFor(task.assignee?.email)}::uuid,
             ${actorEmployeeId}::uuid, ${task.start_on ?? null}::date,
             ${asanaDueAt(task)}::timestamptz, ${completedAt(task)}::timestamptz,
+            ${task.estimated_minutes ?? null},
             'asana', ${task.gid}
           )
           on conflict (source_platform, external_id)
@@ -164,6 +385,7 @@ export async function importAsanaWorkspace(input: {
             start_date = excluded.start_date,
             due_at = excluded.due_at,
             completed_at = excluded.completed_at,
+            estimated_minutes = excluded.estimated_minutes,
             archived_at = null,
             updated_at = now()
           returning work_item_id as id
@@ -307,7 +529,7 @@ export async function importAsanaWorkspace(input: {
             external_id, created_at
           ) values (
             ${itemId}::uuid,
-            ${employeeFor(story.created_by?.email) ?? actorEmployeeId}::uuid,
+            ${employeeForUser(story.created_by) ?? actorEmployeeId}::uuid,
             ${body}, 'asana', ${story.gid},
             ${story.created_at ?? new Date().toISOString()}::timestamptz
           )
@@ -346,8 +568,264 @@ export async function importAsanaWorkspace(input: {
         attachments++;
       }
 
+      const goalIds = new Map<string, string>();
+      for (const goal of scan.goals) {
+        const [row] = await tx.execute(sql<{ id: string }>`
+          insert into public.work_goal (
+            name, description, scope, owner_employee_id, status, progress,
+            start_date, due_date, privacy, created_by_employee_id,
+            source_platform, external_id, source_data, created_at
+          ) values (
+            ${limited(goal.name, 300)}, ${goal.notes ?? ""},
+            ${goal.is_workspace_level ? "company" : goal.team ? "team" : "individual"},
+            ${employeeForUser(goal.owner)}::uuid, ${asanaGoalStatus(goal.status)},
+            ${asanaGoalProgress(goal)}, ${goal.start_on ?? null}::date,
+            ${goal.due_on ?? null}::date, ${privateInAsana(goal.privacy_setting)},
+            ${actorEmployeeId}::uuid, 'asana', ${goal.gid},
+            ${JSON.stringify(goal)}::jsonb,
+            ${goal.created_at ?? new Date().toISOString()}::timestamptz
+          )
+          on conflict (source_platform, external_id)
+            where external_id is not null
+          do update set name = excluded.name, description = excluded.description,
+            scope = excluded.scope, owner_employee_id = excluded.owner_employee_id,
+            status = excluded.status, progress = excluded.progress,
+            start_date = excluded.start_date, due_date = excluded.due_date,
+            privacy = excluded.privacy, source_data = excluded.source_data,
+            archived_at = null, updated_at = now()
+          returning work_goal_id as id
+        `);
+        goalIds.set(goal.gid, String(row!.id));
+      }
+
+      const portfolioIds = new Map<string, string>();
+      for (const portfolio of scan.portfolios) {
+        const [row] = await tx.execute(sql<{ id: string }>`
+          insert into public.work_portfolio (
+            name, description, color, privacy, owner_employee_id,
+            created_by_employee_id, start_date, due_date, source_platform,
+            external_id, source_data, archived_at, created_at
+          ) values (
+            ${limited(portfolio.name, 200)}, '', ${asanaColor(portfolio.color)},
+            ${privateInAsana(portfolio.privacy_setting)},
+            ${employeeForUser(portfolio.owner)}::uuid, ${actorEmployeeId}::uuid,
+            ${portfolio.start_on ?? null}::date, ${portfolio.due_on ?? null}::date,
+            'asana', ${portfolio.gid}, ${JSON.stringify(portfolio)}::jsonb,
+            ${portfolio.archived ? (portfolio.created_at ?? new Date().toISOString()) : null}::timestamptz,
+            ${portfolio.created_at ?? new Date().toISOString()}::timestamptz
+          )
+          on conflict (source_platform, external_id)
+            where external_id is not null
+          do update set name = excluded.name, color = excluded.color,
+            privacy = excluded.privacy, owner_employee_id = excluded.owner_employee_id,
+            start_date = excluded.start_date, due_date = excluded.due_date,
+            source_data = excluded.source_data, archived_at = excluded.archived_at,
+            updated_at = now()
+          returning work_portfolio_id as id
+        `);
+        portfolioIds.set(portfolio.gid, String(row!.id));
+      }
+
+      let portfolioItems = 0;
+      for (const [position, item] of scan.portfolioItems.entries()) {
+        const portfolioId = portfolioIds.get(item.portfolioGid);
+        const projectId = projectIds.get(item.projectGid);
+        if (!portfolioId || !projectId) continue;
+        await tx.execute(sql`
+          insert into public.work_portfolio_project (
+            work_portfolio_id, work_project_id, position
+          ) values (${portfolioId}::uuid, ${projectId}::uuid, ${position})
+          on conflict (work_portfolio_id, work_project_id) do update set
+            position = excluded.position
+        `);
+        portfolioItems++;
+      }
+
+      let goalRelationships = 0;
+      for (const entry of scan.goalRelationships) {
+        const goalId = goalIds.get(entry.goalGid);
+        const resource = entry.relationship.supporting_resource;
+        if (!goalId) continue;
+        if (
+          entry.relationship.resource_subtype === "subgoal" &&
+          resource.resource_type === "goal"
+        ) {
+          const childId = goalIds.get(resource.gid);
+          if (!childId) continue;
+          await tx.execute(sql`
+            update public.work_goal set parent_work_goal_id = ${goalId}::uuid,
+              updated_at = now()
+            where work_goal_id = ${childId}::uuid
+          `);
+          goalRelationships++;
+          continue;
+        }
+        const projectId =
+          resource.resource_type === "project"
+            ? projectIds.get(resource.gid)
+            : null;
+        const itemId =
+          resource.resource_type === "task" ? itemIds.get(resource.gid) : null;
+        const portfolioId =
+          resource.resource_type === "portfolio"
+            ? portfolioIds.get(resource.gid)
+            : null;
+        const supportingGoalId =
+          resource.resource_type === "goal" ? goalIds.get(resource.gid) : null;
+        if (!projectId && !itemId && !portfolioId && !supportingGoalId)
+          continue;
+        await tx.execute(sql`
+          insert into public.work_goal_link (
+            work_goal_id, work_project_id, work_item_id, work_portfolio_id,
+            supporting_work_goal_id, weight, source_platform, external_id
+          ) values (
+            ${goalId}::uuid, ${projectId ?? null}::uuid, ${itemId ?? null}::uuid,
+            ${portfolioId ?? null}::uuid, ${supportingGoalId ?? null}::uuid,
+            ${entry.relationship.contribution_weight ?? 1}, 'asana',
+            ${entry.relationship.gid}
+          )
+          on conflict (source_platform, external_id)
+            where external_id is not null
+          do update set work_goal_id = excluded.work_goal_id,
+            work_project_id = excluded.work_project_id,
+            work_item_id = excluded.work_item_id,
+            work_portfolio_id = excluded.work_portfolio_id,
+            supporting_work_goal_id = excluded.supporting_work_goal_id,
+            weight = excluded.weight
+        `);
+        goalRelationships++;
+      }
+
+      let templates = 0;
+      for (const template of scan.projectTemplates) {
+        await tx.execute(sql`
+          insert into public.work_template (
+            name, template_type, blueprint, created_by_employee_id,
+            source_platform, external_id
+          ) values (
+            ${limited(template.name, 160)}, 'project',
+            ${JSON.stringify(template)}::jsonb, ${actorEmployeeId}::uuid,
+            'asana', ${template.gid}
+          )
+          on conflict (source_platform, external_id)
+            where external_id is not null
+          do update set name = excluded.name, blueprint = excluded.blueprint,
+            archived_at = null, updated_at = now()
+        `);
+        templates++;
+      }
+      for (const template of scan.taskTemplates) {
+        const projectId = template.project?.gid
+          ? (projectIds.get(template.project.gid) ?? null)
+          : null;
+        await tx.execute(sql`
+          insert into public.work_template (
+            work_project_id, name, template_type, blueprint,
+            created_by_employee_id, source_platform, external_id
+          ) values (
+            ${projectId}::uuid, ${limited(template.name, 160)}, 'task',
+            ${JSON.stringify(template)}::jsonb, ${actorEmployeeId}::uuid,
+            'asana', ${template.gid}
+          )
+          on conflict (source_platform, external_id)
+            where external_id is not null
+          do update set work_project_id = excluded.work_project_id,
+            name = excluded.name, blueprint = excluded.blueprint,
+            archived_at = null, updated_at = now()
+        `);
+        templates++;
+      }
+
+      let statusUpdates = 0;
+      for (const entry of scan.statusUpdates ?? []) {
+        const projectId =
+          entry.parentType === "project"
+            ? projectIds.get(entry.parentGid)
+            : null;
+        const portfolioId =
+          entry.parentType === "portfolio"
+            ? portfolioIds.get(entry.parentGid)
+            : null;
+        const goalId =
+          entry.parentType === "goal" ? goalIds.get(entry.parentGid) : null;
+        if (!projectId && !portfolioId && !goalId) continue;
+        await tx.execute(sql`
+          insert into public.work_status_update (
+            work_project_id, work_portfolio_id, work_goal_id, health, title,
+            body, created_by_employee_id, source_platform, external_id,
+            source_data, created_at
+          ) values (
+            ${projectId ?? null}::uuid, ${portfolioId ?? null}::uuid,
+            ${goalId ?? null}::uuid, ${asanaStatusHealth(entry.status)},
+            ${limited(entry.status.title, 300)},
+            ${(entry.status.text ?? entry.status.html_text ?? "").slice(0, 50_000)},
+            ${employeeForUser(entry.status.author) ?? actorEmployeeId}::uuid,
+            'asana', ${entry.status.gid}, ${JSON.stringify(entry.status)}::jsonb,
+            ${entry.status.created_at ?? new Date().toISOString()}::timestamptz
+          )
+          on conflict (source_platform, external_id)
+            where external_id is not null
+          do update set health = excluded.health, title = excluded.title,
+            body = excluded.body, source_data = excluded.source_data
+        `);
+        statusUpdates++;
+      }
+
+      let timeTrackingEntries = 0;
+      for (const row of scan.timeTrackingEntries ?? []) {
+        const employeeId = employeeForUser(row.entry.created_by);
+        const itemId = itemIds.get(row.taskGid);
+        const fallbackProjectGid = scan.projectTasks.find(
+          (link) => link.taskGid === row.taskGid,
+        )?.projectGid;
+        const projectId = projectIds.get(
+          row.entry.attributable_to?.gid ?? fallbackProjectGid ?? "",
+        );
+        if (
+          !employeeId ||
+          !itemId ||
+          !projectId ||
+          row.entry.duration_minutes < 1
+        )
+          continue;
+        const status = (row.entry.approval_status ?? "DRAFT").toLowerCase();
+        await tx.execute(sql`
+          insert into public.time_entry (
+            employee_id, work_project_id, work_item_id, work_date, minutes,
+            is_billable, description, status, submitted_at,
+            decided_by_employee_id, decided_at, created_by_employee_id,
+            source_platform, external_id, source_data, created_at
+          ) values (
+            ${employeeId}::uuid, ${projectId}::uuid, ${itemId}::uuid,
+            ${row.entry.entered_on}::date, ${Math.round(row.entry.duration_minutes)},
+            ${row.entry.billable_status === "billable"}, ${row.entry.description ?? null},
+            ${status}, ${status === "draft" ? null : (row.entry.created_at ?? new Date().toISOString())}::timestamptz,
+            ${status === "approved" || status === "rejected" ? employeeId : null}::uuid,
+            ${status === "approved" || status === "rejected" ? (row.entry.created_at ?? new Date().toISOString()) : null}::timestamptz,
+            ${employeeId}::uuid, 'asana', ${row.entry.gid},
+            ${JSON.stringify(row.entry)}::jsonb,
+            ${row.entry.created_at ?? new Date().toISOString()}::timestamptz
+          )
+          on conflict (source_platform, external_id)
+            where external_id is not null
+          do update set employee_id = excluded.employee_id,
+            work_project_id = excluded.work_project_id,
+            work_item_id = excluded.work_item_id, work_date = excluded.work_date,
+            minutes = excluded.minutes, is_billable = excluded.is_billable,
+            description = excluded.description, status = excluded.status,
+            submitted_at = excluded.submitted_at,
+            decided_by_employee_id = excluded.decided_by_employee_id,
+            decided_at = excluded.decided_at, source_data = excluded.source_data,
+            updated_at = now()
+        `);
+        timeTrackingEntries++;
+      }
+
       return {
+        teams: teamIds.size,
+        teamMemberships,
         projects: projectIds.size,
+        projectMemberships,
         sections: sectionIds.size,
         tasks: itemIds.size,
         projectTaskLinks: scan.projectTasks.length,
@@ -357,6 +835,13 @@ export async function importAsanaWorkspace(input: {
         customFieldValues,
         comments,
         attachments,
+        timeTrackingEntries,
+        goals: goalIds.size,
+        goalRelationships,
+        portfolios: portfolioIds.size,
+        portfolioItems,
+        templates,
+        statusUpdates,
       };
     });
 

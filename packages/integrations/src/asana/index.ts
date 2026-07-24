@@ -24,6 +24,8 @@ export type AsanaProject = {
   privacy_setting?: string;
   owner?: AsanaUser | null;
   team?: { gid: string; name: string } | null;
+  start_on?: string | null;
+  due_on?: string | null;
   created_at?: string;
   modified_at?: string;
 };
@@ -47,6 +49,7 @@ export type AsanaTask = {
   due_at?: string | null;
   resource_subtype?: string;
   num_subtasks?: number;
+  estimated_minutes?: number | null;
   assignee?: AsanaUser | null;
   parent?: { gid: string; name?: string } | null;
   memberships?: Array<{
@@ -59,6 +62,115 @@ export type AsanaTask = {
   custom_fields?: Array<
     Record<string, unknown> & { gid: string; name: string }
   >;
+};
+
+export type AsanaTeam = {
+  gid: string;
+  name: string;
+  description?: string;
+  html_description?: string;
+  visibility?: string;
+};
+
+export type AsanaTeamMembership = {
+  gid: string;
+  user: AsanaUser;
+  team: { gid: string; name?: string };
+  is_admin?: boolean;
+  is_guest?: boolean;
+  is_limited_access?: boolean;
+};
+
+export type AsanaMembership = {
+  gid: string;
+  resource_subtype?: string;
+  parent: { gid: string; name?: string; resource_type?: string };
+  member: AsanaUser & { resource_type?: "user" | "team" };
+  access_level?: "admin" | "editor" | "commenter" | "viewer";
+};
+
+export type AsanaGoal = {
+  gid: string;
+  name: string;
+  notes?: string;
+  html_notes?: string;
+  start_on?: string | null;
+  due_on?: string | null;
+  is_workspace_level?: boolean;
+  team?: { gid: string; name?: string } | null;
+  owner?: AsanaUser | null;
+  status?: string;
+  privacy_setting?: string;
+  metric?: {
+    initial_number_value?: number | null;
+    target_number_value?: number | null;
+    current_number_value?: number | null;
+    current_display_value?: string | null;
+    progress_source?: string;
+  } | null;
+  created_at?: string;
+  modified_at?: string;
+};
+
+export type AsanaGoalRelationship = {
+  gid: string;
+  resource_subtype?: "subgoal" | "supporting_work";
+  supporting_resource: {
+    gid: string;
+    name?: string;
+    resource_type?: "goal" | "project" | "task" | "portfolio";
+  };
+  supported_goal?: { gid: string; name?: string };
+  contribution_weight?: number;
+};
+
+export type AsanaPortfolio = {
+  gid: string;
+  name: string;
+  archived?: boolean;
+  color?: string;
+  start_on?: string | null;
+  due_on?: string | null;
+  owner?: AsanaUser | null;
+  public?: boolean;
+  privacy_setting?: string;
+  created_at?: string;
+};
+
+export type AsanaProjectTemplate = Record<string, unknown> & {
+  gid: string;
+  name: string;
+};
+
+export type AsanaTaskTemplate = Record<string, unknown> & {
+  gid: string;
+  name: string;
+  project?: { gid: string; name?: string };
+};
+
+export type AsanaStatusUpdate = {
+  gid: string;
+  title: string;
+  text?: string;
+  html_text?: string;
+  status_type?: string;
+  created_at?: string;
+  author?: AsanaUser | null;
+  parent?: { gid: string; name?: string; resource_type?: string };
+};
+
+export type AsanaTimeTrackingEntry = {
+  gid: string;
+  duration_minutes: number;
+  entered_on: string;
+  attributable_to?: { gid: string; name?: string } | null;
+  created_by: AsanaUser;
+  categories?: Array<{ gid: string; name: string; color?: string }>;
+  task?: { gid: string; name?: string };
+  created_at?: string;
+  approval_status?: "APPROVED" | "DRAFT" | "REJECTED" | "SUBMITTED";
+  billable_status?: "billable" | "nonBillable" | "notApplicable";
+  description?: string;
 };
 
 export type AsanaStory = {
@@ -126,8 +238,9 @@ class AsanaApiError extends Error {
   constructor(
     readonly status: number,
     readonly data: unknown,
+    path?: string,
   ) {
-    super(`Asana request failed (${status})`);
+    super(`Asana request failed (${status})${path ? ` for ${path}` : ""}`);
   }
 }
 
@@ -136,11 +249,22 @@ export interface AsanaAdapter {
   listWorkspaces(): Promise<AsanaWorkspace[]>;
   listUsers(workspaceGid: string): Promise<AsanaUser[]>;
   listProjects(workspaceGid: string): Promise<AsanaProject[]>;
+  listTeams(workspaceGid: string): Promise<AsanaTeam[]>;
+  listTeamMemberships(teamGid: string): Promise<AsanaTeamMembership[]>;
+  listProjectMemberships(projectGid: string): Promise<AsanaMembership[]>;
   listSections(projectGid: string): Promise<AsanaSection[]>;
   listProjectTasks(projectGid: string): Promise<AsanaTask[]>;
   listSubtasks(taskGid: string): Promise<AsanaTask[]>;
   listStories(taskGid: string): Promise<AsanaStory[]>;
   listAttachments(taskGid: string): Promise<AsanaAttachment[]>;
+  listGoals(workspaceGid: string): Promise<AsanaGoal[]>;
+  listGoalRelationships(goalGid: string): Promise<AsanaGoalRelationship[]>;
+  listPortfolios(workspaceGid: string): Promise<AsanaPortfolio[]>;
+  listPortfolioItems(portfolioGid: string): Promise<AsanaProject[]>;
+  listProjectTemplates(workspaceGid: string): Promise<AsanaProjectTemplate[]>;
+  listTaskTemplates(projectGid: string): Promise<AsanaTaskTemplate[]>;
+  listStatusUpdates(parentGid: string): Promise<AsanaStatusUpdate[]>;
+  listTimeTrackingEntries(taskGid: string): Promise<AsanaTimeTrackingEntry[]>;
   workspaceEvents(workspaceGid: string, sync?: string): Promise<AsanaEventPage>;
   createWebhook(
     resourceGid: string,
@@ -169,6 +293,7 @@ const TASK_FIELDS = [
   "due_at",
   "resource_subtype",
   "num_subtasks",
+  "estimated_minutes",
   "assignee.gid",
   "assignee.name",
   "assignee.email",
@@ -217,7 +342,7 @@ function directTransport(input: {
       body: body ? JSON.stringify(body) : undefined,
     });
     const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new AsanaApiError(response.status, payload);
+    if (!response.ok) throw new AsanaApiError(response.status, payload, path);
     return payload as T;
   }
   return {
@@ -250,7 +375,7 @@ function composioTransport(input: {
         return result.data;
       } catch (error) {
         if (error instanceof ComposioApiError)
-          throw new AsanaApiError(error.status, error.data);
+          throw new AsanaApiError(error.status, error.data, path);
         throw error;
       }
     },
@@ -265,7 +390,7 @@ function composioTransport(input: {
         return result.data;
       } catch (error) {
         if (error instanceof ComposioApiError)
-          throw new AsanaApiError(error.status, error.data);
+          throw new AsanaApiError(error.status, error.data, path);
         throw error;
       }
     },
@@ -278,7 +403,7 @@ function composioTransport(input: {
         });
       } catch (error) {
         if (error instanceof ComposioApiError)
-          throw new AsanaApiError(error.status, error.data);
+          throw new AsanaApiError(error.status, error.data, path);
         throw error;
       }
     },
@@ -328,7 +453,7 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
           workspace: workspaceGid,
           archived: String(archived),
           opt_fields:
-            "gid,name,notes,archived,color,privacy_setting,owner.gid,owner.name,owner.email,team.gid,team.name,created_at,modified_at",
+            "gid,name,notes,archived,color,privacy_setting,owner.gid,owner.name,owner.email,team.gid,team.name,start_on,due_on,created_at,modified_at",
         });
       const pages = await Promise.all([
         list<AsanaProject>("/projects", projectQuery(false)),
@@ -340,6 +465,30 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         ).values(),
       ];
     },
+    listTeams: (workspaceGid) =>
+      list<AsanaTeam>(
+        `/workspaces/${encodeURIComponent(workspaceGid)}/teams`,
+        new URLSearchParams({
+          opt_fields: "gid,name,description,html_description,visibility",
+        }),
+      ),
+    listTeamMemberships: (teamGid) =>
+      list<AsanaTeamMembership>(
+        `/teams/${encodeURIComponent(teamGid)}/team_memberships`,
+        new URLSearchParams({
+          opt_fields:
+            "gid,user.gid,user.name,user.email,team.gid,team.name,is_admin,is_guest,is_limited_access",
+        }),
+      ),
+    listProjectMemberships: (projectGid) =>
+      list<AsanaMembership>(
+        "/memberships",
+        new URLSearchParams({
+          parent: projectGid,
+          opt_fields:
+            "gid,resource_subtype,parent.gid,parent.name,parent.resource_type,member.gid,member.name,member.email,member.resource_type,access_level",
+        }),
+      ),
     listSections: (projectGid) =>
       list<AsanaSection>(
         `/projects/${encodeURIComponent(projectGid)}/sections`,
@@ -372,6 +521,72 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         new URLSearchParams({
           opt_fields:
             "gid,name,resource_subtype,download_url,permanent_url,view_url,created_at",
+        }),
+      ),
+    listGoals: (workspaceGid) =>
+      list<AsanaGoal>(
+        "/goals",
+        new URLSearchParams({
+          workspace: workspaceGid,
+          opt_fields:
+            "gid,name,notes,html_notes,start_on,due_on,is_workspace_level,team.gid,team.name,owner.gid,owner.name,owner.email,status,privacy_setting,metric.initial_number_value,metric.target_number_value,metric.current_number_value,metric.current_display_value,metric.progress_source,created_at,modified_at",
+        }),
+      ),
+    listGoalRelationships: (goalGid) =>
+      list<AsanaGoalRelationship>(
+        "/goal_relationships",
+        new URLSearchParams({
+          supported_goal: goalGid,
+          opt_fields:
+            "gid,resource_subtype,supporting_resource.gid,supporting_resource.name,supporting_resource.resource_type,supported_goal.gid,supported_goal.name,contribution_weight",
+        }),
+      ),
+    listPortfolios: (workspaceGid) =>
+      list<AsanaPortfolio>(
+        "/portfolios",
+        new URLSearchParams({
+          workspace: workspaceGid,
+          opt_fields:
+            "gid,name,archived,color,start_on,due_on,owner.gid,owner.name,owner.email,public,privacy_setting,created_at",
+        }),
+      ),
+    listPortfolioItems: (portfolioGid) =>
+      list<AsanaProject>(
+        `/portfolios/${encodeURIComponent(portfolioGid)}/items`,
+        new URLSearchParams({ opt_fields: "gid,name" }),
+      ),
+    listProjectTemplates: (workspaceGid) =>
+      list<AsanaProjectTemplate>(
+        "/project_templates",
+        new URLSearchParams({
+          workspace: workspaceGid,
+          opt_fields:
+            "gid,name,description,html_description,color,public,team,owner,requested_dates",
+        }),
+      ),
+    listTaskTemplates: (projectGid) =>
+      list<AsanaTaskTemplate>(
+        "/task_templates",
+        new URLSearchParams({
+          project: projectGid,
+          opt_fields: "gid,name,project,template,created_at,created_by",
+        }),
+      ),
+    listStatusUpdates: (parentGid) =>
+      list<AsanaStatusUpdate>(
+        "/status_updates",
+        new URLSearchParams({
+          parent: parentGid,
+          opt_fields:
+            "gid,title,text,html_text,status_type,created_at,author.gid,author.name,author.email,parent.gid,parent.name,parent.resource_type",
+        }),
+      ),
+    listTimeTrackingEntries: (taskGid) =>
+      list<AsanaTimeTrackingEntry>(
+        `/tasks/${encodeURIComponent(taskGid)}/time_tracking_entries`,
+        new URLSearchParams({
+          opt_fields:
+            "gid,duration_minutes,entered_on,attributable_to.gid,attributable_to.name,created_by.gid,created_by.name,created_by.email,categories.gid,categories.name,categories.color,task.gid,task.name,created_at,approval_status,billable_status,description",
         }),
       ),
     async workspaceEvents(workspaceGid, sync) {

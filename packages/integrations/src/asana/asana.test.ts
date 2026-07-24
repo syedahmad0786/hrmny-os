@@ -109,6 +109,45 @@ describe("Asana integration", () => {
     );
   });
 
+  it("uses the current Asana endpoints for migration fidelity objects", async () => {
+    const requests: string[] = [];
+    const fetchImpl = vi.fn(async (request: RequestInfo | URL) => {
+      requests.push(String(request));
+      return json({ data: [] });
+    }) as unknown as typeof fetch;
+    const asana = createAsanaDirect({ accessToken: "token", fetchImpl });
+
+    await Promise.all([
+      asana.listTeams("w1"),
+      asana.listTeamMemberships("team1"),
+      asana.listProjectMemberships("p1"),
+      asana.listGoals("w1"),
+      asana.listGoalRelationships("g1"),
+      asana.listPortfolios("w1"),
+      asana.listPortfolioItems("pf1"),
+      asana.listProjectTemplates("w1"),
+      asana.listTaskTemplates("p1"),
+      asana.listStatusUpdates("p1"),
+      asana.listTimeTrackingEntries("t1"),
+    ]);
+
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("/workspaces/w1/teams?"),
+        expect.stringContaining("/teams/team1/team_memberships?"),
+        expect.stringContaining("/memberships?parent=p1"),
+        expect.stringContaining("/goals?workspace=w1"),
+        expect.stringContaining("/goal_relationships?supported_goal=g1"),
+        expect.stringContaining("/portfolios?workspace=w1"),
+        expect.stringContaining("/portfolios/pf1/items?"),
+        expect.stringContaining("/project_templates?workspace=w1"),
+        expect.stringContaining("/task_templates?project=p1"),
+        expect.stringContaining("/status_updates?parent=p1"),
+        expect.stringContaining("/tasks/t1/time_tracking_entries?"),
+      ]),
+    );
+  });
+
   it("initializes and advances a workspace event cursor", async () => {
     const fetchImpl = vi.fn(async (request: RequestInfo | URL) => {
       const url = new URL(String(request));
