@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { initials } from "@/components/crm/format";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { featureForPathname } from "@/features/catalog";
+import { PwaRegister } from "@/components/pwa-register";
 
 const PRIMARY_NAV = [
   {
@@ -262,6 +263,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="desk-shell">
+      <PwaRegister enabled={enabledFeatures.has("work.mobile_pwa")} />
       <a className="work-skip-link" href="#staff-main">
         Skip to main content
       </a>
