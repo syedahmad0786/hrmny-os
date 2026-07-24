@@ -22,7 +22,16 @@ import {
   saveWorkOrganizationPolicy,
   setDemoWorkLicense,
 } from "../work-governance";
-import { getDemoWork } from "./work-management-router";
+import {
+  createWorkWebhook,
+  deleteWorkWebhook,
+  issueWorkApiToken,
+  listWorkApiConfiguration,
+  revokeWorkApiToken,
+  WORK_API_SCOPES,
+  WORK_WEBHOOK_EVENTS,
+} from "../work-api";
+import { getDemoWork, requireProjectAccess } from "./work-management-router";
 import { requirePermission, router, staffProcedure } from "./trpc";
 
 const uuid = z.string().uuid();
@@ -175,6 +184,9 @@ const WORK_EXPORT_TABLES = [
   "work_organization_policy",
   "work_migration_run",
   "asana_sync_state",
+  "work_api_token",
+  "work_webhook_subscription",
+  "work_webhook_delivery",
   "time_entry",
 ] as const;
 
@@ -1121,6 +1133,109 @@ export const workAdminRouter = router({
           "work_scim_token",
           input.tokenId,
           { revoked: true },
+        );
+        return { ok: true as const };
+      }),
+  }),
+
+  apiWebhooks: router({
+    get: workAdminProcedure.query(() => listWorkApiConfiguration()),
+
+    issueToken: workAdminProcedure
+      .input(
+        z.object({
+          label: z.string().trim().min(1).max(120),
+          scopes: z
+            .array(z.enum(WORK_API_SCOPES))
+            .min(1)
+            .max(WORK_API_SCOPES.length),
+          expiresAt: z.string().datetime().nullable(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx.employeeId);
+        const token = await issueWorkApiToken({
+          label: input.label,
+          scopes: [...new Set(input.scopes)],
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          employeeId,
+          employeeName: ctx.user?.displayName,
+        });
+        await audit(
+          employeeId,
+          "work.api.token.issue",
+          "work_api_token",
+          token.tokenId,
+          {
+            label: token.label,
+            scopes: token.scopes,
+            expiresAt: token.expiresAt,
+          },
+        );
+        return token;
+      }),
+
+    revokeToken: workAdminProcedure
+      .input(z.object({ tokenId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx.employeeId);
+        await revokeWorkApiToken(input.tokenId);
+        await audit(
+          employeeId,
+          "work.api.token.revoke",
+          "work_api_token",
+          input.tokenId,
+          { revoked: true },
+        );
+        return { ok: true as const };
+      }),
+
+    createWebhook: workAdminProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          name: z.string().trim().min(1).max(120),
+          targetUrl: z.string().trim().url().max(2048),
+          eventTypes: z
+            .array(z.enum(WORK_WEBHOOK_EVENTS))
+            .min(1)
+            .max(WORK_WEBHOOK_EVENTS.length),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx.employeeId);
+        await requireProjectAccess(ctx, input.projectId, "admin");
+        const webhook = await createWorkWebhook({
+          ...input,
+          eventTypes: [...new Set(input.eventTypes)],
+          employeeId,
+          employeeName: ctx.user?.displayName,
+        });
+        await audit(
+          employeeId,
+          "work.webhook.create",
+          "work_webhook_subscription",
+          webhook.subscriptionId,
+          {
+            projectId: input.projectId,
+            targetUrl: webhook.targetUrl,
+            eventTypes: webhook.eventTypes,
+          },
+        );
+        return webhook;
+      }),
+
+    deleteWebhook: workAdminProcedure
+      .input(z.object({ subscriptionId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx.employeeId);
+        await deleteWorkWebhook(input.subscriptionId);
+        await audit(
+          employeeId,
+          "work.webhook.delete",
+          "work_webhook_subscription",
+          input.subscriptionId,
+          { deleted: true },
         );
         return { ok: true as const };
       }),

@@ -197,6 +197,13 @@
       "when": 1784944800000,
       "tag": "0027_asana_webhooks",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1784948400000,
+      "tag": "0028_work_api_webhooks",
+      "breakpoints": true
     }
   ]
 }

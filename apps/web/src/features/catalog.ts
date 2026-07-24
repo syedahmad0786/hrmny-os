@@ -851,7 +851,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     description: "Public automation surface with signed event delivery.",
     group: "Integrations",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
 
@@ -1080,6 +1080,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["workAdmin.policy.", "work.domain_controls"],
   ["workAdmin.rbac.", "work.custom_rbac"],
   ["workAdmin.identity.", "work.sso_scim"],
+  ["workAdmin.apiWebhooks.", "work.api_webhooks"],
   ["workAdmin.export.audit", "work.audit_export"],
   ["workAdmin.export.organization", "work.data_export"],
   ["workAdmin.", "work.admin_console"],

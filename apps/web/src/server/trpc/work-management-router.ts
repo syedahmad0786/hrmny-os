@@ -634,7 +634,7 @@ async function requireWorkFeature(ctx: TrpcContext, featureKey: string) {
     });
 }
 
-async function requireProjectAccess(
+export async function requireProjectAccess(
   ctx: TrpcContext,
   projectId: string,
   minimum: AccessLevel = "viewer",
@@ -2040,6 +2040,60 @@ export const workManagementRouter = router({
   }),
 
   tasks: router({
+    get: staffProcedure
+      .input(z.object({ itemId: uuid }))
+      .query(async ({ input, ctx }) => {
+        const access = await requireItemAccess(ctx, input.itemId);
+        const showTime = await featureEnabled("work.time_tracking", {
+          userId: ctx.employeeId,
+          clientId: ctx.clientId,
+          roles: ctx.roles,
+        });
+        const db = getDb();
+        if (!db) {
+          const item = getDemoWork().items.get(input.itemId)!;
+          await requireWorkTypeFeature(ctx, item.itemType);
+          return {
+            ...item,
+            estimatedMinutes: showTime ? item.estimatedMinutes : null,
+          };
+        }
+        const rows = await db.execute<
+          WorkItem & {
+            dueAt: Date | string | null;
+            completedAt: Date | string | null;
+          }
+        >(sql`
+          select item.work_item_id as "itemId",
+            item.parent_work_item_id as "parentItemId", item.title,
+            item.description, item.item_type as "itemType", item.priority,
+            item.recurrence, item.estimated_minutes as "estimatedMinutes",
+            item.assignee_employee_id as "assigneeEmployeeId",
+            assignee.display_name as "assigneeName", item.start_date as "startDate",
+            item.due_at as "dueAt", item.completed_at as "completedAt",
+            membership.work_section_id as "sectionId", membership.position,
+            membership.work_project_id as "projectId"
+          from public.work_item item
+          join public.work_project_item membership
+            on membership.work_item_id = item.work_item_id
+            and membership.work_project_id = ${access.projectId}::uuid
+          left join public.employee assignee
+            on assignee.employee_id = item.assignee_employee_id
+          where item.work_item_id = ${input.itemId}::uuid
+            and item.archived_at is null limit 1
+        `);
+        const item = rows[0];
+        if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+        await requireWorkTypeFeature(ctx, item.itemType);
+        return {
+          ...item,
+          estimatedMinutes: showTime ? item.estimatedMinutes : null,
+          startDate: item.startDate ? String(item.startDate) : null,
+          dueAt: iso(item.dueAt),
+          completedAt: iso(item.completedAt),
+        };
+      }),
+
     create: staffProcedure
       .input(
         z.object({
@@ -2298,6 +2352,23 @@ export const workManagementRouter = router({
             "due_date_set",
           );
         return rows[0];
+      }),
+
+    archive: staffProcedure
+      .input(z.object({ itemId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireItemAccess(ctx, input.itemId, "editor");
+        const db = getDb();
+        if (!db) getDemoWork().items.delete(input.itemId);
+        else
+          await db.execute(sql`
+            update public.work_item set archived_at = now(), updated_at = now()
+            where work_item_id = ${input.itemId}::uuid and archived_at is null
+          `);
+        await audit(ctx, "work.task.archive", "work_item", input.itemId, {
+          archived: true,
+        });
+        return { ok: true as const };
       }),
 
     complete: staffProcedure

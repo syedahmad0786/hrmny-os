@@ -6,6 +6,7 @@ import { featureEnabled } from "@/server/features";
 import { syncAsanaWorkspace } from "@/server/asana-sync";
 import { getVerifiedAsanaConnection } from "@/server/trpc/connections-router";
 import { refreshAsanaWebhooksIfEnabled } from "@/server/asana-webhooks";
+import { deliverPendingWorkWebhooks } from "@/server/work-api";
 
 export const dynamic = "force-dynamic";
 
@@ -157,5 +158,11 @@ export async function GET(request: Request) {
       delayedJobs: Number(lag!.count),
     });
   }
-  return Response.json({ claimed: claimed.length, completed, failed });
+  const workWebhooks = await deliverPendingWorkWebhooks();
+  return Response.json({
+    claimed: claimed.length,
+    completed,
+    failed,
+    workWebhooks,
+  });
 }

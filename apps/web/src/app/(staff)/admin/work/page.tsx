@@ -11,6 +11,7 @@ type Tab =
   | "members"
   | "roles"
   | "identity"
+  | "api"
   | "exports";
 
 function download(result: {
@@ -59,6 +60,9 @@ export default function WorkAdminPage() {
   const identity = trpc.workAdmin.identity.get.useQuery(undefined, {
     enabled: enabled.has("work.sso_scim"),
   });
+  const apiWebhooks = trpc.workAdmin.apiWebhooks.get.useQuery(undefined, {
+    enabled: enabled.has("work.api_webhooks"),
+  });
 
   const tabs = [
     ["organization", "Organization", "work.domain_controls"],
@@ -67,6 +71,7 @@ export default function WorkAdminPage() {
     ["members", "Members", "work.view_only"],
     ["roles", "Roles", "work.custom_rbac"],
     ["identity", "SSO & SCIM", "work.sso_scim"],
+    ["api", "API & webhooks", "work.api_webhooks"],
     ["exports", "Exports", "work.data_export"],
   ] as const;
   const visibleTabs = tabs.filter(([, , feature]) =>
@@ -203,6 +208,13 @@ export default function WorkAdminPage() {
         <IdentityPanel
           identity={identity.data}
           refresh={() => utils.workAdmin.identity.get.invalidate()}
+        />
+      ) : null}
+      {tab === "api" && enabled.has("work.api_webhooks") ? (
+        <ApiWebhooksPanel
+          configuration={apiWebhooks.data}
+          projects={directory.data?.projects ?? []}
+          refresh={() => utils.workAdmin.apiWebhooks.get.invalidate()}
         />
       ) : null}
       {tab === "exports" ? (
@@ -1270,6 +1282,411 @@ function IdentityPanel({
         </div>
       </div>
     </section>
+  );
+}
+
+const workApiScopes = [
+  "projects:read",
+  "projects:write",
+  "tasks:read",
+  "tasks:write",
+  "comments:read",
+  "comments:write",
+] as const;
+const workWebhookEvents = [
+  "project.created",
+  "project.updated",
+  "task.created",
+  "task.updated",
+  "task.moved",
+  "task.removed",
+  "comment.created",
+] as const;
+
+function ApiWebhooksPanel({
+  configuration,
+  projects,
+  refresh,
+}: {
+  configuration:
+    | {
+        tokens: Array<{
+          tokenId: string;
+          label: string;
+          tokenPrefix: string;
+          scopes: string[];
+          expiresAt: string | null;
+          lastUsedAt: string | null;
+          revokedAt: string | null;
+        }>;
+        webhooks: Array<{
+          subscriptionId: string;
+          projectId: string;
+          projectName: string;
+          name: string;
+          targetUrl: string;
+          eventTypes: string[];
+          status: string;
+        }>;
+        deliveries: Array<{
+          deliveryId: string;
+          subscriptionName: string;
+          eventType: string;
+          status: string;
+          attempts: number;
+          responseStatus: number | null;
+          lastError: string | null;
+          createdAt: string;
+        }>;
+      }
+    | undefined;
+  projects: Array<{ projectId: string; name: string }>;
+  refresh: () => Promise<unknown>;
+}) {
+  const [tokenLabel, setTokenLabel] = useState("Automation token");
+  const [expiresOn, setExpiresOn] = useState("");
+  const [scopes, setScopes] = useState<string[]>([
+    "projects:read",
+    "tasks:read",
+    "comments:read",
+  ]);
+  const [issuedToken, setIssuedToken] = useState<string | null>(null);
+  const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
+  const [webhookName, setWebhookName] = useState("Project automation");
+  const [projectId, setProjectId] = useState("");
+  const [targetUrl, setTargetUrl] = useState("");
+  const [eventTypes, setEventTypes] = useState<string[]>([
+    "task.created",
+    "task.updated",
+  ]);
+  const issue = trpc.workAdmin.apiWebhooks.issueToken.useMutation({
+    onSuccess: async (result) => {
+      setIssuedToken(result.token);
+      await refresh();
+    },
+  });
+  const revoke = trpc.workAdmin.apiWebhooks.revokeToken.useMutation({
+    onSuccess: refresh,
+  });
+  const createWebhook = trpc.workAdmin.apiWebhooks.createWebhook.useMutation({
+    onSuccess: async (result) => {
+      setWebhookSecret(result.secret);
+      setTargetUrl("");
+      await refresh();
+    },
+  });
+  const deleteWebhook = trpc.workAdmin.apiWebhooks.deleteWebhook.useMutation({
+    onSuccess: refresh,
+  });
+
+  useEffect(() => {
+    if (!projectId && projects[0]) setProjectId(projects[0].projectId);
+  }, [projectId, projects]);
+
+  const toggle = (
+    values: string[],
+    value: string,
+    set: (next: string[]) => void,
+  ) =>
+    set(
+      values.includes(value)
+        ? values.filter((item) => item !== value)
+        : [...values, value],
+    );
+
+  return (
+    <section className="grid gap-4 xl:grid-cols-2">
+      <div className={cardClass}>
+        <h2 className="font-display text-xl font-semibold">
+          Scoped API tokens
+        </h2>
+        <p className="mt-1 text-sm text-muted">
+          Tokens act as their owner and keep that person&apos;s current project
+          permissions. Secrets are stored only as hashes and shown once.
+        </p>
+        <form
+          className="mt-4 space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            issue.mutate({
+              label: tokenLabel,
+              scopes: scopes as (typeof workApiScopes)[number][],
+              expiresAt: expiresOn
+                ? new Date(`${expiresOn}T23:59:59.999Z`).toISOString()
+                : null,
+            });
+          }}
+        >
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="text-sm">
+              <span className="mb-1 block font-medium">Name</span>
+              <input
+                className={inputClass}
+                value={tokenLabel}
+                maxLength={120}
+                onChange={(event) => setTokenLabel(event.target.value)}
+              />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block font-medium">Expiry (optional)</span>
+              <input
+                className={inputClass}
+                type="date"
+                value={expiresOn}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={(event) => setExpiresOn(event.target.value)}
+              />
+            </label>
+          </div>
+          <fieldset>
+            <legend className="text-sm font-medium">Scopes</legend>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {workApiScopes.map((scope) => (
+                <label key={scope} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={scopes.includes(scope)}
+                    onChange={() => toggle(scopes, scope, setScopes)}
+                  />
+                  {scope}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <button
+            className="rounded-lg bg-ink px-4 py-2 text-sm text-white"
+            type="submit"
+            disabled={issue.isPending || !scopes.length}
+          >
+            {issue.isPending ? "Issuing…" : "Issue token"}
+          </button>
+        </form>
+        {issuedToken ? (
+          <OneTimeSecret label="Copy this API token now" value={issuedToken} />
+        ) : null}
+        {issue.error ? (
+          <p className="mt-2 text-sm text-[var(--hrmny-danger)]">
+            {issue.error.message}
+          </p>
+        ) : null}
+        <div className="mt-5 divide-y divide-sand">
+          {(configuration?.tokens ?? []).map((token) => (
+            <div
+              key={token.tokenId}
+              className="flex items-start justify-between gap-3 py-3 text-sm"
+            >
+              <div>
+                <p className="font-medium">
+                  {token.label} · <code>{token.tokenPrefix}…</code>
+                </p>
+                <p className="text-xs text-muted">{token.scopes.join(", ")}</p>
+                <p className="text-xs text-muted">
+                  {token.revokedAt
+                    ? "Revoked"
+                    : token.lastUsedAt
+                      ? `Last used ${new Date(token.lastUsedAt).toLocaleString()}`
+                      : "Never used"}
+                  {token.expiresAt
+                    ? ` · expires ${new Date(token.expiresAt).toLocaleDateString()}`
+                    : ""}
+                </p>
+              </div>
+              {!token.revokedAt ? (
+                <button
+                  type="button"
+                  className="text-xs text-[var(--hrmny-danger)] underline"
+                  onClick={() => revoke.mutate({ tokenId: token.tokenId })}
+                >
+                  Revoke
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className={cardClass}>
+        <h2 className="font-display text-xl font-semibold">Signed webhooks</h2>
+        <p className="mt-1 text-sm text-muted">
+          Send project events to a public HTTPS endpoint. Delivery access is
+          rechecked and failed calls retry automatically.
+        </p>
+        <form
+          className="mt-4 space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            createWebhook.mutate({
+              projectId,
+              name: webhookName,
+              targetUrl,
+              eventTypes: eventTypes as (typeof workWebhookEvents)[number][],
+            });
+          }}
+        >
+          <label className="text-sm">
+            <span className="mb-1 block font-medium">Name</span>
+            <input
+              className={inputClass}
+              value={webhookName}
+              maxLength={120}
+              onChange={(event) => setWebhookName(event.target.value)}
+            />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block font-medium">Project</span>
+            <select
+              className={inputClass}
+              value={projectId}
+              onChange={(event) => setProjectId(event.target.value)}
+            >
+              {projects.map((project) => (
+                <option key={project.projectId} value={project.projectId}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block font-medium">Destination URL</span>
+            <input
+              className={inputClass}
+              type="url"
+              required
+              value={targetUrl}
+              placeholder="https://automation.example.com/hrmny"
+              onChange={(event) => setTargetUrl(event.target.value)}
+            />
+          </label>
+          <fieldset>
+            <legend className="text-sm font-medium">Events</legend>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {workWebhookEvents.map((eventType) => (
+                <label
+                  key={eventType}
+                  className="flex items-center gap-2 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    checked={eventTypes.includes(eventType)}
+                    onChange={() =>
+                      toggle(eventTypes, eventType, setEventTypes)
+                    }
+                  />
+                  {eventType}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <button
+            className="rounded-lg bg-ink px-4 py-2 text-sm text-white"
+            type="submit"
+            disabled={
+              createWebhook.isPending || !projectId || !eventTypes.length
+            }
+          >
+            {createWebhook.isPending ? "Creating…" : "Create webhook"}
+          </button>
+        </form>
+        {webhookSecret ? (
+          <OneTimeSecret
+            label="Copy this signing secret now"
+            value={webhookSecret}
+          />
+        ) : null}
+        {createWebhook.error ? (
+          <p className="mt-2 text-sm text-[var(--hrmny-danger)]">
+            {createWebhook.error.message}
+          </p>
+        ) : null}
+        <div className="mt-5 divide-y divide-sand">
+          {(configuration?.webhooks ?? []).map((webhook) => (
+            <div
+              key={webhook.subscriptionId}
+              className="flex items-start justify-between gap-3 py-3 text-sm"
+            >
+              <div className="min-w-0">
+                <p className="font-medium">
+                  {webhook.name} · {webhook.projectName}
+                </p>
+                <p className="truncate text-xs text-muted">
+                  {webhook.targetUrl}
+                </p>
+                <p className="text-xs text-muted">
+                  {webhook.eventTypes.join(", ")}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="text-xs text-[var(--hrmny-danger)] underline"
+                onClick={() =>
+                  deleteWebhook.mutate({
+                    subscriptionId: webhook.subscriptionId,
+                  })
+                }
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className={`${cardClass} xl:col-span-2`}>
+        <h2 className="font-display text-xl font-semibold">
+          Recent deliveries
+        </h2>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-sand text-xs text-muted">
+                <th className="py-2">Webhook</th>
+                <th>Event</th>
+                <th>Status</th>
+                <th>Attempts</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(configuration?.deliveries ?? []).map((delivery) => (
+                <tr
+                  key={delivery.deliveryId}
+                  className="border-b border-sand/70"
+                >
+                  <td className="py-2">{delivery.subscriptionName}</td>
+                  <td>{delivery.eventType}</td>
+                  <td>
+                    {delivery.status}
+                    {delivery.responseStatus
+                      ? ` (${delivery.responseStatus})`
+                      : ""}
+                  </td>
+                  <td>{delivery.attempts}</td>
+                  <td>{new Date(delivery.createdAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function OneTimeSecret({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3">
+      <p className="text-xs font-semibold">
+        {label}. It will not be shown again.
+      </p>
+      <code className="mt-2 block break-all text-xs">{value}</code>
+      <button
+        className="mt-2 text-xs underline"
+        type="button"
+        onClick={() => void navigator.clipboard.writeText(value)}
+      >
+        Copy
+      </button>
+    </div>
   );
 }
 
