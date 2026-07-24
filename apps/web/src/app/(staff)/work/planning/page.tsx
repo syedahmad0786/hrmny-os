@@ -29,6 +29,12 @@ type MetadataGroup =
   | "portfolio_privacy";
 type ReportHealth = "on_track" | "at_risk" | "off_track" | "complete";
 type GoalStatus = "on_track" | "at_risk" | "off_track" | "achieved" | "dropped";
+type ReportDateField = "created" | "start" | "due";
+type ReportDateFilterValue = {
+  dateField: ReportDateField;
+  dateFrom: string;
+  dateTo: string;
+};
 
 const metadataGroups: Record<
   Exclude<ReportType, "tasks">,
@@ -92,6 +98,105 @@ function ReportFilterSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+function ReportObjectFilter({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: readonly { value: string; label: string }[];
+  value: readonly string[];
+  onChange: (value: string[]) => void;
+}) {
+  return (
+    <details className="rounded border border-sand bg-white px-3 py-2 text-sm">
+      <summary className="cursor-pointer">
+        {label}: {value.length ? `${value.length} selected` : "All"}
+      </summary>
+      <div className="mt-2 grid max-h-48 gap-1 overflow-auto">
+        {value.length ? (
+          <button
+            type="button"
+            className="justify-self-start text-xs text-clay underline"
+            onClick={() => onChange([])}
+          >
+            Clear selection
+          </button>
+        ) : null}
+        {options.map((option) => (
+          <label key={option.value} className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={value.includes(option.value)}
+              onChange={(event) =>
+                onChange(
+                  event.target.checked
+                    ? [...value, option.value]
+                    : value.filter((id) => id !== option.value),
+                )
+              }
+            />
+            {option.label}
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function ReportDateFilters({
+  fields,
+  value,
+  onChange,
+}: {
+  fields: readonly { value: ReportDateField; label: string }[];
+  value: ReportDateFilterValue;
+  onChange: (value: Partial<ReportDateFilterValue>) => void;
+}) {
+  const label = fields.find((field) => field.value === value.dateField)?.label;
+  return (
+    <>
+      {fields.length > 1 ? (
+        <label className="grid gap-1 text-xs text-muted">
+          Date field
+          <select
+            className="rounded border border-sand px-3 py-2 text-sm text-ink"
+            value={value.dateField}
+            onChange={(event) =>
+              onChange({ dateField: event.target.value as ReportDateField })
+            }
+          >
+            {fields.map((field) => (
+              <option key={field.value} value={field.value}>
+                {field.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <label className="grid gap-1 text-xs text-muted">
+        {label} from
+        <input
+          className="rounded border border-sand px-3 py-2 text-sm text-ink"
+          type="date"
+          value={value.dateFrom}
+          onChange={(event) => onChange({ dateFrom: event.target.value })}
+        />
+      </label>
+      <label className="grid gap-1 text-xs text-muted">
+        {label} through
+        <input
+          className="rounded border border-sand px-3 py-2 text-sm text-ink"
+          type="date"
+          value={value.dateTo}
+          onChange={(event) => onChange({ dateTo: event.target.value })}
+        />
+      </label>
+    </>
   );
 }
 
@@ -172,22 +277,35 @@ export default function PlanningPage() {
   const [metadataGroup, setMetadataGroup] =
     useState<MetadataGroup>("project_health");
   const [projectFilters, setProjectFilters] = useState({
+    objectIds: [] as string[],
     ownerEmployeeId: "",
     status: "" as "" | ReportHealth,
     privacy: "" as "" | "organization" | "private",
     sourcePlatform: "" as "" | "native" | "asana",
+    teamId: "",
+    dateField: "due" as ReportDateField,
+    dateFrom: "",
+    dateTo: "",
   });
   const [goalFilters, setGoalFilters] = useState({
+    objectIds: [] as string[],
     ownerEmployeeId: "",
     status: "" as "" | GoalStatus,
     scope: "" as "" | "company" | "team" | "individual",
     timePeriod: "",
     includeSubgoals: true,
+    dateField: "due" as ReportDateField,
+    dateFrom: "",
+    dateTo: "",
   });
   const [portfolioFilters, setPortfolioFilters] = useState({
+    objectIds: [] as string[],
     ownerEmployeeId: "",
     status: "" as "" | ReportHealth,
     privacy: "" as "" | "organization" | "private",
+    dateField: "created" as ReportDateField,
+    dateFrom: "",
+    dateTo: "",
   });
   const employees = trpc.work.members.listEmployees.useQuery({
     projectId: projectId || undefined,
@@ -256,6 +374,10 @@ export default function PlanningPage() {
   const statusEnabled = enabled.has("work.status_updates");
   const reportingEnabled = enabled.has("work.reporting_dashboards");
   const customFieldsEnabled = enabled.has("work.custom_fields");
+  const teamsEnabled = enabled.has("work.teams");
+  const teams = trpc.work.members.listTeams.useQuery(undefined, {
+    enabled: chartReportType === "projects" && teamsEnabled,
+  });
   const workloadEnabled = enabled.has("work.workload");
   const portfolioWorkloadActive = Boolean(
     workloadPortfolioId && portfoliosEnabled,
@@ -273,6 +395,10 @@ export default function PlanningPage() {
         setPortfolioFilters((current) => ({ ...current, status: "" }));
     }
   }, [portfolioFilters.status, projectFilters.status, statusEnabled]);
+  useEffect(() => {
+    if (!teamsEnabled && projectFilters.teamId)
+      setProjectFilters((current) => ({ ...current, teamId: "" }));
+  }, [projectFilters.teamId, teamsEnabled]);
   useEffect(() => {
     if (
       (chartItemType === "milestone" && !enabled.has("work.milestones")) ||
@@ -469,10 +595,15 @@ export default function PlanningPage() {
           (!portfolio || portfolio.projectIds.includes(project.projectId)) &&
           matchesMetadataReportFilters(
             {
+              objectId: project.projectId,
               ownerEmployeeId: project.ownerEmployeeId,
               status: project.health,
               privacy: project.privacy,
               sourcePlatform: project.sourcePlatform,
+              teamIds: project.teamIds,
+              createdAt: project.createdAt,
+              startDate: project.startDate,
+              dueDate: project.dueDate,
             },
             projectFilters,
           ),
@@ -497,11 +628,15 @@ export default function PlanningPage() {
           .filter((goal) =>
             matchesMetadataReportFilters(
               {
+                objectId: goal.goalId,
                 ownerEmployeeId: goal.ownerEmployeeId,
                 status: goal.status,
                 scope: goal.scope,
                 timePeriod: goalTimePeriod(goal.dueDate),
                 parentId: goal.parentGoalId,
+                createdAt: goal.createdAt,
+                startDate: goal.startDate,
+                dueDate: goal.dueDate,
               },
               goalFilters,
             ),
@@ -519,9 +654,11 @@ export default function PlanningPage() {
         .filter((portfolio) =>
           matchesMetadataReportFilters(
             {
+              objectId: portfolio.portfolioId,
               ownerEmployeeId: portfolio.ownerEmployeeId,
               status: portfolio.health,
               privacy: portfolio.privacy,
+              createdAt: portfolio.createdAt,
             },
             portfolioFilters,
           ),
@@ -739,8 +876,23 @@ export default function PlanningPage() {
       )
         ? (saved.privacy as "organization" | "private")
         : "";
+      const objectIds = Array.isArray(saved.objectIds)
+        ? saved.objectIds.filter(
+            (objectId): objectId is string => typeof objectId === "string",
+          )
+        : [];
+      const savedDateField = ["created", "start", "due"].includes(
+        String(saved.dateField),
+      )
+        ? (saved.dateField as ReportDateField)
+        : reportType === "portfolios"
+          ? "created"
+          : "due";
+      const dateFrom = typeof saved.dateFrom === "string" ? saved.dateFrom : "";
+      const dateTo = typeof saved.dateTo === "string" ? saved.dateTo : "";
       if (reportType === "projects") {
         setProjectFilters({
+          objectIds,
           ownerEmployeeId,
           status: health,
           privacy,
@@ -749,9 +901,14 @@ export default function PlanningPage() {
           )
             ? (saved.sourcePlatform as "native" | "asana")
             : "",
+          teamId: typeof saved.teamId === "string" ? saved.teamId : "",
+          dateField: savedDateField,
+          dateFrom,
+          dateTo,
         });
       } else if (reportType === "goals") {
         setGoalFilters({
+          objectIds,
           ownerEmployeeId,
           status: [
             "on_track",
@@ -768,9 +925,20 @@ export default function PlanningPage() {
           timePeriod:
             typeof saved.timePeriod === "string" ? saved.timePeriod : "",
           includeSubgoals: saved.includeSubgoals !== false,
+          dateField: savedDateField,
+          dateFrom,
+          dateTo,
         });
       } else {
-        setPortfolioFilters({ ownerEmployeeId, status: health, privacy });
+        setPortfolioFilters({
+          objectIds,
+          ownerEmployeeId,
+          status: health,
+          privacy,
+          dateField: "created",
+          dateFrom,
+          dateTo,
+        });
       }
       return;
     }
@@ -1007,27 +1175,40 @@ export default function PlanningPage() {
                         groupBy: metadataGroup,
                         ...(chartReportType === "projects"
                           ? {
+                              objectIds: projectFilters.objectIds,
                               ownerEmployeeId:
                                 projectFilters.ownerEmployeeId || null,
                               status: projectFilters.status || null,
                               privacy: projectFilters.privacy || null,
                               sourcePlatform:
                                 projectFilters.sourcePlatform || null,
+                              teamId: projectFilters.teamId || null,
+                              dateField: projectFilters.dateField,
+                              dateFrom: projectFilters.dateFrom || null,
+                              dateTo: projectFilters.dateTo || null,
                             }
                           : chartReportType === "goals"
                             ? {
+                                objectIds: goalFilters.objectIds,
                                 ownerEmployeeId:
                                   goalFilters.ownerEmployeeId || null,
                                 status: goalFilters.status || null,
                                 scope: goalFilters.scope || null,
                                 timePeriod: goalFilters.timePeriod || null,
                                 includeSubgoals: goalFilters.includeSubgoals,
+                                dateField: goalFilters.dateField,
+                                dateFrom: goalFilters.dateFrom || null,
+                                dateTo: goalFilters.dateTo || null,
                               }
                             : {
+                                objectIds: portfolioFilters.objectIds,
                                 ownerEmployeeId:
                                   portfolioFilters.ownerEmployeeId || null,
                                 status: portfolioFilters.status || null,
                                 privacy: portfolioFilters.privacy || null,
+                                dateField: portfolioFilters.dateField,
+                                dateFrom: portfolioFilters.dateFrom || null,
+                                dateTo: portfolioFilters.dateTo || null,
                               }),
                       },
                     },
@@ -1147,9 +1328,14 @@ export default function PlanningPage() {
                   <select
                     className="rounded border border-sand px-3 py-2 text-sm text-ink"
                     value={chartPortfolioId}
-                    onChange={(event) =>
-                      setChartPortfolioId(event.target.value)
-                    }
+                    onChange={(event) => {
+                      setChartPortfolioId(event.target.value);
+                      if (chartReportType === "projects")
+                        setProjectFilters((current) => ({
+                          ...current,
+                          objectIds: [],
+                        }));
+                    }}
                   >
                     <option value="">
                       {chartReportType === "tasks"
@@ -1249,6 +1435,30 @@ export default function PlanningPage() {
               ) : null}
               {chartReportType === "projects" ? (
                 <>
+                  <ReportObjectFilter
+                    label="Specific projects"
+                    value={projectFilters.objectIds}
+                    options={(projects.data ?? [])
+                      .filter((project) => {
+                        if (!chartPortfolioId) return true;
+                        return (portfolios.data ?? [])
+                          .find(
+                            (portfolio) =>
+                              portfolio.portfolioId === chartPortfolioId,
+                          )
+                          ?.projectIds.includes(project.projectId);
+                      })
+                      .map((project) => ({
+                        value: project.projectId,
+                        label: project.name,
+                      }))}
+                    onChange={(objectIds) =>
+                      setProjectFilters((current) => ({
+                        ...current,
+                        objectIds,
+                      }))
+                    }
+                  />
                   <ReportFilterSelect
                     label="Owner"
                     allLabel="All owners"
@@ -1303,9 +1513,54 @@ export default function PlanningPage() {
                       }))
                     }
                   />
+                  {teamsEnabled && (teams.data ?? []).length ? (
+                    <ReportFilterSelect
+                      label="Team"
+                      allLabel="All teams"
+                      value={projectFilters.teamId}
+                      options={(teams.data ?? []).map((team) => ({
+                        value: team.teamId,
+                        label: team.name,
+                      }))}
+                      onChange={(teamId) =>
+                        setProjectFilters((current) => ({
+                          ...current,
+                          teamId,
+                        }))
+                      }
+                    />
+                  ) : null}
+                  <ReportDateFilters
+                    fields={[
+                      { value: "created", label: "Created" },
+                      { value: "start", label: "Start" },
+                      { value: "due", label: "Due" },
+                    ]}
+                    value={projectFilters}
+                    onChange={(value) =>
+                      setProjectFilters((current) => ({
+                        ...current,
+                        ...value,
+                      }))
+                    }
+                  />
                 </>
               ) : chartReportType === "goals" ? (
                 <>
+                  <ReportObjectFilter
+                    label="Specific goals"
+                    value={goalFilters.objectIds}
+                    options={(goals.data ?? []).map((goal) => ({
+                      value: goal.goalId,
+                      label: goal.name,
+                    }))}
+                    onChange={(objectIds) =>
+                      setGoalFilters((current) => ({
+                        ...current,
+                        objectIds,
+                      }))
+                    }
+                  />
                   <ReportFilterSelect
                     label="Owner"
                     allLabel="All owners"
@@ -1383,9 +1638,37 @@ export default function PlanningPage() {
                     />
                     Include sub-goals
                   </label>
+                  <ReportDateFilters
+                    fields={[
+                      { value: "created", label: "Created" },
+                      { value: "start", label: "Start" },
+                      { value: "due", label: "Due" },
+                    ]}
+                    value={goalFilters}
+                    onChange={(value) =>
+                      setGoalFilters((current) => ({
+                        ...current,
+                        ...value,
+                      }))
+                    }
+                  />
                 </>
               ) : chartReportType === "portfolios" ? (
                 <>
+                  <ReportObjectFilter
+                    label="Specific portfolios"
+                    value={portfolioFilters.objectIds}
+                    options={(portfolios.data ?? []).map((portfolio) => ({
+                      value: portfolio.portfolioId,
+                      label: portfolio.name,
+                    }))}
+                    onChange={(objectIds) =>
+                      setPortfolioFilters((current) => ({
+                        ...current,
+                        objectIds,
+                      }))
+                    }
+                  />
                   <ReportFilterSelect
                     label="Owner"
                     allLabel="All owners"
@@ -1421,6 +1704,16 @@ export default function PlanningPage() {
                       setPortfolioFilters((current) => ({
                         ...current,
                         privacy: privacy as "" | "organization" | "private",
+                      }))
+                    }
+                  />
+                  <ReportDateFilters
+                    fields={[{ value: "created", label: "Created" }]}
+                    value={portfolioFilters}
+                    onChange={(value) =>
+                      setPortfolioFilters((current) => ({
+                        ...current,
+                        ...value,
                       }))
                     }
                   />
