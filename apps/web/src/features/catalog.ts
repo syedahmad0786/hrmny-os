@@ -787,6 +787,16 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     defaultEnabled: true,
   }),
   feature({
+    key: "work.status_update_templates",
+    name: "Status update templates",
+    description:
+      "Reusable client-scoped structures for consistent project status updates.",
+    group: "Goals & reporting",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
+  feature({
     key: "work.reporting_dashboards",
     name: "Reporting dashboards",
     description: "Real-time charts, filters, drill-down, and exports.",
@@ -1430,6 +1440,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["work.goals.", "work.goals"],
   ["work.portfolios.", "work.portfolios"],
   ["work.statusUpdates.", "work.status_updates"],
+  ["work.statusTemplates.", "work.status_update_templates"],
   ["work.reporting.", "work.reporting_dashboards"],
   ["work.workload.upsert", "work.capacity_planning"],
   ["work.workload.", "work.workload"],

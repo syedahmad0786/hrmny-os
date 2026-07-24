@@ -333,7 +333,7 @@ type WorkTemplate = {
   templateId: string;
   projectId: string | null;
   name: string;
-  templateType: "task" | "project";
+  templateType: "task" | "project" | "status";
   blueprint: Record<string, unknown>;
   createdByEmployeeId: string;
 };
@@ -994,6 +994,13 @@ const projectTemplateBlueprintSchema = z.object({
       }),
     )
     .max(5000),
+});
+const statusTemplateBlueprintSchema = z.object({
+  clientId: nullableUuid,
+  title: z.string().trim().min(1).max(300),
+  body: z.string().trim().max(50_000).default(""),
+  health: z.enum(["on_track", "at_risk", "off_track", "complete"]),
+  progress: z.number().min(0).max(100).nullable().default(null),
 });
 const bundleBlueprintSchema = z.object({
   sections: z
@@ -4864,6 +4871,44 @@ async function submitWorkForm(
     message: raw.confirmationMessage,
     receiptQueued: Boolean(getDb() && receiptEmail),
   };
+}
+
+async function ownedStatusTemplate(ctx: TrpcContext, templateId: string) {
+  const db = getDb();
+  const template = !db
+    ? getDemoWork().templates.get(templateId)
+    : (
+        await db.execute<WorkTemplate>(sql`
+          select work_template_id as "templateId", null::uuid as "projectId",
+            name, template_type as "templateType", blueprint,
+            created_by_employee_id as "createdByEmployeeId"
+          from public.work_template
+          where work_template_id = ${templateId}::uuid
+            and template_type = 'status' and archived_at is null
+        `)
+      )[0];
+  const blueprint = statusTemplateBlueprintSchema.safeParse(
+    template?.blueprint,
+  );
+  if (
+    !template ||
+    template.templateType !== "status" ||
+    template.createdByEmployeeId !== actor(ctx) ||
+    !blueprint.success
+  )
+    throw new TRPCError({ code: "NOT_FOUND" });
+  if (
+    !(await featureEnabled("work.status_update_templates", {
+      userId: ctx.employeeId,
+      clientId: blueprint.data.clientId,
+      roles: ctx.roles,
+    }))
+  )
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.status_update_templates",
+    });
+  return { db, blueprint: blueprint.data };
 }
 
 export const workManagementRouter = router({
@@ -12298,6 +12343,153 @@ export const workManagementRouter = router({
           "work_portfolio",
           input.portfolioId,
           { archived: true },
+        );
+        return { ok: true as const };
+      }),
+  }),
+
+  statusTemplates: router({
+    list: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireScopedFeature(
+          ctx,
+          "work.status_update_templates",
+          input.projectId,
+        );
+        const project = await requireProjectAccess(ctx, input.projectId);
+        const db = getDb();
+        const templates = !db
+          ? [...getDemoWork().templates.values()].filter(
+              (template) => template.templateType === "status",
+            )
+          : await db.execute<WorkTemplate>(sql`
+              select work_template_id as "templateId", null::uuid as "projectId",
+                name, template_type as "templateType", blueprint,
+                created_by_employee_id as "createdByEmployeeId"
+              from public.work_template
+              where template_type = 'status' and archived_at is null
+                and blueprint ->> 'clientId'
+                  is not distinct from ${project.clientId}::text
+              order by lower(name)
+            `);
+        return templates.flatMap((template) => {
+          const blueprint = statusTemplateBlueprintSchema.safeParse(
+            template.blueprint,
+          );
+          return blueprint.success &&
+            blueprint.data.clientId === project.clientId
+            ? [
+                {
+                  ...template,
+                  blueprint: blueprint.data,
+                  ownedByMe: template.createdByEmployeeId === actor(ctx),
+                },
+              ]
+            : [];
+        });
+      }),
+    create: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          name: z.string().trim().min(1).max(160),
+          blueprint: statusTemplateBlueprintSchema.omit({ clientId: true }),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireScopedFeature(
+          ctx,
+          "work.status_update_templates",
+          input.projectId,
+        );
+        const project = await requireProjectAccess(
+          ctx,
+          input.projectId,
+          "editor",
+        );
+        const template: WorkTemplate = {
+          templateId: randomUUID(),
+          projectId: null,
+          name: input.name,
+          templateType: "status",
+          blueprint: { ...input.blueprint, clientId: project.clientId },
+          createdByEmployeeId: actor(ctx),
+        };
+        const db = getDb();
+        if (!db) getDemoWork().templates.set(template.templateId, template);
+        else
+          await db.execute(sql`
+            insert into public.work_template (
+              work_template_id, name, template_type, blueprint,
+              created_by_employee_id
+            ) values (
+              ${template.templateId}::uuid, ${template.name}, 'status',
+              ${JSON.stringify(template.blueprint)}::jsonb, ${actor(ctx)}::uuid
+            )
+          `);
+        await audit(
+          ctx,
+          "work.status_template.create",
+          "work_template",
+          template.templateId,
+          { projectId: input.projectId },
+        );
+        return { ...template, ownedByMe: true };
+      }),
+    update: staffProcedure
+      .input(
+        z.object({
+          templateId: uuid,
+          name: z.string().trim().min(1).max(160),
+          blueprint: statusTemplateBlueprintSchema.omit({ clientId: true }),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const { db, blueprint: stored } = await ownedStatusTemplate(
+          ctx,
+          input.templateId,
+        );
+        const blueprint = {
+          ...input.blueprint,
+          clientId: stored.clientId,
+        };
+        if (!db)
+          Object.assign(getDemoWork().templates.get(input.templateId)!, {
+            name: input.name,
+            blueprint,
+          });
+        else
+          await db.execute(sql`
+            update public.work_template set name = ${input.name},
+              blueprint = ${JSON.stringify(blueprint)}::jsonb, updated_at = now()
+            where work_template_id = ${input.templateId}::uuid
+          `);
+        await audit(
+          ctx,
+          "work.status_template.update",
+          "work_template",
+          input.templateId,
+          {},
+        );
+        return { templateId: input.templateId };
+      }),
+    archive: staffProcedure
+      .input(z.object({ templateId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        const { db } = await ownedStatusTemplate(ctx, input.templateId);
+        if (!db) getDemoWork().templates.delete(input.templateId);
+        else
+          await db.execute(sql`
+            update public.work_template set archived_at = now(), updated_at = now()
+            where work_template_id = ${input.templateId}::uuid
+          `);
+        await audit(
+          ctx,
+          "work.status_template.archive",
+          "work_template",
+          input.templateId,
+          {},
         );
         return { ok: true as const };
       }),
