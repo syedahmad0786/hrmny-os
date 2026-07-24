@@ -1,5 +1,6 @@
 import { sql, type Db } from "@hrmny/db";
 import type {
+  AsanaCustomField,
   AsanaGoal,
   AsanaStatusUpdate,
   AsanaTask,
@@ -37,6 +38,58 @@ function fieldType(field: Record<string, unknown>): string {
   if (type.includes("date")) return "date";
   if (type.includes("people")) return "people";
   return "text";
+}
+
+function fieldOptions(field: AsanaCustomField): string[] {
+  return (field.enum_options ?? [])
+    .filter((option) => option.enabled !== false)
+    .map((option) => option.name);
+}
+
+function namedValues(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.flatMap((item) => {
+    const name =
+      item && typeof item === "object"
+        ? (item as { name?: unknown }).name
+        : null;
+    return typeof name === "string" ? [name] : [];
+  });
+}
+
+export function asanaObjectFieldValue(field: AsanaCustomField): unknown {
+  if (typeof field.number_value === "number") return field.number_value;
+  if (typeof field.text_value === "string") return field.text_value;
+  if (field.date_value && typeof field.date_value === "object") {
+    const date = field.date_value as {
+      date?: unknown;
+      date_time?: unknown;
+    };
+    if (typeof date.date_time === "string") return date.date_time;
+    if (typeof date.date === "string") return date.date;
+  }
+  if (field.enum_value && typeof field.enum_value === "object") {
+    const value = field.enum_value as { name?: unknown };
+    if (typeof value.name === "string") return value.name;
+  }
+  for (const key of [
+    "multi_enum_values",
+    "people_value",
+    "reference_value",
+  ] as const) {
+    const values = namedValues(field[key]);
+    if (values) return values;
+  }
+  return typeof field.display_value === "string" ? field.display_value : null;
+}
+
+export function asanaObjectFieldDisplayValue(
+  field: AsanaCustomField,
+  value = asanaObjectFieldValue(field),
+): string | null {
+  if (typeof field.display_value === "string") return field.display_value;
+  if (Array.isArray(value)) return value.join(", ");
+  return value === null ? null : String(value);
 }
 
 function limited(value: string, length: number): string {
@@ -180,6 +233,7 @@ export type AsanaImportSummary = {
   customTaskStatuses: number;
   projectCustomTaskTypes: number;
   customFieldValues: number;
+  objectCustomFieldValues: number;
   comments: number;
   attachments: number;
   timeTrackingEntries: number;
@@ -304,7 +358,7 @@ export async function importAsanaWorkspace(input: {
             name, description, color, privacy, owner_employee_id,
             created_by_employee_id, source_platform, external_id, archived_at,
             start_date, due_date, source_workspace_external_id,
-            source_connection_external_id
+            source_connection_external_id, source_data
           ) values (
             ${limited(project.name, 160)}, ${project.notes ?? ""}, ${asanaColor(project.color)},
             ${privateInAsana(project.privacy_setting)},
@@ -312,7 +366,8 @@ export async function importAsanaWorkspace(input: {
             ${actorEmployeeId}::uuid, 'asana', ${project.gid},
             ${project.archived ? (project.modified_at ?? project.created_at ?? new Date().toISOString()) : null}::timestamptz,
             ${project.start_on ?? null}::date, ${project.due_on ?? null}::date,
-            ${input.workspaceGid}, ${input.connectedAccountId}
+            ${input.workspaceGid}, ${input.connectedAccountId},
+            ${JSON.stringify(project)}::jsonb
           )
           on conflict (source_platform, external_id)
             where external_id is not null
@@ -327,10 +382,36 @@ export async function importAsanaWorkspace(input: {
             due_date = excluded.due_date,
             source_workspace_external_id = excluded.source_workspace_external_id,
             source_connection_external_id = excluded.source_connection_external_id,
+            source_data = excluded.source_data,
             updated_at = now()
           returning work_project_id as id
         `);
         projectIds.set(project.gid, String(row!.id));
+      }
+
+      for (const project of scan.projects) {
+        const projectId = projectIds.get(project.gid);
+        if (!projectId) continue;
+        for (const [position, setting] of (
+          project.custom_field_settings ?? []
+        ).entries()) {
+          const field = setting.custom_field;
+          await tx.execute(sql`
+            insert into public.work_custom_field (
+              work_project_id, name, field_type, options, position,
+              source_platform, external_id
+            ) values (
+              ${projectId}::uuid, ${limited(field.name, 120)},
+              ${fieldType(field)}, ${JSON.stringify(fieldOptions(field))}::jsonb,
+              ${position}, 'asana', ${field.gid}
+            )
+            on conflict (work_project_id, source_platform, external_id)
+              where external_id is not null
+            do update set name = excluded.name, field_type = excluded.field_type,
+              options = excluded.options, position = excluded.position,
+              updated_at = now()
+          `);
+        }
       }
 
       let projectMemberships = 0;
@@ -857,16 +938,19 @@ export async function importAsanaWorkspace(input: {
           for (const field of task.custom_fields ?? []) {
             const [fieldRow] = await tx.execute(sql<{ id: string }>`
               insert into public.work_custom_field (
-                work_project_id, name, field_type, source_platform, external_id
+                work_project_id, name, field_type, options, source_platform,
+                external_id
               ) values (
                 ${projectId}::uuid, ${limited(field.name, 120)},
-                ${fieldType(field)}, 'asana', ${field.gid}
+                ${fieldType(field)}, ${JSON.stringify(fieldOptions(field))}::jsonb,
+                'asana', ${field.gid}
               )
               on conflict (work_project_id, source_platform, external_id)
                 where external_id is not null
               do update set
                 name = excluded.name,
                 field_type = excluded.field_type,
+                options = excluded.options,
                 updated_at = now()
               returning work_custom_field_id as id
             `);
@@ -1021,6 +1105,91 @@ export async function importAsanaWorkspace(input: {
         `);
         portfolioIds.set(portfolio.gid, String(row!.id));
       }
+
+      const objectFieldRows = [
+        ...scan.projects.flatMap((project) =>
+          (project.custom_fields ?? []).flatMap((field) => {
+            const projectId = projectIds.get(project.gid);
+            return projectId
+              ? [
+                  {
+                    projectId,
+                    portfolioId: null,
+                    goalId: null,
+                    targetGid: project.gid,
+                    field,
+                  },
+                ]
+              : [];
+          }),
+        ),
+        ...scan.portfolios.flatMap((portfolio) =>
+          (portfolio.custom_fields ?? []).flatMap((field) => {
+            const portfolioId = portfolioIds.get(portfolio.gid);
+            return portfolioId
+              ? [
+                  {
+                    projectId: null,
+                    portfolioId,
+                    goalId: null,
+                    targetGid: portfolio.gid,
+                    field,
+                  },
+                ]
+              : [];
+          }),
+        ),
+        ...scan.goals.flatMap((goal) =>
+          (goal.custom_fields ?? []).flatMap((field) => {
+            const goalId = goalIds.get(goal.gid);
+            return goalId
+              ? [
+                  {
+                    projectId: null,
+                    portfolioId: null,
+                    goalId,
+                    targetGid: goal.gid,
+                    field,
+                  },
+                ]
+              : [];
+          }),
+        ),
+      ];
+      const objectFieldExternalIds: string[] = [];
+      for (const row of objectFieldRows) {
+        const value = asanaObjectFieldValue(row.field);
+        const externalId = `${row.targetGid}:${row.field.gid}`;
+        await tx.execute(sql`
+          insert into public.work_object_custom_field_value (
+            work_project_id, work_portfolio_id, work_goal_id, name, field_type,
+            options, value, display_value, source_platform, external_id,
+            field_external_id, source_workspace_external_id,
+            source_connection_external_id, source_data
+          ) values (
+            ${row.projectId}::uuid, ${row.portfolioId}::uuid, ${row.goalId}::uuid,
+            ${limited(row.field.name, 120)}, ${fieldType(row.field)},
+            ${JSON.stringify(fieldOptions(row.field))}::jsonb,
+            ${JSON.stringify(value)}::jsonb,
+            ${asanaObjectFieldDisplayValue(row.field, value)}, 'asana',
+            ${externalId}, ${row.field.gid}, ${input.workspaceGid},
+            ${input.connectedAccountId}, ${JSON.stringify(row.field)}::jsonb
+          ) on conflict (
+            source_platform, source_connection_external_id, external_id
+          ) where external_id is not null
+          do update set work_project_id = excluded.work_project_id,
+            work_portfolio_id = excluded.work_portfolio_id,
+            work_goal_id = excluded.work_goal_id,
+            name = excluded.name, field_type = excluded.field_type,
+            options = excluded.options, value = excluded.value,
+            display_value = excluded.display_value,
+            field_external_id = excluded.field_external_id,
+            source_workspace_external_id = excluded.source_workspace_external_id,
+            source_data = excluded.source_data, updated_at = now()
+        `);
+        objectFieldExternalIds.push(externalId);
+      }
+      const objectCustomFieldValues = objectFieldRows.length;
 
       let portfolioItems = 0;
       const portfolioProjectExternalIds: string[] = [];
@@ -1464,11 +1633,23 @@ export async function importAsanaWorkspace(input: {
           and item.source_connection_external_id = ${input.connectedAccountId}
           and value.source_platform = 'asana'
           and coalesce(value.external_id, '') <>
-            all(${textArray(customFieldValueExternalIds)})
+              all(${textArray(customFieldValueExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_object_custom_field_value
+        where source_platform = 'asana'
+          and source_workspace_external_id = ${input.workspaceGid}
+          and source_connection_external_id = ${input.connectedAccountId}
+          and coalesce(external_id, '') <>
+            all(${textArray(objectFieldExternalIds)})
       `);
 
       for (const project of scan.projects) {
-        const fieldExternalIds = new Set<string>();
+        const fieldExternalIds = new Set(
+          (project.custom_field_settings ?? []).map(
+            (setting) => setting.custom_field.gid,
+          ),
+        );
         for (const link of scan.projectTasks) {
           if (link.projectGid !== project.gid) continue;
           const task = scan.tasks.find((value) => value.gid === link.taskGid);
@@ -1573,6 +1754,7 @@ export async function importAsanaWorkspace(input: {
         customTaskStatuses: customTaskStatusIds.size,
         projectCustomTaskTypes: projectCustomTaskTypeExternalIds.length,
         customFieldValues,
+        objectCustomFieldValues,
         comments,
         attachments,
         timeTrackingEntries,

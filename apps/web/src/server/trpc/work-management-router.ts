@@ -55,6 +55,19 @@ import {
 
 type AccessLevel = "admin" | "editor" | "commenter" | "viewer";
 type CustomTaskTypeAccessLevel = "admin" | "editor" | "user" | "none";
+type WorkObjectCustomField = {
+  objectCustomFieldValueId: string;
+  targetType: "project" | "portfolio" | "goal";
+  targetId: string;
+  key: string;
+  name: string;
+  fieldType: WorkCustomFieldType;
+  options: string[];
+  value: unknown;
+  displayValue: string | null;
+  sourcePlatform: "native" | "asana";
+  fieldExternalId: string | null;
+};
 type WorkProject = {
   projectId: string;
   name: string;
@@ -74,6 +87,7 @@ type WorkProject = {
   teamIds?: string[];
   startDate?: string | null;
   dueDate?: string | null;
+  customFields?: WorkObjectCustomField[];
   createdAt: string;
 };
 type WorkSection = {
@@ -348,6 +362,7 @@ type WorkGoal = {
   privacy: "organization" | "private";
   createdByEmployeeId: string;
   createdAt: string;
+  customFields?: WorkObjectCustomField[];
 };
 type WorkGoalLink = {
   goalLinkId: string;
@@ -366,6 +381,7 @@ type WorkPortfolio = {
   ownerName?: string | null;
   createdByEmployeeId: string;
   createdAt: string;
+  customFields?: WorkObjectCustomField[];
 };
 type WorkStatusUpdate = {
   statusUpdateId: string;
@@ -448,6 +464,7 @@ type DemoWork = {
   itemTags: Map<string, Set<string>>;
   customFields: Map<string, WorkCustomField>;
   customFieldValues: Map<string, unknown>;
+  objectCustomFields: Map<string, WorkObjectCustomField>;
   customTaskTypes: Map<string, WorkCustomTaskType>;
   projectCustomTaskTypes: Map<string, WorkProjectCustomTaskType>;
   customTaskTypeMembers: Map<string, WorkCustomTaskTypeMember>;
@@ -593,6 +610,7 @@ export function getDemoWork(): DemoWork {
     itemTags: new Map(),
     customFields: new Map(),
     customFieldValues: new Map(),
+    objectCustomFields: new Map(),
     customTaskTypes: new Map(),
     projectCustomTaskTypes: new Map(),
     customTaskTypeMembers: new Map(),
@@ -1152,6 +1170,21 @@ const metadataReportSpecSchema = z
     dateField: z.enum(["created", "start", "due"]).nullable().optional(),
     dateFrom: z.string().date().nullable().optional(),
     dateTo: z.string().date().nullable().optional(),
+    customFieldKey: z.string().trim().min(1).max(500).nullable().optional(),
+    customFieldOperator: z
+      .enum([
+        "is",
+        "is_not",
+        "contains",
+        "not_contains",
+        "is_empty",
+        "is_not_empty",
+        "greater_than",
+        "less_than",
+      ])
+      .nullable()
+      .optional(),
+    customFieldValue: z.string().trim().min(1).max(1_000).nullable().optional(),
   })
   .superRefine((value, ctx) => {
     if ((value.dateFrom || value.dateTo) && !value.dateField)
@@ -1165,6 +1198,18 @@ const metadataReportSpecSchema = z
         code: z.ZodIssueCode.custom,
         path: ["dateTo"],
         message: "Date through must be on or after date from",
+      });
+    if (
+      Boolean(value.customFieldKey) !== Boolean(value.customFieldOperator) ||
+      (value.customFieldOperator &&
+        !["is_empty", "is_not_empty"].includes(value.customFieldOperator) &&
+        !value.customFieldValue) ||
+      (!value.customFieldKey && value.customFieldValue)
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["customFieldKey"],
+        message: "Choose a complete custom-field filter",
       });
   });
 const dashboardWidgetConfigSchema = z
@@ -3302,6 +3347,22 @@ async function requireDashboardAccess(
   )
     await requireScopedFeature(ctx, "work.teams", null);
   if (
+    reportType !== "tasks" &&
+    spec &&
+    typeof spec === "object" &&
+    typeof (spec as Record<string, unknown>).customFieldKey === "string"
+  ) {
+    await requireScopedFeature(ctx, "work.custom_fields", null);
+    if (
+      reportType === "projects" &&
+      Array.isArray((spec as Record<string, unknown>).objectIds)
+    )
+      for (const projectId of (spec as Record<string, unknown>)
+        .objectIds as unknown[])
+        if (typeof projectId === "string")
+          await requireScopedFeature(ctx, "work.custom_fields", projectId);
+  }
+  if (
     (reportType === "projects" || reportType === "portfolios") &&
     spec &&
     typeof spec === "object" &&
@@ -3413,6 +3474,90 @@ async function allReportingProjectIds(ctx: TrpcContext) {
     }
   }
   return accessible;
+}
+
+async function objectCustomFieldsByTarget(
+  targetType: "project" | "portfolio" | "goal",
+  targetIds: string[],
+) {
+  const byTarget = new Map<string, WorkObjectCustomField[]>();
+  if (!targetIds.length) return byTarget;
+  const db = getDb();
+  if (!db) {
+    for (const field of getDemoWork().objectCustomFields.values()) {
+      if (
+        field.targetType !== targetType ||
+        !targetIds.includes(field.targetId)
+      )
+        continue;
+      const fields = byTarget.get(field.targetId) ?? [];
+      fields.push(field);
+      byTarget.set(field.targetId, fields);
+    }
+    return byTarget;
+  }
+  const rows = await db.execute<{
+    objectCustomFieldValueId: string;
+    targetId: string;
+    name: string;
+    fieldType: WorkCustomFieldType;
+    options: unknown;
+    value: unknown;
+    displayValue: string | null;
+    sourcePlatform: "native" | "asana";
+    fieldExternalId: string | null;
+  }>(
+    targetType === "project"
+      ? sql`
+          select work_object_custom_field_value_id as "objectCustomFieldValueId",
+            work_project_id as "targetId", name, field_type as "fieldType",
+            options, value, display_value as "displayValue",
+            source_platform as "sourcePlatform",
+            field_external_id as "fieldExternalId"
+          from public.work_object_custom_field_value
+          where work_project_id = any(${targetIds}::uuid[])
+          order by lower(name), created_at
+        `
+      : targetType === "portfolio"
+        ? sql`
+          select work_object_custom_field_value_id as "objectCustomFieldValueId",
+            work_portfolio_id as "targetId", name, field_type as "fieldType",
+            options, value, display_value as "displayValue",
+            source_platform as "sourcePlatform",
+            field_external_id as "fieldExternalId"
+          from public.work_object_custom_field_value
+          where work_portfolio_id = any(${targetIds}::uuid[])
+          order by lower(name), created_at
+        `
+        : sql`
+          select work_object_custom_field_value_id as "objectCustomFieldValueId",
+            work_goal_id as "targetId", name, field_type as "fieldType",
+            options, value, display_value as "displayValue",
+            source_platform as "sourcePlatform",
+            field_external_id as "fieldExternalId"
+          from public.work_object_custom_field_value
+          where work_goal_id = any(${targetIds}::uuid[])
+          order by lower(name), created_at
+        `,
+  );
+  for (const row of rows) {
+    const fields = byTarget.get(row.targetId) ?? [];
+    fields.push({
+      ...row,
+      targetType,
+      key:
+        row.sourcePlatform === "asana" && row.fieldExternalId
+          ? `asana:${row.fieldExternalId}`
+          : `native:${row.objectCustomFieldValueId}`,
+      options: Array.isArray(row.options)
+        ? row.options.filter(
+            (option): option is string => typeof option === "string",
+          )
+        : [],
+    });
+    byTarget.set(row.targetId, fields);
+  }
+  return byTarget;
 }
 
 async function reportRowsForProjects(
@@ -3657,6 +3802,7 @@ async function renderDashboardWidget(
               createdAt: project.createdAt,
               startDate: project.startDate,
               dueDate: project.dueDate,
+              customFields: project.customFields,
             },
             spec,
           ),
@@ -3686,6 +3832,7 @@ async function renderDashboardWidget(
             createdAt: goal.createdAt,
             startDate: goal.startDate,
             dueDate: goal.dueDate,
+            customFields: goal.customFields,
           },
           spec,
         ),
@@ -3709,6 +3856,7 @@ async function renderDashboardWidget(
             status: portfolio.health,
             privacy: portfolio.privacy,
             createdAt: portfolio.createdAt,
+            customFields: portfolio.customFields,
           },
           spec,
         ),
@@ -4561,8 +4709,15 @@ export const workManagementRouter = router({
                     .filter((item) => item.projectId === project.projectId)
                     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
                 : null;
+              const showCustomFields = await featureEnabled(
+                "work.custom_fields",
+                featureScope,
+              );
               return {
                 ...project,
+                customFields: showCustomFields
+                  ? (project.customFields ?? [])
+                  : [],
                 ownerName:
                   project.ownerName ??
                   (project.ownerEmployeeId === employeeId
@@ -4580,12 +4735,21 @@ export const workManagementRouter = router({
             }),
           )
         ).filter((project) => project !== null);
-      if (!db)
-        return visibleProjects(
-          [...getDemoWork().projects.values()].filter(
-            (project) => project.projectKind !== "personal",
-          ),
+      if (!db) {
+        const projects = [...getDemoWork().projects.values()].filter(
+          (project) => project.projectKind !== "personal",
         );
+        const fields = await objectCustomFieldsByTarget(
+          "project",
+          projects.map((project) => project.projectId),
+        );
+        return visibleProjects(
+          projects.map((project) => ({
+            ...project,
+            customFields: fields.get(project.projectId) ?? [],
+          })),
+        );
+      }
       const rows = await db.execute<WorkProject>(sql`
         select project.work_project_id as "projectId", project.name,
           project.description, project.color, project.privacy,
@@ -4643,10 +4807,15 @@ export const workManagementRouter = router({
           )
         order by lower(project.name)
       `);
+      const fields = await objectCustomFieldsByTarget(
+        "project",
+        rows.map((project) => project.projectId),
+      );
       return visibleProjects(
         rows.map((row) => ({
           ...row,
           createdAt: new Date(row.createdAt).toISOString(),
+          customFields: fields.get(row.projectId) ?? [],
         })),
       );
     }),
@@ -11381,9 +11550,22 @@ export const workManagementRouter = router({
             )
             order by goal.due_date nulls last, lower(goal.name)
           `);
+      const [customFields, showCustomFields] = await Promise.all([
+        objectCustomFieldsByTarget(
+          "goal",
+          goals.map((goal) => goal.goalId),
+        ),
+        featureEnabled("work.custom_fields", {
+          userId: ctx.employeeId,
+          roles: ctx.roles,
+        }),
+      ]);
       return Promise.all(
         goals.map(async (goal) => ({
           ...goal,
+          customFields: showCustomFields
+            ? (customFields.get(goal.goalId) ?? [])
+            : [],
           ownerName:
             goal.ownerName ??
             (goal.ownerEmployeeId === employeeId
@@ -11657,6 +11839,16 @@ export const workManagementRouter = router({
               or portfolio.created_by_employee_id = ${employeeId}::uuid
             ) order by lower(portfolio.name)
           `);
+      const [customFields, showCustomFields] = await Promise.all([
+        objectCustomFieldsByTarget(
+          "portfolio",
+          portfolios.map((portfolio) => portfolio.portfolioId),
+        ),
+        featureEnabled("work.custom_fields", {
+          userId: ctx.employeeId,
+          roles: ctx.roles,
+        }),
+      ]);
       return Promise.all(
         portfolios.map(async (portfolio) => {
           const projectIds = !db
@@ -11703,6 +11895,9 @@ export const workManagementRouter = router({
               )[0];
           return {
             ...portfolio,
+            customFields: showCustomFields
+              ? (customFields.get(portfolio.portfolioId) ?? [])
+              : [],
             ownerName:
               portfolio.ownerName ??
               (portfolio.ownerEmployeeId === employeeId

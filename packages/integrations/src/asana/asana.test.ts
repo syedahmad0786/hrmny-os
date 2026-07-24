@@ -159,9 +159,17 @@ describe("Asana integration", () => {
     await expect(asana.listProjects("w1")).resolves.toHaveLength(2);
     await asana.listProjectTasks("p1");
 
-    expect(requests.filter((url) => url.includes("/projects?"))).toHaveLength(
-      2,
+    const projectRequests = requests.filter((url) =>
+      url.includes("/projects?"),
     );
+    expect(projectRequests).toHaveLength(2);
+    const projectFields = new URL(projectRequests[0]!).searchParams.get(
+      "opt_fields",
+    );
+    expect(projectFields).toContain(
+      "custom_field_settings.custom_field.enum_options.name",
+    );
+    expect(projectFields).toContain("custom_fields.display_value");
     expect(requests.at(-1)).toContain(
       "completed_since=1970-01-01T00%3A00%3A00.000Z",
     );
@@ -210,6 +218,20 @@ describe("Asana integration", () => {
         expect.stringContaining("/tasks/t1/time_tracking_entries?"),
       ]),
     );
+    const portfolioFields = new URL(
+      requests.find((url) => url.includes("/portfolios?workspace=w1"))!,
+    ).searchParams.get("opt_fields");
+    expect(portfolioFields).toContain(
+      "custom_field_settings.custom_field.enum_options.name",
+    );
+    expect(portfolioFields).toContain("custom_fields.display_value");
+    const goalFields = new URL(
+      requests.find((url) => url.includes("/goals?workspace=w1"))!,
+    ).searchParams.get("opt_fields");
+    expect(goalFields).toContain(
+      "custom_field_settings.custom_field.enum_options.name",
+    );
+    expect(goalFields).toContain("custom_fields.display_value");
   });
 
   it("reads the connected user's complete My Tasks list", async () => {
