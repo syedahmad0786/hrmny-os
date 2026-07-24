@@ -2607,6 +2607,31 @@ describe("work management", () => {
       enabled: true,
       reason: "restore team reporting",
     });
+    const teamClientId = resolveDevUser("portal_a").clientId!;
+    getDemoWork().projects.get(project.projectId)!.clientId = teamClientId;
+    await caller.admin.features.setOverride({
+      featureKey: "work.teams",
+      scopeType: "client",
+      scopeKey: teamClientId,
+      enabled: false,
+      reason: "client disabled team reporting",
+    });
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      projectReportDashboard,
+    );
+    expect(
+      (await caller.work.projects.list()).find(
+        (item) => item.projectId === project.projectId,
+      )?.teamIds,
+    ).toEqual([]);
+    await caller.admin.features.setOverride({
+      featureKey: "work.teams",
+      scopeType: "client",
+      scopeKey: teamClientId,
+      enabled: true,
+      reason: "restore client team reporting",
+    });
+    getDemoWork().projects.get(project.projectId)!.clientId = null;
     await expect(
       caller.work.reporting.saveDashboard({
         name: "Invalid mixed report",

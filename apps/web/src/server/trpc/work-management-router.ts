@@ -3250,8 +3250,14 @@ async function requireDashboardAccess(
     spec &&
     typeof spec === "object" &&
     typeof (spec as Record<string, unknown>).teamId === "string"
-  )
+  ) {
     await requireScopedFeature(ctx, "work.teams", null);
+    const objectIds = (spec as Record<string, unknown>).objectIds;
+    if (Array.isArray(objectIds))
+      for (const projectId of objectIds)
+        if (typeof projectId === "string")
+          await requireScopedFeature(ctx, "work.teams", projectId);
+  }
   if (
     (reportType === "projects" || reportType === "portfolios") &&
     spec &&
@@ -4356,6 +4362,9 @@ export const workManagementRouter = router({
                 ))
                   ? (project.health ?? latest?.health ?? "on_track")
                   : null,
+                teamIds: (await featureEnabled("work.teams", featureScope))
+                  ? (project.teamIds ?? [])
+                  : [],
               };
             }),
           )
