@@ -16,7 +16,7 @@ A capability is only marked **available** when all of these are true:
 
 Database tables without a usable workflow do not count as parity. The code-owned catalogue at `apps/web/src/features/catalog.ts` is the live status register; **planned** features cannot be switched on.
 
-Current catalogue verdict: all 127 recorded capabilities have a usable surface; 32 are marked available and 95 remain beta. Nothing is still labelled planned, but beta is not a claim of production acceptance. The 100% goal remains open until the live Composio/Asana account is verified, provider auth configs are exercised, and client acceptance confirms the beta workflows at production scale.
+Current catalogue verdict: all 128 recorded capabilities have a usable surface; 32 are marked available and 96 remain beta. Nothing is still labelled planned, but beta is not a claim of production acceptance. The 100% goal remains open until the live Composio/Asana account is verified, provider auth configs are exercised, and client acceptance confirms the beta workflows at production scale.
 
 ## Connection finding
 
@@ -37,6 +37,7 @@ The application database contains no saved Composio or Asana connection for that
 | Sections / board columns                     | `work_section`                                 | Available |
 | Tasks, assignee, dates, priority, completion | `work_item`                                    | Available |
 | Subtasks                                     | `work_item.parent_work_item_id`                | Available |
+| Subtask hide-completed and sorting controls  | governed task-detail view                      | Beta      |
 | Milestones and approvals                     | `work_item.item_type`                          | Beta      |
 | Multi-home tasks                             | `work_project_item`                            | Beta      |
 | Dependencies                                 | `work_item_dependency`                         | Available |

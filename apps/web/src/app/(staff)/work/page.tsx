@@ -10,6 +10,7 @@ import {
   WorkRichTextEditor,
   type WorkMentionOption,
 } from "@/components/work-rich-text";
+import { visibleSubtasks, type SubtaskSort } from "@/lib/work-subtasks";
 
 type View = "list" | "board" | "calendar" | "timeline" | "files";
 type EditableCustomTaskStatus = {
@@ -89,6 +90,8 @@ export default function WorkPage() {
   const [quickTasks, setQuickTasks] = useState<Record<string, string>>({});
   const [comment, setComment] = useState("");
   const [subtask, setSubtask] = useState("");
+  const [subtaskSort, setSubtaskSort] = useState<SubtaskSort>("manual");
+  const [showCompletedSubtasks, setShowCompletedSubtasks] = useState(true);
   const [dependencyId, setDependencyId] = useState("");
   const [tagName, setTagName] = useState("");
   const [fieldName, setFieldName] = useState("");
@@ -180,6 +183,7 @@ export default function WorkPage() {
   const commentsEnabled = enabled.has("work.comments");
   const dependenciesEnabled = enabled.has("work.dependencies");
   const subtasksEnabled = enabled.has("work.subtasks");
+  const subtaskViewControlsEnabled = enabled.has("work.subtasks.view_controls");
   const sectionsEnabled = enabled.has("work.sections");
   const boardEnabled = enabled.has("work.views.board");
   const listEnabled = enabled.has("work.views.list");
@@ -2562,13 +2566,44 @@ export default function WorkPage() {
 
             {subtasksEnabled ? (
               <section className="mt-6">
-                <h3 className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
-                  Subtasks
-                </h3>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
+                    Subtasks
+                  </h3>
+                  {subtaskViewControlsEnabled ? (
+                    <div className="flex items-center gap-2 text-xs text-muted">
+                      <label className="flex items-center gap-1">
+                        <input
+                          type="checkbox"
+                          checked={showCompletedSubtasks}
+                          onChange={(event) =>
+                            setShowCompletedSubtasks(event.target.checked)
+                          }
+                        />
+                        Show completed
+                      </label>
+                      <select
+                        aria-label="Sort subtasks"
+                        className="rounded border border-sand bg-white px-2 py-1"
+                        value={subtaskSort}
+                        onChange={(event) =>
+                          setSubtaskSort(event.target.value as SubtaskSort)
+                        }
+                      >
+                        <option value="manual">Manual order</option>
+                        <option value="due_date">Due date</option>
+                        <option value="assignee">Assignee</option>
+                        <option value="title">Title</option>
+                      </select>
+                    </div>
+                  ) : null}
+                </div>
                 <div className="mt-2 overflow-hidden rounded-lg border border-sand">
-                  {items
-                    .filter((item) => item.parentItemId === selectedItem.itemId)
-                    .map(taskRow)}
+                  {visibleSubtasks(items, selectedItem.itemId, {
+                    showCompleted:
+                      !subtaskViewControlsEnabled || showCompletedSubtasks,
+                    sort: subtaskViewControlsEnabled ? subtaskSort : "manual",
+                  }).map(taskRow)}
                   {canEdit && projectId ? (
                     <form
                       className="flex gap-2 border-t border-sand bg-white/50 p-2"

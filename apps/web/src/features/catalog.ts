@@ -283,6 +283,16 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     defaultEnabled: true,
   }),
   feature({
+    key: "work.subtasks.view_controls",
+    name: "Subtask view controls",
+    description:
+      "Hide completed subtasks and sort dense subtask lists in task details.",
+    group: "Core work",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
+  feature({
     key: "work.assignees",
     name: "Task assignees",
     description: "One accountable owner per task with reassignment history.",
