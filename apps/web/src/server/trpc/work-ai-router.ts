@@ -194,6 +194,10 @@ export const workAiRouter = router({
               value: action.value,
             });
             break;
+          case "set_custom_task_status":
+            await requireFeature(ctx, "work.custom_task_types");
+            result = await work.customTaskTypes.setForTask(action);
+            break;
           case "add_to_project":
             await requireFeature(ctx, "work.multi_home");
             result = await work.tasks.addToProject({

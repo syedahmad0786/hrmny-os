@@ -13,6 +13,7 @@ const triggers = [
   ["priority_changed", "Priority changed"],
   ["due_date_set", "Due date set"],
   ["approval_decided", "Approval decided"],
+  ["custom_status_changed", "Custom status changed"],
   ["scheduled", "On a schedule"],
 ] as const;
 const actionTypes = [
@@ -27,6 +28,7 @@ const actionTypes = [
   ["delete_task", "Archive task"],
   ["create_subtask", "Create subtask"],
   ["set_custom_field", "Update custom field"],
+  ["set_custom_task_status", "Set custom task status"],
   ["add_to_project", "Add task to project"],
   ["add_follower", "Add collaborator"],
   ["remove_follower", "Remove collaborator"],
@@ -43,6 +45,10 @@ const card = "rounded-xl border border-sand bg-white/80 p-5";
 const input = "w-full rounded-lg border border-sand bg-white px-3 py-2";
 
 export default function WorkAiStudioPage() {
+  const session = trpc.auth.session.useQuery();
+  const customTaskTypesEnabled =
+    session.data?.enabledFeatureKeys.includes("work.custom_task_types") ??
+    false;
   const projects = trpc.work.projects.list.useQuery();
   const workflows = trpc.workAiStudio.list.useQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -290,11 +296,17 @@ export default function WorkAiStudioPage() {
                   setTriggerType(event.target.value as Trigger)
                 }
               >
-                {triggers.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
+                {triggers
+                  .filter(
+                    ([value]) =>
+                      customTaskTypesEnabled ||
+                      value !== "custom_status_changed",
+                  )
+                  .map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
               </select>
             </label>
             {triggerType === "scheduled" ? (
@@ -353,25 +365,31 @@ export default function WorkAiStudioPage() {
                 Actions AI may propose
               </legend>
               <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {actionTypes.map(([value, label]) => (
-                  <label
-                    key={value}
-                    className="flex items-center gap-2 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={allowedActionTypes.includes(value)}
-                      onChange={() =>
-                        setAllowedActionTypes((current) =>
-                          current.includes(value)
-                            ? current.filter((item) => item !== value)
-                            : [...current, value],
-                        )
-                      }
-                    />
-                    {label}
-                  </label>
-                ))}
+                {actionTypes
+                  .filter(
+                    ([value]) =>
+                      customTaskTypesEnabled ||
+                      value !== "set_custom_task_status",
+                  )
+                  .map(([value, label]) => (
+                    <label
+                      key={value}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={allowedActionTypes.includes(value)}
+                        onChange={() =>
+                          setAllowedActionTypes((current) =>
+                            current.includes(value)
+                              ? current.filter((item) => item !== value)
+                              : [...current, value],
+                          )
+                        }
+                      />
+                      {label}
+                    </label>
+                  ))}
               </div>
             </fieldset>
             <label className="block text-sm md:col-span-2">

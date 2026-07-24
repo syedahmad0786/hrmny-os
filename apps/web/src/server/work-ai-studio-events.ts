@@ -8,7 +8,8 @@ export type WorkAiStudioEvent =
   | "task_moved"
   | "priority_changed"
   | "due_date_set"
-  | "approval_decided";
+  | "approval_decided"
+  | "custom_status_changed";
 
 export async function queueWorkAiStudioEvent(
   ctx: TrpcContext,

@@ -3,6 +3,7 @@ import { sql } from "@hrmny/db";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getDb } from "./db";
+import { featureEnabled } from "./features";
 import { writeAudit } from "./m1-persistence";
 import type { TrpcContext } from "./trpc/trpc";
 import {
@@ -26,6 +27,7 @@ export const workAiStudioTriggerTypes = [
   "priority_changed",
   "due_date_set",
   "approval_decided",
+  "custom_status_changed",
   "scheduled",
 ] as const;
 export type WorkAiStudioTrigger = (typeof workAiStudioTriggerTypes)[number];
@@ -78,6 +80,47 @@ export type WorkAiStudioWorkflow = WorkAiStudioWorkflowInput & {
   tokenCount: number;
   lastRunAt: string | null;
 };
+
+function workflowUsesCustomTaskTypes(
+  workflow: Pick<
+    WorkAiStudioWorkflowInput,
+    "triggerType" | "allowedActionTypes"
+  >,
+) {
+  return (
+    workflow.triggerType === "custom_status_changed" ||
+    workflow.allowedActionTypes.includes("set_custom_task_status")
+  );
+}
+
+async function customTaskTypesEnabled(
+  ctx: TrpcContext,
+  clientId: string | null,
+) {
+  return featureEnabled("work.custom_task_types", {
+    userId: ctx.employeeId,
+    clientId,
+    roles: ctx.roles,
+  });
+}
+
+async function requireCustomTaskTypeWorkflow(
+  ctx: TrpcContext,
+  clientId: string | null,
+  workflow: Pick<
+    WorkAiStudioWorkflowInput,
+    "triggerType" | "allowedActionTypes"
+  >,
+) {
+  if (
+    workflowUsesCustomTaskTypes(workflow) &&
+    !(await customTaskTypesEnabled(ctx, clientId))
+  )
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.custom_task_types",
+    });
+}
 
 type WorkAiStudioRun = {
   studioRunId: string;
@@ -175,8 +218,12 @@ export async function listWorkAiStudioWorkflows(ctx: TrpcContext) {
     const visible = [];
     for (const workflow of demoWorkflows.values()) {
       try {
-        await requireProjectAccess(ctx, workflow.projectId);
-        visible.push(workflow);
+        const project = await requireProjectAccess(ctx, workflow.projectId);
+        if (
+          (await customTaskTypesEnabled(ctx, project.clientId)) ||
+          !workflowUsesCustomTaskTypes(workflow)
+        )
+          visible.push(workflow);
       } catch (error) {
         if (!(error instanceof TRPCError)) throw error;
       }
@@ -209,8 +256,13 @@ export async function listWorkAiStudioWorkflows(ctx: TrpcContext) {
   const visible: WorkAiStudioWorkflow[] = [];
   for (const row of rows) {
     try {
-      await requireProjectAccess(ctx, row.projectId);
-      visible.push(mapWorkflow(row));
+      const project = await requireProjectAccess(ctx, row.projectId);
+      const workflow = mapWorkflow(row);
+      if (
+        (await customTaskTypesEnabled(ctx, project.clientId)) ||
+        !workflowUsesCustomTaskTypes(workflow)
+      )
+        visible.push(workflow);
     } catch (error) {
       if (!(error instanceof TRPCError)) throw error;
     }
@@ -224,7 +276,8 @@ export async function createWorkAiStudioWorkflow(
 ) {
   const input = workAiStudioWorkflowInputSchema.parse(raw);
   const employeeId = actor(ctx);
-  await requireProjectAccess(ctx, input.projectId, "editor");
+  const project = await requireProjectAccess(ctx, input.projectId, "editor");
+  await requireCustomTaskTypeWorkflow(ctx, project.clientId, input);
   const now = new Date().toISOString();
   const workflow: WorkAiStudioWorkflow = {
     ...input,
@@ -276,10 +329,11 @@ export async function updateWorkAiStudioWorkflow(
   const input = workAiStudioWorkflowInputSchema.parse(raw);
   const employeeId = actor(ctx);
   const current = await workflowById(ctx, workflowId);
-  await Promise.all([
+  const [, project] = await Promise.all([
     requireProjectAccess(ctx, current.projectId, "editor"),
     requireProjectAccess(ctx, input.projectId, "editor"),
   ]);
+  await requireCustomTaskTypeWorkflow(ctx, project.clientId, input);
   const allowedActionTypes = [...new Set(input.allowedActionTypes)];
   const db = getDb();
   if (!db) {
@@ -346,7 +400,9 @@ export async function setWorkAiStudioWorkflowStatus(
 ) {
   const employeeId = actor(ctx);
   const workflow = await workflowById(ctx, workflowId);
-  await requireProjectAccess(ctx, workflow.projectId, "editor");
+  const project = await requireProjectAccess(ctx, workflow.projectId, "editor");
+  if (status === "published")
+    await requireCustomTaskTypeWorkflow(ctx, project.clientId, workflow);
   const db = getDb();
   if (!db) {
     workflow.status = status;
@@ -469,6 +525,8 @@ export async function runWorkAiStudioWorkflow(input: {
   allowDraft?: boolean;
 }) {
   const workflow = await workflowById(input.ctx, input.workflowId);
+  const project = await requireProjectAccess(input.ctx, workflow.projectId);
+  await requireCustomTaskTypeWorkflow(input.ctx, project.clientId, workflow);
   const employeeId = actor(input.ctx);
   if (workflow.status !== "published" && !input.allowDraft)
     throw new TRPCError({

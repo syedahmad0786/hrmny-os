@@ -16,6 +16,7 @@ export default function WorkflowsPage() {
   const collaboratorRulesEnabled = enabled.has(
     "work.rules.collaborator_trigger",
   );
+  const customTaskTypesEnabled = enabled.has("work.custom_task_types");
   const templatesEnabled = enabled.has("work.templates");
   const bundlesEnabled = enabled.has("work.bundles");
   const approvalsEnabled = enabled.has("work.approvals");
@@ -41,6 +42,10 @@ export default function WorkflowsPage() {
   const rules = trpc.work.rules.list.useQuery(
     { projectId },
     { enabled: Boolean(projectId && rulesEnabled) },
+  );
+  const customTaskTypes = trpc.work.customTaskTypes.list.useQuery(
+    { projectId },
+    { enabled: Boolean(projectId && rulesEnabled && customTaskTypesEnabled) },
   );
   const ruleRuns = trpc.work.rules.runs.useQuery(
     { projectId, limit: 20 },
@@ -86,13 +91,20 @@ export default function WorkflowsPage() {
     | "priority_changed"
     | "due_date_set"
     | "approval_decided"
+    | "custom_status_changed"
     | "collaborator_added"
     | "scheduled"
   >("task_added");
   const [scheduleMinutes, setScheduleMinutes] = useState("1440");
   const [conditionPriority, setConditionPriority] = useState("");
+  const [conditionCustomStatus, setConditionCustomStatus] = useState("");
   const [actionType, setActionType] = useState<
-    "set_priority" | "move_section" | "assign" | "complete" | "add_tag"
+    | "set_priority"
+    | "move_section"
+    | "assign"
+    | "complete"
+    | "add_tag"
+    | "set_custom_task_status"
   >("set_priority");
   const [actionValue, setActionValue] = useState("high");
   const createRule = trpc.work.rules.create.useMutation({
@@ -398,6 +410,13 @@ export default function WorkflowsPage() {
             className="mt-4 grid gap-2 md:grid-cols-3 lg:grid-cols-6"
             onSubmit={(event) => {
               event.preventDefault();
+              const selectedActionType = (customTaskTypes.data ?? []).find(
+                (type) =>
+                  type.isAssociated &&
+                  type.statuses.some(
+                    (status) => status.statusOptionId === actionValue,
+                  ),
+              );
               const action =
                 actionType === "set_priority"
                   ? {
@@ -411,7 +430,14 @@ export default function WorkflowsPage() {
                       ? { type: actionType, employeeId: actionValue || null }
                       : actionType === "add_tag"
                         ? { type: actionType, tagId: actionValue }
-                        : { type: actionType };
+                        : actionType === "set_custom_task_status"
+                          ? {
+                              type: actionType,
+                              customTaskTypeId:
+                                selectedActionType!.customTaskTypeId,
+                              statusOptionId: actionValue,
+                            }
+                          : { type: actionType };
               createRule.mutate({
                 projectId,
                 name: ruleName,
@@ -421,15 +447,26 @@ export default function WorkflowsPage() {
                 branches: [
                   {
                     mode: "all",
-                    conditions: conditionPriority
-                      ? [
-                          {
-                            field: "priority",
-                            operator: "equals",
-                            value: conditionPriority,
-                          },
-                        ]
-                      : [],
+                    conditions: [
+                      ...(conditionPriority
+                        ? [
+                            {
+                              field: "priority" as const,
+                              operator: "equals" as const,
+                              value: conditionPriority,
+                            },
+                          ]
+                        : []),
+                      ...(conditionCustomStatus
+                        ? [
+                            {
+                              field: "customTaskStatusOptionId" as const,
+                              operator: "equals" as const,
+                              value: conditionCustomStatus,
+                            },
+                          ]
+                        : []),
+                    ],
                     actions: [action],
                   },
                 ],
@@ -457,6 +494,11 @@ export default function WorkflowsPage() {
               <option value="priority_changed">Priority changed</option>
               <option value="due_date_set">Due date set</option>
               <option value="approval_decided">Approval decided</option>
+              {customTaskTypesEnabled ? (
+                <option value="custom_status_changed">
+                  Custom status changed
+                </option>
+              ) : null}
               {collaboratorRulesEnabled ? (
                 <option value="collaborator_added">Collaborator added</option>
               ) : null}
@@ -485,6 +527,32 @@ export default function WorkflowsPage() {
               <option value="high">High priority</option>
               <option value="urgent">Urgent priority</option>
             </select>
+            {customTaskTypesEnabled ? (
+              <select
+                aria-label="Rule custom status condition"
+                className="rounded border border-sand px-2 py-1.5"
+                value={conditionCustomStatus}
+                onChange={(event) =>
+                  setConditionCustomStatus(event.target.value)
+                }
+              >
+                <option value="">Any custom status</option>
+                {(customTaskTypes.data ?? [])
+                  .filter((type) => type.isAssociated)
+                  .flatMap((type) =>
+                    type.statuses
+                      .filter((status) => status.enabled)
+                      .map((status) => (
+                        <option
+                          key={status.statusOptionId}
+                          value={status.statusOptionId}
+                        >
+                          {type.icon} {type.name}: {status.name}
+                        </option>
+                      )),
+                  )}
+              </select>
+            ) : null}
             <select
               aria-label="Rule action"
               className="rounded border border-sand px-2 py-1.5"
@@ -500,6 +568,11 @@ export default function WorkflowsPage() {
               <option value="assign">Assign</option>
               <option value="complete">Complete</option>
               <option value="add_tag">Add tag</option>
+              {customTaskTypesEnabled ? (
+                <option value="set_custom_task_status">
+                  Set custom status
+                </option>
+              ) : null}
             </select>
             {actionType === "set_priority" ? (
               <select
@@ -554,6 +627,29 @@ export default function WorkflowsPage() {
                   </option>
                 ))}
               </select>
+            ) : actionType === "set_custom_task_status" ? (
+              <select
+                aria-label="Custom task status to set"
+                className="rounded border border-sand px-2 py-1.5"
+                value={actionValue}
+                onChange={(event) => setActionValue(event.target.value)}
+              >
+                <option value="">Choose status</option>
+                {(customTaskTypes.data ?? [])
+                  .filter((type) => type.isAssociated)
+                  .flatMap((type) =>
+                    type.statuses
+                      .filter((status) => status.enabled)
+                      .map((status) => (
+                        <option
+                          key={status.statusOptionId}
+                          value={status.statusOptionId}
+                        >
+                          {type.icon} {type.name}: {status.name}
+                        </option>
+                      )),
+                  )}
+              </select>
             ) : (
               <span />
             )}
@@ -565,7 +661,9 @@ export default function WorkflowsPage() {
                   (!Number.isInteger(Number(scheduleMinutes)) ||
                     Number(scheduleMinutes) < 15 ||
                     Number(scheduleMinutes) > 525600)) ||
-                (["move_section", "add_tag"].includes(actionType) &&
+                (["move_section", "add_tag", "set_custom_task_status"].includes(
+                  actionType,
+                ) &&
                   !actionValue)
               }
             >

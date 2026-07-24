@@ -91,6 +91,103 @@ describe("AI Studio", () => {
     expect(skipped.run?.result?.actions).toEqual([]);
   });
 
+  it("governs custom task status triggers and actions", async () => {
+    const caller = partnerCaller();
+    await caller.admin.features.setOverride({
+      featureKey: "work.ai.studio",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: true,
+      reason: "test",
+    });
+    const project = await caller.work.projects.create({
+      name: `Studio custom status ${crypto.randomUUID()}`,
+      description: "Workflow project",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const type = await caller.work.customTaskTypes.create({
+      projectId: project.projectId,
+      name: "Request",
+      icon: "◆",
+      isDefault: false,
+      statuses: [
+        {
+          name: "Open",
+          color: "#6B7280",
+          completionState: "incomplete",
+        },
+        {
+          name: "Closed",
+          color: "#2E7D5B",
+          completionState: "complete",
+        },
+      ],
+    });
+    const task = await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Route this request",
+      description: "",
+    });
+    const workflow = await caller.workAiStudio.create({
+      projectId: project.projectId,
+      name: "Set custom status",
+      description: "",
+      triggerType: "custom_status_changed",
+      aiCondition: null,
+      instructions: "Set the custom task status using the supplied IDs.",
+      referenceText: "",
+      allowedActionTypes: ["set_custom_task_status"],
+      model: null,
+      scheduleMinutes: null,
+    });
+    const result = await caller.workAiStudio.run({
+      workflowId: workflow.workflowId,
+      itemId: task.itemId,
+    });
+    expect(result.run?.result?.actions[0]).toMatchObject({
+      type: "set_custom_task_status",
+      customTaskTypeId: type.customTaskTypeId,
+      itemId: task.itemId,
+    });
+    await caller.workAi.applyAction({
+      runId: result.run!.runId,
+      actionIndex: 0,
+    });
+    expect(
+      await caller.work.customTaskTypes.assignments({
+        projectId: project.projectId,
+      }),
+    ).toContainEqual(
+      expect.objectContaining({
+        itemId: task.itemId,
+        customTaskTypeId: type.customTaskTypeId,
+        statusName: "Open",
+      }),
+    );
+    await caller.admin.features.setOverride({
+      featureKey: "work.custom_task_types",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    expect(await caller.workAiStudio.list()).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ workflowId: workflow.workflowId }),
+      ]),
+    );
+    await expect(
+      caller.workAiStudio.run({
+        workflowId: workflow.workflowId,
+        itemId: task.itemId,
+      }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.custom_task_types",
+    });
+  });
+
   it("fails closed when AI Studio is disabled", async () => {
     const caller = partnerCaller();
     await expect(caller.workAiStudio.list()).rejects.toMatchObject({
