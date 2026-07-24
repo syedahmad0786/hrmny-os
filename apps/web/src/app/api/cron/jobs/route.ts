@@ -9,6 +9,7 @@ import { refreshAsanaWebhooksIfEnabled } from "@/server/asana-webhooks";
 import { deliverPendingWorkWebhooks } from "@/server/work-api";
 import { cleanupExpiredWorkAiRuns } from "@/server/work-ai";
 import { runWorkAiStudioJob } from "@/server/work-ai-studio";
+import { runWorkAiTeammateJob } from "@/server/work-ai-teammates";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,14 @@ const WorkAiStudioJobSchema = z.object({
   actorEmployeeId: z.string().uuid(),
   eventKey: z.string().min(1).max(500),
   recurring: z.boolean(),
+});
+const WorkAiTeammateJobSchema = z.object({
+  teammateId: z.string().uuid(),
+  itemId: z.string().uuid(),
+  actorEmployeeId: z.string().uuid(),
+  requestText: z.string().trim().min(1).max(10_000),
+  triggerType: z.enum(["assignment", "mention", "rule", "follow_up"]),
+  eventKey: z.string().min(1).max(500),
 });
 
 type ClaimedJob = {
@@ -139,6 +148,9 @@ export async function GET(request: Request) {
         nextRunAt = recurring
           ? new Date(Date.now() + (studio.scheduleMinutes ?? 5) * 60_000)
           : null;
+      } else if (job.kind === "work_ai_teammate") {
+        const payload = WorkAiTeammateJobSchema.parse(job.payload);
+        result = await runWorkAiTeammateJob(payload);
       } else {
         throw new Error(`Unsupported job kind: ${job.kind}`);
       }

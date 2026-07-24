@@ -49,6 +49,9 @@ const ITEMS = [
       "work.ai.risk_reports",
       "work.ai.dash",
       "work.ai.studio",
+      "work.ai.teammates",
+      "work.ai.teammate_skills",
+      "work.ai.teammate_memory",
     ],
   },
 ] as const;

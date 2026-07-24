@@ -193,6 +193,12 @@ const WORK_EXPORT_TABLES = [
   "work_ai_action_execution",
   "work_ai_studio_workflow",
   "work_ai_studio_run",
+  "work_ai_teammate",
+  "work_ai_teammate_member",
+  "work_ai_teammate_project_access",
+  "work_ai_teammate_skill",
+  "work_ai_teammate_memory",
+  "work_ai_teammate_run",
   "time_entry",
 ] as const;
 

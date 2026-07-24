@@ -64,6 +64,7 @@ import { workManagementRouter } from "./work-management-router";
 import { workAdminRouter } from "./work-admin-router";
 import { workAiRouter } from "./work-ai-router";
 import { workAiStudioRouter } from "./work-ai-studio-router";
+import { workAiTeammatesRouter } from "./work-ai-teammates-router";
 import { asanaMigrationRouter } from "./asana-migration-router";
 import { clientPreviewRouter } from "./client-preview-router";
 import { opsRouter } from "./ops-router";
@@ -746,6 +747,7 @@ export const appRouter = router({
   workAdmin: workAdminRouter,
   workAi: workAiRouter,
   workAiStudio: workAiStudioRouter,
+  workAiTeammates: workAiTeammatesRouter,
   asanaMigration: asanaMigrationRouter,
   clientPreview: clientPreviewRouter,
   assets: assetsRouter,

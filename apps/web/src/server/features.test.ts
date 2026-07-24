@@ -49,7 +49,7 @@ describe("Feature Lab resolution", () => {
   });
 
   it("never exposes planned features and keeps catalogue keys unique", () => {
-    const planned = FEATURE_BY_KEY.get("work.ai.teammates")!;
+    const planned = FEATURE_BY_KEY.get("work.ai.connectors")!;
     expect(
       resolveFeature(planned, [
         { ...override("global", "global", true), featureKey: planned.key },

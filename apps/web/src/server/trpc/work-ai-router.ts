@@ -7,6 +7,7 @@ import {
 } from "../features";
 import { writeAudit } from "../m1-persistence";
 import { isWorkViewOnlyMember } from "../work-governance";
+import { workAiTeammateExecutionContext } from "../work-ai-teammates";
 import {
   beginWorkAiAction,
   featureKeyForWorkAiKind,
@@ -135,7 +136,9 @@ export const workAiRouter = router({
           code: "CONFLICT",
           message: "AI action was already applied or is being applied",
         });
-      const work = createWorkCaller(ctx);
+      const work = createWorkCaller(
+        await workAiTeammateExecutionContext(ctx, run, action),
+      );
       try {
         let result: unknown;
         switch (action.type) {
