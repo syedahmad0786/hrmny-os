@@ -46,6 +46,20 @@ function fieldOptions(field: AsanaCustomField): string[] {
     .map((option) => option.name);
 }
 
+function fieldPrivacy(field: AsanaCustomField) {
+  return field.privacy_setting === "private" ||
+    field.privacy_setting === "public"
+    ? field.privacy_setting
+    : "public_with_guests";
+}
+
+function fieldDefaultAccess(field: AsanaCustomField) {
+  return field.default_access_level === "admin" ||
+    field.default_access_level === "editor"
+    ? field.default_access_level
+    : "user";
+}
+
 function namedValues(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   return value.flatMap((item) => {
@@ -229,6 +243,7 @@ export type AsanaImportSummary = {
   followers: number;
   tags: number;
   customTaskTypes: number;
+  customFieldMemberships: number;
   customTaskTypeMemberships: number;
   customTaskStatuses: number;
   projectCustomTaskTypes: number;
@@ -351,6 +366,45 @@ export async function importAsanaWorkspace(input: {
         teamMemberships++;
       }
 
+      let customFieldMemberships = 0;
+      const customFieldMembershipExternalIds: string[] = [];
+      for (const entry of scan.customFieldMemberships ?? []) {
+        const level = customTaskTypeAccessLevel(entry.membership.access_level);
+        const isTeam =
+          entry.membership.member.resource_type === "team" ||
+          teamIds.has(entry.membership.member.gid);
+        const teamId = isTeam
+          ? (teamIds.get(entry.membership.member.gid) ?? null)
+          : null;
+        const employeeId = isTeam
+          ? null
+          : employeeForUser(entry.membership.member);
+        if (!teamId && !employeeId) continue;
+        await tx.execute(sql`
+          insert into public.work_custom_field_member (
+            field_external_id, member_type, employee_id, work_team_id,
+            access_level, source_platform, source_workspace_external_id,
+            source_connection_external_id, external_id, source_data
+          ) values (
+            ${entry.customFieldGid}, ${isTeam ? "team" : "employee"},
+            ${employeeId}::uuid, ${teamId}::uuid, ${level}, 'asana',
+            ${input.workspaceGid}, ${input.connectedAccountId},
+            ${entry.membership.gid}, ${JSON.stringify(entry.membership)}::jsonb
+          ) on conflict (
+            source_platform, source_connection_external_id, external_id
+          ) where external_id is not null
+          do update set field_external_id = excluded.field_external_id,
+            member_type = excluded.member_type,
+            employee_id = excluded.employee_id,
+            work_team_id = excluded.work_team_id,
+            access_level = excluded.access_level,
+            source_workspace_external_id = excluded.source_workspace_external_id,
+            source_data = excluded.source_data, updated_at = now()
+        `);
+        customFieldMembershipExternalIds.push(entry.membership.gid);
+        customFieldMemberships++;
+      }
+
       const projectIds = new Map<string, string>();
       for (const project of scan.projects) {
         const [row] = await tx.execute(sql<{ id: string }>`
@@ -399,16 +453,28 @@ export async function importAsanaWorkspace(input: {
           await tx.execute(sql`
             insert into public.work_custom_field (
               work_project_id, name, field_type, options, position,
-              source_platform, external_id
+              source_platform, external_id, privacy_setting,
+              default_access_level, is_value_read_only,
+              source_workspace_external_id, source_connection_external_id,
+              source_data
             ) values (
               ${projectId}::uuid, ${limited(field.name, 120)},
               ${fieldType(field)}, ${JSON.stringify(fieldOptions(field))}::jsonb,
-              ${position}, 'asana', ${field.gid}
+              ${position}, 'asana', ${field.gid}, ${fieldPrivacy(field)},
+              ${fieldDefaultAccess(field)}, ${field.is_value_read_only === true},
+              ${input.workspaceGid}, ${input.connectedAccountId},
+              ${JSON.stringify(field)}::jsonb
             )
             on conflict (work_project_id, source_platform, external_id)
               where external_id is not null
             do update set name = excluded.name, field_type = excluded.field_type,
               options = excluded.options, position = excluded.position,
+              privacy_setting = excluded.privacy_setting,
+              default_access_level = excluded.default_access_level,
+              is_value_read_only = excluded.is_value_read_only,
+              source_workspace_external_id = excluded.source_workspace_external_id,
+              source_connection_external_id = excluded.source_connection_external_id,
+              source_data = excluded.source_data,
               updated_at = now()
           `);
         }
@@ -939,11 +1005,16 @@ export async function importAsanaWorkspace(input: {
             const [fieldRow] = await tx.execute(sql<{ id: string }>`
               insert into public.work_custom_field (
                 work_project_id, name, field_type, options, source_platform,
-                external_id
+                external_id, privacy_setting, default_access_level,
+                is_value_read_only, source_workspace_external_id,
+                source_connection_external_id, source_data
               ) values (
                 ${projectId}::uuid, ${limited(field.name, 120)},
                 ${fieldType(field)}, ${JSON.stringify(fieldOptions(field))}::jsonb,
-                'asana', ${field.gid}
+                'asana', ${field.gid}, ${fieldPrivacy(field)},
+                ${fieldDefaultAccess(field)}, ${field.is_value_read_only === true},
+                ${input.workspaceGid}, ${input.connectedAccountId},
+                ${JSON.stringify(field)}::jsonb
               )
               on conflict (work_project_id, source_platform, external_id)
                 where external_id is not null
@@ -951,6 +1022,12 @@ export async function importAsanaWorkspace(input: {
                 name = excluded.name,
                 field_type = excluded.field_type,
                 options = excluded.options,
+                privacy_setting = excluded.privacy_setting,
+                default_access_level = excluded.default_access_level,
+                is_value_read_only = excluded.is_value_read_only,
+                source_workspace_external_id = excluded.source_workspace_external_id,
+                source_connection_external_id = excluded.source_connection_external_id,
+                source_data = excluded.source_data,
                 updated_at = now()
               returning work_custom_field_id as id
             `);
@@ -960,7 +1037,7 @@ export async function importAsanaWorkspace(input: {
                 external_id
               ) values (
                 ${itemId}::uuid, ${String(fieldRow!.id)}::uuid,
-                ${JSON.stringify(field)}::jsonb, 'asana',
+                ${JSON.stringify(asanaObjectFieldValue(field))}::jsonb, 'asana',
                 ${`${task.gid}:${projectGid}:${field.gid}`}
               )
               on conflict (work_item_id, work_custom_field_id)
@@ -1165,7 +1242,8 @@ export async function importAsanaWorkspace(input: {
             work_project_id, work_portfolio_id, work_goal_id, name, field_type,
             options, value, display_value, source_platform, external_id,
             field_external_id, source_workspace_external_id,
-            source_connection_external_id, source_data
+            source_connection_external_id, source_data, privacy_setting,
+            default_access_level, is_value_read_only
           ) values (
             ${row.projectId}::uuid, ${row.portfolioId}::uuid, ${row.goalId}::uuid,
             ${limited(row.field.name, 120)}, ${fieldType(row.field)},
@@ -1173,7 +1251,9 @@ export async function importAsanaWorkspace(input: {
             ${JSON.stringify(value)}::jsonb,
             ${asanaObjectFieldDisplayValue(row.field, value)}, 'asana',
             ${externalId}, ${row.field.gid}, ${input.workspaceGid},
-            ${input.connectedAccountId}, ${JSON.stringify(row.field)}::jsonb
+            ${input.connectedAccountId}, ${JSON.stringify(row.field)}::jsonb,
+            ${fieldPrivacy(row.field)}, ${fieldDefaultAccess(row.field)},
+            ${row.field.is_value_read_only === true}
           ) on conflict (
             source_platform, source_connection_external_id, external_id
           ) where external_id is not null
@@ -1185,7 +1265,11 @@ export async function importAsanaWorkspace(input: {
             display_value = excluded.display_value,
             field_external_id = excluded.field_external_id,
             source_workspace_external_id = excluded.source_workspace_external_id,
-            source_data = excluded.source_data, updated_at = now()
+            source_data = excluded.source_data,
+            privacy_setting = excluded.privacy_setting,
+            default_access_level = excluded.default_access_level,
+            is_value_read_only = excluded.is_value_read_only,
+            updated_at = now()
         `);
         objectFieldExternalIds.push(externalId);
       }
@@ -1456,6 +1540,14 @@ export async function importAsanaWorkspace(input: {
           and member.source_platform = 'asana'
           and coalesce(member.external_id, '') <>
             all(${textArray(teamMembershipExternalIds)})
+      `);
+      await tx.execute(sql`
+        delete from public.work_custom_field_member
+        where source_platform = 'asana'
+          and source_workspace_external_id = ${input.workspaceGid}
+          and source_connection_external_id = ${input.connectedAccountId}
+          and coalesce(external_id, '') <>
+            all(${textArray(customFieldMembershipExternalIds)})
       `);
       await tx.execute(sql`
         delete from public.work_project_member member
@@ -1750,6 +1842,7 @@ export async function importAsanaWorkspace(input: {
         followers,
         tags,
         customTaskTypes: customTaskTypeIds.size,
+        customFieldMemberships,
         customTaskTypeMemberships,
         customTaskStatuses: customTaskStatusIds.size,
         projectCustomTaskTypes: projectCustomTaskTypeExternalIds.length,

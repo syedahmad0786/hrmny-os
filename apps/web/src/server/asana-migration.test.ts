@@ -45,7 +45,11 @@ describe("Asana migration scan", () => {
           custom_field_settings: [
             {
               gid: "setting1",
-              custom_field: { gid: "cf1", name: "Priority" },
+              custom_field: {
+                gid: "cf1",
+                name: "Priority",
+                privacy_setting: "private",
+              },
             },
           ],
           custom_fields: [
@@ -62,6 +66,27 @@ describe("Asana migration scan", () => {
           access_level: "editor",
         },
       ]),
+      listCustomFieldMemberships: vi.fn((gid) =>
+        Promise.resolve(
+          gid === "cf1"
+            ? [
+                {
+                  gid: "cfm1",
+                  parent: {
+                    gid: "cf1",
+                    resource_type: "custom_field" as const,
+                  },
+                  member: {
+                    gid: "team1",
+                    name: "Ops",
+                    resource_type: "team" as const,
+                  },
+                  access_level: "user" as const,
+                },
+              ]
+            : [],
+        ),
+      ),
       listCustomTypeMemberships: vi.fn().mockResolvedValue([
         {
           gid: "ctm1",
@@ -192,6 +217,7 @@ describe("Asana migration scan", () => {
       projectTaskLinks: 2,
       multiHomedTasks: 1,
       customFields: 4,
+      customFieldMemberships: 1,
       objectCustomFieldValues: 3,
       customTaskTypes: 1,
       customTaskTypeMemberships: 1,
@@ -211,6 +237,7 @@ describe("Asana migration scan", () => {
     });
     expect(adapter.listSubtasks).toHaveBeenCalledTimes(2);
     expect(adapter.listCustomTypes).toHaveBeenCalledTimes(2);
+    expect(adapter.listCustomFieldMemberships).toHaveBeenCalledTimes(4);
     expect(adapter.listCustomTypeMemberships).toHaveBeenCalledTimes(1);
     expect(adapter.getCustomType).not.toHaveBeenCalled();
     expect(result.myTasks).toEqual([
@@ -235,6 +262,12 @@ describe("Asana migration scan", () => {
       expect.objectContaining({
         customTaskTypeGid: "ct1",
         membership: expect.objectContaining({ gid: "ctm1" }),
+      }),
+    ]);
+    expect(result.customFieldMemberships).toEqual([
+      expect.objectContaining({
+        customFieldGid: "cf1",
+        membership: expect.objectContaining({ gid: "cfm1" }),
       }),
     ]);
   });
