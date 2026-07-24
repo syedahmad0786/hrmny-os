@@ -1370,6 +1370,96 @@ describe("work management", () => {
     });
   });
 
+  it("rolls bundle publications to installed projects and reports Feature Lab drift", async () => {
+    const owner = partnerCaller();
+    const installer = amCaller();
+    const clientId = "c1000000-0000-4000-8000-0000000000a4";
+    const source = await owner.work.projects.create({
+      name: `Bundle rollout source ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const target = await installer.work.projects.create({
+      name: `Bundle rollout target ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      clientId,
+      color: "#C7702E",
+    });
+    const bundle = await owner.work.bundles.capture({
+      projectId: source.projectId,
+      name: `Rollout bundle ${Date.now()}`,
+      description: "",
+      visibility: "organization",
+    });
+    await installer.work.bundles.applyToProject({
+      bundleId: bundle.bundleId,
+      projectId: target.projectId,
+    });
+    await owner.work.customFields.create({
+      projectId: source.projectId,
+      name: "Region",
+      fieldType: "text",
+      options: [],
+      isRequired: false,
+    });
+    const published = await owner.work.bundles.publish({
+      bundleId: bundle.bundleId,
+      sourceProjectId: source.projectId,
+    });
+    expect(published.rollout).toEqual({
+      installedProjectCount: 1,
+      updatedProjectCount: 1,
+      failures: [],
+    });
+    expect(
+      await installer.work.customFields.list({ projectId: target.projectId }),
+    ).toContainEqual(expect.objectContaining({ name: "Region" }));
+    expect(
+      (await owner.work.bundles.list()).find(
+        (candidate) => candidate.bundleId === bundle.bundleId,
+      ),
+    ).toMatchObject({ installedProjectCount: 1, currentProjectCount: 1 });
+
+    await owner.admin.features.setOverride({
+      featureKey: "work.custom_fields",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "test bundle rollout drift",
+    });
+    await owner.work.customFields.create({
+      projectId: source.projectId,
+      name: "Budget code",
+      fieldType: "text",
+      options: [],
+      isRequired: false,
+    });
+    const blocked = await owner.work.bundles.publish({
+      bundleId: bundle.bundleId,
+      sourceProjectId: source.projectId,
+    });
+    expect(blocked.rollout).toMatchObject({
+      installedProjectCount: 1,
+      updatedProjectCount: 0,
+      failures: [
+        expect.objectContaining({
+          projectId: target.projectId,
+          message: "FEATURE_DISABLED:work.custom_fields",
+        }),
+      ],
+    });
+    expect(
+      await installer.work.customFields.list({ projectId: target.projectId }),
+    ).not.toContainEqual(expect.objectContaining({ name: "Budget code" }));
+    expect(
+      (await owner.work.bundles.list()).find(
+        (candidate) => candidate.bundleId === bundle.bundleId,
+      ),
+    ).toMatchObject({ installedProjectCount: 1, currentProjectCount: 0 });
+  });
+
   it("keeps task metadata when generating a recurring occurrence", async () => {
     const caller = partnerCaller();
     const project = await caller.work.projects.create({

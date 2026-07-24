@@ -144,11 +144,19 @@ export default function WorkflowsPage() {
     onSuccess: () => utils.work.bundles.list.invalidate(),
   });
   const publishBundle = trpc.work.bundles.publish.useMutation({
-    onSuccess: () => utils.work.bundles.list.invalidate(),
+    onSuccess: async () => {
+      await Promise.all([
+        utils.work.bundles.list.invalidate(),
+        utils.work.projects.get.invalidate(),
+        utils.work.rules.list.invalidate(),
+        utils.work.templates.list.invalidate(),
+      ]);
+    },
   });
   const applyBundle = trpc.work.bundles.applyToProject.useMutation({
     onSuccess: async () => {
       await Promise.all([
+        utils.work.bundles.list.invalidate(),
         utils.work.projects.get.invalidate(),
         utils.work.rules.list.invalidate(),
         utils.work.templates.list.invalidate(),
@@ -856,9 +864,19 @@ export default function WorkflowsPage() {
         <section className="rounded-xl border border-sand bg-white/70 p-5">
           <h2 className="font-display text-xl">Bundles</h2>
           <p className="mt-1 text-sm text-muted">
-            Package sections, fields, rules, and task templates, then apply
-            updates to projects.
+            Package sections, fields, rules, custom task types, and task
+            templates. Published changes update every installed project.
           </p>
+          {publishBundle.data ? (
+            <p className="mt-2 text-sm" role="status">
+              Updated {publishBundle.data.rollout.updatedProjectCount} of{" "}
+              {publishBundle.data.rollout.installedProjectCount} installed
+              projects
+              {publishBundle.data.rollout.failures.length
+                ? `; ${publishBundle.data.rollout.failures.length} need attention.`
+                : "."}
+            </p>
+          ) : null}
           <form
             className="mt-4 flex gap-2"
             onSubmit={(event) => {
@@ -894,6 +912,17 @@ export default function WorkflowsPage() {
                 <p className="font-semibold">
                   {bundle.name}{" "}
                   <span className="text-xs text-muted">v{bundle.version}</span>
+                </p>
+                <p
+                  className={`mt-1 text-xs ${
+                    (bundle.currentProjectCount ?? 0) <
+                    (bundle.installedProjectCount ?? 0)
+                      ? "text-amber-700"
+                      : "text-muted"
+                  }`}
+                >
+                  {bundle.currentProjectCount ?? 0} of{" "}
+                  {bundle.installedProjectCount ?? 0} installed projects current
                 </p>
                 <div className="mt-2 flex gap-2">
                   <button
