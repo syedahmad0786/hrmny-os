@@ -508,4 +508,29 @@ describe("work migration compatibility", () => {
     expect(migration).not.toMatch(/UNIQUE\s*\(employee_id\)/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("stores secure personal accessibility preferences", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0041_work_accessibility.sql"),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0041_work_accessibility.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0041_work_accessibility.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_accessibility_preference/i,
+    );
+    expect(migration).toMatch(/employee_id uuid PRIMARY KEY/i);
+    expect(migration).toMatch(/'system', 'light', 'dark'/i);
+    expect(migration).toMatch(/colorblind_mode boolean/i);
+    expect(migration).toMatch(/reduced_motion boolean/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

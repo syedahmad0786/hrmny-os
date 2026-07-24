@@ -124,6 +124,13 @@ type WorkOutOfOffice = {
   createdAt: string;
   updatedAt: string;
 };
+type WorkAccessibilityPreference = {
+  employeeId: string;
+  theme: "system" | "light" | "dark";
+  colorblindMode: boolean;
+  reducedMotion: boolean;
+  updatedAt: string;
+};
 type WorkNotification = {
   notificationId: string;
   itemId: string | null;
@@ -337,6 +344,7 @@ type DemoWork = {
   attachments: Map<string, WorkAttachment>;
   proofAnnotations: Map<string, WorkProofAnnotation>;
   outOfOffice: Map<string, WorkOutOfOffice>;
+  accessibility: Map<string, WorkAccessibilityPreference>;
   notifications: Map<
     string,
     WorkNotification & { recipientEmployeeId: string }
@@ -456,6 +464,7 @@ export function getDemoWork(): DemoWork {
     attachments: new Map(),
     proofAnnotations: new Map(),
     outOfOffice: new Map(),
+    accessibility: new Map(),
     notifications: new Map(),
     messages: new Map(),
     messageComments: new Map(),
@@ -8354,6 +8363,70 @@ export const workManagementRouter = router({
           },
         );
         return { ok: true as const, capturedAt };
+      }),
+  }),
+
+  accessibility: router({
+    get: staffProcedure.query(async ({ ctx }) => {
+      await requireScopedFeature(ctx, "work.accessibility", null);
+      const employeeId = actor(ctx);
+      const fallback: WorkAccessibilityPreference = {
+        employeeId,
+        theme: "system",
+        colorblindMode: false,
+        reducedMotion: false,
+        updatedAt: new Date(0).toISOString(),
+      };
+      const db = getDb();
+      if (!db) return getDemoWork().accessibility.get(employeeId) ?? fallback;
+      const [preference] = await db.execute<WorkAccessibilityPreference>(sql`
+        select employee_id as "employeeId", theme,
+          colorblind_mode as "colorblindMode",
+          reduced_motion as "reducedMotion", updated_at as "updatedAt"
+        from public.work_accessibility_preference
+        where employee_id = ${employeeId}::uuid
+      `);
+      return preference ?? fallback;
+    }),
+    update: staffProcedure
+      .input(
+        z.object({
+          theme: z.enum(["system", "light", "dark"]),
+          colorblindMode: z.boolean(),
+          reducedMotion: z.boolean(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireScopedFeature(ctx, "work.accessibility", null);
+        const employeeId = actor(ctx);
+        const preference: WorkAccessibilityPreference = {
+          employeeId,
+          ...input,
+          updatedAt: new Date().toISOString(),
+        };
+        const db = getDb();
+        if (!db) getDemoWork().accessibility.set(employeeId, preference);
+        else
+          await db.execute(sql`
+            insert into public.work_accessibility_preference (
+              employee_id, theme, colorblind_mode, reduced_motion
+            ) values (
+              ${employeeId}::uuid, ${input.theme}, ${input.colorblindMode},
+              ${input.reducedMotion}
+            ) on conflict (employee_id) do update set
+              theme = excluded.theme,
+              colorblind_mode = excluded.colorblind_mode,
+              reduced_motion = excluded.reduced_motion,
+              updated_at = now()
+          `);
+        await audit(
+          ctx,
+          "work.accessibility.update",
+          "work_accessibility_preference",
+          employeeId,
+          preference,
+        );
+        return preference;
       }),
   }),
 
