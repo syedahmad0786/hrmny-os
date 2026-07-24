@@ -47,6 +47,14 @@ export default function WorkflowsPage() {
   const publicFormsEnabled = enabled.has("work.forms.public");
   const emailReceiptsEnabled = enabled.has("work.forms.email_receipts");
   const rulesEnabled = enabled.has("work.rules");
+  const ruleOwnershipTransferEnabled = enabled.has(
+    "work.rules.ownership_transfer",
+  );
+  const canTransferRuleOwnership =
+    ruleOwnershipTransferEnabled &&
+    ["admin", "editor"].includes(
+      detail.data?.project.accessLevel ?? "viewer",
+    );
   const scheduledRulesEnabled = enabled.has("work.rules.scheduled");
   const collaboratorRulesEnabled = enabled.has(
     "work.rules.collaborator_trigger",
@@ -73,6 +81,14 @@ export default function WorkflowsPage() {
   const rules = trpc.work.rules.list.useQuery(
     { projectId },
     { enabled: Boolean(projectId && rulesEnabled) },
+  );
+  const ruleOwners = trpc.work.rules.owners.useQuery(
+    { projectId },
+    {
+      enabled: Boolean(
+        projectId && rulesEnabled && canTransferRuleOwnership,
+      ),
+    },
   );
   const customTaskTypes = trpc.work.customTaskTypes.list.useQuery(
     { projectId },
@@ -155,6 +171,9 @@ export default function WorkflowsPage() {
     },
   });
   const setRuleEnabled = trpc.work.rules.setEnabled.useMutation({
+    onSuccess: () => utils.work.rules.list.invalidate(),
+  });
+  const transferRuleOwnership = trpc.work.rules.transferOwnership.useMutation({
     onSuccess: () => utils.work.rules.list.invalidate(),
   });
 
@@ -254,6 +273,7 @@ export default function WorkflowsPage() {
     setFormAccess.error ??
     submitForm.error ??
     createRule.error ??
+    transferRuleOwnership.error ??
     createTaskTemplate.error ??
     captureProjectTemplate.error ??
     instantiateTask.error ??
@@ -918,7 +938,7 @@ export default function WorkflowsPage() {
               {(rules.data ?? []).map((rule) => (
                 <div
                   key={rule.ruleId}
-                  className="flex items-center justify-between rounded border border-sand bg-white p-3 text-sm"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded border border-sand bg-white p-3 text-sm"
                 >
                   <span>
                     <strong>{rule.name}</strong> ·{" "}
@@ -927,17 +947,49 @@ export default function WorkflowsPage() {
                       ? ` · every ${rule.scheduleMinutes} minutes`
                       : ""}
                   </span>
-                  <button
-                    className="rounded-full border border-sand px-2 py-1 text-xs"
-                    onClick={() =>
-                      setRuleEnabled.mutate({
-                        ruleId: rule.ruleId,
-                        enabled: !rule.isEnabled,
-                      })
-                    }
-                  >
-                    {rule.isEnabled ? "On" : "Off"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {canTransferRuleOwnership ? (
+                      <select
+                        aria-label={`Owner of ${rule.name}`}
+                        className="rounded border border-sand px-2 py-1 text-xs"
+                        value={rule.ownerEmployeeId ?? ""}
+                        onChange={(event) =>
+                          transferRuleOwnership.mutate({
+                            ruleId: rule.ruleId,
+                            ownerEmployeeId: event.target.value,
+                          })
+                        }
+                      >
+                        {rule.ownerEmployeeId &&
+                        !(ruleOwners.data ?? []).some(
+                          (owner) => owner.employeeId === rule.ownerEmployeeId,
+                        ) ? (
+                          <option value={rule.ownerEmployeeId} disabled>
+                            {rule.ownerName ?? "Former owner"}
+                          </option>
+                        ) : null}
+                        {(ruleOwners.data ?? []).map((owner) => (
+                          <option
+                            key={owner.employeeId}
+                            value={owner.employeeId}
+                          >
+                            {owner.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
+                    <button
+                      className="rounded-full border border-sand px-2 py-1 text-xs"
+                      onClick={() =>
+                        setRuleEnabled.mutate({
+                          ruleId: rule.ruleId,
+                          enabled: !rule.isEnabled,
+                        })
+                      }
+                    >
+                      {rule.isEnabled ? "On" : "Off"}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

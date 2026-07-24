@@ -296,6 +296,7 @@ type WorkRule = {
   ruleId: string;
   projectId: string;
   ownerEmployeeId?: string;
+  ownerName?: string;
   name: string;
   triggerType:
     | "task_added"
@@ -526,6 +527,16 @@ type DemoWork = {
 const DEMO_PROJECT_ID = "a1000000-0000-4000-8000-000000000001";
 const DEMO_SECTION_TODO = "a2000000-0000-4000-8000-000000000001";
 const DEMO_SECTION_DOING = "a2000000-0000-4000-8000-000000000002";
+const DEMO_RULE_OWNERS = [
+  {
+    employeeId: "c0000000-0000-4000-8000-000000000001",
+    displayName: "Dev Partner",
+  },
+  {
+    employeeId: "c0000000-0000-4000-8000-000000000002",
+    displayName: "Dev AM",
+  },
+] as const;
 const myTasksMembershipKey = (employeeId: string, itemId: string) =>
   `${employeeId}:${itemId}`;
 const customTaskTypeProjectKey = (
@@ -4076,6 +4087,7 @@ async function renderDashboardWidget(
 function notificationFeatureKey(eventType: string) {
   if (eventType === "message") return "work.project_messages";
   if (eventType === "status_update") return "work.status_updates";
+  if (eventType === "rule_owner") return "work.rules.ownership_transfer";
   if (eventType === "commented") return "work.comments";
   if (eventType === "followed") return "work.followers";
   return "work.tasks";
@@ -4134,6 +4146,45 @@ async function visibleDemoNotification(
       return false;
     throw error;
   }
+}
+
+type WorkRuleOwner = { employeeId: string; displayName: string };
+
+function ruleOwnerCandidatesQuery(
+  projectId: string,
+  employeeId: string | null = null,
+) {
+  return sql`
+    select employee.employee_id as "employeeId",
+      employee.display_name as "displayName"
+    from public.employee employee
+    join public.work_project project
+      on project.work_project_id = ${projectId}::uuid
+      and project.archived_at is null
+    where employee.is_active = true
+      and employee.email not like '%@teammate.hrmny.internal'
+      and (${employeeId}::uuid is null
+        or employee.employee_id = ${employeeId}::uuid)
+      and (
+        project.created_by_employee_id = employee.employee_id
+        or project.owner_employee_id = employee.employee_id
+        or exists (
+          select 1 from public.work_project_member member
+          where member.work_project_id = project.work_project_id
+            and member.employee_id = employee.employee_id
+            and member.access_level in ('admin', 'editor')
+        )
+        or exists (
+          select 1 from public.work_team_project team_project
+          join public.work_team_member team_member
+            on team_member.work_team_id = team_project.work_team_id
+          where team_project.work_project_id = project.work_project_id
+            and team_project.access_level = 'editor'
+            and team_member.employee_id = employee.employee_id
+        )
+      )
+    order by lower(employee.display_name)
+  `;
 }
 
 function ruleTriggerFeatureKey(
@@ -10034,13 +10085,18 @@ export const workManagementRouter = router({
           customTypesEnabled,
           externalActionsEnabled,
           apiWebhooksEnabled,
+          ownershipTransferEnabled,
         ] = await Promise.all([
           featureEnabled("work.rules.scheduled", scope),
           featureEnabled("work.rules.collaborator_trigger", scope),
           featureEnabled("work.custom_task_types", scope),
           featureEnabled("work.rules.external_actions", scope),
           featureEnabled("work.api_webhooks", scope),
+          featureEnabled("work.rules.ownership_transfer", scope),
         ]);
+        const ownershipVisible =
+          ownershipTransferEnabled &&
+          accessRank[project.accessLevel] >= accessRank.editor;
         const visible = (rule: WorkRule) =>
           (rule.triggerType !== "scheduled" || scheduledEnabled) &&
           (rule.triggerType !== "collaborator_added" || collaboratorEnabled) &&
@@ -10050,26 +10106,56 @@ export const workManagementRouter = router({
             : !ruleUsesExternalActions(rule));
         const db = getDb();
         if (!db)
-          return [...getDemoWork().rules.values()].filter(
-            (rule) => rule.projectId === input.projectId && visible(rule),
-          );
+          return [...getDemoWork().rules.values()]
+            .filter(
+              (rule) => rule.projectId === input.projectId && visible(rule),
+            )
+            .map((rule) => ({
+              ...rule,
+              ownerEmployeeId: ownershipVisible
+                ? rule.ownerEmployeeId
+                : undefined,
+              ownerName: ownershipVisible
+                ? DEMO_RULE_OWNERS.find(
+                    (owner) => owner.employeeId === rule.ownerEmployeeId,
+                  )?.displayName
+                : undefined,
+            }));
         const rows = await db.execute<WorkRule & { branches: unknown }>(sql`
           select work_rule_id as "ruleId", work_project_id as "projectId",
-            name, trigger_type as "triggerType",
+            rule.name, rule.trigger_type as "triggerType",
             schedule_minutes as "scheduleMinutes", branches,
-            is_enabled as "isEnabled"
-          from public.work_rule
-          where work_project_id = ${input.projectId}::uuid
-          order by lower(name)
+            is_enabled as "isEnabled",
+            rule.owner_employee_id as "ownerEmployeeId",
+            owner.display_name as "ownerName"
+          from public.work_rule rule
+          left join public.employee owner
+            on owner.employee_id = rule.owner_employee_id
+          where rule.work_project_id = ${input.projectId}::uuid
+          order by lower(rule.name)
         `);
         return rows.flatMap((rule) => {
           const branches = z.array(ruleBranchSchema).safeParse(rule.branches);
           const normalized = {
             ...rule,
             branches: branches.success ? branches.data : [],
+            ownerEmployeeId: ownershipVisible
+              ? rule.ownerEmployeeId
+              : undefined,
+            ownerName: ownershipVisible ? rule.ownerName : undefined,
           };
           return visible(normalized) ? [normalized] : [];
         });
+      }),
+    owners: staffProcedure
+      .input(z.object({ projectId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireScopedFeature(ctx, "work.rules", input.projectId);
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        const db = getDb();
+        return db
+          ? db.execute<WorkRuleOwner>(ruleOwnerCandidatesQuery(input.projectId))
+          : [...DEMO_RULE_OWNERS];
       }),
     create: staffProcedure
       .input(
@@ -10178,6 +10264,172 @@ export const workManagementRouter = router({
           branches: rule.branches.length,
         });
         return rule;
+      }),
+    transferOwnership: staffProcedure
+      .input(z.object({ ruleId: uuid, ownerEmployeeId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        const db = getDb();
+        const rule = !db
+          ? getDemoWork().rules.get(input.ruleId)
+          : (
+              await db.execute<{
+                projectId: string;
+                name: string;
+                ownerEmployeeId: string;
+                triggerType: WorkRule["triggerType"];
+                scheduleMinutes: number | null;
+                isEnabled: boolean;
+              }>(sql`
+                select work_project_id as "projectId", name,
+                  owner_employee_id as "ownerEmployeeId",
+                  trigger_type as "triggerType",
+                  schedule_minutes as "scheduleMinutes",
+                  is_enabled as "isEnabled"
+                from public.work_rule
+                where work_rule_id = ${input.ruleId}::uuid
+              `)
+            )[0];
+        if (!rule) throw new TRPCError({ code: "NOT_FOUND" });
+        await requireScopedFeature(ctx, "work.rules", rule.projectId);
+        await requireProjectAccess(ctx, rule.projectId, "editor");
+        const currentOwnerEmployeeId = rule.ownerEmployeeId ?? actor(ctx);
+        let owner: WorkRuleOwner;
+        if (!db) {
+          const candidate = DEMO_RULE_OWNERS.find(
+            (item) => item.employeeId === input.ownerEmployeeId,
+          );
+          if (!candidate)
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "The new owner must be a project editor",
+            });
+          owner = candidate;
+          if (currentOwnerEmployeeId !== owner.employeeId) {
+            Object.assign(rule, {
+              ownerEmployeeId: owner.employeeId,
+              ownerName: owner.displayName,
+            });
+            for (const [recipientEmployeeId, message] of [
+              [
+                currentOwnerEmployeeId,
+                `${owner.displayName} is now the owner of rule “${rule.name}”.`,
+              ],
+              [
+                owner.employeeId,
+                `You are now the owner of rule “${rule.name}”.`,
+              ],
+            ] as const) {
+              const notificationId = randomUUID();
+              getDemoWork().notifications.set(notificationId, {
+                notificationId,
+                recipientEmployeeId,
+                itemId: null,
+                projectId: rule.projectId,
+                messageId: null,
+                eventType: "rule_owner",
+                message,
+                readAt: null,
+                createdAt: new Date().toISOString(),
+              });
+            }
+          }
+        } else
+          owner = await db.transaction(async (tx) => {
+            const candidate = (
+              await tx.execute<WorkRuleOwner>(
+                ruleOwnerCandidatesQuery(rule.projectId, input.ownerEmployeeId),
+              )
+            )[0];
+            if (!candidate)
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "The new owner must be a project editor",
+              });
+            if (currentOwnerEmployeeId === candidate.employeeId)
+              return candidate;
+            const scheduledJob = (
+              await tx.execute<{ status: string }>(sql`
+                select status from public.scheduled_job
+                where job_key = ${`work-rule-schedule:${input.ruleId}`}
+                for update
+              `)
+            )[0];
+            if (scheduledJob?.status === "running")
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "Wait for the current scheduled rule run to finish",
+              });
+            const changed = await tx.execute(sql`
+              update public.work_rule set
+                owner_employee_id = ${candidate.employeeId}::uuid,
+                updated_at = now()
+              where work_rule_id = ${input.ruleId}::uuid
+                and owner_employee_id = ${currentOwnerEmployeeId}::uuid
+              returning work_rule_id
+            `);
+            if (!changed[0])
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "Rule ownership changed; refresh and try again",
+              });
+            if (rule.triggerType === "scheduled" && rule.isEnabled)
+              await tx.execute(sql`
+                insert into public.scheduled_job (
+                  job_key, kind, run_at, payload
+                ) values (
+                  ${`work-rule-schedule:${input.ruleId}`}, 'work_rule',
+                  now() + (${rule.scheduleMinutes}::text || ' minutes')::interval,
+                  ${JSON.stringify({
+                    ruleId: input.ruleId,
+                    actorEmployeeId: candidate.employeeId,
+                  })}::jsonb
+                ) on conflict (job_key) do update set
+                  status = 'pending',
+                  run_at = case
+                    when public.scheduled_job.status = 'pending'
+                      then public.scheduled_job.run_at
+                    else excluded.run_at
+                  end,
+                  payload = excluded.payload, attempts = 0, locked_at = null,
+                  completed_at = null, last_error = null, updated_at = now()
+              `);
+            await tx.execute(sql`
+              insert into public.work_notification (
+                recipient_employee_id, actor_employee_id, work_project_id,
+                event_type, message, payload
+              ) values
+                (
+                  ${currentOwnerEmployeeId}::uuid, ${actor(ctx)}::uuid,
+                  ${rule.projectId}::uuid, 'rule_owner',
+                  ${`${candidate.displayName} is now the owner of rule “${rule.name}”.`},
+                  ${JSON.stringify({ ruleId: input.ruleId })}::jsonb
+                ),
+                (
+                  ${candidate.employeeId}::uuid, ${actor(ctx)}::uuid,
+                  ${rule.projectId}::uuid, 'rule_owner',
+                  ${`You are now the owner of rule “${rule.name}”.`},
+                  ${JSON.stringify({ ruleId: input.ruleId })}::jsonb
+                )
+            `);
+            return candidate;
+          });
+        if (currentOwnerEmployeeId !== owner.employeeId)
+          await audit(
+            ctx,
+            "work.rule.owner.transfer",
+            "work_rule",
+            input.ruleId,
+            {
+              projectId: rule.projectId,
+              previousOwnerEmployeeId: currentOwnerEmployeeId,
+              ownerEmployeeId: owner.employeeId,
+            },
+          );
+        return {
+          ruleId: input.ruleId,
+          ownerEmployeeId: owner.employeeId,
+          ownerName: owner.displayName,
+        };
       }),
     setEnabled: staffProcedure
       .input(z.object({ ruleId: uuid, enabled: z.boolean() }))

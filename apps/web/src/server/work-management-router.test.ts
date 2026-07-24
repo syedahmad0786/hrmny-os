@@ -2253,6 +2253,104 @@ describe("work management", () => {
     );
   });
 
+  it("transfers rule ownership only to eligible project editors", async () => {
+    const caller = partnerCaller();
+    const project = await caller.work.projects.create({
+      name: `Rule ownership ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const rule = await caller.work.rules.create({
+      projectId: project.projectId,
+      name: "Keep the workflow staffed",
+      triggerType: "task_added",
+      scheduleMinutes: null,
+      branches: [
+        {
+          mode: "all",
+          conditions: [],
+          actions: [{ type: "set_priority", value: "high" }],
+        },
+      ],
+    });
+    const nextOwner = resolveDevUser("am");
+    expect(
+      await caller.work.rules.owners({ projectId: project.projectId }),
+    ).toContainEqual({
+      employeeId: nextOwner.employeeId,
+      displayName: nextOwner.displayName,
+    });
+    await expect(
+      caller.work.rules.transferOwnership({
+        ruleId: rule.ruleId,
+        ownerEmployeeId: resolveDevUser("finance").employeeId,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      caller.work.rules.transferOwnership({
+        ruleId: rule.ruleId,
+        ownerEmployeeId: nextOwner.employeeId,
+      }),
+    ).resolves.toMatchObject({
+      ownerEmployeeId: nextOwner.employeeId,
+      ownerName: nextOwner.displayName,
+    });
+    expect(
+      await caller.work.rules.list({ projectId: project.projectId }),
+    ).toContainEqual(
+      expect.objectContaining({
+        ruleId: rule.ruleId,
+        ownerEmployeeId: nextOwner.employeeId,
+      }),
+    );
+    expect(await caller.work.personal.inbox()).toContainEqual(
+      expect.objectContaining({
+        eventType: "rule_owner",
+        projectId: project.projectId,
+      }),
+    );
+    expect(await amCaller().work.personal.inbox()).toContainEqual(
+      expect.objectContaining({
+        eventType: "rule_owner",
+        projectId: project.projectId,
+      }),
+    );
+
+    const employeeId = resolveDevUser("partner").employeeId;
+    await caller.admin.features.setOverride({
+      featureKey: "work.rules.ownership_transfer",
+      scopeType: "user",
+      scopeKey: employeeId,
+      enabled: false,
+      reason: "ownership changes disabled",
+    });
+    expect(
+      (await caller.work.rules.list({ projectId: project.projectId })).find(
+        (item) => item.ruleId === rule.ruleId,
+      )?.ownerEmployeeId,
+    ).toBeUndefined();
+    expect(await caller.work.personal.inbox()).not.toContainEqual(
+      expect.objectContaining({
+        eventType: "rule_owner",
+        projectId: project.projectId,
+      }),
+    );
+    await expect(
+      caller.work.rules.owners({ projectId: project.projectId }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.rules.ownership_transfer",
+    });
+    await expect(
+      caller.work.rules.transferOwnership({
+        ruleId: rule.ruleId,
+        ownerEmployeeId: employeeId,
+      }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.rules.ownership_transfer",
+    });
+  });
+
   it("emits governed external rule events and suppresses them per client", async () => {
     const caller = partnerCaller();
     const clientId = resolveDevUser("portal_a").clientId!;

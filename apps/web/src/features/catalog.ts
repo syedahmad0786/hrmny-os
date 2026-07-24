@@ -489,6 +489,16 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     defaultEnabled: true,
   }),
   feature({
+    key: "work.rules.ownership_transfer",
+    name: "Rule ownership transfer",
+    description:
+      "Transfer rules to another project editor and notify both owners.",
+    group: "Workflows",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
+  feature({
     key: "work.rules.scheduled",
     name: "Scheduled rules",
     description:
@@ -1443,6 +1453,8 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["work.personal.deleteSearch", "work.saved_searches"],
   ["work.forms.public", "work.forms.public"],
   ["work.forms.", "work.forms"],
+  ["work.rules.owners", "work.rules.ownership_transfer"],
+  ["work.rules.transferOwnership", "work.rules.ownership_transfer"],
   ["work.rules.", "work.rules"],
   ["work.templates.", "work.templates"],
   ["work.bundles.", "work.bundles"],
