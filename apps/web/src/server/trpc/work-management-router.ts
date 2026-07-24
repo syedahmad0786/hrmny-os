@@ -142,7 +142,10 @@ type WorkRule = {
     | "task_moved"
     | "priority_changed"
     | "due_date_set"
-    | "approval_decided";
+    | "approval_decided"
+    | "collaborator_added"
+    | "scheduled";
+  scheduleMinutes: number | null;
   branches: WorkRuleBranch[];
   isEnabled: boolean;
 };
@@ -426,6 +429,38 @@ const accessRank: Record<AccessLevel, number> = {
 };
 const uuid = z.string().uuid();
 const nullableUuid = uuid.nullable();
+const workRuleTriggerSchema = z.enum([
+  "task_added",
+  "task_completed",
+  "task_moved",
+  "priority_changed",
+  "due_date_set",
+  "approval_decided",
+  "collaborator_added",
+  "scheduled",
+]);
+const workRuleScheduleSchema = z
+  .object({
+    triggerType: workRuleTriggerSchema,
+    scheduleMinutes: z
+      .number()
+      .int()
+      .min(15)
+      .max(525_600)
+      .nullable()
+      .default(null),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      (value.triggerType === "scheduled") !==
+      (value.scheduleMinutes !== null)
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["scheduleMinutes"],
+        message: "Scheduled rules require an interval",
+      });
+  });
 const recurrenceSchema = z.object({
   frequency: z.enum(["daily", "weekly", "monthly", "yearly"]),
   interval: z.number().int().min(1).max(365),
@@ -554,18 +589,30 @@ const bundleBlueprintSchema = z.object({
     .max(200),
   rules: z
     .array(
-      z.object({
-        name: z.string().trim().min(1).max(160),
-        triggerType: z.enum([
-          "task_added",
-          "task_completed",
-          "task_moved",
-          "priority_changed",
-          "due_date_set",
-          "approval_decided",
-        ]),
-        branches: z.array(ruleBranchSchema).min(1).max(20),
-      }),
+      z
+        .object({
+          name: z.string().trim().min(1).max(160),
+          triggerType: workRuleTriggerSchema,
+          scheduleMinutes: z
+            .number()
+            .int()
+            .min(15)
+            .max(525_600)
+            .nullable()
+            .default(null),
+          branches: z.array(ruleBranchSchema).min(1).max(20),
+        })
+        .superRefine((value, ctx) => {
+          if (
+            (value.triggerType === "scheduled") !==
+            (value.scheduleMinutes !== null)
+          )
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["scheduleMinutes"],
+              message: "Scheduled rules require an interval",
+            });
+        }),
     )
     .max(200),
   taskTemplates: z
@@ -1553,18 +1600,63 @@ async function recordRuleRun(
     `);
 }
 
+async function projectClientId(projectId: string): Promise<string | null> {
+  const db = getDb();
+  if (!db) return getDemoWork().projects.get(projectId)?.clientId ?? null;
+  const [project] = await db.execute<{ clientId: string | null }>(sql`
+    select client_id as "clientId" from public.work_project
+    where work_project_id = ${projectId}::uuid and archived_at is null
+  `);
+  return project?.clientId ?? null;
+}
+
+function ruleTriggerFeatureKey(
+  triggerType: WorkRule["triggerType"],
+): "work.rules.scheduled" | "work.rules.collaborator_trigger" | null {
+  if (triggerType === "scheduled") return "work.rules.scheduled";
+  if (triggerType === "collaborator_added")
+    return "work.rules.collaborator_trigger";
+  return null;
+}
+
+async function requireRuleTriggerFeature(
+  ctx: TrpcContext,
+  projectId: string,
+  triggerType: WorkRule["triggerType"],
+) {
+  const featureKey = ruleTriggerFeatureKey(triggerType);
+  if (
+    featureKey &&
+    !(await featureEnabled(featureKey, {
+      userId: ctx.employeeId,
+      clientId: await projectClientId(projectId),
+      roles: ctx.roles,
+    }))
+  )
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `FEATURE_DISABLED:${featureKey}`,
+    });
+}
+
 async function runProjectRules(
   ctx: TrpcContext,
   projectId: string,
   itemId: string,
   triggerType: WorkRule["triggerType"],
+  onlyRuleId?: string,
 ) {
-  await queueWorkAiStudioEvent(ctx, projectId, itemId, triggerType);
+  if (triggerType !== "collaborator_added" && triggerType !== "scheduled")
+    await queueWorkAiStudioEvent(ctx, projectId, itemId, triggerType);
+  const scope = {
+    userId: ctx.employeeId,
+    clientId: await projectClientId(projectId),
+    roles: ctx.roles,
+  };
+  const triggerFeatureKey = ruleTriggerFeatureKey(triggerType);
   if (
-    !(await featureEnabled("work.rules", {
-      userId: ctx.employeeId,
-      roles: ctx.roles,
-    }))
+    !(await featureEnabled("work.rules", scope)) ||
+    (triggerFeatureKey && !(await featureEnabled(triggerFeatureKey, scope)))
   ) {
     return;
   }
@@ -1574,15 +1666,19 @@ async function runProjectRules(
         (rule) =>
           rule.projectId === projectId &&
           rule.triggerType === triggerType &&
+          (!onlyRuleId || rule.ruleId === onlyRuleId) &&
           rule.isEnabled,
       )
     : await db.execute<WorkRule & { branches: unknown }>(sql`
         select work_rule_id as "ruleId", work_project_id as "projectId",
-          name, trigger_type as "triggerType", branches,
+          name, trigger_type as "triggerType",
+          schedule_minutes as "scheduleMinutes", branches,
           is_enabled as "isEnabled"
         from public.work_rule
         where work_project_id = ${projectId}::uuid
           and trigger_type = ${triggerType} and is_enabled = true
+          and (${onlyRuleId ?? null}::uuid is null
+            or work_rule_id = ${onlyRuleId ?? null}::uuid)
         order by created_at
       `);
   const item = await ruleSnapshot(itemId, projectId);
@@ -1625,6 +1721,85 @@ async function runProjectRules(
   }
 }
 
+const scheduledWorkRuleJobSchema = z.object({
+  ruleId: uuid,
+  actorEmployeeId: uuid,
+});
+
+export async function runScheduledWorkRuleJob(input: unknown) {
+  const payload = scheduledWorkRuleJobSchema.parse(input);
+  const db = getDb();
+  if (!db) throw new Error("DATABASE_URL missing");
+  const [rule] = await db.execute<{
+    ruleId: string;
+    projectId: string;
+    scheduleMinutes: number;
+  }>(sql`
+    select rule.work_rule_id as "ruleId",
+      rule.work_project_id as "projectId",
+      rule.schedule_minutes as "scheduleMinutes"
+    from public.work_rule rule
+    join public.work_project project
+      on project.work_project_id = rule.work_project_id
+      and project.archived_at is null
+    join public.employee owner
+      on owner.employee_id = rule.owner_employee_id and owner.is_active = true
+    where rule.work_rule_id = ${payload.ruleId}::uuid
+      and rule.owner_employee_id = ${payload.actorEmployeeId}::uuid
+      and rule.trigger_type = 'scheduled' and rule.is_enabled = true
+      and rule.schedule_minutes is not null
+  `);
+  if (!rule) return { recurring: false, tasksEvaluated: 0 };
+  const roles = await db.execute<{ key: string }>(sql`
+    select role.key from public.employee_role membership
+    join public.role role on role.role_id = membership.role_id
+    where membership.employee_id = ${payload.actorEmployeeId}::uuid
+  `);
+  const ctx: TrpcContext = {
+    user: null,
+    employeeId: payload.actorEmployeeId,
+    roles: roles.map((role) => role.key),
+    canViewMargin: false,
+  };
+  const scope = {
+    userId: ctx.employeeId,
+    clientId: await projectClientId(rule.projectId),
+    roles: ctx.roles,
+  };
+  const [enabled, scheduleEnabled] = await Promise.all([
+    featureEnabled("work.rules", scope),
+    featureEnabled("work.rules.scheduled", scope),
+  ]);
+  if (!enabled || !scheduleEnabled)
+    return {
+      recurring: true,
+      scheduleMinutes: Number(rule.scheduleMinutes),
+      tasksEvaluated: 0,
+      disabled: true,
+    };
+  const items = await db.execute<{ itemId: string }>(sql`
+    select distinct item.work_item_id as "itemId"
+    from public.work_project_item membership
+    join public.work_item item on item.work_item_id = membership.work_item_id
+    where membership.work_project_id = ${rule.projectId}::uuid
+      and item.archived_at is null
+    order by item.work_item_id
+  `);
+  for (const item of items)
+    await runProjectRules(
+      ctx,
+      rule.projectId,
+      item.itemId,
+      "scheduled",
+      rule.ruleId,
+    );
+  return {
+    recurring: true,
+    scheduleMinutes: Number(rule.scheduleMinutes),
+    tasksEvaluated: items.length,
+  };
+}
+
 async function captureBundleBlueprint(
   projectId: string,
 ): Promise<z.infer<typeof bundleBlueprintSchema>> {
@@ -1652,9 +1827,10 @@ async function captureBundleBlueprint(
         })),
       rules: [...store.rules.values()]
         .filter((rule) => rule.projectId === projectId)
-        .map(({ name, triggerType, branches }) => ({
+        .map(({ name, triggerType, scheduleMinutes, branches }) => ({
           name,
           triggerType,
+          scheduleMinutes,
           branches,
         })),
       taskTemplates: [...store.templates.values()]
@@ -1692,9 +1868,11 @@ async function captureBundleBlueprint(
     db.execute<{
       name: string;
       triggerType: WorkRule["triggerType"];
+      scheduleMinutes: number | null;
       branches: unknown;
     }>(sql`
-      select name, trigger_type as "triggerType", branches
+      select name, trigger_type as "triggerType",
+        schedule_minutes as "scheduleMinutes", branches
       from public.work_rule
       where work_project_id = ${projectId}::uuid order by created_at
     `),
@@ -2723,9 +2901,11 @@ export const workManagementRouter = router({
           employeeId === ctx.employeeId ? "viewer" : "editor",
         );
         const db = getDb();
+        let added = false;
         if (!db) {
           const followers =
             getDemoWork().followers.get(input.itemId) ?? new Set();
+          added = !followers.has(employeeId);
           followers.add(employeeId);
           getDemoWork().followers.set(input.itemId, followers);
         } else {
@@ -2737,6 +2917,7 @@ export const workManagementRouter = router({
             on conflict (work_item_id, employee_id) do nothing
             returning work_item_follower_id
           `);
+          added = Boolean(rows[0]);
           if (!rows[0]) {
             const exists = await db.execute(sql`
               select 1 from public.work_item_follower
@@ -2753,6 +2934,24 @@ export const workManagementRouter = router({
         await audit(ctx, "work.follower.add", "work_item", input.itemId, {
           employeeId,
         });
+        if (added) {
+          const projectIds = !db
+            ? [getDemoWork().items.get(input.itemId)!.projectId]
+            : (
+                await db.execute<{ projectId: string }>(sql`
+                  select work_project_id as "projectId"
+                  from public.work_project_item
+                  where work_item_id = ${input.itemId}::uuid
+                `)
+              ).map((row) => row.projectId);
+          for (const projectId of projectIds)
+            await runProjectRules(
+              ctx,
+              projectId,
+              input.itemId,
+              "collaborator_added",
+            );
+        }
         return { ok: true as const };
       }),
     unfollow: staffProcedure
@@ -4008,43 +4207,56 @@ export const workManagementRouter = router({
     list: staffProcedure
       .input(z.object({ projectId: uuid }))
       .query(async ({ input, ctx }) => {
-        await requireProjectAccess(ctx, input.projectId);
+        const project = await requireProjectAccess(ctx, input.projectId);
+        const scope = {
+          userId: ctx.employeeId,
+          clientId: project.clientId,
+          roles: ctx.roles,
+        };
+        const [scheduledEnabled, collaboratorEnabled] = await Promise.all([
+          featureEnabled("work.rules.scheduled", scope),
+          featureEnabled("work.rules.collaborator_trigger", scope),
+        ]);
+        const visible = (rule: WorkRule) =>
+          (rule.triggerType !== "scheduled" || scheduledEnabled) &&
+          (rule.triggerType !== "collaborator_added" || collaboratorEnabled);
         const db = getDb();
         if (!db)
           return [...getDemoWork().rules.values()].filter(
-            (rule) => rule.projectId === input.projectId,
+            (rule) => rule.projectId === input.projectId && visible(rule),
           );
         const rows = await db.execute<WorkRule & { branches: unknown }>(sql`
           select work_rule_id as "ruleId", work_project_id as "projectId",
-            name, trigger_type as "triggerType", branches,
+            name, trigger_type as "triggerType",
+            schedule_minutes as "scheduleMinutes", branches,
             is_enabled as "isEnabled"
           from public.work_rule
           where work_project_id = ${input.projectId}::uuid
           order by lower(name)
         `);
-        return rows.map((rule) => {
+        return rows.flatMap((rule) => {
+          if (!visible(rule)) return [];
           const branches = z.array(ruleBranchSchema).safeParse(rule.branches);
-          return { ...rule, branches: branches.success ? branches.data : [] };
+          return [{ ...rule, branches: branches.success ? branches.data : [] }];
         });
       }),
     create: staffProcedure
       .input(
-        z.object({
-          projectId: uuid,
-          name: z.string().trim().min(1).max(160),
-          triggerType: z.enum([
-            "task_added",
-            "task_completed",
-            "task_moved",
-            "priority_changed",
-            "due_date_set",
-            "approval_decided",
-          ]),
-          branches: z.array(ruleBranchSchema).min(1).max(20),
-        }),
+        z
+          .object({
+            projectId: uuid,
+            name: z.string().trim().min(1).max(160),
+            branches: z.array(ruleBranchSchema).min(1).max(20),
+          })
+          .and(workRuleScheduleSchema),
       )
       .mutation(async ({ input, ctx }) => {
         await requireProjectAccess(ctx, input.projectId, "editor");
+        await requireRuleTriggerFeature(
+          ctx,
+          input.projectId,
+          input.triggerType,
+        );
         for (const branch of input.branches) {
           await validateRuleActions(input.projectId, branch.actions);
           const sectionConditions = branch.conditions.flatMap((condition) =>
@@ -4069,22 +4281,42 @@ export const workManagementRouter = router({
           projectId: input.projectId,
           name: input.name,
           triggerType: input.triggerType,
+          scheduleMinutes: input.scheduleMinutes,
           branches: input.branches,
           isEnabled: true,
         };
         const db = getDb();
         if (!db) getDemoWork().rules.set(rule.ruleId, rule);
-        else
-          await db.execute(sql`
-            insert into public.work_rule (
-              work_rule_id, work_project_id, name, trigger_type, branches,
-              owner_employee_id
-            ) values (
-              ${rule.ruleId}::uuid, ${rule.projectId}::uuid, ${rule.name},
-              ${rule.triggerType}, ${JSON.stringify(rule.branches)}::jsonb,
-              ${actor(ctx)}::uuid
-            )
-          `);
+        else {
+          const employeeId = actor(ctx);
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              insert into public.work_rule (
+                work_rule_id, work_project_id, name, trigger_type,
+                schedule_minutes, branches, owner_employee_id
+              ) values (
+                ${rule.ruleId}::uuid, ${rule.projectId}::uuid, ${rule.name},
+                ${rule.triggerType}, ${rule.scheduleMinutes},
+                ${JSON.stringify(rule.branches)}::jsonb, ${employeeId}::uuid
+              )
+            `);
+            if (rule.triggerType === "scheduled")
+              await tx.execute(sql`
+                insert into public.scheduled_job (job_key, kind, run_at, payload)
+                values (
+                  ${`work-rule-schedule:${rule.ruleId}`}, 'work_rule',
+                  now() + (${rule.scheduleMinutes}::text || ' minutes')::interval,
+                  ${JSON.stringify({
+                    ruleId: rule.ruleId,
+                    actorEmployeeId: employeeId,
+                  })}::jsonb
+                ) on conflict (job_key) do update set status = 'pending',
+                  run_at = excluded.run_at, payload = excluded.payload,
+                  attempts = 0, locked_at = null, completed_at = null,
+                  last_error = null, updated_at = now()
+              `);
+          });
+        }
         await audit(ctx, "work.rule.create", "work_rule", rule.ruleId, {
           projectId: rule.projectId,
           triggerType: rule.triggerType,
@@ -4099,20 +4331,61 @@ export const workManagementRouter = router({
         const rule = !db
           ? getDemoWork().rules.get(input.ruleId)
           : (
-              await db.execute<{ projectId: string }>(sql`
-                select work_project_id as "projectId" from public.work_rule
+              await db.execute<{
+                projectId: string;
+                triggerType: WorkRule["triggerType"];
+                scheduleMinutes: number | null;
+                ownerEmployeeId: string;
+              }>(sql`
+                select work_project_id as "projectId",
+                  trigger_type as "triggerType",
+                  schedule_minutes as "scheduleMinutes",
+                  owner_employee_id as "ownerEmployeeId"
+                from public.work_rule
                 where work_rule_id = ${input.ruleId}::uuid
               `)
             )[0];
         if (!rule) throw new TRPCError({ code: "NOT_FOUND" });
         await requireProjectAccess(ctx, rule.projectId, "editor");
+        if (input.enabled)
+          await requireRuleTriggerFeature(
+            ctx,
+            rule.projectId,
+            rule.triggerType,
+          );
         if (!db)
           getDemoWork().rules.get(input.ruleId)!.isEnabled = input.enabled;
         else
-          await db.execute(sql`
-            update public.work_rule set is_enabled = ${input.enabled}, updated_at = now()
-            where work_rule_id = ${input.ruleId}::uuid
-          `);
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              update public.work_rule set is_enabled = ${input.enabled}, updated_at = now()
+              where work_rule_id = ${input.ruleId}::uuid
+            `);
+            await tx.execute(sql`
+              update public.scheduled_job set status = 'completed',
+                completed_at = now(), locked_at = null, updated_at = now()
+              where job_key = ${`work-rule-schedule:${input.ruleId}`}
+                and status in ('pending', 'running')
+            `);
+            if (input.enabled && rule.triggerType === "scheduled")
+              await tx.execute(sql`
+                insert into public.scheduled_job (job_key, kind, run_at, payload)
+                values (
+                  ${`work-rule-schedule:${input.ruleId}`}, 'work_rule',
+                  now() + (${rule.scheduleMinutes}::text || ' minutes')::interval,
+                  ${JSON.stringify({
+                    ruleId: input.ruleId,
+                    actorEmployeeId:
+                      "ownerEmployeeId" in rule
+                        ? rule.ownerEmployeeId
+                        : actor(ctx),
+                  })}::jsonb
+                ) on conflict (job_key) do update set status = 'pending',
+                  run_at = excluded.run_at, payload = excluded.payload,
+                  attempts = 0, locked_at = null, completed_at = null,
+                  last_error = null, updated_at = now()
+              `);
+          });
         await audit(ctx, "work.rule.enabled", "work_rule", input.ruleId, {
           enabled: input.enabled,
         });
@@ -4126,7 +4399,19 @@ export const workManagementRouter = router({
         }),
       )
       .query(async ({ input, ctx }) => {
-        await requireProjectAccess(ctx, input.projectId);
+        const project = await requireProjectAccess(ctx, input.projectId);
+        const scope = {
+          userId: ctx.employeeId,
+          clientId: project.clientId,
+          roles: ctx.roles,
+        };
+        const [scheduledEnabled, collaboratorEnabled] = await Promise.all([
+          featureEnabled("work.rules.scheduled", scope),
+          featureEnabled("work.rules.collaborator_trigger", scope),
+        ]);
+        const visible = (run: WorkRuleRun) =>
+          (run.triggerType !== "scheduled" || scheduledEnabled) &&
+          (run.triggerType !== "collaborator_added" || collaboratorEnabled);
         const db = getDb();
         if (!db) {
           const ruleIds = new Set(
@@ -4135,7 +4420,7 @@ export const workManagementRouter = router({
               .map((rule) => rule.ruleId),
           );
           return [...getDemoWork().ruleRuns.values()]
-            .filter((run) => ruleIds.has(run.ruleId))
+            .filter((run) => ruleIds.has(run.ruleId) && visible(run))
             .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
             .slice(0, input.limit);
         }
@@ -4151,7 +4436,7 @@ export const workManagementRouter = router({
           where rule.work_project_id = ${input.projectId}::uuid
           order by run.created_at desc limit ${input.limit}
         `);
-        return rows.map((run) => ({
+        return rows.filter(visible).map((run) => ({
           ...run,
           createdAt: new Date(run.createdAt).toISOString(),
         }));
@@ -4825,6 +5110,12 @@ export const workManagementRouter = router({
             code: "PRECONDITION_FAILED",
             message: "Bundle is invalid",
           });
+        for (const rule of parsed.data.rules)
+          await requireRuleTriggerFeature(
+            ctx,
+            input.projectId,
+            rule.triggerType,
+          );
         const store = getDemoWork();
         const key = `${input.projectId}:${input.bundleId}`;
         if (!db) {
@@ -5036,16 +5327,47 @@ export const workManagementRouter = router({
             }
             for (const rule of parsed.data.rules) {
               const branches = remapBranches(rule.branches);
-              await tx.execute(sql`
+              const [upserted] = await tx.execute<{
+                ruleId: string;
+                ownerEmployeeId: string;
+                isEnabled: boolean;
+              }>(sql`
                 insert into public.work_rule (
-                  work_project_id, name, trigger_type, branches, owner_employee_id
+                  work_project_id, name, trigger_type, schedule_minutes,
+                  branches, owner_employee_id
                 ) values (
                   ${input.projectId}::uuid, ${rule.name}, ${rule.triggerType},
-                  ${JSON.stringify(branches)}::jsonb, ${employeeId}::uuid
+                  ${rule.scheduleMinutes}, ${JSON.stringify(branches)}::jsonb,
+                  ${employeeId}::uuid
                 ) on conflict (work_project_id, name) do update
                   set trigger_type = excluded.trigger_type,
+                    schedule_minutes = excluded.schedule_minutes,
                     branches = excluded.branches, updated_at = now()
+                returning work_rule_id as "ruleId",
+                  owner_employee_id as "ownerEmployeeId",
+                  is_enabled as "isEnabled"
               `);
+              await tx.execute(sql`
+                update public.scheduled_job set status = 'completed',
+                  completed_at = now(), locked_at = null, updated_at = now()
+                where job_key = ${`work-rule-schedule:${upserted!.ruleId}`}
+                  and status in ('pending', 'running')
+              `);
+              if (rule.triggerType === "scheduled" && upserted!.isEnabled)
+                await tx.execute(sql`
+                  insert into public.scheduled_job (job_key, kind, run_at, payload)
+                  values (
+                    ${`work-rule-schedule:${upserted!.ruleId}`}, 'work_rule',
+                    now() + (${rule.scheduleMinutes}::text || ' minutes')::interval,
+                    ${JSON.stringify({
+                      ruleId: upserted!.ruleId,
+                      actorEmployeeId: upserted!.ownerEmployeeId,
+                    })}::jsonb
+                  ) on conflict (job_key) do update set status = 'pending',
+                    run_at = excluded.run_at, payload = excluded.payload,
+                    attempts = 0, locked_at = null, completed_at = null,
+                    last_error = null, updated_at = now()
+                `);
             }
             for (const template of parsed.data.taskTemplates) {
               await tx.execute(sql`

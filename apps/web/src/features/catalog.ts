@@ -439,6 +439,26 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     defaultEnabled: true,
   }),
   feature({
+    key: "work.rules.scheduled",
+    name: "Scheduled rules",
+    description:
+      "Run project rules on a governed recurring cadence without a task event.",
+    group: "Workflows",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
+  feature({
+    key: "work.rules.collaborator_trigger",
+    name: "Collaborator-added rules",
+    description:
+      "Trigger project rules when a collaborator is added to a task.",
+    group: "Workflows",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
+  feature({
     key: "work.templates",
     name: "Project & task templates",
     description:

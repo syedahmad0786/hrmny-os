@@ -396,4 +396,31 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/database_fingerprint text NOT NULL/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("adds durable scheduled and collaborator-triggered Work rules", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0037_work_scheduled_rules.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0037_work_scheduled_rules.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0037_work_scheduled_rules.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(/ADD COLUMN IF NOT EXISTS schedule_minutes/i);
+    expect(migration).toContain("'collaborator_added'");
+    expect(migration).toContain("'scheduled'");
+    expect(migration).toMatch(/work_rule_schedule_check/i);
+    expect(migration).toMatch(
+      /trigger_type = 'scheduled' AND schedule_minutes IS NOT NULL/i,
+    );
+  });
 });
