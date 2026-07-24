@@ -9,6 +9,60 @@ import {
   type WorkMentionOption,
 } from "@/components/work-rich-text";
 import { trpc } from "@/lib/trpc";
+import { countReportBuckets } from "@/server/work-planning";
+
+type ReportType = "tasks" | "projects" | "goals" | "portfolios";
+type MetadataGroup =
+  | "project_health"
+  | "project_owner"
+  | "project_privacy"
+  | "project_source"
+  | "goal_status"
+  | "goal_owner"
+  | "goal_scope"
+  | "goal_time_period"
+  | "portfolio_health"
+  | "portfolio_owner"
+  | "portfolio_privacy";
+
+const metadataGroups: Record<
+  Exclude<ReportType, "tasks">,
+  readonly { value: MetadataGroup; label: string }[]
+> = {
+  projects: [
+    { value: "project_health", label: "Health" },
+    { value: "project_owner", label: "Owner" },
+    { value: "project_privacy", label: "Privacy" },
+    { value: "project_source", label: "Source" },
+  ],
+  goals: [
+    { value: "goal_status", label: "Status" },
+    { value: "goal_owner", label: "Owner" },
+    { value: "goal_scope", label: "Scope" },
+    { value: "goal_time_period", label: "Time period" },
+  ],
+  portfolios: [
+    { value: "portfolio_health", label: "Health" },
+    { value: "portfolio_owner", label: "Owner" },
+    { value: "portfolio_privacy", label: "Privacy" },
+  ],
+};
+
+function readable(value: string) {
+  const text = value.replaceAll("_", " ");
+  return `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
+}
+
+function availableMetadataGroups(
+  reportType: Exclude<ReportType, "tasks">,
+  statusEnabled: boolean,
+) {
+  return reportType === "projects" && !statusEnabled
+    ? metadataGroups.projects.filter(
+        (option) => option.value !== "project_health",
+      )
+    : metadataGroups[reportType];
+}
 
 function monday() {
   const value = new Date();
@@ -34,6 +88,9 @@ export default function PlanningPage() {
   const [projectId, setProjectId] = useState("");
   const [workloadPortfolioId, setWorkloadPortfolioId] = useState("");
   const [chartPortfolioId, setChartPortfolioId] = useState("");
+  const [chartReportType, setChartReportType] = useState<ReportType>("tasks");
+  const [metadataGroup, setMetadataGroup] =
+    useState<MetadataGroup>("project_health");
   const employees = trpc.work.members.listEmployees.useQuery({
     projectId: projectId || undefined,
   });
@@ -123,6 +180,7 @@ export default function PlanningPage() {
     {
       enabled: Boolean(
         projectId &&
+        chartReportType === "tasks" &&
         !chartPortfolioId &&
         reportingEnabled &&
         customFieldsEnabled,
@@ -131,6 +189,7 @@ export default function PlanningPage() {
   );
   useEffect(() => {
     const fields = reportingCustomFields.data ?? [];
+    if (chartReportType !== "tasks") return;
     if (!chartPortfolioId && chartGroupBy === "project")
       setChartGroupBy("completion");
     if (chartPortfolioId || !customFieldsEnabled || !fields.length) {
@@ -144,9 +203,17 @@ export default function PlanningPage() {
     chartCustomFieldId,
     chartGroupBy,
     chartPortfolioId,
+    chartReportType,
     customFieldsEnabled,
     reportingCustomFields.data,
   ]);
+  useEffect(() => {
+    if (chartReportType === "tasks") return;
+    const options = availableMetadataGroups(chartReportType, statusEnabled);
+    if (!options.some((option) => option.value === metadataGroup))
+      setMetadataGroup(options[0]!.value);
+    if (chartReportType !== "projects") setChartPortfolioId("");
+  }, [chartReportType, metadataGroup, statusEnabled]);
   const projectChart = trpc.work.reporting.chart.useQuery(
     {
       projectId,
@@ -163,6 +230,7 @@ export default function PlanningPage() {
     {
       enabled: Boolean(
         projectId &&
+        chartReportType === "tasks" &&
         !chartPortfolioId &&
         reportingEnabled &&
         (chartGroupBy !== "custom_field" || chartCustomFieldId),
@@ -184,22 +252,92 @@ export default function PlanningPage() {
     },
     {
       enabled: Boolean(
-        chartPortfolioId && reportingEnabled && chartGroupBy !== "custom_field",
+        chartReportType === "tasks" &&
+        chartPortfolioId &&
+        reportingEnabled &&
+        chartGroupBy !== "custom_field",
       ),
     },
   );
-  const chart = chartPortfolioId ? portfolioChart : projectChart;
+  const taskChart = chartPortfolioId ? portfolioChart : projectChart;
+  const metadataChart = useMemo(() => {
+    if (chartReportType === "tasks") return null;
+    if (chartReportType === "projects") {
+      const portfolio = (portfolios.data ?? []).find(
+        (item) => item.portfolioId === chartPortfolioId,
+      );
+      const scoped = (projects.data ?? []).filter(
+        (project) =>
+          !portfolio || portfolio.projectIds.includes(project.projectId),
+      );
+      return countReportBuckets(
+        scoped.map((project) =>
+          metadataGroup === "project_health"
+            ? project.health
+              ? readable(project.health)
+              : "Health unavailable"
+            : metadataGroup === "project_owner"
+              ? (project.ownerName ?? "Unassigned")
+              : metadataGroup === "project_privacy"
+                ? readable(project.privacy)
+                : readable(project.sourcePlatform),
+        ),
+      );
+    }
+    if (chartReportType === "goals")
+      return countReportBuckets(
+        (goals.data ?? []).map((goal) => {
+          if (metadataGroup === "goal_status") return readable(goal.status);
+          if (metadataGroup === "goal_owner")
+            return goal.ownerName ?? "Unassigned";
+          if (metadataGroup === "goal_scope") return readable(goal.scope);
+          if (!goal.dueDate) return "No time period";
+          const date = new Date(`${goal.dueDate}T00:00:00Z`);
+          return `Q${Math.floor(date.getUTCMonth() / 3) + 1} ${date.getUTCFullYear()}`;
+        }),
+      );
+    return countReportBuckets(
+      (portfolios.data ?? []).map((portfolio) =>
+        metadataGroup === "portfolio_health"
+          ? readable(portfolio.health)
+          : metadataGroup === "portfolio_owner"
+            ? (portfolio.ownerName ?? "Unassigned")
+            : readable(portfolio.privacy),
+      ),
+    );
+  }, [
+    chartPortfolioId,
+    chartReportType,
+    goals.data,
+    metadataGroup,
+    portfolios.data,
+    projects.data,
+  ]);
+  const chartData =
+    chartReportType === "tasks" ? taskChart.data : metadataChart;
+  const chartError = chartReportType === "tasks" ? taskChart.error : null;
+  const chartPending =
+    chartReportType === "tasks"
+      ? taskChart.isPending
+      : chartReportType === "projects"
+        ? projects.isPending ||
+          (Boolean(chartPortfolioId) && portfolios.isPending)
+        : chartReportType === "goals"
+          ? goals.isPending
+          : portfolios.isPending;
+  const displayedMetric =
+    chartReportType === "tasks" ? chartMetric : "task_count";
   const donutBackground = useMemo(() => {
-    if (!chart.data?.total) return "#F0E9DE";
+    if (!chartData?.total) return "#F0E9DE";
     let offset = 0;
-    return `conic-gradient(${chart.data.data
+    return `conic-gradient(${chartData.data
       .map((bucket, index) => {
         const start = offset;
-        offset += (bucket.value / chart.data!.total) * 100;
+        offset += (bucket.value / chartData.total) * 100;
         return `${chartColors[index % chartColors.length]} ${start}% ${offset}%`;
       })
       .join(", ")})`;
-  }, [chart.data]);
+  }, [chartData]);
   const dashboards = trpc.work.reporting.dashboards.useQuery(undefined, {
     enabled: reportingEnabled,
   });
@@ -324,19 +462,39 @@ export default function PlanningPage() {
   });
   const loadDashboard = (config: Record<string, unknown>) => {
     const spec = config.spec;
+    const reportType = ["projects", "goals", "portfolios"].includes(
+      String(config.reportType),
+    )
+      ? (config.reportType as Exclude<ReportType, "tasks">)
+      : "tasks";
     const savedProjectId =
       typeof config.projectId === "string" ? config.projectId : null;
     const savedPortfolioId =
       typeof config.portfolioId === "string" ? config.portfolioId : null;
     if (
-      Boolean(savedProjectId) === Boolean(savedPortfolioId) ||
       !["bar", "donut", "number"].includes(String(config.chartStyle)) ||
       !spec ||
       typeof spec !== "object"
     )
       return;
     const saved = spec as Record<string, unknown>;
+    if (reportType !== "tasks") {
+      const options = availableMetadataGroups(reportType, statusEnabled);
+      if (
+        savedProjectId ||
+        ((reportType === "goals" || reportType === "portfolios") &&
+          savedPortfolioId) ||
+        !options.some((option) => option.value === saved.groupBy)
+      )
+        return;
+      setChartReportType(reportType);
+      setChartPortfolioId(savedPortfolioId ?? "");
+      setChartStyle(config.chartStyle as typeof chartStyle);
+      setMetadataGroup(saved.groupBy as MetadataGroup);
+      return;
+    }
     if (
+      Boolean(savedProjectId) === Boolean(savedPortfolioId) ||
       ![
         "completion",
         "assignee",
@@ -354,6 +512,7 @@ export default function PlanningPage() {
       return;
     if (savedPortfolioId && saved.groupBy === "custom_field") return;
     if (savedProjectId) setProjectId(savedProjectId);
+    setChartReportType("tasks");
     setChartPortfolioId(savedPortfolioId ?? "");
     setChartStyle(config.chartStyle as typeof chartStyle);
     setChartGroupBy(saved.groupBy as typeof chartGroupBy);
@@ -522,25 +681,39 @@ export default function PlanningPage() {
               className="flex gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                saveDashboard.mutate({
-                  name: dashboardName,
-                  config: {
-                    ...(chartPortfolioId
-                      ? { portfolioId: chartPortfolioId }
-                      : { projectId }),
-                    view: "chart",
-                    chartStyle,
-                    spec: {
-                      groupBy: chartGroupBy,
-                      metric: chartMetric,
-                      completion: chartCompletion,
-                      dueFrom: chartDueFrom || null,
-                      dueTo: chartDueTo || null,
-                      includeSubtasks: chartIncludeSubtasks,
-                      customFieldId: chartCustomFieldId || null,
+                if (chartReportType !== "tasks")
+                  saveDashboard.mutate({
+                    name: dashboardName,
+                    config: {
+                      reportType: chartReportType,
+                      ...(chartReportType === "projects" && chartPortfolioId
+                        ? { portfolioId: chartPortfolioId }
+                        : {}),
+                      chartStyle,
+                      spec: { groupBy: metadataGroup },
                     },
-                  },
-                });
+                  });
+                else
+                  saveDashboard.mutate({
+                    name: dashboardName,
+                    config: {
+                      reportType: "tasks",
+                      ...(chartPortfolioId
+                        ? { portfolioId: chartPortfolioId }
+                        : { projectId }),
+                      view: "chart",
+                      chartStyle,
+                      spec: {
+                        groupBy: chartGroupBy,
+                        metric: chartMetric,
+                        completion: chartCompletion,
+                        dueFrom: chartDueFrom || null,
+                        dueTo: chartDueTo || null,
+                        includeSubtasks: chartIncludeSubtasks,
+                        customFieldId: chartCustomFieldId || null,
+                      },
+                    },
+                  });
               }}
             >
               <input
@@ -556,7 +729,7 @@ export default function PlanningPage() {
               >
                 Save view
               </button>
-              {!chartPortfolioId ? (
+              {chartReportType === "tasks" && !chartPortfolioId ? (
                 <button
                   type="button"
                   className="rounded border border-sand px-3 py-2 text-sm"
@@ -603,23 +776,48 @@ export default function PlanningPage() {
           <div className="mt-5 border-t border-sand pt-4">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <label className="grid gap-1 text-xs text-muted">
-                Chart across
+                Report on
                 <select
                   className="rounded border border-sand px-3 py-2 text-sm text-ink"
-                  value={chartPortfolioId}
-                  onChange={(event) => setChartPortfolioId(event.target.value)}
+                  value={chartReportType}
+                  onChange={(event) =>
+                    setChartReportType(event.target.value as ReportType)
+                  }
                 >
-                  <option value="">This project</option>
-                  {(portfolios.data ?? []).map((portfolio) => (
-                    <option
-                      key={portfolio.portfolioId}
-                      value={portfolio.portfolioId}
-                    >
-                      Portfolio: {portfolio.name}
-                    </option>
-                  ))}
+                  <option value="tasks">Tasks</option>
+                  <option value="projects">Projects</option>
+                  {goalsEnabled ? <option value="goals">Goals</option> : null}
+                  {portfoliosEnabled ? (
+                    <option value="portfolios">Portfolios</option>
+                  ) : null}
                 </select>
               </label>
+              {chartReportType === "tasks" || chartReportType === "projects" ? (
+                <label className="grid gap-1 text-xs text-muted">
+                  Chart across
+                  <select
+                    className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                    value={chartPortfolioId}
+                    onChange={(event) =>
+                      setChartPortfolioId(event.target.value)
+                    }
+                  >
+                    <option value="">
+                      {chartReportType === "tasks"
+                        ? "This project"
+                        : "All visible projects"}
+                    </option>
+                    {(portfolios.data ?? []).map((portfolio) => (
+                      <option
+                        key={portfolio.portfolioId}
+                        value={portfolio.portfolioId}
+                      >
+                        Portfolio: {portfolio.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="grid gap-1 text-xs text-muted">
                 Chart style
                 <select
@@ -640,27 +838,46 @@ export default function PlanningPage() {
                 Group by
                 <select
                   className="rounded border border-sand px-3 py-2 text-sm text-ink"
-                  value={chartGroupBy}
-                  onChange={(event) =>
-                    setChartGroupBy(event.target.value as typeof chartGroupBy)
+                  value={
+                    chartReportType === "tasks" ? chartGroupBy : metadataGroup
                   }
+                  onChange={(event) => {
+                    if (chartReportType === "tasks")
+                      setChartGroupBy(
+                        event.target.value as typeof chartGroupBy,
+                      );
+                    else setMetadataGroup(event.target.value as MetadataGroup);
+                  }}
                 >
-                  <option value="completion">Completion</option>
-                  <option value="assignee">Assignee</option>
-                  <option value="priority">Priority</option>
-                  <option value="section">Section</option>
-                  <option value="task_type">Task type</option>
-                  {chartPortfolioId ? (
-                    <option value="project">Project</option>
-                  ) : null}
-                  {!chartPortfolioId &&
-                  customFieldsEnabled &&
-                  (reportingCustomFields.data ?? []).length ? (
-                    <option value="custom_field">Custom field</option>
-                  ) : null}
+                  {chartReportType === "tasks" ? (
+                    <>
+                      <option value="completion">Completion</option>
+                      <option value="assignee">Assignee</option>
+                      <option value="priority">Priority</option>
+                      <option value="section">Section</option>
+                      <option value="task_type">Task type</option>
+                      {chartPortfolioId ? (
+                        <option value="project">Project</option>
+                      ) : null}
+                      {!chartPortfolioId &&
+                      customFieldsEnabled &&
+                      (reportingCustomFields.data ?? []).length ? (
+                        <option value="custom_field">Custom field</option>
+                      ) : null}
+                    </>
+                  ) : (
+                    availableMetadataGroups(chartReportType, statusEnabled).map(
+                      (option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ),
+                    )
+                  )}
                 </select>
               </label>
-              {chartGroupBy === "custom_field" ? (
+              {chartReportType === "tasks" &&
+              chartGroupBy === "custom_field" ? (
                 <label className="grid gap-1 text-xs text-muted">
                   Custom field
                   <select
@@ -681,72 +898,76 @@ export default function PlanningPage() {
                   </select>
                 </label>
               ) : null}
-              <label className="grid gap-1 text-xs text-muted">
-                Measure
-                <select
-                  className="rounded border border-sand px-3 py-2 text-sm text-ink"
-                  value={chartMetric}
-                  onChange={(event) =>
-                    setChartMetric(event.target.value as typeof chartMetric)
-                  }
-                >
-                  <option value="task_count">Task count</option>
-                  <option value="estimated_minutes">Estimated time</option>
-                  <option value="actual_minutes">Actual time</option>
-                </select>
-              </label>
-              <label className="grid gap-1 text-xs text-muted">
-                Completion
-                <select
-                  className="rounded border border-sand px-3 py-2 text-sm text-ink"
-                  value={chartCompletion}
-                  onChange={(event) =>
-                    setChartCompletion(
-                      event.target.value as typeof chartCompletion,
-                    )
-                  }
-                >
-                  <option value="all">All tasks</option>
-                  <option value="incomplete">Incomplete</option>
-                  <option value="complete">Complete</option>
-                </select>
-              </label>
-              <label className="grid gap-1 text-xs text-muted">
-                Due from
-                <input
-                  className="rounded border border-sand px-3 py-2 text-sm text-ink"
-                  type="date"
-                  value={chartDueFrom}
-                  onChange={(event) => setChartDueFrom(event.target.value)}
-                />
-              </label>
-              <label className="grid gap-1 text-xs text-muted">
-                Due through
-                <input
-                  className="rounded border border-sand px-3 py-2 text-sm text-ink"
-                  type="date"
-                  value={chartDueTo}
-                  onChange={(event) => setChartDueTo(event.target.value)}
-                />
-              </label>
-              <label className="flex items-end gap-2 pb-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={chartIncludeSubtasks}
-                  onChange={(event) =>
-                    setChartIncludeSubtasks(event.target.checked)
-                  }
-                />
-                Include subtasks
-              </label>
+              {chartReportType === "tasks" ? (
+                <>
+                  <label className="grid gap-1 text-xs text-muted">
+                    Measure
+                    <select
+                      className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                      value={chartMetric}
+                      onChange={(event) =>
+                        setChartMetric(event.target.value as typeof chartMetric)
+                      }
+                    >
+                      <option value="task_count">Task count</option>
+                      <option value="estimated_minutes">Estimated time</option>
+                      <option value="actual_minutes">Actual time</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs text-muted">
+                    Completion
+                    <select
+                      className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                      value={chartCompletion}
+                      onChange={(event) =>
+                        setChartCompletion(
+                          event.target.value as typeof chartCompletion,
+                        )
+                      }
+                    >
+                      <option value="all">All tasks</option>
+                      <option value="incomplete">Incomplete</option>
+                      <option value="complete">Complete</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs text-muted">
+                    Due from
+                    <input
+                      className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                      type="date"
+                      value={chartDueFrom}
+                      onChange={(event) => setChartDueFrom(event.target.value)}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs text-muted">
+                    Due through
+                    <input
+                      className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                      type="date"
+                      value={chartDueTo}
+                      onChange={(event) => setChartDueTo(event.target.value)}
+                    />
+                  </label>
+                  <label className="flex items-end gap-2 pb-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={chartIncludeSubtasks}
+                      onChange={(event) =>
+                        setChartIncludeSubtasks(event.target.checked)
+                      }
+                    />
+                    Include subtasks
+                  </label>
+                </>
+              ) : null}
             </div>
-            {chart.error ? (
-              <p className="mt-4 text-sm text-red-700">{chart.error.message}</p>
-            ) : chart.isPending ? (
+            {chartError ? (
+              <p className="mt-4 text-sm text-red-700">{chartError.message}</p>
+            ) : chartPending ? (
               <p className="mt-4 text-sm text-muted">Updating chart…</p>
-            ) : !chart.data?.data.length ? (
+            ) : !chartData?.data.length ? (
               <p className="mt-4 text-sm text-muted">
-                No work matches these filters.
+                No records match these filters.
               </p>
             ) : chartStyle === "number" ? (
               <div className="mt-5 rounded-lg border border-sand bg-white p-5 text-center">
@@ -754,7 +975,7 @@ export default function PlanningPage() {
                   Total
                 </p>
                 <p className="mt-1 text-4xl font-semibold">
-                  {chartValue(chartMetric, chart.data.total)}
+                  {chartValue(displayedMetric, chartData.total)}
                 </p>
               </div>
             ) : chartStyle === "donut" ? (
@@ -766,12 +987,12 @@ export default function PlanningPage() {
                 >
                   <div className="grid h-24 w-24 place-items-center rounded-full bg-white text-center">
                     <span className="font-semibold">
-                      {chartValue(chartMetric, chart.data.total)}
+                      {chartValue(displayedMetric, chartData.total)}
                     </span>
                   </div>
                 </div>
                 <div className="grid gap-2 text-sm">
-                  {chart.data.data.map((bucket, index) => (
+                  {chartData.data.map((bucket, index) => (
                     <div key={bucket.label} className="flex items-center gap-2">
                       <span
                         className="h-3 w-3 rounded-full"
@@ -780,18 +1001,22 @@ export default function PlanningPage() {
                         }}
                       />
                       <span className="min-w-32">{bucket.label}</span>
-                      <strong>{chartValue(chartMetric, bucket.value)}</strong>
+                      <strong>
+                        {chartValue(displayedMetric, bucket.value)}
+                      </strong>
                     </div>
                   ))}
                 </div>
               </div>
             ) : (
               <div className="mt-5 grid gap-3">
-                {chart.data.data.map((bucket) => (
+                {chartData.data.map((bucket) => (
                   <div key={bucket.label}>
                     <div className="mb-1 flex justify-between gap-3 text-sm">
                       <span>{bucket.label}</span>
-                      <strong>{chartValue(chartMetric, bucket.value)}</strong>
+                      <strong>
+                        {chartValue(displayedMetric, bucket.value)}
+                      </strong>
                     </div>
                     <div className="h-3 overflow-hidden rounded-full bg-sand/60">
                       <div
@@ -801,7 +1026,7 @@ export default function PlanningPage() {
                             2,
                             (bucket.value /
                               Math.max(
-                                ...chart.data.data.map((item) => item.value),
+                                ...chartData.data.map((item) => item.value),
                                 1,
                               )) *
                               100,
@@ -874,7 +1099,7 @@ export default function PlanningPage() {
                               Only selected people
                             </option>
                             <option value="organization">
-                              Everyone with project access
+                              Everyone who has access
                             </option>
                           </select>
                         </label>

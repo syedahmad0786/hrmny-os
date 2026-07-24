@@ -61,6 +61,8 @@ type WorkProject = {
   privacy: "organization" | "private";
   clientId: string | null;
   ownerEmployeeId: string | null;
+  ownerName?: string | null;
+  health?: "on_track" | "at_risk" | "off_track" | "complete" | null;
   sourcePlatform: "native" | "asana";
   projectKind?: "standard" | "personal";
   accessLevel: AccessLevel;
@@ -331,6 +333,7 @@ type WorkGoal = {
   description: string;
   scope: "company" | "team" | "individual";
   ownerEmployeeId: string | null;
+  ownerName?: string | null;
   status: "on_track" | "at_risk" | "off_track" | "achieved" | "dropped";
   progress: number;
   startDate: string | null;
@@ -353,6 +356,7 @@ type WorkPortfolio = {
   color: string;
   privacy: "organization" | "private";
   ownerEmployeeId: string | null;
+  ownerName?: string | null;
   createdByEmployeeId: string;
   createdAt: string;
 };
@@ -1062,20 +1066,64 @@ const reportChartSpecSchema = z
         message: "Choose a custom field to group by",
       });
   });
+const metadataReportSpecSchema = z.object({
+  groupBy: z.enum([
+    "project_health",
+    "project_owner",
+    "project_privacy",
+    "project_source",
+    "goal_status",
+    "goal_owner",
+    "goal_scope",
+    "goal_time_period",
+    "portfolio_health",
+    "portfolio_owner",
+    "portfolio_privacy",
+  ]),
+});
 const dashboardConfigSchema = z
   .object({
+    reportType: z.enum(["tasks", "projects", "goals", "portfolios"]).optional(),
     projectId: uuid.optional(),
     portfolioId: uuid.optional(),
     chartStyle: z.enum(["bar", "donut", "number"]).optional(),
-    spec: reportChartSpecSchema.optional(),
+    spec: z.union([reportChartSpecSchema, metadataReportSpecSchema]).optional(),
   })
   .catchall(z.unknown())
   .superRefine((value, ctx) => {
-    if (Boolean(value.projectId) === Boolean(value.portfolioId))
+    const reportType = value.reportType ?? "tasks";
+    if (
+      (reportType === "tasks" &&
+        Boolean(value.projectId) === Boolean(value.portfolioId)) ||
+      (reportType === "projects" && Boolean(value.projectId)) ||
+      ((reportType === "goals" || reportType === "portfolios") &&
+        Boolean(value.projectId || value.portfolioId))
+    )
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["projectId"],
-        message: "Choose one reporting scope",
+        message: "Choose a valid reporting scope",
+      });
+    if (!value.spec) {
+      if (reportType !== "tasks")
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["spec"],
+          message: "Choose how to group this report",
+        });
+      return;
+    }
+    const groupBy = value.spec.groupBy;
+    const valid =
+      reportType === "tasks"
+        ? !groupBy.includes("_") ||
+          ["task_type", "custom_field"].includes(groupBy)
+        : groupBy.startsWith(`${reportType.slice(0, -1)}_`);
+    if (!valid)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["spec", "groupBy"],
+        message: "Group does not match the report type",
       });
   });
 
@@ -2966,16 +3014,48 @@ async function requireDashboardAccess(
   ctx: TrpcContext,
   config: Record<string, unknown>,
 ) {
+  const reportType =
+    config.reportType === "projects" ||
+    config.reportType === "goals" ||
+    config.reportType === "portfolios"
+      ? config.reportType
+      : "tasks";
   const projectId = config.projectId;
   const portfolioId = config.portfolioId;
-  if ((typeof projectId === "string") === (typeof portfolioId === "string"))
-    throw new TRPCError({ code: "NOT_FOUND" });
-  if (typeof projectId === "string") await requireProjectAccess(ctx, projectId);
-  else {
+  if (reportType === "goals") {
+    if (typeof projectId === "string" || typeof portfolioId === "string")
+      throw new TRPCError({ code: "NOT_FOUND" });
+    await requireScopedFeature(ctx, "work.goals", null);
+  } else if (reportType === "portfolios") {
+    if (typeof projectId === "string" || typeof portfolioId === "string")
+      throw new TRPCError({ code: "NOT_FOUND" });
     await requireScopedFeature(ctx, "work.portfolios", null);
-    await requirePortfolioAccess(ctx, portfolioId as string);
+  } else if (reportType === "projects") {
+    if (typeof projectId === "string")
+      throw new TRPCError({ code: "NOT_FOUND" });
+    await requireScopedFeature(ctx, "work.projects", null);
+    if (typeof portfolioId === "string") {
+      await requireScopedFeature(ctx, "work.portfolios", null);
+      await requirePortfolioAccess(ctx, portfolioId);
+    }
+  } else {
+    if ((typeof projectId === "string") === (typeof portfolioId === "string"))
+      throw new TRPCError({ code: "NOT_FOUND" });
+    if (typeof projectId === "string")
+      await requireProjectAccess(ctx, projectId);
+    else {
+      await requireScopedFeature(ctx, "work.portfolios", null);
+      await requirePortfolioAccess(ctx, portfolioId as string);
+    }
   }
   const spec = config.spec;
+  if (
+    reportType === "projects" &&
+    spec &&
+    typeof spec === "object" &&
+    (spec as Record<string, unknown>).groupBy === "project_health"
+  )
+    await requireScopedFeature(ctx, "work.status_updates", null);
   if (
     spec &&
     typeof spec === "object" &&
@@ -2988,7 +3068,7 @@ async function requireDashboardAccess(
       throw new TRPCError({ code: "NOT_FOUND" });
     await requireProjectCustomField(ctx, projectId, customFieldId);
   }
-  return projectId ?? portfolioId;
+  return projectId ?? portfolioId ?? reportType;
 }
 
 async function portfolioReportingProjectIds(
@@ -3920,15 +4000,36 @@ export const workManagementRouter = router({
       const visibleProjects = async (projects: WorkProject[]) =>
         (
           await Promise.all(
-            projects.map(async (project) =>
-              (await featureEnabled("work.projects", {
+            projects.map(async (project) => {
+              const featureScope = {
                 userId: ctx.employeeId,
                 clientId: project.clientId,
                 roles: ctx.roles,
-              }))
-                ? project
-                : null,
-            ),
+              };
+              if (!(await featureEnabled("work.projects", featureScope)))
+                return null;
+              const latest = !db
+                ? [...getDemoWork().statusUpdates.values()]
+                    .filter((item) => item.projectId === project.projectId)
+                    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+                : null;
+              return {
+                ...project,
+                ownerName:
+                  project.ownerName ??
+                  (project.ownerEmployeeId === employeeId
+                    ? (ctx.user?.displayName ?? "You")
+                    : project.ownerEmployeeId
+                      ? "Member"
+                      : null),
+                health: (await featureEnabled(
+                  "work.status_updates",
+                  featureScope,
+                ))
+                  ? (project.health ?? latest?.health ?? "on_track")
+                  : null,
+              };
+            }),
           )
         ).filter((project) => project !== null);
       if (!db)
@@ -3942,6 +4043,7 @@ export const workManagementRouter = router({
           project.description, project.color, project.privacy,
           project.client_id as "clientId",
           project.owner_employee_id as "ownerEmployeeId",
+          owner.display_name as "ownerName", latest_status.health,
           project.source_platform as "sourcePlatform",
           case
             when project.created_by_employee_id = ${employeeId}::uuid
@@ -3952,6 +4054,8 @@ export const workManagementRouter = router({
           end as "accessLevel",
           project.created_at as "createdAt"
         from public.work_project project
+        left join public.employee owner
+          on owner.employee_id = project.owner_employee_id
         left join public.work_project_member member
           on member.work_project_id = project.work_project_id
           and member.employee_id = ${employeeId}::uuid
@@ -3966,6 +4070,13 @@ export const workManagementRouter = router({
             when 'editor' then 3 when 'commenter' then 2 else 1 end desc
           limit 1
         ) team_access on true
+        left join lateral (
+          select status.health
+          from public.work_status_update status
+          where status.work_project_id = project.work_project_id
+          order by status.created_at desc
+          limit 1
+        ) latest_status on true
         where project.archived_at is null
           and project.project_kind = 'standard'
           and (
@@ -10697,21 +10808,34 @@ export const workManagementRouter = router({
               ),
           )
         : await db.execute<WorkGoal & { progress: string | number }>(sql`
-            select work_goal_id as "goalId",
-              parent_work_goal_id as "parentGoalId", name, description, scope,
-              owner_employee_id as "ownerEmployeeId", status, progress,
-              start_date::text as "startDate", due_date::text as "dueDate", privacy,
-              created_by_employee_id as "createdByEmployeeId", created_at as "createdAt"
-            from public.work_goal
-            where archived_at is null and (
-              privacy = 'organization' or owner_employee_id = ${employeeId}::uuid
-              or created_by_employee_id = ${employeeId}::uuid
+            select goal.work_goal_id as "goalId",
+              goal.parent_work_goal_id as "parentGoalId", goal.name,
+              goal.description, goal.scope,
+              goal.owner_employee_id as "ownerEmployeeId",
+              owner.display_name as "ownerName", goal.status, goal.progress,
+              goal.start_date::text as "startDate",
+              goal.due_date::text as "dueDate", goal.privacy,
+              goal.created_by_employee_id as "createdByEmployeeId",
+              goal.created_at as "createdAt"
+            from public.work_goal goal
+            left join public.employee owner
+              on owner.employee_id = goal.owner_employee_id
+            where goal.archived_at is null and (
+              goal.privacy = 'organization' or goal.owner_employee_id = ${employeeId}::uuid
+              or goal.created_by_employee_id = ${employeeId}::uuid
             )
-            order by due_date nulls last, lower(name)
+            order by goal.due_date nulls last, lower(goal.name)
           `);
       return Promise.all(
         goals.map(async (goal) => ({
           ...goal,
+          ownerName:
+            goal.ownerName ??
+            (goal.ownerEmployeeId === employeeId
+              ? (ctx.user?.displayName ?? "You")
+              : goal.ownerEmployeeId
+                ? "Member"
+                : null),
           progress: await goalProgress({
             ...goal,
             progress: Number(goal.progress),
@@ -10962,13 +11086,21 @@ export const workManagementRouter = router({
               ),
           )
         : await db.execute<WorkPortfolio>(sql`
-            select work_portfolio_id as "portfolioId", name, description, color,
-              privacy, owner_employee_id as "ownerEmployeeId",
-              created_by_employee_id as "createdByEmployeeId", created_at as "createdAt"
-            from public.work_portfolio where archived_at is null and (
-              privacy = 'organization' or owner_employee_id = ${employeeId}::uuid
-              or created_by_employee_id = ${employeeId}::uuid
-            ) order by lower(name)
+            select portfolio.work_portfolio_id as "portfolioId",
+              portfolio.name, portfolio.description, portfolio.color,
+              portfolio.privacy,
+              portfolio.owner_employee_id as "ownerEmployeeId",
+              owner.display_name as "ownerName",
+              portfolio.created_by_employee_id as "createdByEmployeeId",
+              portfolio.created_at as "createdAt"
+            from public.work_portfolio portfolio
+            left join public.employee owner
+              on owner.employee_id = portfolio.owner_employee_id
+            where portfolio.archived_at is null and (
+              portfolio.privacy = 'organization'
+              or portfolio.owner_employee_id = ${employeeId}::uuid
+              or portfolio.created_by_employee_id = ${employeeId}::uuid
+            ) order by lower(portfolio.name)
           `);
       return Promise.all(
         portfolios.map(async (portfolio) => {
@@ -11016,6 +11148,13 @@ export const workManagementRouter = router({
               )[0];
           return {
             ...portfolio,
+            ownerName:
+              portfolio.ownerName ??
+              (portfolio.ownerEmployeeId === employeeId
+                ? (ctx.user?.displayName ?? "You")
+                : portfolio.ownerEmployeeId
+                  ? "Member"
+                  : null),
             createdAt: new Date(portfolio.createdAt).toISOString(),
             projectIds: accessible,
             progress,
