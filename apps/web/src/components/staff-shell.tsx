@@ -6,20 +6,36 @@ import { setDevRole, getDevRole, trpc } from "@/lib/trpc";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { initials } from "@/components/crm/format";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
+import { featureForPathname } from "@/features/catalog";
 
 const PRIMARY_NAV = [
-  { href: "/", label: "Home", index: "01", match: (p: string) => p === "/" },
+  {
+    href: "/",
+    label: "Home",
+    index: "01",
+    features: ["core.home"],
+    match: (p: string) => p === "/",
+  },
   {
     href: "/crm",
     label: "CRM",
     index: "02",
+    features: ["crm.workspace"],
     match: (p: string) =>
       p === "/crm" || p.startsWith("/crm/") || p.startsWith("/sales"),
   },
   {
+    href: "/work",
+    label: "Work",
+    index: "03",
+    features: ["work.projects"],
+    match: (p: string) => p === "/work" || p.startsWith("/work/"),
+  },
+  {
     href: "/delivery",
     label: "Delivery",
-    index: "03",
+    index: "04",
+    features: ["delivery.workspace"],
     match: (p: string) =>
       ["/delivery", "/traffic", "/creative", "/account", "/assets"].some(
         (h) => p === h || p.startsWith(`${h}/`),
@@ -28,7 +44,8 @@ const PRIMARY_NAV = [
   {
     href: "/finance",
     label: "Finance",
-    index: "04",
+    index: "05",
+    features: ["finance.workspace"],
     match: (p: string) =>
       ["/finance", "/billing", "/margin"].some(
         (h) => p === h || p.startsWith(`${h}/`),
@@ -37,7 +54,16 @@ const PRIMARY_NAV = [
   {
     href: "/people",
     label: "People / HR",
-    index: "05",
+    index: "06",
+    features: [
+      "people.core_hr",
+      "people.leave_attendance",
+      "people.talent",
+      "people.payroll",
+      "people.shifts_timesheets",
+      "people.workplace",
+      "people.benefits",
+    ],
     match: (p: string) =>
       [
         "/people",
@@ -55,13 +81,26 @@ const PRIMARY_NAV = [
   {
     href: "/requests",
     label: "Requests",
-    index: "06",
+    index: "07",
+    features: ["requests.feature_intake"],
     match: (p: string) => p === "/requests" || p.startsWith("/requests/"),
   },
   {
-    href: "/settings/connections",
-    label: "Settings",
-    index: "07",
+    href: "/client-preview",
+    label: "Client Preview",
+    index: "08",
+    features: ["portal.client"],
+    match: (p: string) => p.startsWith("/client-preview"),
+  },
+  {
+    href: "/admin/features",
+    label: "Admin",
+    index: "09",
+    features: [
+      "admin.feature_lab",
+      "work.admin_console",
+      "integrations.connections",
+    ],
     match: (p: string) =>
       p.startsWith("/settings") ||
       p.startsWith("/admin") ||
@@ -165,6 +204,9 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   );
 
   const avatar = initials(session.data?.displayName ?? "Partner");
+  const enabledFeatures = new Set(session.data?.enabledFeatureKeys ?? []);
+  const requiredFeature = featureForPathname(pathname);
+  const pageEnabled = !requiredFeature || enabledFeatures.has(requiredFeature);
 
   if (
     session.isLoading ||
@@ -193,7 +235,9 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         </div>
         <p className="desk-nav-label">Operate</p>
         <nav className="desk-nav" aria-label="Primary">
-          {PRIMARY_NAV.map((item) => {
+          {PRIMARY_NAV.filter((item) =>
+            item.features.some((featureKey) => enabledFeatures.has(featureKey)),
+          ).map((item) => {
             const active = item.match(pathname);
             return (
               <Link
@@ -266,7 +310,21 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
               {connectionMessage}
             </p>
           ) : null}
-          {children}
+          {pageEnabled ? (
+            children
+          ) : (
+            <main className="rounded-lg border border-sand bg-white/70 p-6">
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted">
+                Feature unavailable
+              </p>
+              <h1 className="mt-2 font-display text-2xl font-semibold">
+                This area is switched off for your access scope.
+              </h1>
+              <p className="mt-2 text-sm text-muted">
+                Ask a Feature Lab administrator if you need access.
+              </p>
+            </main>
+          )}
         </div>
       </div>
     </div>

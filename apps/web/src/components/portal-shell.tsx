@@ -5,12 +5,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getDevRole, setDevRole, trpc } from "@/lib/trpc";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
+import { featureForPathname } from "@/features/catalog";
 
 const NAV = [
-  { href: "/portal", label: "Home" },
-  { href: "/portal/deliveries", label: "Deliveries" },
-  { href: "/portal/approvals", label: "Approvals" },
-  { href: "/portal/reports", label: "Reports" },
+  { href: "/portal", label: "Home", feature: "portal.client" },
+  { href: "/portal/work", label: "Shared work", feature: "work.guests" },
+  { href: "/portal/deliveries", label: "Deliveries", feature: "portal.client" },
+  { href: "/portal/approvals", label: "Approvals", feature: "portal.client" },
+  { href: "/portal/reports", label: "Reports", feature: "portal.client" },
 ];
 
 /** Portal chrome only — never import finance/margin/payroll modules here. */
@@ -24,7 +26,9 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     retry: false,
   });
   const users = trpc.auth.devUsers.useQuery();
-  const portalUsers = (users.data ?? []).filter((u) => u.actorType === "portal");
+  const portalUsers = (users.data ?? []).filter(
+    (u) => u.actorType === "portal",
+  );
 
   useEffect(() => {
     if (pathname === "/portal/login") return;
@@ -66,6 +70,10 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  const enabled = new Set(session.data?.enabledFeatureKeys ?? []);
+  const requiredFeature = featureForPathname(pathname);
+  const pageEnabled = !requiredFeature || enabled.has(requiredFeature);
+
   return (
     <div className="min-h-screen bg-[linear-gradient(160deg,#F7F3EE_0%,#EFE8DF_45%,#F7F3EE_100%)]">
       <header className="border-b border-[#D9D0C4]/bg-paper/90 backdrop-blur">
@@ -100,7 +108,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
           ) : null}
         </div>
         <nav className="mx-auto flex max-w-4xl gap-1 px-4 pb-3">
-          {NAV.map((item) => {
+          {NAV.filter((item) => enabled.has(item.feature)).map((item) => {
             const active = pathname === item.href;
             return (
               <Link
@@ -133,7 +141,20 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
           ) : null}
         </nav>
       </header>
-      <div className="mx-auto max-w-4xl px-6 py-8">{children}</div>
+      <div className="mx-auto max-w-4xl px-6 py-8">
+        {pageEnabled ? (
+          children
+        ) : (
+          <main className="rounded-lg border border-[#D9D0C4] bg-white/70 p-6">
+            <h1 className="font-display text-2xl font-semibold">
+              This feature is not included in your portal.
+            </h1>
+            <p className="mt-2 text-sm text-muted">
+              Ask your workspace administrator if you need access.
+            </p>
+          </main>
+        )}
+      </div>
     </div>
   );
 }

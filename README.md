@@ -52,7 +52,7 @@ pnpm install
 | `BAYZAT_API_KEY` | Bayzat API | Required if `BAYZAT_SOURCE=api` without seed |
 | `LLM_PROVIDER` | Invoice intake | `mock` (default without keys) returns structured propose payload |
 | `DATABASE_URL` / `DIRECT_URL` | Migrations | See `packages/db/APPLY.md` |
-| `COMPOSIO_API_KEY` | Live OAuth | Stub redirects / stub send without it |
+| `COMPOSIO_API_KEY` | Managed app connections | Server-only Composio project key |
 | `GOOGLE_CHAT_WEBHOOK_URL` | Health / HR escalate notify | Stub records signal if unset |
 
 ## Apply DB (Supabase)
@@ -76,7 +76,7 @@ pnpm test         # gate + RBAC + M1–M6 demo caller tests
 3. **Audit:** `/admin/audit` (as partner) — see `deal.transition` before/after.
 4. **AM margin deny:** Dev role AM → `/roles` — no `marginPct`; `deals.margin` → FORBIDDEN.
 5. **DAM:** `/assets` — create + upload + signed URL.
-6. **Connections:** `/settings/connections` — Composio OAuth stubs.
+6. **Connections:** `/settings/connections` — direct business keys plus Composio-hosted personal app authorization.
 
 ### M2 demo script (MASTER §12.2)
 

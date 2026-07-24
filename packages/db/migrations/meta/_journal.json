@@ -127,6 +127,139 @@
       "when": 1784908800000,
       "tag": "0017_digital_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784912400000,
+      "tag": "0018_feature_lab",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784916000000,
+      "tag": "0019_work_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784919600000,
+      "tag": "0020_portal_audit_admin",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784923200000,
+      "tag": "0021_work_daily",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1784926800000,
+      "tag": "0022_work_workflows",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784930400000,
+      "tag": "0023_work_planning",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784934000000,
+      "tag": "0024_asana_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784937600000,
+      "tag": "0025_work_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1784941200000,
+      "tag": "0026_work_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1784944800000,
+      "tag": "0027_asana_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1784948400000,
+      "tag": "0028_work_api_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1784952000000,
+      "tag": "0029_work_ai",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1784955600000,
+      "tag": "0030_work_ai_studio",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784959200000,
+      "tag": "0031_work_ai_teammates",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1784962800000,
+      "tag": "0032_work_ai_teammate_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1784966400000,
+      "tag": "0033_work_ai_connected_data",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1784970000000,
+      "tag": "0034_asana_extended_import",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1784973600000,
+      "tag": "0035_asana_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1784977200000,
+      "tag": "0036_work_sandbox",
+      "breakpoints": true
     }
   ]
 }

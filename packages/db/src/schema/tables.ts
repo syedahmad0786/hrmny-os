@@ -607,6 +607,7 @@ export const auditEvent = pgTable("audit_event", {
   actorEmployeeId: uuid("actor_employee_id").references(
     () => employee.employeeId,
   ),
+  actorPortalUserId: uuid("actor_portal_user_id"),
   action: text("action").notNull(),
   entityType: text("entity_type").notNull(),
   entityId: uuid("entity_id"),
@@ -686,6 +687,59 @@ export const connectionAccount = pgTable("connection_account", {
   lastError: text("last_error"),
   ...timestamps,
 });
+
+/** Feature Lab: code-owned catalogue overrides by global/client/role/user scope. */
+export const featureOverride = pgTable(
+  "feature_override",
+  {
+    featureOverrideId: uuid("feature_override_id").defaultRandom().primaryKey(),
+    featureKey: text("feature_key").notNull(),
+    scopeType: text("scope_type").notNull(),
+    scopeKey: text("scope_key").notNull(),
+    enabled: boolean("enabled").notNull(),
+    reason: text("reason"),
+    updatedByEmployeeId: uuid("updated_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("feature_override_scope_uniq").on(
+      table.featureKey,
+      table.scopeType,
+      table.scopeKey,
+    ),
+    index("feature_override_scope_idx").on(table.scopeType, table.scopeKey),
+  ],
+);
+
+/** Verified control-plane record for the separately deployed Work sandbox. */
+export const workSandbox = pgTable(
+  "work_sandbox",
+  {
+    workSandboxId: uuid("work_sandbox_id").defaultRandom().primaryKey(),
+    organizationKey: text("organization_key").default("default").notNull(),
+    name: text("name").notNull(),
+    environmentId: text("environment_id").notNull().unique(),
+    baseUrl: text("base_url").notNull(),
+    databaseFingerprint: text("database_fingerprint").notNull(),
+    authFingerprint: text("auth_fingerprint"),
+    status: text("status").default("active").notNull(),
+    settingsCopiedAt: timestamp("settings_copied_at", { withTimezone: true }),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    createdByEmployeeId: uuid("created_by_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    deletedByEmployeeId: uuid("deleted_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("work_sandbox_organization_uniq").on(table.organizationKey),
+  ],
+);
 
 /** Product requests: idea/voice intake → editable PRD → approval → build. */
 export const featureRequest = pgTable("feature_request", {

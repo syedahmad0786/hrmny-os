@@ -10,6 +10,9 @@ import {
   type SessionUser,
 } from "../auth/session";
 import { emitHealthSignal } from "../m1-persistence";
+import { featureForTrpcPath } from "@/features/catalog";
+import { featureEnabled } from "../features";
+import { isWorkViewOnlyMember } from "../work-governance";
 
 export type TrpcContext = {
   user: SessionUser | null;
@@ -109,9 +112,30 @@ const portalStaffBoundary = t.middleware(async ({ ctx, next, path }) => {
   return next({ ctx });
 });
 
+const requireEnabledFeature = t.middleware(async ({ ctx, next, path }) => {
+  const featureKey = featureForTrpcPath(path);
+  if (
+    featureKey &&
+    ctx.user &&
+    !(await featureEnabled(featureKey, {
+      userId: ctx.user.employeeId,
+      clientId: ctx.user.clientId,
+      roles: ctx.user.roles,
+    }))
+  ) {
+    await recordAuthDenied(path, `feature:${featureKey}`, ctx.employeeId);
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `FEATURE_DISABLED:${featureKey}`,
+    });
+  }
+  return next({ ctx });
+});
+
 export const protectedProcedure = t.procedure
   .use(isAuthed)
-  .use(portalStaffBoundary);
+  .use(portalStaffBoundary)
+  .use(requireEnabledFeature);
 
 /** Staff-only — portal actors cannot call finance / margin / payroll APIs. */
 const requireStaff = t.middleware(async ({ ctx, next, path }) => {
@@ -125,7 +149,26 @@ const requireStaff = t.middleware(async ({ ctx, next, path }) => {
   return next({ ctx });
 });
 
-export const staffProcedure = protectedProcedure.use(requireStaff);
+const requireWorkWriteLicense = t.middleware(
+  async ({ ctx, next, path, type }) => {
+    if (
+      type === "mutation" &&
+      path.startsWith("work.") &&
+      (await isWorkViewOnlyMember(ctx.employeeId))
+    ) {
+      await recordAuthDenied(path, "work_view_only", ctx.employeeId);
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "FORBIDDEN: Work access is view-only",
+      });
+    }
+    return next({ ctx });
+  },
+);
+
+export const staffProcedure = protectedProcedure
+  .use(requireStaff)
+  .use(requireWorkWriteLicense);
 
 /** Portal-only — requires bound clientId (app-layer RLS scope). */
 const requirePortal = t.middleware(async ({ ctx, next, path }) => {
