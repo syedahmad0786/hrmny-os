@@ -2316,6 +2316,50 @@ describe("work management", () => {
         projectId: project.projectId,
       }),
     );
+    await caller.admin.features.setOverride({
+      featureKey: "work.rules",
+      scopeType: "user",
+      scopeKey: nextOwner.employeeId,
+      enabled: false,
+      reason: "owner cannot run rules",
+    });
+    const skippedTask = await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Owner-disabled rule",
+      description: "",
+    });
+    expect(
+      (
+        await caller.work.projects.get({ projectId: project.projectId })
+      ).items.find((item) => item.itemId === skippedTask.itemId)?.priority,
+    ).toBeNull();
+    await caller.admin.features.setOverride({
+      featureKey: "work.rules",
+      scopeType: "user",
+      scopeKey: nextOwner.employeeId,
+      enabled: true,
+      reason: "owner can run rules",
+    });
+    const executedTask = await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Owner-enabled rule",
+      description: "",
+    });
+    expect(
+      (
+        await caller.work.projects.get({ projectId: project.projectId })
+      ).items.find((item) => item.itemId === executedTask.itemId)?.priority,
+    ).toBe("high");
+    expect(
+      await caller.work.rules.runs({ projectId: project.projectId, limit: 20 }),
+    ).toContainEqual(
+      expect.objectContaining({
+        itemId: executedTask.itemId,
+        output: expect.objectContaining({
+          ownerEmployeeId: nextOwner.employeeId,
+        }),
+      }),
+    );
 
     const employeeId = resolveDevUser("partner").employeeId;
     await caller.admin.features.setOverride({

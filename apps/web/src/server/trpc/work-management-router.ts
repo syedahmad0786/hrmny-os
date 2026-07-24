@@ -4263,29 +4263,11 @@ async function runProjectRules(
   triggerType: WorkRule["triggerType"],
   onlyRuleId?: string,
 ) {
-  const scope = {
-    userId: ctx.employeeId,
-    clientId: await projectClientId(projectId),
-    roles: ctx.roles,
-  };
+  const clientId = await projectClientId(projectId);
   const triggerFeatureKey = ruleTriggerFeatureKey(triggerType);
-  const customTaskTypesEnabled = await featureEnabled(
-    "work.custom_task_types",
-    scope,
-  );
-  const externalActionsEnabled =
-    (await featureEnabled("work.rules.external_actions", scope)) &&
-    (await featureEnabled("work.api_webhooks", scope));
-  if (triggerType === "custom_status_changed" && !customTaskTypesEnabled)
-    return;
   if (triggerType !== "collaborator_added" && triggerType !== "scheduled")
     await queueWorkAiStudioEvent(ctx, projectId, itemId, triggerType);
-  if (
-    !(await featureEnabled("work.rules", scope)) ||
-    (triggerFeatureKey && !(await featureEnabled(triggerFeatureKey, scope)))
-  ) {
-    return;
-  }
+  if (!(await featureEnabled("work.rules", { clientId }))) return;
   const db = getDb();
   const rules = !db
     ? [...getDemoWork().rules.values()].filter(
@@ -4299,7 +4281,8 @@ async function runProjectRules(
         select work_rule_id as "ruleId", work_project_id as "projectId",
           name, trigger_type as "triggerType",
           schedule_minutes as "scheduleMinutes", branches,
-          is_enabled as "isEnabled"
+          is_enabled as "isEnabled",
+          owner_employee_id as "ownerEmployeeId"
         from public.work_rule
         where work_project_id = ${projectId}::uuid
           and trigger_type = ${triggerType} and is_enabled = true
@@ -4320,23 +4303,70 @@ async function runProjectRules(
   for (const candidate of rules) {
     const parsed = z.array(ruleBranchSchema).safeParse(candidate.branches);
     const rule = { ...candidate, branches: parsed.success ? parsed.data : [] };
-    if (!customTaskTypesEnabled && ruleUsesCustomTaskTypes(rule)) continue;
-    if (!externalActionsEnabled && ruleUsesExternalActions(rule)) continue;
+    const ownerEmployeeId = rule.ownerEmployeeId;
+    if (!ownerEmployeeId) {
+      await recordRuleRun(rule, itemId, "failed", {}, "Rule owner is missing");
+      continue;
+    }
+    let executionCtx: TrpcContext;
+    try {
+      executionCtx = await workAiContextForEmployee(ownerEmployeeId);
+      await requireProjectAccess(executionCtx, projectId, "editor");
+    } catch {
+      await recordRuleRun(
+        rule,
+        itemId,
+        "failed",
+        { ownerEmployeeId },
+        "Rule owner is inactive or no longer has edit access",
+      );
+      continue;
+    }
+    const requiredFeatures = new Set(["work.rules"]);
+    if (triggerFeatureKey) requiredFeatures.add(triggerFeatureKey);
+    if (ruleUsesCustomTaskTypes(rule))
+      requiredFeatures.add("work.custom_task_types");
+    if (ruleUsesExternalActions(rule)) {
+      requiredFeatures.add("work.rules.external_actions");
+      requiredFeatures.add("work.api_webhooks");
+    }
+    let disabledFeature: string | null = null;
+    for (const featureKey of requiredFeatures)
+      if (
+        !(await featureEnabled(featureKey, {
+          userId: executionCtx.employeeId,
+          clientId,
+          roles: executionCtx.roles,
+        }))
+      ) {
+        disabledFeature = featureKey;
+        break;
+      }
+    if (disabledFeature) {
+      await recordRuleRun(
+        rule,
+        itemId,
+        "skipped",
+        { ownerEmployeeId, disabledFeature },
+        null,
+      );
+      continue;
+    }
     const branch = rule.branches.find((value) =>
       ruleBranchMatches(value, snapshot),
     );
     if (!branch) {
-      await recordRuleRun(rule, itemId, "skipped", {}, null);
+      await recordRuleRun(rule, itemId, "skipped", { ownerEmployeeId }, null);
       continue;
     }
     try {
       for (const action of branch.actions)
-        await executeRuleAction(ctx, projectId, itemId, action);
+        await executeRuleAction(executionCtx, projectId, itemId, action);
       await recordRuleRun(
         rule,
         itemId,
         "succeeded",
-        { actions: branch.actions.length },
+        { actions: branch.actions.length, ownerEmployeeId },
         null,
       );
     } catch (error) {
@@ -4344,7 +4374,7 @@ async function runProjectRules(
         rule,
         itemId,
         "failed",
-        {},
+        { ownerEmployeeId },
         error instanceof Error ? error.message : "Rule failed",
       );
     }
