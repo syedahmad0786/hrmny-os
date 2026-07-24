@@ -52,6 +52,7 @@ export type WorkReportChartSpec = {
     | "priority"
     | "section"
     | "task_type"
+    | "project"
     | "custom_field";
   metric: "task_count" | "estimated_minutes" | "actual_minutes";
   completion: "all" | "complete" | "incomplete";
@@ -68,6 +69,7 @@ export type WorkReportChartRow = {
   priority: "low" | "medium" | "high" | "urgent" | null;
   assigneeName: string | null;
   sectionName: string | null;
+  projectName: string;
   dueAt: string | null;
   completedAt: string | null;
   estimatedMinutes: number | null;
@@ -106,7 +108,9 @@ export function buildWorkReportChart(
                   : row.itemType === "milestone"
                     ? "Milestone"
                     : "Approval"
-                : null;
+                : spec.groupBy === "project"
+                  ? row.projectName
+                  : null;
     const value =
       spec.metric === "task_count"
         ? 1

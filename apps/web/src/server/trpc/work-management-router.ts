@@ -34,6 +34,7 @@ import {
   splitTimerByUtcDay,
   weightedProgress,
   type WorkReportChartRow,
+  type WorkReportChartSpec,
 } from "../work-planning";
 import { validateDailyMinutes } from "../shifts-timesheets";
 import { queueWorkAiStudioEvent } from "../work-ai-studio-events";
@@ -1036,6 +1037,7 @@ const reportChartSpecSchema = z
       "priority",
       "section",
       "task_type",
+      "project",
       "custom_field",
     ]),
     metric: z.enum(["task_count", "estimated_minutes", "actual_minutes"]),
@@ -1061,11 +1063,20 @@ const reportChartSpecSchema = z
   });
 const dashboardConfigSchema = z
   .object({
-    projectId: uuid,
+    projectId: uuid.optional(),
+    portfolioId: uuid.optional(),
     chartStyle: z.enum(["bar", "donut", "number"]).optional(),
     spec: reportChartSpecSchema.optional(),
   })
-  .catchall(z.unknown());
+  .catchall(z.unknown())
+  .superRefine((value, ctx) => {
+    if (Boolean(value.projectId) === Boolean(value.portfolioId))
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["projectId"],
+        message: "Choose one reporting scope",
+      });
+  });
 
 function actor(ctx: TrpcContext): string {
   if (!ctx.employeeId) throw new TRPCError({ code: "UNAUTHORIZED" });
@@ -2893,20 +2904,139 @@ async function requireDashboardAccess(
   config: Record<string, unknown>,
 ) {
   const projectId = config.projectId;
-  if (typeof projectId !== "string") throw new TRPCError({ code: "NOT_FOUND" });
-  await requireProjectAccess(ctx, projectId);
+  const portfolioId = config.portfolioId;
+  if ((typeof projectId === "string") === (typeof portfolioId === "string"))
+    throw new TRPCError({ code: "NOT_FOUND" });
+  if (typeof projectId === "string") await requireProjectAccess(ctx, projectId);
+  else {
+    await requireScopedFeature(ctx, "work.portfolios", null);
+    await requirePortfolioAccess(ctx, portfolioId as string);
+  }
   const spec = config.spec;
   if (
     spec &&
     typeof spec === "object" &&
     (spec as Record<string, unknown>).groupBy === "custom_field"
   ) {
+    if (typeof projectId !== "string")
+      throw new TRPCError({ code: "NOT_FOUND" });
     const customFieldId = (spec as Record<string, unknown>).customFieldId;
     if (typeof customFieldId !== "string")
       throw new TRPCError({ code: "NOT_FOUND" });
     await requireProjectCustomField(ctx, projectId, customFieldId);
   }
-  return projectId;
+  return projectId ?? portfolioId;
+}
+
+async function portfolioReportingProjectIds(
+  ctx: TrpcContext,
+  portfolioId: string,
+) {
+  await requireScopedFeature(ctx, "work.portfolios", null);
+  await requirePortfolioAccess(ctx, portfolioId);
+  const db = getDb();
+  const projectIds = !db
+    ? [...(getDemoWork().portfolioProjects.get(portfolioId) ?? [])]
+    : (
+        await db.execute<{ projectId: string }>(sql`
+          select work_project_id as "projectId"
+          from public.work_portfolio_project
+          where work_portfolio_id = ${portfolioId}::uuid
+          order by position
+        `)
+      ).map((item) => item.projectId);
+  const accessible: string[] = [];
+  for (const projectId of projectIds) {
+    try {
+      await requireProjectAccess(ctx, projectId);
+      accessible.push(projectId);
+    } catch (error) {
+      if (!(error instanceof TRPCError)) throw error;
+    }
+  }
+  return accessible;
+}
+
+async function reportRowsForProjects(
+  projectIds: string[],
+  spec: WorkReportChartSpec,
+): Promise<WorkReportChartRow[]> {
+  if (!projectIds.length) return [];
+  const db = getDb();
+  if (!db) {
+    const store = getDemoWork();
+    return [...store.items.values()]
+      .filter((item) => projectIds.includes(item.projectId))
+      .map((item) => ({
+        itemId: item.itemId,
+        parentItemId: item.parentItemId,
+        itemType: item.itemType,
+        priority: item.priority,
+        assigneeName: item.assigneeName,
+        sectionName: item.sectionId
+          ? (store.sections.get(item.sectionId)?.name ?? null)
+          : null,
+        projectName: store.projects.get(item.projectId)?.name ?? "Project",
+        dueAt: item.dueAt,
+        completedAt: item.completedAt,
+        estimatedMinutes: item.estimatedMinutes ?? null,
+        actualMinutes: [...store.timeEntries.values()]
+          .filter(
+            (entry) =>
+              projectIds.includes(entry.projectId) &&
+              entry.itemId === item.itemId,
+          )
+          .reduce((sum, entry) => sum + entry.minutes, 0),
+        customFieldValue: spec.customFieldId
+          ? store.customFieldValues.get(`${item.itemId}:${spec.customFieldId}`)
+          : undefined,
+      }));
+  }
+  return (
+    await db.execute<
+      Omit<WorkReportChartRow, "dueAt" | "completedAt"> & {
+        dueAt: Date | string | null;
+        completedAt: Date | string | null;
+      }
+    >(sql`
+      select distinct on (item.work_item_id)
+        item.work_item_id as "itemId",
+        item.parent_work_item_id as "parentItemId",
+        item.item_type as "itemType", item.priority,
+        employee.display_name as "assigneeName",
+        section.name as "sectionName", project.name as "projectName",
+        item.due_at as "dueAt", item.completed_at as "completedAt",
+        item.estimated_minutes as "estimatedMinutes",
+        custom_value.value as "customFieldValue",
+        coalesce((select sum(entry.minutes)
+          from public.time_entry entry
+          where entry.work_project_id = any(${projectIds}::uuid[])
+            and entry.work_item_id = item.work_item_id), 0)::int
+          as "actualMinutes"
+      from public.work_project_item membership
+      join public.work_project project
+        on project.work_project_id = membership.work_project_id
+      join public.work_item item
+        on item.work_item_id = membership.work_item_id
+      left join public.employee employee
+        on employee.employee_id = item.assignee_employee_id
+      left join public.work_section section
+        on section.work_section_id = item.work_section_id
+      left join public.work_custom_field_value custom_value
+        on custom_value.work_item_id = item.work_item_id
+        and custom_value.work_custom_field_id = ${spec.customFieldId}::uuid
+      where membership.work_project_id = any(${projectIds}::uuid[])
+        and item.archived_at is null
+      order by item.work_item_id,
+        array_position(${projectIds}::uuid[], membership.work_project_id)
+    `)
+  ).map((item) => ({
+    ...item,
+    dueAt: iso(item.dueAt),
+    completedAt: iso(item.completedAt),
+    estimatedMinutes: Number(item.estimatedMinutes ?? 0),
+    actualMinutes: Number(item.actualMinutes),
+  }));
 }
 
 function notificationFeatureKey(eventType: string) {
@@ -11071,82 +11201,31 @@ export const workManagementRouter = router({
       .input(z.object({ projectId: uuid, spec: reportChartSpecSchema }))
       .query(async ({ input, ctx }) => {
         await requireProjectAccess(ctx, input.projectId);
-        const db = getDb();
         if (input.spec.groupBy === "custom_field")
           await requireProjectCustomField(
             ctx,
             input.projectId,
             input.spec.customFieldId!,
           );
-        const rows: WorkReportChartRow[] = !db
-          ? [...getDemoWork().items.values()]
-              .filter((item) => item.projectId === input.projectId)
-              .map((item) => ({
-                itemId: item.itemId,
-                parentItemId: item.parentItemId,
-                itemType: item.itemType,
-                priority: item.priority,
-                assigneeName: item.assigneeName,
-                sectionName: item.sectionId
-                  ? (getDemoWork().sections.get(item.sectionId)?.name ?? null)
-                  : null,
-                dueAt: item.dueAt,
-                completedAt: item.completedAt,
-                estimatedMinutes: item.estimatedMinutes ?? null,
-                actualMinutes: [...getDemoWork().timeEntries.values()]
-                  .filter(
-                    (entry) =>
-                      entry.projectId === input.projectId &&
-                      entry.itemId === item.itemId,
-                  )
-                  .reduce((sum, entry) => sum + entry.minutes, 0),
-                customFieldValue: input.spec.customFieldId
-                  ? getDemoWork().customFieldValues.get(
-                      `${item.itemId}:${input.spec.customFieldId}`,
-                    )
-                  : undefined,
-              }))
-          : (
-              await db.execute<
-                Omit<WorkReportChartRow, "dueAt" | "completedAt"> & {
-                  dueAt: Date | string | null;
-                  completedAt: Date | string | null;
-                }
-              >(sql`
-                select distinct item.work_item_id as "itemId",
-                  item.parent_work_item_id as "parentItemId",
-                  item.item_type as "itemType", item.priority,
-                  employee.display_name as "assigneeName",
-                  section.name as "sectionName", item.due_at as "dueAt",
-                  item.completed_at as "completedAt",
-                  item.estimated_minutes as "estimatedMinutes",
-                  custom_value.value as "customFieldValue",
-                  coalesce((select sum(entry.minutes)
-                    from public.time_entry entry
-                    where entry.work_project_id = ${input.projectId}::uuid
-                      and entry.work_item_id = item.work_item_id), 0)::int
-                    as "actualMinutes"
-                from public.work_project_item membership
-                join public.work_item item
-                  on item.work_item_id = membership.work_item_id
-                left join public.employee employee
-                  on employee.employee_id = item.assignee_employee_id
-                left join public.work_section section
-                  on section.work_section_id = item.work_section_id
-                left join public.work_custom_field_value custom_value
-                  on custom_value.work_item_id = item.work_item_id
-                  and custom_value.work_custom_field_id = ${input.spec.customFieldId}::uuid
-                where membership.work_project_id = ${input.projectId}::uuid
-                  and item.archived_at is null
-              `)
-            ).map((item) => ({
-              ...item,
-              dueAt: iso(item.dueAt),
-              completedAt: iso(item.completedAt),
-              estimatedMinutes: Number(item.estimatedMinutes ?? 0),
-              actualMinutes: Number(item.actualMinutes),
-            }));
+        const rows = await reportRowsForProjects([input.projectId], input.spec);
         return buildWorkReportChart(rows, input.spec);
+      }),
+    portfolioChart: staffProcedure
+      .input(z.object({ portfolioId: uuid, spec: reportChartSpecSchema }))
+      .query(async ({ input, ctx }) => {
+        if (input.spec.groupBy === "custom_field")
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Custom-field charts require a single project",
+          });
+        const projectIds = await portfolioReportingProjectIds(
+          ctx,
+          input.portfolioId,
+        );
+        return buildWorkReportChart(
+          await reportRowsForProjects(projectIds, input.spec),
+          input.spec,
+        );
       }),
     dashboards: staffProcedure.query(async ({ ctx }) => {
       const employeeId = actor(ctx);
