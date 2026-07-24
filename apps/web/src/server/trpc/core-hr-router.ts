@@ -151,8 +151,11 @@ export const coreHrRouter = router({
         roleKey: z
           .enum([
             "staff",
-            "account_manager",
-            "project_manager",
+            "am",
+            "traffic",
+            "creative",
+            "finance",
+            "hiring",
             "director",
             "partner",
             "hr",

@@ -44,8 +44,11 @@ export default function PeoplePage() {
   const [department, setDepartment] = useState("");
   const [roleKey, setRoleKey] = useState<
     | "staff"
-    | "account_manager"
-    | "project_manager"
+    | "am"
+    | "traffic"
+    | "creative"
+    | "finance"
+    | "hiring"
     | "director"
     | "partner"
     | "hr"
@@ -164,8 +167,11 @@ export default function PeoplePage() {
             }
           >
             <option value="staff">Staff</option>
-            <option value="account_manager">Account manager</option>
-            <option value="project_manager">Project manager</option>
+            <option value="am">Account manager</option>
+            <option value="traffic">Traffic / project manager</option>
+            <option value="creative">Creative</option>
+            <option value="finance">Finance</option>
+            <option value="hiring">Hiring</option>
             <option value="hr">HR</option>
             <option value="director">Director</option>
             <option value="partner">Partner</option>
