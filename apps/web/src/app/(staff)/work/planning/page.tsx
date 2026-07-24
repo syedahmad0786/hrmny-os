@@ -642,6 +642,9 @@ export default function PlanningPage() {
   const capacityEnabled = enabled.has("work.capacity_planning");
   const budgetsEnabled = enabled.has("work.budgets");
   const timeEnabled = enabled.has("work.time_tracking");
+  const timeEntryEditingEnabled = enabled.has(
+    "work.time_tracking.entry_editing",
+  );
   const ganttEnabled = enabled.has("work.views.gantt");
   const richTextEnabled = enabled.has("work.rich_text");
   useEffect(() => {
@@ -1461,8 +1464,20 @@ export default function PlanningPage() {
   const [timeMinutes, setTimeMinutes] = useState("60");
   const [timeItemId, setTimeItemId] = useState("");
   const [timeDescription, setTimeDescription] = useState("");
+  const [editingTimeEntryId, setEditingTimeEntryId] = useState("");
   const logTime = trpc.work.time.log.useMutation({
     onSuccess: async () => {
+      setTimeDescription("");
+      await Promise.all([
+        utils.work.time.list.invalidate(),
+        utils.work.reporting.summary.invalidate(),
+        utils.work.budgets.summary.invalidate(),
+      ]);
+    },
+  });
+  const updateTime = trpc.work.time.update.useMutation({
+    onSuccess: async () => {
+      setEditingTimeEntryId("");
       setTimeDescription("");
       await Promise.all([
         utils.work.time.list.invalidate(),
@@ -1507,6 +1522,7 @@ export default function PlanningPage() {
     updateBudget.error,
     upsertAllocation.error,
     logTime.error,
+    updateTime.error,
     removeTime.error,
     startTimer.error,
     stopTimer.error,
@@ -1531,7 +1547,10 @@ export default function PlanningPage() {
           aria-label="Project"
           className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
           value={projectId}
-          onChange={(event) => setProjectId(event.target.value)}
+          onChange={(event) => {
+            setEditingTimeEntryId("");
+            setProjectId(event.target.value);
+          }}
         >
           {(projects.data ?? []).map((project) => (
             <option key={project.projectId} value={project.projectId}>
@@ -3299,14 +3318,20 @@ export default function PlanningPage() {
             className="mt-4 grid gap-2 md:grid-cols-5"
             onSubmit={(event) => {
               event.preventDefault();
-              logTime.mutate({
+              const values = {
                 projectId,
                 itemId: timeItemId || null,
                 workDate: timeDate,
                 minutes: Number(timeMinutes),
                 isBillable: false,
                 description: timeDescription || null,
-              });
+              };
+              if (editingTimeEntryId)
+                updateTime.mutate({
+                  timeEntryId: editingTimeEntryId,
+                  ...values,
+                });
+              else logTime.mutate(values);
             }}
           >
             <input
@@ -3345,9 +3370,20 @@ export default function PlanningPage() {
               value={timeDescription}
               onChange={(event) => setTimeDescription(event.target.value)}
             />
-            <button className="rounded bg-ink px-4 py-2 text-white">
-              Log time
-            </button>
+            <div className="flex gap-2">
+              <button className="flex-1 rounded bg-ink px-4 py-2 text-white">
+                {editingTimeEntryId ? "Save" : "Log time"}
+              </button>
+              {editingTimeEntryId ? (
+                <button
+                  type="button"
+                  className="rounded border border-sand px-3 py-2"
+                  onClick={() => setEditingTimeEntryId("")}
+                >
+                  Cancel
+                </button>
+              ) : null}
+            </div>
           </form>
           <div className="mt-4 space-y-2">
             {(entries.data ?? []).slice(0, 10).map((entry) => (
@@ -3360,15 +3396,32 @@ export default function PlanningPage() {
                 </span>
                 <strong>{hours(entry.minutes)}</strong>
                 {["draft", "rejected"].includes(entry.status) ? (
-                  <button
-                    type="button"
-                    className="rounded border border-sand px-2 py-1 text-xs"
-                    onClick={() =>
-                      removeTime.mutate({ timeEntryId: entry.timeEntryId })
-                    }
-                  >
-                    Delete
-                  </button>
+                  <div className="flex gap-2">
+                    {timeEntryEditingEnabled ? (
+                      <button
+                        type="button"
+                        className="rounded border border-sand px-2 py-1 text-xs"
+                        onClick={() => {
+                          setEditingTimeEntryId(entry.timeEntryId);
+                          setTimeDate(entry.workDate);
+                          setTimeMinutes(String(entry.minutes));
+                          setTimeItemId(entry.itemId ?? "");
+                          setTimeDescription(entry.description ?? "");
+                        }}
+                      >
+                        Edit
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="rounded border border-sand px-2 py-1 text-xs"
+                      onClick={() =>
+                        removeTime.mutate({ timeEntryId: entry.timeEntryId })
+                      }
+                    >
+                      Delete
+                    </button>
+                  </div>
                 ) : null}
               </div>
             ))}

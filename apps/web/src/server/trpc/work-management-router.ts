@@ -13493,6 +13493,132 @@ export const workManagementRouter = router({
         });
         return entry;
       }),
+    update: staffProcedure
+      .input(
+        z.object({
+          timeEntryId: uuid,
+          projectId: uuid,
+          itemId: nullableUuid.optional(),
+          workDate: z.string().date(),
+          minutes: z.number().int().min(1).max(1_440),
+          isBillable: z.boolean().default(false),
+          description: z.string().trim().max(5_000).nullable().default(null),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        await requireScopedFeature(ctx, "work.time_tracking", input.projectId);
+        await requireProjectAccess(ctx, input.projectId, "commenter");
+        if (input.itemId)
+          await requireItemInProject(ctx, input.itemId, input.projectId);
+        const db = getDb();
+        let entry: WorkTimeEntry;
+        if (!db) {
+          const current = getDemoWork().timeEntries.get(input.timeEntryId);
+          if (
+            !current ||
+            current.employeeId !== employeeId ||
+            current.projectId !== input.projectId ||
+            !["draft", "rejected"].includes(current.status)
+          )
+            throw new TRPCError({ code: "FORBIDDEN" });
+          const dailyMinutes = [...getDemoWork().timeEntries.values()]
+            .filter(
+              (item) =>
+                item.timeEntryId !== input.timeEntryId &&
+                item.employeeId === employeeId &&
+                item.workDate === input.workDate,
+            )
+            .reduce((sum, item) => sum + item.minutes, 0);
+          try {
+            validateDailyMinutes(dailyMinutes, input.minutes);
+          } catch {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "Daily time cannot exceed 24 hours",
+            });
+          }
+          entry = {
+            ...current,
+            itemId: input.itemId ?? null,
+            workDate: input.workDate,
+            minutes: input.minutes,
+            isBillable: input.isBillable,
+            description: input.description,
+            status: "draft",
+          };
+          getDemoWork().timeEntries.set(entry.timeEntryId, entry);
+        } else
+          entry = await db.transaction(async (tx) => {
+            const current = (
+              await tx.execute<WorkTimeEntry>(sql`
+                select time_entry_id as "timeEntryId",
+                  employee_id as "employeeId",
+                  work_project_id as "projectId", work_item_id as "itemId",
+                  work_date::text as "workDate", minutes,
+                  is_billable as "isBillable", description, status
+                from public.time_entry
+                where time_entry_id = ${input.timeEntryId}::uuid
+                for update
+              `)
+            )[0];
+            if (
+              !current ||
+              current.employeeId !== employeeId ||
+              current.projectId !== input.projectId ||
+              !["draft", "rejected"].includes(current.status)
+            )
+              throw new TRPCError({ code: "FORBIDDEN" });
+            await tx.execute(
+              sql`select pg_advisory_xact_lock(hashtext(${`${employeeId}:${input.workDate}`}))`,
+            );
+            const dailyMinutes = Number(
+              (
+                await tx.execute<{ minutes: number }>(sql`
+                  select coalesce(sum(minutes), 0)::int as minutes
+                  from public.time_entry
+                  where employee_id = ${employeeId}::uuid
+                    and work_date = ${input.workDate}::date
+                    and time_entry_id <> ${input.timeEntryId}::uuid
+                `)
+              )[0]?.minutes ?? 0,
+            );
+            try {
+              validateDailyMinutes(dailyMinutes, input.minutes);
+            } catch {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "Daily time cannot exceed 24 hours",
+              });
+            }
+            return (
+              await tx.execute<WorkTimeEntry>(sql`
+                update public.time_entry set
+                  work_item_id = ${input.itemId ?? null}::uuid,
+                  work_date = ${input.workDate}::date,
+                  minutes = ${input.minutes},
+                  is_billable = ${input.isBillable},
+                  description = ${input.description},
+                  status = 'draft', submitted_at = null,
+                  decision_note = null, decided_by_employee_id = null,
+                  decided_at = null, updated_at = now()
+                where time_entry_id = ${input.timeEntryId}::uuid
+                returning time_entry_id as "timeEntryId",
+                  employee_id as "employeeId",
+                  work_project_id as "projectId", work_item_id as "itemId",
+                  work_date::text as "workDate", minutes,
+                  is_billable as "isBillable", description, status
+              `)
+            )[0]!;
+          });
+        await audit(ctx, "work.time.update", "time_entry", input.timeEntryId, {
+          projectId: entry.projectId,
+          itemId: entry.itemId,
+          workDate: entry.workDate,
+          minutes: entry.minutes,
+        });
+        return entry;
+      }),
     remove: staffProcedure
       .input(z.object({ timeEntryId: uuid }))
       .mutation(async ({ input, ctx }) => {

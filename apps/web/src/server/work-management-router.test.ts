@@ -3517,4 +3517,82 @@ describe("work management", () => {
       message: "FEATURE_DISABLED:work.capacity_planning",
     });
   });
+
+  it("lets people edit only their own draft time entries", async () => {
+    const caller = partnerCaller();
+    const project = await caller.work.projects.create({
+      name: `Time corrections ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const entry = await caller.work.time.log({
+      projectId: project.projectId,
+      workDate: "2026-07-24",
+      minutes: 60,
+      isBillable: false,
+      description: "Draft",
+    });
+    await expect(
+      caller.work.time.update({
+        timeEntryId: entry.timeEntryId,
+        projectId: project.projectId,
+        workDate: "2026-07-25",
+        minutes: 90,
+        isBillable: false,
+        description: "Corrected",
+      }),
+    ).resolves.toMatchObject({
+      workDate: "2026-07-25",
+      minutes: 90,
+      description: "Corrected",
+    });
+    await caller.work.time.log({
+      projectId: project.projectId,
+      workDate: "2026-07-26",
+      minutes: 1_400,
+      isBillable: false,
+      description: null,
+    });
+    await expect(
+      caller.work.time.update({
+        timeEntryId: entry.timeEntryId,
+        projectId: project.projectId,
+        workDate: "2026-07-26",
+        minutes: 90,
+        isBillable: false,
+        description: null,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      amCaller().work.time.update({
+        timeEntryId: entry.timeEntryId,
+        projectId: project.projectId,
+        workDate: "2026-07-25",
+        minutes: 30,
+        isBillable: false,
+        description: null,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const employeeId = resolveDevUser("partner").employeeId;
+    await caller.admin.features.setOverride({
+      featureKey: "work.time_tracking.entry_editing",
+      scopeType: "user",
+      scopeKey: employeeId,
+      enabled: false,
+      reason: "time corrections disabled",
+    });
+    await expect(
+      caller.work.time.update({
+        timeEntryId: entry.timeEntryId,
+        projectId: project.projectId,
+        workDate: "2026-07-25",
+        minutes: 30,
+        isBillable: false,
+        description: null,
+      }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.time_tracking.entry_editing",
+    });
+  });
 });

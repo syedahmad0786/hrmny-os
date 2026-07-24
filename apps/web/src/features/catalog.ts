@@ -575,6 +575,15 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     availability: "beta",
     defaultEnabled: true,
   }),
+  feature({
+    key: "work.time_tracking.entry_editing",
+    name: "Edit time entries",
+    description: "Let people correct their own draft or rejected time entries.",
+    group: "Resource management",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
 
   // Views and personal productivity.
   feature({
@@ -1446,6 +1455,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["work.workload.upsert", "work.capacity_planning"],
   ["work.workload.", "work.workload"],
   ["work.budgets.", "work.budgets"],
+  ["work.time.update", "work.time_tracking.entry_editing"],
   ["work.time.", "work.time_tracking"],
   ["work.gantt.", "work.views.gantt"],
   ["work.members.", "work.object_permissions"],
