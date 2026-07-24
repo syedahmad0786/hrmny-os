@@ -17,6 +17,60 @@ CREATE TABLE IF NOT EXISTS public.work_project (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- 0013_shifts_timesheets introduced a smaller work_project first. Keep the
+-- shared table and add the work-management columns when upgrading that schema.
+ALTER TABLE public.work_project
+  ADD COLUMN IF NOT EXISTS code text,
+  ADD COLUMN IF NOT EXISTS is_billable_default boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS color text NOT NULL DEFAULT '#C7702E',
+  ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'organization',
+  ADD COLUMN IF NOT EXISTS owner_employee_id uuid
+    REFERENCES public.employee(employee_id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS source_platform text NOT NULL DEFAULT 'native',
+  ADD COLUMN IF NOT EXISTS external_id text,
+  ADD COLUMN IF NOT EXISTS archived_at timestamptz;
+
+UPDATE public.work_project SET description = '' WHERE description IS NULL;
+ALTER TABLE public.work_project
+  ALTER COLUMN description SET DEFAULT '',
+  ALTER COLUMN description SET NOT NULL,
+  ALTER COLUMN code DROP NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.work_project'::regclass
+      AND conname = 'work_project_color_check'
+  ) THEN
+    ALTER TABLE public.work_project
+      ADD CONSTRAINT work_project_color_check
+      CHECK (color ~ '^#[0-9A-Fa-f]{6}$');
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.work_project'::regclass
+      AND conname = 'work_project_privacy_check'
+  ) THEN
+    ALTER TABLE public.work_project
+      ADD CONSTRAINT work_project_privacy_check
+      CHECK (privacy IN ('organization', 'private'));
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.work_project'::regclass
+      AND conname = 'work_project_source_platform_check'
+  ) THEN
+    ALTER TABLE public.work_project
+      ADD CONSTRAINT work_project_source_platform_check
+      CHECK (source_platform IN ('native', 'asana'));
+  END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS work_project_code_uniq
+  ON public.work_project (code) WHERE code IS NOT NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS work_project_source_external_uniq
   ON public.work_project (source_platform, external_id)
   WHERE external_id IS NOT NULL;
