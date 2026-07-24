@@ -2512,10 +2512,15 @@ describe("work management", () => {
         chartStyle: "donut",
         spec: {
           groupBy: "project_health",
+          objectIds: [project.projectId],
           ownerEmployeeId: employeeId,
           status: "complete",
           privacy: "private",
           sourcePlatform: "native",
+          teamId: "a0000000-0000-4000-8000-000000000002",
+          dateField: "created",
+          dateFrom: "2026-01-01",
+          dateTo: "2026-12-31",
         },
       },
     });
@@ -2526,11 +2531,15 @@ describe("work management", () => {
         chartStyle: "bar",
         spec: {
           groupBy: "goal_status",
+          objectIds: [goal.goalId],
           ownerEmployeeId: employeeId,
           status: "on_track",
           scope: "company",
           timePeriod: "Q3 2026",
           includeSubgoals: false,
+          dateField: "due",
+          dateFrom: "2026-07-01",
+          dateTo: "2026-07-31",
         },
       },
     });
@@ -2541,9 +2550,13 @@ describe("work management", () => {
         chartStyle: "number",
         spec: {
           groupBy: "portfolio_health",
+          objectIds: [portfolio.portfolioId],
           ownerEmployeeId: employeeId,
           status: "on_track",
           privacy: "organization",
+          dateField: "created",
+          dateFrom: "2026-01-01",
+          dateTo: "2026-12-31",
         },
       },
     });
@@ -2554,6 +2567,23 @@ describe("work management", () => {
         portfolioReportDashboard,
       ]),
     );
+    await caller.admin.features.setOverride({
+      featureKey: "work.teams",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "team reporting disabled",
+    });
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      projectReportDashboard,
+    );
+    await caller.admin.features.setOverride({
+      featureKey: "work.teams",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: true,
+      reason: "restore team reporting",
+    });
     await expect(
       caller.work.reporting.saveDashboard({
         name: "Invalid mixed report",
@@ -2577,6 +2607,34 @@ describe("work management", () => {
         },
       }),
     ).rejects.toThrow("Filter does not match the report type");
+    await expect(
+      caller.work.reporting.saveDashboard({
+        name: "Invalid report dates",
+        config: {
+          reportType: "projects",
+          chartStyle: "bar",
+          spec: {
+            groupBy: "project_owner",
+            dateField: "created",
+            dateFrom: "2026-08-01",
+            dateTo: "2026-07-01",
+          },
+        },
+      }),
+    ).rejects.toThrow("Date through must be on or after date from");
+    await expect(
+      caller.work.reporting.saveDashboard({
+        name: "Unavailable project",
+        config: {
+          reportType: "projects",
+          chartStyle: "bar",
+          spec: {
+            groupBy: "project_owner",
+            objectIds: ["a0000000-0000-4000-8000-000000000001"],
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(
       caller.work.reporting.portfolioChart({
         portfolioId: portfolio.portfolioId,

@@ -69,6 +69,9 @@ type WorkProject = {
   budgetAmount?: number | null;
   budgetCurrency?: string;
   hourlyCostRate?: number | null;
+  teamIds?: string[];
+  startDate?: string | null;
+  dueDate?: string | null;
   createdAt: string;
 };
 type WorkSection = {
@@ -1094,42 +1097,62 @@ const reportChartSpecSchema = z
         message: "Choose a numeric custom field to measure",
       });
   });
-const metadataReportSpecSchema = z.object({
-  groupBy: z.enum([
-    "project_health",
-    "project_owner",
-    "project_privacy",
-    "project_source",
-    "goal_status",
-    "goal_owner",
-    "goal_scope",
-    "goal_time_period",
-    "portfolio_health",
-    "portfolio_owner",
-    "portfolio_privacy",
-  ]),
-  ownerEmployeeId: nullableUuid.optional(),
-  status: z
-    .enum([
-      "on_track",
-      "at_risk",
-      "off_track",
-      "complete",
-      "achieved",
-      "dropped",
-    ])
-    .nullable()
-    .optional(),
-  privacy: z.enum(["organization", "private"]).nullable().optional(),
-  sourcePlatform: z.enum(["native", "asana"]).nullable().optional(),
-  scope: z.enum(["company", "team", "individual"]).nullable().optional(),
-  timePeriod: z
-    .string()
-    .regex(/^Q[1-4] \d{4}$/)
-    .nullable()
-    .optional(),
-  includeSubgoals: z.boolean().optional(),
-});
+const metadataReportSpecSchema = z
+  .object({
+    groupBy: z.enum([
+      "project_health",
+      "project_owner",
+      "project_privacy",
+      "project_source",
+      "goal_status",
+      "goal_owner",
+      "goal_scope",
+      "goal_time_period",
+      "portfolio_health",
+      "portfolio_owner",
+      "portfolio_privacy",
+    ]),
+    ownerEmployeeId: nullableUuid.optional(),
+    status: z
+      .enum([
+        "on_track",
+        "at_risk",
+        "off_track",
+        "complete",
+        "achieved",
+        "dropped",
+      ])
+      .nullable()
+      .optional(),
+    privacy: z.enum(["organization", "private"]).nullable().optional(),
+    sourcePlatform: z.enum(["native", "asana"]).nullable().optional(),
+    scope: z.enum(["company", "team", "individual"]).nullable().optional(),
+    timePeriod: z
+      .string()
+      .regex(/^Q[1-4] \d{4}$/)
+      .nullable()
+      .optional(),
+    includeSubgoals: z.boolean().optional(),
+    objectIds: z.array(uuid).max(500).optional(),
+    teamId: nullableUuid.optional(),
+    dateField: z.enum(["created", "start", "due"]).nullable().optional(),
+    dateFrom: z.string().date().nullable().optional(),
+    dateTo: z.string().date().nullable().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if ((value.dateFrom || value.dateTo) && !value.dateField)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dateField"],
+        message: "Choose which date to filter",
+      });
+    if (value.dateFrom && value.dateTo && value.dateFrom > value.dateTo)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dateTo"],
+        message: "Date through must be on or after date from",
+      });
+  });
 const dashboardConfigSchema = z
   .object({
     reportType: z.enum(["tasks", "projects", "goals", "portfolios"]).optional(),
@@ -1187,6 +1210,10 @@ const dashboardConfigSchema = z
           ));
     const invalidFields =
       (reportType !== "projects" && metadata.sourcePlatform) ||
+      (reportType !== "projects" && metadata.teamId) ||
+      (reportType === "portfolios" &&
+        metadata.dateField &&
+        metadata.dateField !== "created") ||
       (reportType !== "goals" &&
         (metadata.scope ||
           metadata.timePeriod ||
@@ -3202,6 +3229,30 @@ async function requireDashboardAccess(
   }
   const spec = config.spec;
   if (
+    reportType !== "tasks" &&
+    spec &&
+    typeof spec === "object" &&
+    Array.isArray((spec as Record<string, unknown>).objectIds)
+  ) {
+    const objectIds = (spec as Record<string, unknown>).objectIds as unknown[];
+    for (const objectId of objectIds) {
+      if (typeof objectId !== "string")
+        throw new TRPCError({ code: "NOT_FOUND" });
+      if (reportType === "projects") {
+        await requireProjectAccess(ctx, objectId);
+        await requireScopedFeature(ctx, "work.projects", objectId);
+      } else if (reportType === "goals") await requireGoalAccess(ctx, objectId);
+      else await requirePortfolioAccess(ctx, objectId);
+    }
+  }
+  if (
+    reportType === "projects" &&
+    spec &&
+    typeof spec === "object" &&
+    typeof (spec as Record<string, unknown>).teamId === "string"
+  )
+    await requireScopedFeature(ctx, "work.teams", null);
+  if (
     (reportType === "projects" || reportType === "portfolios") &&
     spec &&
     typeof spec === "object" &&
@@ -4320,6 +4371,13 @@ export const workManagementRouter = router({
           project.owner_employee_id as "ownerEmployeeId",
           owner.display_name as "ownerName", latest_status.health,
           project.source_platform as "sourcePlatform",
+          project.start_date::text as "startDate",
+          project.due_date::text as "dueDate",
+          coalesce((
+            select array_agg(team_project.work_team_id order by team_project.work_team_id)
+            from public.work_team_project team_project
+            where team_project.work_project_id = project.work_project_id
+          ), array[]::uuid[]) as "teamIds",
           case
             when project.created_by_employee_id = ${employeeId}::uuid
               or project.owner_employee_id = ${employeeId}::uuid then 'admin'

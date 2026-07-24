@@ -210,12 +210,23 @@ describe("work planning calculations", () => {
     expect(
       matchesMetadataReportFilters(
         {
+          objectId: "project",
           ownerEmployeeId: "owner",
           status: "on_track",
           privacy: "organization",
           parentId: "parent",
+          teamIds: ["team"],
+          dueDate: "2026-07-24",
         },
-        { ownerEmployeeId: "owner", status: "on_track" },
+        {
+          objectIds: ["project"],
+          ownerEmployeeId: "owner",
+          status: "on_track",
+          teamId: "team",
+          dateField: "due",
+          dateFrom: "2026-07-01",
+          dateTo: "2026-07-31",
+        },
       ),
     ).toBe(true);
     expect(
@@ -226,6 +237,20 @@ describe("work planning calculations", () => {
           parentId: "parent",
         },
         { includeSubgoals: false },
+      ),
+    ).toBe(false);
+    expect(
+      matchesMetadataReportFilters(
+        {
+          objectId: "project",
+          ownerEmployeeId: "owner",
+          dueDate: "2026-07-24",
+        },
+        {
+          objectIds: ["another-project"],
+          dateField: "due",
+          dateFrom: "2026-08-01",
+        },
       ),
     ).toBe(false);
   });

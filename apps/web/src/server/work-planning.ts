@@ -213,6 +213,7 @@ export function countReportBuckets(labels: readonly string[]) {
 
 export function matchesMetadataReportFilters(
   row: {
+    objectId?: string;
     ownerEmployeeId: string | null;
     status?: string | null;
     privacy?: string | null;
@@ -220,8 +221,13 @@ export function matchesMetadataReportFilters(
     scope?: string | null;
     timePeriod?: string | null;
     parentId?: string | null;
+    teamIds?: readonly string[];
+    createdAt?: string | null;
+    startDate?: string | null;
+    dueDate?: string | null;
   },
   filters: {
+    objectIds?: readonly string[];
     ownerEmployeeId?: string | null;
     status?: string | null;
     privacy?: string | null;
@@ -229,9 +235,24 @@ export function matchesMetadataReportFilters(
     scope?: string | null;
     timePeriod?: string | null;
     includeSubgoals?: boolean;
+    teamId?: string | null;
+    dateField?: "created" | "start" | "due" | null;
+    dateFrom?: string | null;
+    dateTo?: string | null;
   },
 ) {
+  const reportDate = filters.dateField
+    ? row[
+        filters.dateField === "created"
+          ? "createdAt"
+          : filters.dateField === "start"
+            ? "startDate"
+            : "dueDate"
+      ]?.slice(0, 10)
+    : null;
   return (
+    (!filters.objectIds?.length ||
+      (row.objectId ? filters.objectIds.includes(row.objectId) : false)) &&
     (!filters.ownerEmployeeId ||
       row.ownerEmployeeId === filters.ownerEmployeeId) &&
     (!filters.status || row.status === filters.status) &&
@@ -240,6 +261,10 @@ export function matchesMetadataReportFilters(
       row.sourcePlatform === filters.sourcePlatform) &&
     (!filters.scope || row.scope === filters.scope) &&
     (!filters.timePeriod || row.timePeriod === filters.timePeriod) &&
+    (!filters.teamId || row.teamIds?.includes(filters.teamId)) &&
+    (!filters.dateFrom ||
+      Boolean(reportDate && reportDate >= filters.dateFrom)) &&
+    (!filters.dateTo || Boolean(reportDate && reportDate <= filters.dateTo)) &&
     (filters.includeSubgoals !== false || !row.parentId)
   );
 }
