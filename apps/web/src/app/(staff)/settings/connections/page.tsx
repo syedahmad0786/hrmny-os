@@ -3,6 +3,7 @@
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
+import Link from "next/link";
 import { useState } from "react";
 
 const GOOGLE_WORKSPACE_SCOPES = [
@@ -16,6 +17,9 @@ const GOOGLE_WORKSPACE_SCOPES = [
 export default function ConnectionsPage() {
   const utils = trpc.useUtils();
   const list = trpc.connections.list.useQuery();
+  const asanaStatus = trpc.connections.asanaStatus.useQuery(undefined, {
+    retry: false,
+  });
   const saveKey = trpc.connections.saveApiKey.useMutation({
     onSuccess: () => void utils.connections.list.invalidate(),
   });
@@ -59,102 +63,129 @@ export default function ConnectionsPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {(list.data ?? []).map((item) => (
-          <section
-            key={item.toolkit}
-            className="rounded-lg border border-sand bg-white/70 p-4"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="font-display text-lg">{item.label}</h2>
-                <p className="text-sm text-muted">
-                  {item.authType === "api_key"
-                    ? "API key"
-                    : item.authType === "oauth"
-                      ? "OAuth"
-                      : "Manual"}{" "}
-                  · {item.status}
-                </p>
-                <p className="mt-1 text-xs text-muted">{item.note}</p>
-                {item.externalConnectionId ? (
-                  <p className="mt-1 text-xs font-medium text-ink">
-                    {item.externalConnectionId}
+        {(list.data ?? []).map((item) => {
+          const verifiedAsana =
+            item.toolkit === "asana" && asanaStatus.data?.connected;
+          const asanaUser = verifiedAsana ? asanaStatus.data?.user : null;
+          return (
+            <section
+              key={item.toolkit}
+              className="rounded-lg border border-sand bg-white/70 p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-lg">{item.label}</h2>
+                  <p className="text-sm text-muted">
+                    {item.authType === "api_key"
+                      ? "API key"
+                      : item.authType === "oauth"
+                        ? "OAuth"
+                        : item.authType === "managed"
+                          ? "Managed connection"
+                          : "Manual"}{" "}
+                    · {verifiedAsana ? "connected" : item.status}
                   </p>
+                  <p className="mt-1 text-xs text-muted">{item.note}</p>
+                  {asanaUser ? (
+                    <p className="mt-1 text-xs font-medium text-ink">
+                      {asanaUser.email ?? asanaUser.name}
+                    </p>
+                  ) : item.externalConnectionId ? (
+                    <p className="mt-1 text-xs font-medium text-ink">
+                      {item.externalConnectionId}
+                    </p>
+                  ) : null}
+                </div>
+                {item.connectionAccountId ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={disconnect.isPending}
+                    onClick={() =>
+                      disconnect.mutate({ id: item.connectionAccountId! })
+                    }
+                  >
+                    Disconnect
+                  </Button>
                 ) : null}
               </div>
-              {item.connectionAccountId ? (
+
+              {item.authType === "api_key" ? (
+                <div className="mt-4 flex gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded border border-sand bg-white px-3 py-2"
+                    type="password"
+                    autoComplete="off"
+                    placeholder={
+                      item.hasSecret ? "Paste replacement key" : "Paste API key"
+                    }
+                    value={keys[item.toolkit] ?? ""}
+                    onChange={(event) =>
+                      setKeys((current) => ({
+                        ...current,
+                        [item.toolkit]: event.target.value,
+                      }))
+                    }
+                  />
+                  <Button
+                    type="button"
+                    disabled={!keys[item.toolkit]?.trim() || saveKey.isPending}
+                    onClick={() => {
+                      saveKey.mutate({
+                        toolkit: item.toolkit as
+                          "apollo" | "hunter" | "bayzat" | "composio",
+                        apiKey: keys[item.toolkit]!,
+                      });
+                      setKeys((current) => ({
+                        ...current,
+                        [item.toolkit]: "",
+                      }));
+                    }}
+                  >
+                    {item.hasSecret ? "Replace" : "Connect"}
+                  </Button>
+                </div>
+              ) : item.authType === "oauth" ? (
                 <Button
+                  className="mt-4"
                   type="button"
                   variant="ghost"
-                  disabled={disconnect.isPending}
-                  onClick={() =>
-                    disconnect.mutate({ id: item.connectionAccountId! })
-                  }
-                >
-                  Disconnect
-                </Button>
-              ) : null}
-            </div>
-
-            {item.authType === "api_key" ? (
-              <div className="mt-4 flex gap-2">
-                <input
-                  className="min-w-0 flex-1 rounded border border-sand bg-white px-3 py-2"
-                  type="password"
-                  autoComplete="off"
-                  placeholder={
-                    item.hasSecret ? "Paste replacement key" : "Paste API key"
-                  }
-                  value={keys[item.toolkit] ?? ""}
-                  onChange={(event) =>
-                    setKeys((current) => ({
-                      ...current,
-                      [item.toolkit]: event.target.value,
-                    }))
-                  }
-                />
-                <Button
-                  type="button"
-                  disabled={!keys[item.toolkit]?.trim() || saveKey.isPending}
+                  disabled={!item.ready || startOAuth.isPending}
                   onClick={() => {
-                    saveKey.mutate({
-                      toolkit: item.toolkit as "apollo" | "hunter" | "bayzat",
-                      apiKey: keys[item.toolkit]!,
-                    });
-                    setKeys((current) => ({ ...current, [item.toolkit]: "" }));
+                    if (item.toolkit === "google_workspace") {
+                      void connectGoogleWorkspace();
+                      return;
+                    }
+                    void startOAuth
+                      .mutateAsync({
+                        toolkit: item.toolkit as "canva",
+                      })
+                      .then((result) => setRedirect(result.redirectUrl));
                   }}
                 >
-                  {item.hasSecret ? "Replace" : "Connect"}
+                  {item.ready ? "Connect with OAuth" : "Provider setup needed"}
                 </Button>
-              </div>
-            ) : item.authType === "oauth" ? (
-              <Button
-                className="mt-4"
-                type="button"
-                variant="ghost"
-                disabled={!item.ready || startOAuth.isPending}
-                onClick={() => {
-                  if (item.toolkit === "google_workspace") {
-                    void connectGoogleWorkspace();
-                    return;
-                  }
-                  void startOAuth
-                    .mutateAsync({
-                      toolkit: item.toolkit as "canva",
-                    })
-                    .then((result) => setRedirect(result.redirectUrl));
-                }}
-              >
-                {item.ready ? "Connect with OAuth" : "Provider setup needed"}
-              </Button>
-            ) : (
-              <p className="mt-4 text-sm text-muted">
-                Outreach stays human-approved and is copied into LinkedIn
-                manually.
-              </p>
-            )}
-          </section>
-        ))}
+              ) : item.toolkit === "asana" ? (
+                <div className="mt-4 flex items-center gap-3">
+                  <Link
+                    className="rounded border border-sand px-3 py-2 text-sm font-medium hover:bg-cream"
+                    href="/settings/asana-migration"
+                  >
+                    Verify & scan
+                  </Link>
+                  {asanaStatus.isFetching ? (
+                    <span className="text-xs text-muted">Checking…</span>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-muted">
+                  Outreach stays human-approved and is copied into LinkedIn
+                  manually.
+                </p>
+              )}
+            </section>
+          );
+        })}
       </div>
 
       {redirect ? (
@@ -165,9 +196,19 @@ export default function ConnectionsPage() {
           </a>
         </p>
       ) : null}
-      {saveKey.error || disconnect.error || startOAuth.error ? (
+      {saveKey.error ||
+      disconnect.error ||
+      startOAuth.error ||
+      asanaStatus.error ? (
         <p className="text-sm text-red-700">
-          {(saveKey.error ?? disconnect.error ?? startOAuth.error)?.message}
+          {
+            (
+              saveKey.error ??
+              disconnect.error ??
+              startOAuth.error ??
+              asanaStatus.error
+            )?.message
+          }
         </p>
       ) : null}
     </main>

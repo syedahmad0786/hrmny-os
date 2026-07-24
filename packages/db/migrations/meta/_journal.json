@@ -127,6 +127,27 @@
       "when": 1784908800000,
       "tag": "0017_digital_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784912400000,
+      "tag": "0018_feature_lab",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784916000000,
+      "tag": "0019_work_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784919600000,
+      "tag": "0020_asana_import",
+      "breakpoints": true
     }
   ]
 }

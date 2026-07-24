@@ -1,6 +1,12 @@
 import { TRPCError } from "@trpc/server";
 import { and, auditEvent, connectionAccount, eq, sql } from "@hrmny/db";
-import { createComposioStub } from "@hrmny/integrations";
+import {
+  createAsanaViaComposio,
+  createComposioLive,
+  createComposioStub,
+  type AsanaAdapter,
+  type ComposioConnectedAccount,
+} from "@hrmny/integrations";
 import { z } from "zod";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
@@ -8,8 +14,13 @@ import { router, staffProcedure } from "./trpc";
 import { randomUUID } from "node:crypto";
 
 const composio = createComposioStub();
-const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat"]);
-const oauthToolkit = z.enum(["gmail", "calendar", "canva", "linkedin"]);
+const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat", "composio"]);
+const oauthToolkit = z.enum([
+  "gmail",
+  "calendar",
+  "canva",
+  "linkedin",
+]);
 
 export const GoogleProfileSchema = z.object({
   email: z
@@ -63,6 +74,20 @@ export const CONNECTION_CATALOG = [
     note: "Gmail, Calendar, Drive, and Sheets via the existing Google SSO app.",
   },
   {
+    toolkit: "composio",
+    label: "Composio",
+    authType: "api_key",
+    ready: true,
+    note: "Secure bridge used to verify and read connected apps such as Asana.",
+  },
+  {
+    toolkit: "asana",
+    label: "Asana",
+    authType: "managed",
+    ready: true,
+    note: "Verified through the connected Composio project before any migration runs.",
+  },
+  {
     toolkit: "canva",
     label: "Canva",
     authType: "oauth",
@@ -98,7 +123,7 @@ function requireEmployeeId(employeeId: string | null): string {
 
 export async function getEmployeeIntegrationSecret(
   employeeId: string,
-  toolkit: "apollo" | "hunter" | "bayzat",
+  toolkit: "apollo" | "hunter" | "bayzat" | "composio",
 ): Promise<string | null> {
   const db = getDb();
   if (!db) return null;
@@ -125,6 +150,40 @@ export async function getEmployeeIntegrationSecret(
   );
   const decrypted = secrets[0]?.decrypted_secret;
   return typeof decrypted === "string" ? decrypted : null;
+}
+
+const ACTIVE_COMPOSIO_STATUSES = new Set(["ACTIVE", "CONNECTED", "SUCCESS"]);
+
+export type VerifiedAsanaConnection = {
+  account: ComposioConnectedAccount;
+  adapter: AsanaAdapter;
+  provider: "composio";
+};
+
+export async function getVerifiedAsanaConnection(
+  employeeId: string,
+): Promise<VerifiedAsanaConnection | null> {
+  const apiKey =
+    (await getEmployeeIntegrationSecret(employeeId, "composio")) ??
+    process.env.COMPOSIO_API_KEY?.trim();
+  if (!apiKey) return null;
+
+  const client = createComposioLive({ apiKey });
+  const accounts = await client.listConnectedAccounts({ toolkit: "asana" });
+  const account = accounts.find(
+    (candidate) =>
+      !candidate.is_disabled &&
+      ACTIVE_COMPOSIO_STATUSES.has(candidate.status.toUpperCase()),
+  );
+  if (!account) return null;
+  return {
+    account,
+    adapter: createAsanaViaComposio({
+      client,
+      connectedAccountId: account.id,
+    }),
+    provider: "composio",
+  };
 }
 
 export async function getGoogleWorkspaceAccessToken(
@@ -294,6 +353,17 @@ export const connectionsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const employeeId = requireEmployeeId(ctx.employeeId);
+      const composioAccounts =
+        input.toolkit === "composio"
+          ? await createComposioLive({ apiKey: input.apiKey })
+              .listConnectedAccounts()
+              .catch(() => {
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: "Composio rejected this project API key",
+                });
+              })
+          : null;
       const db = requireDb();
       const [existing] = await db
         .select()
@@ -335,6 +405,12 @@ export const connectionsRouter = router({
           authType: "api_key",
           label: input.toolkit,
           secretId,
+          externalConnectionId:
+            input.toolkit === "composio"
+              ? (composioAccounts?.find(
+                  (account) => account.toolkit.slug === "asana",
+                )?.user_id ?? `${composioAccounts?.length ?? 0} connected apps`)
+              : existing?.externalConnectionId,
           status: "connected",
           lastTestedAt: new Date(),
           lastError: null,
@@ -373,6 +449,34 @@ export const connectionsRouter = router({
         hasSecret: true,
       };
     }),
+
+  asanaStatus: staffProcedure.query(async ({ ctx }) => {
+    const verified = await getVerifiedAsanaConnection(
+      requireEmployeeId(ctx.employeeId),
+    );
+    if (!verified) {
+      return {
+        connected: false as const,
+        provider: null,
+        connectedAccountId: null,
+        providerUserId: null,
+        user: null,
+        workspaces: [],
+      };
+    }
+    const [user, workspaces] = await Promise.all([
+      verified.adapter.me(),
+      verified.adapter.listWorkspaces(),
+    ]);
+    return {
+      connected: true as const,
+      provider: verified.provider,
+      connectedAccountId: verified.account.id,
+      providerUserId: verified.account.user_id ?? null,
+      user,
+      workspaces,
+    };
+  }),
 
   saveGoogleWorkspace: staffProcedure
     .input(

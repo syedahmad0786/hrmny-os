@@ -10,6 +10,8 @@ import {
   type SessionUser,
 } from "../auth/session";
 import { emitHealthSignal } from "../m1-persistence";
+import { featureForTrpcPath } from "@/features/catalog";
+import { featureEnabled } from "../features";
 
 export type TrpcContext = {
   user: SessionUser | null;
@@ -109,9 +111,30 @@ const portalStaffBoundary = t.middleware(async ({ ctx, next, path }) => {
   return next({ ctx });
 });
 
+const requireEnabledFeature = t.middleware(async ({ ctx, next, path }) => {
+  const featureKey = featureForTrpcPath(path);
+  if (
+    featureKey &&
+    ctx.user &&
+    !(await featureEnabled(featureKey, {
+      userId: ctx.user.employeeId,
+      clientId: ctx.user.clientId,
+      roles: ctx.user.roles,
+    }))
+  ) {
+    await recordAuthDenied(path, `feature:${featureKey}`, ctx.employeeId);
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `FEATURE_DISABLED:${featureKey}`,
+    });
+  }
+  return next({ ctx });
+});
+
 export const protectedProcedure = t.procedure
   .use(isAuthed)
-  .use(portalStaffBoundary);
+  .use(portalStaffBoundary)
+  .use(requireEnabledFeature);
 
 /** Staff-only — portal actors cannot call finance / margin / payroll APIs. */
 const requireStaff = t.middleware(async ({ ctx, next, path }) => {
