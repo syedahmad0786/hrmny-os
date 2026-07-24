@@ -890,6 +890,16 @@ const projectTemplateBlueprintSchema = z.object({
   description: z.string().max(20_000).default(""),
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
   privacy: z.enum(["organization", "private"]),
+  clientId: nullableUuid.default(null),
+  roles: z
+    .array(
+      z.object({
+        roleId: uuid,
+        name: z.string().trim().min(1).max(120),
+      }),
+    )
+    .max(100)
+    .default([]),
   sections: z
     .array(
       z.object({
@@ -907,6 +917,7 @@ const projectTemplateBlueprintSchema = z.object({
         priority: z.enum(["low", "medium", "high", "urgent"]).nullable(),
         sectionName: z.string().max(120).nullable(),
         dueOffsetDays: z.number().int().min(-3650).max(3650).nullable(),
+        assigneeRoleId: nullableUuid.default(null),
       }),
     )
     .max(5000),
@@ -8520,25 +8531,58 @@ export const workManagementRouter = router({
         const employeeId = actor(ctx);
         if (input?.projectId) await requireProjectAccess(ctx, input.projectId);
         const db = getDb();
-        if (!db)
-          return [...getDemoWork().templates.values()].filter(
-            (template) =>
-              (template.templateType === "project" &&
-                template.createdByEmployeeId === employeeId) ||
-              template.projectId === input?.projectId,
-          );
-        return db.execute<WorkTemplate>(sql`
-          select work_template_id as "templateId",
-            work_project_id as "projectId", name,
-            template_type as "templateType", blueprint,
-            created_by_employee_id as "createdByEmployeeId"
-          from public.work_template
-          where archived_at is null
-            and ((template_type = 'project'
-                and created_by_employee_id = ${employeeId}::uuid)
-              or work_project_id = ${input?.projectId ?? null}::uuid)
-          order by template_type, lower(name)
-        `);
+        const templates = !db
+          ? [...getDemoWork().templates.values()].filter(
+              (template) =>
+                (template.templateType === "project" &&
+                  template.createdByEmployeeId === employeeId) ||
+                template.projectId === input?.projectId,
+            )
+          : await db.execute<WorkTemplate>(sql`
+              select work_template_id as "templateId",
+                work_project_id as "projectId", name,
+                template_type as "templateType", blueprint,
+                created_by_employee_id as "createdByEmployeeId"
+              from public.work_template
+              where archived_at is null
+                and ((template_type = 'project'
+                    and created_by_employee_id = ${employeeId}::uuid)
+                  or work_project_id = ${input?.projectId ?? null}::uuid)
+              order by template_type, lower(name)
+            `);
+        return Promise.all(
+          templates.map(async (template) => {
+            const parsed = projectTemplateBlueprintSchema.safeParse(
+              template.blueprint,
+            );
+            if (template.templateType !== "project" || !parsed.success)
+              return { ...template, rolePlaceholders: [] };
+            const rolePlaceholdersEnabled = await featureEnabled(
+              "work.templates.roles",
+              {
+                userId: ctx.employeeId,
+                clientId: parsed.data.clientId,
+                roles: ctx.roles,
+              },
+            );
+            return {
+              ...template,
+              blueprint: rolePlaceholdersEnabled
+                ? parsed.data
+                : {
+                    ...parsed.data,
+                    roles: [],
+                    tasks: parsed.data.tasks.map((task) => ({
+                      ...task,
+                      assigneeRoleId: null,
+                    })),
+                  },
+              rolePlaceholders: rolePlaceholdersEnabled
+                ? parsed.data.roles
+                : [],
+            };
+          }),
+        );
       }),
     createTask: staffProcedure
       .input(
@@ -8590,13 +8634,57 @@ export const workManagementRouter = router({
       }),
     captureProject: staffProcedure
       .input(
-        z.object({ projectId: uuid, name: z.string().trim().min(1).max(160) }),
+        z.object({
+          projectId: uuid,
+          name: z.string().trim().min(1).max(160),
+          roles: z
+            .array(
+              z.object({
+                employeeId: uuid,
+                name: z.string().trim().min(1).max(120),
+              }),
+            )
+            .max(100)
+            .default([]),
+        }),
       )
       .mutation(async ({ input, ctx }) => {
         const project = await requireProjectAccess(
           ctx,
           input.projectId,
           "editor",
+        );
+        if (input.roles.length) {
+          await requireScopedFeature(
+            ctx,
+            "work.templates.roles",
+            input.projectId,
+          );
+          if (
+            new Set(input.roles.map((role) => role.employeeId)).size !==
+              input.roles.length ||
+            new Set(input.roles.map((role) => role.name.toLowerCase())).size !==
+              input.roles.length
+          )
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Template roles must have unique people and names",
+            });
+          await validateRuleActions(
+            input.projectId,
+            input.roles.map((role) => ({
+              type: "assign" as const,
+              employeeId: role.employeeId,
+            })),
+          );
+        }
+        const roles = input.roles.map((role) => ({
+          roleId: randomUUID(),
+          name: role.name,
+          employeeId: role.employeeId,
+        }));
+        const roleByEmployeeId = new Map(
+          roles.map((role) => [role.employeeId, role.roleId]),
         );
         const db = getDb();
         let blueprint: z.infer<typeof projectTemplateBlueprintSchema>;
@@ -8612,6 +8700,8 @@ export const workManagementRouter = router({
             description: project.description,
             color: project.color,
             privacy: project.privacy,
+            clientId: project.clientId,
+            roles: roles.map(({ roleId, name }) => ({ roleId, name })),
             sections: sections.map(({ name, position }) => ({
               name,
               position,
@@ -8635,6 +8725,9 @@ export const workManagementRouter = router({
                         86_400_000,
                     )
                   : null,
+                assigneeRoleId: item.assigneeEmployeeId
+                  ? (roleByEmployeeId.get(item.assigneeEmployeeId) ?? null)
+                  : null,
               })),
           };
         } else {
@@ -8650,9 +8743,11 @@ export const workManagementRouter = router({
             priority: WorkItem["priority"];
             sectionName: string | null;
             dueAt: Date | string | null;
+            assigneeEmployeeId: string | null;
           }>(sql`
             select item.title, item.description, item.item_type as "itemType",
-              item.priority, section.name as "sectionName", item.due_at as "dueAt"
+              item.priority, section.name as "sectionName", item.due_at as "dueAt",
+              item.assignee_employee_id as "assigneeEmployeeId"
             from public.work_project_item membership
             join public.work_item item on item.work_item_id = membership.work_item_id
             left join public.work_section section
@@ -8665,6 +8760,8 @@ export const workManagementRouter = router({
             description: project.description,
             color: project.color,
             privacy: project.privacy,
+            clientId: project.clientId,
+            roles: roles.map(({ roleId, name }) => ({ roleId, name })),
             sections: sections.map(({ name, position }) => ({
               name,
               position,
@@ -8679,6 +8776,9 @@ export const workManagementRouter = router({
                 ? Math.round(
                     (new Date(task.dueAt).getTime() - Date.now()) / 86_400_000,
                   )
+                : null,
+              assigneeRoleId: task.assigneeEmployeeId
+                ? (roleByEmployeeId.get(task.assigneeEmployeeId) ?? null)
                 : null,
             })),
           };
@@ -8710,6 +8810,7 @@ export const workManagementRouter = router({
           {
             sourceProjectId: input.projectId,
             tasks: blueprint.tasks.length,
+            roles: blueprint.roles.length,
           },
         );
         return template;
@@ -8859,6 +8960,7 @@ export const workManagementRouter = router({
           templateId: uuid,
           name: z.string().trim().min(1).max(160),
           referenceDate: z.string().date(),
+          roleAssignments: z.record(uuid, nullableUuid).default({}),
         }),
       )
       .mutation(async ({ input, ctx }) => {
@@ -8890,6 +8992,51 @@ export const workManagementRouter = router({
             code: "PRECONDITION_FAILED",
             message: "Template is invalid",
           });
+        for (const featureKey of ["work.projects", "work.templates"])
+          if (
+            !(await featureEnabled(featureKey, {
+              userId: ctx.employeeId,
+              clientId: parsed.data.clientId,
+              roles: ctx.roles,
+            }))
+          )
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: `FEATURE_DISABLED:${featureKey}`,
+            });
+        const roleIds = new Set(parsed.data.roles.map((role) => role.roleId));
+        if (
+          Object.keys(input.roleAssignments).some(
+            (roleId) => !roleIds.has(roleId),
+          )
+        )
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Template role not found",
+          });
+        const assignedEmployeeIds = Object.values(input.roleAssignments).filter(
+          (employeeId): employeeId is string => Boolean(employeeId),
+        );
+        if (assignedEmployeeIds.length) {
+          if (
+            !(await featureEnabled("work.templates.roles", {
+              userId: ctx.employeeId,
+              clientId: parsed.data.clientId,
+              roles: ctx.roles,
+            }))
+          )
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "FEATURE_DISABLED:work.templates.roles",
+            });
+          await validateRuleActions(
+            randomUUID(),
+            assignedEmployeeIds.map((employeeId) => ({
+              type: "assign" as const,
+              employeeId,
+            })),
+          );
+        }
         for (const task of parsed.data.tasks)
           await requireWorkTypeFeature(ctx, task.itemType);
         const projectId = randomUUID();
@@ -8902,7 +9049,7 @@ export const workManagementRouter = router({
             description: parsed.data.description,
             color: parsed.data.color,
             privacy: parsed.data.privacy,
-            clientId: null,
+            clientId: parsed.data.clientId,
             ownerEmployeeId: actor(ctx),
             sourcePlatform: "native",
             accessLevel: "admin",
@@ -8916,6 +9063,9 @@ export const workManagementRouter = router({
           }
           parsed.data.tasks.forEach((task, position) => {
             const itemId = randomUUID();
+            const assigneeEmployeeId = task.assigneeRoleId
+              ? (input.roleAssignments[task.assigneeRoleId] ?? null)
+              : null;
             store.items.set(itemId, {
               itemId,
               parentItemId: null,
@@ -8923,8 +9073,8 @@ export const workManagementRouter = router({
               description: task.description,
               itemType: task.itemType,
               priority: task.priority,
-              assigneeEmployeeId: null,
-              assigneeName: null,
+              assigneeEmployeeId,
+              assigneeName: assigneeEmployeeId ? "Assigned user" : null,
               startDate: null,
               dueAt:
                 task.dueOffsetDays === null
@@ -8944,10 +9094,11 @@ export const workManagementRouter = router({
             await tx.execute(sql`
               insert into public.work_project (
                 work_project_id, name, description, color, privacy,
-                owner_employee_id, created_by_employee_id
+                client_id, owner_employee_id, created_by_employee_id
               ) values (
                 ${projectId}::uuid, ${input.name}, ${parsed.data.description},
-                ${parsed.data.color}, ${parsed.data.privacy}, ${actor(ctx)}::uuid,
+                ${parsed.data.color}, ${parsed.data.privacy},
+                ${parsed.data.clientId}::uuid, ${actor(ctx)}::uuid,
                 ${actor(ctx)}::uuid
               )
             `);
@@ -8956,6 +9107,15 @@ export const workManagementRouter = router({
                 work_project_id, employee_id, access_level
               ) values (${projectId}::uuid, ${actor(ctx)}::uuid, 'admin')
             `);
+            for (const employeeId of new Set(assignedEmployeeIds)) {
+              if (employeeId === actor(ctx)) continue;
+              await tx.execute(sql`
+                insert into public.work_project_member (
+                  work_project_id, employee_id, access_level
+                ) values (${projectId}::uuid, ${employeeId}::uuid, 'editor')
+                on conflict (work_project_id, employee_id) do nothing
+              `);
+            }
             const sectionIds = new Map<string, string>();
             for (const section of parsed.data.sections) {
               const sectionId = randomUUID();
@@ -8971,13 +9131,17 @@ export const workManagementRouter = router({
             }
             for (const [position, task] of parsed.data.tasks.entries()) {
               const itemId = randomUUID();
+              const assigneeEmployeeId = task.assigneeRoleId
+                ? (input.roleAssignments[task.assigneeRoleId] ?? null)
+                : null;
               await tx.execute(sql`
                 insert into public.work_item (
                   work_item_id, title, description, item_type, priority,
-                  created_by_employee_id, due_at
+                  assignee_employee_id, created_by_employee_id, due_at
                 ) values (
                   ${itemId}::uuid, ${task.title}, ${task.description},
-                  ${task.itemType}, ${task.priority}, ${actor(ctx)}::uuid,
+                  ${task.itemType}, ${task.priority},
+                  ${assigneeEmployeeId}::uuid, ${actor(ctx)}::uuid,
                   ${task.dueOffsetDays === null ? null : relativeDate(task.dueOffsetDays, baseDate)}::timestamptz
                 )
               `);
@@ -8996,6 +9160,7 @@ export const workManagementRouter = router({
         await audit(ctx, "work.template.project", "work_project", projectId, {
           templateId: template.templateId,
           tasks: parsed.data.tasks.length,
+          assignedRoles: assignedEmployeeIds.length,
         });
         return { projectId };
       }),

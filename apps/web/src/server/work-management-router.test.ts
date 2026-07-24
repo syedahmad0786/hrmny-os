@@ -1740,6 +1740,87 @@ describe("work management", () => {
     ).toBe("approved");
   });
 
+  it("maps project template role placeholders and obeys Feature Lab", async () => {
+    const caller = partnerCaller();
+    const employeeId = resolveDevUser("partner").employeeId;
+    const source = await caller.work.projects.create({
+      name: `Role template source ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const clientId = resolveDevUser("portal_a").clientId!;
+    getDemoWork().projects.get(source.projectId)!.clientId = clientId;
+    const sourceDetail = await caller.work.projects.get({
+      projectId: source.projectId,
+    });
+    await caller.work.tasks.create({
+      projectId: source.projectId,
+      sectionId: sourceDetail.sections[0]!.sectionId,
+      title: "Prepare launch design",
+      description: "",
+      assigneeEmployeeId: employeeId,
+    });
+    const captured = await caller.work.templates.captureProject({
+      projectId: source.projectId,
+      name: `Role template ${Date.now()}`,
+      roles: [{ employeeId, name: "Designer" }],
+    });
+    const listed = await caller.work.templates.list({
+      projectId: source.projectId,
+    });
+    const role = listed
+      .find((template) => template.templateId === captured.templateId)
+      ?.rolePlaceholders.at(0);
+    expect(role).toMatchObject({ name: "Designer" });
+
+    const created = await caller.work.templates.instantiateProject({
+      templateId: captured.templateId,
+      name: `Role template result ${Date.now()}`,
+      referenceDate: "2026-07-24",
+      roleAssignments: { [role!.roleId]: employeeId },
+    });
+    expect(
+      (
+        await caller.work.projects.get({ projectId: created.projectId })
+      ).items.find((item) => item.title === "Prepare launch design"),
+    ).toMatchObject({ assigneeEmployeeId: employeeId });
+
+    await caller.admin.features.setOverride({
+      featureKey: "work.templates.roles",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "template role pause",
+    });
+    expect(
+      (await caller.work.templates.list({ projectId: source.projectId })).find(
+        (template) => template.templateId === captured.templateId,
+      )?.rolePlaceholders,
+    ).toEqual([]);
+    await expect(
+      caller.work.templates.instantiateProject({
+        templateId: captured.templateId,
+        name: "Blocked role assignment",
+        referenceDate: "2026-07-24",
+        roleAssignments: { [role!.roleId]: employeeId },
+      }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.templates.roles",
+    });
+    const skipped = await caller.work.templates.instantiateProject({
+      templateId: captured.templateId,
+      name: "Skipped role assignment",
+      referenceDate: "2026-07-24",
+      roleAssignments: {},
+    });
+    expect(
+      (
+        await caller.work.projects.get({ projectId: skipped.projectId })
+      ).items.find((item) => item.title === "Prepare launch design"),
+    ).toMatchObject({ assigneeEmployeeId: null });
+  });
+
   it("accepts governed public form submissions with attachments", async () => {
     const owner = partnerCaller();
     const publicUser = anonymousCaller();
