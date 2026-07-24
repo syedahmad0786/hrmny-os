@@ -143,6 +143,15 @@ export function buildWorkReportChart(
   };
 }
 
+export function countReportBuckets(labels: readonly string[]) {
+  const buckets = new Map<string, number>();
+  for (const label of labels) buckets.set(label, (buckets.get(label) ?? 0) + 1);
+  const data = [...buckets.entries()]
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  return { data, total: labels.length };
+}
+
 export function criticalPath(
   items: readonly {
     itemId: string;

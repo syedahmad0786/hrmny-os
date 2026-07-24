@@ -3,6 +3,7 @@ import {
   budgetSummary,
   buildWorkReportChart,
   capacityUtilization,
+  countReportBuckets,
   criticalPath,
   splitTimerByUtcDay,
   weightedProgress,
@@ -114,6 +115,13 @@ describe("work planning calculations", () => {
         { label: "UAE", value: 1 },
       ],
       total: 2,
+    });
+    expect(countReportBuckets(["On track", "At risk", "On track"])).toEqual({
+      data: [
+        { label: "On track", value: 2 },
+        { label: "At risk", value: 1 },
+      ],
+      total: 3,
     });
   });
 });
