@@ -13,6 +13,61 @@ const driveFileSchema = z.object({
 
 const driveFileListSchema = z.object({ files: z.array(driveFileSchema) });
 
+const gmailMessageListSchema = z.object({
+  messages: z
+    .array(z.object({ id: z.string().min(1), threadId: z.string().optional() }))
+    .optional(),
+});
+
+const gmailMessageSchema = z.object({
+  id: z.string().min(1),
+  threadId: z.string().optional(),
+  snippet: z.string().optional(),
+  internalDate: z.string().optional(),
+  payload: z
+    .object({
+      headers: z
+        .array(z.object({ name: z.string(), value: z.string() }))
+        .optional(),
+    })
+    .optional(),
+});
+
+const calendarEventListSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        summary: z.string().optional(),
+        description: z.string().optional(),
+        location: z.string().optional(),
+        htmlLink: z.string().url().optional(),
+        start: z
+          .object({
+            date: z.string().optional(),
+            dateTime: z.string().optional(),
+          })
+          .optional(),
+        end: z
+          .object({
+            date: z.string().optional(),
+            dateTime: z.string().optional(),
+          })
+          .optional(),
+        attendees: z
+          .array(
+            z.object({
+              email: z.string().optional(),
+              displayName: z.string().optional(),
+              responseStatus: z.string().optional(),
+            }),
+          )
+          .optional(),
+      }),
+    )
+    .optional(),
+});
+
 const ignoredTerms = new Set([
   "about",
   "after",
@@ -94,14 +149,13 @@ async function fileText(
   return (await response.text()).slice(0, 8_000);
 }
 
-export async function searchGoogleWorkspace(input: {
+async function searchGoogleDrive(input: {
   accessToken: string;
   query: string;
-  fetchImpl?: typeof fetch;
+  fetchImpl: typeof fetch;
 }) {
   const terms = googleDriveSearchTerms(input.query);
   if (!terms.length) return [];
-  const fetchImpl = input.fetchImpl ?? fetch;
   const q = `trashed = false and (${terms
     .map(
       (term) =>
@@ -118,12 +172,12 @@ export async function searchGoogleWorkspace(input: {
     `https://www.googleapis.com/drive/v3/files?${params}`,
     input.accessToken,
     {},
-    fetchImpl,
+    input.fetchImpl,
   );
   const files = driveFileListSchema.parse(await response.json()).files;
   const sources = [];
   for (const file of files) {
-    const text = await fileText(file, input.accessToken, fetchImpl).catch(
+    const text = await fileText(file, input.accessToken, input.fetchImpl).catch(
       () => "",
     );
     sources.push({
@@ -141,6 +195,134 @@ export async function searchGoogleWorkspace(input: {
     });
   }
   return sources;
+}
+
+async function searchGmail(input: {
+  accessToken: string;
+  query: string;
+  fetchImpl: typeof fetch;
+}) {
+  const terms = googleDriveSearchTerms(input.query);
+  if (!terms.length) return [];
+  const list = await googleRequest(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?${new URLSearchParams(
+      {
+        q: `{${terms.join(" ")}}`,
+        maxResults: "5",
+        fields: "messages(id,threadId)",
+      },
+    )}`,
+    input.accessToken,
+    {},
+    input.fetchImpl,
+  );
+  const messages =
+    gmailMessageListSchema.parse(await list.json()).messages ?? [];
+  const details = await Promise.allSettled(
+    messages.map(async ({ id }) => {
+      const params = new URLSearchParams({
+        format: "metadata",
+        fields: "id,threadId,snippet,internalDate,payload(headers)",
+      });
+      for (const header of ["Subject", "From", "Date"])
+        params.append("metadataHeaders", header);
+      const response = await googleRequest(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?${params}`,
+        input.accessToken,
+        {},
+        input.fetchImpl,
+      );
+      const message = gmailMessageSchema.parse(await response.json());
+      const headers = new Map(
+        (message.payload?.headers ?? []).map((header) => [
+          header.name.toLowerCase(),
+          header.value,
+        ]),
+      );
+      const timestamp = Number(message.internalDate);
+      return {
+        id: `google:gmail:${message.id}`,
+        type: "external_file" as const,
+        label: headers.get("subject")?.slice(0, 300) || "Gmail message",
+        content: JSON.stringify({
+          provider: "Google Workspace Gmail",
+          from: headers.get("from")?.slice(0, 500) ?? null,
+          date:
+            headers.get("date") ??
+            (Number.isFinite(timestamp)
+              ? new Date(timestamp).toISOString()
+              : null),
+          snippet: message.snippet?.slice(0, 2_000) ?? "",
+          url: `https://mail.google.com/mail/u/0/#all/${message.id}`,
+        }),
+      };
+    }),
+  );
+  return details.flatMap((result) =>
+    result.status === "fulfilled" ? [result.value] : [],
+  );
+}
+
+async function searchGoogleCalendar(input: {
+  accessToken: string;
+  query: string;
+  fetchImpl: typeof fetch;
+}) {
+  const terms = googleDriveSearchTerms(input.query);
+  if (!terms.length) return [];
+  const response = await googleRequest(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events?${new URLSearchParams(
+      {
+        q: terms.join(" "),
+        maxResults: "5",
+        maxAttendees: "20",
+        singleEvents: "true",
+        orderBy: "startTime",
+        timeMin: new Date().toISOString(),
+        fields:
+          "items(id,summary,description,location,htmlLink,start,end,attendees(email,displayName,responseStatus))",
+      },
+    )}`,
+    input.accessToken,
+    {},
+    input.fetchImpl,
+  );
+  return (calendarEventListSchema.parse(await response.json()).items ?? []).map(
+    (event) => ({
+      id: `google:calendar:${event.id}`,
+      type: "external_file" as const,
+      label: event.summary?.slice(0, 300) || "Calendar event",
+      content: JSON.stringify({
+        provider: "Google Workspace Calendar",
+        description: event.description?.slice(0, 2_000) ?? "",
+        location: event.location?.slice(0, 500) ?? null,
+        start: event.start?.dateTime ?? event.start?.date ?? null,
+        end: event.end?.dateTime ?? event.end?.date ?? null,
+        attendees: (event.attendees ?? []).map((attendee) => ({
+          name: attendee.displayName ?? null,
+          email: attendee.email ?? null,
+          response: attendee.responseStatus ?? null,
+        })),
+        url: event.htmlLink ?? null,
+      }),
+    }),
+  );
+}
+
+export async function searchGoogleWorkspace(input: {
+  accessToken: string;
+  query: string;
+  fetchImpl?: typeof fetch;
+}) {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const results = await Promise.allSettled([
+    searchGoogleDrive({ ...input, fetchImpl }),
+    searchGmail({ ...input, fetchImpl }),
+    searchGoogleCalendar({ ...input, fetchImpl }),
+  ]);
+  return results.flatMap((result) =>
+    result.status === "fulfilled" ? result.value : [],
+  );
 }
 
 export async function createGoogleWorkspaceFile(input: {
