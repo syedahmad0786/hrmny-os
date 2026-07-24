@@ -153,6 +153,19 @@ export default function WorkPage() {
     { projectId: projectId! },
     { enabled: Boolean(projectId) },
   );
+  const enabled = useMemo(
+    () =>
+      new Set(
+        detail.data?.enabledFeatureKeys ??
+          (projectId ? [] : session.data?.enabledFeatureKeys) ??
+          [],
+      ),
+    [
+      detail.data?.enabledFeatureKeys,
+      projectId,
+      session.data?.enabledFeatureKeys,
+    ],
+  );
   const selectedItem =
     detail.data?.items.find((item) => item.itemId === selectedItemId) ?? null;
   useEffect(() => {
@@ -168,43 +181,24 @@ export default function WorkPage() {
       ),
     [employees.data],
   );
-  const commentsEnabled =
-    session.data?.enabledFeatureKeys.includes("work.comments") ?? false;
-  const dependenciesEnabled =
-    session.data?.enabledFeatureKeys.includes("work.dependencies") ?? false;
-  const subtasksEnabled =
-    session.data?.enabledFeatureKeys.includes("work.subtasks") ?? false;
-  const sectionsEnabled =
-    session.data?.enabledFeatureKeys.includes("work.sections") ?? false;
-  const boardEnabled =
-    session.data?.enabledFeatureKeys.includes("work.views.board") ?? false;
-  const listEnabled =
-    session.data?.enabledFeatureKeys.includes("work.views.list") ?? false;
-  const calendarEnabled =
-    session.data?.enabledFeatureKeys.includes("work.views.calendar") ?? false;
-  const timelineEnabled =
-    session.data?.enabledFeatureKeys.includes("work.views.timeline") ?? false;
-  const filesViewEnabled =
-    session.data?.enabledFeatureKeys.includes("work.views.files") ?? false;
-  const followersEnabled =
-    session.data?.enabledFeatureKeys.includes("work.followers") ?? false;
-  const tagsEnabled =
-    session.data?.enabledFeatureKeys.includes("work.tags") ?? false;
-  const customFieldsEnabled =
-    session.data?.enabledFeatureKeys.includes("work.custom_fields") ?? false;
-  const customTaskTypesEnabled =
-    session.data?.enabledFeatureKeys.includes("work.custom_task_types") ??
-    false;
-  const attachmentsEnabled =
-    session.data?.enabledFeatureKeys.includes("work.attachments") ?? false;
-  const proofingEnabled =
-    session.data?.enabledFeatureKeys.includes("work.proofing") ?? false;
-  const recurrenceEnabled =
-    session.data?.enabledFeatureKeys.includes("work.recurring_tasks") ?? false;
-  const timeEnabled =
-    session.data?.enabledFeatureKeys.includes("work.time_tracking") ?? false;
-  const richTextEnabled =
-    session.data?.enabledFeatureKeys.includes("work.rich_text") ?? false;
+  const commentsEnabled = enabled.has("work.comments");
+  const dependenciesEnabled = enabled.has("work.dependencies");
+  const subtasksEnabled = enabled.has("work.subtasks");
+  const sectionsEnabled = enabled.has("work.sections");
+  const boardEnabled = enabled.has("work.views.board");
+  const listEnabled = enabled.has("work.views.list");
+  const calendarEnabled = enabled.has("work.views.calendar");
+  const timelineEnabled = enabled.has("work.views.timeline");
+  const filesViewEnabled = enabled.has("work.views.files");
+  const followersEnabled = enabled.has("work.followers");
+  const tagsEnabled = enabled.has("work.tags");
+  const customFieldsEnabled = enabled.has("work.custom_fields");
+  const customTaskTypesEnabled = enabled.has("work.custom_task_types");
+  const attachmentsEnabled = enabled.has("work.attachments");
+  const proofingEnabled = enabled.has("work.proofing");
+  const recurrenceEnabled = enabled.has("work.recurring_tasks");
+  const timeEnabled = enabled.has("work.time_tracking");
+  const richTextEnabled = enabled.has("work.rich_text");
   const comments = trpc.work.comments.list.useQuery(
     { itemId: selectedItemId! },
     { enabled: Boolean(selectedItemId && commentsEnabled) },

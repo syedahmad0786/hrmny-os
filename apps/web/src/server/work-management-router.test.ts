@@ -465,6 +465,61 @@ describe("work management", () => {
     );
   });
 
+  it("enforces client Feature Lab boundaries across project APIs and discovery", async () => {
+    const caller = partnerCaller();
+    const clientId = resolveDevUser("portal_a").clientId!;
+    const project = await caller.work.projects.create({
+      name: `Client feature boundary ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      clientId,
+      color: "#C7702E",
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.custom_fields",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "client does not use custom fields",
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.custom_fields",
+      scopeType: "user",
+      scopeKey: resolveDevUser("partner").employeeId,
+      enabled: true,
+      reason: "client boundary must still win",
+    });
+    const detail = await caller.work.projects.get({
+      projectId: project.projectId,
+    });
+    expect(detail.enabledFeatureKeys).not.toContain("work.custom_fields");
+    await expect(
+      caller.work.customFields.list({ projectId: project.projectId }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.custom_fields",
+    });
+
+    await caller.admin.features.setOverride({
+      featureKey: "work.projects",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "client work module disabled",
+    });
+    expect(
+      (await caller.work.projects.list()).some(
+        (candidate) => candidate.projectId === project.projectId,
+      ),
+    ).toBe(false);
+    await expect(
+      caller.work.projects.get({ projectId: project.projectId }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.projects",
+    });
+  });
+
   it("turns proofing pins into governed actionable subtasks", async () => {
     expect(
       isProofableAttachment({ name: "creative.PDF", contentType: null }),
@@ -1450,8 +1505,15 @@ describe("work management", () => {
         }),
       ],
     });
+    await expect(
+      installer.work.customFields.list({ projectId: target.projectId }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.custom_fields",
+    });
     expect(
-      await installer.work.customFields.list({ projectId: target.projectId }),
+      [...getDemoWork().customFields.values()].filter(
+        (field) => field.projectId === target.projectId,
+      ),
     ).not.toContainEqual(expect.objectContaining({ name: "Budget code" }));
     expect(
       (await owner.work.bundles.list()).find(

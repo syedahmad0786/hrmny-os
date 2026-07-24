@@ -4,7 +4,11 @@ import { sql } from "@hrmny/db";
 import { z } from "zod";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
-import { featureEnabled } from "../features";
+import {
+  featureEnabled,
+  listFeatureOverrides,
+  resolveFeatureCatalog,
+} from "../features";
 import { getWorkOrganizationPolicy } from "../work-governance";
 import { writeAudit } from "../m1-persistence";
 import {
@@ -1135,6 +1139,8 @@ export async function requireProjectAccess(
       project.ownerEmployeeId !== employeeId
     )
       throw new TRPCError({ code: "NOT_FOUND" });
+    if (ctx.requestedFeatureKey)
+      await requireScopedFeature(ctx, ctx.requestedFeatureKey, projectId);
     return project;
   }
   const rows = await db.execute<WorkProject>(sql`
@@ -1185,6 +1191,8 @@ export async function requireProjectAccess(
       message: `${minimum} project access required`,
     });
   }
+  if (ctx.requestedFeatureKey)
+    await requireScopedFeature(ctx, ctx.requestedFeatureKey, projectId);
   return { ...project, createdAt: new Date(project.createdAt).toISOString() };
 }
 
@@ -3056,9 +3064,25 @@ export const workManagementRouter = router({
     list: staffProcedure.query(async ({ ctx }) => {
       const employeeId = actor(ctx);
       const db = getDb();
+      const visibleProjects = async (projects: WorkProject[]) =>
+        (
+          await Promise.all(
+            projects.map(async (project) =>
+              (await featureEnabled("work.projects", {
+                userId: ctx.employeeId,
+                clientId: project.clientId,
+                roles: ctx.roles,
+              }))
+                ? project
+                : null,
+            ),
+          )
+        ).filter((project) => project !== null);
       if (!db)
-        return [...getDemoWork().projects.values()].filter(
-          (project) => project.projectKind !== "personal",
+        return visibleProjects(
+          [...getDemoWork().projects.values()].filter(
+            (project) => project.projectKind !== "personal",
+          ),
         );
       const rows = await db.execute<WorkProject>(sql`
         select project.work_project_id as "projectId", project.name,
@@ -3100,10 +3124,12 @@ export const workManagementRouter = router({
           )
         order by lower(project.name)
       `);
-      return rows.map((row) => ({
-        ...row,
-        createdAt: new Date(row.createdAt).toISOString(),
-      }));
+      return visibleProjects(
+        rows.map((row) => ({
+          ...row,
+          createdAt: new Date(row.createdAt).toISOString(),
+        })),
+      );
     }),
 
     get: staffProcedure
@@ -3111,18 +3137,26 @@ export const workManagementRouter = router({
       .query(async ({ input, ctx }) => {
         const project = await requireProjectAccess(ctx, input.projectId);
         const db = getDb();
-        const subject = { userId: ctx.employeeId, roles: ctx.roles };
-        const [showSections, showTasks, showDependencies, showTime] =
-          await Promise.all([
-            featureEnabled("work.sections", subject),
-            featureEnabled("work.tasks", subject),
-            featureEnabled("work.dependencies", subject),
-            featureEnabled("work.time_tracking", subject),
-          ]);
+        const enabledFeatureKeys = resolveFeatureCatalog(
+          await listFeatureOverrides(),
+          {
+            userId: ctx.employeeId,
+            clientId: project.clientId,
+            roles: ctx.roles,
+          },
+        )
+          .filter((feature) => feature.enabled)
+          .map((feature) => feature.key);
+        const enabled = new Set(enabledFeatureKeys);
+        const showSections = enabled.has("work.sections");
+        const showTasks = enabled.has("work.tasks");
+        const showDependencies = enabled.has("work.dependencies");
+        const showTime = enabled.has("work.time_tracking");
         if (!db) {
           const store = getDemoWork();
           return {
             project,
+            enabledFeatureKeys,
             sections: showSections
               ? [...store.sections.values()]
                   .filter((item) => item.projectId === input.projectId)
@@ -3195,6 +3229,7 @@ export const workManagementRouter = router({
         ]);
         return {
           project,
+          enabledFeatureKeys,
           sections,
           items: items.map((item) => ({
             ...item,

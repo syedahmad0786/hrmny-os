@@ -24,21 +24,6 @@ function hours(minutes: number) {
 export default function PlanningPage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
-  const enabled = useMemo(
-    () => new Set(session.data?.enabledFeatureKeys ?? []),
-    [session.data?.enabledFeatureKeys],
-  );
-  const goalsEnabled = enabled.has("work.goals");
-  const portfoliosEnabled = enabled.has("work.portfolios");
-  const statusEnabled = enabled.has("work.status_updates");
-  const reportingEnabled = enabled.has("work.reporting_dashboards");
-  const workloadEnabled = enabled.has("work.workload");
-  const capacityEnabled = enabled.has("work.capacity_planning");
-  const budgetsEnabled = enabled.has("work.budgets");
-  const timeEnabled = enabled.has("work.time_tracking");
-  const ganttEnabled = enabled.has("work.views.gantt");
-  const richTextEnabled = enabled.has("work.rich_text");
-
   const projects = trpc.work.projects.list.useQuery();
   const employees = trpc.work.members.listEmployees.useQuery();
   const [projectId, setProjectId] = useState("");
@@ -52,6 +37,29 @@ export default function PlanningPage() {
     { projectId },
     { enabled: Boolean(projectId) },
   );
+  const enabled = useMemo(
+    () =>
+      new Set(
+        detail.data?.enabledFeatureKeys ??
+          (projectId ? [] : session.data?.enabledFeatureKeys) ??
+          [],
+      ),
+    [
+      detail.data?.enabledFeatureKeys,
+      projectId,
+      session.data?.enabledFeatureKeys,
+    ],
+  );
+  const goalsEnabled = enabled.has("work.goals");
+  const portfoliosEnabled = enabled.has("work.portfolios");
+  const statusEnabled = enabled.has("work.status_updates");
+  const reportingEnabled = enabled.has("work.reporting_dashboards");
+  const workloadEnabled = enabled.has("work.workload");
+  const capacityEnabled = enabled.has("work.capacity_planning");
+  const budgetsEnabled = enabled.has("work.budgets");
+  const timeEnabled = enabled.has("work.time_tracking");
+  const ganttEnabled = enabled.has("work.views.gantt");
+  const richTextEnabled = enabled.has("work.rich_text");
   const goals = trpc.work.goals.list.useQuery(undefined, {
     enabled: goalsEnabled,
   });

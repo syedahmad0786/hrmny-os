@@ -188,6 +188,54 @@ describe("AI Studio", () => {
     });
   });
 
+  it("treats a client AI Studio switch as a project hard boundary", async () => {
+    const caller = partnerCaller();
+    const clientId = resolveDevUser("portal_a").clientId!;
+    await caller.admin.features.setOverride({
+      featureKey: "work.ai.studio",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: true,
+      reason: "test",
+    });
+    const project = await caller.work.projects.create({
+      name: `Client Studio ${crypto.randomUUID()}`,
+      description: "",
+      privacy: "private",
+      clientId,
+      color: "#C7702E",
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.ai.studio",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "client AI disabled",
+    });
+    expect(
+      await caller.work.projects.get({ projectId: project.projectId }),
+    ).toMatchObject({
+      enabledFeatureKeys: expect.not.arrayContaining(["work.ai.studio"]),
+    });
+    await expect(
+      caller.workAiStudio.create({
+        projectId: project.projectId,
+        name: "Blocked workflow",
+        description: "",
+        triggerType: "manual",
+        aiCondition: null,
+        instructions: "Do the work",
+        referenceText: "",
+        allowedActionTypes: ["create_task"],
+        model: null,
+        scheduleMinutes: null,
+      }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.ai.studio",
+    });
+  });
+
   it("fails closed when AI Studio is disabled", async () => {
     const caller = partnerCaller();
     await expect(caller.workAiStudio.list()).rejects.toMatchObject({
