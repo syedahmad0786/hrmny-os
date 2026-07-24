@@ -335,4 +335,45 @@ describe("work migration compatibility", () => {
     expect(migration).toContain("'on_hold'");
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("adds source-scoped Asana reconciliation provenance", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0035_asana_reconciliation.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0035_asana_reconciliation.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0035_asana_reconciliation.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(/source_workspace_external_id text/i);
+    expect(migration).toMatch(/source_connection_external_id text/i);
+    for (const table of [
+      "work_project_member",
+      "work_team_member",
+      "work_team_project",
+      "work_portfolio_project",
+      "work_project_item",
+      "work_item_dependency",
+      "work_item_follower",
+      "work_item_tag",
+      "work_custom_field_value",
+    ]) {
+      expect(migration).toMatch(
+        new RegExp(
+          `ALTER TABLE public\\.${table}[\\s\\S]+?external_id text`,
+          "i",
+        ),
+      );
+    }
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

@@ -5,6 +5,7 @@ import {
   asanaGoalProgress,
   asanaGoalStatus,
   asanaItemType,
+  importAsanaWorkspace,
 } from "./asana-import";
 
 describe("Asana import mapping", () => {
@@ -32,5 +33,18 @@ describe("Asana import mapping", () => {
         },
       }),
     ).toBe(75);
+  });
+
+  it("refuses a partial scan before reconciliation can change data", async () => {
+    await expect(
+      importAsanaWorkspace({
+        db: {} as never,
+        scan: { depth: "structure" } as never,
+        workspaceGid: "w1",
+        workspaceName: "Main",
+        connectedAccountId: "ca1",
+        actorEmployeeId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).rejects.toThrow("requires a full scan");
   });
 });

@@ -164,6 +164,7 @@ export const asanaMigrationRouter = router({
         scan,
         workspaceGid: workspace.gid,
         workspaceName: workspace.name,
+        connectedAccountId: verified.account.id,
         actorEmployeeId: ctx.employeeId!,
       });
       await writeAudit({
