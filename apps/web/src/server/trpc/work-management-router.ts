@@ -21,6 +21,7 @@ import {
   normalizeFormAnswers,
   relativeDate,
   ruleBranchMatches,
+  type WorkFormAttachmentAnswer,
   type WorkFormQuestion,
   type WorkRuleAction,
   type WorkRuleBranch,
@@ -39,8 +40,10 @@ import {
   queueAssignedWorkAiTeammate,
   queueMentionedWorkAiTeammates,
 } from "../work-ai-teammate-events";
+import { workAiContextForEmployee } from "../work-ai-actor";
 import {
   createCallerFactory,
+  publicProcedure,
   router,
   staffProcedure,
   type TrpcContext,
@@ -252,6 +255,8 @@ type WorkForm = {
   defaultAssigneeEmployeeId: string | null;
   confirmationMessage: string;
   isActive: boolean;
+  accessLevel: "organization" | "anyone" | "deactivated";
+  createdByEmployeeId: string;
 };
 type WorkRule = {
   ruleId: string;
@@ -427,7 +432,13 @@ type DemoWork = {
   forms: Map<string, WorkForm>;
   formSubmissions: Map<
     string,
-    { formId: string; itemId: string; answers: Record<string, unknown> }
+    {
+      formId: string;
+      itemId: string;
+      answers: Record<string, unknown>;
+      submittedByEmployeeId: string | null;
+      submittedAt: string;
+    }
   >;
   rules: Map<string, WorkRule>;
   ruleRuns: Map<string, WorkRuleRun>;
@@ -778,15 +789,21 @@ const formQuestionSchema = z.object({
     "date",
     "number",
     "checkbox",
+    "attachment",
   ]),
   required: z.boolean().default(false),
   options: z.array(z.string().trim().min(1).max(120)).max(100).default([]),
+  multiple: z.boolean().optional(),
   showWhen: z
     .object({
       key: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
       equals: z.union([z.string().max(200), z.boolean()]),
     })
     .optional(),
+});
+const formSubmissionSchema = z.object({
+  formId: uuid,
+  answers: z.record(z.string().max(64), z.unknown()),
 });
 const ruleConditionSchema = z
   .object({
@@ -1825,6 +1842,7 @@ async function notifyItem(
   itemId: string,
   eventType: NotificationEvent,
   message: string,
+  includeActor = false,
 ) {
   const employeeId = actor(ctx);
   const db = getDb();
@@ -1833,7 +1851,7 @@ async function notifyItem(
     const item = store.items.get(itemId);
     const recipients = new Set(store.followers.get(itemId) ?? []);
     if (item?.assigneeEmployeeId) recipients.add(item.assigneeEmployeeId);
-    recipients.delete(employeeId);
+    if (!includeActor) recipients.delete(employeeId);
     for (const recipientEmployeeId of recipients) {
       const notificationId = randomUUID();
       store.notifications.set(notificationId, {
@@ -1871,7 +1889,7 @@ async function notifyItem(
       where follower.work_item_id = ${itemId}::uuid
     ) recipient
     where recipient.employee_id is not null
-      and recipient.employee_id <> ${employeeId}::uuid
+      and (${includeActor} or recipient.employee_id <> ${employeeId}::uuid)
   `);
 }
 
@@ -3057,6 +3075,292 @@ async function requireBundleCustomTaskTypeAccess(
       requireCustomTaskTypeAccess(ctx, type.customTaskTypeId),
     ),
   );
+}
+
+async function workFormById(formId: string): Promise<WorkForm | null> {
+  const db = getDb();
+  if (!db) return getDemoWork().forms.get(formId) ?? null;
+  const [raw] = await db.execute<WorkForm & { questions: unknown }>(sql`
+    select work_form_id as "formId", work_project_id as "projectId",
+      work_section_id as "sectionId", name, description,
+      title_question_key as "titleQuestionKey", questions,
+      default_assignee_employee_id as "defaultAssigneeEmployeeId",
+      confirmation_message as "confirmationMessage", is_active as "isActive",
+      access_level as "accessLevel",
+      created_by_employee_id as "createdByEmployeeId"
+    from public.work_form where work_form_id = ${formId}::uuid
+  `);
+  if (!raw) return null;
+  const questions = z.array(formQuestionSchema).safeParse(raw.questions);
+  return questions.success ? { ...raw, questions: questions.data } : null;
+}
+
+function formAttachments(
+  questions: readonly WorkFormQuestion[],
+  answers: Record<string, unknown>,
+  itemId: string,
+) {
+  const files = questions.flatMap((question) =>
+    question.type === "attachment"
+      ? ((answers[question.key] ?? []) as WorkFormAttachmentAnswer[])
+      : [],
+  );
+  if (files.length > 10)
+    throw new TRPCError({
+      code: "PAYLOAD_TOO_LARGE",
+      message: "A submission can include up to 10 files",
+    });
+  let totalBytes = 0;
+  return files.map((file) => {
+    const body = Buffer.from(file.contentBase64, "base64");
+    totalBytes += body.byteLength;
+    if (body.byteLength > 10_000_000 || totalBytes > 25_000_000)
+      throw new TRPCError({
+        code: "PAYLOAD_TOO_LARGE",
+        message: "Files are limited to 10 MB each and 25 MB per submission",
+      });
+    const attachmentId = randomUUID();
+    const safeName = file.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    return {
+      attachment: {
+        attachmentId,
+        itemId,
+        name: file.fileName,
+        storagePath: `work/${itemId}/${attachmentId}-${safeName}`,
+        externalUrl: null,
+        contentType: file.contentType,
+        sizeBytes: body.byteLength,
+        createdAt: new Date().toISOString(),
+      } satisfies WorkAttachment,
+      body: new Uint8Array(body),
+    };
+  });
+}
+
+async function submitWorkForm(
+  ctx: TrpcContext,
+  input: { formId: string; answers: Record<string, unknown> },
+  publicSubmission: boolean,
+) {
+  const raw = await workFormById(input.formId);
+  if (!raw) throw new TRPCError({ code: "NOT_FOUND" });
+  if (publicSubmission) {
+    if (raw.accessLevel !== "anyone" || !raw.isActive)
+      throw new TRPCError({ code: "NOT_FOUND" });
+    await Promise.all([
+      requireScopedFeature(ctx, "work.forms", raw.projectId),
+      requireScopedFeature(ctx, "work.forms.public", raw.projectId),
+    ]);
+  } else {
+    await requireProjectAccess(ctx, raw.projectId);
+    if (raw.accessLevel === "deactivated" || !raw.isActive)
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "Form is unavailable",
+      });
+  }
+  let answers: Record<string, unknown>;
+  try {
+    answers = normalizeFormAnswers(raw.questions, input.answers);
+  } catch (error) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: error instanceof Error ? error.message : "Answers are invalid",
+    });
+  }
+  const title = answers[raw.titleQuestionKey];
+  if (typeof title !== "string" || !title.trim())
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Task title is required",
+    });
+  const description = raw.questions
+    .flatMap((question) => {
+      const answer = answers[question.key];
+      if (answer === undefined) return [];
+      const value =
+        question.type === "attachment"
+          ? (answer as WorkFormAttachmentAnswer[])
+              .map((file) => file.fileName)
+              .join(", ")
+          : Array.isArray(answer)
+            ? answer.join(", ")
+            : String(answer);
+      return [`${question.label}: ${value}`];
+    })
+    .join("\n");
+  const itemId = randomUUID();
+  const submissionId = randomUUID();
+  const submittedByEmployeeId = publicSubmission ? null : actor(ctx);
+  const createdByEmployeeId = submittedByEmployeeId ?? raw.createdByEmployeeId;
+  const attachments = formAttachments(raw.questions, answers, itemId);
+  const storedPaths: string[] = [];
+  try {
+    for (const { attachment, body } of attachments) {
+      await getDemoStore().objectStore.put({
+        path: attachment.storagePath!,
+        body,
+        contentType: attachment.contentType!,
+      });
+      storedPaths.push(attachment.storagePath!);
+    }
+    const db = getDb();
+    if (!db) {
+      if (publicSubmission) {
+        const recent = [...getDemoWork().formSubmissions.values()].filter(
+          (submission) =>
+            submission.formId === raw.formId &&
+            submission.submittedByEmployeeId === null &&
+            Date.now() - new Date(submission.submittedAt).getTime() < 60_000,
+        );
+        if (recent.length >= 30)
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "Please wait before submitting again",
+          });
+      }
+      getDemoWork().items.set(itemId, {
+        itemId,
+        parentItemId: null,
+        title: title.trim(),
+        description,
+        itemType: "task",
+        priority: null,
+        assigneeEmployeeId: raw.defaultAssigneeEmployeeId,
+        assigneeName: raw.defaultAssigneeEmployeeId ? "Assigned user" : null,
+        startDate: null,
+        dueAt: null,
+        completedAt: null,
+        sectionId: raw.sectionId,
+        position: [...getDemoWork().items.values()].filter(
+          (item) => item.projectId === raw.projectId,
+        ).length,
+        projectId: raw.projectId,
+        recurrence: null,
+      });
+      getDemoWork().formSubmissions.set(submissionId, {
+        formId: raw.formId,
+        itemId,
+        answers,
+        submittedByEmployeeId,
+        submittedAt: new Date().toISOString(),
+      });
+      for (const { attachment } of attachments)
+        getDemoWork().attachments.set(attachment.attachmentId, attachment);
+    } else {
+      await db.transaction(async (tx) => {
+        if (publicSubmission) {
+          const accepted = await tx.execute(sql`
+            insert into public.work_form_public_rate_limit (
+              work_form_id, window_started_at, request_count
+            ) values (${raw.formId}::uuid, now(), 1)
+            on conflict (work_form_id) do update set
+              window_started_at = case
+                when work_form_public_rate_limit.window_started_at
+                  <= now() - interval '1 minute' then now()
+                else work_form_public_rate_limit.window_started_at end,
+              request_count = case
+                when work_form_public_rate_limit.window_started_at
+                  <= now() - interval '1 minute' then 1
+                else work_form_public_rate_limit.request_count + 1 end,
+              updated_at = now()
+            where work_form_public_rate_limit.window_started_at
+                <= now() - interval '1 minute'
+              or work_form_public_rate_limit.request_count < 30
+            returning request_count
+          `);
+          if (!accepted[0])
+            throw new TRPCError({
+              code: "TOO_MANY_REQUESTS",
+              message: "Please wait before submitting again",
+            });
+        }
+        await tx.execute(sql`
+          insert into public.work_item (
+            work_item_id, title, description, item_type,
+            assignee_employee_id, created_by_employee_id
+          ) values (
+            ${itemId}::uuid, ${title.trim()}, ${description}, 'task',
+            ${raw.defaultAssigneeEmployeeId}::uuid,
+            ${createdByEmployeeId}::uuid
+          )
+        `);
+        await tx.execute(sql`
+          insert into public.work_project_item (
+            work_project_id, work_item_id, work_section_id, position
+          ) values (
+            ${raw.projectId}::uuid, ${itemId}::uuid, ${raw.sectionId}::uuid,
+            (select coalesce(max(position), -1) + 1
+             from public.work_project_item
+             where work_project_id = ${raw.projectId}::uuid)
+          )
+        `);
+        await tx.execute(sql`
+          insert into public.work_form_submission (
+            work_form_submission_id, work_form_id, submitted_by_employee_id,
+            answers, work_item_id
+          ) values (
+            ${submissionId}::uuid, ${raw.formId}::uuid,
+            ${submittedByEmployeeId}::uuid,
+            ${JSON.stringify(answers)}::jsonb, ${itemId}::uuid
+          )
+        `);
+        for (const { attachment } of attachments)
+          await tx.execute(sql`
+            insert into public.work_attachment (
+              work_attachment_id, work_item_id, name, storage_path,
+              content_type, size_bytes, uploaded_by_employee_id
+            ) values (
+              ${attachment.attachmentId}::uuid, ${itemId}::uuid,
+              ${attachment.name}, ${attachment.storagePath},
+              ${attachment.contentType}, ${attachment.sizeBytes},
+              ${submittedByEmployeeId}::uuid
+            )
+          `);
+      });
+    }
+  } catch (error) {
+    await Promise.all(
+      storedPaths.map((path) => getDemoStore().objectStore.remove?.(path)),
+    );
+    throw error;
+  }
+  await writeAudit({
+    actorEmployeeId: submittedByEmployeeId,
+    action: "work.form.submit",
+    entityType: "work_form_submission",
+    entityId: submissionId,
+    before: null,
+    after: { formId: raw.formId, itemId, publicSubmission },
+    reason: null,
+  });
+  let executionCtx = ctx;
+  if (publicSubmission) {
+    try {
+      executionCtx = await workAiContextForEmployee(raw.createdByEmployeeId);
+    } catch {
+      executionCtx = {
+        ...ctx,
+        employeeId: raw.createdByEmployeeId,
+        roles: [],
+      };
+    }
+    executionCtx.clientId = await projectClientId(raw.projectId);
+  }
+  if (raw.defaultAssigneeEmployeeId)
+    await notifyItem(
+      executionCtx,
+      itemId,
+      "assigned",
+      `Assigned: ${title.trim()}`,
+      publicSubmission,
+    );
+  await runProjectRules(executionCtx, raw.projectId, itemId, "task_added");
+  return {
+    submissionId,
+    itemId,
+    message: raw.confirmationMessage,
+  };
 }
 
 export const workManagementRouter = router({
@@ -7675,7 +7979,9 @@ export const workManagementRouter = router({
             work_section_id as "sectionId", name, description,
             title_question_key as "titleQuestionKey", questions,
             default_assignee_employee_id as "defaultAssigneeEmployeeId",
-            confirmation_message as "confirmationMessage", is_active as "isActive"
+            confirmation_message as "confirmationMessage", is_active as "isActive",
+            access_level as "accessLevel",
+            created_by_employee_id as "createdByEmployeeId"
           from public.work_form
           where work_project_id = ${input.projectId}::uuid
           order by lower(name)
@@ -7709,10 +8015,15 @@ export const workManagementRouter = router({
             .min(1)
             .max(1000)
             .default("Your request was submitted."),
+          accessLevel: z
+            .enum(["organization", "anyone", "deactivated"])
+            .default("organization"),
         }),
       )
       .mutation(async ({ input, ctx }) => {
         await requireProjectAccess(ctx, input.projectId, "editor");
+        if (input.accessLevel === "anyone")
+          await requireScopedFeature(ctx, "work.forms.public", input.projectId);
         const keys = new Set(input.questions.map((question) => question.key));
         if (keys.size !== input.questions.length)
           throw new TRPCError({
@@ -7739,6 +8050,11 @@ export const workManagementRouter = router({
               code: "BAD_REQUEST",
               message: `${question.label} needs at least one option`,
             });
+          if (question.multiple && question.type !== "attachment")
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `${question.label} cannot accept multiple files`,
+            });
           if (question.showWhen && !keys.has(question.showWhen.key))
             throw new TRPCError({
               code: "BAD_REQUEST",
@@ -7755,7 +8071,9 @@ export const workManagementRouter = router({
           questions: input.questions,
           defaultAssigneeEmployeeId: input.defaultAssigneeEmployeeId ?? null,
           confirmationMessage: input.confirmationMessage,
-          isActive: true,
+          isActive: input.accessLevel !== "deactivated",
+          accessLevel: input.accessLevel,
+          createdByEmployeeId: actor(ctx),
         };
         const db = getDb();
         if (!db) {
@@ -7798,12 +8116,14 @@ export const workManagementRouter = router({
             insert into public.work_form (
               work_form_id, work_project_id, work_section_id, name, description,
               title_question_key, questions, default_assignee_employee_id,
-              confirmation_message, created_by_employee_id
+              confirmation_message, access_level, is_active,
+              created_by_employee_id
             ) values (
               ${form.formId}::uuid, ${form.projectId}::uuid, ${form.sectionId}::uuid,
               ${form.name}, ${form.description}, ${form.titleQuestionKey},
               ${JSON.stringify(form.questions)}::jsonb,
               ${form.defaultAssigneeEmployeeId}::uuid, ${form.confirmationMessage},
+              ${form.accessLevel}, ${form.isActive},
               ${actor(ctx)}::uuid
             )
           `);
@@ -7814,165 +8134,91 @@ export const workManagementRouter = router({
         });
         return form;
       }),
+    setAccess: staffProcedure
+      .input(
+        z.object({
+          formId: uuid,
+          accessLevel: z.enum(["organization", "anyone", "deactivated"]),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const form = await workFormById(input.formId);
+        if (!form) throw new TRPCError({ code: "NOT_FOUND" });
+        await requireProjectAccess(ctx, form.projectId, "editor");
+        if (input.accessLevel === "anyone")
+          await requireScopedFeature(ctx, "work.forms.public", form.projectId);
+        const isActive = input.accessLevel !== "deactivated";
+        const db = getDb();
+        if (!db)
+          Object.assign(getDemoWork().forms.get(input.formId)!, {
+            accessLevel: input.accessLevel,
+            isActive,
+          });
+        else
+          await db.execute(sql`
+            update public.work_form
+            set access_level = ${input.accessLevel}, is_active = ${isActive},
+              updated_at = now()
+            where work_form_id = ${input.formId}::uuid
+          `);
+        await audit(ctx, "work.form.access", "work_form", input.formId, {
+          accessLevel: input.accessLevel,
+        });
+        return { formId: input.formId, accessLevel: input.accessLevel };
+      }),
     setActive: staffProcedure
       .input(z.object({ formId: uuid, active: z.boolean() }))
       .mutation(async ({ input, ctx }) => {
-        const db = getDb();
-        const form = !db
-          ? getDemoWork().forms.get(input.formId)
-          : (
-              await db.execute<{ projectId: string }>(sql`
-                select work_project_id as "projectId" from public.work_form
-                where work_form_id = ${input.formId}::uuid
-              `)
-            )[0];
+        const form = await workFormById(input.formId);
         if (!form) throw new TRPCError({ code: "NOT_FOUND" });
         await requireProjectAccess(ctx, form.projectId, "editor");
-        if (!db) getDemoWork().forms.get(input.formId)!.isActive = input.active;
+        const accessLevel = input.active
+          ? form.accessLevel === "deactivated"
+            ? "organization"
+            : form.accessLevel
+          : "deactivated";
+        const db = getDb();
+        if (!db)
+          Object.assign(getDemoWork().forms.get(input.formId)!, {
+            isActive: input.active,
+            accessLevel,
+          });
         else
           await db.execute(sql`
-            update public.work_form set is_active = ${input.active}, updated_at = now()
+            update public.work_form set is_active = ${input.active},
+              access_level = ${accessLevel}, updated_at = now()
             where work_form_id = ${input.formId}::uuid
           `);
         await audit(ctx, "work.form.active", "work_form", input.formId, {
           active: input.active,
+          accessLevel,
         });
         return { ok: true as const };
       }),
     submit: staffProcedure
-      .input(
-        z.object({
-          formId: uuid,
-          answers: z.record(z.string().max(64), z.unknown()),
-        }),
-      )
-      .mutation(async ({ input, ctx }) => {
-        const db = getDb();
-        const raw = !db
-          ? getDemoWork().forms.get(input.formId)
-          : (
-              await db.execute<WorkForm & { questions: unknown }>(sql`
-                select work_form_id as "formId", work_project_id as "projectId",
-                  work_section_id as "sectionId", name, description,
-                  title_question_key as "titleQuestionKey", questions,
-                  default_assignee_employee_id as "defaultAssigneeEmployeeId",
-                  confirmation_message as "confirmationMessage", is_active as "isActive"
-                from public.work_form where work_form_id = ${input.formId}::uuid
-              `)
-            )[0];
-        if (!raw) throw new TRPCError({ code: "NOT_FOUND" });
-        await requireProjectAccess(ctx, raw.projectId);
-        const parsed = z.array(formQuestionSchema).safeParse(raw.questions);
-        if (!raw.isActive || !parsed.success)
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "Form is unavailable",
-          });
-        let answers: Record<string, unknown>;
-        try {
-          answers = normalizeFormAnswers(parsed.data, input.answers);
-        } catch (error) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message:
-              error instanceof Error ? error.message : "Answers are invalid",
-          });
-        }
-        const title = answers[raw.titleQuestionKey];
-        if (typeof title !== "string" || !title.trim())
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Task title is required",
-          });
-        const description = parsed.data
-          .flatMap((question) =>
-            answers[question.key] === undefined
-              ? []
-              : [
-                  `${question.label}: ${Array.isArray(answers[question.key]) ? (answers[question.key] as unknown[]).join(", ") : String(answers[question.key])}`,
-                ],
-          )
-          .join("\n");
-        const itemId = randomUUID();
-        const submissionId = randomUUID();
-        if (!db) {
-          getDemoWork().items.set(itemId, {
-            itemId,
-            parentItemId: null,
-            title: title.trim(),
-            description,
-            itemType: "task",
-            priority: null,
-            assigneeEmployeeId: raw.defaultAssigneeEmployeeId,
-            assigneeName: raw.defaultAssigneeEmployeeId
-              ? "Assigned user"
-              : null,
-            startDate: null,
-            dueAt: null,
-            completedAt: null,
-            sectionId: raw.sectionId,
-            position: [...getDemoWork().items.values()].filter(
-              (item) => item.projectId === raw.projectId,
-            ).length,
-            projectId: raw.projectId,
-            recurrence: null,
-          });
-          getDemoWork().formSubmissions.set(submissionId, {
-            formId: raw.formId,
-            itemId,
-            answers,
-          });
-        } else {
-          await db.transaction(async (tx) => {
-            await tx.execute(sql`
-              insert into public.work_item (
-                work_item_id, title, description, item_type,
-                assignee_employee_id, created_by_employee_id
-              ) values (
-                ${itemId}::uuid, ${title.trim()}, ${description}, 'task',
-                ${raw.defaultAssigneeEmployeeId}::uuid, ${actor(ctx)}::uuid
-              )
-            `);
-            await tx.execute(sql`
-              insert into public.work_project_item (
-                work_project_id, work_item_id, work_section_id, position
-              ) values (
-                ${raw.projectId}::uuid, ${itemId}::uuid, ${raw.sectionId}::uuid,
-                (select coalesce(max(position), -1) + 1 from public.work_project_item
-                 where work_project_id = ${raw.projectId}::uuid)
-              )
-            `);
-            await tx.execute(sql`
-              insert into public.work_form_submission (
-                work_form_submission_id, work_form_id, submitted_by_employee_id,
-                answers, work_item_id
-              ) values (
-                ${submissionId}::uuid, ${raw.formId}::uuid, ${actor(ctx)}::uuid,
-                ${JSON.stringify(answers)}::jsonb, ${itemId}::uuid
-              )
-            `);
-          });
-        }
-        await audit(
-          ctx,
-          "work.form.submit",
-          "work_form_submission",
-          submissionId,
-          {
-            formId: raw.formId,
-            itemId,
-          },
-        );
-        if (raw.defaultAssigneeEmployeeId)
-          await notifyItem(
-            ctx,
-            itemId,
-            "assigned",
-            `Assigned: ${title.trim()}`,
-          );
-        await runProjectRules(ctx, raw.projectId, itemId, "task_added");
-        return { submissionId, itemId, message: raw.confirmationMessage };
+      .input(formSubmissionSchema)
+      .mutation(({ input, ctx }) => submitWorkForm(ctx, input, false)),
+    publicView: publicProcedure
+      .input(z.object({ formId: uuid }))
+      .query(async ({ input, ctx }) => {
+        const form = await workFormById(input.formId);
+        if (!form || form.accessLevel !== "anyone" || !form.isActive)
+          throw new TRPCError({ code: "NOT_FOUND" });
+        await Promise.all([
+          requireScopedFeature(ctx, "work.forms", form.projectId),
+          requireScopedFeature(ctx, "work.forms.public", form.projectId),
+        ]);
+        return {
+          formId: form.formId,
+          name: form.name,
+          description: form.description,
+          questions: form.questions,
+          confirmationMessage: form.confirmationMessage,
+        };
       }),
+    publicSubmit: publicProcedure
+      .input(formSubmissionSchema)
+      .mutation(({ input, ctx }) => submitWorkForm(ctx, input, true)),
   }),
 
   rules: router({

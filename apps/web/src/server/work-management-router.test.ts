@@ -29,6 +29,16 @@ function amCaller() {
   });
 }
 
+function anonymousCaller() {
+  return createCaller({
+    user: null,
+    employeeId: null,
+    roles: [],
+    canViewMargin: false,
+    clientId: null,
+  });
+}
+
 describe("work management", () => {
   beforeEach(() => clearDemoFeatureOverrides());
 
@@ -1728,6 +1738,157 @@ describe("work management", () => {
         (item) => item.itemId === approval.itemId,
       )?.decision?.decision,
     ).toBe("approved");
+  });
+
+  it("accepts governed public form submissions with attachments", async () => {
+    const owner = partnerCaller();
+    const publicUser = anonymousCaller();
+    const project = await owner.work.projects.create({
+      name: `Public intake ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    await owner.work.rules.create({
+      projectId: project.projectId,
+      name: `Prioritize public intake ${Date.now()}`,
+      triggerType: "task_added",
+      scheduleMinutes: null,
+      branches: [
+        {
+          mode: "all",
+          conditions: [],
+          actions: [{ type: "set_priority", value: "high" }],
+        },
+      ],
+    });
+    const form = await owner.work.forms.create({
+      projectId: project.projectId,
+      name: `Public request ${Date.now()}`,
+      description: "Send us the brief.",
+      titleQuestionKey: "title",
+      questions: [
+        {
+          key: "title",
+          label: "Request title",
+          type: "text",
+          required: true,
+          options: [],
+        },
+        {
+          key: "brief",
+          label: "Brief",
+          type: "attachment",
+          required: true,
+          options: [],
+          multiple: true,
+        },
+      ],
+      confirmationMessage: "We received your request.",
+      accessLevel: "anyone",
+    });
+    await expect(
+      publicUser.work.forms.publicView({ formId: form.formId }),
+    ).resolves.toMatchObject({
+      name: form.name,
+      questions: expect.arrayContaining([
+        expect.objectContaining({ type: "attachment" }),
+      ]),
+    });
+    const submission = await publicUser.work.forms.publicSubmit({
+      formId: form.formId,
+      answers: {
+        title: "Launch campaign",
+        brief: [
+          {
+            fileName: "brief.txt",
+            contentType: "text/plain",
+            contentBase64: Buffer.from("Campaign brief").toString("base64"),
+          },
+        ],
+      },
+    });
+    expect(submission.message).toBe("We received your request.");
+    expect(
+      (
+        await owner.work.projects.get({ projectId: project.projectId })
+      ).items.find((item) => item.itemId === submission.itemId),
+    ).toMatchObject({ title: "Launch campaign", priority: "high" });
+    expect(
+      await owner.work.attachments.list({ itemId: submission.itemId }),
+    ).toContainEqual(
+      expect.objectContaining({ name: "brief.txt", contentType: "text/plain" }),
+    );
+
+    await owner.work.forms.setAccess({
+      formId: form.formId,
+      accessLevel: "organization",
+    });
+    await expect(
+      publicUser.work.forms.publicView({ formId: form.formId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      publicUser.work.forms.publicSubmit({
+        formId: form.formId,
+        answers: { title: "Blocked", brief: [] },
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("rate-limits public forms and obeys their Feature Lab switch", async () => {
+    const owner = partnerCaller();
+    const publicUser = anonymousCaller();
+    const project = await owner.work.projects.create({
+      name: `Governed public intake ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const form = await owner.work.forms.create({
+      projectId: project.projectId,
+      name: `Governed public form ${Date.now()}`,
+      description: "",
+      titleQuestionKey: "title",
+      questions: [
+        {
+          key: "title",
+          label: "Title",
+          type: "text",
+          required: true,
+          options: [],
+        },
+      ],
+      confirmationMessage: "Received",
+      accessLevel: "anyone",
+    });
+    for (let index = 0; index < 30; index += 1)
+      getDemoWork().formSubmissions.set(crypto.randomUUID(), {
+        formId: form.formId,
+        itemId: crypto.randomUUID(),
+        answers: { title: `Request ${index}` },
+        submittedByEmployeeId: null,
+        submittedAt: new Date().toISOString(),
+      });
+    await expect(
+      publicUser.work.forms.publicSubmit({
+        formId: form.formId,
+        answers: { title: "One too many" },
+      }),
+    ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+
+    await owner.admin.features.setOverride({
+      featureKey: "work.forms.public",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "public intake paused",
+    });
+    await expect(
+      publicUser.work.forms.publicView({ formId: form.formId }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.forms.public",
+    });
   });
 
   it("runs collaborator rules and validates scheduled rule cadence", async () => {

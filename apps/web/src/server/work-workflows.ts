@@ -17,11 +17,40 @@ export type WorkFormQuestion = {
     | "multi_select"
     | "date"
     | "number"
-    | "checkbox";
+    | "checkbox"
+    | "attachment";
   required: boolean;
   options: string[];
+  multiple?: boolean;
   showWhen?: { key: string; equals: string | boolean };
 };
+
+export type WorkFormAttachmentAnswer = {
+  fileName: string;
+  contentType: string;
+  contentBase64: string;
+};
+
+function validAttachmentAnswer(
+  value: unknown,
+): value is WorkFormAttachmentAnswer {
+  if (!value || typeof value !== "object") return false;
+  const file = value as Partial<WorkFormAttachmentAnswer>;
+  return (
+    typeof file.fileName === "string" &&
+    file.fileName.trim().length > 0 &&
+    file.fileName.length <= 255 &&
+    typeof file.contentType === "string" &&
+    file.contentType.length > 0 &&
+    file.contentType.length <= 160 &&
+    typeof file.contentBase64 === "string" &&
+    file.contentBase64.length > 0 &&
+    file.contentBase64.length <= 14_000_000 &&
+    /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      file.contentBase64,
+    )
+  );
+}
 
 export function normalizeFormAnswers(
   questions: readonly WorkFormQuestion[],
@@ -44,6 +73,16 @@ export function normalizeFormAnswers(
     if (question.required && empty)
       throw new Error(`${question.label} is required`);
     if (empty) continue;
+    if (question.type === "attachment") {
+      if (
+        !Array.isArray(value) ||
+        value.length > (question.multiple ? 10 : 1) ||
+        value.some((file) => !validAttachmentAnswer(file))
+      )
+        throw new Error(`${question.label} is invalid`);
+      answers[question.key] = value.map((file) => ({ ...file }));
+      continue;
+    }
     if (
       (["text", "textarea", "date"] as const).includes(
         question.type as "text" | "textarea" | "date",

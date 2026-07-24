@@ -344,6 +344,13 @@
       "when": 1785020400000,
       "tag": "0048_work_custom_task_type_access",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1785024000000,
+      "tag": "0049_work_public_forms",
+      "breakpoints": true
     }
   ]
 }
