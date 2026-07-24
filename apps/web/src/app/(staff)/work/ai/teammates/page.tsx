@@ -31,7 +31,7 @@ type ActionType = (typeof actionTypes)[number][0];
 const connectedApps = [
   {
     value: "google_workspace",
-    label: "Google Workspace (Drive, Docs, and Sheets)",
+    label: "Google Workspace (Drive, Gmail, Calendar, Docs, and Sheets)",
     featureKeys: [],
   },
   {
