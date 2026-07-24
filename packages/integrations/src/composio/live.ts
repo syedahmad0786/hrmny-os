@@ -55,6 +55,22 @@ const proxyResponseSchema = z
   })
   .passthrough();
 
+const toolResponseSchema = z
+  .object({
+    data: z.unknown(),
+    error: z.unknown().nullable().optional(),
+    successful: z.boolean().optional(),
+  })
+  .passthrough();
+
+const readOnlyToolSlugs = new Set([
+  "ONE_DRIVE_SEARCH_DRIVE_ITEMS",
+  "OUTLOOK_SEARCH_MESSAGES",
+  "SLACK_SEARCH_MESSAGES",
+  "MICROSOFT_TEAMS_SEARCH_MESSAGES",
+  "JIRA_SEARCH_ISSUES",
+]);
+
 export type ComposioConnectedAccount = z.infer<typeof connectedAccountSchema>;
 export type ComposioAuthConfig = z.infer<typeof authConfigSchema>;
 export type ComposioConnectLink = z.infer<typeof connectLinkSchema>;
@@ -79,11 +95,16 @@ export class ComposioApiError extends Error {
 
 export type ComposioLiveClient = {
   listManagedToolkits(): Promise<ComposioManagedToolkit[]>;
-  authorize(userId: string, toolkitSlug: string): Promise<{
+  authorize(
+    userId: string,
+    toolkitSlug: string,
+  ): Promise<{
     id: string;
     redirectUrl: string;
   }>;
-  listUserConnectedAccounts(userId: string): Promise<ComposioConnectedAccount[]>;
+  listUserConnectedAccounts(
+    userId: string,
+  ): Promise<ComposioConnectedAccount[]>;
   disconnect(connectedAccountId: string): Promise<void>;
   listConnectedAccounts(input?: {
     toolkit?: string;
@@ -102,6 +123,13 @@ export type ComposioLiveClient = {
     connectedAccountId: string;
     revokeOnDelete?: boolean;
   }): Promise<void>;
+  executeTool<T = unknown>(input: {
+    connectedAccountId: string;
+    toolSlug: string;
+    arguments?: Record<string, unknown>;
+    text?: string;
+    version?: string;
+  }): Promise<T>;
   proxy<T = unknown>(input: {
     connectedAccountId: string;
     endpoint: string;
@@ -268,6 +296,41 @@ export function createComposioLive(input: {
         `/connected_accounts/${encodeURIComponent(deleteInput.connectedAccountId)}?${query}`,
         { method: "DELETE" },
       );
+    },
+
+    async executeTool<T>(toolInput: {
+      connectedAccountId: string;
+      toolSlug: string;
+      arguments?: Record<string, unknown>;
+      text?: string;
+      version?: string;
+    }) {
+      if (!readOnlyToolSlugs.has(toolInput.toolSlug))
+        throw new ComposioApiError(
+          "Only approved read-only Composio tools may be executed",
+          403,
+        );
+      const result = toolResponseSchema.parse(
+        await request(
+          `/tools/execute/${encodeURIComponent(toolInput.toolSlug)}`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              connected_account_id: toolInput.connectedAccountId,
+              arguments: toolInput.arguments,
+              text: toolInput.text,
+              version: toolInput.version ?? "latest",
+            }),
+          },
+        ),
+      );
+      if (result.successful === false)
+        throw new ComposioApiError(
+          "Composio tool execution failed",
+          502,
+          result.error,
+        );
+      return result.data as T;
     },
 
     async proxy<T>(proxyInput: {

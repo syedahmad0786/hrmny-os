@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 import { clearDemoFeatureOverrides, setFeatureOverride } from "./features";
 import { createCaller } from "./trpc/root";
 import {
+  getVerifiedWorkAppConnection,
   WORK_APP_CATALOG,
   workIntegrationFeatureKeysForToolkit,
 } from "./trpc/connections-router";
@@ -111,6 +112,65 @@ describe("Work governance", () => {
       code: "FORBIDDEN",
       message: "FEATURE_DISABLED:work.integrations.communication",
     });
+  });
+
+  it("accepts only the current employee's matching Composio account", async () => {
+    const employee = resolveDevUser("partner");
+    const previousKey = process.env.COMPOSIO_API_KEY;
+    process.env.COMPOSIO_API_KEY = "test-key";
+    let items = [
+      {
+        id: "ca_other_user",
+        status: "ACTIVE",
+        toolkit: { slug: "slack" },
+        user_id: "other-employee",
+      },
+      {
+        id: "ca_wrong_toolkit",
+        status: "ACTIVE",
+        toolkit: { slug: "outlook" },
+        user_id: employee.employeeId,
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ items, next_cursor: null }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    try {
+      await expect(
+        getVerifiedWorkAppConnection(employee.employeeId, "slack", {
+          clientId: null,
+          roles: employee.roles,
+        }),
+      ).resolves.toBeNull();
+      items = [
+        ...items,
+        {
+          id: "ca_employee_slack",
+          status: "ACTIVE",
+          toolkit: { slug: "slack" },
+          user_id: employee.employeeId,
+        },
+      ];
+      await expect(
+        getVerifiedWorkAppConnection(employee.employeeId, "slack", {
+          clientId: null,
+          roles: employee.roles,
+        }),
+      ).resolves.toMatchObject({
+        account: { id: "ca_employee_slack" },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+      if (previousKey === undefined) delete process.env.COMPOSIO_API_KEY;
+      else process.env.COMPOSIO_API_KEY = previousKey;
+    }
   });
 
   it("manages teams and denies every Work mutation for a view-only member", async () => {

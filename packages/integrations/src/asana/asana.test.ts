@@ -137,6 +137,43 @@ describe("Asana integration", () => {
     });
   });
 
+  it("executes a versioned read-only Composio tool for one account", async () => {
+    const fetchMock = vi.fn(
+      async (_request: RequestInfo | URL, init?: RequestInit) => {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          connected_account_id: "ca_outlook",
+          text: "Search Outlook for Acme renewal and return at most 5 results.",
+          version: "latest",
+        });
+        return json({
+          successful: true,
+          data: { value: [{ subject: "Acme renewal" }] },
+        });
+      },
+    );
+    const fetchImpl = fetchMock as typeof fetch;
+    const composio = createComposioLive({ apiKey: "key", fetchImpl });
+
+    await expect(
+      composio.executeTool({
+        connectedAccountId: "ca_outlook",
+        toolSlug: "OUTLOOK_SEARCH_MESSAGES",
+        text: "Search Outlook for Acme renewal and return at most 5 results.",
+      }),
+    ).resolves.toEqual({ value: [{ subject: "Acme renewal" }] });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/tools/execute/OUTLOOK_SEARCH_MESSAGES",
+    );
+    await expect(
+      composio.executeTool({
+        connectedAccountId: "ca_outlook",
+        toolSlug: "OUTLOOK_SEND_EMAIL",
+        text: "Send an email",
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("discovers active and archived projects and requests completed tasks", async () => {
     const requests: string[] = [];
     const fetchImpl = vi.fn(async (request: RequestInfo | URL) => {
