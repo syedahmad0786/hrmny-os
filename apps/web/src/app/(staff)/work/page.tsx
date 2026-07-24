@@ -19,6 +19,15 @@ type EditableCustomTaskStatus = {
   completionState: "incomplete" | "complete";
   enabled: boolean;
 };
+type CustomTaskTypeAccessLevel = "admin" | "editor" | "user" | "none";
+
+function canUseCustomTaskType(
+  accessLevel: CustomTaskTypeAccessLevel,
+  minimum: Exclude<CustomTaskTypeAccessLevel, "none"> = "user",
+) {
+  const rank = { none: 0, user: 1, editor: 2, admin: 3 } as const;
+  return rank[accessLevel] >= rank[minimum];
+}
 
 function dateInputValue(value: string | null | undefined) {
   return value ? value.slice(0, 10) : "";
@@ -55,6 +64,9 @@ export default function WorkPage() {
   const session = trpc.auth.session.useQuery();
   const projects = trpc.work.projects.list.useQuery();
   const employees = trpc.work.members.listEmployees.useQuery(undefined, {
+    retry: false,
+  });
+  const teams = trpc.work.members.listTeams.useQuery(undefined, {
     retry: false,
   });
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -108,6 +120,16 @@ export default function WorkPage() {
   const [editingCustomTaskTypeId, setEditingCustomTaskTypeId] = useState<
     string | null
   >(null);
+  const [accessCustomTaskTypeId, setAccessCustomTaskTypeId] = useState<
+    string | null
+  >(null);
+  const [customTaskTypeMemberType, setCustomTaskTypeMemberType] = useState<
+    "employee" | "team"
+  >("employee");
+  const [customTaskTypeMemberId, setCustomTaskTypeMemberId] = useState("");
+  const [customTaskTypeMemberAccess, setCustomTaskTypeMemberAccess] = useState<
+    "admin" | "editor" | "user"
+  >("user");
   const [customTaskTypeEditName, setCustomTaskTypeEditName] = useState("");
   const [customTaskTypeEditIcon, setCustomTaskTypeEditIcon] = useState("");
   const [customTaskTypeEditStatuses, setCustomTaskTypeEditStatuses] = useState<
@@ -214,6 +236,17 @@ export default function WorkPage() {
   const customTaskAssignments = trpc.work.customTaskTypes.assignments.useQuery(
     { projectId: projectId! },
     { enabled: Boolean(projectId && customTaskTypesEnabled) },
+  );
+  const customTaskTypeAccess = trpc.work.customTaskTypes.access.useQuery(
+    {
+      projectId: projectId!,
+      customTaskTypeId: accessCustomTaskTypeId!,
+    },
+    {
+      enabled: Boolean(
+        projectId && accessCustomTaskTypeId && customTaskTypesEnabled,
+      ),
+    },
   );
   const attachments = trpc.work.attachments.list.useQuery(
     { itemId: selectedItemId! },
@@ -342,6 +375,24 @@ export default function WorkPage() {
     trpc.work.customTaskTypes.removeFromProject.useMutation({
       onSuccess: () => utils.work.customTaskTypes.list.invalidate(),
     });
+  const setCustomTaskTypeDefaultAccess =
+    trpc.work.customTaskTypes.setDefaultAccess.useMutation({
+      onSuccess: () =>
+        Promise.all([
+          utils.work.customTaskTypes.access.invalidate(),
+          utils.work.customTaskTypes.list.invalidate(),
+        ]),
+    });
+  const updateCustomTaskTypeMemberAccess =
+    trpc.work.customTaskTypes.setMemberAccess.useMutation({
+      onSuccess: async () => {
+        setCustomTaskTypeMemberId("");
+        await Promise.all([
+          utils.work.customTaskTypes.access.invalidate(),
+          utils.work.customTaskTypes.list.invalidate(),
+        ]);
+      },
+    });
   const addAttachmentLink = trpc.work.attachments.addLink.useMutation({
     onSuccess: async () => {
       setAttachmentName("");
@@ -453,6 +504,10 @@ export default function WorkPage() {
   const selectedCustomTaskAssignment = selectedItemId
     ? customTaskAssignmentByItem.get(selectedItemId)
     : undefined;
+  const selectedCustomTaskType = (customTaskTypes.data ?? []).find(
+    (type) =>
+      type.customTaskTypeId === selectedCustomTaskAssignment?.customTaskTypeId,
+  );
   const listGroups = groupByCustomTaskType
     ? [
         {
@@ -1444,14 +1499,22 @@ export default function WorkPage() {
                       }}
                     >
                       <option value="">Standard task</option>
-                      {(customTaskTypes.data ?? []).map((type) => (
-                        <option
-                          key={type.customTaskTypeId}
-                          value={type.customTaskTypeId}
-                        >
-                          {type.icon} {type.name}
-                        </option>
-                      ))}
+                      {(customTaskTypes.data ?? [])
+                        .filter(
+                          (type) =>
+                            (type.isAssociated &&
+                              canUseCustomTaskType(type.accessLevel)) ||
+                            type.customTaskTypeId ===
+                              selectedCustomTaskAssignment?.customTaskTypeId,
+                        )
+                        .map((type) => (
+                          <option
+                            key={type.customTaskTypeId}
+                            value={type.customTaskTypeId}
+                          >
+                            {type.icon} {type.name}
+                          </option>
+                        ))}
                     </select>
                   </label>
                   <label className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
@@ -1461,7 +1524,11 @@ export default function WorkPage() {
                       value={selectedCustomTaskAssignment?.statusOptionId ?? ""}
                       disabled={
                         !canEdit ||
-                        !selectedCustomTaskAssignment?.customTaskTypeId
+                        !selectedCustomTaskAssignment?.customTaskTypeId ||
+                        !selectedCustomTaskType ||
+                        !canUseCustomTaskType(
+                          selectedCustomTaskType.accessLevel,
+                        )
                       }
                       onChange={(event) => {
                         if (
@@ -1905,7 +1972,9 @@ export default function WorkPage() {
                             </span>
                           ) : null}
                         </p>
-                        {canEdit && projectId ? (
+                        {canEdit &&
+                        projectId &&
+                        canUseCustomTaskType(type.accessLevel) ? (
                           <div className="flex flex-wrap gap-2">
                             {type.isAssociated ? (
                               <>
@@ -1959,7 +2028,7 @@ export default function WorkPage() {
                               </>
                             ) : null}
                             {type.sourcePlatform === "native" &&
-                            type.ownerProjectId === projectId ? (
+                            canUseCustomTaskType(type.accessLevel, "editor") ? (
                               <button
                                 type="button"
                                 className="rounded-full border border-sand px-2.5 py-1 text-xs"
@@ -1983,6 +2052,21 @@ export default function WorkPage() {
                                 Edit
                               </button>
                             ) : null}
+                            {type.accessLevel === "admin" ? (
+                              <button
+                                type="button"
+                                className="rounded-full border border-sand px-2.5 py-1 text-xs"
+                                onClick={() =>
+                                  setAccessCustomTaskTypeId((current) =>
+                                    current === type.customTaskTypeId
+                                      ? null
+                                      : type.customTaskTypeId,
+                                  )
+                                }
+                              >
+                                Manage access
+                              </button>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
@@ -1998,6 +2082,146 @@ export default function WorkPage() {
                           </span>
                         ))}
                       </div>
+                      {accessCustomTaskTypeId === type.customTaskTypeId &&
+                      projectId &&
+                      customTaskTypeAccess.data ? (
+                        <div className="mt-3 space-y-3 border-t border-sand pt-3 text-xs">
+                          <label className="grid gap-1 sm:grid-cols-[10rem_1fr] sm:items-center">
+                            Organization access
+                            <select
+                              aria-label="Organization task type access"
+                              className="rounded border border-sand bg-white px-2 py-1"
+                              value={
+                                customTaskTypeAccess.data.defaultAccessLevel
+                              }
+                              onChange={(event) =>
+                                setCustomTaskTypeDefaultAccess.mutate({
+                                  projectId,
+                                  customTaskTypeId: type.customTaskTypeId,
+                                  accessLevel: event.target
+                                    .value as CustomTaskTypeAccessLevel,
+                                })
+                              }
+                            >
+                              <option value="admin">Admin</option>
+                              <option value="editor">Editor</option>
+                              <option value="user">User</option>
+                              <option value="none">No access</option>
+                            </select>
+                          </label>
+                          <div className="space-y-1">
+                            {customTaskTypeAccess.data.members.map((member) => (
+                              <div
+                                key={`${member.memberType}:${member.memberId}`}
+                                className="flex flex-wrap items-center justify-between gap-2 rounded border border-sand px-2 py-1"
+                              >
+                                <span>
+                                  {member.memberType === "employee"
+                                    ? (employeeById.get(member.memberId)
+                                        ?.displayName ?? member.memberId)
+                                    : (teams.data?.find(
+                                        (team) =>
+                                          team.teamId === member.memberId,
+                                      )?.name ?? member.memberId)}
+                                  {` · ${member.accessLevel}`}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="rounded border border-sand px-2 py-0.5"
+                                  onClick={() =>
+                                    updateCustomTaskTypeMemberAccess.mutate({
+                                      projectId,
+                                      customTaskTypeId: type.customTaskTypeId,
+                                      memberType: member.memberType,
+                                      memberId: member.memberId,
+                                      accessLevel: null,
+                                    })
+                                  }
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <form
+                            className="grid gap-2 sm:grid-cols-[7rem_1fr_7rem_auto]"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              if (!customTaskTypeMemberId) return;
+                              updateCustomTaskTypeMemberAccess.mutate({
+                                projectId,
+                                customTaskTypeId: type.customTaskTypeId,
+                                memberType: customTaskTypeMemberType,
+                                memberId: customTaskTypeMemberId,
+                                accessLevel: customTaskTypeMemberAccess,
+                              });
+                            }}
+                          >
+                            <select
+                              aria-label="Task type member kind"
+                              className="rounded border border-sand bg-white px-2 py-1"
+                              value={customTaskTypeMemberType}
+                              onChange={(event) => {
+                                setCustomTaskTypeMemberType(
+                                  event.target.value as "employee" | "team",
+                                );
+                                setCustomTaskTypeMemberId("");
+                              }}
+                            >
+                              <option value="employee">Person</option>
+                              <option value="team">Team</option>
+                            </select>
+                            <select
+                              aria-label="Task type member"
+                              className="rounded border border-sand bg-white px-2 py-1"
+                              value={customTaskTypeMemberId}
+                              onChange={(event) =>
+                                setCustomTaskTypeMemberId(event.target.value)
+                              }
+                            >
+                              <option value="">Choose…</option>
+                              {customTaskTypeMemberType === "employee"
+                                ? (employees.data ?? []).map((employee) => (
+                                    <option
+                                      key={employee.employeeId}
+                                      value={employee.employeeId}
+                                    >
+                                      {employee.displayName}
+                                    </option>
+                                  ))
+                                : (teams.data ?? []).map((team) => (
+                                    <option
+                                      key={team.teamId}
+                                      value={team.teamId}
+                                    >
+                                      {team.name}
+                                    </option>
+                                  ))}
+                            </select>
+                            <select
+                              aria-label="Task type member access"
+                              className="rounded border border-sand bg-white px-2 py-1"
+                              value={customTaskTypeMemberAccess}
+                              onChange={(event) =>
+                                setCustomTaskTypeMemberAccess(
+                                  event.target.value as
+                                    "admin" | "editor" | "user",
+                                )
+                              }
+                            >
+                              <option value="admin">Admin</option>
+                              <option value="editor">Editor</option>
+                              <option value="user">User</option>
+                            </select>
+                            <button
+                              className="rounded bg-ink px-3 py-1 text-white"
+                              disabled={!customTaskTypeMemberId}
+                            >
+                              Add
+                            </button>
+                          </form>
+                        </div>
+                      ) : null}
                       {editingCustomTaskTypeId === type.customTaskTypeId &&
                       projectId ? (
                         <form

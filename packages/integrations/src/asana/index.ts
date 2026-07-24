@@ -110,7 +110,7 @@ export type AsanaMembership = {
   resource_subtype?: string;
   parent: { gid: string; name?: string; resource_type?: string };
   member: AsanaUser & { resource_type?: "user" | "team" };
-  access_level?: "admin" | "editor" | "commenter" | "viewer";
+  access_level?: "admin" | "editor" | "user" | "commenter" | "viewer";
 };
 
 export type AsanaGoal = {
@@ -276,6 +276,7 @@ export interface AsanaAdapter {
   listTeams(workspaceGid: string): Promise<AsanaTeam[]>;
   listTeamMemberships(teamGid: string): Promise<AsanaTeamMembership[]>;
   listProjectMemberships(projectGid: string): Promise<AsanaMembership[]>;
+  listCustomTypeMemberships?(customTypeGid: string): Promise<AsanaMembership[]>;
   listSections(projectGid: string): Promise<AsanaSection[]>;
   listProjectTasks(projectGid: string): Promise<AsanaTask[]>;
   listCustomTypes(projectGid: string): Promise<AsanaCustomType[]>;
@@ -522,6 +523,15 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         "/memberships",
         new URLSearchParams({
           parent: projectGid,
+          opt_fields:
+            "gid,resource_subtype,parent.gid,parent.name,parent.resource_type,member.gid,member.name,member.email,member.resource_type,access_level",
+        }),
+      ),
+    listCustomTypeMemberships: (customTypeGid) =>
+      list<AsanaMembership>(
+        "/memberships",
+        new URLSearchParams({
+          parent: customTypeGid,
           opt_fields:
             "gid,resource_subtype,parent.gid,parent.name,parent.resource_type,member.gid,member.name,member.email,member.resource_type,access_level",
         }),

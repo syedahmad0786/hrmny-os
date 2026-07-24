@@ -701,4 +701,33 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/work_ai_studio_workflow_trigger_type_check/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("stores custom task type defaults and user or team access", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0048_work_custom_task_type_access.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0048_work_custom_task_type_access.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0048_work_custom_task_type_access.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(/default_access_level/i);
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_custom_task_type_member/i,
+    );
+    expect(migration).toContain("'admin', 'editor', 'user', 'none'");
+    expect(migration).toMatch(/member_type = 'employee'/i);
+    expect(migration).toMatch(/member_type = 'team'/i);
+    expect(migration).toMatch(/created_by_employee_id, 'admin'/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

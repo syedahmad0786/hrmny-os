@@ -413,6 +413,7 @@ export default function WorkflowsPage() {
               const selectedActionType = (customTaskTypes.data ?? []).find(
                 (type) =>
                   type.isAssociated &&
+                  type.accessLevel !== "none" &&
                   type.statuses.some(
                     (status) => status.statusOptionId === actionValue,
                   ),
@@ -538,7 +539,9 @@ export default function WorkflowsPage() {
               >
                 <option value="">Any custom status</option>
                 {(customTaskTypes.data ?? [])
-                  .filter((type) => type.isAssociated)
+                  .filter(
+                    (type) => type.isAssociated && type.accessLevel !== "none",
+                  )
                   .flatMap((type) =>
                     type.statuses
                       .filter((status) => status.enabled)
@@ -636,7 +639,9 @@ export default function WorkflowsPage() {
               >
                 <option value="">Choose status</option>
                 {(customTaskTypes.data ?? [])
-                  .filter((type) => type.isAssociated)
+                  .filter(
+                    (type) => type.isAssociated && type.accessLevel !== "none",
+                  )
                   .flatMap((type) =>
                     type.statuses
                       .filter((status) => status.enabled)

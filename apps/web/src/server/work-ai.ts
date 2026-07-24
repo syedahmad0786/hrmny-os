@@ -8,6 +8,7 @@ import { featureEnabled } from "./features";
 import { writeAudit } from "./m1-persistence";
 import type { TrpcContext } from "./trpc/trpc";
 import {
+  customTaskTypeAccess,
   getDemoWork,
   requireItemAccess,
   requireProjectAccess,
@@ -573,6 +574,15 @@ async function buildContext(
     });
     if (!db) {
       const store = getDemoWork();
+      const allowedCustomTaskTypeIds = new Set<string>();
+      if (customTaskTypesEnabled)
+        for (const association of store.projectCustomTaskTypes.values())
+          if (
+            association.projectId === projectId &&
+            (await customTaskTypeAccess(ctx, association.customTaskTypeId)) !==
+              "none"
+          )
+            allowedCustomTaskTypeIds.add(association.customTaskTypeId);
       for (const section of getDemoWork().sections.values())
         if (section.projectId === projectId)
           sources.push({
@@ -596,7 +606,9 @@ async function buildContext(
             priority: item.priority,
             dueAt: item.dueAt,
             completedAt: item.completedAt,
-            ...(customTaskTypesEnabled
+            ...(customTaskTypesEnabled &&
+            (!item.customTaskTypeId ||
+              allowedCustomTaskTypeIds.has(item.customTaskTypeId))
               ? {
                   customTaskTypeId: item.customTaskTypeId,
                   customTaskStatusOptionId: item.customTaskStatusOptionId,
@@ -609,6 +621,8 @@ async function buildContext(
         ? store.projectCustomTaskTypes.values()
         : []) {
         if (association.projectId !== projectId) continue;
+        if (!allowedCustomTaskTypeIds.has(association.customTaskTypeId))
+          continue;
         const type = store.customTaskTypes.get(association.customTaskTypeId);
         if (!type) continue;
         sources.push({
@@ -701,6 +715,15 @@ async function buildContext(
         order by lower(type.name), status.position, status.created_at
       `),
     ]);
+    const allowedCustomTaskTypeIds = new Set<string>();
+    for (const customTaskTypeId of new Set(
+      customTaskTypes.map((type) => type.customTaskTypeId),
+    ))
+      if ((await customTaskTypeAccess(ctx, customTaskTypeId)) !== "none")
+        allowedCustomTaskTypeIds.add(customTaskTypeId);
+    const visibleCustomTaskTypes = customTaskTypes.filter((type) =>
+      allowedCustomTaskTypeIds.has(type.customTaskTypeId),
+    );
     for (const section of sections)
       sources.push({
         id: section.id,
@@ -720,7 +743,9 @@ async function buildContext(
           completedAt: task.completedAt
             ? new Date(task.completedAt).toISOString()
             : null,
-          ...(customTaskTypesEnabled
+          ...(customTaskTypesEnabled &&
+          (!task.customTaskTypeId ||
+            allowedCustomTaskTypeIds.has(task.customTaskTypeId))
             ? {
                 customTaskTypeId: task.customTaskTypeId,
                 customTaskStatusOptionId: task.customTaskStatusOptionId,
@@ -736,7 +761,7 @@ async function buildContext(
         content: comment.body.slice(0, 1_000),
       });
     const seenTypes = new Set<string>();
-    for (const type of customTaskTypesEnabled ? customTaskTypes : []) {
+    for (const type of customTaskTypesEnabled ? visibleCustomTaskTypes : []) {
       if (!seenTypes.has(type.customTaskTypeId)) {
         seenTypes.add(type.customTaskTypeId);
         sources.push({

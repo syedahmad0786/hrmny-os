@@ -18,6 +18,17 @@ function partnerCaller() {
   });
 }
 
+function amCaller() {
+  const user = resolveDevUser("am");
+  return createCaller({
+    user,
+    employeeId: user.employeeId,
+    roles: user.roles,
+    canViewMargin: sessionCanViewMargin(user),
+    clientId: user.clientId,
+  });
+}
+
 describe("work management", () => {
   beforeEach(() => clearDemoFeatureOverrides());
 
@@ -1081,6 +1092,278 @@ describe("work management", () => {
     });
     await expect(
       caller.work.customTaskTypes.list({ projectId: source.projectId }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.custom_task_types",
+    });
+  });
+
+  it("controls each custom task type with default and member access", async () => {
+    const owner = partnerCaller();
+    const collaborator = amCaller();
+    const collaboratorUser = resolveDevUser("am");
+    const ownerUser = resolveDevUser("partner");
+    const project = await owner.work.projects.create({
+      name: `Task type access ${Date.now()}`,
+      description: "",
+      privacy: "organization",
+      color: "#C7702E",
+    });
+    const type = await owner.work.customTaskTypes.create({
+      projectId: project.projectId,
+      name: "Incident",
+      icon: "◆",
+      isDefault: false,
+      statuses: [
+        {
+          name: "Open",
+          color: "#6B7280",
+          completionState: "incomplete",
+        },
+        {
+          name: "Resolved",
+          color: "#2E7D5B",
+          completionState: "complete",
+        },
+      ],
+    });
+    expect(
+      (
+        await collaborator.work.customTaskTypes.list({
+          projectId: project.projectId,
+        })
+      ).find(
+        (candidate) => candidate.customTaskTypeId === type.customTaskTypeId,
+      ),
+    ).toMatchObject({ accessLevel: "user" });
+
+    await owner.work.customTaskTypes.setDefaultAccess({
+      projectId: project.projectId,
+      customTaskTypeId: type.customTaskTypeId,
+      accessLevel: "none",
+    });
+    await expect(
+      collaborator.work.customTaskTypes.update({
+        projectId: project.projectId,
+        customTaskTypeId: type.customTaskTypeId,
+        name: "Restricted incident",
+        icon: "◆",
+        statuses: type.statuses.map((status) => ({
+          statusOptionId: status.statusOptionId,
+          name: status.name,
+          color: status.color,
+          completionState: status.completionState,
+        })),
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      collaborator.work.rules.create({
+        projectId: project.projectId,
+        name: `Restricted type rule ${Date.now()}`,
+        triggerType: "task_added",
+        scheduleMinutes: null,
+        branches: [
+          {
+            mode: "all",
+            conditions: [
+              {
+                field: "customTaskTypeId",
+                operator: "equals",
+                value: type.customTaskTypeId,
+              },
+            ],
+            actions: [{ type: "set_priority", value: "urgent" }],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const task = await owner.work.tasks.create({
+      projectId: project.projectId,
+      title: "Investigate",
+      description: "",
+    });
+    await expect(
+      collaborator.work.customTaskTypes.setForTask({
+        projectId: project.projectId,
+        itemId: task.itemId,
+        customTaskTypeId: type.customTaskTypeId,
+        statusOptionId: type.statuses[0]!.statusOptionId,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await owner.work.customTaskTypes.setMemberAccess({
+      projectId: project.projectId,
+      customTaskTypeId: type.customTaskTypeId,
+      memberType: "employee",
+      memberId: collaboratorUser.employeeId,
+      accessLevel: "editor",
+    });
+    await collaborator.work.customTaskTypes.update({
+      projectId: project.projectId,
+      customTaskTypeId: type.customTaskTypeId,
+      name: "Managed incident",
+      icon: "◇",
+      statuses: type.statuses.map((status) => ({
+        statusOptionId: status.statusOptionId,
+        name: status.name,
+        color: status.color,
+        completionState: status.completionState,
+      })),
+    });
+    await expect(
+      collaborator.work.customTaskTypes.access({
+        projectId: project.projectId,
+        customTaskTypeId: type.customTaskTypeId,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      owner.work.customTaskTypes.setMemberAccess({
+        projectId: project.projectId,
+        customTaskTypeId: type.customTaskTypeId,
+        memberType: "employee",
+        memberId: ownerUser.employeeId,
+        accessLevel: null,
+      }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "A custom task type must keep at least one admin",
+    });
+    await owner.work.customTaskTypes.setMemberAccess({
+      projectId: project.projectId,
+      customTaskTypeId: type.customTaskTypeId,
+      memberType: "employee",
+      memberId: collaboratorUser.employeeId,
+      accessLevel: "admin",
+    });
+    await owner.work.customTaskTypes.setMemberAccess({
+      projectId: project.projectId,
+      customTaskTypeId: type.customTaskTypeId,
+      memberType: "employee",
+      memberId: ownerUser.employeeId,
+      accessLevel: null,
+    });
+    await expect(
+      collaborator.work.customTaskTypes.access({
+        projectId: project.projectId,
+        customTaskTypeId: type.customTaskTypeId,
+      }),
+    ).resolves.toMatchObject({ defaultAccessLevel: "none" });
+  });
+
+  it("carries custom task types and status rules in bundles", async () => {
+    const caller = partnerCaller();
+    const source = await caller.work.projects.create({
+      name: `Bundle type source ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const target = await caller.work.projects.create({
+      name: `Bundle type target ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const type = await caller.work.customTaskTypes.create({
+      projectId: source.projectId,
+      name: "Request",
+      icon: "◆",
+      isDefault: false,
+      statuses: [
+        {
+          name: "Backlog",
+          color: "#6B7280",
+          completionState: "incomplete",
+        },
+        {
+          name: "In progress",
+          color: "#C7702E",
+          completionState: "incomplete",
+        },
+        {
+          name: "Done",
+          color: "#2E7D5B",
+          completionState: "complete",
+        },
+      ],
+    });
+    const active = type.statuses.find(
+      (status) => status.name === "In progress",
+    )!;
+    await caller.work.rules.create({
+      projectId: source.projectId,
+      name: `Escalate active request ${Date.now()}`,
+      triggerType: "custom_status_changed",
+      scheduleMinutes: null,
+      branches: [
+        {
+          mode: "all",
+          conditions: [
+            {
+              field: "customTaskStatusOptionId",
+              operator: "equals",
+              value: active.statusOptionId,
+            },
+          ],
+          actions: [{ type: "set_priority", value: "urgent" }],
+        },
+      ],
+    });
+    const bundle = await caller.work.bundles.capture({
+      projectId: source.projectId,
+      name: `Request bundle ${Date.now()}`,
+      description: "",
+      visibility: "organization",
+    });
+    expect(bundle.blueprint.customTaskTypes).toContainEqual(
+      expect.objectContaining({ customTaskTypeId: type.customTaskTypeId }),
+    );
+    await caller.work.bundles.applyToProject({
+      bundleId: bundle.bundleId,
+      projectId: target.projectId,
+    });
+    expect(
+      await caller.work.customTaskTypes.list({ projectId: target.projectId }),
+    ).toContainEqual(
+      expect.objectContaining({
+        customTaskTypeId: type.customTaskTypeId,
+        isAssociated: true,
+      }),
+    );
+    const task = await caller.work.tasks.create({
+      projectId: target.projectId,
+      title: "Bundled request",
+      description: "",
+    });
+    await caller.work.customTaskTypes.setForTask({
+      projectId: target.projectId,
+      itemId: task.itemId,
+      customTaskTypeId: type.customTaskTypeId,
+      statusOptionId: active.statusOptionId,
+    });
+    expect(
+      (
+        await caller.work.projects.get({ projectId: target.projectId })
+      ).items.find((item) => item.itemId === task.itemId)?.priority,
+    ).toBe("urgent");
+    const disabledTarget = await caller.work.projects.create({
+      name: `Disabled bundle target ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.custom_task_types",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.work.bundles.applyToProject({
+        bundleId: bundle.bundleId,
+        projectId: disabledTarget.projectId,
+      }),
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
       message: "FEATURE_DISABLED:work.custom_task_types",
