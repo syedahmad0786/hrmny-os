@@ -15,18 +15,43 @@ const GOOGLE_WORKSPACE_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
 ].join(" ");
 
+const WORK_APP_FAMILIES = [
+  { key: "files", label: "Cloud files" },
+  { key: "communication", label: "Communication" },
+  { key: "enterprise", label: "Enterprise workflows" },
+] as const;
+
 export default function ConnectionsPage() {
   const utils = trpc.useUtils();
   const list = trpc.connections.list.useQuery();
   const asanaStatus = trpc.connections.asanaStatus.useQuery(undefined, {
     retry: false,
   });
+  const workApps = trpc.connections.workApps.useQuery(undefined, {
+    retry: false,
+  });
   const saveKey = trpc.connections.saveApiKey.useMutation({
-    onSuccess: () => void utils.connections.list.invalidate(),
+    onSuccess: () =>
+      void Promise.all([
+        utils.connections.list.invalidate(),
+        utils.connections.workApps.invalidate(),
+        utils.connections.asanaStatus.invalidate(),
+      ]),
   });
   const startOAuth = trpc.connections.startOAuth.useMutation();
   const disconnect = trpc.connections.disconnect.useMutation({
-    onSuccess: () => void utils.connections.list.invalidate(),
+    onSuccess: () =>
+      void Promise.all([
+        utils.connections.list.invalidate(),
+        utils.connections.workApps.invalidate(),
+        utils.connections.asanaStatus.invalidate(),
+      ]),
+  });
+  const startWorkApp = trpc.connections.startWorkAppLink.useMutation({
+    onSuccess: (result) => window.location.assign(result.redirectUrl),
+  });
+  const disconnectWorkApp = trpc.connections.disconnectWorkApp.useMutation({
+    onSuccess: () => void utils.connections.workApps.invalidate(),
   });
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [redirect, setRedirect] = useState<string | null>(null);
@@ -201,6 +226,141 @@ export default function ConnectionsPage() {
         })}
       </div>
 
+      {workApps.data?.apps.length ? (
+        <section className="flex flex-col gap-4">
+          <div>
+            <h2 className="font-display text-2xl font-semibold">
+              Work app integrations
+            </h2>
+            <p className="mt-1 text-sm text-muted">
+              These groups are independently controlled by Feature Lab. A
+              provider is connectable only after its auth config exists in the
+              connected Composio project.
+            </p>
+          </div>
+
+          {!workApps.data.bridgeAllowed ? (
+            <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              Composio is blocked by the organization connected-app policy.
+            </p>
+          ) : !workApps.data.bridgeConfigured ? (
+            <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              Connect the Composio project above to discover live provider
+              accounts and auth configurations.
+            </p>
+          ) : workApps.data.bridgeError ? (
+            <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+              Composio could not be checked: {workApps.data.bridgeError}
+            </p>
+          ) : null}
+
+          {WORK_APP_FAMILIES.map((family) => {
+            const apps = workApps.data.apps.filter(
+              (item) => item.family === family.key,
+            );
+            if (!apps.length) return null;
+            return (
+              <div key={family.key}>
+                <h3 className="mb-2 font-display text-lg">{family.label}</h3>
+                <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+                  {apps.map((item) => (
+                    <article
+                      key={item.toolkit}
+                      className="rounded-lg border border-sand bg-white/70 p-4"
+                    >
+                      <div className="flex min-h-24 flex-col">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h4 className="font-display text-base">
+                              {item.label}
+                            </h4>
+                            <p className="text-xs font-medium text-muted">
+                              {item.connected
+                                ? "Connected"
+                                : !workApps.data.bridgeConfigured ||
+                                    workApps.data.bridgeError
+                                  ? "Not checked"
+                                  : item.connectionStatus
+                                    ? item.connectionStatus.toLowerCase()
+                                    : item.authConfigured
+                                      ? "Ready to connect"
+                                      : "Auth config needed"}
+                              {item.managedAuth === true
+                                ? " · managed auth"
+                                : item.managedAuth === false
+                                  ? " · custom auth"
+                                  : ""}
+                            </p>
+                          </div>
+                          <span
+                            className={`mt-1 size-2.5 rounded-full ${item.connected ? "bg-green-600" : "bg-sand"}`}
+                            aria-label={
+                              item.connected ? "Connected" : "Not connected"
+                            }
+                          />
+                        </div>
+                        <p className="mt-2 flex-1 text-xs text-muted">
+                          {item.note}
+                        </p>
+                      </div>
+                      {!item.allowed ? (
+                        <p className="mt-2 text-xs font-semibold text-amber-800">
+                          Blocked by the connected-app policy
+                        </p>
+                      ) : null}
+                      {item.connectedAccountId ? (
+                        <Button
+                          className="mt-3"
+                          type="button"
+                          variant="ghost"
+                          disabled={disconnectWorkApp.isPending}
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                `Disconnect ${item.label} and revoke its provider credentials?`,
+                              )
+                            )
+                              return;
+                            disconnectWorkApp.mutate({
+                              toolkit: item.toolkit,
+                              connectedAccountId: item.connectedAccountId!,
+                            });
+                          }}
+                        >
+                          Disconnect
+                        </Button>
+                      ) : (
+                        <Button
+                          className="mt-3"
+                          type="button"
+                          variant="ghost"
+                          disabled={
+                            !item.allowed ||
+                            !item.authConfigured ||
+                            !workApps.data.bridgeConfigured ||
+                            Boolean(workApps.data.bridgeError) ||
+                            startWorkApp.isPending
+                          }
+                          onClick={() =>
+                            startWorkApp.mutate({ toolkit: item.toolkit })
+                          }
+                        >
+                          {item.authConfigured
+                            ? "Connect"
+                            : item.authConfigured === false
+                              ? "Configure in Composio"
+                              : "Connect Composio first"}
+                        </Button>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      ) : null}
+
       {redirect ? (
         <p className="rounded-lg border border-sand bg-white/70 p-4 text-sm">
           Authorization ready:{" "}
@@ -212,6 +372,9 @@ export default function ConnectionsPage() {
       {saveKey.error ||
       disconnect.error ||
       startOAuth.error ||
+      startWorkApp.error ||
+      disconnectWorkApp.error ||
+      workApps.error ||
       asanaStatus.error ? (
         <p className="text-sm text-red-700">
           {
@@ -219,6 +382,9 @@ export default function ConnectionsPage() {
               saveKey.error ??
               disconnect.error ??
               startOAuth.error ??
+              startWorkApp.error ??
+              disconnectWorkApp.error ??
+              workApps.error ??
               asanaStatus.error
             )?.message
           }

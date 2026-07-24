@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
-import { clearDemoFeatureOverrides } from "./features";
+import { clearDemoFeatureOverrides, setFeatureOverride } from "./features";
 import { createCaller } from "./trpc/root";
+import {
+  WORK_APP_CATALOG,
+  workIntegrationFeatureKeysForToolkit,
+} from "./trpc/connections-router";
 import { clearDemoWorkAdmin, rowsToCsv } from "./trpc/work-admin-router";
 import {
   clearDemoWorkGovernance,
@@ -38,6 +42,7 @@ describe("Work governance", () => {
 
   it("allows curated apps under the default approved-only policy", async () => {
     expect(await isWorkConnectedAppAllowed("asana")).toBe(true);
+    expect(await isWorkConnectedAppAllowed("slack")).toBe(true);
     expect(await isWorkConnectedAppAllowed("unreviewed_app")).toBe(false);
     await caller("partner").workAdmin.policy.save({
       approvedDomains: [],
@@ -49,6 +54,58 @@ describe("Work governance", () => {
       sessionTimeoutMinutes: 720,
     });
     expect(await isWorkConnectedAppAllowed("asana")).toBe(false);
+  });
+
+  it("governs every Work app family before Composio is called", async () => {
+    expect(new Set(WORK_APP_CATALOG.map((item) => item.family))).toEqual(
+      new Set(["files", "communication", "enterprise"]),
+    );
+    expect(workIntegrationFeatureKeysForToolkit("slack")).toEqual([
+      "work.integrations.communication",
+      "work.integrations.communication.slack",
+    ]);
+    const partner = resolveDevUser("partner");
+    await setFeatureOverride({
+      featureKey: "work.integrations.communication.slack",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      updatedByEmployeeId: partner.employeeId,
+    });
+    await expect(
+      caller("partner").connections.startWorkAppLink({ toolkit: "slack" }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.integrations.communication.slack",
+    });
+    clearDemoFeatureOverrides();
+
+    for (const featureKey of [
+      "work.integrations.files",
+      "work.integrations.communication",
+      "work.integrations.enterprise",
+    ]) {
+      await setFeatureOverride({
+        featureKey,
+        scopeType: "global",
+        scopeKey: "global",
+        enabled: false,
+        updatedByEmployeeId: partner.employeeId,
+      });
+    }
+
+    await expect(caller("partner").connections.workApps()).resolves.toEqual({
+      bridgeAllowed: true,
+      bridgeConfigured: false,
+      bridgeError: null,
+      apps: [],
+    });
+    await expect(
+      caller("partner").connections.startWorkAppLink({ toolkit: "slack" }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.integrations.communication",
+    });
   });
 
   it("manages teams and denies every Work mutation for a view-only member", async () => {

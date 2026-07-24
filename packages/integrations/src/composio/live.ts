@@ -20,6 +20,32 @@ const connectedAccountListSchema = z
   })
   .passthrough();
 
+const authConfigSchema = z
+  .object({
+    id: z.string().min(1),
+    toolkit: z.object({ slug: z.string().min(1) }),
+    name: z.string().min(1),
+    auth_scheme: z.string().min(1),
+    is_composio_managed: z.boolean(),
+    status: z.string().min(1),
+  })
+  .passthrough();
+
+const authConfigListSchema = z
+  .object({
+    items: z.array(authConfigSchema),
+    next_cursor: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+const connectLinkSchema = z
+  .object({
+    redirect_url: z.string().url(),
+    connected_account_id: z.string().min(1),
+    expires_at: z.string().min(1),
+  })
+  .passthrough();
+
 const proxyResponseSchema = z
   .object({
     status: z.number(),
@@ -29,6 +55,8 @@ const proxyResponseSchema = z
   .passthrough();
 
 export type ComposioConnectedAccount = z.infer<typeof connectedAccountSchema>;
+export type ComposioAuthConfig = z.infer<typeof authConfigSchema>;
+export type ComposioConnectLink = z.infer<typeof connectLinkSchema>;
 
 export class ComposioApiError extends Error {
   constructor(
@@ -47,6 +75,18 @@ export type ComposioLiveClient = {
     statuses?: readonly string[];
     userId?: string;
   }): Promise<ComposioConnectedAccount[]>;
+  listAuthConfigs(input?: {
+    toolkits?: readonly string[];
+  }): Promise<ComposioAuthConfig[]>;
+  createConnectLink(input: {
+    authConfigId: string;
+    userId: string;
+    callbackUrl?: string;
+  }): Promise<ComposioConnectLink>;
+  deleteConnectedAccount(input: {
+    connectedAccountId: string;
+    revokeOnDelete?: boolean;
+  }): Promise<void>;
   proxy<T = unknown>(input: {
     connectedAccountId: string;
     endpoint: string;
@@ -114,6 +154,46 @@ export function createComposioLive(input: {
         cursor = page.next_cursor ?? undefined;
       } while (cursor);
       return items;
+    },
+
+    async listAuthConfigs(filters = {}) {
+      const items: ComposioAuthConfig[] = [];
+      let cursor: string | undefined;
+      do {
+        const query = new URLSearchParams({ limit: "1000" });
+        if (filters.toolkits?.length)
+          query.set("toolkit_slug", filters.toolkits.join(","));
+        if (cursor) query.set("cursor", cursor);
+        const page = authConfigListSchema.parse(
+          await request(`/auth_configs?${query}`),
+        );
+        items.push(...page.items);
+        cursor = page.next_cursor ?? undefined;
+      } while (cursor);
+      return items;
+    },
+
+    async createConnectLink(linkInput) {
+      return connectLinkSchema.parse(
+        await request("/connected_accounts/link", {
+          method: "POST",
+          body: JSON.stringify({
+            auth_config_id: linkInput.authConfigId,
+            user_id: linkInput.userId,
+            callback_url: linkInput.callbackUrl,
+          }),
+        }),
+      );
+    },
+
+    async deleteConnectedAccount(deleteInput) {
+      const query = new URLSearchParams({
+        revoke_on_delete: String(deleteInput.revokeOnDelete ?? true),
+      });
+      await request(
+        `/connected_accounts/${encodeURIComponent(deleteInput.connectedAccountId)}?${query}`,
+        { method: "DELETE" },
+      );
     },
 
     async proxy<T>(proxyInput: {

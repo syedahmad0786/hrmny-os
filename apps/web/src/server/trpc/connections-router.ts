@@ -4,6 +4,7 @@ import {
   createAsanaViaComposio,
   createComposioLive,
   createComposioStub,
+  ComposioApiError,
   type AsanaAdapter,
   type ComposioConnectedAccount,
 } from "@hrmny/integrations";
@@ -13,6 +14,7 @@ import { getDemoStore } from "../demo-store";
 import { router, staffProcedure } from "./trpc";
 import { randomUUID } from "node:crypto";
 import { isWorkConnectedAppAllowed } from "../work-governance";
+import { featureEnabled } from "../features";
 
 const composio = createComposioStub();
 const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat", "composio"]);
@@ -99,6 +101,158 @@ export const CONNECTION_CATALOG = [
   },
 ] as const;
 
+const workAppToolkits = [
+  "googledrive",
+  "one_drive",
+  "dropbox",
+  "box",
+  "adobe",
+  "gmail",
+  "outlook",
+  "slack",
+  "microsoft_teams",
+  "zoom",
+  "salesforce",
+  "jira",
+  "power_bi",
+  "servicenow",
+] as const;
+const workAppToolkit = z.enum(workAppToolkits);
+
+export const WORK_APP_CATALOG = [
+  {
+    toolkit: "googledrive",
+    label: "Google Drive",
+    family: "files",
+    familyFeatureKey: "work.integrations.files",
+    featureKey: "work.integrations.files.google_drive",
+    note: "Attach Drive files to work without copying them into hrmny.",
+  },
+  {
+    toolkit: "one_drive",
+    label: "OneDrive",
+    family: "files",
+    familyFeatureKey: "work.integrations.files",
+    featureKey: "work.integrations.files.one_drive",
+    note: "Use Microsoft cloud files alongside tasks and projects.",
+  },
+  {
+    toolkit: "dropbox",
+    label: "Dropbox",
+    family: "files",
+    familyFeatureKey: "work.integrations.files",
+    featureKey: "work.integrations.files.dropbox",
+    note: "Link Dropbox assets to shared work.",
+  },
+  {
+    toolkit: "box",
+    label: "Box",
+    family: "files",
+    familyFeatureKey: "work.integrations.files",
+    featureKey: "work.integrations.files.box",
+    note: "Connect governed Box content to work.",
+  },
+  {
+    toolkit: "adobe",
+    label: "Adobe",
+    family: "files",
+    familyFeatureKey: "work.integrations.files",
+    featureKey: "work.integrations.files.adobe",
+    note: "Connect Adobe assets; review and proofing stay in hrmny.",
+  },
+  {
+    toolkit: "gmail",
+    label: "Gmail",
+    family: "communication",
+    familyFeatureKey: "work.integrations.communication",
+    featureKey: "work.integrations.communication.gmail",
+    note: "Capture email context and send governed work updates.",
+  },
+  {
+    toolkit: "outlook",
+    label: "Outlook",
+    family: "communication",
+    familyFeatureKey: "work.integrations.communication",
+    featureKey: "work.integrations.communication.outlook",
+    note: "Connect Microsoft email and calendar context.",
+  },
+  {
+    toolkit: "slack",
+    label: "Slack",
+    family: "communication",
+    familyFeatureKey: "work.integrations.communication",
+    featureKey: "work.integrations.communication.slack",
+    note: "Turn conversations into work and publish approved updates.",
+  },
+  {
+    toolkit: "microsoft_teams",
+    label: "Microsoft Teams",
+    family: "communication",
+    familyFeatureKey: "work.integrations.communication",
+    featureKey: "work.integrations.communication.teams",
+    note: "Connect Teams conversations and meeting collaboration.",
+  },
+  {
+    toolkit: "zoom",
+    label: "Zoom",
+    family: "communication",
+    familyFeatureKey: "work.integrations.communication",
+    featureKey: "work.integrations.communication.zoom",
+    note: "Connect meeting recordings and transcripts to follow-up work.",
+  },
+  {
+    toolkit: "salesforce",
+    label: "Salesforce",
+    family: "enterprise",
+    familyFeatureKey: "work.integrations.enterprise",
+    featureKey: "work.integrations.enterprise.salesforce",
+    note: "Connect customer records and delivery work.",
+  },
+  {
+    toolkit: "jira",
+    label: "Jira",
+    family: "enterprise",
+    familyFeatureKey: "work.integrations.enterprise",
+    featureKey: "work.integrations.enterprise.jira",
+    note: "Coordinate product and engineering work across systems.",
+  },
+  {
+    toolkit: "power_bi",
+    label: "Power BI",
+    family: "enterprise",
+    familyFeatureKey: "work.integrations.enterprise",
+    featureKey: "work.integrations.enterprise.power_bi",
+    note: "Use a project auth config to connect reporting workflows.",
+  },
+  {
+    toolkit: "servicenow",
+    label: "ServiceNow",
+    family: "enterprise",
+    familyFeatureKey: "work.integrations.enterprise",
+    featureKey: "work.integrations.enterprise.servicenow",
+    note: "Connect service-management requests and delivery work.",
+  },
+] as const;
+
+type WorkAppDefinition = (typeof WORK_APP_CATALOG)[number];
+type WorkIntegrationFeatureKey =
+  WorkAppDefinition["familyFeatureKey"] | WorkAppDefinition["featureKey"];
+const WORK_INTEGRATION_FEATURE_KEYS: readonly WorkIntegrationFeatureKey[] = [
+  ...new Set(
+    WORK_APP_CATALOG.flatMap((item) => [
+      item.familyFeatureKey,
+      item.featureKey,
+    ]),
+  ),
+];
+
+export function workIntegrationFeatureKeysForToolkit(toolkit: string) {
+  const item = WORK_APP_CATALOG.find(
+    (candidate) => candidate.toolkit === toolkit,
+  );
+  return item ? [item.familyFeatureKey, item.featureKey] : [];
+}
+
 function requireDb() {
   const db = getDb();
   if (!db) {
@@ -124,6 +278,68 @@ async function requireAllowedApp(toolkit: string) {
       message: `${toolkit} is blocked by the organization connected-app policy`,
     });
   }
+}
+
+function featureSubject(ctx: {
+  employeeId: string | null;
+  clientId?: string | null;
+  roles: readonly string[];
+}) {
+  return {
+    userId: ctx.employeeId,
+    clientId: ctx.clientId,
+    roles: ctx.roles,
+  };
+}
+
+async function requireWorkIntegrationFeature(
+  definition: WorkAppDefinition,
+  ctx: Parameters<typeof featureSubject>[0],
+) {
+  for (const featureKey of [
+    definition.familyFeatureKey,
+    definition.featureKey,
+  ]) {
+    if (!(await featureEnabled(featureKey, featureSubject(ctx)))) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: `FEATURE_DISABLED:${featureKey}`,
+      });
+    }
+  }
+}
+
+async function auditComposioConnection(input: {
+  employeeId: string;
+  action:
+    "connections.workApp.connectStarted" | "connections.workApp.disconnect";
+  toolkit: string;
+  connectedAccountId: string;
+}) {
+  const after = {
+    toolkit: input.toolkit,
+    connectedAccountId: input.connectedAccountId,
+  };
+  const db = getDb();
+  if (db) {
+    await db.insert(auditEvent).values({
+      actorEmployeeId: input.employeeId,
+      action: input.action,
+      entityType: "composio_connected_account",
+      entityId: null,
+      after,
+    });
+    return;
+  }
+  getDemoStore().appendAudit({
+    actorEmployeeId: input.employeeId,
+    action: input.action,
+    entityType: "composio_connected_account",
+    entityId: "00000000-0000-4000-8000-000000000000",
+    before: null,
+    after,
+    reason: null,
+  });
 }
 
 export async function getEmployeeIntegrationSecret(
@@ -503,6 +719,235 @@ export const connectionsRouter = router({
       workspaces,
     };
   }),
+
+  workApps: staffProcedure.query(async ({ ctx }) => {
+    const employeeId = requireEmployeeId(ctx.employeeId);
+    const enabled = new Map<WorkIntegrationFeatureKey, boolean>(
+      await Promise.all(
+        WORK_INTEGRATION_FEATURE_KEYS.map(
+          async (featureKey) =>
+            [
+              featureKey,
+              await featureEnabled(featureKey, featureSubject(ctx)),
+            ] as const,
+        ),
+      ),
+    );
+    const visible = WORK_APP_CATALOG.filter(
+      (item) =>
+        enabled.get(item.familyFeatureKey) && enabled.get(item.featureKey),
+    );
+    const bridgeAllowed = await isWorkConnectedAppAllowed("composio");
+    if (!visible.length) {
+      return {
+        bridgeAllowed,
+        bridgeConfigured: false,
+        bridgeError: null,
+        apps: [],
+      };
+    }
+    const allowed = new Map(
+      await Promise.all(
+        visible.map(
+          async (item) =>
+            [
+              item.toolkit,
+              await isWorkConnectedAppAllowed(item.toolkit),
+            ] as const,
+        ),
+      ),
+    );
+    const apiKey = bridgeAllowed
+      ? ((await getEmployeeIntegrationSecret(employeeId, "composio")) ??
+        process.env.COMPOSIO_API_KEY?.trim())
+      : null;
+    const emptyApps = () =>
+      visible.map((item) => ({
+        ...item,
+        allowed: allowed.get(item.toolkit) ?? false,
+        connected: false,
+        connectedAccountId: null,
+        connectionStatus: null,
+        authConfigured: null,
+        managedAuth: null,
+      }));
+    if (!apiKey) {
+      return {
+        bridgeAllowed,
+        bridgeConfigured: false,
+        bridgeError: null,
+        apps: emptyApps(),
+      };
+    }
+
+    try {
+      const client = createComposioLive({ apiKey });
+      const [accounts, authConfigs] = await Promise.all([
+        client.listConnectedAccounts({ userId: employeeId }),
+        client.listAuthConfigs(),
+      ]);
+      return {
+        bridgeAllowed,
+        bridgeConfigured: true,
+        bridgeError: null,
+        apps: visible.map((item) => {
+          const candidates = accounts.filter(
+            (account) => account.toolkit.slug.toLowerCase() === item.toolkit,
+          );
+          const account =
+            candidates.find(
+              (candidate) =>
+                !candidate.is_disabled &&
+                ACTIVE_COMPOSIO_STATUSES.has(candidate.status.toUpperCase()),
+            ) ?? candidates[0];
+          const authConfig = authConfigs.find(
+            (config) =>
+              config.toolkit.slug.toLowerCase() === item.toolkit &&
+              config.status.toUpperCase() === "ENABLED",
+          );
+          return {
+            ...item,
+            allowed: allowed.get(item.toolkit) ?? false,
+            connected: Boolean(
+              account &&
+              !account.is_disabled &&
+              ACTIVE_COMPOSIO_STATUSES.has(account.status.toUpperCase()),
+            ),
+            connectedAccountId: account?.id ?? null,
+            connectionStatus: account?.status ?? null,
+            authConfigured: Boolean(authConfig),
+            managedAuth: authConfig?.is_composio_managed ?? null,
+          };
+        }),
+      };
+    } catch (error) {
+      return {
+        bridgeAllowed,
+        bridgeConfigured: true,
+        bridgeError:
+          error instanceof ComposioApiError
+            ? `Composio rejected the connection check (${error.status})`
+            : "Composio returned an invalid connection response",
+        apps: emptyApps(),
+      };
+    }
+  }),
+
+  startWorkAppLink: staffProcedure
+    .input(z.object({ toolkit: workAppToolkit }))
+    .mutation(async ({ input, ctx }) => {
+      const employeeId = requireEmployeeId(ctx.employeeId);
+      const definition = WORK_APP_CATALOG.find(
+        (item) => item.toolkit === input.toolkit,
+      )!;
+      await requireWorkIntegrationFeature(definition, ctx);
+      await requireAllowedApp("composio");
+      await requireAllowedApp(input.toolkit);
+      const apiKey =
+        (await getEmployeeIntegrationSecret(employeeId, "composio")) ??
+        process.env.COMPOSIO_API_KEY?.trim();
+      if (!apiKey) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Connect the Composio project first",
+        });
+      }
+      const client = createComposioLive({ apiKey });
+      const [configs, accounts] = await Promise.all([
+        client.listAuthConfigs({ toolkits: [input.toolkit] }),
+        client.listConnectedAccounts({
+          toolkit: input.toolkit,
+          userId: employeeId,
+        }),
+      ]);
+      if (
+        accounts.some(
+          (account) =>
+            !account.is_disabled &&
+            ACTIVE_COMPOSIO_STATUSES.has(account.status.toUpperCase()),
+        )
+      ) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `${definition.label} is already connected`,
+        });
+      }
+      const authConfig = configs.find(
+        (config) => config.status.toUpperCase() === "ENABLED",
+      );
+      if (!authConfig) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Create and enable a ${definition.label} auth config in Composio first`,
+        });
+      }
+      const link = await client.createConnectLink({
+        authConfigId: authConfig.id,
+        userId: employeeId,
+        callbackUrl: new URL(
+          "/settings/connections",
+          process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+        ).toString(),
+      });
+      await auditComposioConnection({
+        employeeId,
+        action: "connections.workApp.connectStarted",
+        toolkit: input.toolkit,
+        connectedAccountId: link.connected_account_id,
+      });
+      return {
+        redirectUrl: link.redirect_url,
+        connectedAccountId: link.connected_account_id,
+        expiresAt: link.expires_at,
+      };
+    }),
+
+  disconnectWorkApp: staffProcedure
+    .input(
+      z.object({
+        toolkit: workAppToolkit,
+        connectedAccountId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const employeeId = requireEmployeeId(ctx.employeeId);
+      const definition = WORK_APP_CATALOG.find(
+        (item) => item.toolkit === input.toolkit,
+      )!;
+      await requireWorkIntegrationFeature(definition, ctx);
+      await requireAllowedApp("composio");
+      await requireAllowedApp(input.toolkit);
+      const apiKey =
+        (await getEmployeeIntegrationSecret(employeeId, "composio")) ??
+        process.env.COMPOSIO_API_KEY?.trim();
+      if (!apiKey) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Connect the Composio project first",
+        });
+      }
+      const client = createComposioLive({ apiKey });
+      const accounts = await client.listConnectedAccounts({
+        toolkit: input.toolkit,
+        userId: employeeId,
+      });
+      if (
+        !accounts.some((account) => account.id === input.connectedAccountId)
+      ) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      await client.deleteConnectedAccount({
+        connectedAccountId: input.connectedAccountId,
+        revokeOnDelete: true,
+      });
+      await auditComposioConnection({
+        employeeId,
+        action: "connections.workApp.disconnect",
+        toolkit: input.toolkit,
+        connectedAccountId: input.connectedAccountId,
+      });
+      return { ok: true as const };
+    }),
 
   saveGoogleWorkspace: staffProcedure
     .input(
