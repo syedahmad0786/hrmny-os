@@ -85,8 +85,43 @@ describe("work planning calculations", () => {
           dueFrom: "2026-07-20",
           dueTo: "2026-07-26",
           includeSubtasks: false,
+          customFieldId: null,
         },
       ),
     ).toEqual({ data: [{ label: "Aisha", value: 120 }], total: 120 });
+    expect(
+      buildWorkReportChart(
+        [
+          {
+            itemId: "a",
+            parentItemId: null,
+            itemType: "task",
+            priority: null,
+            assigneeName: null,
+            sectionName: null,
+            dueAt: null,
+            completedAt: null,
+            estimatedMinutes: null,
+            actualMinutes: 0,
+            customFieldValue: ["UAE", "KSA", "UAE"],
+          },
+        ],
+        {
+          groupBy: "custom_field",
+          metric: "task_count",
+          completion: "all",
+          dueFrom: null,
+          dueTo: null,
+          includeSubtasks: true,
+          customFieldId: "field",
+        },
+      ),
+    ).toEqual({
+      data: [
+        { label: "KSA", value: 1 },
+        { label: "UAE", value: 1 },
+      ],
+      total: 2,
+    });
   });
 });

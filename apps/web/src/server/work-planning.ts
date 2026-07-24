@@ -46,12 +46,19 @@ export function budgetSummary(
 }
 
 export type WorkReportChartSpec = {
-  groupBy: "completion" | "assignee" | "priority" | "section" | "task_type";
+  groupBy:
+    | "completion"
+    | "assignee"
+    | "priority"
+    | "section"
+    | "task_type"
+    | "custom_field";
   metric: "task_count" | "estimated_minutes" | "actual_minutes";
   completion: "all" | "complete" | "incomplete";
   dueFrom: string | null;
   dueTo: string | null;
   includeSubtasks: boolean;
+  customFieldId: string | null;
 };
 
 export type WorkReportChartRow = {
@@ -65,6 +72,7 @@ export type WorkReportChartRow = {
   completedAt: string | null;
   estimatedMinutes: number | null;
   actualMinutes: number;
+  customFieldValue?: unknown;
 };
 
 export function buildWorkReportChart(
@@ -92,18 +100,35 @@ export function buildWorkReportChart(
               : "No priority"
             : spec.groupBy === "section"
               ? (row.sectionName ?? "No section")
-              : row.itemType === "task"
-                ? "Task"
-                : row.itemType === "milestone"
-                  ? "Milestone"
-                  : "Approval";
+              : spec.groupBy === "task_type"
+                ? row.itemType === "task"
+                  ? "Task"
+                  : row.itemType === "milestone"
+                    ? "Milestone"
+                    : "Approval"
+                : null;
     const value =
       spec.metric === "task_count"
         ? 1
         : spec.metric === "estimated_minutes"
           ? (row.estimatedMinutes ?? 0)
           : row.actualMinutes;
-    buckets.set(label, (buckets.get(label) ?? 0) + value);
+    const labels =
+      spec.groupBy !== "custom_field"
+        ? [label!]
+        : Array.isArray(row.customFieldValue)
+          ? [
+              ...new Set(
+                row.customFieldValue.map((item) => String(item).trim()),
+              ),
+            ].filter(Boolean)
+          : row.customFieldValue === null ||
+              row.customFieldValue === undefined ||
+              String(row.customFieldValue).trim() === ""
+            ? []
+            : [String(row.customFieldValue)];
+    for (const bucket of labels.length ? labels : ["No value"])
+      buckets.set(bucket, (buckets.get(bucket) ?? 0) + value);
   }
   const data = [...buckets.entries()]
     .map(([label, value]) => ({ label, value }))
