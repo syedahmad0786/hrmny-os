@@ -504,6 +504,51 @@ describe("work management", () => {
     });
   });
 
+  it("turns governed rich-text person mentions into task followers", async () => {
+    const caller = partnerCaller();
+    const employeeId = resolveDevUser("partner").employeeId;
+    const project = await caller.work.projects.create({
+      name: `Rich text ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const task = await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Mentioned task",
+      description: "",
+    });
+    await caller.work.tasks.update({
+      itemId: task.itemId,
+      description: `Please review @[Dev Partner](person:${employeeId})`,
+    });
+    expect(await caller.work.followers.list({ itemId: task.itemId })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ employeeId })]),
+    );
+
+    const plainTask = await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Plain text task",
+      description: "",
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.rich_text",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await caller.work.comments.create({
+      itemId: plainTask.itemId,
+      body: `Literal @[Dev Partner](person:${employeeId})`,
+    });
+    expect(
+      await caller.work.followers.list({ itemId: plainTask.itemId }),
+    ).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ employeeId })]),
+    );
+  });
+
   it("enforces a Feature Lab switch at the API boundary", async () => {
     const caller = partnerCaller();
     const project = (await caller.work.projects.list())[0]!;

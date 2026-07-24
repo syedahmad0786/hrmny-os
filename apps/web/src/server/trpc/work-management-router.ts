@@ -30,6 +30,7 @@ import {
 } from "../work-planning";
 import { validateDailyMinutes } from "../shifts-timesheets";
 import { queueWorkAiStudioEvent } from "../work-ai-studio-events";
+import { workMentionEmployeeIds } from "../../lib/work-rich-text";
 import {
   queueAssignedWorkAiTeammate,
   queueMentionedWorkAiTeammates,
@@ -1551,6 +1552,40 @@ async function notifyItem(
   `);
 }
 
+async function addMentionedItemFollowers(
+  ctx: TrpcContext,
+  itemId: string,
+  projectId: string,
+  value: string,
+) {
+  if (
+    !(await featureEnabled("work.rich_text", {
+      userId: ctx.employeeId,
+      clientId: await projectClientId(projectId),
+      roles: ctx.roles,
+    }))
+  )
+    return;
+  const employeeIds = workMentionEmployeeIds(value);
+  if (!employeeIds.length) return;
+  const db = getDb();
+  if (!db) {
+    const followers = getDemoWork().followers.get(itemId) ?? new Set<string>();
+    for (const employeeId of employeeIds) followers.add(employeeId);
+    getDemoWork().followers.set(itemId, followers);
+    return;
+  }
+  await db.execute(sql`
+    insert into public.work_item_follower (work_item_id, employee_id)
+    select ${itemId}::uuid, employee.employee_id
+    from unnest(string_to_array(${employeeIds.join(",")}, ',')::uuid[])
+      mention(employee_id)
+    join public.employee employee on employee.employee_id = mention.employee_id
+      and employee.is_active = true
+    on conflict do nothing
+  `);
+}
+
 async function notifyStatusUpdate(ctx: TrpcContext, update: WorkStatusUpdate) {
   const employeeId = actor(ctx);
   const db = getDb();
@@ -2948,6 +2983,12 @@ export const workManagementRouter = router({
           title: item.title,
           itemType: item.itemType,
         });
+        await addMentionedItemFollowers(
+          ctx,
+          item.itemId,
+          input.projectId,
+          item.description,
+        );
         if (item.assigneeEmployeeId) {
           await notifyItem(
             ctx,
@@ -3021,6 +3062,13 @@ export const workManagementRouter = router({
           await audit(ctx, "work.task.update", "work_item", input.itemId, {
             fields: Object.keys(input).filter((key) => key !== "itemId"),
           });
+          if (input.description !== undefined)
+            await addMentionedItemFollowers(
+              ctx,
+              input.itemId,
+              access.projectId,
+              input.description,
+            );
           await notifyItem(
             ctx,
             input.itemId,
@@ -3064,6 +3112,13 @@ export const workManagementRouter = router({
         await audit(ctx, "work.task.update", "work_item", input.itemId, {
           fields: Object.keys(input).filter((key) => key !== "itemId"),
         });
+        if (input.description !== undefined)
+          await addMentionedItemFollowers(
+            ctx,
+            input.itemId,
+            access.projectId,
+            input.description,
+          );
         await notifyItem(
           ctx,
           input.itemId,
@@ -3272,7 +3327,7 @@ export const workManagementRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         const employeeId = actor(ctx);
-        await requireItemAccess(ctx, input.itemId, "commenter");
+        const access = await requireItemAccess(ctx, input.itemId, "commenter");
         const db = getDb();
         let comment: WorkComment;
         if (!db) {
@@ -3306,6 +3361,12 @@ export const workManagementRouter = router({
           "work_comment",
           comment.commentId,
           { itemId: input.itemId },
+        );
+        await addMentionedItemFollowers(
+          ctx,
+          input.itemId,
+          access.projectId,
+          input.body,
         );
         await notifyItem(
           ctx,
