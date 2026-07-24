@@ -162,6 +162,13 @@
       "when": 1784926800000,
       "tag": "0022_work_workflows",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784930400000,
+      "tag": "0023_work_planning",
+      "breakpoints": true
     }
   ]
 }

@@ -20,6 +20,20 @@ const ITEMS = [
       "work.approvals",
     ],
   },
+  {
+    href: "/work/planning",
+    label: "Planning",
+    features: [
+      "work.goals",
+      "work.portfolios",
+      "work.reporting_dashboards",
+      "work.workload",
+      "work.capacity_planning",
+      "work.budgets",
+      "work.time_tracking",
+      "work.views.gantt",
+    ],
+  },
 ] as const;
 
 export function WorkNav() {

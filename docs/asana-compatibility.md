@@ -48,7 +48,7 @@ It did not contain a Composio project key or a separately stored Asana account, 
 
 ### Views and personal work
 
-List, board, monthly Calendar, date-range Timeline, and Files views use the same project data and are available in beta. My Tasks, Inbox, full-text search, and saved searches are also beta. Gantt, advanced personal sections/focus controls, weekly Calendar, and offline work mutation remain planned.
+List, board, monthly Calendar, date-range Timeline, Files, and Gantt views use the same project data and are available in beta. Gantt includes dependencies, critical-path calculation, captured baselines, and schedule variance. My Tasks, Inbox, full-text search, and saved searches are also beta. Advanced personal sections/focus controls, weekly Calendar, and offline work mutation remain planned.
 
 ### Intake, automation, and standardisation
 
@@ -56,7 +56,7 @@ Forms, conditional form questions, task-creating submissions, event rules with c
 
 ### Goals, portfolios, reporting, and resources
 
-Goals, sub-goals, contributing work, portfolios, status updates, reporting dashboards, Workload, capacity planning, budgets, and time tracking remain planned. Existing hrmny operational dashboards are not counted as Asana parity until they operate on the work graph and respect work-object permissions.
+Goals, sub-goals, weighted contributing projects/tasks, portfolio progress and health, structured status updates, live and saved reporting dashboards, CSV export, weekly Workload, capacity allocations, project budgets/cost forecasts, task estimates, manual time entries, and single-user timers are available in beta. They operate on the shared work graph and enforce work-object permissions. Portfolio-wide workload, richer report chart/group/filter builders, goal history, and multi-rate cost models remain planned.
 
 ### Enterprise administration
 
@@ -86,8 +86,8 @@ AI features remain planned until the provider performs real generation, sources 
 1. **Feature Lab foundation** — catalogue, inheritance, client/role/user controls, navigation/API enforcement, audit. Implemented.
 2. **Core work graph** — projects, permissions, sections, tasks, subtasks, dates, dependencies, comments, list/board. Implemented at first usable depth.
 3. **Asana connection and migration** — live Composio verification, read-only discovery, dry-run report, and idempotent core import implemented in beta; delta sync and cutover remain.
-4. **Workflow depth** — custom fields, tags, files, followers, recurrence, forms, event rules, templates, bundles, and approvals implemented in beta; proofing, richer automation, public intake, and time remain.
-5. **Planning and reporting** — Calendar, Timeline, Files, My Tasks, Inbox, and search implemented in beta; Gantt, goals, portfolios, statuses, dashboards, workload, and capacity remain.
+4. **Workflow depth** — custom fields, tags, files, followers, recurrence, forms, event rules, templates, bundles, and approvals implemented in beta; proofing, richer automation, and public intake remain.
+5. **Planning and reporting** — Calendar, Timeline, Files, My Tasks, Inbox, search, Gantt, goals, portfolios, statuses, dashboards, workload, capacity, budgets, and time are implemented in beta; richer cross-portfolio analytics remain.
 6. **Enterprise controls and integrations** — teams, guests, sharing, admin, SSO/SCIM, exports, webhooks, third-party apps.
 7. **AI** — smart assists first, then AI Studio, Teammates/Skills, and the Dash equivalent, all using the same Feature Lab and permission resolver.
 

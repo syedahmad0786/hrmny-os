@@ -100,6 +100,8 @@ export default function WorkPage() {
     session.data?.enabledFeatureKeys.includes("work.attachments") ?? false;
   const recurrenceEnabled =
     session.data?.enabledFeatureKeys.includes("work.recurring_tasks") ?? false;
+  const timeEnabled =
+    session.data?.enabledFeatureKeys.includes("work.time_tracking") ?? false;
   const comments = trpc.work.comments.list.useQuery(
     { itemId: selectedItemId! },
     { enabled: Boolean(selectedItemId && commentsEnabled) },
@@ -965,6 +967,27 @@ export default function WorkPage() {
                   <option value="urgent">Urgent</option>
                 </select>
               </label>
+              {timeEnabled ? (
+                <label className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
+                  Estimated minutes
+                  <input
+                    className="mt-1 w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-ink"
+                    type="number"
+                    min="1"
+                    max="1000000"
+                    value={selectedItem.estimatedMinutes ?? ""}
+                    disabled={!canEdit}
+                    onChange={(event) =>
+                      updateTask.mutate({
+                        itemId: selectedItem.itemId,
+                        estimatedMinutes: event.target.value
+                          ? Number(event.target.value)
+                          : null,
+                      })
+                    }
+                  />
+                </label>
+              ) : null}
               <label className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
                 Section
                 <select
