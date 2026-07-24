@@ -115,6 +115,15 @@ type WorkProofAnnotation = {
   createdByEmployeeId: string;
   createdAt: string;
 };
+type WorkOutOfOffice = {
+  outOfOfficeId: string;
+  employeeId: string;
+  startDate: string;
+  endDate: string;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+};
 type WorkNotification = {
   notificationId: string;
   itemId: string | null;
@@ -327,6 +336,7 @@ type DemoWork = {
   customFieldValues: Map<string, unknown>;
   attachments: Map<string, WorkAttachment>;
   proofAnnotations: Map<string, WorkProofAnnotation>;
+  outOfOffice: Map<string, WorkOutOfOffice>;
   notifications: Map<
     string,
     WorkNotification & { recipientEmployeeId: string }
@@ -445,6 +455,7 @@ export function getDemoWork(): DemoWork {
     customFieldValues: new Map(),
     attachments: new Map(),
     proofAnnotations: new Map(),
+    outOfOffice: new Map(),
     notifications: new Map(),
     messages: new Map(),
     messageComments: new Map(),
@@ -497,6 +508,28 @@ const likeTargetTypeSchema = z.enum([
   "message",
   "message_comment",
 ]);
+const outOfOfficeFields = {
+  startDate: z.string().date(),
+  endDate: z.string().date(),
+  note: z.string().trim().max(500).default(""),
+};
+const validOutOfOfficeRange = <
+  T extends { startDate: string; endDate: string },
+>(
+  value: T,
+) => value.endDate >= value.startDate;
+const outOfOfficeSchema = z
+  .object(outOfOfficeFields)
+  .refine(validOutOfOfficeRange, {
+    path: ["endDate"],
+    message: "End date must be on or after the start date",
+  });
+const updateOutOfOfficeSchema = z
+  .object({ outOfOfficeId: uuid, ...outOfOfficeFields })
+  .refine(validOutOfOfficeRange, {
+    path: ["endDate"],
+    message: "End date must be on or after the start date",
+  });
 const workRuleTriggerSchema = z.enum([
   "task_added",
   "task_completed",
@@ -696,6 +729,19 @@ const bundleBlueprintSchema = z.object({
 function actor(ctx: TrpcContext): string {
   if (!ctx.employeeId) throw new TRPCError({ code: "UNAUTHORIZED" });
   return ctx.employeeId;
+}
+
+function withOutOfOfficeStatus(period: WorkOutOfOffice) {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    ...period,
+    status:
+      period.startDate > today
+        ? ("upcoming" as const)
+        : period.endDate < today
+          ? ("past" as const)
+          : ("active" as const),
+  };
 }
 
 async function audit(
@@ -8311,19 +8357,197 @@ export const workManagementRouter = router({
       }),
   }),
 
-  members: router({
-    listEmployees: staffProcedure.query(async () => {
+  outOfOffice: router({
+    list: staffProcedure.query(async ({ ctx }) => {
+      await requireScopedFeature(ctx, "work.out_of_office", null);
+      const employeeId = actor(ctx);
       const db = getDb();
       if (!db)
+        return [...getDemoWork().outOfOffice.values()]
+          .filter((period) => period.employeeId === employeeId)
+          .sort((a, b) => b.startDate.localeCompare(a.startDate))
+          .map(withOutOfOfficeStatus);
+      return db.execute<
+        WorkOutOfOffice & { status: "active" | "upcoming" | "past" }
+      >(sql`
+        select work_out_of_office_id as "outOfOfficeId",
+          employee_id as "employeeId", start_date::text as "startDate",
+          end_date::text as "endDate", note, created_at as "createdAt",
+          updated_at as "updatedAt",
+          case when current_date between start_date and end_date then 'active'
+            when start_date > current_date then 'upcoming' else 'past'
+          end as status
+        from public.work_out_of_office
+        where employee_id = ${employeeId}::uuid
+        order by start_date desc, created_at desc
+      `);
+    }),
+    create: staffProcedure
+      .input(outOfOfficeSchema)
+      .mutation(async ({ input, ctx }) => {
+        await requireScopedFeature(ctx, "work.out_of_office", null);
+        const employeeId = actor(ctx);
+        const now = new Date().toISOString();
+        const period: WorkOutOfOffice = {
+          outOfOfficeId: randomUUID(),
+          employeeId,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          note: input.note,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const db = getDb();
+        if (!db) getDemoWork().outOfOffice.set(period.outOfOfficeId, period);
+        else
+          await db.execute(sql`
+            insert into public.work_out_of_office (
+              work_out_of_office_id, employee_id, start_date, end_date, note
+            ) values (
+              ${period.outOfOfficeId}::uuid, ${employeeId}::uuid,
+              ${input.startDate}::date, ${input.endDate}::date, ${input.note}
+            )
+          `);
+        await audit(
+          ctx,
+          "work.out_of_office.create",
+          "work_out_of_office",
+          period.outOfOfficeId,
+          period,
+        );
+        return withOutOfOfficeStatus(period);
+      }),
+    update: staffProcedure
+      .input(updateOutOfOfficeSchema)
+      .mutation(async ({ input, ctx }) => {
+        await requireScopedFeature(ctx, "work.out_of_office", null);
+        const employeeId = actor(ctx);
+        const db = getDb();
+        let period: WorkOutOfOffice | undefined;
+        if (!db) {
+          const existing = getDemoWork().outOfOffice.get(input.outOfOfficeId);
+          if (existing?.employeeId === employeeId) {
+            period = {
+              ...existing,
+              startDate: input.startDate,
+              endDate: input.endDate,
+              note: input.note,
+              updatedAt: new Date().toISOString(),
+            };
+            getDemoWork().outOfOffice.set(period.outOfOfficeId, period);
+          }
+        } else {
+          [period] = await db.execute<WorkOutOfOffice>(sql`
+            update public.work_out_of_office set
+              start_date = ${input.startDate}::date,
+              end_date = ${input.endDate}::date,
+              note = ${input.note}, updated_at = now()
+            where work_out_of_office_id = ${input.outOfOfficeId}::uuid
+              and employee_id = ${employeeId}::uuid
+            returning work_out_of_office_id as "outOfOfficeId",
+              employee_id as "employeeId", start_date::text as "startDate",
+              end_date::text as "endDate", note, created_at as "createdAt",
+              updated_at as "updatedAt"
+          `);
+        }
+        if (!period) throw new TRPCError({ code: "NOT_FOUND" });
+        await audit(
+          ctx,
+          "work.out_of_office.update",
+          "work_out_of_office",
+          period.outOfOfficeId,
+          period,
+        );
+        return withOutOfOfficeStatus(period);
+      }),
+    remove: staffProcedure
+      .input(z.object({ outOfOfficeId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireScopedFeature(ctx, "work.out_of_office", null);
+        const employeeId = actor(ctx);
+        const db = getDb();
+        let removed = false;
+        if (!db) {
+          const period = getDemoWork().outOfOffice.get(input.outOfOfficeId);
+          if (period?.employeeId === employeeId) {
+            getDemoWork().outOfOffice.delete(input.outOfOfficeId);
+            removed = true;
+          }
+        } else {
+          const rows = await db.execute<{ outOfOfficeId: string }>(sql`
+            delete from public.work_out_of_office
+            where work_out_of_office_id = ${input.outOfOfficeId}::uuid
+              and employee_id = ${employeeId}::uuid
+            returning work_out_of_office_id as "outOfOfficeId"
+          `);
+          removed = rows.length > 0;
+        }
+        if (!removed) throw new TRPCError({ code: "NOT_FOUND" });
+        await audit(
+          ctx,
+          "work.out_of_office.remove",
+          "work_out_of_office",
+          input.outOfOfficeId,
+          {},
+        );
+        return { ok: true as const };
+      }),
+  }),
+
+  members: router({
+    listEmployees: staffProcedure.query(async ({ ctx }) => {
+      const outOfOfficeEnabled = await featureEnabled("work.out_of_office", {
+        userId: ctx.employeeId,
+        clientId: ctx.clientId,
+        roles: ctx.roles,
+      });
+      const db = getDb();
+      if (!db) {
+        const employeeId = "c0000000-0000-4000-8000-000000000001";
+        const away = outOfOfficeEnabled
+          ? [...getDemoWork().outOfOffice.values()]
+              .filter(
+                (period) =>
+                  period.employeeId === employeeId &&
+                  withOutOfOfficeStatus(period).status === "active",
+              )
+              .sort((a, b) => b.endDate.localeCompare(a.endDate))[0]
+          : undefined;
         return [
           {
-            employeeId: "c0000000-0000-4000-8000-000000000001",
+            employeeId,
             displayName: "Dev Partner",
+            displayLabel: away
+              ? `Dev Partner · Away through ${away.endDate}`
+              : "Dev Partner",
+            outOfOfficeUntil: away?.endDate ?? null,
+            outOfOfficeNote: away?.note ?? null,
           },
         ];
-      return db.execute<{ employeeId: string; displayName: string }>(sql`
-        select employee_id as "employeeId", display_name as "displayName"
-        from public.employee where is_active = true order by lower(display_name)
+      }
+      return db.execute<{
+        employeeId: string;
+        displayName: string;
+        displayLabel: string;
+        outOfOfficeUntil: string | null;
+        outOfOfficeNote: string | null;
+      }>(sql`
+        select employee.employee_id as "employeeId",
+          employee.display_name as "displayName",
+          employee.display_name || case when away.end_date is not null
+            then ' · Away through ' || away.end_date::text else '' end
+            as "displayLabel",
+          away.end_date::text as "outOfOfficeUntil",
+          away.note as "outOfOfficeNote"
+        from public.employee employee
+        left join lateral (
+          select period.end_date, period.note
+          from public.work_out_of_office period
+          where period.employee_id = employee.employee_id
+            and current_date between period.start_date and period.end_date
+          order by period.end_date desc limit 1
+        ) away on ${outOfOfficeEnabled}
+        where employee.is_active = true order by lower(employee.display_name)
       `);
     }),
     upsert: staffProcedure

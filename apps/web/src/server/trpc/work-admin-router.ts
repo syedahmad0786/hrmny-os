@@ -158,6 +158,7 @@ const WORK_EXPORT_TABLES = [
   "work_message_follower",
   "work_like",
   "work_proof_annotation",
+  "work_out_of_office",
   "work_project",
   "work_project_member",
   "work_project_guest",

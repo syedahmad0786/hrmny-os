@@ -484,4 +484,28 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/y_position >= 0 AND y_position <= 1/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("stores multiple secure out-of-office periods per employee", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0040_work_out_of_office.sql"),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0040_work_out_of_office.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0040_work_out_of_office.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_out_of_office/i,
+    );
+    expect(migration).toMatch(/employee_id uuid NOT NULL/i);
+    expect(migration).toMatch(/CHECK \(end_date >= start_date\)/i);
+    expect(migration).not.toMatch(/UNIQUE\s*\(employee_id\)/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

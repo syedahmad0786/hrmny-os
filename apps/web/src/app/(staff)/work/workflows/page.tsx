@@ -536,7 +536,7 @@ export default function WorkflowsPage() {
                 <option value="">Unassigned</option>
                 {(employees.data ?? []).map((employee) => (
                   <option key={employee.employeeId} value={employee.employeeId}>
-                    {employee.displayName}
+                    {employee.displayLabel}
                   </option>
                 ))}
               </select>
