@@ -105,6 +105,16 @@ type WorkAttachment = {
   sizeBytes: number | null;
   createdAt: string;
 };
+type WorkProofAnnotation = {
+  annotationId: string;
+  attachmentId: string;
+  itemId: string;
+  xPosition: number;
+  yPosition: number;
+  pageNumber: number | null;
+  createdByEmployeeId: string;
+  createdAt: string;
+};
 type WorkNotification = {
   notificationId: string;
   itemId: string | null;
@@ -316,6 +326,7 @@ type DemoWork = {
   customFields: Map<string, WorkCustomField>;
   customFieldValues: Map<string, unknown>;
   attachments: Map<string, WorkAttachment>;
+  proofAnnotations: Map<string, WorkProofAnnotation>;
   notifications: Map<
     string,
     WorkNotification & { recipientEmployeeId: string }
@@ -433,6 +444,7 @@ export function getDemoWork(): DemoWork {
     customFields: new Map(),
     customFieldValues: new Map(),
     attachments: new Map(),
+    proofAnnotations: new Map(),
     notifications: new Map(),
     messages: new Map(),
     messageComments: new Map(),
@@ -858,6 +870,73 @@ async function requireItemInProject(
       code: "BAD_REQUEST",
       message: "Task does not belong to the selected project",
     });
+}
+
+const PROOFING_CONTENT_TYPES = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/bmp",
+]);
+
+export function isProofableAttachment(
+  attachment: Pick<WorkAttachment, "name" | "contentType">,
+) {
+  return (
+    PROOFING_CONTENT_TYPES.has(attachment.contentType?.toLowerCase() ?? "") ||
+    /\.(?:pdf|png|jpe?g|gif|bmp)$/i.test(attachment.name)
+  );
+}
+
+function isPdfAttachment(
+  attachment: Pick<WorkAttachment, "name" | "contentType">,
+) {
+  return (
+    attachment.contentType?.toLowerCase() === "application/pdf" ||
+    /\.pdf$/i.test(attachment.name)
+  );
+}
+
+async function attachmentById(
+  ctx: TrpcContext,
+  attachmentId: string,
+  minimum: AccessLevel = "viewer",
+): Promise<WorkAttachment> {
+  const db = getDb();
+  const attachment = !db
+    ? getDemoWork().attachments.get(attachmentId)
+    : (
+        await db.execute<
+          Omit<WorkAttachment, "createdAt" | "sizeBytes"> & {
+            createdAt: Date | string;
+            sizeBytes: string | number | null;
+          }
+        >(sql`
+          select work_attachment_id as "attachmentId", work_item_id as "itemId",
+            name, storage_path as "storagePath", external_url as "externalUrl",
+            content_type as "contentType", size_bytes as "sizeBytes",
+            created_at as "createdAt"
+          from public.work_attachment
+          where work_attachment_id = ${attachmentId}::uuid
+        `)
+      )[0];
+  if (!attachment) throw new TRPCError({ code: "NOT_FOUND" });
+  await requireItemAccess(ctx, attachment.itemId, minimum);
+  return {
+    ...attachment,
+    sizeBytes:
+      attachment.sizeBytes === null ? null : Number(attachment.sizeBytes),
+    createdAt: new Date(attachment.createdAt).toISOString(),
+  };
+}
+
+async function requireProofingFeatures(ctx: TrpcContext, projectId: string) {
+  await Promise.all(
+    ["work.proofing", "work.attachments", "work.subtasks", "work.tasks"].map(
+      (featureKey) => requireScopedFeature(ctx, featureKey, projectId),
+    ),
+  );
 }
 
 type WorkMessageScope = { projectId: string | null; teamId: string | null };
@@ -4318,23 +4397,7 @@ export const workManagementRouter = router({
     open: staffProcedure
       .input(z.object({ attachmentId: uuid }))
       .mutation(async ({ input, ctx }) => {
-        const db = getDb();
-        const attachment = !db
-          ? getDemoWork().attachments.get(input.attachmentId)
-          : (
-              await db.execute<{
-                itemId: string;
-                storagePath: string | null;
-                externalUrl: string | null;
-              }>(sql`
-                select work_item_id as "itemId", storage_path as "storagePath",
-                  external_url as "externalUrl"
-                from public.work_attachment
-                where work_attachment_id = ${input.attachmentId}::uuid
-              `)
-            )[0];
-        if (!attachment) throw new TRPCError({ code: "NOT_FOUND" });
-        await requireItemAccess(ctx, attachment.itemId);
+        const attachment = await attachmentById(ctx, input.attachmentId);
         if (attachment.externalUrl)
           return { url: attachment.externalUrl, expiresAt: null };
         if (!attachment.storagePath) throw new TRPCError({ code: "NOT_FOUND" });
@@ -4347,20 +4410,11 @@ export const workManagementRouter = router({
       .input(z.object({ attachmentId: uuid }))
       .mutation(async ({ input, ctx }) => {
         const db = getDb();
-        const attachment = !db
-          ? getDemoWork().attachments.get(input.attachmentId)
-          : (
-              await db.execute<{
-                itemId: string;
-                storagePath: string | null;
-              }>(sql`
-                select work_item_id as "itemId", storage_path as "storagePath"
-                from public.work_attachment
-                where work_attachment_id = ${input.attachmentId}::uuid
-              `)
-            )[0];
-        if (!attachment) throw new TRPCError({ code: "NOT_FOUND" });
-        await requireItemAccess(ctx, attachment.itemId, "editor");
+        const attachment = await attachmentById(
+          ctx,
+          input.attachmentId,
+          "editor",
+        );
         if (!db) getDemoWork().attachments.delete(input.attachmentId);
         else
           await db.execute(
@@ -4378,6 +4432,272 @@ export const workManagementRouter = router({
           },
         );
         return { ok: true as const };
+      }),
+  }),
+
+  proofing: router({
+    list: staffProcedure
+      .input(z.object({ attachmentId: uuid }))
+      .query(async ({ input, ctx }) => {
+        const attachment = await attachmentById(ctx, input.attachmentId);
+        const access = await requireItemAccess(ctx, attachment.itemId);
+        await requireProofingFeatures(ctx, access.projectId);
+        if (!isProofableAttachment(attachment))
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Proofing supports PDF, PNG, JPG, GIF, and BMP files",
+          });
+        const db = getDb();
+        if (!db) {
+          const store = getDemoWork();
+          return [...store.proofAnnotations.values()]
+            .filter(
+              (annotation) => annotation.attachmentId === input.attachmentId,
+            )
+            .flatMap((annotation) => {
+              const item = store.items.get(annotation.itemId);
+              return item
+                ? [
+                    {
+                      ...annotation,
+                      title: item.title,
+                      description: item.description,
+                      assigneeEmployeeId: item.assigneeEmployeeId,
+                      assigneeName: item.assigneeName,
+                      dueAt: item.dueAt,
+                      completedAt: item.completedAt,
+                    },
+                  ]
+                : [];
+            })
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        }
+        const rows = await db.execute<
+          WorkProofAnnotation & {
+            xPosition: string | number;
+            yPosition: string | number;
+            createdAt: Date | string;
+            title: string;
+            description: string;
+            assigneeEmployeeId: string | null;
+            assigneeName: string | null;
+            dueAt: Date | string | null;
+            completedAt: Date | string | null;
+          }
+        >(sql`
+          select proof.work_proof_annotation_id as "annotationId",
+            proof.work_attachment_id as "attachmentId",
+            proof.work_item_id as "itemId", proof.x_position as "xPosition",
+            proof.y_position as "yPosition", proof.page_number as "pageNumber",
+            proof.created_by_employee_id as "createdByEmployeeId",
+            proof.created_at as "createdAt", item.title, item.description,
+            item.assignee_employee_id as "assigneeEmployeeId",
+            assignee.display_name as "assigneeName", item.due_at as "dueAt",
+            item.completed_at as "completedAt"
+          from public.work_proof_annotation proof
+          join public.work_item item on item.work_item_id = proof.work_item_id
+          left join public.employee assignee
+            on assignee.employee_id = item.assignee_employee_id
+          where proof.work_attachment_id = ${input.attachmentId}::uuid
+            and item.archived_at is null
+          order by proof.created_at
+        `);
+        return rows.map((row) => ({
+          ...row,
+          xPosition: Number(row.xPosition),
+          yPosition: Number(row.yPosition),
+          dueAt: iso(row.dueAt),
+          completedAt: iso(row.completedAt),
+          createdAt: new Date(row.createdAt).toISOString(),
+        }));
+      }),
+    create: staffProcedure
+      .input(
+        z.object({
+          attachmentId: uuid,
+          xPosition: z.number().min(0).max(1),
+          yPosition: z.number().min(0).max(1),
+          pageNumber: z.number().int().min(1).max(10_000).nullable().optional(),
+          feedback: z.string().trim().min(1).max(500),
+          assigneeEmployeeId: nullableUuid.optional(),
+          dueAt: z.string().datetime().nullable().optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        const attachment = await attachmentById(
+          ctx,
+          input.attachmentId,
+          "commenter",
+        );
+        const access = await requireItemAccess(
+          ctx,
+          attachment.itemId,
+          "commenter",
+        );
+        await requireProofingFeatures(ctx, access.projectId);
+        if (!isProofableAttachment(attachment))
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Proofing supports PDF, PNG, JPG, GIF, and BMP files",
+          });
+        const pageNumber = isPdfAttachment(attachment)
+          ? (input.pageNumber ?? 1)
+          : null;
+        const annotation: WorkProofAnnotation = {
+          annotationId: randomUUID(),
+          attachmentId: attachment.attachmentId,
+          itemId: randomUUID(),
+          xPosition: input.xPosition,
+          yPosition: input.yPosition,
+          pageNumber,
+          createdByEmployeeId: employeeId,
+          createdAt: new Date().toISOString(),
+        };
+        const description = `Proofing feedback on ${attachment.name}${pageNumber ? `, page ${pageNumber}` : ""}.`;
+        const db = getDb();
+        let item: WorkItem;
+        if (!db) {
+          const store = getDemoWork();
+          const parent = store.items.get(attachment.itemId)!;
+          item = {
+            itemId: annotation.itemId,
+            parentItemId: attachment.itemId,
+            title: input.feedback,
+            description,
+            itemType: "task",
+            priority: null,
+            assigneeEmployeeId: input.assigneeEmployeeId ?? null,
+            assigneeName: input.assigneeEmployeeId ? "Assigned user" : null,
+            startDate: null,
+            dueAt: input.dueAt ?? null,
+            completedAt: null,
+            sectionId: parent.sectionId,
+            position: [...store.items.values()].filter(
+              (candidate) => candidate.projectId === access.projectId,
+            ).length,
+            projectId: access.projectId,
+            recurrence: null,
+            estimatedMinutes: null,
+          };
+          store.items.set(item.itemId, item);
+          store.proofAnnotations.set(annotation.annotationId, annotation);
+        } else {
+          const [membership] = await db.execute<{
+            sectionId: string | null;
+          }>(sql`
+            select work_section_id as "sectionId"
+            from public.work_project_item
+            where work_project_id = ${access.projectId}::uuid
+              and work_item_id = ${attachment.itemId}::uuid
+            limit 1
+          `);
+          if (!membership) throw new TRPCError({ code: "NOT_FOUND" });
+          item = await db.transaction(async (tx) => {
+            const [created] = await tx.execute<
+              WorkItem & { dueAt: Date | string | null }
+            >(sql`
+              insert into public.work_item (
+                work_item_id, parent_work_item_id, title, description,
+                item_type, assignee_employee_id, created_by_employee_id, due_at
+              ) values (
+                ${annotation.itemId}::uuid, ${attachment.itemId}::uuid,
+                ${input.feedback}, ${description}, 'task',
+                ${input.assigneeEmployeeId ?? null}::uuid,
+                ${employeeId}::uuid, ${input.dueAt ?? null}::timestamptz
+              )
+              returning work_item_id as "itemId",
+                parent_work_item_id as "parentItemId", title, description,
+                item_type as "itemType", priority, recurrence,
+                estimated_minutes as "estimatedMinutes",
+                assignee_employee_id as "assigneeEmployeeId",
+                start_date as "startDate", due_at as "dueAt",
+                completed_at as "completedAt"
+            `);
+            const [projectItem] = await tx.execute<{ position: number }>(sql`
+              insert into public.work_project_item (
+                work_project_id, work_item_id, work_section_id, position
+              ) values (
+                ${access.projectId}::uuid, ${annotation.itemId}::uuid,
+                ${membership.sectionId}::uuid,
+                (select coalesce(max(position), -1) + 1
+                  from public.work_project_item
+                  where work_project_id = ${access.projectId}::uuid)
+              ) returning position
+            `);
+            if (!created || !projectItem)
+              throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+            await tx.execute(sql`
+              insert into public.work_proof_annotation (
+                work_proof_annotation_id, work_attachment_id, work_item_id,
+                x_position, y_position, page_number, created_by_employee_id
+              ) values (
+                ${annotation.annotationId}::uuid,
+                ${annotation.attachmentId}::uuid, ${annotation.itemId}::uuid,
+                ${annotation.xPosition}, ${annotation.yPosition},
+                ${annotation.pageNumber}, ${employeeId}::uuid
+              )
+            `);
+            let assigneeName: string | null = null;
+            if (created.assigneeEmployeeId) {
+              const [assignee] = await tx.execute<{ name: string }>(sql`
+                select display_name as name from public.employee
+                where employee_id = ${created.assigneeEmployeeId}::uuid
+              `);
+              assigneeName = assignee?.name ?? null;
+            }
+            return {
+              ...created,
+              assigneeName,
+              startDate: created.startDate ? String(created.startDate) : null,
+              dueAt: iso(created.dueAt),
+              completedAt: iso(created.completedAt),
+              sectionId: membership.sectionId,
+              position: projectItem.position,
+              projectId: access.projectId,
+            };
+          });
+        }
+        await audit(
+          ctx,
+          "work.proofing.create",
+          "work_proof_annotation",
+          annotation.annotationId,
+          {
+            attachmentId: annotation.attachmentId,
+            itemId: annotation.itemId,
+            pageNumber,
+          },
+        );
+        await notifyItem(
+          ctx,
+          attachment.itemId,
+          "commented",
+          "New proofing feedback on a followed task",
+        );
+        if (item.assigneeEmployeeId) {
+          await notifyItem(
+            ctx,
+            item.itemId,
+            "assigned",
+            `Assigned: ${item.title}`,
+          );
+          await queueAssignedWorkAiTeammate(
+            ctx,
+            item.itemId,
+            item.assigneeEmployeeId,
+          );
+        }
+        await runProjectRules(ctx, access.projectId, item.itemId, "task_added");
+        return {
+          ...annotation,
+          title: item.title,
+          description: item.description,
+          assigneeEmployeeId: item.assigneeEmployeeId,
+          assigneeName: item.assigneeName,
+          dueAt: item.dueAt,
+          completedAt: item.completedAt,
+        };
       }),
   }),
 
@@ -4592,21 +4912,9 @@ export const workManagementRouter = router({
             and (
               notification.work_item_id is null
               or exists (
-                select 1
-                from public.work_project_item project_item
-                join public.work_project project
-                  on project.work_project_id = project_item.work_project_id
-                left join public.work_project_member member
-                  on member.work_project_id = project.work_project_id
-                  and member.employee_id = ${employeeId}::uuid
+                select 1 from public.work_project_item project_item
                 where project_item.work_item_id = notification.work_item_id
-                  and project.archived_at is null
-                  and (
-                    project.privacy = 'organization'
-                    or project.created_by_employee_id = ${employeeId}::uuid
-                    or project.owner_employee_id = ${employeeId}::uuid
-                    or member.employee_id is not null
-                  )
+                  and project_item.work_project_id = notification.work_project_id
               )
             )
           order by notification.created_at desc

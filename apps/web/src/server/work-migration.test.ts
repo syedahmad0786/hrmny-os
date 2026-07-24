@@ -459,4 +459,29 @@ describe("work migration compatibility", () => {
     expect(migration).toContain("'status_update'");
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("stores normalized proofing pins against actionable subtasks", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0039_work_proofing.sql"),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0039_work_proofing.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0039_work_proofing.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_proof_annotation/i,
+    );
+    expect(migration).toMatch(/work_attachment_id uuid NOT NULL/i);
+    expect(migration).toMatch(/work_item_id uuid NOT NULL UNIQUE/i);
+    expect(migration).toMatch(/x_position >= 0 AND x_position <= 1/i);
+    expect(migration).toMatch(/y_position >= 0 AND y_position <= 1/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });
