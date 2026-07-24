@@ -21,6 +21,7 @@ import {
   listWorkAiRuns,
   rejectWorkAiRun,
   requireWorkAiFeature,
+  type WorkAiContextSource,
   workAiKinds,
 } from "../work-ai";
 import { getGoogleWorkspaceAccessToken } from "./connections-router";
@@ -87,9 +88,81 @@ export const workAiRouter = router({
           })
           .nullable()
           .default(null),
+        summaryPortfolioId: uuid.nullable().default(null),
+        includeInbox: z.boolean().default(false),
       }),
     )
-    .mutation(({ input, ctx }) => generateWorkAi({ ...input, ctx })),
+    .mutation(async ({ input, ctx }) => {
+      const {
+        summaryPortfolioId,
+        includeInbox,
+        projectIds: selectedProjectIds,
+        ...generation
+      } = input;
+      const projectIds = [...selectedProjectIds];
+      const externalSources: WorkAiContextSource[] = [];
+      if (input.kind === "smart_summaries") {
+        await requireWorkAiFeature(ctx, input.kind);
+        const work = createWorkCaller(ctx);
+        if (summaryPortfolioId) {
+          await requireFeature(ctx, "work.portfolios");
+          const [portfolios, projects] = await Promise.all([
+            work.portfolios.list(),
+            work.projects.list(),
+          ]);
+          const portfolio = portfolios.find(
+            (candidate) => candidate.portfolioId === summaryPortfolioId,
+          );
+          if (!portfolio) throw new TRPCError({ code: "NOT_FOUND" });
+          const visibleProjectIds = new Set(
+            projects.map((project) => project.projectId),
+          );
+          const portfolioProjectIds = portfolio.projectIds.filter((projectId) =>
+            visibleProjectIds.has(projectId),
+          );
+          for (const projectId of portfolioProjectIds)
+            if (!projectIds.includes(projectId) && projectIds.length < 10)
+              projectIds.push(projectId);
+          externalSources.push({
+            id: portfolio.portfolioId,
+            type: "portfolio" as const,
+            label: portfolio.name,
+            content: JSON.stringify({
+              description: portfolio.description,
+              progress: portfolio.progress,
+              health: portfolio.health,
+              projectIds: portfolioProjectIds,
+            }),
+          });
+        }
+        if (includeInbox) {
+          await requireFeature(ctx, "work.inbox");
+          const notifications = await work.personal.inbox({});
+          externalSources.push({
+            id: `inbox:${actor(ctx)}`,
+            type: "inbox" as const,
+            label: "Inbox",
+            content: JSON.stringify(
+              notifications.map(
+                ({ eventType, message, readAt, createdAt, projectId }) => ({
+                  eventType,
+                  message,
+                  readAt,
+                  createdAt,
+                  projectId,
+                }),
+              ),
+            ),
+          });
+        }
+      }
+      return generateWorkAi({
+        ...generation,
+        ctx,
+        projectIds,
+        externalSources,
+      });
+    }),
 
   reject: staffProcedure
     .input(z.object({ runId: uuid }))

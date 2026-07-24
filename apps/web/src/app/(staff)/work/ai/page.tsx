@@ -85,6 +85,8 @@ export default function WorkAiPage() {
   const [kind, setKind] = useState<Kind>("smart_chat");
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [statusTarget, setStatusTarget] = useState("");
+  const [summaryPortfolioId, setSummaryPortfolioId] = useState("");
+  const [includeInbox, setIncludeInbox] = useState(false);
   const [itemId, setItemId] = useState("");
   const [requestText, setRequestText] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -93,7 +95,9 @@ export default function WorkAiPage() {
     enabled: kind === "smart_status" && enabled.has("work.goals"),
   });
   const portfolios = trpc.work.portfolios.list.useQuery(undefined, {
-    enabled: kind === "smart_status" && enabled.has("work.portfolios"),
+    enabled:
+      (kind === "smart_status" || kind === "smart_summaries") &&
+      enabled.has("work.portfolios"),
   });
   const generate = trpc.workAi.generate.useMutation({
     onSuccess: async (run) => {
@@ -141,8 +145,8 @@ export default function WorkAiPage() {
             Work intelligence
           </h1>
           <p className="mt-2 max-w-3xl text-sm text-muted">
-            AI sees only projects you can already open. Answers cite their
-            sources, and every proposed change waits for your approval.
+            AI sees only work you can already open. Answers cite their sources,
+            and every proposed change waits for your approval.
           </p>
         </div>
         {enabled.has("work.ai.studio") ? (
@@ -196,6 +200,11 @@ export default function WorkAiPage() {
                           ),
                         }
                       : null,
+                  summaryPortfolioId:
+                    kind === "smart_summaries" && summaryPortfolioId
+                      ? summaryPortfolioId
+                      : null,
+                  includeInbox: kind === "smart_summaries" && includeInbox,
                 });
               }}
             >
@@ -284,6 +293,48 @@ export default function WorkAiPage() {
                     evidence and still waits for your approval.
                   </p>
                 </label>
+              ) : null}
+
+              {kind === "smart_summaries" ? (
+                <fieldset className="space-y-3">
+                  <legend className="text-sm font-medium">
+                    Summary sources
+                  </legend>
+                  {enabled.has("work.portfolios") ? (
+                    <label className="block text-sm">
+                      <span className="mb-1 block">Portfolio (optional)</span>
+                      <select
+                        className="w-full rounded-lg border border-sand bg-white px-3 py-2"
+                        value={summaryPortfolioId}
+                        onChange={(event) =>
+                          setSummaryPortfolioId(event.target.value)
+                        }
+                      >
+                        <option value="">No portfolio roll-up</option>
+                        {(portfolios.data ?? []).map((portfolio) => (
+                          <option
+                            key={portfolio.portfolioId}
+                            value={portfolio.portfolioId}
+                          >
+                            {portfolio.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  {enabled.has("work.inbox") ? (
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={includeInbox}
+                        onChange={(event) =>
+                          setIncludeInbox(event.target.checked)
+                        }
+                      />
+                      Include my permission-filtered Inbox
+                    </label>
+                  ) : null}
+                </fieldset>
               ) : null}
 
               {kind === "smart_editor" ? (

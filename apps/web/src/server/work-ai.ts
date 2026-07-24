@@ -322,6 +322,7 @@ const sourceSchema = z.object({
     "custom_task_status",
     "goal",
     "portfolio",
+    "inbox",
     "external_file",
   ]),
   label: z.string().trim().min(1).max(300),
@@ -596,6 +597,14 @@ async function buildContext(
   }
   for (const projectId of ids.slice(0, 10)) {
     const project = await requireProjectAccess(ctx, projectId);
+    if (
+      !(await featureEnabled("work.projects", {
+        userId: ctx.employeeId,
+        clientId: project.clientId,
+        roles: ctx.roles,
+      }))
+    )
+      throw new TRPCError({ code: "NOT_FOUND" });
     const customTaskTypesEnabled = await featureEnabled(
       "work.custom_task_types",
       {
@@ -865,7 +874,11 @@ function safeResult(
   actionTypes?: readonly WorkAiAction["type"][],
 ) {
   const sources = new Map(context.sources.map((source) => [source.id, source]));
-  const allowedProjects = new Set(context.projectIds);
+  const allowedProjects = new Set(
+    context.sources
+      .filter((source) => source.type === "project")
+      .map((source) => source.id),
+  );
   const allowedItems = new Set(
     context.sources
       .filter((source) => source.type === "task")
