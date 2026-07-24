@@ -544,14 +544,20 @@ export default function PlanningPage() {
     },
   );
   const reportingNumericFields = trpc.work.reporting.numericFields.useQuery(
-    chartPortfolioId ? { portfolioId: chartPortfolioId } : { projectId },
+    chartPortfolioId === "all"
+      ? { allProjects: true }
+      : chartPortfolioId
+        ? { portfolioId: chartPortfolioId }
+        : { projectId },
     {
       enabled: Boolean(
         chartReportType === "tasks" &&
         reportingEnabled &&
-        (chartPortfolioId
-          ? portfoliosEnabled
-          : projectId && customFieldsEnabled),
+        (chartPortfolioId === "all"
+          ? true
+          : chartPortfolioId
+            ? portfoliosEnabled
+            : projectId && customFieldsEnabled),
       ),
     },
   );
@@ -616,27 +622,29 @@ export default function PlanningPage() {
     const options = availableMetadataGroups(chartReportType, statusEnabled);
     if (!options.some((option) => option.value === metadataGroup))
       setMetadataGroup(options[0]!.value);
-    if (chartReportType !== "projects") setChartPortfolioId("");
-  }, [chartReportType, metadataGroup, statusEnabled]);
+    if (chartReportType !== "projects" || chartPortfolioId === "all")
+      setChartPortfolioId("");
+  }, [chartPortfolioId, chartReportType, metadataGroup, statusEnabled]);
+  const taskReportSpec = {
+    groupBy: chartGroupBy,
+    metric: chartMetric,
+    completion: chartCompletion,
+    dueFrom: chartDueFrom || null,
+    dueTo: chartDueTo || null,
+    includeSubtasks: chartSubtasks !== "exclude",
+    customFieldId: chartPortfolioId ? null : chartCustomFieldId || null,
+    metricCustomFieldKey: numericFieldMetric
+      ? chartNumericFieldKey || null
+      : null,
+    assigneeEmployeeId: chartAssigneeId || null,
+    priority: chartPriority || null,
+    itemType: chartItemType || null,
+    subtasks: chartSubtasks,
+  };
   const projectChart = trpc.work.reporting.chart.useQuery(
     {
       projectId,
-      spec: {
-        groupBy: chartGroupBy,
-        metric: chartMetric,
-        completion: chartCompletion,
-        dueFrom: chartDueFrom || null,
-        dueTo: chartDueTo || null,
-        includeSubtasks: chartSubtasks !== "exclude",
-        customFieldId: chartCustomFieldId || null,
-        metricCustomFieldKey: numericFieldMetric
-          ? chartNumericFieldKey || null
-          : null,
-        assigneeEmployeeId: chartAssigneeId || null,
-        priority: chartPriority || null,
-        itemType: chartItemType || null,
-        subtasks: chartSubtasks,
-      },
+      spec: taskReportSpec,
     },
     {
       enabled: Boolean(
@@ -652,34 +660,37 @@ export default function PlanningPage() {
   const portfolioChart = trpc.work.reporting.portfolioChart.useQuery(
     {
       portfolioId: chartPortfolioId,
-      spec: {
-        groupBy: chartGroupBy,
-        metric: chartMetric,
-        completion: chartCompletion,
-        dueFrom: chartDueFrom || null,
-        dueTo: chartDueTo || null,
-        includeSubtasks: chartSubtasks !== "exclude",
-        customFieldId: null,
-        metricCustomFieldKey: numericFieldMetric
-          ? chartNumericFieldKey || null
-          : null,
-        assigneeEmployeeId: chartAssigneeId || null,
-        priority: chartPriority || null,
-        itemType: chartItemType || null,
-        subtasks: chartSubtasks,
-      },
+      spec: taskReportSpec,
     },
     {
       enabled: Boolean(
         chartReportType === "tasks" &&
         chartPortfolioId &&
+        chartPortfolioId !== "all" &&
         reportingEnabled &&
         chartGroupBy !== "custom_field" &&
         numericFieldSelected,
       ),
     },
   );
-  const taskChart = chartPortfolioId ? portfolioChart : projectChart;
+  const allProjectsChart = trpc.work.reporting.allProjectsChart.useQuery(
+    { spec: taskReportSpec },
+    {
+      enabled: Boolean(
+        chartReportType === "tasks" &&
+        chartPortfolioId === "all" &&
+        reportingEnabled &&
+        chartGroupBy !== "custom_field" &&
+        numericFieldSelected,
+      ),
+    },
+  );
+  const taskChart =
+    chartPortfolioId === "all"
+      ? allProjectsChart
+      : chartPortfolioId
+        ? portfolioChart
+        : projectChart;
   const metadataChart = useMemo(() => {
     if (chartReportType === "tasks") return null;
     if (chartReportType === "projects") {
@@ -947,6 +958,7 @@ export default function PlanningPage() {
       typeof config.projectId === "string" ? config.projectId : null;
     const savedPortfolioId =
       typeof config.portfolioId === "string" ? config.portfolioId : null;
+    const savedAllProjects = config.allProjects === true;
     if (
       !["bar", "donut", "number"].includes(String(config.chartStyle)) ||
       !spec ||
@@ -1046,7 +1058,8 @@ export default function PlanningPage() {
       return;
     }
     if (
-      Boolean(savedProjectId) === Boolean(savedPortfolioId) ||
+      [savedProjectId, savedPortfolioId, savedAllProjects].filter(Boolean)
+        .length !== 1 ||
       ![
         "completion",
         "assignee",
@@ -1068,10 +1081,14 @@ export default function PlanningPage() {
       !["all", "complete", "incomplete"].includes(String(saved.completion))
     )
       return;
-    if (savedPortfolioId && saved.groupBy === "custom_field") return;
+    if (
+      (savedPortfolioId || savedAllProjects) &&
+      saved.groupBy === "custom_field"
+    )
+      return;
     if (savedProjectId) setProjectId(savedProjectId);
     setChartReportType("tasks");
-    setChartPortfolioId(savedPortfolioId ?? "");
+    setChartPortfolioId(savedAllProjects ? "all" : (savedPortfolioId ?? ""));
     setChartStyle(config.chartStyle as typeof chartStyle);
     setChartGroupBy(saved.groupBy as typeof chartGroupBy);
     setChartMetric(saved.metric as typeof chartMetric);
@@ -1321,27 +1338,14 @@ export default function PlanningPage() {
                     name: dashboardName,
                     config: {
                       reportType: "tasks",
-                      ...(chartPortfolioId
-                        ? { portfolioId: chartPortfolioId }
-                        : { projectId }),
+                      ...(chartPortfolioId === "all"
+                        ? { allProjects: true }
+                        : chartPortfolioId
+                          ? { portfolioId: chartPortfolioId }
+                          : { projectId }),
                       view: "chart",
                       chartStyle,
-                      spec: {
-                        groupBy: chartGroupBy,
-                        metric: chartMetric,
-                        completion: chartCompletion,
-                        dueFrom: chartDueFrom || null,
-                        dueTo: chartDueTo || null,
-                        includeSubtasks: chartSubtasks !== "exclude",
-                        customFieldId: chartCustomFieldId || null,
-                        metricCustomFieldKey: numericFieldMetric
-                          ? chartNumericFieldKey || null
-                          : null,
-                        assigneeEmployeeId: chartAssigneeId || null,
-                        priority: chartPriority || null,
-                        itemType: chartItemType || null,
-                        subtasks: chartSubtasks,
-                      },
+                      spec: taskReportSpec,
                     },
                   });
               }}
@@ -1445,6 +1449,9 @@ export default function PlanningPage() {
                         ? "This project"
                         : "All visible projects"}
                     </option>
+                    {chartReportType === "tasks" ? (
+                      <option value="all">All visible projects</option>
+                    ) : null}
                     {(portfolios.data ?? []).map((portfolio) => (
                       <option
                         key={portfolio.portfolioId}

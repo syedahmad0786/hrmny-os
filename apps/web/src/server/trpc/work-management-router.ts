@@ -1173,6 +1173,7 @@ const dashboardWidgetConfigSchema = z
     reportType: z.enum(["tasks", "projects", "goals", "portfolios"]).optional(),
     projectId: uuid.optional(),
     portfolioId: uuid.optional(),
+    allProjects: z.literal(true).optional(),
     chartStyle: z.enum(["bar", "donut", "number"]).optional(),
     spec: z.union([reportChartSpecSchema, metadataReportSpecSchema]).optional(),
   })
@@ -1181,10 +1182,12 @@ const dashboardWidgetConfigSchema = z
     const reportType = value.reportType ?? "tasks";
     if (
       (reportType === "tasks" &&
-        Boolean(value.projectId) === Boolean(value.portfolioId)) ||
-      (reportType === "projects" && Boolean(value.projectId)) ||
+        [value.projectId, value.portfolioId, value.allProjects].filter(Boolean)
+          .length !== 1) ||
+      (reportType === "projects" &&
+        Boolean(value.projectId || value.allProjects)) ||
       ((reportType === "goals" || reportType === "portfolios") &&
-        Boolean(value.projectId || value.portfolioId))
+        Boolean(value.projectId || value.portfolioId || value.allProjects))
     )
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -3232,16 +3235,25 @@ async function requireDashboardAccess(
       : "tasks";
   const projectId = config.projectId;
   const portfolioId = config.portfolioId;
+  const allProjects = config.allProjects === true;
   if (reportType === "goals") {
-    if (typeof projectId === "string" || typeof portfolioId === "string")
+    if (
+      typeof projectId === "string" ||
+      typeof portfolioId === "string" ||
+      allProjects
+    )
       throw new TRPCError({ code: "NOT_FOUND" });
     await requireScopedFeature(ctx, "work.goals", null);
   } else if (reportType === "portfolios") {
-    if (typeof projectId === "string" || typeof portfolioId === "string")
+    if (
+      typeof projectId === "string" ||
+      typeof portfolioId === "string" ||
+      allProjects
+    )
       throw new TRPCError({ code: "NOT_FOUND" });
     await requireScopedFeature(ctx, "work.portfolios", null);
   } else if (reportType === "projects") {
-    if (typeof projectId === "string")
+    if (typeof projectId === "string" || allProjects)
       throw new TRPCError({ code: "NOT_FOUND" });
     await requireScopedFeature(ctx, "work.projects", null);
     if (typeof portfolioId === "string") {
@@ -3249,14 +3261,20 @@ async function requireDashboardAccess(
       await requirePortfolioAccess(ctx, portfolioId);
     }
   } else {
-    if ((typeof projectId === "string") === (typeof portfolioId === "string"))
+    if (
+      [
+        typeof projectId === "string",
+        typeof portfolioId === "string",
+        allProjects,
+      ].filter(Boolean).length !== 1
+    )
       throw new TRPCError({ code: "NOT_FOUND" });
     if (typeof projectId === "string")
       await requireProjectAccess(ctx, projectId);
-    else {
+    else if (typeof portfolioId === "string") {
       await requireScopedFeature(ctx, "work.portfolios", null);
-      await requirePortfolioAccess(ctx, portfolioId as string);
-    }
+      await requirePortfolioAccess(ctx, portfolioId);
+    } else await requireScopedFeature(ctx, "work.projects", null);
   }
   const spec = config.spec;
   if (
@@ -3319,7 +3337,9 @@ async function requireDashboardAccess(
       const projectIds =
         typeof projectId === "string"
           ? [projectId]
-          : await portfolioReportingProjectIds(ctx, portfolioId as string);
+          : allProjects
+            ? await allReportingProjectIds(ctx)
+            : await portfolioReportingProjectIds(ctx, portfolioId as string);
       await resolveNumericReportFieldIds(
         ctx,
         projectIds,
@@ -3335,7 +3355,9 @@ async function requireDashboardAccess(
         await requireScopedFeature(ctx, "work.time_tracking", projectId);
     }
   }
-  return projectId ?? portfolioId ?? reportType;
+  return (
+    projectId ?? portfolioId ?? (allProjects ? "all-projects" : reportType)
+  );
 }
 
 async function portfolioReportingProjectIds(
@@ -3360,6 +3382,40 @@ async function portfolioReportingProjectIds(
     try {
       await requireProjectAccess(ctx, projectId);
       accessible.push(projectId);
+    } catch (error) {
+      if (!(error instanceof TRPCError)) throw error;
+    }
+  }
+  return accessible;
+}
+
+async function allReportingProjectIds(ctx: TrpcContext) {
+  await requireScopedFeature(ctx, "work.projects", null);
+  const db = getDb();
+  const projectIds = !db
+    ? [...getDemoWork().projects.values()]
+        .filter((project) => project.projectKind !== "personal")
+        .map((project) => project.projectId)
+    : (
+        await db.execute<{ projectId: string }>(sql`
+          select work_project_id as "projectId"
+          from public.work_project
+          where archived_at is null and project_kind = 'standard'
+          order by lower(name)
+        `)
+      ).map((project) => project.projectId);
+  const accessible: string[] = [];
+  for (const projectId of projectIds) {
+    try {
+      await requireProjectAccess(ctx, projectId);
+      if (
+        await featureEnabled("work.projects", {
+          userId: ctx.employeeId,
+          clientId: await projectClientId(projectId),
+          roles: ctx.roles,
+        })
+      )
+        accessible.push(projectId);
     } catch (error) {
       if (!(error instanceof TRPCError)) throw error;
     }
@@ -3570,10 +3626,12 @@ async function renderDashboardWidget(
     if (!("metric" in spec)) throw new TRPCError({ code: "NOT_FOUND" });
     const chart = widget.projectId
       ? await caller.reporting.chart({ projectId: widget.projectId, spec })
-      : await caller.reporting.portfolioChart({
-          portfolioId: widget.portfolioId!,
-          spec,
-        });
+      : widget.allProjects
+        ? await caller.reporting.allProjectsChart({ spec })
+        : await caller.reporting.portfolioChart({
+            portfolioId: widget.portfolioId!,
+            spec,
+          });
     return {
       title: widget.title ?? "Task report",
       reportType,
@@ -11910,9 +11968,16 @@ export const workManagementRouter = router({
     numericFields: staffProcedure
       .input(
         z
-          .object({ projectId: uuid.optional(), portfolioId: uuid.optional() })
+          .object({
+            projectId: uuid.optional(),
+            portfolioId: uuid.optional(),
+            allProjects: z.literal(true).optional(),
+          })
           .refine(
-            (value) => Boolean(value.projectId) !== Boolean(value.portfolioId),
+            (value) =>
+              [value.projectId, value.portfolioId, value.allProjects].filter(
+                Boolean,
+              ).length === 1,
             "Choose one reporting scope",
           ),
       )
@@ -11922,12 +11987,12 @@ export const workManagementRouter = router({
         if (input.projectId) {
           await requireProjectAccess(ctx, input.projectId);
           projectIds = [input.projectId];
-        } else {
+        } else if (input.portfolioId) {
           projectIds = await portfolioReportingProjectIds(
             ctx,
-            input.portfolioId!,
+            input.portfolioId,
           );
-        }
+        } else projectIds = await allReportingProjectIds(ctx);
         return (await numericReportFields(ctx, projectIds, strictProject)).map(
           ({ key, name, projectIds }) => ({
             key,
@@ -11974,6 +12039,33 @@ export const workManagementRouter = router({
           ctx,
           input.portfolioId,
         );
+        const metricCustomFieldIds = input.spec.metricCustomFieldKey
+          ? await resolveNumericReportFieldIds(
+              ctx,
+              projectIds,
+              input.spec.metricCustomFieldKey,
+              false,
+            )
+          : [];
+        return buildWorkReportChart(
+          await reportRowsForProjects(
+            ctx,
+            projectIds,
+            input.spec,
+            metricCustomFieldIds,
+          ),
+          input.spec,
+        );
+      }),
+    allProjectsChart: staffProcedure
+      .input(z.object({ spec: reportChartSpecSchema }))
+      .query(async ({ input, ctx }) => {
+        if (input.spec.groupBy === "custom_field")
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Custom-field charts require a single project",
+          });
+        const projectIds = await allReportingProjectIds(ctx);
         const metricCustomFieldIds = input.spec.metricCustomFieldKey
           ? await resolveNumericReportFieldIds(
               ctx,

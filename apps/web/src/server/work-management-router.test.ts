@@ -2890,6 +2890,13 @@ describe("work management", () => {
       name: "Budget points",
       projectCount: 2,
     });
+    expect(
+      await caller.work.reporting.numericFields({ allProjects: true }),
+    ).toContainEqual({
+      key: "asana:budget-points",
+      name: "Budget points",
+      projectCount: 2,
+    });
     const numericSpec = {
       groupBy: "completion" as const,
       metric: "custom_field_sum" as const,
@@ -2922,6 +2929,54 @@ describe("work management", () => {
       ],
       total: 15,
     });
+    expect(
+      await caller.work.reporting.allProjectsChart({
+        spec: {
+          ...numericSpec,
+          groupBy: "project",
+          metric: "custom_field_average",
+        },
+      }),
+    ).toEqual({
+      data: [
+        { label: "Planning support", value: 20 },
+        { label: "Planning pilot", value: 10 },
+      ],
+      total: 15,
+    });
+    const allProjectsDashboard = await caller.work.reporting.saveDashboard({
+      name: "All project budget points",
+      config: {
+        reportType: "tasks",
+        allProjects: true,
+        chartStyle: "bar",
+        spec: numericSpec,
+      },
+    });
+    expect(
+      await caller.work.reporting.renderDashboard({
+        dashboardId: allProjectsDashboard.dashboardId,
+      }),
+    ).toMatchObject({
+      widgets: [
+        {
+          reportType: "tasks",
+          chart: { total: 30 },
+        },
+      ],
+    });
+    await expect(
+      caller.work.reporting.saveDashboard({
+        name: "Invalid all-project scope",
+        config: {
+          reportType: "tasks",
+          projectId: project.projectId,
+          allProjects: true,
+          chartStyle: "bar",
+          spec: numericSpec,
+        },
+      }),
+    ).rejects.toThrow("Choose a valid reporting scope");
     const numericDashboard = await caller.work.reporting.saveDashboard({
       name: "Budget points total",
       config: {
@@ -2954,6 +3009,18 @@ describe("work management", () => {
     await expect(
       caller.work.reporting.numericFields({ projectId: project.projectId }),
     ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.custom_fields" });
+    expect(
+      await caller.work.reporting.numericFields({ allProjects: true }),
+    ).toContainEqual({
+      key: "asana:budget-points",
+      name: "Budget points",
+      projectCount: 1,
+    });
+    expect(
+      await caller.work.reporting.renderDashboard({
+        dashboardId: allProjectsDashboard.dashboardId,
+      }),
+    ).toMatchObject({ widgets: [{ chart: { total: 20 } }] });
     await caller.admin.features.setOverride({
       featureKey: "work.custom_fields",
       scopeType: "client",
