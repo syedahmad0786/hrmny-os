@@ -267,42 +267,64 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
 
       <div className="desk-workspace">
         <header className="desk-topbar">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
-              Staff desk
-            </p>
-            <p className="font-display text-sm font-semibold text-ink">
-              {session.data?.displayName ?? "…"}
-            </p>
-          </div>
-          {(users.data ?? []).length > 0 ? (
-            <div className="desk-devbox">
-              <label htmlFor="persona">Persona</label>
-              <select
-                id="persona"
-                value={role}
-                onChange={(e) => void onRoleChange(e.target.value)}
-              >
-                {users.data!.map((u) => (
-                  <option key={u.key} value={u.key}>
-                    {u.displayName}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-          {session.data?.authMode === "supabase" && session.data.employeeId ? (
-            <button
-              type="button"
-              className="text-xs underline"
-              onClick={() => void onSignOut()}
+          <Link href="/work/search" className="desk-search-trigger">
+            <span className="desk-search-icon" aria-hidden>
+              ⌕
+            </span>
+            <span className="desk-search-copy">
+              Search clients, deals, tasks…
+            </span>
+            <kbd>⌘ K</kbd>
+          </Link>
+          <div className="desk-top-actions">
+            {(users.data ?? []).length > 0 ? (
+              <div className="desk-devbox">
+                <label htmlFor="persona">Dev only</label>
+                <select
+                  id="persona"
+                  value={role}
+                  onChange={(e) => void onRoleChange(e.target.value)}
+                >
+                  {users.data!.map((u) => (
+                    <option key={u.key} value={u.key}>
+                      {u.displayName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+            <Link href="/client-preview" className="desk-topbar-primary">
+              Client preview
+            </Link>
+            <Link
+              href="/admin/audit"
+              className="desk-icon-btn"
+              aria-label="Open audit activity"
+              title="Audit activity"
             >
-              Sign out
-            </button>
-          ) : null}
-          <span className="desk-avatar" aria-hidden>
-            {avatar}
-          </span>
+              A°
+            </Link>
+            {session.data?.authMode === "supabase" &&
+            session.data.employeeId ? (
+              <button
+                type="button"
+                className="desk-avatar"
+                onClick={() => void onSignOut()}
+                aria-label={`Sign out ${session.data.displayName ?? "account"}`}
+                title="Sign out"
+              >
+                {avatar}
+              </button>
+            ) : (
+              <span
+                className="desk-avatar"
+                title={session.data?.displayName ?? "Partner"}
+                aria-hidden
+              >
+                {avatar}
+              </span>
+            )}
+          </div>
         </header>
         <div className="desk-content">
           {connectionMessage ? (
