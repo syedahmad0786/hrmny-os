@@ -21,6 +21,8 @@ export type TrpcContext = {
   canViewMargin: boolean;
   /** Set when actorType is portal (app-layer RLS). */
   clientId?: string | null;
+  /** Internal-only context used to propagate a published bundle. */
+  workBundleRollout?: { bundleId: string };
 };
 
 export async function createContext(

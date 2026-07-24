@@ -35,7 +35,12 @@ import {
   queueAssignedWorkAiTeammate,
   queueMentionedWorkAiTeammates,
 } from "../work-ai-teammate-events";
-import { router, staffProcedure, type TrpcContext } from "./trpc";
+import {
+  createCallerFactory,
+  router,
+  staffProcedure,
+  type TrpcContext,
+} from "./trpc";
 
 type AccessLevel = "admin" | "editor" | "commenter" | "viewer";
 type CustomTaskTypeAccessLevel = "admin" | "editor" | "user" | "none";
@@ -288,6 +293,8 @@ type WorkBundle = {
   version: number;
   blueprint: Record<string, unknown>;
   createdByEmployeeId: string;
+  installedProjectCount?: number;
+  currentProjectCount?: number;
 };
 type WorkApprovalDecision = {
   decisionId: string;
@@ -2542,9 +2549,9 @@ async function requireScopedFeature(
 ) {
   if (
     !(await featureEnabled(featureKey, {
-      userId: ctx.employeeId,
+      userId: ctx.workBundleRollout ? undefined : ctx.employeeId,
       clientId: projectId ? await projectClientId(projectId) : ctx.clientId,
-      roles: ctx.roles,
+      roles: ctx.workBundleRollout ? undefined : ctx.roles,
     }))
   )
     throw new TRPCError({
@@ -2658,9 +2665,9 @@ async function requireRuleTriggerFeature(
   if (
     featureKey &&
     !(await featureEnabled(featureKey, {
-      userId: ctx.employeeId,
+      userId: ctx.workBundleRollout ? undefined : ctx.employeeId,
       clientId: await projectClientId(projectId),
-      roles: ctx.roles,
+      roles: ctx.workBundleRollout ? undefined : ctx.roles,
     }))
   )
     throw new TRPCError({
@@ -3036,6 +3043,7 @@ async function requireBundleCustomTaskTypeAccess(
 ) {
   if (!blueprint.customTaskTypes.length) return;
   await requireScopedFeature(ctx, "work.custom_task_types", projectId);
+  if (ctx.workBundleRollout) return;
   await Promise.all(
     blueprint.customTaskTypes.map((type) =>
       requireCustomTaskTypeAccess(ctx, type.customTaskTypeId),
@@ -8716,17 +8724,39 @@ export const workManagementRouter = router({
     list: staffProcedure.query(async ({ ctx }) => {
       const employeeId = actor(ctx);
       const db = getDb();
-      if (!db)
-        return [...getDemoWork().bundles.values()].filter(
-          (bundle) =>
-            bundle.visibility === "organization" ||
-            bundle.createdByEmployeeId === employeeId,
-        );
+      if (!db) {
+        const store = getDemoWork();
+        return [...store.bundles.values()]
+          .filter(
+            (bundle) =>
+              bundle.visibility === "organization" ||
+              bundle.createdByEmployeeId === employeeId,
+          )
+          .map((bundle) => {
+            const installations = [...store.projectBundles.entries()].filter(
+              ([key]) => key.endsWith(`:${bundle.bundleId}`),
+            );
+            return {
+              ...bundle,
+              installedProjectCount: installations.length,
+              currentProjectCount: installations.filter(
+                ([, installation]) => installation.version === bundle.version,
+              ).length,
+            };
+          });
+      }
       const rows = await db.execute<WorkBundle & { blueprint: unknown }>(sql`
         select bundle.work_bundle_id as "bundleId", bundle.name,
           bundle.description, bundle.visibility,
           bundle.created_by_employee_id as "createdByEmployeeId",
-          latest.version, latest.blueprint
+          latest.version, latest.blueprint,
+          (select count(*)::int from public.work_project_bundle installation
+            where installation.work_bundle_id = bundle.work_bundle_id)
+            as "installedProjectCount",
+          (select count(*)::int from public.work_project_bundle installation
+            where installation.work_bundle_id = bundle.work_bundle_id
+              and installation.applied_version = latest.version)
+            as "currentProjectCount"
         from public.work_bundle bundle
         join lateral (
           select version, blueprint from public.work_bundle_version
@@ -8843,6 +8873,17 @@ export const workManagementRouter = router({
           blueprint,
         );
         const version = bundle.version + 1;
+        const installedProjectIds = !db
+          ? [...getDemoWork().projectBundles.keys()]
+              .filter((key) => key.endsWith(`:${input.bundleId}`))
+              .map((key) => key.slice(0, -input.bundleId.length - 1))
+          : (
+              await db.execute<{ projectId: string }>(sql`
+                select work_project_id as "projectId"
+                from public.work_project_bundle
+                where work_bundle_id = ${input.bundleId}::uuid
+              `)
+            ).map((installation) => installation.projectId);
         if (!db) {
           Object.assign(getDemoWork().bundles.get(input.bundleId)!, {
             version,
@@ -8862,16 +8903,41 @@ export const workManagementRouter = router({
             where work_bundle_id = ${input.bundleId}::uuid
           `);
         }
+        const rollout = await rolloutPublishedBundle(
+          ctx,
+          input.bundleId,
+          installedProjectIds,
+        );
         await audit(ctx, "work.bundle.publish", "work_bundle", input.bundleId, {
           sourceProjectId: input.sourceProjectId,
           version,
+          rollout,
         });
-        return { bundleId: input.bundleId, version };
+        return { bundleId: input.bundleId, version, rollout };
       }),
     applyToProject: staffProcedure
       .input(z.object({ bundleId: uuid, projectId: uuid }))
       .mutation(async ({ input, ctx }) => {
-        await requireProjectAccess(ctx, input.projectId, "editor");
+        const automaticRollout =
+          ctx.workBundleRollout?.bundleId === input.bundleId;
+        if (!automaticRollout)
+          await requireProjectAccess(ctx, input.projectId, "editor");
+        else {
+          const db = getDb();
+          const exists = !db
+            ? getDemoWork().projects.has(input.projectId)
+            : Boolean(
+                (
+                  await db.execute(sql`
+                    select 1 from public.work_project
+                    where work_project_id = ${input.projectId}::uuid
+                      and archived_at is null
+                  `)
+                )[0],
+              );
+          if (!exists) throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        await requireScopedFeature(ctx, "work.bundles", input.projectId);
         const employeeId = actor(ctx);
         const db = getDb();
         const raw = !db
@@ -8901,6 +8967,18 @@ export const workManagementRouter = router({
             code: "PRECONDITION_FAILED",
             message: "Bundle is invalid",
           });
+        if (parsed.data.sections.length)
+          await requireScopedFeature(ctx, "work.sections", input.projectId);
+        if (parsed.data.customFields.length)
+          await requireScopedFeature(
+            ctx,
+            "work.custom_fields",
+            input.projectId,
+          );
+        if (parsed.data.rules.length)
+          await requireScopedFeature(ctx, "work.rules", input.projectId);
+        if (parsed.data.taskTemplates.length)
+          await requireScopedFeature(ctx, "work.templates", input.projectId);
         await requireBundleCustomTaskTypeAccess(
           ctx,
           input.projectId,
@@ -9323,6 +9401,7 @@ export const workManagementRouter = router({
         await audit(ctx, "work.bundle.apply", "work_project", input.projectId, {
           bundleId: input.bundleId,
           version: raw.version,
+          automaticRollout,
         });
         return {
           projectId: input.projectId,
@@ -11297,3 +11376,39 @@ export const workManagementRouter = router({
       }),
   }),
 });
+
+type BundleRolloutResult = {
+  installedProjectCount: number;
+  updatedProjectCount: number;
+  failures: { projectId: string; message: string }[];
+};
+
+async function rolloutPublishedBundle(
+  ctx: TrpcContext,
+  bundleId: string,
+  projectIds: readonly string[],
+): Promise<BundleRolloutResult> {
+  const caller = createCallerFactory(workManagementRouter)({
+    ...ctx,
+    workBundleRollout: { bundleId },
+  });
+  const failures: BundleRolloutResult["failures"] = [];
+  let updatedProjectCount = 0;
+  for (const projectId of projectIds) {
+    try {
+      await caller.bundles.applyToProject({ bundleId, projectId });
+      updatedProjectCount += 1;
+    } catch (error) {
+      failures.push({
+        projectId,
+        message:
+          error instanceof Error ? error.message : "Bundle update failed",
+      });
+    }
+  }
+  return {
+    installedProjectCount: projectIds.length,
+    updatedProjectCount,
+    failures,
+  };
+}
