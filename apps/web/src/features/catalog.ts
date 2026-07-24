@@ -863,7 +863,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Permission-aware questions, answers, insights, and task creation across work.",
     group: "AI",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
   feature({
@@ -873,7 +873,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Task, project, portfolio, and inbox summaries with action extraction.",
     group: "AI",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
   feature({
@@ -883,7 +883,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Draft project, portfolio, and goal updates from live work context.",
     group: "AI",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
   feature({
@@ -893,7 +893,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "AI-generated field definitions and permission-safe field completion.",
     group: "AI",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
   feature({
@@ -903,7 +903,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Rewrite, shorten, expand, format, and adjust tone with review before save.",
     group: "AI",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
   feature({
@@ -913,7 +913,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Goal drafting, improvement recommendations, and progress insights.",
     group: "AI",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
   feature({
@@ -923,7 +923,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Generate project descriptions, sections, and fields from an objective.",
     group: "AI",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
   feature({
@@ -933,7 +933,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Generate editable workflow rules from natural-language instructions.",
     group: "AI",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
   feature({
@@ -943,7 +943,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Recurring blocker, slippage, and mitigation analysis linked to source work.",
     group: "AI",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
   feature({
@@ -993,7 +993,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Daily brief, priority surfacing, blockers, decisions, and recommended actions.",
     group: "AI",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
   feature({

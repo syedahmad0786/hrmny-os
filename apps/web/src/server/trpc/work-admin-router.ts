@@ -31,6 +31,7 @@ import {
   WORK_API_SCOPES,
   WORK_WEBHOOK_EVENTS,
 } from "../work-api";
+import { getWorkAiPolicy, getWorkAiUsage, saveWorkAiPolicy } from "../work-ai";
 import { getDemoWork, requireProjectAccess } from "./work-management-router";
 import { requirePermission, router, staffProcedure } from "./trpc";
 
@@ -187,6 +188,9 @@ const WORK_EXPORT_TABLES = [
   "work_api_token",
   "work_webhook_subscription",
   "work_webhook_delivery",
+  "work_ai_policy",
+  "work_ai_run",
+  "work_ai_action_execution",
   "time_entry",
 ] as const;
 
@@ -1238,6 +1242,41 @@ export const workAdminRouter = router({
           { deleted: true },
         );
         return { ok: true as const };
+      }),
+  }),
+
+  aiGovernance: router({
+    get: workAdminProcedure.query(async () => ({
+      policy: await getWorkAiPolicy(),
+      usage: await getWorkAiUsage(),
+    })),
+    save: workAdminProcedure
+      .input(
+        z.object({
+          model: z.string().trim().min(1).max(200).nullable(),
+          monthlyTokenLimit: z.number().int().min(1_000).max(1_000_000_000),
+          dailyUserRequestLimit: z.number().int().min(1).max(10_000),
+          retentionDays: z.number().int().min(1).max(365),
+          requireHumanApproval: z.literal(true),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx.employeeId);
+        const saved = await saveWorkAiPolicy(input, employeeId);
+        await audit(
+          employeeId,
+          "work.ai.policy.update",
+          "work_ai_policy",
+          null,
+          {
+            model: saved.model,
+            monthlyTokenLimit: saved.monthlyTokenLimit,
+            dailyUserRequestLimit: saved.dailyUserRequestLimit,
+            retentionDays: saved.retentionDays,
+            requireHumanApproval: saved.requireHumanApproval,
+          },
+        );
+        return saved;
       }),
   }),
 

@@ -697,7 +697,7 @@ export async function requireProjectAccess(
   return { ...project, createdAt: new Date(project.createdAt).toISOString() };
 }
 
-async function requireItemAccess(
+export async function requireItemAccess(
   ctx: TrpcContext,
   itemId: string,
   minimum: AccessLevel = "viewer",

@@ -7,6 +7,7 @@ import { syncAsanaWorkspace } from "@/server/asana-sync";
 import { getVerifiedAsanaConnection } from "@/server/trpc/connections-router";
 import { refreshAsanaWebhooksIfEnabled } from "@/server/asana-webhooks";
 import { deliverPendingWorkWebhooks } from "@/server/work-api";
+import { cleanupExpiredWorkAiRuns } from "@/server/work-ai";
 
 export const dynamic = "force-dynamic";
 
@@ -158,11 +159,15 @@ export async function GET(request: Request) {
       delayedJobs: Number(lag!.count),
     });
   }
-  const workWebhooks = await deliverPendingWorkWebhooks();
+  const [workWebhooks, expiredAiRuns] = await Promise.all([
+    deliverPendingWorkWebhooks(),
+    cleanupExpiredWorkAiRuns(),
+  ]);
   return Response.json({
     claimed: claimed.length,
     completed,
     failed,
     workWebhooks,
+    expiredAiRuns,
   });
 }

@@ -204,6 +204,13 @@
       "when": 1784948400000,
       "tag": "0028_work_api_webhooks",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1784952000000,
+      "tag": "0029_work_ai",
+      "breakpoints": true
     }
   ]
 }

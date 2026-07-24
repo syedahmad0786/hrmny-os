@@ -34,6 +34,22 @@ const ITEMS = [
       "work.views.gantt",
     ],
   },
+  {
+    href: "/work/ai",
+    label: "AI",
+    features: [
+      "work.ai.smart_chat",
+      "work.ai.smart_summaries",
+      "work.ai.smart_status",
+      "work.ai.smart_fields",
+      "work.ai.smart_editor",
+      "work.ai.smart_goals",
+      "work.ai.smart_projects",
+      "work.ai.smart_rules",
+      "work.ai.risk_reports",
+      "work.ai.dash",
+    ],
+  },
 ] as const;
 
 export function WorkNav() {

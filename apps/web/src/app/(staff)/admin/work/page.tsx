@@ -12,6 +12,7 @@ type Tab =
   | "roles"
   | "identity"
   | "api"
+  | "ai"
   | "exports";
 
 function download(result: {
@@ -63,6 +64,10 @@ export default function WorkAdminPage() {
   const apiWebhooks = trpc.workAdmin.apiWebhooks.get.useQuery(undefined, {
     enabled: enabled.has("work.api_webhooks"),
   });
+  const anyAiEnabled = [...enabled].some((key) => key.startsWith("work.ai."));
+  const aiGovernance = trpc.workAdmin.aiGovernance.get.useQuery(undefined, {
+    enabled: anyAiEnabled,
+  });
 
   const tabs = [
     ["organization", "Organization", "work.domain_controls"],
@@ -72,13 +77,17 @@ export default function WorkAdminPage() {
     ["roles", "Roles", "work.custom_rbac"],
     ["identity", "SSO & SCIM", "work.sso_scim"],
     ["api", "API & webhooks", "work.api_webhooks"],
+    ["ai", "AI governance", "work.ai.any"],
     ["exports", "Exports", "work.data_export"],
   ] as const;
-  const visibleTabs = tabs.filter(([, , feature]) =>
-    feature === "work.data_export"
-      ? enabled.has("work.data_export") || enabled.has("work.audit_export")
-      : enabled.has(feature),
-  );
+  const visibleTabs = tabs.filter(([, , feature]) => {
+    if (feature === "work.data_export")
+      return (
+        enabled.has("work.data_export") || enabled.has("work.audit_export")
+      );
+    if (feature === "work.ai.any") return anyAiEnabled;
+    return enabled.has(feature);
+  });
 
   useEffect(() => {
     if (!visibleTabs.some(([key]) => key === tab) && visibleTabs[0]) {
@@ -215,6 +224,12 @@ export default function WorkAdminPage() {
           configuration={apiWebhooks.data}
           projects={directory.data?.projects ?? []}
           refresh={() => utils.workAdmin.apiWebhooks.get.invalidate()}
+        />
+      ) : null}
+      {tab === "ai" && anyAiEnabled ? (
+        <AiGovernancePanel
+          configuration={aiGovernance.data}
+          refresh={() => utils.workAdmin.aiGovernance.get.invalidate()}
         />
       ) : null}
       {tab === "exports" ? (
@@ -1279,6 +1294,192 @@ function IdentityPanel({
               ) : null}
             </div>
           ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AiGovernancePanel({
+  configuration,
+  refresh,
+}: {
+  configuration:
+    | {
+        policy: {
+          model: string | null;
+          monthlyTokenLimit: number;
+          dailyUserRequestLimit: number;
+          retentionDays: number;
+          requireHumanApproval: boolean;
+        };
+        usage: {
+          requests: number;
+          inputTokens: number;
+          outputTokens: number;
+          byUser: Array<{
+            employeeId: string;
+            displayName: string;
+            requests: number;
+            tokens: number;
+          }>;
+        };
+      }
+    | undefined;
+  refresh: () => Promise<unknown>;
+}) {
+  const [model, setModel] = useState("");
+  const [monthlyTokens, setMonthlyTokens] = useState(1_000_000);
+  const [dailyRequests, setDailyRequests] = useState(100);
+  const [retentionDays, setRetentionDays] = useState(30);
+  const save = trpc.workAdmin.aiGovernance.save.useMutation({
+    onSuccess: refresh,
+  });
+
+  useEffect(() => {
+    if (!configuration) return;
+    setModel(configuration.policy.model ?? "");
+    setMonthlyTokens(configuration.policy.monthlyTokenLimit);
+    setDailyRequests(configuration.policy.dailyUserRequestLimit);
+    setRetentionDays(configuration.policy.retentionDays);
+  }, [configuration]);
+
+  const usedTokens =
+    (configuration?.usage.inputTokens ?? 0) +
+    (configuration?.usage.outputTokens ?? 0);
+
+  return (
+    <section className="grid gap-4 xl:grid-cols-2">
+      <form
+        className={cardClass}
+        onSubmit={(event) => {
+          event.preventDefault();
+          save.mutate({
+            model: model.trim() || null,
+            monthlyTokenLimit: monthlyTokens,
+            dailyUserRequestLimit: dailyRequests,
+            retentionDays,
+            requireHumanApproval: true,
+          });
+        }}
+      >
+        <h2 className="font-display text-xl font-semibold">AI guardrails</h2>
+        <p className="mt-1 text-sm text-muted">
+          Feature Lab decides who can use each capability. These limits govern
+          model selection, consumption, retention, and human review.
+        </p>
+        <div className="mt-4 space-y-3">
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">Model</span>
+            <input
+              className={inputClass}
+              value={model}
+              maxLength={200}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder="Uses LLM_DEFAULT_MODEL when blank"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">Monthly token limit</span>
+            <input
+              className={inputClass}
+              type="number"
+              min={1_000}
+              max={1_000_000_000}
+              value={monthlyTokens}
+              onChange={(event) => setMonthlyTokens(Number(event.target.value))}
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">
+              Daily requests per user
+            </span>
+            <input
+              className={inputClass}
+              type="number"
+              min={1}
+              max={10_000}
+              value={dailyRequests}
+              onChange={(event) => setDailyRequests(Number(event.target.value))}
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">
+              AI history retention (days)
+            </span>
+            <input
+              className={inputClass}
+              type="number"
+              min={1}
+              max={365}
+              value={retentionDays}
+              onChange={(event) => setRetentionDays(Number(event.target.value))}
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked disabled />
+            Explicit human approval is required before every AI change
+          </label>
+          <button
+            className="rounded-lg bg-ink px-4 py-2 text-sm text-white"
+            type="submit"
+            disabled={save.isPending}
+          >
+            {save.isPending ? "Saving…" : "Save AI policy"}
+          </button>
+          {save.error ? (
+            <p role="alert" className="text-sm text-[var(--hrmny-danger)]">
+              {save.error.message}
+            </p>
+          ) : null}
+        </div>
+      </form>
+
+      <div className={cardClass}>
+        <h2 className="font-display text-xl font-semibold">
+          This month&apos;s usage
+        </h2>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="rounded-lg border border-sand bg-white p-3">
+            <p className="text-xs text-muted">Requests</p>
+            <p className="mt-1 font-display text-2xl font-semibold">
+              {configuration?.usage.requests ?? 0}
+            </p>
+          </div>
+          <div className="rounded-lg border border-sand bg-white p-3">
+            <p className="text-xs text-muted">Tokens</p>
+            <p className="mt-1 font-display text-2xl font-semibold">
+              {usedTokens.toLocaleString()}
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-sand">
+          <div
+            className="h-full bg-ochre"
+            style={{
+              width: `${Math.min(100, (usedTokens / Math.max(monthlyTokens, 1)) * 100)}%`,
+            }}
+          />
+        </div>
+        <p className="mt-2 text-xs text-muted">
+          {usedTokens.toLocaleString()} of {monthlyTokens.toLocaleString()}{" "}
+          tokens
+        </p>
+        <div className="mt-5 divide-y divide-sand">
+          {(configuration?.usage.byUser ?? []).map((user) => (
+            <div
+              key={user.employeeId}
+              className="flex justify-between gap-3 py-3 text-sm"
+            >
+              <span>{user.displayName}</span>
+              <span className="text-muted">
+                {user.requests} requests · {user.tokens.toLocaleString()} tokens
+              </span>
+            </div>
+          ))}
+          {!configuration?.usage.byUser.length ? (
+            <p className="py-3 text-sm text-muted">No AI usage this month.</p>
+          ) : null}
         </div>
       </div>
     </section>

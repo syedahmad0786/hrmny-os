@@ -169,4 +169,27 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/queue_work_webhook_event/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("adds governed AI runs, usage limits, retention, and approved actions", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0029_work_ai.sql"),
+      join(process.cwd(), "../../packages/db/migrations/0029_work_ai.sql"),
+      join(__dirname, "../../../../packages/db/migrations/0029_work_ai.sql"),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_ai_policy/i,
+    );
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_ai_run/i,
+    );
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_ai_action_execution/i,
+    );
+    expect(migration).toMatch(/require_human_approval boolean NOT NULL/i);
+    expect(migration).toMatch(/expires_at timestamptz NOT NULL/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });
