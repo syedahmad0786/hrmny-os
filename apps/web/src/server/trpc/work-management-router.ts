@@ -40,7 +40,7 @@ import {
   queueAssignedWorkAiTeammate,
   queueMentionedWorkAiTeammates,
 } from "../work-ai-teammate-events";
-import { workAiContextForEmployee } from "../work-ai-actor";
+import { isDemoWorkAiActor, workAiContextForEmployee } from "../work-ai-actor";
 import {
   createCallerFactory,
   publicProcedure,
@@ -2038,10 +2038,16 @@ async function generateNextOccurrence(
           store.customFieldValues.get(sourceKey),
         );
     }
+    await queueAssignedWorkAiTeammate(
+      ctx,
+      generated.itemId,
+      generated.assigneeEmployeeId,
+      "A recurring task was created and assigned to you. Review it and propose the next useful actions.",
+    );
     return generated.itemId;
   }
 
-  return db.transaction(async (tx) => {
+  const generated = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${itemId}))`);
     const [source] = await tx.execute<{
       title: string;
@@ -2086,7 +2092,12 @@ async function generateNextOccurrence(
         and scheduled_for = ${dueAt.slice(0, 10)}::date
       limit 1
     `);
-    if (existing) return existing.id;
+    if (existing)
+      return {
+        itemId: existing.id,
+        assigneeEmployeeId: source.assigneeEmployeeId,
+        created: false,
+      };
 
     const [created] = await tx.execute<{ id: string }>(sql`
       insert into public.work_item (
@@ -2147,8 +2158,21 @@ async function generateNextOccurrence(
         source_work_item_id, generated_work_item_id, scheduled_for
       ) values (${itemId}::uuid, ${generatedId}::uuid, ${dueAt.slice(0, 10)}::date)
     `);
-    return generatedId;
+    return {
+      itemId: generatedId,
+      assigneeEmployeeId: source.assigneeEmployeeId,
+      created: true,
+    };
   });
+  if (!generated) return null;
+  if (generated.created)
+    await queueAssignedWorkAiTeammate(
+      ctx,
+      generated.itemId,
+      generated.assigneeEmployeeId,
+      "A recurring task was created and assigned to you. Review it and propose the next useful actions.",
+    );
+  return generated.itemId;
 }
 
 async function ruleSnapshot(
@@ -2185,12 +2209,70 @@ async function ruleSnapshot(
   return item;
 }
 
+async function requireAssignableEmployee(
+  ctx: TrpcContext,
+  projectId: string,
+  employeeId: string,
+) {
+  const db = getDb();
+  if (!db) {
+    if (employeeId === "c0000000-0000-4000-8000-000000000001") return;
+    if (!isDemoWorkAiActor(employeeId))
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Employee not found",
+      });
+    await requireScopedFeature(ctx, "work.ai.teammates", projectId);
+    return;
+  }
+  const [employee] = await db.execute<{
+    teammateId: string | null;
+    teammateStatus: "active" | "paused" | null;
+    hasMemberAccess: boolean;
+    hasProjectAccess: boolean;
+  }>(sql`
+    select teammate.work_ai_teammate_id as "teammateId",
+      teammate.status as "teammateStatus",
+      coalesce(member.work_ai_teammate_member_id is not null, false)
+        as "hasMemberAccess",
+      coalesce(access.work_ai_teammate_project_access_id is not null, false)
+        as "hasProjectAccess"
+    from public.employee employee
+    left join public.work_ai_teammate teammate
+      on teammate.employee_id = employee.employee_id
+      and teammate.archived_at is null
+    left join public.work_ai_teammate_member member
+      on member.work_ai_teammate_id = teammate.work_ai_teammate_id
+      and member.employee_id = ${actor(ctx)}::uuid
+    left join public.work_ai_teammate_project_access access
+      on access.work_ai_teammate_id = teammate.work_ai_teammate_id
+      and access.work_project_id = ${projectId}::uuid
+    where employee.employee_id = ${employeeId}::uuid and employee.is_active = true
+    limit 1
+  `);
+  if (!employee)
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Employee not found" });
+  if (!employee.teammateId) return;
+  await requireScopedFeature(ctx, "work.ai.teammates", projectId);
+  if (
+    employee.teammateStatus !== "active" ||
+    !employee.hasMemberAccess ||
+    !employee.hasProjectAccess
+  )
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "AI Teammate must be active and shared into this project",
+    });
+}
+
 async function executeRuleAction(
   ctx: TrpcContext,
   projectId: string,
   itemId: string,
   action: WorkRuleAction,
 ) {
+  if (action.type === "assign" && action.employeeId)
+    await requireAssignableEmployee(ctx, projectId, action.employeeId);
   const db = getDb();
   if (!db) {
     const store = getDemoWork();
@@ -2203,12 +2285,6 @@ async function executeRuleAction(
         throw new Error("Section not found");
       item.sectionId = action.sectionId;
     } else if (action.type === "assign") {
-      if (
-        action.employeeId &&
-        action.employeeId !== "c0000000-0000-4000-8000-000000000001"
-      ) {
-        throw new Error("Employee not found");
-      }
       item.assigneeEmployeeId = action.employeeId;
       item.assigneeName = action.employeeId ? "Dev Partner" : null;
     } else if (action.type === "complete") {
@@ -2267,6 +2343,7 @@ async function executeRuleAction(
     if (action.type === "complete") {
       const enabled = await featureEnabled("work.recurring_tasks", {
         userId: ctx.employeeId,
+        clientId: await projectClientId(projectId),
         roles: ctx.roles,
       });
       if (enabled) await generateNextOccurrence(ctx, itemId);
@@ -2302,13 +2379,6 @@ async function executeRuleAction(
     `);
     if (!changed[0]) throw new Error("Section not found");
   } else if (action.type === "assign") {
-    if (action.employeeId) {
-      const employee = await db.execute(sql`
-        select 1 from public.employee
-        where employee_id = ${action.employeeId}::uuid and is_active = true
-      `);
-      if (!employee[0]) throw new Error("Employee not found");
-    }
     await db.execute(sql`
       update public.work_item
       set assignee_employee_id = ${action.employeeId}::uuid, updated_at = now()
@@ -2396,6 +2466,7 @@ async function executeRuleAction(
   if (action.type === "complete") {
     const enabled = await featureEnabled("work.recurring_tasks", {
       userId: ctx.employeeId,
+      clientId: await projectClientId(projectId),
       roles: ctx.roles,
     });
     if (enabled) await generateNextOccurrence(ctx, itemId);
@@ -2410,6 +2481,8 @@ async function executeRuleAction(
         : "updated",
     `Rule action: ${action.type.replaceAll("_", " ")}`,
   );
+  if (action.type === "assign")
+    await queueAssignedWorkAiTeammate(ctx, itemId, action.employeeId);
 }
 
 async function validateRuleActions(
@@ -2453,12 +2526,16 @@ async function validateRuleActions(
       if (
         action.type === "assign" &&
         action.employeeId &&
-        action.employeeId !== "c0000000-0000-4000-8000-000000000001"
+        !ctx &&
+        action.employeeId !== "c0000000-0000-4000-8000-000000000001" &&
+        !isDemoWorkAiActor(action.employeeId)
       )
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Employee not found",
         });
+      if (action.type === "assign" && action.employeeId && ctx)
+        await requireAssignableEmployee(ctx, projectId, action.employeeId);
     }
     return;
   }
@@ -2497,15 +2574,19 @@ async function validateRuleActions(
         });
       if (ctx) await requireCustomTaskTypeAccess(ctx, action.customTaskTypeId);
     } else if (action.type === "assign" && action.employeeId) {
-      const rows = await db.execute(sql`
-        select 1 from public.employee
-        where employee_id = ${action.employeeId}::uuid and is_active = true
-      `);
-      if (!rows[0])
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Employee not found",
-        });
+      if (ctx)
+        await requireAssignableEmployee(ctx, projectId, action.employeeId);
+      else {
+        const rows = await db.execute(sql`
+          select 1 from public.employee
+          where employee_id = ${action.employeeId}::uuid and is_active = true
+        `);
+        if (!rows[0])
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Employee not found",
+          });
+      }
     }
   }
 }
@@ -3245,6 +3326,25 @@ async function submitWorkForm(
       code: "BAD_REQUEST",
       message: "Task title is required",
     });
+  let executionCtx = ctx;
+  if (publicSubmission) {
+    try {
+      executionCtx = await workAiContextForEmployee(raw.createdByEmployeeId);
+    } catch {
+      executionCtx = {
+        ...ctx,
+        employeeId: raw.createdByEmployeeId,
+        roles: [],
+      };
+    }
+    executionCtx.clientId = await projectClientId(raw.projectId);
+  }
+  if (raw.defaultAssigneeEmployeeId)
+    await requireAssignableEmployee(
+      executionCtx,
+      raw.projectId,
+      raw.defaultAssigneeEmployeeId,
+    );
   const description = raw.questions
     .flatMap((question) => {
       const answer = answers[question.key];
@@ -3405,20 +3505,7 @@ async function submitWorkForm(
     after: { formId: raw.formId, itemId, publicSubmission },
     reason: null,
   });
-  let executionCtx = ctx;
-  if (publicSubmission) {
-    try {
-      executionCtx = await workAiContextForEmployee(raw.createdByEmployeeId);
-    } catch {
-      executionCtx = {
-        ...ctx,
-        employeeId: raw.createdByEmployeeId,
-        roles: [],
-      };
-    }
-    executionCtx.clientId = await projectClientId(raw.projectId);
-  }
-  if (raw.defaultAssigneeEmployeeId)
+  if (raw.defaultAssigneeEmployeeId) {
     await notifyItem(
       executionCtx,
       itemId,
@@ -3426,6 +3513,13 @@ async function submitWorkForm(
       `Assigned: ${title.trim()}`,
       publicSubmission,
     );
+    await queueAssignedWorkAiTeammate(
+      executionCtx,
+      itemId,
+      raw.defaultAssigneeEmployeeId,
+      "A form submission created this task and assigned it to you. Review the request and propose the next useful actions.",
+    );
+  }
   await runProjectRules(executionCtx, raw.projectId, itemId, "task_added");
   return {
     submissionId,
@@ -3899,6 +3993,12 @@ export const workManagementRouter = router({
         if (input.estimatedMinutes !== undefined)
           await requireWorkFeature(ctx, "work.time_tracking");
         await requireProjectAccess(ctx, input.projectId, "editor");
+        if (input.assigneeEmployeeId)
+          await requireAssignableEmployee(
+            ctx,
+            input.projectId,
+            input.assigneeEmployeeId,
+          );
         if (input.parentItemId)
           await requireItemAccess(ctx, input.parentItemId, "editor");
         const db = getDb();
@@ -4042,6 +4142,12 @@ export const workManagementRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         const access = await requireItemAccess(ctx, input.itemId, "editor");
+        if (input.assigneeEmployeeId)
+          await requireAssignableEmployee(
+            ctx,
+            access.projectId,
+            input.assigneeEmployeeId,
+          );
         if (input.estimatedMinutes !== undefined)
           await requireWorkFeature(ctx, "work.time_tracking");
         const db = getDb();
@@ -4215,6 +4321,7 @@ export const workManagementRouter = router({
           );
         const recurrenceEnabled = await featureEnabled("work.recurring_tasks", {
           userId: ctx.employeeId,
+          clientId: await projectClientId(access.projectId),
           roles: ctx.roles,
         });
         const generatedItemId =
@@ -6786,6 +6893,12 @@ export const workManagementRouter = router({
           "commenter",
         );
         await requireProofingFeatures(ctx, access.projectId);
+        if (input.assigneeEmployeeId)
+          await requireAssignableEmployee(
+            ctx,
+            access.projectId,
+            input.assigneeEmployeeId,
+          );
         if (!isProofableAttachment(attachment))
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -8039,30 +8152,55 @@ export const workManagementRouter = router({
     list: staffProcedure
       .input(z.object({ projectId: uuid }))
       .query(async ({ input, ctx }) => {
-        await requireProjectAccess(ctx, input.projectId);
+        const project = await requireProjectAccess(ctx, input.projectId);
+        const aiTeammatesEnabled = await featureEnabled("work.ai.teammates", {
+          userId: ctx.employeeId,
+          clientId: project.clientId,
+          roles: ctx.roles,
+        });
         const db = getDb();
         if (!db)
-          return [...getDemoWork().forms.values()].filter(
-            (form) => form.projectId === input.projectId,
-          );
-        const rows = await db.execute<WorkForm & { questions: unknown }>(sql`
+          return [...getDemoWork().forms.values()]
+            .filter((form) => form.projectId === input.projectId)
+            .map((form) => ({
+              ...form,
+              defaultAssigneeEmployeeId:
+                aiTeammatesEnabled ||
+                !form.defaultAssigneeEmployeeId ||
+                !isDemoWorkAiActor(form.defaultAssigneeEmployeeId)
+                  ? form.defaultAssigneeEmployeeId
+                  : null,
+            }));
+        const rows = await db.execute<
+          WorkForm & { questions: unknown; defaultAssigneeIsAi: boolean }
+        >(sql`
           select work_form_id as "formId", work_project_id as "projectId",
             work_section_id as "sectionId", name, description,
             title_question_key as "titleQuestionKey", questions,
             default_assignee_employee_id as "defaultAssigneeEmployeeId",
+            exists (
+              select 1 from public.work_ai_teammate teammate
+              where teammate.employee_id = form.default_assignee_employee_id
+                and teammate.archived_at is null
+            ) as "defaultAssigneeIsAi",
             confirmation_message as "confirmationMessage", is_active as "isActive",
             access_level as "accessLevel",
             created_by_employee_id as "createdByEmployeeId"
-          from public.work_form
-          where work_project_id = ${input.projectId}::uuid
+          from public.work_form form
+          where form.work_project_id = ${input.projectId}::uuid
           order by lower(name)
         `);
         return rows.map((form) => {
           const questions = z
             .array(formQuestionSchema)
             .safeParse(form.questions);
+          const { defaultAssigneeIsAi, ...visible } = form;
           return {
-            ...form,
+            ...visible,
+            defaultAssigneeEmployeeId:
+              aiTeammatesEnabled || !defaultAssigneeIsAi
+                ? form.defaultAssigneeEmployeeId
+                : null,
             questions: questions.success ? questions.data : [],
           };
         });
@@ -8132,6 +8270,12 @@ export const workManagementRouter = router({
               message: `${question.label} has an unknown branch question`,
             });
         }
+        if (input.defaultAssigneeEmployeeId)
+          await requireAssignableEmployee(
+            ctx,
+            input.projectId,
+            input.defaultAssigneeEmployeeId,
+          );
         const form: WorkForm = {
           formId: randomUUID(),
           projectId: input.projectId,
@@ -8148,15 +8292,6 @@ export const workManagementRouter = router({
         };
         const db = getDb();
         if (!db) {
-          if (
-            form.defaultAssigneeEmployeeId &&
-            form.defaultAssigneeEmployeeId !==
-              "c0000000-0000-4000-8000-000000000001"
-          )
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: "Employee not found",
-            });
           getDemoWork().forms.set(form.formId, form);
         } else {
           if (form.sectionId) {
@@ -8169,18 +8304,6 @@ export const workManagementRouter = router({
               throw new TRPCError({
                 code: "BAD_REQUEST",
                 message: "Section not found",
-              });
-          }
-          if (form.defaultAssigneeEmployeeId) {
-            const employee = await db.execute(sql`
-              select 1 from public.employee
-              where employee_id = ${form.defaultAssigneeEmployeeId}::uuid
-                and is_active = true
-            `);
-            if (!employee[0])
-              throw new TRPCError({
-                code: "BAD_REQUEST",
-                message: "Employee not found",
               });
           }
           await db.execute(sql`
@@ -8710,9 +8833,16 @@ export const workManagementRouter = router({
         await requireProjectAccess(ctx, input.projectId, "editor");
         await requireWorkTypeFeature(ctx, input.blueprint.itemType);
         if (input.blueprint.assigneeEmployeeId)
-          await validateRuleActions(input.projectId, [
-            { type: "assign", employeeId: input.blueprint.assigneeEmployeeId },
-          ]);
+          await validateRuleActions(
+            input.projectId,
+            [
+              {
+                type: "assign",
+                employeeId: input.blueprint.assigneeEmployeeId,
+              },
+            ],
+            ctx,
+          );
         const template: WorkTemplate = {
           templateId: randomUUID(),
           projectId: input.projectId,
@@ -8790,6 +8920,7 @@ export const workManagementRouter = router({
               type: "assign" as const,
               employeeId: role.employeeId,
             })),
+            ctx,
           );
         }
         const roles = input.roles.map((role) => ({
@@ -8969,6 +9100,12 @@ export const workManagementRouter = router({
             message: "Template is invalid",
           });
         await requireWorkTypeFeature(ctx, parsed.data.itemType);
+        if (parsed.data.assigneeEmployeeId)
+          await requireAssignableEmployee(
+            ctx,
+            input.projectId,
+            parsed.data.assigneeEmployeeId,
+          );
         const itemId = randomUUID();
         const dueAt =
           parsed.data.dueInDays === undefined
@@ -9065,6 +9202,12 @@ export const workManagementRouter = router({
           templateId: template.templateId,
           projectId: input.projectId,
         });
+        if (parsed.data.assigneeEmployeeId)
+          await queueAssignedWorkAiTeammate(
+            ctx,
+            itemId,
+            parsed.data.assigneeEmployeeId,
+          );
         await runProjectRules(ctx, input.projectId, itemId, "task_added");
         return { itemId };
       }),
@@ -11855,43 +11998,52 @@ export const workManagementRouter = router({
         order by lower(name)
       `);
     }),
-    listEmployees: staffProcedure.query(async ({ ctx }) => {
-      const outOfOfficeEnabled = await featureEnabled("work.out_of_office", {
-        userId: ctx.employeeId,
-        clientId: ctx.clientId,
-        roles: ctx.roles,
-      });
-      const db = getDb();
-      if (!db) {
-        const employeeId = "c0000000-0000-4000-8000-000000000001";
-        const away = outOfOfficeEnabled
-          ? [...getDemoWork().outOfOffice.values()]
-              .filter(
-                (period) =>
-                  period.employeeId === employeeId &&
-                  withOutOfOfficeStatus(period).status === "active",
-              )
-              .sort((a, b) => b.endDate.localeCompare(a.endDate))[0]
-          : undefined;
-        return [
-          {
-            employeeId,
-            displayName: "Dev Partner",
-            displayLabel: away
-              ? `Dev Partner · Away through ${away.endDate}`
-              : "Dev Partner",
-            outOfOfficeUntil: away?.endDate ?? null,
-            outOfOfficeNote: away?.note ?? null,
-          },
-        ];
-      }
-      return db.execute<{
-        employeeId: string;
-        displayName: string;
-        displayLabel: string;
-        outOfOfficeUntil: string | null;
-        outOfOfficeNote: string | null;
-      }>(sql`
+    listEmployees: staffProcedure
+      .input(z.object({ projectId: uuid.optional() }).optional())
+      .query(async ({ input, ctx }) => {
+        const project = input?.projectId
+          ? await requireProjectAccess(ctx, input.projectId)
+          : null;
+        const scope = {
+          userId: ctx.employeeId,
+          clientId: project?.clientId ?? ctx.clientId,
+          roles: ctx.roles,
+        };
+        const [outOfOfficeEnabled, aiTeammatesEnabled] = await Promise.all([
+          featureEnabled("work.out_of_office", scope),
+          featureEnabled("work.ai.teammates", scope),
+        ]);
+        const db = getDb();
+        if (!db) {
+          const employeeId = "c0000000-0000-4000-8000-000000000001";
+          const away = outOfOfficeEnabled
+            ? [...getDemoWork().outOfOffice.values()]
+                .filter(
+                  (period) =>
+                    period.employeeId === employeeId &&
+                    withOutOfOfficeStatus(period).status === "active",
+                )
+                .sort((a, b) => b.endDate.localeCompare(a.endDate))[0]
+            : undefined;
+          return [
+            {
+              employeeId,
+              displayName: "Dev Partner",
+              displayLabel: away
+                ? `Dev Partner · Away through ${away.endDate}`
+                : "Dev Partner",
+              outOfOfficeUntil: away?.endDate ?? null,
+              outOfOfficeNote: away?.note ?? null,
+            },
+          ];
+        }
+        return db.execute<{
+          employeeId: string;
+          displayName: string;
+          displayLabel: string;
+          outOfOfficeUntil: string | null;
+          outOfOfficeNote: string | null;
+        }>(sql`
         select employee.employee_id as "employeeId",
           employee.display_name as "displayName",
           employee.display_name || case when away.end_date is not null
@@ -11907,9 +12059,29 @@ export const workManagementRouter = router({
             and current_date between period.start_date and period.end_date
           order by period.end_date desc limit 1
         ) away on ${outOfOfficeEnabled}
-        where employee.is_active = true order by lower(employee.display_name)
+        where employee.is_active = true
+          and (
+            employee.email not like '%@teammate.hrmny.internal'
+            or (
+              ${aiTeammatesEnabled}
+              and exists (
+                select 1 from public.work_ai_teammate teammate
+                join public.work_ai_teammate_member member
+                  on member.work_ai_teammate_id = teammate.work_ai_teammate_id
+                  and member.employee_id = ${actor(ctx)}::uuid
+                where teammate.employee_id = employee.employee_id
+                  and teammate.status = 'active' and teammate.archived_at is null
+                  and (${input?.projectId ?? null}::uuid is null or exists (
+                    select 1 from public.work_ai_teammate_project_access access
+                    where access.work_ai_teammate_id = teammate.work_ai_teammate_id
+                      and access.work_project_id = ${input?.projectId ?? null}::uuid
+                  ))
+              )
+            )
+          )
+        order by lower(employee.display_name)
       `);
-    }),
+      }),
     upsert: staffProcedure
       .input(
         z.object({

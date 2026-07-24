@@ -2,7 +2,15 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 import { clearDemoFeatureOverrides } from "./features";
 import { createCaller } from "./trpc/root";
-import { clearDemoWorkAiTeammates } from "./work-ai-teammates";
+import { getDemoWork } from "./trpc/work-management-router";
+import {
+  clearDemoAssignedTeammateEvents,
+  listDemoAssignedTeammateEvents,
+} from "./work-ai-teammate-events";
+import {
+  clearDemoWorkAiTeammates,
+  runWorkAiTeammateJob,
+} from "./work-ai-teammates";
 import { clearDemoWorkAi } from "./work-ai";
 
 function partnerCaller() {
@@ -35,6 +43,7 @@ async function enableTeammates(caller: ReturnType<typeof partnerCaller>) {
 describe("AI Teammates", () => {
   beforeEach(() => {
     clearDemoFeatureOverrides();
+    clearDemoAssignedTeammateEvents();
     clearDemoWorkAiTeammates();
     clearDemoWorkAi();
   });
@@ -217,5 +226,134 @@ describe("AI Teammates", () => {
       code: "FORBIDDEN",
       message: "FEATURE_DISABLED:work.ai.teammates",
     });
+  });
+
+  it("triggers assigned teammates from forms and recurrence within the project client boundary", async () => {
+    const caller = partnerCaller();
+    await enableTeammates(caller);
+    const project = await caller.work.projects.create({
+      name: `Automated teammate ${crypto.randomUUID()}`,
+      description: "Form and recurring work",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const teammate = await caller.workAiTeammates.create({
+      name: "Intake partner",
+      roleDescription: "Triage recurring requests",
+      instructions: "Review the task and propose the next useful action.",
+      allowedActionTypes: ["create_comment"],
+      allowedConnectedApps: [],
+      model: null,
+    });
+    await caller.workAiTeammates.projects.set({
+      teammateId: teammate.teammateId,
+      projectId: project.projectId,
+      accessLevel: "editor",
+    });
+    const form = await caller.work.forms.create({
+      projectId: project.projectId,
+      name: `AI intake ${crypto.randomUUID()}`,
+      description: "",
+      titleQuestionKey: "title",
+      questions: [
+        {
+          key: "title",
+          label: "Request title",
+          type: "text",
+          required: true,
+          options: [],
+        },
+      ],
+      defaultAssigneeEmployeeId: teammate.employeeId,
+      confirmationMessage: "Received",
+      accessLevel: "organization",
+    });
+    const submission = await caller.work.forms.submit({
+      formId: form.formId,
+      answers: { title: "Review new request" },
+    });
+    expect(listDemoAssignedTeammateEvents()).toContainEqual(
+      expect.objectContaining({
+        itemId: submission.itemId,
+        assigneeEmployeeId: teammate.employeeId,
+        requestText: expect.stringContaining("form submission"),
+      }),
+    );
+
+    const recurring = await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Weekly intake review",
+      description: "",
+      assigneeEmployeeId: teammate.employeeId,
+      dueAt: "2026-07-24T12:00:00.000Z",
+    });
+    await caller.work.recurrence.set({
+      itemId: recurring.itemId,
+      recurrence: { frequency: "weekly", interval: 1 },
+    });
+    clearDemoAssignedTeammateEvents();
+    const completed = await caller.work.tasks.complete({
+      itemId: recurring.itemId,
+      completed: true,
+    });
+    expect(completed.generatedItemId).toBeTruthy();
+    expect(listDemoAssignedTeammateEvents()).toContainEqual(
+      expect.objectContaining({
+        itemId: completed.generatedItemId,
+        assigneeEmployeeId: teammate.employeeId,
+        requestText: expect.stringContaining("recurring task"),
+      }),
+    );
+
+    const clientId = resolveDevUser("portal_a").clientId!;
+    getDemoWork().projects.get(project.projectId)!.clientId = clientId;
+    const visibleRun = await caller.workAiTeammates.run({
+      teammateId: teammate.teammateId,
+      projectId: project.projectId,
+      itemId: submission.itemId,
+      requestText: "Review the assigned request",
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.ai.teammates",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "client disabled automated teammates",
+    });
+    await expect(
+      caller.workAiTeammates.run({
+        teammateId: teammate.teammateId,
+        projectId: project.projectId,
+        itemId: submission.itemId,
+        requestText: "Continue the request",
+      }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.ai.teammates",
+    });
+    expect(
+      await caller.workAiTeammates.activity.list({
+        teammateId: teammate.teammateId,
+      }),
+    ).not.toContainEqual(
+      expect.objectContaining({ teammateRunId: visibleRun.teammateRunId }),
+    );
+    await expect(
+      caller.work.tasks.update({
+        itemId: submission.itemId,
+        assigneeEmployeeId: teammate.employeeId,
+      }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.ai.teammates",
+    });
+    await expect(
+      runWorkAiTeammateJob({
+        teammateId: teammate.teammateId,
+        itemId: submission.itemId,
+        actorEmployeeId: resolveDevUser("partner").employeeId,
+        requestText: "Queued before the client disabled AI teammates",
+        triggerType: "assignment",
+        eventKey: `disabled:${crypto.randomUUID()}`,
+      }),
+    ).resolves.toEqual({ disabled: true });
   });
 });

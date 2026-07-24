@@ -58,7 +58,9 @@ export default function WorkflowsPage() {
   const templateRolesEnabled = enabled.has("work.templates.roles");
   const bundlesEnabled = enabled.has("work.bundles");
   const approvalsEnabled = enabled.has("work.approvals");
-  const employees = trpc.work.members.listEmployees.useQuery();
+  const employees = trpc.work.members.listEmployees.useQuery({
+    projectId: projectId || undefined,
+  });
   const tags = trpc.work.tags.list.useQuery(
     { projectId },
     { enabled: Boolean(projectId && rulesEnabled) },
@@ -93,6 +95,7 @@ export default function WorkflowsPage() {
 
   const [formName, setFormName] = useState("");
   const [formQuestions, setFormQuestions] = useState("");
+  const [formAssigneeEmployeeId, setFormAssigneeEmployeeId] = useState("");
   const [formAccessLevel, setFormAccessLevel] = useState<
     "organization" | "anyone"
   >("organization");
@@ -102,6 +105,7 @@ export default function WorkflowsPage() {
     onSuccess: async () => {
       setFormName("");
       setFormQuestions("");
+      setFormAssigneeEmployeeId("");
       setFormAttachment(false);
       await utils.work.forms.list.invalidate();
     },
@@ -293,7 +297,7 @@ export default function WorkflowsPage() {
             Every submission becomes a task in this project.
           </p>
           <form
-            className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-[1fr_2fr_auto_auto_auto]"
+            className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-[1fr_2fr_1fr_auto_auto_auto]"
             onSubmit={(event) => {
               event.preventDefault();
               const extra = formQuestions
@@ -334,6 +338,7 @@ export default function WorkflowsPage() {
                       ]
                     : []),
                 ],
+                defaultAssigneeEmployeeId: formAssigneeEmployeeId || null,
                 confirmationMessage: "Your request was submitted.",
                 accessLevel: publicFormsEnabled
                   ? formAccessLevel
@@ -355,6 +360,21 @@ export default function WorkflowsPage() {
               value={formQuestions}
               onChange={(event) => setFormQuestions(event.target.value)}
             />
+            <select
+              aria-label="Default form assignee"
+              className="rounded border border-sand px-3 py-2"
+              value={formAssigneeEmployeeId}
+              onChange={(event) =>
+                setFormAssigneeEmployeeId(event.target.value)
+              }
+            >
+              <option value="">Leave unassigned</option>
+              {(employees.data ?? []).map((employee) => (
+                <option key={employee.employeeId} value={employee.employeeId}>
+                  {employee.displayLabel}
+                </option>
+              ))}
+            </select>
             <select
               aria-label="Form access"
               className="rounded border border-sand px-3 py-2"
