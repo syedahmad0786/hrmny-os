@@ -99,6 +99,14 @@ export default function PlanningPage() {
   const goals = trpc.work.goals.list.useQuery(undefined, {
     enabled: goalsEnabled,
   });
+  const [selectedGoalId, setSelectedGoalId] = useState("");
+  const selectedGoal = (goals.data ?? []).find(
+    (goal) => goal.goalId === selectedGoalId,
+  );
+  const goalUpdates = trpc.work.statusUpdates.list.useQuery(
+    { targetType: "goal", targetId: selectedGoalId },
+    { enabled: Boolean(selectedGoalId && goalsEnabled && statusEnabled) },
+  );
   const portfolios = trpc.work.portfolios.list.useQuery(undefined, {
     enabled: portfoliosEnabled,
   });
@@ -251,6 +259,11 @@ export default function PlanningPage() {
 
   const [goalName, setGoalName] = useState("");
   const [goalDueDate, setGoalDueDate] = useState("");
+  const [goalUpdateTitle, setGoalUpdateTitle] = useState("");
+  const [goalUpdateBody, setGoalUpdateBody] = useState("");
+  const [goalHealth, setGoalHealth] = useState<
+    "on_track" | "at_risk" | "off_track" | "complete"
+  >("on_track");
   const createGoal = trpc.work.goals.create.useMutation({
     onSuccess: async () => {
       setGoalName("");
@@ -259,6 +272,13 @@ export default function PlanningPage() {
   });
   const linkGoal = trpc.work.goals.link.useMutation({
     onSuccess: () => utils.work.goals.list.invalidate(),
+  });
+  const createGoalUpdate = trpc.work.statusUpdates.create.useMutation({
+    onSuccess: async () => {
+      setGoalUpdateTitle("");
+      setGoalUpdateBody("");
+      await utils.work.statusUpdates.list.invalidate();
+    },
   });
 
   const [portfolioName, setPortfolioName] = useState("");
@@ -409,6 +429,7 @@ export default function PlanningPage() {
 
   const errors = [
     createGoal.error,
+    createGoalUpdate.error,
     linkGoal.error,
     createPortfolio.error,
     addPortfolioProject.error,
@@ -938,23 +959,144 @@ export default function PlanningPage() {
                     style={{ width: `${goal.progress}%` }}
                   />
                 </div>
-                {projectId ? (
-                  <button
-                    type="button"
-                    className="mt-3 rounded border border-sand px-3 py-1.5 text-xs"
-                    onClick={() =>
-                      linkGoal.mutate({
-                        goalId: goal.goalId,
-                        target: { type: "project", id: projectId },
-                      })
-                    }
-                  >
-                    Link selected project
-                  </button>
-                ) : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {projectId ? (
+                    <button
+                      type="button"
+                      className="rounded border border-sand px-3 py-1.5 text-xs"
+                      onClick={() =>
+                        linkGoal.mutate({
+                          goalId: goal.goalId,
+                          target: { type: "project", id: projectId },
+                        })
+                      }
+                    >
+                      Link selected project
+                    </button>
+                  ) : null}
+                  {statusEnabled ? (
+                    <button
+                      type="button"
+                      className="rounded border border-sand px-3 py-1.5 text-xs"
+                      onClick={() =>
+                        setSelectedGoalId(
+                          selectedGoalId === goal.goalId ? "" : goal.goalId,
+                        )
+                      }
+                    >
+                      {selectedGoalId === goal.goalId
+                        ? "Hide history"
+                        : "Progress history"}
+                    </button>
+                  ) : null}
+                </div>
               </article>
             ))}
           </div>
+          {selectedGoal && statusEnabled ? (
+            <div className="mt-4 rounded-lg border border-sand bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-semibold">{selectedGoal.name} history</h3>
+                  <p className="text-xs text-muted">
+                    Dated progress updates are kept here.
+                  </p>
+                </div>
+                <strong>{selectedGoal.progress}% now</strong>
+              </div>
+              <form
+                className="mt-3 grid gap-2 md:grid-cols-[1fr_2fr_auto_auto]"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  createGoalUpdate.mutate({
+                    targetType: "goal",
+                    targetId: selectedGoal.goalId,
+                    health: goalHealth,
+                    progress: selectedGoal.progress,
+                    title: goalUpdateTitle,
+                    body: goalUpdateBody,
+                  });
+                }}
+              >
+                <input
+                  aria-label="Goal update title"
+                  className="rounded border border-sand px-3 py-2"
+                  placeholder="Update title"
+                  value={goalUpdateTitle}
+                  onChange={(event) => setGoalUpdateTitle(event.target.value)}
+                />
+                <textarea
+                  aria-label="Goal update details"
+                  className="min-h-10 rounded border border-sand px-3 py-2"
+                  maxLength={50_000}
+                  placeholder="What changed?"
+                  value={goalUpdateBody}
+                  onChange={(event) => setGoalUpdateBody(event.target.value)}
+                />
+                <select
+                  aria-label="Goal health"
+                  className="rounded border border-sand px-3 py-2"
+                  value={goalHealth}
+                  onChange={(event) =>
+                    setGoalHealth(event.target.value as typeof goalHealth)
+                  }
+                >
+                  <option value="on_track">On track</option>
+                  <option value="at_risk">At risk</option>
+                  <option value="off_track">Off track</option>
+                  <option value="complete">Complete</option>
+                </select>
+                <button
+                  className="rounded bg-ink px-4 py-2 text-white"
+                  disabled={
+                    !goalUpdateTitle.trim() || createGoalUpdate.isPending
+                  }
+                >
+                  Add update
+                </button>
+              </form>
+              <div className="mt-4 space-y-2">
+                {goalUpdates.isPending ? (
+                  <p className="text-sm text-muted">Loading history…</p>
+                ) : !(goalUpdates.data ?? []).length ? (
+                  <p className="text-sm text-muted">No updates yet.</p>
+                ) : (
+                  (goalUpdates.data ?? []).map((update) => (
+                    <article
+                      key={update.statusUpdateId}
+                      className="rounded border border-sand p-3"
+                    >
+                      <div className="flex flex-wrap justify-between gap-2">
+                        <div>
+                          <h4 className="font-medium">{update.title}</h4>
+                          <p className="text-xs text-muted">
+                            {new Date(update.createdAt).toLocaleDateString()} ·{" "}
+                            {update.health.replaceAll("_", " ")}
+                          </p>
+                        </div>
+                        {update.progress === null ? null : (
+                          <strong>{update.progress}%</strong>
+                        )}
+                      </div>
+                      {update.body ? (
+                        <p className="mt-2 whitespace-pre-wrap text-sm text-muted">
+                          {update.body}
+                        </p>
+                      ) : null}
+                      {update.progress === null ? null : (
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-sand">
+                          <div
+                            className="h-full bg-ochre"
+                            style={{ width: `${update.progress}%` }}
+                          />
+                        </div>
+                      )}
+                    </article>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
