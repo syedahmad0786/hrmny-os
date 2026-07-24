@@ -148,6 +148,13 @@
       "when": 1784919600000,
       "tag": "0020_asana_import",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784923200000,
+      "tag": "0021_work_daily",
+      "breakpoints": true
     }
   ]
 }
