@@ -616,6 +616,17 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     route: "/work/my-tasks",
   }),
   feature({
+    key: "work.my_tasks.quick_add",
+    name: "My Tasks quick add",
+    description:
+      "Create private assigned tasks directly from My Tasks without choosing a project.",
+    group: "Personal productivity",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+    route: "/work/my-tasks",
+  }),
+  feature({
     key: "work.inbox",
     name: "Inbox",
     description:
@@ -1340,6 +1351,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["work.customFields.", "work.custom_fields"],
   ["work.attachments.", "work.attachments"],
   ["work.recurrence.", "work.recurring_tasks"],
+  ["work.personal.quickAdd", "work.my_tasks.quick_add"],
   ["work.personal.focus.", "work.my_tasks.focus"],
   ["work.personal.myTaskSections.", "work.my_tasks.sections"],
   ["work.personal.myTasks", "work.my_tasks"],

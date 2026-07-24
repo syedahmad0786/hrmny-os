@@ -149,6 +149,74 @@ describe("work management", () => {
     });
   });
 
+  it("creates governed private tasks directly from My Tasks", async () => {
+    const user = resolveDevUser("partner");
+    const caller = partnerCaller();
+    const section = await caller.work.personal.myTaskSections.create({
+      name: `Personal ${Date.now()}`,
+    });
+    const first = await caller.work.personal.quickAdd({
+      title: "Book focused review",
+      dueAt: "2026-07-27T12:00:00.000Z",
+      priority: "high",
+      personalSectionId: section.sectionId,
+    });
+    const second = await caller.work.personal.quickAdd({
+      title: "Capture follow-up notes",
+    });
+    expect(first).toMatchObject({
+      assigneeEmployeeId: user.employeeId,
+      projectKind: "personal",
+      projectName: "Private task",
+      personalSectionId: section.sectionId,
+    });
+    expect(second.projectId).toBe(first.projectId);
+    expect(
+      (await caller.work.projects.list()).some(
+        (project) => project.projectId === first.projectId,
+      ),
+    ).toBe(false);
+    expect(
+      (await caller.work.personal.myTasks({ includeCompleted: false })).find(
+        (item) => item.itemId === first.itemId,
+      ),
+    ).toMatchObject({
+      projectKind: "personal",
+      projectName: "Private task",
+      personalSectionId: section.sectionId,
+    });
+    await caller.work.tasks.update({
+      itemId: first.itemId,
+      title: "Book private focused review",
+    });
+
+    const other = resolveDevUser("am");
+    const otherCaller = createCaller({
+      user: other,
+      employeeId: other.employeeId,
+      roles: other.roles,
+      canViewMargin: sessionCanViewMargin(other),
+      clientId: other.clientId,
+    });
+    await expect(
+      otherCaller.work.tasks.get({ itemId: first.itemId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    await setFeatureOverride({
+      featureKey: "work.my_tasks.quick_add",
+      scopeType: "user",
+      scopeKey: user.employeeId,
+      enabled: false,
+      updatedByEmployeeId: user.employeeId,
+    });
+    await expect(
+      caller.work.personal.quickAdd({ title: "Should be blocked" }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.my_tasks.quick_add",
+    });
+  });
+
   it("creates a project graph with task, subtask, dependency, and comment", async () => {
     const caller = partnerCaller();
     const project = await caller.work.projects.create({

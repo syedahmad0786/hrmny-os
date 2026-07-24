@@ -16,7 +16,7 @@ A capability is only marked **available** when all of these are true:
 
 Database tables without a usable workflow do not count as parity. The code-owned catalogue at `apps/web/src/features/catalog.ts` is the live status register; **planned** features cannot be switched on.
 
-Current catalogue verdict: all 121 recorded capabilities have a usable surface; 32 are marked available and 89 remain beta. Nothing is still labelled planned, but beta is not a claim of production acceptance. The 100% goal remains open until the live Composio/Asana account is verified, provider auth configs are exercised, and client acceptance confirms the beta workflows at production scale.
+Current catalogue verdict: all 122 recorded capabilities have a usable surface; 32 are marked available and 90 remain beta. Nothing is still labelled planned, but beta is not a claim of production acceptance. The 100% goal remains open until the live Composio/Asana account is verified, provider auth configs are exercised, and client acceptance confirms the beta workflows at production scale.
 
 ## Connection finding
 
@@ -51,7 +51,7 @@ The integration audit found no separately stored Asana account and confirmed tha
 
 ### Views and personal work
 
-List, board, monthly Calendar, date-range Timeline, Files, and Gantt views use the same project data and are available in beta. Gantt includes dependencies, critical-path calculation, captured baselines, and schedule variance. My Tasks now has private custom sections, section ordering, list and board organization, sorting, grouping, due-date filters, weekly/monthly personal calendars with weekend and unscheduled-work controls, a persisted weekly focus, and a task-bound 25-minute focus timer. Its sections and focus are governed separately by Feature Lab, and reassignment clears the former assignee's private organization. Inbox, full-text search, and saved searches are also beta. The browser surface has no push-notification channel to pause during a timer; desktop/native notification suppression and offline work mutation remain beta acceptance gaps under the personal-work and mobile switches.
+List, board, monthly Calendar, date-range Timeline, Files, and Gantt views use the same project data and are available in beta. Gantt includes dependencies, critical-path calculation, captured baselines, and schedule variance. My Tasks now has private quick-add tasks that do not require choosing a project, private custom sections, section ordering, list and board organization, sorting, grouping, due-date filters, weekly/monthly personal calendars with weekend and unscheduled-work controls, a persisted weekly focus, and a task-bound 25-minute focus timer. Its quick add, sections, and focus are governed separately by Feature Lab. Personal tasks use one hidden private graph container per employee so the existing task permissions and actions still apply, while project selectors never expose it. Reassignment clears the former assignee's private organization. Inbox, full-text search, and saved searches are also beta. The browser surface has no push-notification channel to pause during a timer; importing Asana tasks that belong only to My Tasks, desktop/native notification suppression, and offline work mutation remain beta acceptance gaps under the personal-work, migration, and mobile switches.
 
 ### Intake, automation, and standardisation
 
@@ -108,6 +108,7 @@ AI Teammates now have synthetic employee identities, owner/editor/user sharing, 
 - https://asana.com/features
 - https://help.asana.com/s/article/release-notes
 - https://help.asana.com/s/article/maximize-productivity-with-my-tasks
+- https://help.asana.com/s/article/views-in-my-tasks
 - https://help.asana.com/s/article/sections
 - https://help.asana.com/s/article/calendar-view
 - https://help.asana.com/s/article/asana-desktop-app

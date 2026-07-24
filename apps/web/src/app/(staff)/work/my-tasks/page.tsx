@@ -26,6 +26,8 @@ export default function MyTasksPage() {
   const enabled = new Set(session.data?.enabledFeatureKeys ?? []);
   const sectionsEnabled = enabled.has("work.my_tasks.sections");
   const focusEnabled = enabled.has("work.my_tasks.focus");
+  const quickAddEnabled =
+    enabled.has("work.my_tasks.quick_add") && enabled.has("work.tasks");
   const boardEnabled = sectionsEnabled && enabled.has("work.views.board");
   const calendarEnabled =
     enabled.has("work.views.calendar") &&
@@ -47,6 +49,12 @@ export default function MyTasksPage() {
   const [focusItemId, setFocusItemId] = useState("");
   const [focusSeconds, setFocusSeconds] = useState(25 * 60);
   const [focusRunning, setFocusRunning] = useState(false);
+  const [quickTitle, setQuickTitle] = useState("");
+  const [quickDue, setQuickDue] = useState("");
+  const [quickPriority, setQuickPriority] = useState<
+    "" | "low" | "medium" | "high" | "urgent"
+  >("");
+  const [quickSectionId, setQuickSectionId] = useState("");
   const today = localDateKey(new Date());
   const weekStart = startOfWeek(today);
   const tasks = trpc.work.personal.myTasks.useQuery({
@@ -103,6 +111,15 @@ export default function MyTasksPage() {
   });
   const saveFocus = trpc.work.personal.focus.save.useMutation({
     onSuccess: () => utils.work.personal.focus.get.invalidate({ weekStart }),
+  });
+  const quickAdd = trpc.work.personal.quickAdd.useMutation({
+    onSuccess: () => {
+      setQuickTitle("");
+      setQuickDue("");
+      setQuickPriority("");
+      setQuickSectionId("");
+      refresh();
+    },
   });
   const weekEnd = personalCalendarDateKeys(today, "week", true).at(-1)!;
   const sectionNames = new Map(
@@ -178,7 +195,8 @@ export default function MyTasksPage() {
     reorderSections.error ??
     moveTask.error ??
     focus.error ??
-    saveFocus.error;
+    saveFocus.error ??
+    quickAdd.error;
   const schedule = (itemId: string, dateKey: string) =>
     updateTask.mutate({
       itemId,
@@ -260,6 +278,85 @@ export default function MyTasksPage() {
           Organize your assigned work privately across every project.
         </p>
       </header>
+
+      {quickAddEnabled ? (
+        <section className="rounded-xl border border-sand bg-white/70 p-4">
+          <h2 className="text-sm font-semibold">Add a private task</h2>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <input
+              className="min-w-64 flex-1 rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+              maxLength={500}
+              placeholder="Task name"
+              value={quickTitle}
+              onChange={(event) => setQuickTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && quickTitle.trim())
+                  quickAdd.mutate({
+                    title: quickTitle,
+                    dueAt: quickDue ? dueAtFromDateKey(quickDue) : null,
+                    priority: quickPriority || null,
+                    personalSectionId: quickSectionId || null,
+                  });
+              }}
+            />
+            <input
+              type="date"
+              aria-label="Private task due date"
+              className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+              value={quickDue}
+              onChange={(event) => setQuickDue(event.target.value)}
+            />
+            <select
+              aria-label="Private task priority"
+              className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+              value={quickPriority}
+              onChange={(event) =>
+                setQuickPriority(event.target.value as typeof quickPriority)
+              }
+            >
+              <option value="">No priority</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+            {sectionsEnabled ? (
+              <select
+                aria-label="Private task section"
+                className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+                value={quickSectionId}
+                onChange={(event) => setQuickSectionId(event.target.value)}
+              >
+                <option value="">Recently assigned</option>
+                {(sections.data ?? []).map((section) => (
+                  <option key={section.sectionId} value={section.sectionId}>
+                    {section.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <button
+              type="button"
+              className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+              disabled={!quickTitle.trim() || quickAdd.isPending}
+              onClick={() =>
+                quickAdd.mutate({
+                  title: quickTitle,
+                  dueAt: quickDue ? dueAtFromDateKey(quickDue) : null,
+                  priority: quickPriority || null,
+                  personalSectionId: quickSectionId || null,
+                })
+              }
+            >
+              Add task
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-muted">
+            Private tasks stay in My Tasks until you add them to a shared
+            project.
+          </p>
+        </section>
+      ) : null}
 
       {focusEnabled ? (
         <section className="grid gap-4 rounded-xl border border-sand bg-white/70 p-4 lg:grid-cols-2">

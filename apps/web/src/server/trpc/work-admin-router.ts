@@ -120,11 +120,13 @@ function demoDirectory() {
         email: user.email,
         active: true,
       })),
-    projects: [...getDemoWork().projects.values()].map((project) => ({
-      projectId: project.projectId,
-      name: project.name,
-      privacy: project.privacy,
-    })),
+    projects: [...getDemoWork().projects.values()]
+      .filter((project) => project.projectKind !== "personal")
+      .map((project) => ({
+        projectId: project.projectId,
+        name: project.name,
+        privacy: project.privacy,
+      })),
   };
 }
 
@@ -250,7 +252,9 @@ export const workAdminRouter = router({
       `),
       db.execute<{ projectId: string; name: string; privacy: string }>(sql`
         select work_project_id as "projectId", name, privacy
-        from public.work_project where archived_at is null order by lower(name)
+        from public.work_project
+        where archived_at is null and project_kind = 'standard'
+        order by lower(name)
       `),
     ]);
     return { employees, clients, portalUsers, projects };

@@ -47,6 +47,7 @@ type WorkProject = {
   clientId: string | null;
   ownerEmployeeId: string | null;
   sourcePlatform: "native" | "asana";
+  projectKind?: "standard" | "personal";
   accessLevel: AccessLevel;
   budgetAmount?: number | null;
   budgetCurrency?: string;
@@ -847,6 +848,11 @@ export async function requireProjectAccess(
   if (!db) {
     const project = getDemoWork().projects.get(projectId);
     if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+    if (
+      project.projectKind === "personal" &&
+      project.ownerEmployeeId !== employeeId
+    )
+      throw new TRPCError({ code: "NOT_FOUND" });
     return project;
   }
   const rows = await db.execute<WorkProject>(sql`
@@ -2486,7 +2492,10 @@ export const workManagementRouter = router({
     list: staffProcedure.query(async ({ ctx }) => {
       const employeeId = actor(ctx);
       const db = getDb();
-      if (!db) return [...getDemoWork().projects.values()];
+      if (!db)
+        return [...getDemoWork().projects.values()].filter(
+          (project) => project.projectKind !== "personal",
+        );
       const rows = await db.execute<WorkProject>(sql`
         select project.work_project_id as "projectId", project.name,
           project.description, project.color, project.privacy,
@@ -2517,6 +2526,7 @@ export const workManagementRouter = router({
           limit 1
         ) team_access on true
         where project.archived_at is null
+          and project.project_kind = 'standard'
           and (
             project.privacy = 'organization'
             or project.created_by_employee_id = ${employeeId}::uuid
@@ -4879,6 +4889,187 @@ export const workManagementRouter = router({
   }),
 
   personal: router({
+    quickAdd: staffProcedure
+      .input(
+        z.object({
+          title: z.string().trim().min(1).max(500),
+          description: z.string().trim().max(20_000).default(""),
+          priority: z
+            .enum(["low", "medium", "high", "urgent"])
+            .nullable()
+            .optional(),
+          dueAt: z.string().datetime().nullable().optional(),
+          personalSectionId: nullableUuid.optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx);
+        await requireWorkFeature(ctx, "work.my_tasks.quick_add");
+        await requireWorkFeature(ctx, "work.tasks");
+        const db = getDb();
+        let item: WorkItem & {
+          projectName: string;
+          projectKind: "personal";
+          personalSectionId: string | null;
+          personalPosition: number;
+        };
+        if (!db) {
+          const store = getDemoWork();
+          let project = [...store.projects.values()].find(
+            (candidate) =>
+              candidate.projectKind === "personal" &&
+              candidate.ownerEmployeeId === employeeId,
+          );
+          if (!project) {
+            project = {
+              projectId: randomUUID(),
+              name: "Private tasks",
+              description: "Private tasks created from My Tasks.",
+              color: "#C7702E",
+              privacy: "private",
+              clientId: null,
+              ownerEmployeeId: employeeId,
+              sourcePlatform: "native",
+              projectKind: "personal",
+              accessLevel: "admin",
+              createdAt: new Date().toISOString(),
+            };
+            store.projects.set(project.projectId, project);
+          }
+          if (input.personalSectionId) {
+            const section = store.myTasksSections.get(input.personalSectionId);
+            if (!section || section.employeeId !== employeeId)
+              throw new TRPCError({ code: "NOT_FOUND" });
+          }
+          const itemId = randomUUID();
+          const position = [...store.items.values()].filter(
+            (candidate) => candidate.projectId === project.projectId,
+          ).length;
+          const created: WorkItem = {
+            itemId,
+            parentItemId: null,
+            title: input.title,
+            description: input.description,
+            itemType: "task",
+            priority: input.priority ?? null,
+            assigneeEmployeeId: employeeId,
+            assigneeName: ctx.user?.displayName ?? "You",
+            startDate: null,
+            dueAt: input.dueAt ?? null,
+            completedAt: null,
+            sectionId: null,
+            position,
+            projectId: project.projectId,
+            recurrence: null,
+            estimatedMinutes: null,
+          };
+          store.items.set(itemId, created);
+          if (input.personalSectionId)
+            store.myTasksMemberships.set(
+              myTasksMembershipKey(employeeId, itemId),
+              {
+                employeeId,
+                itemId,
+                sectionId: input.personalSectionId,
+                position: 0,
+              },
+            );
+          item = {
+            ...created,
+            projectName: "Private task",
+            projectKind: "personal",
+            personalSectionId: input.personalSectionId ?? null,
+            personalPosition: 0,
+          };
+        } else {
+          item = await db.transaction(async (tx) => {
+            if (input.personalSectionId) {
+              const section = await tx.execute(sql`
+                select 1 from public.work_my_tasks_section
+                where work_my_tasks_section_id = ${input.personalSectionId}::uuid
+                  and employee_id = ${employeeId}::uuid limit 1
+              `);
+              if (!section[0]) throw new TRPCError({ code: "NOT_FOUND" });
+            }
+            const projects = await tx.execute<{ projectId: string }>(sql`
+              insert into public.work_project (
+                name, description, color, privacy, owner_employee_id,
+                created_by_employee_id, project_kind
+              ) values (
+                'Private tasks', 'Private tasks created from My Tasks.',
+                '#C7702E', 'private', ${employeeId}::uuid,
+                ${employeeId}::uuid, 'personal'
+              ) on conflict (owner_employee_id) where project_kind = 'personal'
+              do update set archived_at = null, updated_at = now()
+              returning work_project_id as "projectId"
+            `);
+            const projectId = projects[0]!.projectId;
+            await tx.execute(sql`
+              insert into public.work_project_member (
+                work_project_id, employee_id, access_level
+              ) values (${projectId}::uuid, ${employeeId}::uuid, 'admin')
+              on conflict (work_project_id, employee_id) do update set
+                access_level = 'admin', updated_at = now()
+            `);
+            const rows = await tx.execute<WorkItem>(sql`
+              insert into public.work_item (
+                title, description, item_type, priority,
+                assignee_employee_id, created_by_employee_id, due_at
+              ) values (
+                ${input.title}, ${input.description}, 'task',
+                ${input.priority ?? null}, ${employeeId}::uuid,
+                ${employeeId}::uuid, ${input.dueAt ?? null}::timestamptz
+              ) returning work_item_id as "itemId",
+                parent_work_item_id as "parentItemId", title, description,
+                item_type as "itemType", priority,
+                assignee_employee_id as "assigneeEmployeeId",
+                null::text as "assigneeName", start_date as "startDate",
+                due_at as "dueAt", completed_at as "completedAt", recurrence,
+                estimated_minutes as "estimatedMinutes"
+            `);
+            const created = rows[0]!;
+            const memberships = await tx.execute<{ position: number }>(sql`
+              insert into public.work_project_item (
+                work_project_id, work_item_id, position
+              ) values (
+                ${projectId}::uuid, ${created.itemId}::uuid,
+                (select coalesce(max(position), -1) + 1
+                  from public.work_project_item
+                  where work_project_id = ${projectId}::uuid)
+              ) returning position
+            `);
+            if (input.personalSectionId)
+              await tx.execute(sql`
+                insert into public.work_my_tasks_membership (
+                  employee_id, work_item_id, work_my_tasks_section_id, position
+                ) values (
+                  ${employeeId}::uuid, ${created.itemId}::uuid,
+                  ${input.personalSectionId}::uuid, 0
+                )
+              `);
+            return {
+              ...created,
+              assigneeName: ctx.user?.displayName ?? "You",
+              startDate: created.startDate ? String(created.startDate) : null,
+              dueAt: iso(created.dueAt),
+              completedAt: iso(created.completedAt),
+              sectionId: null,
+              position: memberships[0]!.position,
+              projectId,
+              projectName: "Private task",
+              projectKind: "personal" as const,
+              personalSectionId: input.personalSectionId ?? null,
+              personalPosition: 0,
+            };
+          });
+        }
+        await audit(ctx, "work.my_tasks.quick_add", "work_item", item.itemId, {
+          personalSectionId: item.personalSectionId,
+          dueAt: item.dueAt,
+        });
+        return item;
+      }),
+
     focus: router({
       get: staffProcedure
         .input(z.object({ weekStart: z.string().date() }))
@@ -5325,9 +5516,14 @@ export const workManagementRouter = router({
               const membership = store.myTasksMemberships.get(
                 myTasksMembershipKey(employeeId, item.itemId),
               );
+              const project = store.projects.get(item.projectId);
               return {
                 ...item,
-                projectName: store.projects.get(item.projectId)?.name ?? "Work",
+                projectName:
+                  project?.projectKind === "personal"
+                    ? "Private task"
+                    : (project?.name ?? "Work"),
+                projectKind: project?.projectKind ?? "standard",
                 personalSectionId: membership?.sectionId ?? null,
                 personalPosition: membership?.position ?? 0,
               };
@@ -5337,6 +5533,7 @@ export const workManagementRouter = router({
         const rows = await db.execute<
           WorkItem & {
             projectName: string;
+            projectKind: "standard" | "personal";
             personalSectionId: string | null;
             personalPosition: number;
           }
@@ -5348,7 +5545,10 @@ export const workManagementRouter = router({
             assignee.display_name as "assigneeName", item.start_date as "startDate",
             item.due_at as "dueAt", item.completed_at as "completedAt",
             chosen."sectionId", chosen.position,
-            chosen."projectId", chosen."projectName",
+            chosen."projectId",
+            case when chosen."projectKind" = 'personal'
+              then 'Private task' else chosen."projectName" end as "projectName",
+            chosen."projectKind",
             personal.work_my_tasks_section_id as "personalSectionId",
             coalesce(personal.position, 0) as "personalPosition",
             item.recurrence
@@ -5357,7 +5557,8 @@ export const workManagementRouter = router({
             select project_item.work_section_id as "sectionId",
               project_item.position,
               project.work_project_id as "projectId",
-              project.name as "projectName"
+              project.name as "projectName",
+              project.project_kind as "projectKind"
             from public.work_project_item project_item
             join public.work_project project
               on project.work_project_id = project_item.work_project_id
@@ -5380,7 +5581,8 @@ export const workManagementRouter = router({
                     and team_member.employee_id = ${employeeId}::uuid
                 )
               )
-            order by project_item.created_at, lower(project.name)
+            order by (project.project_kind = 'personal'),
+              project_item.created_at, lower(project.name)
             limit 1
           ) chosen on true
           left join public.work_my_tasks_membership personal
