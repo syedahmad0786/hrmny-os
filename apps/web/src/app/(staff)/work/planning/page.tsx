@@ -41,7 +41,12 @@ export default function PlanningPage() {
     "bar",
   );
   const [chartGroupBy, setChartGroupBy] = useState<
-    "completion" | "assignee" | "priority" | "section" | "task_type"
+    | "completion"
+    | "assignee"
+    | "priority"
+    | "section"
+    | "task_type"
+    | "custom_field"
   >("completion");
   const [chartMetric, setChartMetric] = useState<
     "task_count" | "estimated_minutes" | "actual_minutes"
@@ -52,6 +57,7 @@ export default function PlanningPage() {
   const [chartDueFrom, setChartDueFrom] = useState("");
   const [chartDueTo, setChartDueTo] = useState("");
   const [chartIncludeSubtasks, setChartIncludeSubtasks] = useState(true);
+  const [chartCustomFieldId, setChartCustomFieldId] = useState("");
   useEffect(() => {
     if (!projectId && projects.data?.[0])
       setProjectId(projects.data[0].projectId);
@@ -78,6 +84,7 @@ export default function PlanningPage() {
   const portfoliosEnabled = enabled.has("work.portfolios");
   const statusEnabled = enabled.has("work.status_updates");
   const reportingEnabled = enabled.has("work.reporting_dashboards");
+  const customFieldsEnabled = enabled.has("work.custom_fields");
   const workloadEnabled = enabled.has("work.workload");
   const portfolioWorkloadActive = Boolean(
     workloadPortfolioId && portfoliosEnabled,
@@ -101,6 +108,27 @@ export default function PlanningPage() {
     { projectId },
     { enabled: Boolean(projectId && reportingEnabled) },
   );
+  const reportingCustomFields = trpc.work.customFields.list.useQuery(
+    { projectId },
+    {
+      enabled: Boolean(projectId && reportingEnabled && customFieldsEnabled),
+    },
+  );
+  useEffect(() => {
+    const fields = reportingCustomFields.data ?? [];
+    if (!customFieldsEnabled || !fields.length) {
+      if (chartGroupBy === "custom_field") setChartGroupBy("completion");
+      setChartCustomFieldId("");
+      return;
+    }
+    if (!fields.some((field) => field.customFieldId === chartCustomFieldId))
+      setChartCustomFieldId(fields[0]!.customFieldId);
+  }, [
+    chartCustomFieldId,
+    chartGroupBy,
+    customFieldsEnabled,
+    reportingCustomFields.data,
+  ]);
   const chart = trpc.work.reporting.chart.useQuery(
     {
       projectId,
@@ -111,9 +139,16 @@ export default function PlanningPage() {
         dueFrom: chartDueFrom || null,
         dueTo: chartDueTo || null,
         includeSubtasks: chartIncludeSubtasks,
+        customFieldId: chartCustomFieldId || null,
       },
     },
-    { enabled: Boolean(projectId && reportingEnabled) },
+    {
+      enabled: Boolean(
+        projectId &&
+        reportingEnabled &&
+        (chartGroupBy !== "custom_field" || chartCustomFieldId),
+      ),
+    },
   );
   const donutBackground = useMemo(() => {
     if (!chart.data?.total) return "#F0E9DE";
@@ -240,9 +275,14 @@ export default function PlanningPage() {
       return;
     const saved = spec as Record<string, unknown>;
     if (
-      !["completion", "assignee", "priority", "section", "task_type"].includes(
-        String(saved.groupBy),
-      ) ||
+      ![
+        "completion",
+        "assignee",
+        "priority",
+        "section",
+        "task_type",
+        "custom_field",
+      ].includes(String(saved.groupBy)) ||
       !["task_count", "estimated_minutes", "actual_minutes"].includes(
         String(saved.metric),
       ) ||
@@ -257,6 +297,9 @@ export default function PlanningPage() {
     setChartDueFrom(typeof saved.dueFrom === "string" ? saved.dueFrom : "");
     setChartDueTo(typeof saved.dueTo === "string" ? saved.dueTo : "");
     setChartIncludeSubtasks(saved.includeSubtasks !== false);
+    setChartCustomFieldId(
+      typeof saved.customFieldId === "string" ? saved.customFieldId : "",
+    );
   };
 
   const [budgetAmount, setBudgetAmount] = useState("");
@@ -403,6 +446,7 @@ export default function PlanningPage() {
                       dueFrom: chartDueFrom || null,
                       dueTo: chartDueTo || null,
                       includeSubtasks: chartIncludeSubtasks,
+                      customFieldId: chartCustomFieldId || null,
                     },
                   },
                 });
@@ -495,8 +539,33 @@ export default function PlanningPage() {
                   <option value="priority">Priority</option>
                   <option value="section">Section</option>
                   <option value="task_type">Task type</option>
+                  {customFieldsEnabled &&
+                  (reportingCustomFields.data ?? []).length ? (
+                    <option value="custom_field">Custom field</option>
+                  ) : null}
                 </select>
               </label>
+              {chartGroupBy === "custom_field" ? (
+                <label className="grid gap-1 text-xs text-muted">
+                  Custom field
+                  <select
+                    className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                    value={chartCustomFieldId}
+                    onChange={(event) =>
+                      setChartCustomFieldId(event.target.value)
+                    }
+                  >
+                    {(reportingCustomFields.data ?? []).map((field) => (
+                      <option
+                        key={field.customFieldId}
+                        value={field.customFieldId}
+                      >
+                        {field.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="grid gap-1 text-xs text-muted">
                 Measure
                 <select

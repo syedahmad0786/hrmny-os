@@ -2369,11 +2369,72 @@ describe("work management", () => {
           dueFrom: "2026-07-20",
           dueTo: "2026-07-31",
           includeSubtasks: false,
+          customFieldId: null,
         },
       }),
     ).toEqual({
       data: [{ label: "Complete", value: 480 }],
       total: 480,
+    });
+    const reportingField = await caller.work.customFields.create({
+      projectId: project.projectId,
+      name: "Delivery confidence",
+      fieldType: "single_select",
+      options: ["High", "Low"],
+      isRequired: false,
+    });
+    await caller.work.customFields.setValue({
+      itemId: task.itemId,
+      customFieldId: reportingField.customFieldId,
+      value: "High",
+    });
+    const customFieldSpec = {
+      groupBy: "custom_field" as const,
+      metric: "task_count" as const,
+      completion: "all" as const,
+      dueFrom: null,
+      dueTo: null,
+      includeSubtasks: true,
+      customFieldId: reportingField.customFieldId,
+    };
+    expect(
+      await caller.work.reporting.chart({
+        projectId: project.projectId,
+        spec: customFieldSpec,
+      }),
+    ).toEqual({ data: [{ label: "High", value: 1 }], total: 1 });
+    const customFieldDashboard = await caller.work.reporting.saveDashboard({
+      name: "Confidence view",
+      config: {
+        projectId: project.projectId,
+        chartStyle: "bar",
+        spec: customFieldSpec,
+      },
+    });
+    const reportingClientId = resolveDevUser("portal_b").clientId!;
+    getDemoWork().projects.get(project.projectId)!.clientId = reportingClientId;
+    await caller.admin.features.setOverride({
+      featureKey: "work.custom_fields",
+      scopeType: "client",
+      scopeKey: reportingClientId,
+      enabled: false,
+      reason: "client disabled custom fields",
+    });
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      customFieldDashboard,
+    );
+    await expect(
+      caller.work.reporting.chart({
+        projectId: project.projectId,
+        spec: customFieldSpec,
+      }),
+    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.custom_fields" });
+    await caller.admin.features.setOverride({
+      featureKey: "work.custom_fields",
+      scopeType: "client",
+      scopeKey: reportingClientId,
+      enabled: true,
+      reason: "restore custom fields",
     });
     await expect(
       caller.work.reporting.chart({
@@ -2385,6 +2446,7 @@ describe("work management", () => {
           dueFrom: "2026-07-31",
           dueTo: "2026-07-20",
           includeSubtasks: true,
+          customFieldId: null,
         },
       }),
     ).rejects.toThrow("Due through must be on or after due from");
@@ -2401,8 +2463,6 @@ describe("work management", () => {
       config: { projectId: project.projectId },
     });
     expect(await caller.work.reporting.dashboards()).toContainEqual(dashboard);
-    const reportingClientId = resolveDevUser("portal_b").clientId!;
-    getDemoWork().projects.get(project.projectId)!.clientId = reportingClientId;
     await caller.admin.features.setOverride({
       featureKey: "work.reporting_dashboards",
       scopeType: "client",
@@ -2423,6 +2483,7 @@ describe("work management", () => {
           dueFrom: null,
           dueTo: null,
           includeSubtasks: true,
+          customFieldId: null,
         },
       }),
     ).rejects.toMatchObject({

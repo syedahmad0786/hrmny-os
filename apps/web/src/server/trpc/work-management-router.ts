@@ -1033,12 +1033,14 @@ const reportChartSpecSchema = z
       "priority",
       "section",
       "task_type",
+      "custom_field",
     ]),
     metric: z.enum(["task_count", "estimated_minutes", "actual_minutes"]),
     completion: z.enum(["all", "complete", "incomplete"]),
     dueFrom: z.string().date().nullable(),
     dueTo: z.string().date().nullable(),
     includeSubtasks: z.boolean(),
+    customFieldId: nullableUuid,
   })
   .superRefine((value, ctx) => {
     if (value.dueFrom && value.dueTo && value.dueFrom > value.dueTo)
@@ -1047,9 +1049,19 @@ const reportChartSpecSchema = z
         path: ["dueTo"],
         message: "Due through must be on or after due from",
       });
+    if (value.groupBy === "custom_field" && !value.customFieldId)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["customFieldId"],
+        message: "Choose a custom field to group by",
+      });
   });
 const dashboardConfigSchema = z
-  .object({ projectId: uuid })
+  .object({
+    projectId: uuid,
+    chartStyle: z.enum(["bar", "donut", "number"]).optional(),
+    spec: reportChartSpecSchema.optional(),
+  })
   .catchall(z.unknown());
 
 function actor(ctx: TrpcContext): string {
@@ -2848,6 +2860,50 @@ async function requireScopedFeature(
       code: "FORBIDDEN",
       message: `FEATURE_DISABLED:${featureKey}`,
     });
+}
+
+async function requireProjectCustomField(
+  ctx: TrpcContext,
+  projectId: string,
+  customFieldId: string,
+) {
+  await requireScopedFeature(ctx, "work.custom_fields", projectId);
+  const db = getDb();
+  const field = !db
+    ? getDemoWork().customFields.get(customFieldId)
+    : (
+        await db.execute<{ customFieldId: string; projectId: string }>(sql`
+          select work_custom_field_id as "customFieldId",
+            work_project_id as "projectId"
+          from public.work_custom_field
+          where work_custom_field_id = ${customFieldId}::uuid
+            and work_project_id = ${projectId}::uuid
+          limit 1
+        `)
+      )[0];
+  if (!field || field.projectId !== projectId)
+    throw new TRPCError({ code: "NOT_FOUND" });
+}
+
+async function requireDashboardAccess(
+  ctx: TrpcContext,
+  config: Record<string, unknown>,
+) {
+  const projectId = config.projectId;
+  if (typeof projectId !== "string") throw new TRPCError({ code: "NOT_FOUND" });
+  await requireProjectAccess(ctx, projectId);
+  const spec = config.spec;
+  if (
+    spec &&
+    typeof spec === "object" &&
+    (spec as Record<string, unknown>).groupBy === "custom_field"
+  ) {
+    const customFieldId = (spec as Record<string, unknown>).customFieldId;
+    if (typeof customFieldId !== "string")
+      throw new TRPCError({ code: "NOT_FOUND" });
+    await requireProjectCustomField(ctx, projectId, customFieldId);
+  }
+  return projectId;
 }
 
 function notificationFeatureKey(eventType: string) {
@@ -11013,6 +11069,12 @@ export const workManagementRouter = router({
       .query(async ({ input, ctx }) => {
         await requireProjectAccess(ctx, input.projectId);
         const db = getDb();
+        if (input.spec.groupBy === "custom_field")
+          await requireProjectCustomField(
+            ctx,
+            input.projectId,
+            input.spec.customFieldId!,
+          );
         const rows: WorkReportChartRow[] = !db
           ? [...getDemoWork().items.values()]
               .filter((item) => item.projectId === input.projectId)
@@ -11035,6 +11097,11 @@ export const workManagementRouter = router({
                       entry.itemId === item.itemId,
                   )
                   .reduce((sum, entry) => sum + entry.minutes, 0),
+                customFieldValue: input.spec.customFieldId
+                  ? getDemoWork().customFieldValues.get(
+                      `${item.itemId}:${input.spec.customFieldId}`,
+                    )
+                  : undefined,
               }))
           : (
               await db.execute<
@@ -11050,6 +11117,7 @@ export const workManagementRouter = router({
                   section.name as "sectionName", item.due_at as "dueAt",
                   item.completed_at as "completedAt",
                   item.estimated_minutes as "estimatedMinutes",
+                  custom_value.value as "customFieldValue",
                   coalesce((select sum(entry.minutes)
                     from public.time_entry entry
                     where entry.work_project_id = ${input.projectId}::uuid
@@ -11062,6 +11130,9 @@ export const workManagementRouter = router({
                   on employee.employee_id = item.assignee_employee_id
                 left join public.work_section section
                   on section.work_section_id = item.work_section_id
+                left join public.work_custom_field_value custom_value
+                  on custom_value.work_item_id = item.work_item_id
+                  and custom_value.work_custom_field_id = ${input.spec.customFieldId}::uuid
                 where membership.work_project_id = ${input.projectId}::uuid
                   and item.archived_at is null
               `)
@@ -11089,10 +11160,8 @@ export const workManagementRouter = router({
           `);
       const visible: WorkDashboard[] = [];
       for (const dashboard of dashboards) {
-        const projectId = dashboard.config.projectId;
-        if (typeof projectId !== "string") continue;
         try {
-          await requireProjectAccess(ctx, projectId);
+          await requireDashboardAccess(ctx, dashboard.config);
           visible.push(dashboard);
         } catch (error) {
           if (!(error instanceof TRPCError)) throw error;
@@ -11110,7 +11179,7 @@ export const workManagementRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         const employeeId = actor(ctx);
-        await requireProjectAccess(ctx, input.config.projectId);
+        await requireDashboardAccess(ctx, input.config);
         const dashboard: WorkDashboard = {
           dashboardId: input.dashboardId ?? randomUUID(),
           ownerEmployeeId: employeeId,
@@ -11154,10 +11223,7 @@ export const workManagementRouter = router({
           const dashboard = getDemoWork().dashboards.get(input.dashboardId);
           if (!dashboard || dashboard.ownerEmployeeId !== employeeId)
             throw new TRPCError({ code: "NOT_FOUND" });
-          const projectId = dashboard.config.projectId;
-          if (typeof projectId !== "string")
-            throw new TRPCError({ code: "NOT_FOUND" });
-          await requireProjectAccess(ctx, projectId);
+          await requireDashboardAccess(ctx, dashboard.config);
           getDemoWork().dashboards.delete(input.dashboardId);
         } else {
           const [dashboard] = await db.execute<{
@@ -11168,10 +11234,8 @@ export const workManagementRouter = router({
               and owner_employee_id = ${employeeId}::uuid
             limit 1
           `);
-          const projectId = dashboard?.config.projectId;
-          if (typeof projectId !== "string")
-            throw new TRPCError({ code: "NOT_FOUND" });
-          await requireProjectAccess(ctx, projectId);
+          if (!dashboard) throw new TRPCError({ code: "NOT_FOUND" });
+          await requireDashboardAccess(ctx, dashboard.config);
           await db.execute(sql`
             delete from public.work_reporting_dashboard
             where work_reporting_dashboard_id = ${input.dashboardId}::uuid
