@@ -191,6 +191,8 @@ const WORK_EXPORT_TABLES = [
   "work_ai_policy",
   "work_ai_run",
   "work_ai_action_execution",
+  "work_ai_studio_workflow",
+  "work_ai_studio_run",
   "time_entry",
 ] as const;
 

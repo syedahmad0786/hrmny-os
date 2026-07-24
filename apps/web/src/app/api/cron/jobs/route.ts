@@ -8,6 +8,7 @@ import { getVerifiedAsanaConnection } from "@/server/trpc/connections-router";
 import { refreshAsanaWebhooksIfEnabled } from "@/server/asana-webhooks";
 import { deliverPendingWorkWebhooks } from "@/server/work-api";
 import { cleanupExpiredWorkAiRuns } from "@/server/work-ai";
+import { runWorkAiStudioJob } from "@/server/work-ai-studio";
 
 export const dynamic = "force-dynamic";
 
@@ -21,12 +22,20 @@ const AsanaSyncJobSchema = z.object({
   workspaceName: z.string().min(1).max(300),
   actorEmployeeId: z.string().uuid(),
 });
+const WorkAiStudioJobSchema = z.object({
+  workflowId: z.string().uuid(),
+  itemId: z.string().uuid().nullable(),
+  actorEmployeeId: z.string().uuid(),
+  eventKey: z.string().min(1).max(500),
+  recurring: z.boolean(),
+});
 
 type ClaimedJob = {
   scheduled_job_id: string;
   kind: string;
   payload: unknown;
   attempts: number;
+  run_at: Date | string;
 };
 
 export async function GET(request: Request) {
@@ -56,7 +65,7 @@ export async function GET(request: Request) {
         updated_at = now()
     from due
     where job.scheduled_job_id = due.scheduled_job_id
-    returning job.scheduled_job_id, job.kind, job.payload, job.attempts
+    returning job.scheduled_job_id, job.kind, job.payload, job.attempts, job.run_at
   `);
   const claimed = Array.from(claimedResult) as unknown as ClaimedJob[];
 
@@ -66,6 +75,7 @@ export async function GET(request: Request) {
     try {
       let result: Record<string, unknown> = { ok: true };
       let recurring = false;
+      let nextRunAt: Date | null = null;
       if (job.kind === "health_signal") {
         const payload = HealthJobSchema.parse(job.payload);
         await emitHealthSignal(
@@ -116,6 +126,19 @@ export async function GET(request: Request) {
           result = { ...synced, webhookRefresh };
           recurring = true;
         } else result = { ok: true, disabled: true };
+      } else if (job.kind === "work_ai_studio") {
+        const payload = WorkAiStudioJobSchema.parse(job.payload);
+        const studio = await runWorkAiStudioJob({
+          ...payload,
+          eventKey: payload.recurring
+            ? `${payload.eventKey}:${new Date(job.run_at).toISOString()}`
+            : payload.eventKey,
+        });
+        result = studio;
+        recurring = studio.recurring;
+        nextRunAt = recurring
+          ? new Date(Date.now() + (studio.scheduleMinutes ?? 5) * 60_000)
+          : null;
       } else {
         throw new Error(`Unsupported job kind: ${job.kind}`);
       }
@@ -123,7 +146,9 @@ export async function GET(request: Request) {
         .update(scheduledJob)
         .set({
           status: recurring ? "pending" : "completed",
-          runAt: recurring ? new Date(Date.now() + 5 * 60_000) : new Date(),
+          runAt: recurring
+            ? (nextRunAt ?? new Date(Date.now() + 5 * 60_000))
+            : new Date(),
           attempts: recurring ? 0 : job.attempts,
           lockedAt: null,
           completedAt: recurring ? null : new Date(),

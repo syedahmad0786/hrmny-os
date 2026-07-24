@@ -192,4 +192,29 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/expires_at timestamptz NOT NULL/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("adds no-code AI Studio workflows and durable executions", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0030_work_ai_studio.sql"),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0030_work_ai_studio.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0030_work_ai_studio.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_ai_studio_workflow/i,
+    );
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_ai_studio_run/i,
+    );
+    expect(migration).toMatch(/allowed_action_types text\[\] NOT NULL/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

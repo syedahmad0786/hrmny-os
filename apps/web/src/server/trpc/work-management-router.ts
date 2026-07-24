@@ -29,6 +29,7 @@ import {
   weightedProgress,
 } from "../work-planning";
 import { validateDailyMinutes } from "../shifts-timesheets";
+import { queueWorkAiStudioEvent } from "../work-ai-studio-events";
 import { router, staffProcedure, type TrpcContext } from "./trpc";
 
 type AccessLevel = "admin" | "editor" | "commenter" | "viewer";
@@ -1554,6 +1555,7 @@ async function runProjectRules(
   itemId: string,
   triggerType: WorkRule["triggerType"],
 ) {
+  await queueWorkAiStudioEvent(ctx, projectId, itemId, triggerType);
   if (
     !(await featureEnabled("work.rules", {
       userId: ctx.employeeId,

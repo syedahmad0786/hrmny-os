@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { WorkNav } from "@/components/work-nav";
 import { trpc } from "@/lib/trpc";
@@ -137,6 +138,14 @@ export default function WorkAiPage() {
             sources, and every proposed change waits for your approval.
           </p>
         </div>
+        {enabled.has("work.ai.studio") ? (
+          <Link
+            className="inline-flex rounded-lg border border-sand bg-white px-4 py-2 text-sm"
+            href="/work/ai/studio"
+          >
+            Open AI Studio
+          </Link>
+        ) : null}
         <WorkNav />
       </header>
 
