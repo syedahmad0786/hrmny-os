@@ -14,12 +14,14 @@ export default function WorkMessagesPage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
   const projects = trpc.work.projects.list.useQuery();
-  const employees = trpc.work.members.listEmployees.useQuery();
   const teams = trpc.work.messages.teams.useQuery();
   const richTextEnabled =
     session.data?.enabledFeatureKeys.includes("work.rich_text") ?? false;
   const [scopeType, setScopeType] = useState<"project" | "team">("project");
   const [scopeId, setScopeId] = useState("");
+  const employees = trpc.work.members.listEmployees.useQuery({
+    projectId: scopeType === "project" && scopeId ? scopeId : undefined,
+  });
   useEffect(() => {
     const options =
       scopeType === "project" ? (projects.data ?? []) : (teams.data ?? []);

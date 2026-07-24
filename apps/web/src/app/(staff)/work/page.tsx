@@ -63,13 +63,14 @@ export default function WorkPage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
   const projects = trpc.work.projects.list.useQuery();
-  const employees = trpc.work.members.listEmployees.useQuery(undefined, {
-    retry: false,
-  });
   const teams = trpc.work.members.listTeams.useQuery(undefined, {
     retry: false,
   });
   const [projectId, setProjectId] = useState<string | null>(null);
+  const employees = trpc.work.members.listEmployees.useQuery(
+    { projectId: projectId ?? undefined },
+    { retry: false },
+  );
   const [view, setView] = useState<View>("list");
   const [calendarMonth, setCalendarMonth] = useState(
     () =>

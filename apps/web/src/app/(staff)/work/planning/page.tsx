@@ -25,8 +25,10 @@ export default function PlanningPage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
   const projects = trpc.work.projects.list.useQuery();
-  const employees = trpc.work.members.listEmployees.useQuery();
   const [projectId, setProjectId] = useState("");
+  const employees = trpc.work.members.listEmployees.useQuery({
+    projectId: projectId || undefined,
+  });
   const [weekStart, setWeekStart] = useState(monday);
   useEffect(() => {
     if (!projectId && projects.data?.[0])
