@@ -5,10 +5,24 @@ import { scanAsanaWorkspace } from "./asana-migration";
 describe("Asana migration scan", () => {
   it("deduplicates multi-homed tasks and follows nested subtasks", async () => {
     const shared = { gid: "t1", name: "Shared", num_subtasks: 1 };
+    const sharedInMyTasks = {
+      ...shared,
+      assignee_section: { gid: "ms1", name: "Today" },
+    };
+    const personal = {
+      gid: "t4",
+      name: "Private",
+      assignee: { gid: "u1", name: "Ayham", email: "ayham@hrmny.co" },
+      assignee_section: { gid: "ms1", name: "Today" },
+    };
     const adapter: AsanaAdapter = {
       me: vi.fn(),
       listWorkspaces: vi.fn(),
-      listUsers: vi.fn().mockResolvedValue([{ gid: "u1", name: "Ayham" }]),
+      listUsers: vi
+        .fn()
+        .mockResolvedValue([
+          { gid: "u1", name: "Ayham", email: "ayham@hrmny.co" },
+        ]),
       listTeams: vi.fn().mockResolvedValue([{ gid: "team1", name: "Ops" }]),
       listTeamMemberships: vi.fn().mockResolvedValue([
         {
@@ -30,8 +44,23 @@ describe("Asana migration scan", () => {
           access_level: "editor",
         },
       ]),
-      listSections: vi.fn().mockResolvedValue([{ gid: "s1", name: "Doing" }]),
+      listSections: vi.fn((gid) =>
+        Promise.resolve(
+          gid === "utl1"
+            ? [{ gid: "ms1", name: "Today" }]
+            : [{ gid: "s1", name: "Doing" }],
+        ),
+      ),
       listProjectTasks: vi.fn().mockResolvedValue([shared]),
+      getUserTaskList: vi.fn().mockResolvedValue({
+        gid: "utl1",
+        name: "My Tasks",
+        owner: { gid: "u1", name: "Ayham", email: "ayham@hrmny.co" },
+        workspace: { gid: "w1", name: "Main" },
+      }),
+      listUserTaskListTasks: vi
+        .fn()
+        .mockResolvedValue([sharedInMyTasks, personal]),
       listSubtasks: vi
         .fn()
         .mockResolvedValueOnce([{ gid: "t2", name: "Child", num_subtasks: 1 }])
@@ -91,15 +120,18 @@ describe("Asana migration scan", () => {
       projects: 2,
       projectMemberships: 2,
       sections: 2,
-      topLevelTasks: 1,
+      myTaskSections: 1,
+      myTasks: 2,
+      myTasksOnly: 1,
+      topLevelTasks: 2,
       subtasks: 2,
-      tasks: 3,
+      tasks: 4,
       projectTaskLinks: 2,
       multiHomedTasks: 1,
-      stories: 3,
-      comments: 3,
-      attachments: 3,
-      timeTrackingEntries: 3,
+      stories: 4,
+      comments: 4,
+      attachments: 4,
+      timeTrackingEntries: 4,
       goals: 1,
       goalRelationships: 1,
       portfolios: 1,
@@ -109,5 +141,23 @@ describe("Asana migration scan", () => {
       statusUpdates: 4,
     });
     expect(adapter.listSubtasks).toHaveBeenCalledTimes(2);
+    expect(result.myTasks).toEqual([
+      {
+        taskGid: "t1",
+        sectionGid: "ms1",
+        position: 0,
+        projectless: false,
+      },
+      {
+        taskGid: "t4",
+        sectionGid: "ms1",
+        position: 1,
+        projectless: true,
+      },
+    ]);
+    expect(result.tasks.filter((task) => task.gid === "t1")).toHaveLength(1);
+    expect(result.tasks.find((task) => task.gid === "t1")).toMatchObject({
+      assignee_section: { gid: "ms1" },
+    });
   });
 });

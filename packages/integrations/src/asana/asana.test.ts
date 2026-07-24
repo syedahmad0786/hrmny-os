@@ -206,6 +206,38 @@ describe("Asana integration", () => {
     );
   });
 
+  it("reads the connected user's complete My Tasks list", async () => {
+    const requests: string[] = [];
+    const fetchImpl = vi.fn(async (request: RequestInfo | URL) => {
+      const url = String(request);
+      requests.push(url);
+      if (url.includes("/users/me/user_task_list?"))
+        return json({
+          data: {
+            gid: "utl1",
+            name: "My Tasks",
+            owner: { gid: "u1", name: "Developer" },
+            workspace: { gid: "w1", name: "Main" },
+          },
+        });
+      return json({ data: [] });
+    }) as unknown as typeof fetch;
+    const asana = createAsanaDirect({ accessToken: "token", fetchImpl });
+
+    await expect(asana.getUserTaskList("me", "w1")).resolves.toMatchObject({
+      gid: "utl1",
+      owner: { gid: "u1" },
+    });
+    await asana.listUserTaskListTasks("utl1");
+
+    expect(requests[0]).toContain("/users/me/user_task_list?workspace=w1");
+    expect(requests[1]).toContain("/user_task_lists/utl1/tasks?");
+    expect(requests[1]).toContain("assignee_section.gid");
+    expect(requests[1]).toContain(
+      "completed_since=1970-01-01T00%3A00%3A00.000Z",
+    );
+  });
+
   it("initializes and advances a workspace event cursor", async () => {
     const fetchImpl = vi.fn(async (request: RequestInfo | URL) => {
       const url = new URL(String(request));
