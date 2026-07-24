@@ -95,6 +95,11 @@ export default function WorkAiTeammatesPage() {
     { projectId: runProjectId || ZERO },
     { enabled: Boolean(runProjectId) },
   );
+  const runEnabled = new Set(
+    runProject.data?.enabledFeatureKeys ??
+      (runProjectId ? [] : session.data?.enabledFeatureKeys) ??
+      [],
+  ).has("work.ai.teammates");
   const canEdit = !selected || selected.memberAccess !== "user";
   const canOwn = selected?.memberAccess === "owner";
 
@@ -450,6 +455,11 @@ export default function WorkAiTeammatesPage() {
                         </option>
                       ))}
                     </select>
+                    {runProjectId && !runEnabled ? (
+                      <span className="mt-1 block text-xs text-amber-700">
+                        AI Teammates are disabled for this client.
+                      </span>
+                    ) : null}
                   </label>
                   <label className="block text-sm">
                     <span className="mb-1 block font-medium">
@@ -484,7 +494,10 @@ export default function WorkAiTeammatesPage() {
                   type="button"
                   className="mt-3 rounded-lg bg-ochre px-4 py-2 text-sm text-white disabled:opacity-50"
                   disabled={
-                    run.isPending || !runProjectId || !requestText.trim()
+                    run.isPending ||
+                    !runProjectId ||
+                    !requestText.trim() ||
+                    !runEnabled
                   }
                   onClick={() =>
                     run.mutate({

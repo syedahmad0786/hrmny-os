@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { WorkNav } from "@/components/work-nav";
 import { trpc } from "@/lib/trpc";
 
+const ZERO = "00000000-0000-0000-0000-000000000000";
 const triggers = [
   ["manual", "Run manually"],
   ["task_added", "Task added"],
@@ -46,13 +47,21 @@ const input = "w-full rounded-lg border border-sand bg-white px-3 py-2";
 
 export default function WorkAiStudioPage() {
   const session = trpc.auth.session.useQuery();
-  const customTaskTypesEnabled =
-    session.data?.enabledFeatureKeys.includes("work.custom_task_types") ??
-    false;
   const projects = trpc.work.projects.list.useQuery();
   const workflows = trpc.workAiStudio.list.useQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [projectId, setProjectId] = useState("");
+  const project = trpc.work.projects.get.useQuery(
+    { projectId: projectId || ZERO },
+    { enabled: Boolean(projectId) },
+  );
+  const projectFeatures = new Set(
+    project.data?.enabledFeatureKeys ??
+      (projectId ? [] : session.data?.enabledFeatureKeys) ??
+      [],
+  );
+  const studioEnabled = projectFeatures.has("work.ai.studio");
+  const customTaskTypesEnabled = projectFeatures.has("work.custom_task_types");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [triggerType, setTriggerType] = useState<Trigger>("manual");
@@ -267,6 +276,11 @@ export default function WorkAiStudioPage() {
                   </option>
                 ))}
               </select>
+              {projectId && !studioEnabled ? (
+                <span className="mt-1 block text-xs text-amber-700">
+                  AI Studio is disabled for this client.
+                </span>
+              ) : null}
             </label>
             <label className="block text-sm">
               <span className="mb-1 block font-medium">Name</span>
@@ -410,7 +424,7 @@ export default function WorkAiStudioPage() {
             <button
               type="submit"
               className="rounded-lg bg-ink px-4 py-2 text-sm text-white disabled:opacity-50"
-              disabled={create.isPending || update.isPending}
+              disabled={create.isPending || update.isPending || !studioEnabled}
             >
               {selectedId ? "Save workflow" : "Create draft"}
             </button>
@@ -419,7 +433,7 @@ export default function WorkAiStudioPage() {
                 <button
                   type="button"
                   className="rounded-lg border border-sand bg-white px-4 py-2 text-sm"
-                  disabled={setStatus.isPending}
+                  disabled={setStatus.isPending || !studioEnabled}
                   onClick={() =>
                     setStatus.mutate({
                       workflowId: selected.workflowId,
@@ -435,7 +449,7 @@ export default function WorkAiStudioPage() {
                 <button
                   type="button"
                   className="rounded-lg border border-sand bg-white px-4 py-2 text-sm"
-                  disabled={run.isPending}
+                  disabled={run.isPending || !studioEnabled}
                   onClick={() =>
                     run.mutate({
                       workflowId: selected.workflowId,
@@ -448,7 +462,7 @@ export default function WorkAiStudioPage() {
                 <button
                   type="button"
                   className="text-sm text-[var(--hrmny-danger)] underline"
-                  disabled={archive.isPending}
+                  disabled={archive.isPending || !studioEnabled}
                   onClick={() => {
                     if (window.confirm("Archive this workflow?"))
                       archive.mutate({ workflowId: selected.workflowId });

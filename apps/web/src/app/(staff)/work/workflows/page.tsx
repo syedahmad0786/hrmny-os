@@ -9,17 +9,6 @@ type Answers = Record<string, Record<string, unknown>>;
 export default function WorkflowsPage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
-  const enabled = new Set(session.data?.enabledFeatureKeys ?? []);
-  const formsEnabled = enabled.has("work.forms");
-  const rulesEnabled = enabled.has("work.rules");
-  const scheduledRulesEnabled = enabled.has("work.rules.scheduled");
-  const collaboratorRulesEnabled = enabled.has(
-    "work.rules.collaborator_trigger",
-  );
-  const customTaskTypesEnabled = enabled.has("work.custom_task_types");
-  const templatesEnabled = enabled.has("work.templates");
-  const bundlesEnabled = enabled.has("work.bundles");
-  const approvalsEnabled = enabled.has("work.approvals");
   const projects = trpc.work.projects.list.useQuery();
   const [projectId, setProjectId] = useState("");
   useEffect(() => {
@@ -30,6 +19,21 @@ export default function WorkflowsPage() {
     { projectId },
     { enabled: Boolean(projectId) },
   );
+  const enabled = new Set(
+    detail.data?.enabledFeatureKeys ??
+      (projectId ? [] : session.data?.enabledFeatureKeys) ??
+      [],
+  );
+  const formsEnabled = enabled.has("work.forms");
+  const rulesEnabled = enabled.has("work.rules");
+  const scheduledRulesEnabled = enabled.has("work.rules.scheduled");
+  const collaboratorRulesEnabled = enabled.has(
+    "work.rules.collaborator_trigger",
+  );
+  const customTaskTypesEnabled = enabled.has("work.custom_task_types");
+  const templatesEnabled = enabled.has("work.templates");
+  const bundlesEnabled = enabled.has("work.bundles");
+  const approvalsEnabled = enabled.has("work.approvals");
   const employees = trpc.work.members.listEmployees.useQuery();
   const tags = trpc.work.tags.list.useQuery(
     { projectId },
