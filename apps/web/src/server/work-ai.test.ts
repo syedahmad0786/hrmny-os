@@ -91,4 +91,46 @@ describe("governed Work AI", () => {
       message: "FEATURE_DISABLED:work.ai.smart_status",
     });
   });
+
+  it("drafts and applies portfolio and goal status updates", async () => {
+    const caller = partnerCaller();
+    await caller.admin.features.setOverride({
+      featureKey: "work.ai.smart_status",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: true,
+      reason: "test",
+    });
+    const portfolio = await caller.work.portfolios.create({
+      name: `AI portfolio ${crypto.randomUUID()}`,
+      description: "Portfolio status evidence",
+      privacy: "private",
+    });
+    const goal = await caller.work.goals.create({
+      name: `AI goal ${crypto.randomUUID()}`,
+      description: "Goal status evidence",
+      privacy: "private",
+    });
+
+    for (const target of [
+      { targetType: "portfolio" as const, targetId: portfolio.portfolioId },
+      { targetType: "goal" as const, targetId: goal.goalId },
+    ]) {
+      const run = await caller.workAi.generate({
+        kind: "smart_status",
+        requestText: "Draft an evidence-based status update",
+        projectIds: [],
+        itemId: null,
+        statusTarget: target,
+      });
+      expect(run.result?.actions[0]).toMatchObject({
+        type: "create_status",
+        ...target,
+      });
+      await caller.workAi.applyAction({ runId: run.runId, actionIndex: 0 });
+      await expect(
+        caller.work.statusUpdates.list(target),
+      ).resolves.toHaveLength(1);
+    }
+  });
 });

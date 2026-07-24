@@ -1911,7 +1911,7 @@ function canManageOwned(
   return employeeId === ownerEmployeeId || employeeId === createdByEmployeeId;
 }
 
-async function requireGoalAccess(
+export async function requireGoalAccess(
   ctx: TrpcContext,
   goalId: string,
   manage = false,
@@ -1954,7 +1954,7 @@ async function requireGoalAccess(
   return goal;
 }
 
-async function requirePortfolioAccess(
+export async function requirePortfolioAccess(
   ctx: TrpcContext,
   portfolioId: string,
   manage = false,

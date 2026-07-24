@@ -21,7 +21,7 @@ const capabilities = [
   [
     "smart_status",
     "Smart status",
-    "Draft a sourced project update",
+    "Draft a sourced project, portfolio, or goal update",
     "work.ai.smart_status",
   ],
   [
@@ -84,10 +84,17 @@ export default function WorkAiPage() {
   );
   const [kind, setKind] = useState<Kind>("smart_chat");
   const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [statusTarget, setStatusTarget] = useState("");
   const [itemId, setItemId] = useState("");
   const [requestText, setRequestText] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [applied, setApplied] = useState<number[]>([]);
+  const goals = trpc.work.goals.list.useQuery(undefined, {
+    enabled: kind === "smart_status" && enabled.has("work.goals"),
+  });
+  const portfolios = trpc.work.portfolios.list.useQuery(undefined, {
+    enabled: kind === "smart_status" && enabled.has("work.portfolios"),
+  });
   const generate = trpc.workAi.generate.useMutation({
     onSuccess: async (run) => {
       setSelectedRunId(run.runId);
@@ -179,6 +186,16 @@ export default function WorkAiPage() {
                   requestText,
                   projectIds,
                   itemId: itemId.trim() || null,
+                  statusTarget:
+                    kind === "smart_status" && statusTarget
+                      ? {
+                          targetType: statusTarget.split(":", 1)[0] as
+                            "project" | "portfolio" | "goal",
+                          targetId: statusTarget.slice(
+                            statusTarget.indexOf(":") + 1,
+                          ),
+                        }
+                      : null,
                 });
               }}
             >
@@ -225,6 +242,50 @@ export default function WorkAiPage() {
                 </div>
               </fieldset>
 
+              {kind === "smart_status" ? (
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium">Status target</span>
+                  <select
+                    className="w-full rounded-lg border border-sand bg-white px-3 py-2"
+                    required
+                    value={statusTarget}
+                    onChange={(event) => setStatusTarget(event.target.value)}
+                  >
+                    <option value="">
+                      Choose a project, portfolio, or goal
+                    </option>
+                    {(projects.data ?? []).map((project) => (
+                      <option
+                        key={`project:${project.projectId}`}
+                        value={`project:${project.projectId}`}
+                      >
+                        Project — {project.name}
+                      </option>
+                    ))}
+                    {(portfolios.data ?? []).map((portfolio) => (
+                      <option
+                        key={`portfolio:${portfolio.portfolioId}`}
+                        value={`portfolio:${portfolio.portfolioId}`}
+                      >
+                        Portfolio — {portfolio.name}
+                      </option>
+                    ))}
+                    {(goals.data ?? []).map((goal) => (
+                      <option
+                        key={`goal:${goal.goalId}`}
+                        value={`goal:${goal.goalId}`}
+                      >
+                        Goal — {goal.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-muted">
+                    The draft uses the selected project context as supporting
+                    evidence and still waits for your approval.
+                  </p>
+                </label>
+              ) : null}
+
               {kind === "smart_editor" ? (
                 <label className="block text-sm">
                   <span className="mb-1 block font-medium">
@@ -253,7 +314,11 @@ export default function WorkAiPage() {
               <button
                 className="rounded-lg bg-ink px-5 py-2.5 text-sm text-white disabled:opacity-50"
                 type="submit"
-                disabled={generate.isPending || !requestText.trim()}
+                disabled={
+                  generate.isPending ||
+                  !requestText.trim() ||
+                  (kind === "smart_status" && !statusTarget)
+                }
               >
                 {generate.isPending
                   ? "Reviewing accessible work…"

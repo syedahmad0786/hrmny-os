@@ -80,6 +80,13 @@ export const workAiRouter = router({
         requestText: z.string().trim().min(1).max(10_000),
         projectIds: z.array(uuid).max(10).default([]),
         itemId: uuid.nullable().default(null),
+        statusTarget: z
+          .object({
+            targetType: z.enum(["project", "portfolio", "goal"]),
+            targetId: uuid,
+          })
+          .nullable()
+          .default(null),
       }),
     )
     .mutation(({ input, ctx }) => generateWorkAi({ ...input, ctx })),
@@ -318,14 +325,24 @@ export const workAiRouter = router({
           }
           case "create_status":
             await requireFeature(ctx, "work.status_updates");
-            result = await work.statusUpdates.create({
-              targetType: "project",
-              targetId: action.projectId,
-              health: action.health,
-              progress: action.progress,
-              title: action.title,
-              body: action.body,
-            });
+            {
+              const targetId =
+                action.targetId ??
+                (action.targetType === "project" ? action.projectId : null);
+              if (!targetId)
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: "Status proposal has no target",
+                });
+              result = await work.statusUpdates.create({
+                targetType: action.targetType,
+                targetId,
+                health: action.health,
+                progress: action.progress,
+                title: action.title,
+                body: action.body,
+              });
+            }
             break;
           case "create_goal":
             await requireFeature(ctx, "work.goals");
