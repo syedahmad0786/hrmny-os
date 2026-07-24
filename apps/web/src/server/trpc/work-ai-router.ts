@@ -5,6 +5,7 @@ import {
   listFeatureOverrides,
   resolveFeatureCatalog,
 } from "../features";
+import { createGoogleWorkspaceFile } from "../google-workspace-ai";
 import { writeAudit } from "../m1-persistence";
 import { isWorkViewOnlyMember } from "../work-governance";
 import {
@@ -22,6 +23,7 @@ import {
   requireWorkAiFeature,
   workAiKinds,
 } from "../work-ai";
+import { getGoogleWorkspaceAccessToken } from "./connections-router";
 import { workManagementRouter } from "./work-management-router";
 import {
   createCallerFactory,
@@ -280,6 +282,36 @@ export const workAiRouter = router({
               actionIndex: input.actionIndex,
             });
             break;
+          case "create_external_file": {
+            await Promise.all([
+              requireFeature(ctx, "work.ai.connectors"),
+              requireFeature(ctx, "work.attachments"),
+            ]);
+            const accessToken = await getGoogleWorkspaceAccessToken(employeeId);
+            if (!accessToken)
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message: "Connect Google Workspace before creating this file",
+              });
+            const file = await createGoogleWorkspaceFile({
+              accessToken,
+              actionKey: `${run.runId}:${input.actionIndex}`,
+              fileType: action.fileType,
+              name: action.name,
+              content: action.content,
+            });
+            const attachment =
+              (await work.attachments.list({ itemId: action.itemId })).find(
+                (candidate) => candidate.externalUrl === file.url,
+              ) ??
+              (await work.attachments.addLink({
+                itemId: action.itemId,
+                name: file.name,
+                url: file.url,
+              }));
+            result = { file, attachment };
+            break;
+          }
           case "create_status":
             await requireFeature(ctx, "work.status_updates");
             result = await work.statusUpdates.create({

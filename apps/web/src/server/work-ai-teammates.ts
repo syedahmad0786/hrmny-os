@@ -5,7 +5,9 @@ import { z } from "zod";
 import type { SessionUser } from "./auth/session";
 import { getDb } from "./db";
 import { featureEnabled } from "./features";
+import { searchGoogleWorkspace } from "./google-workspace-ai";
 import { writeAudit } from "./m1-persistence";
+import { getGoogleWorkspaceAccessToken } from "./trpc/connections-router";
 import type { TrpcContext } from "./trpc/trpc";
 import {
   getDemoWork,
@@ -17,6 +19,7 @@ import {
   rejectWorkAiRun,
   requireWorkAiFeature,
   type WorkAiAction,
+  type WorkAiContextSource,
   type WorkAiRun,
 } from "./work-ai";
 import {
@@ -43,8 +46,11 @@ const teammateActionTypes = [
   "create_milestone",
   "attach_file",
   "schedule_follow_up",
+  "create_external_file",
 ] as const;
 type TeammateActionType = (typeof teammateActionTypes)[number];
+const teammateConnectedApps = ["google_workspace"] as const;
+type TeammateConnectedApp = (typeof teammateConnectedApps)[number];
 type TeammateMemberAccess = "owner" | "editor" | "user";
 type ProjectAccess = "editor" | "commenter" | "viewer";
 
@@ -55,6 +61,10 @@ export const workAiTeammateInputSchema = z.object({
   allowedActionTypes: z
     .array(z.enum(teammateActionTypes))
     .max(teammateActionTypes.length)
+    .default([]),
+  allowedConnectedApps: z
+    .array(z.enum(teammateConnectedApps))
+    .max(teammateConnectedApps.length)
     .default([]),
   model: z.string().trim().min(1).max(200).nullable().default(null),
 });
@@ -136,6 +146,7 @@ function mapTeammate(row: {
   roleDescription: string;
   instructions: string;
   allowedActionTypes: TeammateActionType[];
+  allowedConnectedApps: TeammateConnectedApp[];
   model: string | null;
   status: "active" | "paused";
   memberAccess: TeammateMemberAccess;
@@ -146,6 +157,7 @@ function mapTeammate(row: {
   return {
     ...row,
     allowedActionTypes: row.allowedActionTypes ?? [],
+    allowedConnectedApps: row.allowedConnectedApps ?? [],
     createdAt: new Date(row.createdAt).toISOString(),
     updatedAt: new Date(row.updatedAt).toISOString(),
   };
@@ -168,7 +180,8 @@ async function teammateById(
       select teammate.work_ai_teammate_id as "teammateId",
         teammate.employee_id as "employeeId", teammate.name,
         teammate.role_description as "roleDescription", teammate.instructions,
-        teammate.allowed_action_types as "allowedActionTypes", teammate.model,
+        teammate.allowed_action_types as "allowedActionTypes",
+        teammate.allowed_connected_apps as "allowedConnectedApps", teammate.model,
         teammate.status, member.access_level as "memberAccess",
         teammate.created_by_employee_id as "createdByEmployeeId",
         teammate.created_at as "createdAt", teammate.updated_at as "updatedAt"
@@ -205,7 +218,8 @@ export async function listWorkAiTeammates(ctx: TrpcContext) {
     select teammate.work_ai_teammate_id as "teammateId",
       teammate.employee_id as "employeeId", teammate.name,
       teammate.role_description as "roleDescription", teammate.instructions,
-      teammate.allowed_action_types as "allowedActionTypes", teammate.model,
+      teammate.allowed_action_types as "allowedActionTypes",
+      teammate.allowed_connected_apps as "allowedConnectedApps", teammate.model,
       teammate.status, member.access_level as "memberAccess",
       teammate.created_by_employee_id as "createdByEmployeeId",
       teammate.created_at as "createdAt", teammate.updated_at as "updatedAt"
@@ -341,6 +355,7 @@ export async function createWorkAiTeammate(
   const teammate: WorkAiTeammate = {
     ...input,
     allowedActionTypes: [...new Set(input.allowedActionTypes)],
+    allowedConnectedApps: [...new Set(input.allowedConnectedApps)],
     teammateId,
     employeeId: syntheticEmployeeId,
     status: "active",
@@ -373,12 +388,13 @@ export async function createWorkAiTeammate(
       await tx.execute(sql`
         insert into public.work_ai_teammate (
           work_ai_teammate_id, employee_id, name, role_description,
-          instructions, allowed_action_types, model,
+          instructions, allowed_action_types, allowed_connected_apps, model,
           created_by_employee_id, updated_by_employee_id
         ) values (
           ${teammateId}::uuid, ${syntheticEmployeeId}::uuid, ${input.name},
           ${input.roleDescription}, ${input.instructions},
-          ${teammate.allowedActionTypes}::text[], ${input.model},
+          ${teammate.allowedActionTypes}::text[],
+          ${teammate.allowedConnectedApps}::text[], ${input.model},
           ${creatorId}::uuid, ${creatorId}::uuid
         )
       `);
@@ -397,6 +413,7 @@ export async function createWorkAiTeammate(
     after: {
       name: input.name,
       allowedActionTypes: teammate.allowedActionTypes,
+      allowedConnectedApps: teammate.allowedConnectedApps,
     },
     reason: null,
   });
@@ -414,12 +431,15 @@ export async function updateWorkAiTeammate(
   const before = {
     name: teammate.name,
     allowedActionTypes: teammate.allowedActionTypes,
+    allowedConnectedApps: teammate.allowedConnectedApps,
   };
   const allowedActionTypes = [...new Set(input.allowedActionTypes)];
+  const allowedConnectedApps = [...new Set(input.allowedConnectedApps)];
   const db = getDb();
   if (!db) {
     Object.assign(teammate, input, {
       allowedActionTypes,
+      allowedConnectedApps,
       updatedAt: new Date().toISOString(),
     });
     const stored = demoTeammates.get(teammateId);
@@ -434,7 +454,8 @@ export async function updateWorkAiTeammate(
         update public.work_ai_teammate set name = ${input.name},
           role_description = ${input.roleDescription},
           instructions = ${input.instructions},
-          allowed_action_types = ${allowedActionTypes}::text[], model = ${input.model},
+          allowed_action_types = ${allowedActionTypes}::text[],
+          allowed_connected_apps = ${allowedConnectedApps}::text[], model = ${input.model},
           updated_by_employee_id = ${employeeId}::uuid, updated_at = now()
         where work_ai_teammate_id = ${teammateId}::uuid and archived_at is null
       `);
@@ -449,7 +470,7 @@ export async function updateWorkAiTeammate(
     entityType: "work_ai_teammate",
     entityId: teammateId,
     before,
-    after: { name: input.name, allowedActionTypes },
+    after: { name: input.name, allowedActionTypes, allowedConnectedApps },
     reason: null,
   });
   return teammateById(ctx, teammateId);
@@ -1138,12 +1159,17 @@ export async function runWorkAiTeammate(input: {
       code: "FORBIDDEN",
       message: "AI Teammate does not have access to this project",
     });
-  const permitted = teammate.allowedActionTypes.filter((action) =>
-    access === "editor"
-      ? true
-      : access === "commenter"
-        ? action === "create_comment"
-        : false,
+  const permitted = teammate.allowedActionTypes.filter(
+    (action) =>
+      !(
+        action === "create_external_file" &&
+        !teammate.allowedConnectedApps.includes("google_workspace")
+      ) &&
+      (access === "editor"
+        ? true
+        : access === "commenter"
+          ? action === "create_comment"
+          : false),
   );
   const skillsEnabled = await featureEnabled("work.ai.teammate_skills", {
     userId: input.ctx.employeeId,
@@ -1204,6 +1230,22 @@ export async function runWorkAiTeammate(input: {
     teammateRunId = inserted[0].teammateRunId;
   }
   try {
+    let externalSources: WorkAiContextSource[] = [];
+    if (
+      teammate.allowedConnectedApps.includes("google_workspace") &&
+      (await featureEnabled("work.ai.connectors", {
+        userId: input.ctx.employeeId,
+        clientId: input.ctx.clientId,
+        roles: input.ctx.roles,
+      }))
+    ) {
+      const accessToken = await getGoogleWorkspaceAccessToken(employeeId);
+      if (accessToken)
+        externalSources = await searchGoogleWorkspace({
+          accessToken,
+          query: input.requestText,
+        });
+    }
     const run = await generateWorkAi({
       ctx: input.ctx,
       kind: "teammate",
@@ -1223,6 +1265,7 @@ export async function runWorkAiTeammate(input: {
         .map((skill) => `${skill.name}:\n${skill.referenceText}`)
         .join("\n\n"),
       allowedActionTypes: permitted,
+      externalSources,
       model: teammate.model,
     });
     const cancelled = !db
@@ -1421,6 +1464,7 @@ export async function workAiTeammateExecutionContext(
     employeeId: string;
     status: "active" | "paused";
     allowedActionTypes: TeammateActionType[];
+    allowedConnectedApps: TeammateConnectedApp[];
   };
   let link: TeammateRunLink | undefined;
   if (!db) {
@@ -1437,13 +1481,15 @@ export async function workAiTeammateExecutionContext(
         employeeId: teammate.employeeId,
         status: teammate.status,
         allowedActionTypes: teammate.allowedActionTypes,
+        allowedConnectedApps: teammate.allowedConnectedApps,
       };
   } else {
     const [row] = await db.execute<TeammateRunLink>(sql`
       select teammate.work_ai_teammate_id as "teammateId",
         teammate_run.work_project_id as "projectId",
         teammate.employee_id as "employeeId", teammate.status,
-        teammate.allowed_action_types as "allowedActionTypes"
+        teammate.allowed_action_types as "allowedActionTypes",
+        teammate.allowed_connected_apps as "allowedConnectedApps"
       from public.work_ai_teammate_run teammate_run
       join public.work_ai_teammate teammate
         on teammate.work_ai_teammate_id = teammate_run.work_ai_teammate_id
@@ -1462,6 +1508,14 @@ export async function workAiTeammateExecutionContext(
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "AI Teammate is not allowed to perform this action",
+    });
+  if (
+    action.type === "create_external_file" &&
+    !link.allowedConnectedApps.includes("google_workspace")
+  )
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "AI Teammate does not have Google Workspace access",
     });
   const access = await teammateProjectAccess(teammate, link.projectId);
   const required: ProjectAccess =

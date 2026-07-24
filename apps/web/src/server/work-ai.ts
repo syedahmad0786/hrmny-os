@@ -96,12 +96,19 @@ export const workAiActionTypes = [
   "create_milestone",
   "attach_file",
   "schedule_follow_up",
+  "create_external_file",
 ] as const;
 export const workAiStudioActionTypes = workAiActionTypes.filter(
-  (type) => type !== "schedule_follow_up",
+  (type) => type !== "schedule_follow_up" && type !== "create_external_file",
 ) as [
-  Exclude<(typeof workAiActionTypes)[number], "schedule_follow_up">,
-  ...Exclude<(typeof workAiActionTypes)[number], "schedule_follow_up">[],
+  Exclude<
+    (typeof workAiActionTypes)[number],
+    "schedule_follow_up" | "create_external_file"
+  >,
+  ...Exclude<
+    (typeof workAiActionTypes)[number],
+    "schedule_follow_up" | "create_external_file"
+  >[],
 ];
 
 export const workAiActionSchema = z.discriminatedUnion("type", [
@@ -267,12 +274,19 @@ export const workAiActionSchema = z.discriminatedUnion("type", [
     runAt: z.string().datetime(),
     requestText: z.string().trim().min(1).max(10_000),
   }),
+  z.object({
+    type: z.literal("create_external_file"),
+    itemId: z.string().uuid(),
+    fileType: z.enum(["google_doc", "google_sheet"]),
+    name: z.string().trim().min(1).max(255),
+    content: z.string().max(50_000).default(""),
+  }),
 ]);
 export type WorkAiAction = z.infer<typeof workAiActionSchema>;
 
 const sourceSchema = z.object({
-  id: z.string().uuid(),
-  type: z.enum(["project", "section", "task", "comment"]),
+  id: z.string().min(1).max(300),
+  type: z.enum(["project", "section", "task", "comment", "external_file"]),
   label: z.string().trim().min(1).max(300),
 });
 export const workAiStudioDraftSchema = z
@@ -466,11 +480,13 @@ export async function getWorkAiUsage() {
   };
 }
 
-type ContextSource = z.infer<typeof sourceSchema> & { content: string };
+export type WorkAiContextSource = z.infer<typeof sourceSchema> & {
+  content: string;
+};
 type WorkAiContext = {
   projectIds: string[];
   itemId: string | null;
-  sources: ContextSource[];
+  sources: WorkAiContextSource[];
   text: string;
 };
 
@@ -497,6 +513,7 @@ async function buildContext(
   ctx: TrpcContext,
   projectIds: readonly string[],
   itemId: string | null,
+  externalSources: readonly WorkAiContextSource[],
 ) {
   const ids = [...new Set(projectIds)];
   if (itemId) {
@@ -505,7 +522,7 @@ async function buildContext(
     if (existing >= 0) ids.splice(existing, 1);
     ids.unshift(access.projectId);
   }
-  const sources: ContextSource[] = [];
+  const sources: WorkAiContextSource[] = [];
   const db = getDb();
   for (const projectId of ids.slice(0, 10)) {
     const project = await requireProjectAccess(ctx, projectId);
@@ -615,10 +632,14 @@ async function buildContext(
         content: comment.body.slice(0, 1_000),
       });
   }
-  const included: ContextSource[] = [];
+  const external = externalSources.slice(0, 10).map((source) => ({
+    ...source,
+    content: source.content.slice(0, 30_000),
+  }));
+  const included: WorkAiContextSource[] = [];
   const lines: string[] = [];
   let length = 0;
-  for (const source of sources) {
+  for (const source of [...external, ...sources]) {
     const line = JSON.stringify(source);
     if (length + line.length + Number(lines.length > 0) > 100_000) break;
     included.push(source);
@@ -791,6 +812,21 @@ function mockResult(
     /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{3})?)?Z\b/,
   )?.[0];
   if (
+    kind === "teammate" &&
+    itemId &&
+    /\b(?:google\s+)?(?:doc|document|sheet|spreadsheet)\b/i.test(request) &&
+    actionTypes?.includes("create_external_file")
+  )
+    actions.push({
+      type: "create_external_file",
+      itemId,
+      fileType: /\b(?:sheet|spreadsheet)\b/i.test(request)
+        ? "google_sheet"
+        : "google_doc",
+      name: request.slice(0, 160),
+      content: `Created from the approved AI Teammate request:\n\n${request}`,
+    });
+  else if (
     kind === "teammate" &&
     itemId &&
     requestedRunAt &&
@@ -1015,13 +1051,19 @@ export async function generateWorkAi(input: {
   referenceText?: string;
   aiCondition?: string | null;
   allowedActionTypes?: readonly WorkAiAction["type"][];
+  externalSources?: readonly WorkAiContextSource[];
   model?: string | null;
 }) {
   const employeeId = actor(input.ctx);
   await requireWorkAiFeature(input.ctx, input.kind);
   const policy = await getWorkAiPolicy();
   await enforceLimits(employeeId, policy);
-  const context = await buildContext(input.ctx, input.projectIds, input.itemId);
+  const context = await buildContext(
+    input.ctx,
+    input.projectIds,
+    input.itemId,
+    input.externalSources ?? [],
+  );
   const runId = randomUUID();
   const createdAt = new Date();
   const expiresAt = new Date(

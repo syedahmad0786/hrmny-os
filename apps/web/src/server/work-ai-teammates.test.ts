@@ -21,6 +21,7 @@ async function enableTeammates(caller: ReturnType<typeof partnerCaller>) {
     "work.ai.teammates",
     "work.ai.teammate_skills",
     "work.ai.teammate_memory",
+    "work.ai.connectors",
   ])
     await caller.admin.features.setOverride({
       featureKey,
@@ -58,6 +59,7 @@ describe("AI Teammates", () => {
       roleDescription: "Client communications partner",
       instructions: "Draft concise updates and wait for approval.",
       allowedActionTypes: ["create_comment"],
+      allowedConnectedApps: [],
       model: null,
     });
     await caller.workAiTeammates.projects.set({
@@ -118,6 +120,7 @@ describe("AI Teammates", () => {
         roleDescription: teammate.roleDescription,
         instructions: teammate.instructions,
         allowedActionTypes: ["create_subtask", "schedule_follow_up"],
+        allowedConnectedApps: [],
         model: null,
       },
     });
@@ -149,6 +152,46 @@ describe("AI Teammates", () => {
       actionIndex: 0,
     });
     expect(scheduled.result).toMatchObject({ runAt });
+
+    await caller.workAiTeammates.update({
+      teammateId: teammate.teammateId,
+      teammate: {
+        name: teammate.name,
+        roleDescription: teammate.roleDescription,
+        instructions: teammate.instructions,
+        allowedActionTypes: ["create_external_file"],
+        allowedConnectedApps: [],
+        model: null,
+      },
+    });
+    const blockedFileRun = await caller.workAiTeammates.run({
+      teammateId: teammate.teammateId,
+      projectId: project.projectId,
+      itemId: task.itemId,
+      requestText: "Create a Google document for the client plan",
+    });
+    expect(blockedFileRun.run?.status).toBe("answered");
+
+    await caller.workAiTeammates.update({
+      teammateId: teammate.teammateId,
+      teammate: {
+        name: teammate.name,
+        roleDescription: teammate.roleDescription,
+        instructions: teammate.instructions,
+        allowedActionTypes: ["create_external_file"],
+        allowedConnectedApps: ["google_workspace"],
+        model: null,
+      },
+    });
+    const grantedFileRun = await caller.workAiTeammates.run({
+      teammateId: teammate.teammateId,
+      projectId: project.projectId,
+      itemId: task.itemId,
+      requestText: "Create a Google document for the client plan",
+    });
+    expect(grantedFileRun.run?.result?.actions[0]?.type).toBe(
+      "create_external_file",
+    );
 
     await caller.workAiTeammates.projects.remove({
       teammateId: teammate.teammateId,
