@@ -151,7 +151,14 @@ function hours(minutes: number) {
 const chartColors = ["#C7702E", "#315C4C", "#D9A441", "#547AA5", "#8B5E83"];
 
 function chartValue(metric: string, value: number) {
-  return metric === "task_count" ? value.toLocaleString() : hours(value);
+  if (metric === "task_count") return value.toLocaleString();
+  if (["estimated_minutes", "actual_minutes"].includes(metric))
+    return hours(value);
+  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function isNumericFieldMetric(metric: string) {
+  return metric === "custom_field_sum" || metric === "custom_field_average";
 }
 
 export default function PlanningPage() {
@@ -199,7 +206,11 @@ export default function PlanningPage() {
     | "custom_field"
   >("completion");
   const [chartMetric, setChartMetric] = useState<
-    "task_count" | "estimated_minutes" | "actual_minutes"
+    | "task_count"
+    | "estimated_minutes"
+    | "actual_minutes"
+    | "custom_field_sum"
+    | "custom_field_average"
   >("task_count");
   const [chartCompletion, setChartCompletion] = useState<
     "all" | "complete" | "incomplete"
@@ -217,6 +228,7 @@ export default function PlanningPage() {
     "all" | "exclude" | "only"
   >("all");
   const [chartCustomFieldId, setChartCustomFieldId] = useState("");
+  const [chartNumericFieldKey, setChartNumericFieldKey] = useState("");
   useEffect(() => {
     if (!projectId && projects.data?.[0])
       setProjectId(projects.data[0].projectId);
@@ -269,7 +281,10 @@ export default function PlanningPage() {
       setChartItemType("");
   }, [chartItemType, enabled]);
   useEffect(() => {
-    if (!timeEnabled && chartMetric !== "task_count")
+    if (
+      !timeEnabled &&
+      ["estimated_minutes", "actual_minutes"].includes(chartMetric)
+    )
       setChartMetric("task_count");
   }, [chartMetric, timeEnabled]);
   const goals = trpc.work.goals.list.useQuery(undefined, {
@@ -306,6 +321,54 @@ export default function PlanningPage() {
       ),
     },
   );
+  const reportingNumericFields = trpc.work.reporting.numericFields.useQuery(
+    chartPortfolioId ? { portfolioId: chartPortfolioId } : { projectId },
+    {
+      enabled: Boolean(
+        chartReportType === "tasks" &&
+        reportingEnabled &&
+        (chartPortfolioId
+          ? portfoliosEnabled
+          : projectId && customFieldsEnabled),
+      ),
+    },
+  );
+  const numericFieldMetric = isNumericFieldMetric(chartMetric);
+  const numericFieldFeatureEnabled = Boolean(
+    chartPortfolioId || customFieldsEnabled,
+  );
+  const numericFieldSelected =
+    !numericFieldMetric ||
+    (numericFieldFeatureEnabled &&
+      !reportingNumericFields.error &&
+      Boolean(
+        reportingNumericFields.data?.some(
+          (field) => field.key === chartNumericFieldKey,
+        ),
+      ));
+  useEffect(() => {
+    if (!numericFieldFeatureEnabled || reportingNumericFields.isError) {
+      setChartNumericFieldKey("");
+      if (numericFieldMetric) setChartMetric("task_count");
+      return;
+    }
+    if (!reportingNumericFields.isSuccess) return;
+    const fields = reportingNumericFields.data;
+    if (!fields.length) {
+      setChartNumericFieldKey("");
+      if (numericFieldMetric) setChartMetric("task_count");
+      return;
+    }
+    if (!fields.some((field) => field.key === chartNumericFieldKey))
+      setChartNumericFieldKey(fields[0]!.key);
+  }, [
+    chartNumericFieldKey,
+    numericFieldFeatureEnabled,
+    numericFieldMetric,
+    reportingNumericFields.data,
+    reportingNumericFields.isError,
+    reportingNumericFields.isSuccess,
+  ]);
   useEffect(() => {
     const fields = reportingCustomFields.data ?? [];
     if (chartReportType !== "tasks") return;
@@ -344,6 +407,9 @@ export default function PlanningPage() {
         dueTo: chartDueTo || null,
         includeSubtasks: chartSubtasks !== "exclude",
         customFieldId: chartCustomFieldId || null,
+        metricCustomFieldKey: numericFieldMetric
+          ? chartNumericFieldKey || null
+          : null,
         assigneeEmployeeId: chartAssigneeId || null,
         priority: chartPriority || null,
         itemType: chartItemType || null,
@@ -356,7 +422,8 @@ export default function PlanningPage() {
         chartReportType === "tasks" &&
         !chartPortfolioId &&
         reportingEnabled &&
-        (chartGroupBy !== "custom_field" || chartCustomFieldId),
+        (chartGroupBy !== "custom_field" || chartCustomFieldId) &&
+        numericFieldSelected,
       ),
     },
   );
@@ -371,6 +438,9 @@ export default function PlanningPage() {
         dueTo: chartDueTo || null,
         includeSubtasks: chartSubtasks !== "exclude",
         customFieldId: null,
+        metricCustomFieldKey: numericFieldMetric
+          ? chartNumericFieldKey || null
+          : null,
         assigneeEmployeeId: chartAssigneeId || null,
         priority: chartPriority || null,
         itemType: chartItemType || null,
@@ -382,7 +452,8 @@ export default function PlanningPage() {
         chartReportType === "tasks" &&
         chartPortfolioId &&
         reportingEnabled &&
-        chartGroupBy !== "custom_field",
+        chartGroupBy !== "custom_field" &&
+        numericFieldSelected,
       ),
     },
   );
@@ -476,7 +547,11 @@ export default function PlanningPage() {
   ]);
   const chartData =
     chartReportType === "tasks" ? taskChart.data : metadataChart;
-  const chartError = chartReportType === "tasks" ? taskChart.error : null;
+  const chartError =
+    chartReportType === "tasks"
+      ? (taskChart.error ??
+        (numericFieldMetric ? reportingNumericFields.error : null))
+      : null;
   const chartPending =
     chartReportType === "tasks"
       ? taskChart.isPending
@@ -710,9 +785,15 @@ export default function PlanningPage() {
         "project",
         "custom_field",
       ].includes(String(saved.groupBy)) ||
-      !["task_count", "estimated_minutes", "actual_minutes"].includes(
-        String(saved.metric),
-      ) ||
+      ![
+        "task_count",
+        "estimated_minutes",
+        "actual_minutes",
+        "custom_field_sum",
+        "custom_field_average",
+      ].includes(String(saved.metric)) ||
+      (isNumericFieldMetric(String(saved.metric)) &&
+        typeof saved.metricCustomFieldKey !== "string") ||
       !["all", "complete", "incomplete"].includes(String(saved.completion))
     )
       return;
@@ -750,6 +831,11 @@ export default function PlanningPage() {
     );
     setChartCustomFieldId(
       typeof saved.customFieldId === "string" ? saved.customFieldId : "",
+    );
+    setChartNumericFieldKey(
+      typeof saved.metricCustomFieldKey === "string"
+        ? saved.metricCustomFieldKey
+        : "",
     );
   };
 
@@ -964,6 +1050,9 @@ export default function PlanningPage() {
                         dueTo: chartDueTo || null,
                         includeSubtasks: chartSubtasks !== "exclude",
                         customFieldId: chartCustomFieldId || null,
+                        metricCustomFieldKey: numericFieldMetric
+                          ? chartNumericFieldKey || null
+                          : null,
                         assigneeEmployeeId: chartAssigneeId || null,
                         priority: chartPriority || null,
                         itemType: chartItemType || null,
@@ -982,7 +1071,10 @@ export default function PlanningPage() {
               />
               <button
                 className="rounded bg-ink px-3 py-2 text-sm text-white"
-                disabled={!dashboardName.trim()}
+                disabled={
+                  !dashboardName.trim() ||
+                  (numericFieldMetric && !numericFieldSelected)
+                }
               >
                 Save view
               </button>
@@ -1354,8 +1446,41 @@ export default function PlanningPage() {
                           <option value="actual_minutes">Actual time</option>
                         </>
                       ) : null}
+                      {numericFieldFeatureEnabled &&
+                      !reportingNumericFields.error &&
+                      (reportingNumericFields.data ?? []).length ? (
+                        <>
+                          <option value="custom_field_sum">
+                            Numeric field total
+                          </option>
+                          <option value="custom_field_average">
+                            Numeric field average
+                          </option>
+                        </>
+                      ) : null}
                     </select>
                   </label>
+                  {numericFieldMetric ? (
+                    <label className="grid gap-1 text-xs text-muted">
+                      Numeric field
+                      <select
+                        className="rounded border border-sand px-3 py-2 text-sm text-ink"
+                        value={chartNumericFieldKey}
+                        onChange={(event) =>
+                          setChartNumericFieldKey(event.target.value)
+                        }
+                      >
+                        {(reportingNumericFields.data ?? []).map((field) => (
+                          <option key={field.key} value={field.key}>
+                            {field.name}
+                            {field.projectCount > 1
+                              ? ` · ${field.projectCount} projects`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   <label className="grid gap-1 text-xs text-muted">
                     Completion
                     <select

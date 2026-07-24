@@ -54,12 +54,18 @@ export type WorkReportChartSpec = {
     | "task_type"
     | "project"
     | "custom_field";
-  metric: "task_count" | "estimated_minutes" | "actual_minutes";
+  metric:
+    | "task_count"
+    | "estimated_minutes"
+    | "actual_minutes"
+    | "custom_field_sum"
+    | "custom_field_average";
   completion: "all" | "complete" | "incomplete";
   dueFrom: string | null;
   dueTo: string | null;
   includeSubtasks: boolean;
   customFieldId: string | null;
+  metricCustomFieldKey?: string | null;
   assigneeEmployeeId?: string | null;
   priority?: "low" | "medium" | "high" | "urgent" | null;
   itemType?: "task" | "milestone" | "approval" | null;
@@ -81,13 +87,25 @@ export type WorkReportChartRow = {
   estimatedMinutes: number | null;
   actualMinutes: number;
   customFieldValue?: unknown;
+  metricCustomFieldValue?: unknown;
 };
+
+function numericCustomFieldValue(value: unknown) {
+  const raw =
+    value && typeof value === "object" && "number_value" in value
+      ? (value as { number_value?: unknown }).number_value
+      : value;
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export function buildWorkReportChart(
   rows: readonly WorkReportChartRow[],
   spec: WorkReportChartSpec,
 ) {
-  const buckets = new Map<string, number>();
+  const buckets = new Map<string, { sum: number; count: number }>();
   for (const row of rows) {
     const subtasks =
       spec.subtasks ?? (spec.includeSubtasks ? "all" : "exclude");
@@ -127,12 +145,17 @@ export function buildWorkReportChart(
                 : spec.groupBy === "project"
                   ? row.projectName
                   : null;
-    const value =
-      spec.metric === "task_count"
+    const customMetric =
+      spec.metric === "custom_field_sum" ||
+      spec.metric === "custom_field_average";
+    const value = customMetric
+      ? numericCustomFieldValue(row.metricCustomFieldValue)
+      : spec.metric === "task_count"
         ? 1
         : spec.metric === "estimated_minutes"
           ? (row.estimatedMinutes ?? 0)
           : row.actualMinutes;
+    if (value === null) continue;
     const labels =
       spec.groupBy !== "custom_field"
         ? [label!]
@@ -147,15 +170,35 @@ export function buildWorkReportChart(
               String(row.customFieldValue).trim() === ""
             ? []
             : [String(row.customFieldValue)];
-    for (const bucket of labels.length ? labels : ["No value"])
-      buckets.set(bucket, (buckets.get(bucket) ?? 0) + value);
+    for (const bucket of labels.length ? labels : ["No value"]) {
+      const current = buckets.get(bucket) ?? { sum: 0, count: 0 };
+      current.sum += value;
+      current.count++;
+      buckets.set(bucket, current);
+    }
   }
   const data = [...buckets.entries()]
-    .map(([label, value]) => ({ label, value }))
+    .map(([label, value]) => ({
+      label,
+      value:
+        spec.metric === "custom_field_average"
+          ? value.sum / value.count
+          : value.sum,
+    }))
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  const totals = [...buckets.values()].reduce(
+    (total, bucket) => ({
+      sum: total.sum + bucket.sum,
+      count: total.count + bucket.count,
+    }),
+    { sum: 0, count: 0 },
+  );
   return {
     data,
-    total: data.reduce((sum, bucket) => sum + bucket.value, 0),
+    total:
+      spec.metric === "custom_field_average" && totals.count
+        ? totals.sum / totals.count
+        : totals.sum,
   };
 }
 

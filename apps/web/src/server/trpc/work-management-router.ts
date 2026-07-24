@@ -115,6 +115,8 @@ type WorkCustomField = {
   options: string[];
   isRequired: boolean;
   position: number;
+  sourcePlatform?: "native" | "asana";
+  externalId?: string | null;
 };
 type WorkCustomTaskStatusOption = {
   statusOptionId: string;
@@ -1045,12 +1047,25 @@ const reportChartSpecSchema = z
       "project",
       "custom_field",
     ]),
-    metric: z.enum(["task_count", "estimated_minutes", "actual_minutes"]),
+    metric: z.enum([
+      "task_count",
+      "estimated_minutes",
+      "actual_minutes",
+      "custom_field_sum",
+      "custom_field_average",
+    ]),
     completion: z.enum(["all", "complete", "incomplete"]),
     dueFrom: z.string().date().nullable(),
     dueTo: z.string().date().nullable(),
     includeSubtasks: z.boolean(),
     customFieldId: nullableUuid,
+    metricCustomFieldKey: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      .nullable()
+      .optional(),
     assigneeEmployeeId: nullableUuid.optional(),
     priority: z.enum(["low", "medium", "high", "urgent"]).nullable().optional(),
     itemType: z.enum(["task", "milestone", "approval"]).nullable().optional(),
@@ -1068,6 +1083,15 @@ const reportChartSpecSchema = z
         code: z.ZodIssueCode.custom,
         path: ["customFieldId"],
         message: "Choose a custom field to group by",
+      });
+    if (
+      ["custom_field_sum", "custom_field_average"].includes(value.metric) &&
+      !value.metricCustomFieldKey
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["metricCustomFieldKey"],
+        message: "Choose a numeric custom field to measure",
       });
   });
 const metadataReportSpecSchema = z.object({
@@ -3059,6 +3083,85 @@ async function requireProjectCustomField(
     throw new TRPCError({ code: "NOT_FOUND" });
 }
 
+type NumericReportField = {
+  key: string;
+  name: string;
+  fieldIds: string[];
+  projectIds: string[];
+};
+
+async function numericReportFields(
+  ctx: TrpcContext,
+  projectIds: string[],
+  strictProject: boolean,
+): Promise<NumericReportField[]> {
+  if (!projectIds.length) return [];
+  if (strictProject)
+    await requireScopedFeature(ctx, "work.custom_fields", projectIds[0]!);
+  else await requireScopedFeature(ctx, "work.custom_fields", null);
+  const enabledProjectIds = (
+    await Promise.all(
+      projectIds.map(async (projectId) => ({
+        projectId,
+        enabled: await featureEnabled("work.custom_fields", {
+          userId: ctx.employeeId,
+          clientId: await projectClientId(projectId),
+          roles: ctx.roles,
+        }),
+      })),
+    )
+  ).flatMap(({ projectId, enabled }) => (enabled ? [projectId] : []));
+  if (!enabledProjectIds.length) return [];
+  const db = getDb();
+  const fields: WorkCustomField[] = !db
+    ? [...getDemoWork().customFields.values()].filter(
+        (field) =>
+          enabledProjectIds.includes(field.projectId) &&
+          field.fieldType === "number",
+      )
+    : await db.execute<WorkCustomField>(sql`
+        select work_custom_field_id as "customFieldId",
+          work_project_id as "projectId", name, field_type as "fieldType",
+          options, is_required as "isRequired", position,
+          source_platform as "sourcePlatform", external_id as "externalId"
+        from public.work_custom_field
+        where work_project_id = any(${enabledProjectIds}::uuid[])
+          and field_type = 'number'
+        order by lower(name), work_custom_field_id
+      `);
+  const grouped = new Map<string, NumericReportField>();
+  for (const field of fields) {
+    const key =
+      field.sourcePlatform === "asana" && field.externalId
+        ? `asana:${field.externalId}`
+        : `field:${field.customFieldId}`;
+    const group = grouped.get(key) ?? {
+      key,
+      name: field.name,
+      fieldIds: [],
+      projectIds: [],
+    };
+    group.fieldIds.push(field.customFieldId);
+    if (!group.projectIds.includes(field.projectId))
+      group.projectIds.push(field.projectId);
+    grouped.set(key, group);
+  }
+  return [...grouped.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function resolveNumericReportFieldIds(
+  ctx: TrpcContext,
+  projectIds: string[],
+  key: string,
+  strictProject: boolean,
+) {
+  const field = (
+    await numericReportFields(ctx, projectIds, strictProject)
+  ).find((candidate) => candidate.key === key);
+  if (!field) throw new TRPCError({ code: "NOT_FOUND" });
+  return field.fieldIds;
+}
+
 async function requireDashboardAccess(
   ctx: TrpcContext,
   config: Record<string, unknown>,
@@ -3120,21 +3223,29 @@ async function requireDashboardAccess(
   }
   if (reportType === "tasks" && typeof projectId === "string")
     await requireScopedFeature(ctx, "work.tasks", projectId);
-  if (
-    reportType === "tasks" &&
-    typeof projectId === "string" &&
-    spec &&
-    typeof spec === "object"
-  ) {
-    const itemType = (spec as Record<string, unknown>).itemType;
-    if (itemType === "milestone" || itemType === "approval")
-      await requireScopedFeature(ctx, `work.${itemType}s`, projectId);
-    if (
-      ["estimated_minutes", "actual_minutes"].includes(
-        String((spec as Record<string, unknown>).metric),
-      )
-    )
-      await requireScopedFeature(ctx, "work.time_tracking", projectId);
+  if (reportType === "tasks" && spec && typeof spec === "object") {
+    const metric = String((spec as Record<string, unknown>).metric);
+    if (["custom_field_sum", "custom_field_average"].includes(metric)) {
+      const key = (spec as Record<string, unknown>).metricCustomFieldKey;
+      if (typeof key !== "string") throw new TRPCError({ code: "NOT_FOUND" });
+      const projectIds =
+        typeof projectId === "string"
+          ? [projectId]
+          : await portfolioReportingProjectIds(ctx, portfolioId as string);
+      await resolveNumericReportFieldIds(
+        ctx,
+        projectIds,
+        key,
+        typeof projectId === "string",
+      );
+    }
+    if (typeof projectId === "string") {
+      const itemType = (spec as Record<string, unknown>).itemType;
+      if (itemType === "milestone" || itemType === "approval")
+        await requireScopedFeature(ctx, `work.${itemType}s`, projectId);
+      if (["estimated_minutes", "actual_minutes"].includes(metric))
+        await requireScopedFeature(ctx, "work.time_tracking", projectId);
+    }
   }
   return projectId ?? portfolioId ?? reportType;
 }
@@ -3172,6 +3283,7 @@ async function reportRowsForProjects(
   ctx: TrpcContext,
   projectIds: string[],
   spec: WorkReportChartSpec,
+  metricCustomFieldIds: string[] = [],
 ): Promise<WorkReportChartRow[]> {
   if (!projectIds.length) return [];
   const available = new Map<
@@ -3181,6 +3293,7 @@ async function reportRowsForProjects(
       milestones: boolean;
       approvals: boolean;
       timeTracking: boolean;
+      customFields: boolean;
     }
   >();
   await Promise.all(
@@ -3197,16 +3310,25 @@ async function reportRowsForProjects(
         approvals: tasks && (await featureEnabled("work.approvals", scope)),
         timeTracking:
           tasks && (await featureEnabled("work.time_tracking", scope)),
+        customFields:
+          tasks && (await featureEnabled("work.custom_fields", scope)),
       });
     }),
   );
   const enabledProjectIds = (
-    key: "tasks" | "milestones" | "approvals" | "timeTracking",
+    key: "tasks" | "milestones" | "approvals" | "timeTracking" | "customFields",
   ) => projectIds.filter((projectId) => available.get(projectId)?.[key]);
   const taskProjectIds = enabledProjectIds("tasks");
   const milestoneProjectIds = enabledProjectIds("milestones");
   const approvalProjectIds = enabledProjectIds("approvals");
   const timeProjectIds = enabledProjectIds("timeTracking");
+  const customFieldProjectIds = enabledProjectIds("customFields");
+  const customMetric = ["custom_field_sum", "custom_field_average"].includes(
+    spec.metric,
+  );
+  const timeMetric = ["estimated_minutes", "actual_minutes"].includes(
+    spec.metric,
+  );
   const db = getDb();
   const rows: WorkReportChartRow[] = !db
     ? (() => {
@@ -3216,7 +3338,8 @@ async function reportRowsForProjects(
             const enabled = available.get(item.projectId);
             return (
               enabled?.tasks === true &&
-              (spec.metric === "task_count" || enabled.timeTracking) &&
+              (!timeMetric || enabled.timeTracking) &&
+              (!customMetric || enabled.customFields) &&
               (item.itemType === "task" ||
                 (item.itemType === "milestone" && enabled.milestones) ||
                 (item.itemType === "approval" && enabled.approvals))
@@ -3249,6 +3372,15 @@ async function reportRowsForProjects(
                   `${item.itemId}:${spec.customFieldId}`,
                 )
               : undefined,
+            metricCustomFieldValue: (() => {
+              const fieldId = metricCustomFieldIds.find(
+                (id) =>
+                  store.customFields.get(id)?.projectId === item.projectId,
+              );
+              return fieldId
+                ? store.customFieldValues.get(`${item.itemId}:${fieldId}`)
+                : undefined;
+            })(),
           }));
       })()
     : (
@@ -3269,6 +3401,7 @@ async function reportRowsForProjects(
         item.due_at as "dueAt", item.completed_at as "completedAt",
         item.estimated_minutes as "estimatedMinutes",
         custom_value.value as "customFieldValue",
+        metric_custom_value.value as "metricCustomFieldValue",
         coalesce((select sum(entry.minutes)
           from public.time_entry entry
           where entry.work_project_id = any(${timeProjectIds}::uuid[])
@@ -3286,10 +3419,25 @@ async function reportRowsForProjects(
       left join public.work_custom_field_value custom_value
         on custom_value.work_item_id = item.work_item_id
         and custom_value.work_custom_field_id = ${spec.customFieldId}::uuid
+      left join lateral (
+        select value.value
+        from public.work_custom_field_value value
+        join public.work_custom_field field
+          on field.work_custom_field_id = value.work_custom_field_id
+          and field.work_project_id = membership.work_project_id
+        where value.work_item_id = item.work_item_id
+          and value.work_custom_field_id = any(${metricCustomFieldIds}::uuid[])
+        order by array_position(
+          ${metricCustomFieldIds}::uuid[], value.work_custom_field_id
+        )
+        limit 1
+      ) metric_custom_value on true
       where membership.work_project_id = any(${projectIds}::uuid[])
         and item.archived_at is null
-        and (${spec.metric === "task_count"}
+        and (${!timeMetric}
           or membership.work_project_id = any(${timeProjectIds}::uuid[]))
+        and (${!customMetric}
+          or membership.work_project_id = any(${customFieldProjectIds}::uuid[]))
         and (
           (item.item_type = 'task'
             and membership.work_project_id = any(${taskProjectIds}::uuid[]))
@@ -11528,6 +11676,35 @@ export const workManagementRouter = router({
     summary: staffProcedure
       .input(z.object({ projectId: uuid }))
       .query(({ input, ctx }) => projectPlanningSummary(ctx, input.projectId)),
+    numericFields: staffProcedure
+      .input(
+        z
+          .object({ projectId: uuid.optional(), portfolioId: uuid.optional() })
+          .refine(
+            (value) => Boolean(value.projectId) !== Boolean(value.portfolioId),
+            "Choose one reporting scope",
+          ),
+      )
+      .query(async ({ input, ctx }) => {
+        const strictProject = Boolean(input.projectId);
+        let projectIds: string[];
+        if (input.projectId) {
+          await requireProjectAccess(ctx, input.projectId);
+          projectIds = [input.projectId];
+        } else {
+          projectIds = await portfolioReportingProjectIds(
+            ctx,
+            input.portfolioId!,
+          );
+        }
+        return (await numericReportFields(ctx, projectIds, strictProject)).map(
+          ({ key, name, projectIds }) => ({
+            key,
+            name,
+            projectCount: projectIds.length,
+          }),
+        );
+      }),
     chart: staffProcedure
       .input(z.object({ projectId: uuid, spec: reportChartSpecSchema }))
       .query(async ({ input, ctx }) => {
@@ -11538,10 +11715,19 @@ export const workManagementRouter = router({
             input.projectId,
             input.spec.customFieldId!,
           );
+        const metricCustomFieldIds = input.spec.metricCustomFieldKey
+          ? await resolveNumericReportFieldIds(
+              ctx,
+              [input.projectId],
+              input.spec.metricCustomFieldKey,
+              true,
+            )
+          : [];
         const rows = await reportRowsForProjects(
           ctx,
           [input.projectId],
           input.spec,
+          metricCustomFieldIds,
         );
         return buildWorkReportChart(rows, input.spec);
       }),
@@ -11557,8 +11743,21 @@ export const workManagementRouter = router({
           ctx,
           input.portfolioId,
         );
+        const metricCustomFieldIds = input.spec.metricCustomFieldKey
+          ? await resolveNumericReportFieldIds(
+              ctx,
+              projectIds,
+              input.spec.metricCustomFieldKey,
+              false,
+            )
+          : [];
         return buildWorkReportChart(
-          await reportRowsForProjects(ctx, projectIds, input.spec),
+          await reportRowsForProjects(
+            ctx,
+            projectIds,
+            input.spec,
+            metricCustomFieldIds,
+          ),
           input.spec,
         );
       }),
