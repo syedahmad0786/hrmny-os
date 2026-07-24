@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 import { clearDemoFeatureOverrides } from "./features";
 import { createCaller } from "./trpc/root";
-import { getDemoWork } from "./trpc/work-management-router";
+import {
+  getDemoWork,
+  isProofableAttachment,
+} from "./trpc/work-management-router";
 
 function partnerCaller() {
   const user = resolveDevUser("partner");
@@ -253,6 +256,127 @@ describe("work management", () => {
     expect(await caller.work.personal.inbox({})).not.toContainEqual(
       expect.objectContaining({ notificationId }),
     );
+  });
+
+  it("turns proofing pins into governed actionable subtasks", async () => {
+    expect(
+      isProofableAttachment({ name: "creative.PDF", contentType: null }),
+    ).toBe(true);
+    expect(
+      isProofableAttachment({ name: "notes.txt", contentType: "text/plain" }),
+    ).toBe(false);
+
+    const caller = partnerCaller();
+    const project = await caller.work.projects.create({
+      name: `Proofing ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    const parent = await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Review campaign art",
+      description: "",
+    });
+    const attachment = await caller.work.attachments.addLink({
+      itemId: parent.itemId,
+      name: "campaign.png",
+      url: "https://example.com/campaign.png",
+    });
+    const annotation = await caller.work.proofing.create({
+      attachmentId: attachment.attachmentId,
+      xPosition: 0.25,
+      yPosition: 0.75,
+      pageNumber: 9,
+      feedback: "Increase the logo contrast",
+      assigneeEmployeeId: null,
+      dueAt: "2026-08-01T12:00:00.000Z",
+    });
+    expect(annotation).toMatchObject({
+      attachmentId: attachment.attachmentId,
+      title: "Increase the logo contrast",
+      pageNumber: null,
+      xPosition: 0.25,
+      yPosition: 0.75,
+    });
+    expect(
+      (
+        await caller.work.projects.get({ projectId: project.projectId })
+      ).items.find((item) => item.itemId === annotation.itemId),
+    ).toMatchObject({
+      parentItemId: parent.itemId,
+      dueAt: "2026-08-01T12:00:00.000Z",
+    });
+    await caller.work.tasks.complete({
+      itemId: annotation.itemId,
+      completed: true,
+    });
+    expect(
+      await caller.work.proofing.list({
+        attachmentId: attachment.attachmentId,
+      }),
+    ).toContainEqual(
+      expect.objectContaining({
+        annotationId: annotation.annotationId,
+        completedAt: expect.any(String),
+      }),
+    );
+    const pdf = await caller.work.attachments.addLink({
+      itemId: parent.itemId,
+      name: "campaign.pdf",
+      url: "https://example.com/campaign.pdf",
+    });
+    expect(
+      await caller.work.proofing.create({
+        attachmentId: pdf.attachmentId,
+        xPosition: 0.4,
+        yPosition: 0.6,
+        pageNumber: 3,
+        feedback: "Align this heading",
+      }),
+    ).toMatchObject({ pageNumber: 3 });
+
+    const unsupported = await caller.work.attachments.addLink({
+      itemId: parent.itemId,
+      name: "brief.txt",
+      url: "https://example.com/brief.txt",
+    });
+    await expect(
+      caller.work.proofing.create({
+        attachmentId: unsupported.attachmentId,
+        xPosition: 0.5,
+        yPosition: 0.5,
+        feedback: "Unsupported",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    await caller.admin.features.setOverride({
+      featureKey: "work.proofing",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.work.proofing.list({ attachmentId: attachment.attachmentId }),
+    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.proofing" });
+    await caller.admin.features.setOverride({
+      featureKey: "work.proofing",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: true,
+      reason: "test",
+    });
+    await caller.admin.features.setOverride({
+      featureKey: "work.subtasks",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      reason: "test",
+    });
+    await expect(
+      caller.work.proofing.list({ attachmentId: attachment.attachmentId }),
+    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.subtasks" });
   });
 
   it("enforces a Feature Lab switch at the API boundary", async () => {

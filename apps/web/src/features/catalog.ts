@@ -398,8 +398,8 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Pinned image and PDF feedback that can become actionable tasks.",
     group: "Communication",
     source: "asana",
-    availability: "planned",
-    defaultEnabled: false,
+    availability: "beta",
+    defaultEnabled: true,
   }),
   feature({
     key: "work.project_messages",
@@ -1154,6 +1154,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["work.followers.", "work.followers"],
   ["work.messages.", "work.project_messages"],
   ["work.likes.", "work.likes"],
+  ["work.proofing.", "work.proofing"],
   ["work.tags.", "work.tags"],
   ["work.customFields.", "work.custom_fields"],
   ["work.attachments.", "work.attachments"],

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { WorkNav } from "@/components/work-nav";
 import { WorkLikeButton } from "@/components/work-like-button";
+import { WorkProofingDialog } from "@/components/work-proofing-dialog";
 
 type View = "list" | "board" | "calendar" | "timeline" | "files";
 
@@ -19,6 +20,22 @@ function fileAsBase64(file: File): Promise<string> {
     reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
     reader.readAsDataURL(file);
   });
+}
+
+function isProofableAttachment(attachment: {
+  name: string;
+  contentType: string | null;
+}) {
+  return (
+    [
+      "application/pdf",
+      "image/png",
+      "image/jpeg",
+      "image/gif",
+      "image/bmp",
+    ].includes(attachment.contentType?.toLowerCase() ?? "") ||
+    /\.(?:pdf|png|jpe?g|gif|bmp)$/i.test(attachment.name)
+  );
 }
 
 export default function WorkPage() {
@@ -61,6 +78,11 @@ export default function WorkPage() {
   const [fieldOptions, setFieldOptions] = useState("");
   const [attachmentName, setAttachmentName] = useState("");
   const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [proofingAttachment, setProofingAttachment] = useState<{
+    attachmentId: string;
+    name: string;
+    contentType: string | null;
+  } | null>(null);
 
   useEffect(() => {
     if (!projectId && projects.data?.[0])
@@ -99,6 +121,8 @@ export default function WorkPage() {
     session.data?.enabledFeatureKeys.includes("work.custom_fields") ?? false;
   const attachmentsEnabled =
     session.data?.enabledFeatureKeys.includes("work.attachments") ?? false;
+  const proofingEnabled =
+    session.data?.enabledFeatureKeys.includes("work.proofing") ?? false;
   const recurrenceEnabled =
     session.data?.enabledFeatureKeys.includes("work.recurring_tasks") ?? false;
   const timeEnabled =
@@ -1373,6 +1397,17 @@ export default function WorkPage() {
                         📎 {attachment.name}
                       </button>
                       <div className="flex items-center gap-2">
+                        {proofingEnabled &&
+                        canComment &&
+                        isProofableAttachment(attachment) ? (
+                          <button
+                            type="button"
+                            className="rounded-full border border-sand px-2.5 py-1 text-xs text-muted"
+                            onClick={() => setProofingAttachment(attachment)}
+                          >
+                            Proof
+                          </button>
+                        ) : null}
                         <WorkLikeButton
                           targetType="attachment"
                           targetId={attachment.attachmentId}
@@ -1632,6 +1667,18 @@ export default function WorkPage() {
             ) : null}
           </aside>
         </div>
+      ) : null}
+      {proofingAttachment ? (
+        <WorkProofingDialog
+          attachment={proofingAttachment}
+          employees={employees.data ?? []}
+          onClose={() => setProofingAttachment(null)}
+          onChanged={refreshProject}
+          onOpenTask={(itemId) => {
+            setProofingAttachment(null);
+            setSelectedItemId(itemId);
+          }}
+        />
       ) : null}
     </main>
   );
