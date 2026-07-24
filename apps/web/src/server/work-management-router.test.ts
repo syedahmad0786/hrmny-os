@@ -2090,6 +2090,113 @@ describe("work management", () => {
     );
   });
 
+  it("emits governed external rule events and suppresses them per client", async () => {
+    const caller = partnerCaller();
+    const clientId = resolveDevUser("portal_a").clientId!;
+    const project = await caller.work.projects.create({
+      name: `External rule ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    getDemoWork().projects.get(project.projectId)!.clientId = clientId;
+    await caller.admin.features.setOverride({
+      featureKey: "work.api_webhooks",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: true,
+      reason: "external automation test",
+    });
+    const rule = await caller.work.rules.create({
+      projectId: project.projectId,
+      name: `Notify automation ${Date.now()}`,
+      triggerType: "task_added",
+      scheduleMinutes: null,
+      branches: [
+        {
+          mode: "all",
+          conditions: [],
+          actions: [
+            {
+              type: "send_webhook",
+              message: "A new request needs external handling",
+            },
+          ],
+        },
+      ],
+    });
+    const before = [...getDemoWork().externalRuleEvents.values()].filter(
+      (event) => event.projectId === project.projectId,
+    ).length;
+    await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Prepare partner brief",
+      description: "",
+    });
+    expect(
+      [...getDemoWork().externalRuleEvents.values()].find(
+        (event) =>
+          event.projectId === project.projectId &&
+          event.taskTitle === "Prepare partner brief",
+      ),
+    ).toMatchObject({
+      message: "A new request needs external handling",
+    });
+    expect(
+      await caller.work.rules.runs({ projectId: project.projectId, limit: 20 }),
+    ).toContainEqual(
+      expect.objectContaining({ ruleId: rule.ruleId, status: "succeeded" }),
+    );
+
+    await caller.admin.features.setOverride({
+      featureKey: "work.rules.external_actions",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "external automation paused",
+    });
+    expect(
+      (await caller.work.rules.list({ projectId: project.projectId })).some(
+        (candidate) => candidate.ruleId === rule.ruleId,
+      ),
+    ).toBe(false);
+    expect(
+      await caller.work.rules.runs({ projectId: project.projectId, limit: 20 }),
+    ).not.toContainEqual(expect.objectContaining({ ruleId: rule.ruleId }));
+    await caller.work.tasks.create({
+      projectId: project.projectId,
+      title: "Suppressed partner brief",
+      description: "",
+    });
+    expect(
+      [...getDemoWork().externalRuleEvents.values()].filter(
+        (event) => event.projectId === project.projectId,
+      ),
+    ).toHaveLength(before + 1);
+    await expect(
+      caller.work.rules.setEnabled({ ruleId: rule.ruleId, enabled: false }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.rules.external_actions",
+    });
+    await expect(
+      caller.work.rules.create({
+        projectId: project.projectId,
+        name: "Blocked external rule",
+        triggerType: "task_added",
+        scheduleMinutes: null,
+        branches: [
+          {
+            mode: "all",
+            conditions: [],
+            actions: [{ type: "send_webhook", message: "Blocked" }],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.rules.external_actions",
+    });
+  });
+
   it("connects goals, portfolios, reporting, resources, time, budgets, and Gantt", async () => {
     const caller = partnerCaller();
     const project = await caller.work.projects.create({

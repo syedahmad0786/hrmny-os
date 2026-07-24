@@ -50,6 +50,9 @@ export default function WorkflowsPage() {
   const collaboratorRulesEnabled = enabled.has(
     "work.rules.collaborator_trigger",
   );
+  const externalRulesEnabled =
+    enabled.has("work.rules.external_actions") &&
+    enabled.has("work.api_webhooks");
   const customTaskTypesEnabled = enabled.has("work.custom_task_types");
   const templatesEnabled = enabled.has("work.templates");
   const templateRolesEnabled = enabled.has("work.templates.roles");
@@ -134,6 +137,7 @@ export default function WorkflowsPage() {
     | "assign"
     | "complete"
     | "add_tag"
+    | "send_webhook"
     | "set_custom_task_status"
   >("set_priority");
   const [actionValue, setActionValue] = useState("high");
@@ -610,7 +614,9 @@ export default function WorkflowsPage() {
                                 selectedActionType!.customTaskTypeId,
                               statusOptionId: actionValue,
                             }
-                          : { type: actionType };
+                          : actionType === "send_webhook"
+                            ? { type: actionType, message: actionValue }
+                            : { type: actionType };
               createRule.mutate({
                 projectId,
                 name: ruleName,
@@ -748,6 +754,9 @@ export default function WorkflowsPage() {
                   Set custom status
                 </option>
               ) : null}
+              {externalRulesEnabled ? (
+                <option value="send_webhook">Send signed webhook</option>
+              ) : null}
             </select>
             {actionType === "set_priority" ? (
               <select
@@ -827,6 +836,15 @@ export default function WorkflowsPage() {
                       )),
                   )}
               </select>
+            ) : actionType === "send_webhook" ? (
+              <input
+                aria-label="Webhook message"
+                className="rounded border border-sand px-2 py-1.5"
+                maxLength={2000}
+                placeholder="Message for the external workflow"
+                value={actionValue}
+                onChange={(event) => setActionValue(event.target.value)}
+              />
             ) : (
               <span />
             )}
@@ -838,9 +856,12 @@ export default function WorkflowsPage() {
                   (!Number.isInteger(Number(scheduleMinutes)) ||
                     Number(scheduleMinutes) < 15 ||
                     Number(scheduleMinutes) > 525600)) ||
-                (["move_section", "add_tag", "set_custom_task_status"].includes(
-                  actionType,
-                ) &&
+                ([
+                  "move_section",
+                  "add_tag",
+                  "set_custom_task_status",
+                  "send_webhook",
+                ].includes(actionType) &&
                   !actionValue)
               }
             >
