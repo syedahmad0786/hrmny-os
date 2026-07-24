@@ -150,6 +150,56 @@ describe("work planning calculations", () => {
         },
       ),
     ).toEqual({ data: [{ label: "Aisha", value: 1 }], total: 1 });
+    const numericRows = [
+      {
+        itemId: "native",
+        parentItemId: null,
+        itemType: "task" as const,
+        priority: null,
+        assigneeName: null,
+        sectionName: null,
+        projectName: "Launch",
+        dueAt: null,
+        completedAt: null,
+        estimatedMinutes: null,
+        actualMinutes: 0,
+        metricCustomFieldValue: 10,
+      },
+      {
+        itemId: "asana",
+        parentItemId: null,
+        itemType: "task" as const,
+        priority: null,
+        assigneeName: null,
+        sectionName: null,
+        projectName: "Support",
+        dueAt: null,
+        completedAt: null,
+        estimatedMinutes: null,
+        actualMinutes: 0,
+        metricCustomFieldValue: { number_value: 20 },
+      },
+    ];
+    const numericSpec = {
+      groupBy: "completion" as const,
+      metric: "custom_field_sum" as const,
+      completion: "all" as const,
+      dueFrom: null,
+      dueTo: null,
+      includeSubtasks: true,
+      customFieldId: null,
+      metricCustomFieldKey: "asana:budget",
+    };
+    expect(buildWorkReportChart(numericRows, numericSpec)).toEqual({
+      data: [{ label: "Incomplete", value: 30 }],
+      total: 30,
+    });
+    expect(
+      buildWorkReportChart(numericRows, {
+        ...numericSpec,
+        metric: "custom_field_average",
+      }),
+    ).toEqual({ data: [{ label: "Incomplete", value: 15 }], total: 15 });
     expect(countReportBuckets(["On track", "At risk", "On track"])).toEqual({
       data: [
         { label: "On track", value: 2 },

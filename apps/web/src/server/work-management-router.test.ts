@@ -2689,6 +2689,99 @@ describe("work management", () => {
         spec: customFieldSpec,
       },
     });
+    const supportTask = await caller.work.tasks.create({
+      projectId: secondProject.projectId,
+      title: "Support delivery",
+      description: "",
+      startDate: null,
+      dueAt: null,
+      estimatedMinutes: null,
+    });
+    const projectBudget = await caller.work.customFields.create({
+      projectId: project.projectId,
+      name: "Budget points",
+      fieldType: "number",
+      options: [],
+      isRequired: false,
+    });
+    const supportBudget = await caller.work.customFields.create({
+      projectId: secondProject.projectId,
+      name: "Budget points",
+      fieldType: "number",
+      options: [],
+      isRequired: false,
+    });
+    Object.assign(
+      getDemoWork().customFields.get(projectBudget.customFieldId)!,
+      { sourcePlatform: "asana", externalId: "budget-points" },
+    );
+    Object.assign(
+      getDemoWork().customFields.get(supportBudget.customFieldId)!,
+      { sourcePlatform: "asana", externalId: "budget-points" },
+    );
+    await caller.work.customFields.setValue({
+      itemId: task.itemId,
+      customFieldId: projectBudget.customFieldId,
+      value: 10,
+    });
+    await caller.work.customFields.setValue({
+      itemId: supportTask.itemId,
+      customFieldId: supportBudget.customFieldId,
+      value: 20,
+    });
+    getDemoWork().customFieldValues.set(
+      `${supportTask.itemId}:${supportBudget.customFieldId}`,
+      { number_value: 20 },
+    );
+    expect(
+      await caller.work.reporting.numericFields({
+        portfolioId: portfolio.portfolioId,
+      }),
+    ).toContainEqual({
+      key: "asana:budget-points",
+      name: "Budget points",
+      projectCount: 2,
+    });
+    const numericSpec = {
+      groupBy: "completion" as const,
+      metric: "custom_field_sum" as const,
+      completion: "all" as const,
+      dueFrom: null,
+      dueTo: null,
+      includeSubtasks: true,
+      customFieldId: null,
+      metricCustomFieldKey: "asana:budget-points",
+    };
+    expect(
+      await caller.work.reporting.chart({
+        projectId: project.projectId,
+        spec: numericSpec,
+      }),
+    ).toEqual({ data: [{ label: "Complete", value: 10 }], total: 10 });
+    expect(
+      await caller.work.reporting.portfolioChart({
+        portfolioId: portfolio.portfolioId,
+        spec: {
+          ...numericSpec,
+          groupBy: "project",
+          metric: "custom_field_average",
+        },
+      }),
+    ).toEqual({
+      data: [
+        { label: "Planning support", value: 20 },
+        { label: "Planning pilot", value: 10 },
+      ],
+      total: 15,
+    });
+    const numericDashboard = await caller.work.reporting.saveDashboard({
+      name: "Budget points total",
+      config: {
+        projectId: project.projectId,
+        chartStyle: "number",
+        spec: numericSpec,
+      },
+    });
     const reportingClientId = resolveDevUser("portal_b").clientId!;
     getDemoWork().projects.get(project.projectId)!.clientId = reportingClientId;
     await caller.admin.features.setOverride({
@@ -2701,11 +2794,17 @@ describe("work management", () => {
     expect(await caller.work.reporting.dashboards()).not.toContainEqual(
       customFieldDashboard,
     );
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      numericDashboard,
+    );
     await expect(
       caller.work.reporting.chart({
         projectId: project.projectId,
         spec: customFieldSpec,
       }),
+    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.custom_fields" });
+    await expect(
+      caller.work.reporting.numericFields({ projectId: project.projectId }),
     ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.custom_fields" });
     await caller.admin.features.setOverride({
       featureKey: "work.custom_fields",
@@ -2714,6 +2813,15 @@ describe("work management", () => {
       enabled: true,
       reason: "restore custom fields",
     });
+    await expect(
+      caller.work.reporting.chart({
+        projectId: project.projectId,
+        spec: {
+          ...numericSpec,
+          metricCustomFieldKey: null,
+        },
+      }),
+    ).rejects.toThrow("Choose a numeric custom field to measure");
     await expect(
       caller.work.reporting.chart({
         projectId: project.projectId,
@@ -2834,7 +2942,10 @@ describe("work management", () => {
           customFieldId: null,
         },
       }),
-    ).toEqual({ data: [], total: 0 });
+    ).toEqual({
+      data: [{ label: "Planning support", value: 1 }],
+      total: 1,
+    });
     await expect(
       caller.work.reporting.chart({
         projectId: project.projectId,
