@@ -83,7 +83,26 @@ export const workAiActionTypes = [
   "create_custom_field",
   "create_rule",
   "create_project",
+  "delete_task",
+  "create_subtask",
+  "set_custom_field",
+  "add_to_project",
+  "add_follower",
+  "remove_follower",
+  "create_section",
+  "update_section",
+  "bulk_update_tasks",
+  "add_dependency",
+  "create_milestone",
+  "attach_file",
+  "schedule_follow_up",
 ] as const;
+export const workAiStudioActionTypes = workAiActionTypes.filter(
+  (type) => type !== "schedule_follow_up",
+) as [
+  Exclude<(typeof workAiActionTypes)[number], "schedule_follow_up">,
+  ...Exclude<(typeof workAiActionTypes)[number], "schedule_follow_up">[],
+];
 
 export const workAiActionSchema = z.discriminatedUnion("type", [
   z.object({
@@ -100,6 +119,7 @@ export const workAiActionSchema = z.discriminatedUnion("type", [
     title: z.string().trim().min(1).max(500).optional(),
     description: z.string().trim().max(20_000).optional(),
     priority: priority.optional(),
+    assigneeEmployeeId: z.string().uuid().nullable().optional(),
     dueAt: z.string().datetime().nullable().optional(),
   }),
   z.object({
@@ -162,12 +182,97 @@ export const workAiActionSchema = z.discriminatedUnion("type", [
       .max(100)
       .default([]),
   }),
+  z.object({ type: z.literal("delete_task"), itemId: z.string().uuid() }),
+  z.object({
+    type: z.literal("create_subtask"),
+    projectId: z.string().uuid(),
+    parentItemId: z.string().uuid(),
+    title: z.string().trim().min(1).max(500),
+    description: z.string().trim().max(20_000).default(""),
+    priority,
+    assigneeEmployeeId: z.string().uuid().nullable().default(null),
+    dueAt: z.string().datetime().nullable().default(null),
+  }),
+  z.object({
+    type: z.literal("set_custom_field"),
+    itemId: z.string().uuid(),
+    customFieldId: z.string().uuid(),
+    value: z.unknown(),
+  }),
+  z.object({
+    type: z.literal("add_to_project"),
+    itemId: z.string().uuid(),
+    projectId: z.string().uuid(),
+    sectionId: z.string().uuid().nullable().default(null),
+  }),
+  z.object({
+    type: z.literal("add_follower"),
+    itemId: z.string().uuid(),
+    employeeId: z.string().uuid(),
+  }),
+  z.object({
+    type: z.literal("remove_follower"),
+    itemId: z.string().uuid(),
+    employeeId: z.string().uuid(),
+  }),
+  z.object({
+    type: z.literal("create_section"),
+    projectId: z.string().uuid(),
+    name: z.string().trim().min(1).max(120),
+  }),
+  z.object({
+    type: z.literal("update_section"),
+    projectId: z.string().uuid(),
+    sectionId: z.string().uuid(),
+    name: z.string().trim().min(1).max(120),
+  }),
+  z.object({
+    type: z.literal("bulk_update_tasks"),
+    updates: z
+      .array(
+        z.object({
+          itemId: z.string().uuid(),
+          title: z.string().trim().min(1).max(500).optional(),
+          description: z.string().trim().max(20_000).optional(),
+          priority: priority.optional(),
+          assigneeEmployeeId: z.string().uuid().nullable().optional(),
+          dueAt: z.string().datetime().nullable().optional(),
+          completed: z.boolean().optional(),
+        }),
+      )
+      .min(1)
+      .max(50),
+  }),
+  z.object({
+    type: z.literal("add_dependency"),
+    itemId: z.string().uuid(),
+    dependsOnItemId: z.string().uuid(),
+  }),
+  z.object({
+    type: z.literal("create_milestone"),
+    projectId: z.string().uuid(),
+    title: z.string().trim().min(1).max(500),
+    description: z.string().trim().max(20_000).default(""),
+    dueAt: z.string().datetime().nullable().default(null),
+  }),
+  z.object({
+    type: z.literal("attach_file"),
+    itemId: z.string().uuid(),
+    name: z.string().trim().min(1).max(255),
+    url: z.string().url().max(4_096),
+  }),
+  z.object({
+    type: z.literal("schedule_follow_up"),
+    itemId: z.string().uuid(),
+    runAt: z.string().datetime(),
+    requestText: z.string().trim().min(1).max(10_000),
+  }),
 ]);
 export type WorkAiAction = z.infer<typeof workAiActionSchema>;
 
 const sourceSchema = z.object({
   id: z.string().uuid(),
-  type: z.enum(["project", "task", "comment"]),
+  type: z.enum(["project", "section", "task", "comment"]),
   label: z.string().trim().min(1).max(300),
 });
 export const workAiStudioDraftSchema = z
@@ -187,8 +292,8 @@ export const workAiStudioDraftSchema = z
     aiCondition: z.string().trim().max(10_000).nullable().default(null),
     instructions: z.string().trim().min(1).max(20_000),
     allowedActionTypes: z
-      .array(z.enum(workAiActionTypes))
-      .max(workAiActionTypes.length)
+      .array(z.enum(workAiStudioActionTypes))
+      .max(workAiStudioActionTypes.length)
       .default([]),
     scheduleMinutes: z
       .number()
@@ -411,6 +516,14 @@ async function buildContext(
       content: project.description.slice(0, 2_000),
     });
     if (!db) {
+      for (const section of getDemoWork().sections.values())
+        if (section.projectId === projectId)
+          sources.push({
+            id: section.sectionId,
+            type: "section",
+            label: section.name,
+            content: `Position ${section.position}`,
+          });
       for (const item of [...getDemoWork().items.values()]
         .filter((candidate) => candidate.projectId === projectId)
         .sort((left, right) =>
@@ -431,7 +544,13 @@ async function buildContext(
       }
       continue;
     }
-    const [tasks, comments] = await Promise.all([
+    const [sections, tasks, comments] = await Promise.all([
+      db.execute<{ id: string; label: string; position: number }>(sql`
+        select work_section_id as id, name as label, position
+        from public.work_section
+        where work_project_id = ${projectId}::uuid
+        order by position, created_at
+      `),
       db.execute<{
         id: string;
         label: string;
@@ -467,6 +586,13 @@ async function buildContext(
         order by comment.created_at desc limit 30
       `),
     ]);
+    for (const section of sections)
+      sources.push({
+        id: section.id,
+        type: "section",
+        label: section.label,
+        content: `Position ${section.position}`,
+      });
     for (const task of tasks)
       sources.push({
         id: task.id,
@@ -518,7 +644,7 @@ const allowedActions: Record<WorkAiKind, ReadonlySet<WorkAiAction["type"]>> = {
   smart_rules: new Set(["create_rule"]),
   risk_reports: new Set(),
   dash: new Set(["create_task"]),
-  studio: new Set(workAiActionTypes),
+  studio: new Set(workAiStudioActionTypes),
   teammate: new Set(workAiActionTypes),
 };
 
@@ -533,6 +659,11 @@ function safeResult(
   const allowedItems = new Set(
     context.sources
       .filter((source) => source.type === "task")
+      .map((source) => source.id),
+  );
+  const allowedSections = new Set(
+    context.sources
+      .filter((source) => source.type === "section")
       .map((source) => source.id),
   );
   const permittedActions = actionTypes
@@ -550,9 +681,37 @@ function safeResult(
     actions: result.conditionMatched
       ? result.actions.filter((action) => {
           if (!permittedActions.has(action.type)) return false;
-          if ("projectId" in action)
-            return allowedProjects.has(action.projectId);
-          if ("itemId" in action) return allowedItems.has(action.itemId);
+          if ("projectId" in action && !allowedProjects.has(action.projectId))
+            return false;
+          if ("itemId" in action && !allowedItems.has(action.itemId))
+            return false;
+          if (
+            "sectionId" in action &&
+            action.sectionId &&
+            !allowedSections.has(action.sectionId)
+          )
+            return false;
+          if (
+            action.type === "create_subtask" &&
+            !allowedItems.has(action.parentItemId)
+          )
+            return false;
+          if (
+            action.type === "add_dependency" &&
+            !allowedItems.has(action.dependsOnItemId)
+          )
+            return false;
+          if (
+            action.type === "bulk_update_tasks" &&
+            !action.updates.every((update) => allowedItems.has(update.itemId))
+          )
+            return false;
+          if (
+            "projectId" in action ||
+            "itemId" in action ||
+            action.type === "bulk_update_tasks"
+          )
+            return true;
           return (
             action.type === "create_goal" || action.type === "create_project"
           );
@@ -580,7 +739,7 @@ function mockResult(
           : /\bmove|section\b/i.test(request)
             ? "task_moved"
             : "task_added";
-    const allowedActionTypes: WorkAiAction["type"][] = [
+    const allowedActionTypes: (typeof workAiStudioActionTypes)[number][] = [
       /\bcomment|reply\b/i.test(request)
         ? "create_comment"
         : /\bstatus\b/i.test(request)
@@ -628,7 +787,63 @@ function mockResult(
       priority: null,
       dueAt: null,
     });
-  if (kind === "teammate" && itemId && actionTypes?.includes("create_comment"))
+  const requestedRunAt = request.match(
+    /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{3})?)?Z\b/,
+  )?.[0];
+  if (
+    kind === "teammate" &&
+    itemId &&
+    requestedRunAt &&
+    actionTypes?.includes("schedule_follow_up")
+  )
+    actions.push({
+      type: "schedule_follow_up",
+      itemId,
+      runAt: requestedRunAt,
+      requestText: request,
+    });
+  else if (
+    kind === "teammate" &&
+    itemId &&
+    projectId &&
+    /\bsubtask\b/i.test(request) &&
+    actionTypes?.includes("create_subtask")
+  )
+    actions.push({
+      type: "create_subtask",
+      projectId,
+      parentItemId: itemId,
+      title: request.slice(0, 160),
+      description: "Drafted by an AI Teammate for review.",
+      priority: null,
+      assigneeEmployeeId: null,
+      dueAt: null,
+    });
+  else if (
+    kind === "teammate" &&
+    projectId &&
+    /\bmilestone\b/i.test(request) &&
+    actionTypes?.includes("create_milestone")
+  )
+    actions.push({
+      type: "create_milestone",
+      projectId,
+      title: request.slice(0, 160),
+      description: "Drafted by an AI Teammate for review.",
+      dueAt: null,
+    });
+  else if (
+    kind === "teammate" &&
+    itemId &&
+    /\b(delete|archive)\b/i.test(request) &&
+    actionTypes?.includes("delete_task")
+  )
+    actions.push({ type: "delete_task", itemId });
+  else if (
+    kind === "teammate" &&
+    itemId &&
+    actionTypes?.includes("create_comment")
+  )
     actions.push({
       type: "create_comment",
       itemId,

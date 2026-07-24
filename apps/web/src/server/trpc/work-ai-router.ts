@@ -7,7 +7,10 @@ import {
 } from "../features";
 import { writeAudit } from "../m1-persistence";
 import { isWorkViewOnlyMember } from "../work-governance";
-import { workAiTeammateExecutionContext } from "../work-ai-teammates";
+import {
+  scheduleWorkAiTeammateFollowUp,
+  workAiTeammateExecutionContext,
+} from "../work-ai-teammates";
 import {
   beginWorkAiAction,
   featureKeyForWorkAiKind,
@@ -157,11 +160,124 @@ export const workAiRouter = router({
             await requireFeature(ctx, "work.tasks");
             result = await work.tasks.update(action);
             break;
+          case "delete_task":
+            await requireFeature(ctx, "work.tasks");
+            result = await work.tasks.archive({ itemId: action.itemId });
+            break;
+          case "create_subtask":
+            await requireFeature(ctx, "work.subtasks");
+            result = await work.tasks.create({
+              projectId: action.projectId,
+              parentItemId: action.parentItemId,
+              title: action.title,
+              description: action.description,
+              priority: action.priority,
+              assigneeEmployeeId: action.assigneeEmployeeId,
+              dueAt: action.dueAt,
+              itemType: "task",
+            });
+            break;
           case "create_comment":
             await requireFeature(ctx, "work.comments");
             result = await work.comments.create({
               itemId: action.itemId,
               body: action.body,
+            });
+            break;
+          case "set_custom_field":
+            await requireFeature(ctx, "work.custom_fields");
+            result = await work.customFields.setValue({
+              itemId: action.itemId,
+              customFieldId: action.customFieldId,
+              value: action.value,
+            });
+            break;
+          case "add_to_project":
+            await requireFeature(ctx, "work.multi_home");
+            result = await work.tasks.addToProject({
+              itemId: action.itemId,
+              projectId: action.projectId,
+              sectionId: action.sectionId,
+            });
+            break;
+          case "add_follower":
+            await requireFeature(ctx, "work.followers");
+            result = await work.followers.follow({
+              itemId: action.itemId,
+              employeeId: action.employeeId,
+            });
+            break;
+          case "remove_follower":
+            await requireFeature(ctx, "work.followers");
+            result = await work.followers.unfollow({
+              itemId: action.itemId,
+              employeeId: action.employeeId,
+            });
+            break;
+          case "create_section":
+            await requireFeature(ctx, "work.sections");
+            result = await work.sections.create({
+              projectId: action.projectId,
+              name: action.name,
+            });
+            break;
+          case "update_section":
+            await requireFeature(ctx, "work.sections");
+            result = await work.sections.update({
+              projectId: action.projectId,
+              sectionId: action.sectionId,
+              name: action.name,
+            });
+            break;
+          case "bulk_update_tasks": {
+            await requireFeature(ctx, "work.tasks");
+            const updated = [];
+            for (const update of action.updates) {
+              const { completed, ...fields } = update;
+              if (Object.keys(fields).length > 1)
+                updated.push(await work.tasks.update(fields));
+              if (completed !== undefined)
+                updated.push(
+                  await work.tasks.complete({
+                    itemId: update.itemId,
+                    completed,
+                  }),
+                );
+            }
+            result = updated;
+            break;
+          }
+          case "add_dependency":
+            await requireFeature(ctx, "work.dependencies");
+            result = await work.dependencies.add({
+              itemId: action.itemId,
+              dependsOnItemId: action.dependsOnItemId,
+            });
+            break;
+          case "create_milestone":
+            await requireFeature(ctx, "work.milestones");
+            result = await work.tasks.create({
+              projectId: action.projectId,
+              title: action.title,
+              description: action.description,
+              dueAt: action.dueAt,
+              itemType: "milestone",
+            });
+            break;
+          case "attach_file":
+            await requireFeature(ctx, "work.attachments");
+            result = await work.attachments.addLink({
+              itemId: action.itemId,
+              name: action.name,
+              url: action.url,
+            });
+            break;
+          case "schedule_follow_up":
+            result = await scheduleWorkAiTeammateFollowUp({
+              ctx,
+              run,
+              action,
+              actionIndex: input.actionIndex,
             });
             break;
           case "create_status":

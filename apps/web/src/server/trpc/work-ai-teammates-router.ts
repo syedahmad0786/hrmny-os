@@ -7,10 +7,12 @@ import {
   createWorkAiTeammate,
   deleteWorkAiTeammateSkill,
   forgetWorkAiTeammateMemory,
+  interruptWorkAiTeammateRun,
   listWorkAiTeammateDirectory,
   listWorkAiTeammateMembers,
   listWorkAiTeammateMemories,
   listWorkAiTeammateProjectAccess,
+  listWorkAiTeammateRuns,
   listWorkAiTeammates,
   listWorkAiTeammateSkills,
   removeWorkAiTeammateMember,
@@ -188,6 +190,18 @@ export const workAiTeammatesRouter = router({
           requireWorkAiFeature(ctx, "teammate"),
         ]);
         return forgetWorkAiTeammateMemory({ ...input, ctx });
+      }),
+  }),
+
+  activity: router({
+    list: staffProcedure
+      .input(z.object({ teammateId: uuid }))
+      .query(({ input, ctx }) => listWorkAiTeammateRuns(ctx, input.teammateId)),
+    interrupt: staffProcedure
+      .input(z.object({ teammateId: uuid, teammateRunId: uuid }))
+      .mutation(async ({ input, ctx }) => {
+        await requireWrite(ctx);
+        return interruptWorkAiTeammateRun({ ...input, ctx });
       }),
   }),
 });

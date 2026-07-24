@@ -24,6 +24,18 @@ const actionTypes = [
   ["create_custom_field", "Create custom field"],
   ["create_rule", "Create rule"],
   ["create_project", "Create project"],
+  ["delete_task", "Archive task"],
+  ["create_subtask", "Create subtask"],
+  ["set_custom_field", "Update custom field"],
+  ["add_to_project", "Add task to project"],
+  ["add_follower", "Add collaborator"],
+  ["remove_follower", "Remove collaborator"],
+  ["create_section", "Create section"],
+  ["update_section", "Update section"],
+  ["bulk_update_tasks", "Bulk update tasks"],
+  ["add_dependency", "Create dependency"],
+  ["create_milestone", "Create milestone"],
+  ["attach_file", "Attach linked file"],
 ] as const;
 type Trigger = (typeof triggers)[number][0];
 type ActionType = (typeof actionTypes)[number][0];

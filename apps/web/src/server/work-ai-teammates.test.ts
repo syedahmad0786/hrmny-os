@@ -111,6 +111,45 @@ describe("AI Teammates", () => {
       }),
     ).toHaveLength(1);
 
+    await caller.workAiTeammates.update({
+      teammateId: teammate.teammateId,
+      teammate: {
+        name: teammate.name,
+        roleDescription: teammate.roleDescription,
+        instructions: teammate.instructions,
+        allowedActionTypes: ["create_subtask", "schedule_follow_up"],
+        model: null,
+      },
+    });
+    const subtaskRun = await caller.workAiTeammates.run({
+      teammateId: teammate.teammateId,
+      projectId: project.projectId,
+      itemId: task.itemId,
+      requestText: "Create a subtask to review the client update",
+    });
+    await caller.workAi.applyAction({
+      runId: subtaskRun.run!.runId,
+      actionIndex: 0,
+    });
+    expect(
+      (
+        await caller.work.projects.get({ projectId: project.projectId })
+      ).items.some((item) => item.parentItemId === task.itemId),
+    ).toBe(true);
+
+    const runAt = new Date(Date.now() + 86_400_000).toISOString();
+    const followUpRun = await caller.workAiTeammates.run({
+      teammateId: teammate.teammateId,
+      projectId: project.projectId,
+      itemId: task.itemId,
+      requestText: `Follow up at ${runAt}`,
+    });
+    const scheduled = await caller.workAi.applyAction({
+      runId: followUpRun.run!.runId,
+      actionIndex: 0,
+    });
+    expect(scheduled.result).toMatchObject({ runAt });
+
     await caller.workAiTeammates.projects.remove({
       teammateId: teammate.teammateId,
       projectId: project.projectId,

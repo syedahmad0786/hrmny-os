@@ -223,6 +223,7 @@ export default function WorkAdminPage() {
         <ApiWebhooksPanel
           configuration={apiWebhooks.data}
           projects={directory.data?.projects ?? []}
+          mcpEnabled={enabled.has("work.ai.connectors")}
           refresh={() => utils.workAdmin.apiWebhooks.get.invalidate()}
         />
       ) : null}
@@ -1507,6 +1508,7 @@ const workWebhookEvents = [
 function ApiWebhooksPanel({
   configuration,
   projects,
+  mcpEnabled,
   refresh,
 }: {
   configuration:
@@ -1542,6 +1544,7 @@ function ApiWebhooksPanel({
       }
     | undefined;
   projects: Array<{ projectId: string; name: string }>;
+  mcpEnabled: boolean;
   refresh: () => Promise<unknown>;
 }) {
   const [tokenLabel, setTokenLabel] = useState("Automation token");
@@ -1605,6 +1608,16 @@ function ApiWebhooksPanel({
           Tokens act as their owner and keep that person&apos;s current project
           permissions. Secrets are stored only as hashes and shown once.
         </p>
+        {mcpEnabled ? (
+          <div className="mt-3 rounded-lg border border-sand bg-white p-3 text-sm">
+            <p className="font-medium">AI client connection</p>
+            <p className="mt-1 text-muted">
+              Use a token from this section as a Bearer token. Available tools
+              match its scopes and the owner&apos;s live permissions.
+            </p>
+            <code className="mt-2 block break-all text-xs">/api/mcp/work</code>
+          </div>
+        ) : null}
         <form
           className="mt-4 space-y-3"
           onSubmit={(event) => {

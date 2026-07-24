@@ -2043,6 +2043,47 @@ export const workManagementRouter = router({
         );
         return section;
       }),
+    update: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          sectionId: uuid,
+          name: z.string().trim().min(1).max(120),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        const db = getDb();
+        let section: WorkSection | undefined;
+        if (!db) {
+          const stored = getDemoWork().sections.get(input.sectionId);
+          if (stored?.projectId === input.projectId) {
+            stored.name = input.name;
+            section = stored;
+          }
+        } else {
+          const [updated] = await db.execute<WorkSection>(sql`
+            update public.work_section set name = ${input.name}, updated_at = now()
+            where work_section_id = ${input.sectionId}::uuid
+              and work_project_id = ${input.projectId}::uuid
+            returning work_section_id as "sectionId", work_project_id as "projectId",
+              name, position
+          `);
+          section = updated;
+        }
+        if (!section) throw new TRPCError({ code: "NOT_FOUND" });
+        await audit(
+          ctx,
+          "work.section.update",
+          "work_section",
+          input.sectionId,
+          {
+            projectId: input.projectId,
+            name: input.name,
+          },
+        );
+        return section;
+      }),
   }),
 
   tasks: router({

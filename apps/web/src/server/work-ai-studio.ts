@@ -12,8 +12,7 @@ import {
 } from "./trpc/work-management-router";
 import {
   generateWorkAi,
-  workAiActionTypes,
-  type WorkAiAction,
+  workAiStudioActionTypes,
   type WorkAiRun,
   type WorkAiStudioDraft,
 } from "./work-ai";
@@ -41,8 +40,8 @@ export const workAiStudioWorkflowInputSchema = z
     instructions: z.string().trim().min(1).max(20_000),
     referenceText: z.string().trim().max(50_000).default(""),
     allowedActionTypes: z
-      .array(z.enum(workAiActionTypes))
-      .max(workAiActionTypes.length)
+      .array(z.enum(workAiStudioActionTypes))
+      .max(workAiStudioActionTypes.length)
       .default([]),
     model: z.string().trim().min(1).max(200).nullable().default(null),
     scheduleMinutes: z
@@ -111,7 +110,7 @@ function mapWorkflow(row: {
   aiCondition: string | null;
   instructions: string;
   referenceText: string;
-  allowedActionTypes: WorkAiAction["type"][];
+  allowedActionTypes: WorkAiStudioWorkflowInput["allowedActionTypes"];
   model: string | null;
   status: WorkAiStudioWorkflow["status"];
   scheduleMinutes: number | null;

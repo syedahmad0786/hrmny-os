@@ -11,6 +11,19 @@ const actionTypes = [
   ["update_task", "Update tasks"],
   ["create_comment", "Post comments"],
   ["create_project", "Create public projects"],
+  ["delete_task", "Archive tasks"],
+  ["create_subtask", "Create subtasks"],
+  ["set_custom_field", "Update custom fields"],
+  ["add_to_project", "Add tasks to projects"],
+  ["add_follower", "Add collaborators"],
+  ["remove_follower", "Remove collaborators"],
+  ["create_section", "Create sections"],
+  ["update_section", "Update sections"],
+  ["bulk_update_tasks", "Bulk update tasks"],
+  ["add_dependency", "Create dependencies"],
+  ["create_milestone", "Create milestones"],
+  ["attach_file", "Attach linked files"],
+  ["schedule_follow_up", "Schedule follow-ups"],
 ] as const;
 type ActionType = (typeof actionTypes)[number][0];
 const card = "rounded-xl border border-sand bg-white/80 p-5";
@@ -45,6 +58,10 @@ export default function WorkAiTeammatesPage() {
   const memories = trpc.workAiTeammates.memory.list.useQuery(
     { teammateId },
     { enabled: Boolean(selectedId) && enabled.has("work.ai.teammate_memory") },
+  );
+  const activity = trpc.workAiTeammates.activity.list.useQuery(
+    { teammateId },
+    { enabled: Boolean(selectedId) },
   );
 
   const [name, setName] = useState("");
@@ -136,7 +153,15 @@ export default function WorkAiTeammatesPage() {
   const forgetMemory = trpc.workAiTeammates.memory.forget.useMutation({
     onSuccess: () => memories.refetch(),
   });
-  const run = trpc.workAiTeammates.run.useMutation();
+  const interrupt = trpc.workAiTeammates.activity.interrupt.useMutation({
+    onSuccess: () => activity.refetch(),
+  });
+  const run = trpc.workAiTeammates.run.useMutation({
+    onSuccess: async () => {
+      await activity.refetch();
+      if (enabled.has("work.ai.teammate_memory")) await memories.refetch();
+    },
+  });
 
   const teammateInput = () => ({
     name,
@@ -157,6 +182,7 @@ export default function WorkAiTeammatesPage() {
     saveSkill.error ??
     deleteSkill.error ??
     forgetMemory.error ??
+    interrupt.error ??
     run.error;
 
   function reset() {
@@ -438,6 +464,67 @@ export default function WorkAiTeammatesPage() {
                     .
                   </p>
                 ) : null}
+              </section>
+
+              <section className={card}>
+                <h2 className="font-display text-xl font-semibold">Activity</h2>
+                <p className="mt-1 text-sm text-muted">
+                  See every trigger, selected skill, outcome, and error. Running
+                  work can be interrupted without applying its proposals.
+                </p>
+                <div className="mt-3 space-y-2">
+                  {(activity.data ?? []).map((entry) => (
+                    <article
+                      key={entry.teammateRunId}
+                      className="rounded-lg border border-sand bg-white p-3 text-sm"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium">
+                            {entry.itemTitle ?? "Project-level request"}
+                          </p>
+                          <p className="mt-1 text-xs text-muted">
+                            {entry.triggerType.replaceAll("_", " ")} ·{" "}
+                            {entry.status} ·{" "}
+                            {new Date(entry.createdAt).toLocaleString()}
+                          </p>
+                        </div>
+                        {entry.status === "running" ? (
+                          <button
+                            type="button"
+                            className="text-[var(--hrmny-danger)] underline"
+                            disabled={interrupt.isPending}
+                            onClick={() =>
+                              interrupt.mutate({
+                                teammateId: selected.teammateId,
+                                teammateRunId: entry.teammateRunId,
+                              })
+                            }
+                          >
+                            Interrupt
+                          </button>
+                        ) : null}
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap">
+                        {entry.requestText}
+                      </p>
+                      {entry.selectedSkillIds.length ? (
+                        <p className="mt-2 text-xs text-muted">
+                          Used {entry.selectedSkillIds.length} selected skill
+                          {entry.selectedSkillIds.length === 1 ? "" : "s"}
+                        </p>
+                      ) : null}
+                      {entry.errorMessage ? (
+                        <p className="mt-2 text-xs text-[var(--hrmny-danger)]">
+                          {entry.errorMessage}
+                        </p>
+                      ) : null}
+                    </article>
+                  ))}
+                  {!activity.data?.length ? (
+                    <p className="text-sm text-muted">No activity yet.</p>
+                  ) : null}
+                </div>
               </section>
 
               <section className="grid gap-5 lg:grid-cols-2">
