@@ -60,7 +60,7 @@ Forms support conditional questions, organization-only or unauthenticated public
 
 ### Goals, portfolios, reporting, and resources
 
-Goals, sub-goals, weighted contributing projects/tasks, portfolio progress and health, structured status updates, live and saved reporting dashboards, CSV export, weekly Workload, capacity allocations, project budgets/cost forecasts, task estimates, manual time entries, and single-user timers are available in beta. They operate on the shared work graph and enforce work-object permissions. Portfolio-wide workload, richer report chart/group/filter builders, goal history, and multi-rate cost models remain beta acceptance gaps under their corresponding workload, reporting, goals, and budgets switches.
+Goals, sub-goals, weighted contributing projects/tasks, portfolio progress and health, structured status updates, live and saved reporting dashboards, CSV export, weekly Workload, capacity allocations, project budgets/cost forecasts, task estimates, manual time entries, and single-user timers are available in beta. They operate on the shared work graph and enforce work-object permissions. Workload can aggregate weekly capacity, allocations, scheduled estimates, and actual time across every visible, Feature Lab-enabled project in a portfolio without double-counting multi-homed tasks. Richer report chart/group/filter builders, goal history, and multi-rate cost models remain beta acceptance gaps under their corresponding reporting, goals, and budgets switches.
 
 ### Enterprise administration
 

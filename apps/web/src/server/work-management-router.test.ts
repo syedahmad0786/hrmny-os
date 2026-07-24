@@ -2248,6 +2248,16 @@ describe("work management", () => {
         (item) => item.portfolioId === portfolio.portfolioId,
       ),
     ).toMatchObject({ progress: 100, health: "complete" });
+    const secondProject = await caller.work.projects.create({
+      name: "Planning support",
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+    });
+    await caller.work.portfolios.addProject({
+      portfolioId: portfolio.portfolioId,
+      projectId: secondProject.projectId,
+    });
 
     await caller.work.statusUpdates.create({
       targetType: "project",
@@ -2276,9 +2286,45 @@ describe("work management", () => {
       allocatedMinutes: 2_400,
       roleName: null,
     });
+    await caller.work.workload.upsert({
+      projectId: secondProject.projectId,
+      employeeId,
+      weekStart: "2026-07-20",
+      allocatedMinutes: 600,
+      roleName: null,
+    });
     expect(
       await caller.work.workload.list({
         projectId: project.projectId,
+        weekStart: "2026-07-20",
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ allocatedMinutes: 2_400, utilization: 100 }),
+      ]),
+    );
+    expect(
+      await caller.work.workload.portfolio({
+        portfolioId: portfolio.portfolioId,
+        weekStart: "2026-07-20",
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ allocatedMinutes: 3_000, utilization: 125 }),
+      ]),
+    );
+    const clientId = resolveDevUser("portal_a").clientId!;
+    getDemoWork().projects.get(secondProject.projectId)!.clientId = clientId;
+    await caller.admin.features.setOverride({
+      featureKey: "work.workload",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "client disabled portfolio workload",
+    });
+    expect(
+      await caller.work.workload.portfolio({
+        portfolioId: portfolio.portfolioId,
         weekStart: "2026-07-20",
       }),
     ).toEqual(

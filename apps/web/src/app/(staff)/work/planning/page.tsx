@@ -26,6 +26,7 @@ export default function PlanningPage() {
   const session = trpc.auth.session.useQuery();
   const projects = trpc.work.projects.list.useQuery();
   const [projectId, setProjectId] = useState("");
+  const [workloadPortfolioId, setWorkloadPortfolioId] = useState("");
   const employees = trpc.work.members.listEmployees.useQuery({
     projectId: projectId || undefined,
   });
@@ -57,6 +58,9 @@ export default function PlanningPage() {
   const statusEnabled = enabled.has("work.status_updates");
   const reportingEnabled = enabled.has("work.reporting_dashboards");
   const workloadEnabled = enabled.has("work.workload");
+  const portfolioWorkloadActive = Boolean(
+    workloadPortfolioId && portfoliosEnabled,
+  );
   const capacityEnabled = enabled.has("work.capacity_planning");
   const budgetsEnabled = enabled.has("work.budgets");
   const timeEnabled = enabled.has("work.time_tracking");
@@ -83,10 +87,23 @@ export default function PlanningPage() {
     { projectId },
     { enabled: false },
   );
-  const workload = trpc.work.workload.list.useQuery(
+  const projectWorkload = trpc.work.workload.list.useQuery(
     { projectId, weekStart },
-    { enabled: Boolean(projectId && workloadEnabled) },
+    {
+      enabled: Boolean(
+        projectId && workloadEnabled && !portfolioWorkloadActive,
+      ),
+    },
   );
+  const portfolioWorkload = trpc.work.workload.portfolio.useQuery(
+    { portfolioId: workloadPortfolioId, weekStart },
+    {
+      enabled: Boolean(portfolioWorkloadActive && workloadEnabled),
+    },
+  );
+  const workload = portfolioWorkloadActive
+    ? portfolioWorkload
+    : projectWorkload;
   const budget = trpc.work.budgets.summary.useQuery(
     { projectId },
     { enabled: Boolean(projectId && budgetsEnabled) },
@@ -182,7 +199,12 @@ export default function PlanningPage() {
       setAllocationEmployeeId(employees.data[0].employeeId);
   }, [allocationEmployeeId, employees.data]);
   const upsertAllocation = trpc.work.workload.upsert.useMutation({
-    onSuccess: () => utils.work.workload.list.invalidate(),
+    onSuccess: async () => {
+      await Promise.all([
+        utils.work.workload.list.invalidate(),
+        utils.work.workload.portfolio.invalidate(),
+      ]);
+    },
   });
 
   const [timeDate, setTimeDate] = useState(() =>
@@ -661,18 +683,42 @@ export default function PlanningPage() {
             <div>
               <h2 className="font-display text-xl">Workload</h2>
               <p className="text-sm text-muted">
-                Planned work compared with weekly capacity.
+                {portfolioWorkloadActive
+                  ? "Capacity across every visible project in this portfolio."
+                  : "Planned work compared with weekly capacity."}
               </p>
             </div>
-            <input
-              aria-label="Week starting"
-              className="rounded border border-sand px-3 py-2"
-              type="date"
-              value={weekStart}
-              onChange={(event) => setWeekStart(event.target.value)}
-            />
+            <div className="flex flex-wrap gap-2">
+              {portfoliosEnabled && (portfolios.data ?? []).length ? (
+                <select
+                  aria-label="Workload scope"
+                  className="rounded border border-sand px-3 py-2"
+                  value={workloadPortfolioId}
+                  onChange={(event) =>
+                    setWorkloadPortfolioId(event.target.value)
+                  }
+                >
+                  <option value="">Selected project</option>
+                  {(portfolios.data ?? []).map((portfolio) => (
+                    <option
+                      key={portfolio.portfolioId}
+                      value={portfolio.portfolioId}
+                    >
+                      {portfolio.name}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+              <input
+                aria-label="Week starting"
+                className="rounded border border-sand px-3 py-2"
+                type="date"
+                value={weekStart}
+                onChange={(event) => setWeekStart(event.target.value)}
+              />
+            </div>
           </div>
-          {capacityEnabled ? (
+          {capacityEnabled && !portfolioWorkloadActive ? (
             <form
               className="mt-4 grid gap-2 md:grid-cols-[2fr_1fr_auto]"
               onSubmit={(event) => {

@@ -1856,6 +1856,109 @@ async function projectPlanningSummary(ctx: TrpcContext, projectId: string) {
   };
 }
 
+async function workloadForProjects(
+  ctx: TrpcContext,
+  projectIds: string[],
+  weekStart: string,
+) {
+  if (!projectIds.length) return [];
+  const db = getDb();
+  if (!db) {
+    const store = getDemoWork();
+    const employeeId = actor(ctx);
+    const weekEnd = relativeDate(7, new Date(`${weekStart}T00:00:00Z`)).slice(
+      0,
+      10,
+    );
+    const allocations = [...store.allocations.values()].filter(
+      (item) =>
+        projectIds.includes(item.projectId) && item.weekStart === weekStart,
+    );
+    const allocatedMinutes = allocations
+      .filter((item) => item.employeeId === employeeId)
+      .reduce((sum, item) => sum + item.allocatedMinutes, 0);
+    const assignedMinutes = [...store.items.values()]
+      .filter(
+        (item) =>
+          projectIds.includes(item.projectId) &&
+          item.assigneeEmployeeId === employeeId &&
+          !item.completedAt &&
+          item.dueAt &&
+          item.dueAt.slice(0, 10) >= weekStart &&
+          item.dueAt.slice(0, 10) < weekEnd,
+      )
+      .reduce((sum, item) => sum + (item.estimatedMinutes ?? 0), 0);
+    return [
+      {
+        employeeId,
+        displayName: "Dev Partner",
+        capacityHours: 40,
+        allocatedMinutes,
+        assignedMinutes,
+        actualMinutes: [...store.timeEntries.values()]
+          .filter(
+            (item) =>
+              item.employeeId === employeeId &&
+              projectIds.includes(item.projectId) &&
+              item.workDate >= weekStart &&
+              item.workDate < weekEnd,
+          )
+          .reduce((sum, item) => sum + item.minutes, 0),
+        utilization: capacityUtilization(
+          Math.max(allocatedMinutes, assignedMinutes),
+          40,
+        ),
+        allocations,
+      },
+    ];
+  }
+  const rows = await db.execute<{
+    employeeId: string;
+    displayName: string;
+    capacityHours: string | number | null;
+    allocatedMinutes: number;
+    assignedMinutes: number;
+    actualMinutes: number;
+  }>(sql`
+    select employee.employee_id as "employeeId",
+      employee.display_name as "displayName",
+      employee.capacity_hours_per_week as "capacityHours",
+      coalesce((select sum(allocation.allocated_minutes)
+        from public.work_capacity_allocation allocation
+        where allocation.employee_id = employee.employee_id
+          and allocation.work_project_id = any(${projectIds}::uuid[])
+          and allocation.week_start = ${weekStart}::date), 0)::int
+        as "allocatedMinutes",
+      coalesce((select sum(scoped.estimated_minutes) from (
+        select distinct item.work_item_id, item.estimated_minutes
+        from public.work_project_item membership
+        join public.work_item item
+          on item.work_item_id = membership.work_item_id
+        where membership.work_project_id = any(${projectIds}::uuid[])
+          and item.assignee_employee_id = employee.employee_id
+          and item.completed_at is null
+          and item.due_at >= ${weekStart}::date
+          and item.due_at < ${weekStart}::date + interval '7 days'
+      ) scoped), 0)::int as "assignedMinutes",
+      coalesce((select sum(entry.minutes) from public.time_entry entry
+        where entry.employee_id = employee.employee_id
+          and entry.work_project_id = any(${projectIds}::uuid[])
+          and entry.work_date >= ${weekStart}::date
+          and entry.work_date < ${weekStart}::date + 7), 0)::int
+        as "actualMinutes"
+    from public.employee employee where employee.is_active = true
+    order by lower(employee.display_name)
+  `);
+  return rows.map((row) => ({
+    ...row,
+    capacityHours: Number(row.capacityHours ?? 40),
+    utilization: capacityUtilization(
+      Math.max(row.allocatedMinutes, row.assignedMinutes),
+      Number(row.capacityHours ?? 40),
+    ),
+  }));
+}
+
 function iso(value: Date | string | null): string | null {
   return value ? new Date(value).toISOString() : null;
 }
@@ -11011,97 +11114,35 @@ export const workManagementRouter = router({
       .input(z.object({ projectId: uuid, weekStart: z.string().date() }))
       .query(async ({ input, ctx }) => {
         await requireProjectAccess(ctx, input.projectId);
+        return workloadForProjects(ctx, [input.projectId], input.weekStart);
+      }),
+    portfolio: staffProcedure
+      .input(z.object({ portfolioId: uuid, weekStart: z.string().date() }))
+      .query(async ({ input, ctx }) => {
+        await requireScopedFeature(ctx, "work.portfolios", null);
+        await requirePortfolioAccess(ctx, input.portfolioId);
         const db = getDb();
-        if (!db) {
-          const allocations = [...getDemoWork().allocations.values()].filter(
-            (item) =>
-              item.projectId === input.projectId &&
-              item.weekStart === input.weekStart,
-          );
-          const employeeId = actor(ctx);
-          const allocatedMinutes = allocations
-            .filter((item) => item.employeeId === employeeId)
-            .reduce((sum, item) => sum + item.allocatedMinutes, 0);
-          const assignedMinutes = [...getDemoWork().items.values()]
-            .filter(
-              (item) =>
-                item.projectId === input.projectId &&
-                item.assigneeEmployeeId === employeeId &&
-                !item.completedAt,
-            )
-            .reduce((sum, item) => sum + (item.estimatedMinutes ?? 0), 0);
-          return [
-            {
-              employeeId,
-              displayName: "Dev Partner",
-              capacityHours: 40,
-              allocatedMinutes,
-              assignedMinutes,
-              actualMinutes: [...getDemoWork().timeEntries.values()]
-                .filter(
-                  (item) =>
-                    item.employeeId === employeeId &&
-                    item.projectId === input.projectId &&
-                    item.workDate >= input.weekStart &&
-                    item.workDate <
-                      relativeDate(
-                        7,
-                        new Date(`${input.weekStart}T00:00:00Z`),
-                      ).slice(0, 10),
-                )
-                .reduce((sum, item) => sum + item.minutes, 0),
-              utilization: capacityUtilization(
-                Math.max(allocatedMinutes, assignedMinutes),
-                40,
-              ),
-              allocations,
-            },
-          ];
+        const projectIds = !db
+          ? [...(getDemoWork().portfolioProjects.get(input.portfolioId) ?? [])]
+          : (
+              await db.execute<{ projectId: string }>(sql`
+                select work_project_id as "projectId"
+                from public.work_portfolio_project
+                where work_portfolio_id = ${input.portfolioId}::uuid
+                order by position
+              `)
+            ).map((item) => item.projectId);
+        const accessible: string[] = [];
+        for (const projectId of projectIds) {
+          try {
+            await requireProjectAccess(ctx, projectId);
+            await requireScopedFeature(ctx, "work.portfolios", projectId);
+            accessible.push(projectId);
+          } catch (error) {
+            if (!(error instanceof TRPCError)) throw error;
+          }
         }
-        const rows = await db.execute<{
-          employeeId: string;
-          displayName: string;
-          capacityHours: string | number | null;
-          allocatedMinutes: number;
-          assignedMinutes: number;
-          actualMinutes: number;
-        }>(sql`
-          select employee.employee_id as "employeeId",
-            employee.display_name as "displayName",
-            employee.capacity_hours_per_week as "capacityHours",
-            coalesce((select sum(allocation.allocated_minutes)
-              from public.work_capacity_allocation allocation
-              where allocation.employee_id = employee.employee_id
-                and allocation.work_project_id = ${input.projectId}::uuid
-                and allocation.week_start = ${input.weekStart}::date), 0)::int
-              as "allocatedMinutes",
-            coalesce((select sum(item.estimated_minutes)
-              from public.work_project_item membership
-              join public.work_item item
-                on item.work_item_id = membership.work_item_id
-              where membership.work_project_id = ${input.projectId}::uuid
-                and item.assignee_employee_id = employee.employee_id
-                and item.completed_at is null
-                and item.due_at >= ${input.weekStart}::date
-                and item.due_at < ${input.weekStart}::date + interval '7 days'), 0)::int
-              as "assignedMinutes",
-            coalesce((select sum(entry.minutes) from public.time_entry entry
-              where entry.employee_id = employee.employee_id
-                and entry.work_project_id = ${input.projectId}::uuid
-                and entry.work_date >= ${input.weekStart}::date
-                and entry.work_date < ${input.weekStart}::date + 7), 0)::int
-              as "actualMinutes"
-          from public.employee employee where employee.is_active = true
-          order by lower(employee.display_name)
-        `);
-        return rows.map((row) => ({
-          ...row,
-          capacityHours: Number(row.capacityHours ?? 40),
-          utilization: capacityUtilization(
-            Math.max(row.allocatedMinutes, row.assignedMinutes),
-            Number(row.capacityHours ?? 40),
-          ),
-        }));
+        return workloadForProjects(ctx, accessible, input.weekStart);
       }),
     upsert: staffProcedure
       .input(
