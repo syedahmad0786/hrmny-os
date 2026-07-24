@@ -376,4 +376,24 @@ describe("work migration compatibility", () => {
     }
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("registers one verified external Work sandbox", () => {
+    const candidates = [
+      join(process.cwd(), "packages/db/migrations/0036_work_sandbox.sql"),
+      join(process.cwd(), "../../packages/db/migrations/0036_work_sandbox.sql"),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0036_work_sandbox.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_sandbox/i,
+    );
+    expect(migration).toMatch(/UNIQUE \(organization_key\)/i);
+    expect(migration).toMatch(/database_fingerprint text NOT NULL/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

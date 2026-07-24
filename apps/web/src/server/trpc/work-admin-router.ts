@@ -32,6 +32,12 @@ import {
   WORK_WEBHOOK_EVENTS,
 } from "../work-api";
 import { getWorkAiPolicy, getWorkAiUsage, saveWorkAiPolicy } from "../work-ai";
+import {
+  activateWorkSandbox,
+  deleteWorkSandbox,
+  getWorkSandbox,
+  verifyWorkSandbox,
+} from "../work-sandbox";
 import { getDemoWork, requireProjectAccess } from "./work-management-router";
 import { requirePermission, router, staffProcedure } from "./trpc";
 
@@ -1285,6 +1291,49 @@ export const workAdminRouter = router({
           },
         );
         return saved;
+      }),
+  }),
+
+  sandboxes: router({
+    get: workAdminProcedure.query(() => getWorkSandbox()),
+
+    activate: workAdminProcedure
+      .input(z.object({ name: z.string().trim().min(1).max(120) }))
+      .mutation(async ({ input, ctx }) => {
+        const employeeId = actor(ctx.employeeId);
+        const sandbox = await activateWorkSandbox(input.name, employeeId);
+        await audit(
+          employeeId,
+          "work.sandbox.activate",
+          "work_sandbox",
+          sandbox?.sandboxId ?? null,
+          sandbox ?? null,
+        );
+        return sandbox;
+      }),
+
+    verify: workAdminProcedure.mutation(async ({ ctx }) => {
+      const employeeId = actor(ctx.employeeId);
+      const sandbox = await verifyWorkSandbox();
+      await audit(
+        employeeId,
+        "work.sandbox.verify",
+        "work_sandbox",
+        sandbox.sandboxId,
+        { status: sandbox.status, lastVerifiedAt: sandbox.lastVerifiedAt },
+      );
+      return sandbox;
+    }),
+
+    delete: workAdminProcedure
+      .input(z.object({ confirmation: z.literal("DELETE SANDBOX") }))
+      .mutation(async ({ ctx }) => {
+        const employeeId = actor(ctx.employeeId);
+        await deleteWorkSandbox(employeeId);
+        await audit(employeeId, "work.sandbox.delete", "work_sandbox", null, {
+          deleted: true,
+        });
+        return { ok: true as const };
       }),
   }),
 

@@ -712,6 +712,34 @@ export const featureOverride = pgTable(
   ],
 );
 
+/** Verified control-plane record for the separately deployed Work sandbox. */
+export const workSandbox = pgTable(
+  "work_sandbox",
+  {
+    workSandboxId: uuid("work_sandbox_id").defaultRandom().primaryKey(),
+    organizationKey: text("organization_key").default("default").notNull(),
+    name: text("name").notNull(),
+    environmentId: text("environment_id").notNull().unique(),
+    baseUrl: text("base_url").notNull(),
+    databaseFingerprint: text("database_fingerprint").notNull(),
+    authFingerprint: text("auth_fingerprint"),
+    status: text("status").default("active").notNull(),
+    settingsCopiedAt: timestamp("settings_copied_at", { withTimezone: true }),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    createdByEmployeeId: uuid("created_by_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    deletedByEmployeeId: uuid("deleted_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("work_sandbox_organization_uniq").on(table.organizationKey),
+  ],
+);
+
 /** Product requests: idea/voice intake → editable PRD → approval → build. */
 export const featureRequest = pgTable("feature_request", {
   featureRequestId: uuid("feature_request_id").defaultRandom().primaryKey(),
