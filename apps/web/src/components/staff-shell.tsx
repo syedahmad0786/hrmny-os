@@ -59,9 +59,15 @@ const PRIMARY_NAV = [
     match: (p: string) => p === "/requests" || p.startsWith("/requests/"),
   },
   {
-    href: "/settings/connections",
-    label: "Settings",
+    href: "/client-preview",
+    label: "Client Preview",
     index: "07",
+    match: (p: string) => p.startsWith("/client-preview"),
+  },
+  {
+    href: "/settings/connections",
+    label: "Admin",
+    index: "08",
     match: (p: string) =>
       p.startsWith("/settings") ||
       p.startsWith("/admin") ||

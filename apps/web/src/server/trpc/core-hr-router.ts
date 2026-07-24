@@ -126,7 +126,7 @@ export const coreHrRouter = router({
         p.probation_end_date
       from public.employee e
       left join public.employee_hr_profile p on p.employee_id = e.employee_id
-      where ${access}
+      where ${access} and e.is_active = true
       order by e.display_name
     `);
   }),

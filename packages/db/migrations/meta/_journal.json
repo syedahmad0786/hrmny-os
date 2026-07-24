@@ -127,6 +127,13 @@
       "when": 1784908800000,
       "tag": "0017_digital_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784919600000,
+      "tag": "0020_portal_audit_admin",
+      "breakpoints": true
     }
   ]
 }
