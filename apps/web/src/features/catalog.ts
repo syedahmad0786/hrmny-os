@@ -346,6 +346,16 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     defaultEnabled: true,
   }),
   feature({
+    key: "work.custom_task_types",
+    name: "Custom task types & statuses",
+    description:
+      "Shared task types with project defaults and completion-aware status workflows.",
+    group: "Work management",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+  }),
+  feature({
     key: "work.tags",
     name: "Tags",
     description: "Cross-project labels for filtering and reporting.",
@@ -1347,6 +1357,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["work.outOfOffice.", "work.out_of_office"],
   ["work.accessibility.", "work.accessibility"],
   ["work.tags.", "work.tags"],
+  ["work.customTaskTypes.", "work.custom_task_types"],
   ["work.customFields.", "work.custom_fields"],
   ["work.attachments.", "work.attachments"],
   ["work.recurrence.", "work.recurring_tasks"],

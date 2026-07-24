@@ -642,4 +642,38 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/WHERE external_id IS NOT NULL/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("stores shared custom task types with completion-aware statuses", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0046_work_custom_task_types.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0046_work_custom_task_types.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0046_work_custom_task_types.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    for (const table of [
+      "work_custom_task_type",
+      "work_custom_task_status_option",
+      "work_project_custom_task_type",
+    ])
+      expect(migration).toMatch(
+        new RegExp(`CREATE TABLE IF NOT EXISTS public\\.${table}`, "i"),
+      );
+    expect(migration).toMatch(/work_custom_task_type_id uuid/i);
+    expect(migration).toMatch(/work_custom_task_status_option_id uuid/i);
+    expect(migration).toMatch(/'incomplete', 'complete'/i);
+    expect(migration).toMatch(/apply_default_custom_task_type/i);
+    expect(migration).toMatch(/sync_custom_task_status_completion/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

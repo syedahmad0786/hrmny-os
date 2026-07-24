@@ -4,7 +4,13 @@ import { scanAsanaWorkspace } from "./asana-migration";
 
 describe("Asana migration scan", () => {
   it("deduplicates multi-homed tasks and follows nested subtasks", async () => {
-    const shared = { gid: "t1", name: "Shared", num_subtasks: 1 };
+    const shared = {
+      gid: "t1",
+      name: "Shared",
+      num_subtasks: 1,
+      custom_type: { gid: "ct1", name: "Request" },
+      custom_type_status_option: { gid: "cts1", name: "Open" },
+    };
     const sharedInMyTasks = {
       ...shared,
       assignee_section: { gid: "ms1", name: "Today" },
@@ -52,6 +58,25 @@ describe("Asana migration scan", () => {
         ),
       ),
       listProjectTasks: vi.fn().mockResolvedValue([shared]),
+      listCustomTypes: vi.fn().mockResolvedValue([
+        {
+          gid: "ct1",
+          name: "Request",
+          status_options: [
+            {
+              gid: "cts1",
+              name: "Open",
+              completion_state: "incomplete",
+            },
+            {
+              gid: "cts2",
+              name: "Resolved",
+              completion_state: "complete",
+            },
+          ],
+        },
+      ]),
+      getCustomType: vi.fn(),
       getUserTaskList: vi.fn().mockResolvedValue({
         gid: "utl1",
         name: "My Tasks",
@@ -128,6 +153,9 @@ describe("Asana migration scan", () => {
       tasks: 4,
       projectTaskLinks: 2,
       multiHomedTasks: 1,
+      customTaskTypes: 1,
+      customTaskStatuses: 2,
+      projectCustomTaskTypes: 2,
       stories: 4,
       comments: 4,
       attachments: 4,
@@ -141,6 +169,8 @@ describe("Asana migration scan", () => {
       statusUpdates: 4,
     });
     expect(adapter.listSubtasks).toHaveBeenCalledTimes(2);
+    expect(adapter.listCustomTypes).toHaveBeenCalledTimes(2);
+    expect(adapter.getCustomType).not.toHaveBeenCalled();
     expect(result.myTasks).toEqual([
       {
         taskGid: "t1",

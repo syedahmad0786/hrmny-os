@@ -18,6 +18,8 @@ export {
   createAsanaViaComposio,
   type AsanaAdapter,
   type AsanaAttachment,
+  type AsanaCustomType,
+  type AsanaCustomTypeStatusOption,
   type AsanaEvent,
   type AsanaEventPage,
   type AsanaGoal,
