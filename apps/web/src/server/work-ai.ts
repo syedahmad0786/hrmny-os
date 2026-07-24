@@ -10,7 +10,9 @@ import type { TrpcContext } from "./trpc/trpc";
 import {
   customTaskTypeAccess,
   getDemoWork,
+  requireGoalAccess,
   requireItemAccess,
+  requirePortfolioAccess,
   requireProjectAccess,
 } from "./trpc/work-management-router";
 
@@ -151,7 +153,9 @@ export const workAiActionSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("create_status"),
-    projectId: z.string().uuid(),
+    targetType: z.enum(["project", "portfolio", "goal"]).default("project"),
+    targetId: z.string().uuid().nullable().default(null),
+    projectId: z.string().uuid().nullable().default(null),
     health: z.enum(["on_track", "at_risk", "off_track", "complete"]),
     progress: z.number().min(0).max(100).nullable(),
     title: z.string().trim().min(1).max(300),
@@ -316,6 +320,8 @@ const sourceSchema = z.object({
     "comment",
     "custom_task_type",
     "custom_task_status",
+    "goal",
+    "portfolio",
     "external_file",
   ]),
   label: z.string().trim().min(1).max(300),
@@ -546,8 +552,17 @@ async function buildContext(
   projectIds: readonly string[],
   itemId: string | null,
   externalSources: readonly WorkAiContextSource[],
+  statusTarget: {
+    targetType: "project" | "portfolio" | "goal";
+    targetId: string;
+  } | null,
 ) {
   const ids = [...new Set(projectIds)];
+  if (statusTarget?.targetType === "project") {
+    const existing = ids.indexOf(statusTarget.targetId);
+    if (existing >= 0) ids.splice(existing, 1);
+    ids.unshift(statusTarget.targetId);
+  }
   if (itemId) {
     const access = await requireItemAccess(ctx, itemId);
     const existing = ids.indexOf(access.projectId);
@@ -556,6 +571,29 @@ async function buildContext(
   }
   const sources: WorkAiContextSource[] = [];
   const db = getDb();
+  if (statusTarget?.targetType === "goal") {
+    const goal = await requireGoalAccess(ctx, statusTarget.targetId);
+    sources.push({
+      id: goal.goalId,
+      type: "goal",
+      label: goal.name,
+      content: JSON.stringify({
+        description: goal.description.slice(0, 2_000),
+        status: goal.status,
+        progress: goal.progress,
+        startDate: goal.startDate,
+        dueDate: goal.dueDate,
+      }),
+    });
+  } else if (statusTarget?.targetType === "portfolio") {
+    const portfolio = await requirePortfolioAccess(ctx, statusTarget.targetId);
+    sources.push({
+      id: portfolio.portfolioId,
+      type: "portfolio",
+      label: portfolio.name,
+      content: portfolio.description.slice(0, 2_000),
+    });
+  }
   for (const projectId of ids.slice(0, 10)) {
     const project = await requireProjectAccess(ctx, projectId);
     const customTaskTypesEnabled = await featureEnabled(
@@ -863,6 +901,15 @@ function safeResult(
     actions: result.conditionMatched
       ? result.actions.filter((action) => {
           if (!permittedActions.has(action.type)) return false;
+          if (action.type === "create_status") {
+            const targetId =
+              action.targetId ??
+              (action.targetType === "project" ? action.projectId : null);
+            return context.sources.some(
+              (source) =>
+                source.id === targetId && source.type === action.targetType,
+            );
+          }
           if ("projectId" in action && !allowedProjects.has(action.projectId))
             return false;
           if ("itemId" in action && !allowedItems.has(action.itemId))
@@ -961,6 +1008,9 @@ function mockResult(
   const tasks = context.sources.filter((source) => source.type === "task");
   const projects = context.sources.filter(
     (source) => source.type === "project",
+  );
+  const statusTarget = context.sources.find((source) =>
+    ["project", "portfolio", "goal"].includes(source.type),
   );
   const projectId = projects[0]?.id;
   const itemId = context.itemId ?? tasks[0]?.id;
@@ -1122,13 +1172,15 @@ function mockResult(
       priority: null,
       dueAt: null,
     });
-  if (kind === "smart_status" && projectId)
+  if (kind === "smart_status" && statusTarget)
     actions.push({
       type: "create_status",
-      projectId,
+      targetType: statusTarget.type as "project" | "portfolio" | "goal",
+      targetId: statusTarget.id,
+      projectId: statusTarget.type === "project" ? statusTarget.id : null,
       health: "on_track",
       progress: null,
-      title: "Draft project status",
+      title: `Draft ${statusTarget.type} status`,
       body: `${tasks.length} visible tasks reviewed. ${bullets.join("; ")}`,
     });
   if (kind === "smart_fields" && projectId)
@@ -1253,6 +1305,10 @@ export async function generateWorkAi(input: {
   aiCondition?: string | null;
   allowedActionTypes?: readonly WorkAiAction["type"][];
   externalSources?: readonly WorkAiContextSource[];
+  statusTarget?: {
+    targetType: "project" | "portfolio" | "goal";
+    targetId: string;
+  } | null;
   model?: string | null;
 }) {
   const employeeId = actor(input.ctx);
@@ -1264,6 +1320,7 @@ export async function generateWorkAi(input: {
     input.projectIds,
     input.itemId,
     input.externalSources ?? [],
+    input.statusTarget ?? null,
   );
   const runId = randomUUID();
   const createdAt = new Date();
