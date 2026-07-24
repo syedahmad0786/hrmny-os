@@ -266,6 +266,102 @@ function isNumericFieldMetric(metric: string) {
   return metric === "custom_field_sum" || metric === "custom_field_average";
 }
 
+function ReportChart({
+  data,
+  style,
+  metric,
+  pending = false,
+  error,
+}: {
+  data?: { data: { label: string; value: number }[]; total: number } | null;
+  style: "bar" | "donut" | "number";
+  metric: string;
+  pending?: boolean;
+  error?: { message: string } | null;
+}) {
+  const donutBackground = useMemo(() => {
+    if (!data?.total) return "#F0E9DE";
+    let offset = 0;
+    return `conic-gradient(${data.data
+      .map((bucket, index) => {
+        const start = offset;
+        offset += (bucket.value / data.total) * 100;
+        return `${chartColors[index % chartColors.length]} ${start}% ${offset}%`;
+      })
+      .join(", ")})`;
+  }, [data]);
+  if (error)
+    return <p className="mt-4 text-sm text-red-700">{error.message}</p>;
+  if (pending)
+    return <p className="mt-4 text-sm text-muted">Updating chart…</p>;
+  if (!data?.data.length)
+    return (
+      <p className="mt-4 text-sm text-muted">No records match these filters.</p>
+    );
+  if (style === "number")
+    return (
+      <div className="mt-5 rounded-lg border border-sand bg-white p-5 text-center">
+        <p className="text-xs uppercase tracking-wide text-muted">Total</p>
+        <p className="mt-1 text-4xl font-semibold">
+          {chartValue(metric, data.total)}
+        </p>
+      </div>
+    );
+  if (style === "donut")
+    return (
+      <div className="mt-5 flex flex-wrap items-center gap-6">
+        <div
+          aria-label="Donut chart"
+          className="grid h-40 w-40 place-items-center rounded-full"
+          style={{ background: donutBackground }}
+        >
+          <div className="grid h-24 w-24 place-items-center rounded-full bg-white text-center">
+            <span className="font-semibold">
+              {chartValue(metric, data.total)}
+            </span>
+          </div>
+        </div>
+        <div className="grid gap-2 text-sm">
+          {data.data.map((bucket, index) => (
+            <div key={bucket.label} className="flex items-center gap-2">
+              <span
+                className="h-3 w-3 rounded-full"
+                style={{ background: chartColors[index % chartColors.length] }}
+              />
+              <span className="min-w-32">{bucket.label}</span>
+              <strong>{chartValue(metric, bucket.value)}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  return (
+    <div className="mt-5 grid gap-3">
+      {data.data.map((bucket) => (
+        <div key={bucket.label}>
+          <div className="mb-1 flex justify-between gap-3 text-sm">
+            <span>{bucket.label}</span>
+            <strong>{chartValue(metric, bucket.value)}</strong>
+          </div>
+          <div className="h-3 overflow-hidden rounded-full bg-sand/60">
+            <div
+              className="h-full rounded-full bg-clay"
+              style={{
+                width: `${Math.max(
+                  2,
+                  (bucket.value /
+                    Math.max(...data.data.map((item) => item.value), 1)) *
+                    100,
+                )}%`,
+              }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function PlanningPage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
@@ -700,20 +796,14 @@ export default function PlanningPage() {
           : portfolios.isPending;
   const displayedMetric =
     chartReportType === "tasks" ? chartMetric : "task_count";
-  const donutBackground = useMemo(() => {
-    if (!chartData?.total) return "#F0E9DE";
-    let offset = 0;
-    return `conic-gradient(${chartData.data
-      .map((bucket, index) => {
-        const start = offset;
-        offset += (bucket.value / chartData.total) * 100;
-        return `${chartColors[index % chartColors.length]} ${start}% ${offset}%`;
-      })
-      .join(", ")})`;
-  }, [chartData]);
   const dashboards = trpc.work.reporting.dashboards.useQuery(undefined, {
     enabled: reportingEnabled,
   });
+  const [activeDashboardId, setActiveDashboardId] = useState("");
+  const renderedDashboard = trpc.work.reporting.renderDashboard.useQuery(
+    { dashboardId: activeDashboardId },
+    { enabled: Boolean(activeDashboardId && reportingEnabled) },
+  );
   const exportReport = trpc.work.reporting.exportProject.useQuery(
     { projectId },
     { enabled: false },
@@ -821,14 +911,27 @@ export default function PlanningPage() {
   });
 
   const [dashboardName, setDashboardName] = useState("");
+  const [boardName, setBoardName] = useState("");
+  const [boardViewIds, setBoardViewIds] = useState<string[]>([]);
   const saveDashboard = trpc.work.reporting.saveDashboard.useMutation({
     onSuccess: async () => {
       setDashboardName("");
       await utils.work.reporting.dashboards.invalidate();
     },
   });
+  const combineDashboards = trpc.work.reporting.combineDashboards.useMutation({
+    onSuccess: async (dashboard) => {
+      setBoardName("");
+      setBoardViewIds([]);
+      setActiveDashboardId(dashboard.dashboardId);
+      await utils.work.reporting.dashboards.invalidate();
+    },
+  });
   const deleteDashboard = trpc.work.reporting.deleteDashboard.useMutation({
-    onSuccess: () => utils.work.reporting.dashboards.invalidate(),
+    onSuccess: (_result, input) => {
+      if (activeDashboardId === input.dashboardId) setActiveDashboardId("");
+      return utils.work.reporting.dashboards.invalidate();
+    },
   });
   const shareDashboard = trpc.work.reporting.shareDashboard.useMutation({
     onSuccess: () => utils.work.reporting.dashboards.invalidate(),
@@ -1866,83 +1969,13 @@ export default function PlanningPage() {
                 </>
               ) : null}
             </div>
-            {chartError ? (
-              <p className="mt-4 text-sm text-red-700">{chartError.message}</p>
-            ) : chartPending ? (
-              <p className="mt-4 text-sm text-muted">Updating chart…</p>
-            ) : !chartData?.data.length ? (
-              <p className="mt-4 text-sm text-muted">
-                No records match these filters.
-              </p>
-            ) : chartStyle === "number" ? (
-              <div className="mt-5 rounded-lg border border-sand bg-white p-5 text-center">
-                <p className="text-xs uppercase tracking-wide text-muted">
-                  Total
-                </p>
-                <p className="mt-1 text-4xl font-semibold">
-                  {chartValue(displayedMetric, chartData.total)}
-                </p>
-              </div>
-            ) : chartStyle === "donut" ? (
-              <div className="mt-5 flex flex-wrap items-center gap-6">
-                <div
-                  aria-label="Donut chart"
-                  className="grid h-40 w-40 place-items-center rounded-full"
-                  style={{ background: donutBackground }}
-                >
-                  <div className="grid h-24 w-24 place-items-center rounded-full bg-white text-center">
-                    <span className="font-semibold">
-                      {chartValue(displayedMetric, chartData.total)}
-                    </span>
-                  </div>
-                </div>
-                <div className="grid gap-2 text-sm">
-                  {chartData.data.map((bucket, index) => (
-                    <div key={bucket.label} className="flex items-center gap-2">
-                      <span
-                        className="h-3 w-3 rounded-full"
-                        style={{
-                          background: chartColors[index % chartColors.length],
-                        }}
-                      />
-                      <span className="min-w-32">{bucket.label}</span>
-                      <strong>
-                        {chartValue(displayedMetric, bucket.value)}
-                      </strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="mt-5 grid gap-3">
-                {chartData.data.map((bucket) => (
-                  <div key={bucket.label}>
-                    <div className="mb-1 flex justify-between gap-3 text-sm">
-                      <span>{bucket.label}</span>
-                      <strong>
-                        {chartValue(displayedMetric, bucket.value)}
-                      </strong>
-                    </div>
-                    <div className="h-3 overflow-hidden rounded-full bg-sand/60">
-                      <div
-                        className="h-full rounded-full bg-clay"
-                        style={{
-                          width: `${Math.max(
-                            2,
-                            (bucket.value /
-                              Math.max(
-                                ...chartData.data.map((item) => item.value),
-                                1,
-                              )) *
-                              100,
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <ReportChart
+              data={chartData}
+              style={chartStyle}
+              metric={displayedMetric}
+              pending={chartPending}
+              error={chartError}
+            />
           </div>
           {(dashboards.data ?? []).length ? (
             <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
@@ -1956,8 +1989,16 @@ export default function PlanningPage() {
                     <button
                       type="button"
                       className="px-2 py-1"
-                      onClick={() => loadDashboard(item.config)}
+                      onClick={() => {
+                        if (Array.isArray(item.config.widgets))
+                          setActiveDashboardId(item.dashboardId);
+                        else {
+                          setActiveDashboardId("");
+                          loadDashboard(item.config);
+                        }
+                      }}
                     >
+                      {Array.isArray(item.config.widgets) ? "Dashboard: " : ""}
                       {item.name}
                     </button>
                     {item.currentAccess === "viewer" ? (
@@ -2053,6 +2094,124 @@ export default function PlanningPage() {
                   ) : null}
                 </div>
               ))}
+            </div>
+          ) : null}
+          {(dashboards.data ?? []).filter(
+            (dashboard) => !Array.isArray(dashboard.config.widgets),
+          ).length >= 2 ? (
+            <details className="mt-4 rounded-lg border border-sand bg-white p-3">
+              <summary className="cursor-pointer text-sm font-semibold">
+                Build a multi-widget dashboard
+              </summary>
+              <form
+                className="mt-3 grid gap-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  combineDashboards.mutate({
+                    name: boardName,
+                    dashboardIds: boardViewIds,
+                  });
+                }}
+              >
+                <input
+                  aria-label="Dashboard name"
+                  className="rounded border border-sand px-3 py-2 text-sm"
+                  placeholder="Dashboard name"
+                  value={boardName}
+                  onChange={(event) => setBoardName(event.target.value)}
+                />
+                <fieldset className="grid gap-1 sm:grid-cols-2">
+                  <legend className="mb-1 text-xs text-muted">
+                    Choose two or more saved views
+                  </legend>
+                  {(dashboards.data ?? [])
+                    .filter(
+                      (dashboard) => !Array.isArray(dashboard.config.widgets),
+                    )
+                    .map((dashboard) => (
+                      <label
+                        key={dashboard.dashboardId}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={boardViewIds.includes(dashboard.dashboardId)}
+                          onChange={(event) =>
+                            setBoardViewIds((current) =>
+                              event.target.checked
+                                ? [...current, dashboard.dashboardId]
+                                : current.filter(
+                                    (id) => id !== dashboard.dashboardId,
+                                  ),
+                            )
+                          }
+                        />
+                        {dashboard.name}
+                      </label>
+                    ))}
+                </fieldset>
+                {combineDashboards.error ? (
+                  <p className="text-sm text-red-700">
+                    {combineDashboards.error.message}
+                  </p>
+                ) : null}
+                <button
+                  className="justify-self-start rounded bg-ink px-3 py-2 text-sm text-white"
+                  disabled={
+                    !boardName.trim() ||
+                    boardViewIds.length < 2 ||
+                    combineDashboards.isPending
+                  }
+                >
+                  Save dashboard
+                </button>
+              </form>
+            </details>
+          ) : null}
+          {activeDashboardId ? (
+            <div className="mt-5 rounded-xl border border-sand bg-cream/40 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="font-display text-xl">
+                  {renderedDashboard.data?.name ?? "Dashboard"}
+                </h3>
+                <button
+                  type="button"
+                  className="rounded border border-sand bg-white px-3 py-1.5 text-sm"
+                  onClick={() => setActiveDashboardId("")}
+                >
+                  Close
+                </button>
+              </div>
+              {renderedDashboard.error ? (
+                <p className="mt-3 text-sm text-red-700">
+                  {renderedDashboard.error.message}
+                </p>
+              ) : renderedDashboard.isPending ? (
+                <p className="mt-3 text-sm text-muted">Loading dashboard…</p>
+              ) : (
+                <div className="mt-3 grid gap-4 lg:grid-cols-2">
+                  {(renderedDashboard.data?.widgets ?? []).map(
+                    (widget, index) => (
+                      <article
+                        key={`${widget.title}:${index}`}
+                        className="rounded-lg border border-sand bg-white p-4"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <h4 className="font-semibold">{widget.title}</h4>
+                          <span className="text-xs capitalize text-muted">
+                            {widget.reportType}
+                          </span>
+                        </div>
+                        <ReportChart
+                          data={widget.chart}
+                          style={widget.chartStyle}
+                          metric={widget.metric}
+                        />
+                      </article>
+                    ),
+                  )}
+                </div>
+              )}
             </div>
           ) : null}
         </section>
