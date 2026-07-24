@@ -2277,6 +2277,19 @@ describe("work management", () => {
         },
       },
     });
+    const taskDashboard = await caller.work.reporting.saveDashboard({
+      name: "Task report",
+      config: {
+        projectId: project.projectId,
+        chartStyle: "bar",
+        spec: {
+          ...baseSpec,
+          groupBy: "completion",
+          itemType: "task",
+          subtasks: "all",
+        },
+      },
+    });
     const clientId = resolveDevUser("portal_a").clientId!;
     getDemoWork().projects.get(project.projectId)!.clientId = clientId;
     await caller.admin.features.setOverride({
@@ -2321,6 +2334,16 @@ describe("work management", () => {
     ).toEqual({ data: [], total: 0 });
     expect(await caller.work.reporting.dashboards()).not.toContainEqual(
       timeDashboard,
+    );
+    await caller.admin.features.setOverride({
+      featureKey: "work.tasks",
+      scopeType: "client",
+      scopeKey: clientId,
+      enabled: false,
+      reason: "client disabled tasks",
+    });
+    expect(await caller.work.reporting.dashboards()).not.toContainEqual(
+      taskDashboard,
     );
   });
 

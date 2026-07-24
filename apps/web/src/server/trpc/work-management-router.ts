@@ -3118,6 +3118,8 @@ async function requireDashboardAccess(
       throw new TRPCError({ code: "NOT_FOUND" });
     await requireProjectCustomField(ctx, projectId, customFieldId);
   }
+  if (reportType === "tasks" && typeof projectId === "string")
+    await requireScopedFeature(ctx, "work.tasks", projectId);
   if (
     reportType === "tasks" &&
     typeof projectId === "string" &&
