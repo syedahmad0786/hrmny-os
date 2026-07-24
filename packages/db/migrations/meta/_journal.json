@@ -225,6 +225,13 @@
       "when": 1784959200000,
       "tag": "0031_work_ai_teammates",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1784962800000,
+      "tag": "0032_work_ai_teammate_actions",
+      "breakpoints": true
     }
   ]
 }

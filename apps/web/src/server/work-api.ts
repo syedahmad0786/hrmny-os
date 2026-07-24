@@ -367,7 +367,7 @@ export async function deleteWorkWebhook(subscriptionId: string) {
   });
 }
 
-type WorkApiIdentity = {
+export type WorkApiIdentity = {
   tokenId: string;
   employeeId: string;
   email: string;
@@ -414,10 +414,7 @@ async function identityForEmployee(employeeId: string) {
   return rows[0] ?? null;
 }
 
-export async function authenticateWorkApiRequest(
-  request: Request,
-  requiredScope: WorkApiScope,
-) {
+export async function authenticateWorkApiToken(request: Request) {
   const match = /^Bearer\s+(hrmny_work_[A-Za-z0-9_-]{40,})$/i.exec(
     request.headers.get("authorization")?.trim() ?? "",
   );
@@ -468,7 +465,7 @@ export async function authenticateWorkApiRequest(
     `);
     identity = rows[0] ?? null;
   }
-  if (!identity || !identity.scopes.includes(requiredScope)) return null;
+  if (!identity) return null;
   if (
     !(await featureEnabled("work.api_webhooks", {
       userId: identity.employeeId,
@@ -477,6 +474,16 @@ export async function authenticateWorkApiRequest(
   )
     return null;
   return { identity, context: identityContext(identity) };
+}
+
+export async function authenticateWorkApiRequest(
+  request: Request,
+  requiredScope: WorkApiScope,
+) {
+  const authenticated = await authenticateWorkApiToken(request);
+  return authenticated?.identity.scopes.includes(requiredScope)
+    ? authenticated
+    : null;
 }
 
 type DeliveryRow = {

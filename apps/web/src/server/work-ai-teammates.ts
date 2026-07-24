@@ -14,6 +14,7 @@ import {
 } from "./trpc/work-management-router";
 import {
   generateWorkAi,
+  rejectWorkAiRun,
   requireWorkAiFeature,
   type WorkAiAction,
   type WorkAiRun,
@@ -29,6 +30,19 @@ const teammateActionTypes = [
   "update_task",
   "create_comment",
   "create_project",
+  "delete_task",
+  "create_subtask",
+  "set_custom_field",
+  "add_to_project",
+  "add_follower",
+  "remove_follower",
+  "create_section",
+  "update_section",
+  "bulk_update_tasks",
+  "add_dependency",
+  "create_milestone",
+  "attach_file",
+  "schedule_follow_up",
 ] as const;
 type TeammateActionType = (typeof teammateActionTypes)[number];
 type TeammateMemberAccess = "owner" | "editor" | "user";
@@ -86,7 +100,7 @@ type WorkAiTeammateRun = {
   requestText: string;
   selectedSkillIds: string[];
   eventKey: string;
-  status: "running" | "answered" | "proposed" | "failed";
+  status: "running" | "answered" | "proposed" | "failed" | "cancelled";
   errorMessage: string | null;
   createdAt: string;
   completedAt: string | null;
@@ -203,6 +217,116 @@ export async function listWorkAiTeammates(ctx: TrpcContext) {
     order by lower(teammate.name)
   `);
   return rows.map(mapTeammate);
+}
+
+export async function listWorkAiTeammateRuns(
+  ctx: TrpcContext,
+  teammateId: string,
+) {
+  await teammateById(ctx, teammateId);
+  const db = getDb();
+  const runs = !db
+    ? [...demoRuns.values()]
+        .filter((run) => run.teammateId === teammateId)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, 100)
+        .map((run) => ({
+          ...run,
+          itemTitle: run.itemId
+            ? getDemoWork().items.get(run.itemId)?.title
+            : null,
+        }))
+    : (
+        await db.execute<
+          WorkAiTeammateRun & {
+            itemTitle: string | null;
+            createdAt: Date | string;
+            completedAt: Date | string | null;
+          }
+        >(sql`
+          select run.work_ai_teammate_run_id as "teammateRunId",
+            run.work_ai_teammate_id as "teammateId", run.work_ai_run_id as "aiRunId",
+            run.work_project_id as "projectId", run.work_item_id as "itemId",
+            item.title as "itemTitle",
+            run.triggered_by_employee_id as "triggeredByEmployeeId",
+            run.trigger_type as "triggerType", run.request_text as "requestText",
+            run.selected_skill_ids as "selectedSkillIds", run.event_key as "eventKey",
+            run.status, run.error_message as "errorMessage",
+            run.created_at as "createdAt", run.completed_at as "completedAt"
+          from public.work_ai_teammate_run run
+          left join public.work_item item on item.work_item_id = run.work_item_id
+          where run.work_ai_teammate_id = ${teammateId}::uuid
+          order by run.created_at desc limit 100
+        `)
+      ).map((run) => ({
+        ...run,
+        createdAt: new Date(run.createdAt).toISOString(),
+        completedAt: run.completedAt
+          ? new Date(run.completedAt).toISOString()
+          : null,
+      }));
+  const visible = [];
+  for (const run of runs) {
+    try {
+      if (run.itemId) await requireItemAccess(ctx, run.itemId);
+      else await requireProjectAccess(ctx, run.projectId);
+      visible.push(run);
+    } catch (error) {
+      if (!(error instanceof TRPCError)) throw error;
+    }
+  }
+  return visible;
+}
+
+export async function interruptWorkAiTeammateRun(input: {
+  ctx: TrpcContext;
+  teammateId: string;
+  teammateRunId: string;
+}) {
+  const employeeId = actor(input.ctx);
+  const teammate = await teammateById(input.ctx, input.teammateId);
+  const db = getDb();
+  let interrupted = false;
+  if (!db) {
+    const run = demoRuns.get(input.teammateRunId);
+    if (
+      run?.teammateId === input.teammateId &&
+      run.status === "running" &&
+      (run.triggeredByEmployeeId === employeeId ||
+        memberRank[teammate.memberAccess] >= memberRank.editor)
+    ) {
+      run.status = "cancelled";
+      run.completedAt = new Date().toISOString();
+      interrupted = true;
+    }
+  } else {
+    const rows = await db.execute(sql`
+      update public.work_ai_teammate_run set status = 'cancelled', completed_at = now()
+      where work_ai_teammate_run_id = ${input.teammateRunId}::uuid
+        and work_ai_teammate_id = ${input.teammateId}::uuid and status = 'running'
+        and (
+          triggered_by_employee_id = ${employeeId}::uuid
+          or ${memberRank[teammate.memberAccess] >= memberRank.editor}
+        )
+      returning work_ai_teammate_run_id
+    `);
+    interrupted = Boolean(rows[0]);
+  }
+  if (!interrupted)
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "This run can no longer be interrupted",
+    });
+  await writeAudit({
+    actorEmployeeId: employeeId,
+    action: "work.ai.teammate.run.interrupt",
+    entityType: "work_ai_teammate_run",
+    entityId: input.teammateRunId,
+    before: { status: "running" },
+    after: { status: "cancelled" },
+    reason: null,
+  });
+  return { ok: true as const };
 }
 
 export async function createWorkAiTeammate(
@@ -1101,6 +1225,27 @@ export async function runWorkAiTeammate(input: {
       allowedActionTypes: permitted,
       model: teammate.model,
     });
+    const cancelled = !db
+      ? demoRuns.get(teammateRunId)?.status === "cancelled"
+      : Boolean(
+          (
+            await db.execute(sql`
+              select 1 from public.work_ai_teammate_run
+              where work_ai_teammate_run_id = ${teammateRunId}::uuid
+                and status = 'cancelled'
+            `)
+          )[0],
+        );
+    if (cancelled) {
+      if (run.status === "proposed")
+        await rejectWorkAiRun(run.runId, employeeId);
+      return {
+        duplicate: false as const,
+        teammateRunId,
+        run: null,
+        cancelled: true as const,
+      };
+    }
     const status = run.status === "proposed" ? "proposed" : "answered";
     if (!db) {
       const stored = demoRuns.get(teammateRunId)!;
@@ -1206,6 +1351,64 @@ export async function runWorkAiTeammateJob(input: {
   });
 }
 
+export async function scheduleWorkAiTeammateFollowUp(input: {
+  ctx: TrpcContext;
+  run: WorkAiRun;
+  action: Extract<WorkAiAction, { type: "schedule_follow_up" }>;
+  actionIndex: number;
+}) {
+  const employeeId = actor(input.ctx);
+  if (employeeId !== input.run.createdByEmployeeId)
+    throw new TRPCError({ code: "FORBIDDEN" });
+  const runAt = new Date(input.action.runAt);
+  if (
+    runAt.getTime() <= Date.now() ||
+    runAt.getTime() > Date.now() + 366 * 86_400_000
+  )
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Follow-up must be within the next year",
+    });
+  await requireItemAccess(input.ctx, input.action.itemId);
+  const db = getDb();
+  let teammateId: string | undefined;
+  if (!db)
+    teammateId = [...demoRuns.values()].find(
+      (candidate) => candidate.aiRunId === input.run.runId,
+    )?.teammateId;
+  else {
+    const [link] = await db.execute<{ teammateId: string }>(sql`
+      select work_ai_teammate_id as "teammateId"
+      from public.work_ai_teammate_run
+      where work_ai_run_id = ${input.run.runId}::uuid
+      limit 1
+    `);
+    teammateId = link?.teammateId;
+  }
+  if (!teammateId)
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Follow-ups are available only to AI Teammates",
+    });
+  const jobKey = `ai-teammate-follow-up:${input.run.runId}:${input.actionIndex}`;
+  if (db)
+    await db.execute(sql`
+      insert into public.scheduled_job (job_key, kind, run_at, payload)
+      values (
+        ${jobKey}, 'work_ai_teammate', ${runAt},
+        ${JSON.stringify({
+          teammateId,
+          itemId: input.action.itemId,
+          actorEmployeeId: employeeId,
+          requestText: input.action.requestText,
+          triggerType: "follow_up",
+          eventKey: jobKey,
+        })}::jsonb
+      ) on conflict (job_key) do nothing
+    `);
+  return { jobKey, runAt: runAt.toISOString() };
+}
+
 export async function workAiTeammateExecutionContext(
   ctx: TrpcContext,
   run: WorkAiRun,
@@ -1275,6 +1478,13 @@ export async function workAiTeammateExecutionContext(
     });
   if ("itemId" in action)
     await requireItemInProject(ctx, link.projectId, action.itemId);
+  if (action.type === "create_subtask")
+    await requireItemInProject(ctx, link.projectId, action.parentItemId);
+  if (action.type === "add_dependency")
+    await requireItemInProject(ctx, link.projectId, action.dependsOnItemId);
+  if (action.type === "bulk_update_tasks")
+    for (const update of action.updates)
+      await requireItemInProject(ctx, link.projectId, update.itemId);
   if (action.type === "create_project" && action.privacy !== "organization")
     throw new TRPCError({
       code: "FORBIDDEN",

@@ -247,4 +247,35 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/forgotten_at timestamptz/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("adds approval-backed teammate actions, follow-ups, and interruption", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0032_work_ai_teammate_actions.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0032_work_ai_teammate_actions.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0032_work_ai_teammate_actions.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    for (const action of [
+      "create_subtask",
+      "set_custom_field",
+      "bulk_update_tasks",
+      "add_dependency",
+      "create_milestone",
+      "attach_file",
+      "schedule_follow_up",
+    ])
+      expect(migration).toContain(`'${action}'`);
+    expect(migration).toMatch(/'cancelled'/i);
+  });
 });

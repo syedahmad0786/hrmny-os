@@ -1003,7 +1003,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
       "Permission-aware AI access to connected work and external tools.",
     group: "AI",
     source: "asana",
-    availability: "planned",
+    availability: "beta",
     defaultEnabled: false,
   }),
 ];
