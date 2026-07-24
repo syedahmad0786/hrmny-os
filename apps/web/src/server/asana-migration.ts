@@ -69,6 +69,10 @@ export type AsanaWorkspaceScan = {
     sectionGid: string | null;
   }>;
   customTaskTypes: AsanaCustomType[];
+  customTaskTypeMemberships: Array<{
+    customTaskTypeGid: string;
+    membership: AsanaMembership;
+  }>;
   projectCustomTaskTypes: Array<{
     projectGid: string;
     customTaskTypeGid: string;
@@ -111,6 +115,7 @@ export type AsanaWorkspaceScan = {
     tags: number;
     customFields: number;
     customTaskTypes: number;
+    customTaskTypeMemberships: number;
     customTaskStatuses: number;
     projectCustomTaskTypes: number;
     stories: number | null;
@@ -236,6 +241,16 @@ export async function scanAsanaWorkspace(
     adapter.getCustomType(gid),
   ))
     customTaskTypes.set(type.gid, type);
+  const customTaskTypeMembershipRows = await mapLimit(
+    [...customTaskTypes.values()],
+    4,
+    async (type) => ({
+      customTaskTypeGid: type.gid,
+      memberships: adapter.listCustomTypeMemberships
+        ? await adapter.listCustomTypeMemberships(type.gid)
+        : [],
+    }),
+  );
   let stories: Array<{ taskGid: string; story: AsanaStory }> | null = null;
   let attachments: Array<{
     taskGid: string;
@@ -369,6 +384,12 @@ export async function scanAsanaWorkspace(
     tasks: taskValues,
     projectTasks: [...projectTasks.values()],
     customTaskTypes: [...customTaskTypes.values()],
+    customTaskTypeMemberships: customTaskTypeMembershipRows.flatMap((row) =>
+      row.memberships.map((membership) => ({
+        customTaskTypeGid: row.customTaskTypeGid,
+        membership,
+      })),
+    ),
     projectCustomTaskTypes: projectRows.flatMap((row) =>
       row.customTaskTypes.map((type) => ({
         projectGid: row.projectGid,
@@ -422,6 +443,10 @@ export async function scanAsanaWorkspace(
       tags: tags.size,
       customFields: customFields.size,
       customTaskTypes: customTaskTypes.size,
+      customTaskTypeMemberships: customTaskTypeMembershipRows.reduce(
+        (sum, row) => sum + row.memberships.length,
+        0,
+      ),
       customTaskStatuses: [...customTaskTypes.values()].reduce(
         (sum, type) => sum + type.status_options.length,
         0,

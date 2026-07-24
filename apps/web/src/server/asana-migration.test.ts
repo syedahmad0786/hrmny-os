@@ -50,6 +50,14 @@ describe("Asana migration scan", () => {
           access_level: "editor",
         },
       ]),
+      listCustomTypeMemberships: vi.fn().mockResolvedValue([
+        {
+          gid: "ctm1",
+          parent: { gid: "ct1", resource_type: "custom_type" },
+          member: { gid: "team1", name: "Ops", resource_type: "team" },
+          access_level: "editor",
+        },
+      ]),
       listSections: vi.fn((gid) =>
         Promise.resolve(
           gid === "utl1"
@@ -154,6 +162,7 @@ describe("Asana migration scan", () => {
       projectTaskLinks: 2,
       multiHomedTasks: 1,
       customTaskTypes: 1,
+      customTaskTypeMemberships: 1,
       customTaskStatuses: 2,
       projectCustomTaskTypes: 2,
       stories: 4,
@@ -170,6 +179,7 @@ describe("Asana migration scan", () => {
     });
     expect(adapter.listSubtasks).toHaveBeenCalledTimes(2);
     expect(adapter.listCustomTypes).toHaveBeenCalledTimes(2);
+    expect(adapter.listCustomTypeMemberships).toHaveBeenCalledTimes(1);
     expect(adapter.getCustomType).not.toHaveBeenCalled();
     expect(result.myTasks).toEqual([
       {
@@ -189,5 +199,11 @@ describe("Asana migration scan", () => {
     expect(result.tasks.find((task) => task.gid === "t1")).toMatchObject({
       assignee_section: { gid: "ms1" },
     });
+    expect(result.customTaskTypeMemberships).toEqual([
+      expect.objectContaining({
+        customTaskTypeGid: "ct1",
+        membership: expect.objectContaining({ gid: "ctm1" }),
+      }),
+    ]);
   });
 });

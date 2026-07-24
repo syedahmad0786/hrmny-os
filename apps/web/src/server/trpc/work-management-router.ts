@@ -38,6 +38,7 @@ import {
 import { router, staffProcedure, type TrpcContext } from "./trpc";
 
 type AccessLevel = "admin" | "editor" | "commenter" | "viewer";
+type CustomTaskTypeAccessLevel = "admin" | "editor" | "user" | "none";
 type WorkProject = {
   projectId: string;
   name: string;
@@ -114,7 +115,14 @@ type WorkCustomTaskType = {
   name: string;
   icon: string;
   sourcePlatform: "native" | "asana";
+  defaultAccessLevel: CustomTaskTypeAccessLevel;
   statuses: WorkCustomTaskStatusOption[];
+};
+type WorkCustomTaskTypeMember = {
+  customTaskTypeId: string;
+  memberType: "employee" | "team";
+  memberId: string;
+  accessLevel: Exclude<CustomTaskTypeAccessLevel, "none">;
 };
 type WorkProjectCustomTaskType = {
   projectId: string;
@@ -389,6 +397,7 @@ type DemoWork = {
   customFieldValues: Map<string, unknown>;
   customTaskTypes: Map<string, WorkCustomTaskType>;
   projectCustomTaskTypes: Map<string, WorkProjectCustomTaskType>;
+  customTaskTypeMembers: Map<string, WorkCustomTaskTypeMember>;
   attachments: Map<string, WorkAttachment>;
   proofAnnotations: Map<string, WorkProofAnnotation>;
   outOfOffice: Map<string, WorkOutOfOffice>;
@@ -436,6 +445,11 @@ const customTaskTypeProjectKey = (
   projectId: string,
   customTaskTypeId: string,
 ) => `${projectId}:${customTaskTypeId}`;
+const customTaskTypeMemberKey = (
+  customTaskTypeId: string,
+  memberType: WorkCustomTaskTypeMember["memberType"],
+  memberId: string,
+) => `${customTaskTypeId}:${memberType}:${memberId}`;
 let demoWork: DemoWork | undefined;
 
 export function getDemoWork(): DemoWork {
@@ -520,6 +534,7 @@ export function getDemoWork(): DemoWork {
     customFieldValues: new Map(),
     customTaskTypes: new Map(),
     projectCustomTaskTypes: new Map(),
+    customTaskTypeMembers: new Map(),
     attachments: new Map(),
     proofAnnotations: new Map(),
     outOfOffice: new Map(),
@@ -891,6 +906,31 @@ const bundleBlueprintSchema = z.object({
       }),
     )
     .max(200),
+  customTaskTypes: z
+    .array(
+      z.object({
+        customTaskTypeId: uuid,
+        name: z.string().trim().min(1).max(120),
+        icon: z.string().trim().min(1).max(16),
+        sourcePlatform: z.enum(["native", "asana"]),
+        isDefault: z.boolean(),
+        statuses: z
+          .array(
+            z.object({
+              statusOptionId: uuid,
+              name: z.string().trim().min(1).max(120),
+              color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+              completionState: z.enum(["incomplete", "complete"]),
+              enabled: z.boolean(),
+              position: z.number().int().min(0),
+            }),
+          )
+          .min(2)
+          .max(20),
+      }),
+    )
+    .max(100)
+    .default([]),
   rules: z
     .array(
       z
@@ -932,6 +972,76 @@ const bundleBlueprintSchema = z.object({
 function actor(ctx: TrpcContext): string {
   if (!ctx.employeeId) throw new TRPCError({ code: "UNAUTHORIZED" });
   return ctx.employeeId;
+}
+
+const customTaskTypeAccessRank: Record<CustomTaskTypeAccessLevel, number> = {
+  none: 0,
+  user: 1,
+  editor: 2,
+  admin: 3,
+};
+
+export async function customTaskTypeAccess(
+  ctx: TrpcContext,
+  customTaskTypeId: string,
+) {
+  const employeeId = actor(ctx);
+  const db = getDb();
+  if (!db) {
+    const type = getDemoWork().customTaskTypes.get(customTaskTypeId);
+    if (!type) throw new TRPCError({ code: "NOT_FOUND" });
+    return (
+      getDemoWork().customTaskTypeMembers.get(
+        customTaskTypeMemberKey(customTaskTypeId, "employee", employeeId),
+      )?.accessLevel ?? type.defaultAccessLevel
+    );
+  }
+  const [row] = await db.execute<{
+    defaultAccessLevel: CustomTaskTypeAccessLevel;
+    employeeAccessLevel: Exclude<CustomTaskTypeAccessLevel, "none"> | null;
+    teamAccessLevel: Exclude<CustomTaskTypeAccessLevel, "none"> | null;
+  }>(sql`
+    select type.default_access_level as "defaultAccessLevel",
+      employee_access.access_level as "employeeAccessLevel",
+      team_access.access_level as "teamAccessLevel"
+    from public.work_custom_task_type type
+    left join public.work_custom_task_type_member employee_access
+      on employee_access.work_custom_task_type_id = type.work_custom_task_type_id
+      and employee_access.member_type = 'employee'
+      and employee_access.employee_id = ${employeeId}::uuid
+    left join lateral (
+      select access.access_level
+      from public.work_custom_task_type_member access
+      join public.work_team_member team_member
+        on team_member.work_team_id = access.work_team_id
+      where access.work_custom_task_type_id = type.work_custom_task_type_id
+        and access.member_type = 'team'
+        and team_member.employee_id = ${employeeId}::uuid
+      order by case access.access_level
+        when 'admin' then 3 when 'editor' then 2 else 1 end desc
+      limit 1
+    ) team_access on true
+    where type.work_custom_task_type_id = ${customTaskTypeId}::uuid
+      and type.archived_at is null
+  `);
+  if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+  return (
+    row.employeeAccessLevel ?? row.teamAccessLevel ?? row.defaultAccessLevel
+  );
+}
+
+async function requireCustomTaskTypeAccess(
+  ctx: TrpcContext,
+  customTaskTypeId: string,
+  minimum: Exclude<CustomTaskTypeAccessLevel, "none"> = "user",
+) {
+  const accessLevel = await customTaskTypeAccess(ctx, customTaskTypeId);
+  if (customTaskTypeAccessRank[accessLevel] < customTaskTypeAccessRank[minimum])
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `${minimum} custom task type access required`,
+    });
+  return accessLevel;
 }
 
 function withOutOfOfficeStatus(period: WorkOutOfOffice) {
@@ -2221,6 +2331,7 @@ async function executeRuleAction(
 async function validateRuleActions(
   projectId: string,
   actions: readonly WorkRuleAction[],
+  ctx?: TrpcContext,
 ) {
   const db = getDb();
   if (!db) {
@@ -2252,6 +2363,8 @@ async function validateRuleActions(
             code: "BAD_REQUEST",
             message: "Task status not found",
           });
+        if (ctx)
+          await requireCustomTaskTypeAccess(ctx, action.customTaskTypeId);
       }
       if (
         action.type === "assign" &&
@@ -2298,6 +2411,7 @@ async function validateRuleActions(
           code: "BAD_REQUEST",
           message: "Task status not found",
         });
+      if (ctx) await requireCustomTaskTypeAccess(ctx, action.customTaskTypeId);
     } else if (action.type === "assign" && action.employeeId) {
       const rows = await db.execute(sql`
         select 1 from public.employee
@@ -2315,6 +2429,7 @@ async function validateRuleActions(
 async function validateCustomTaskRuleCondition(
   projectId: string,
   condition: WorkRuleBranch["conditions"][number],
+  ctx?: TrpcContext,
 ) {
   if (
     !["customTaskTypeId", "customTaskStatusOptionId"].includes(
@@ -2332,12 +2447,14 @@ async function validateCustomTaskRuleCondition(
       message: "Custom task type condition is invalid",
     });
   const db = getDb();
-  const exists = !db
+  const customTaskTypeId = !db
     ? condition.field === "customTaskTypeId"
       ? getDemoWork().projectCustomTaskTypes.has(
           customTaskTypeProjectKey(projectId, condition.value),
         )
-      : [...getDemoWork().projectCustomTaskTypes.values()].some(
+        ? condition.value
+        : null
+      : ([...getDemoWork().projectCustomTaskTypes.values()].find(
           (association) =>
             association.projectId === projectId &&
             getDemoWork()
@@ -2346,11 +2463,11 @@ async function validateCustomTaskRuleCondition(
                 (status) =>
                   status.statusOptionId === condition.value && status.enabled,
               ),
-        )
-    : Boolean(
-        (
-          await db.execute(sql`
-            select 1 from public.work_project_custom_task_type association
+        )?.customTaskTypeId ?? null)
+    : (
+        await db.execute<{ customTaskTypeId: string }>(sql`
+            select association.work_custom_task_type_id as "customTaskTypeId"
+            from public.work_project_custom_task_type association
             ${
               condition.field === "customTaskStatusOptionId"
                 ? sql`join public.work_custom_task_status_option status
@@ -2367,13 +2484,13 @@ async function validateCustomTaskRuleCondition(
               }
             limit 1
           `)
-        )[0],
-      );
-  if (!exists)
+      )[0]?.customTaskTypeId;
+  if (!customTaskTypeId)
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "Custom task type condition is not available in this project",
     });
+  if (ctx) await requireCustomTaskTypeAccess(ctx, customTaskTypeId);
 }
 
 async function recordRuleRun(
@@ -2747,6 +2864,26 @@ async function captureBundleBlueprint(
           options,
           isRequired,
         })),
+      customTaskTypes: [...store.projectCustomTaskTypes.values()]
+        .filter((association) => association.projectId === projectId)
+        .flatMap((association) => {
+          const type = store.customTaskTypes.get(association.customTaskTypeId);
+          return type
+            ? [
+                {
+                  customTaskTypeId: type.customTaskTypeId,
+                  name: type.name,
+                  icon: type.icon,
+                  sourcePlatform: type.sourcePlatform,
+                  isDefault: association.isDefault,
+                  statuses: type.statuses.map(
+                    ({ customTaskTypeId: _customTaskTypeId, ...status }) =>
+                      status,
+                  ),
+                },
+              ]
+            : [];
+        }),
       rules: [...store.rules.values()]
         .filter((rule) => rule.projectId === projectId)
         .map(({ name, triggerType, scheduleMinutes, branches }) => ({
@@ -2771,40 +2908,93 @@ async function captureBundleBlueprint(
         }),
     };
   }
-  const [sections, customFields, rules, templates] = await Promise.all([
-    db.execute<{ name: string }>(sql`
+  const [sections, customFields, customTaskTypeRows, rules, templates] =
+    await Promise.all([
+      db.execute<{ name: string }>(sql`
       select name from public.work_section
       where work_project_id = ${projectId}::uuid order by position
     `),
-    db.execute<{
-      name: string;
-      fieldType: WorkCustomFieldType;
-      options: unknown;
-      isRequired: boolean;
-    }>(sql`
+      db.execute<{
+        name: string;
+        fieldType: WorkCustomFieldType;
+        options: unknown;
+        isRequired: boolean;
+      }>(sql`
       select name, field_type as "fieldType", options,
         is_required as "isRequired"
       from public.work_custom_field
       where work_project_id = ${projectId}::uuid order by position
     `),
-    db.execute<{
-      name: string;
-      triggerType: WorkRule["triggerType"];
-      scheduleMinutes: number | null;
-      branches: unknown;
-    }>(sql`
+      db.execute<{
+        customTaskTypeId: string;
+        name: string;
+        icon: string;
+        sourcePlatform: "native" | "asana";
+        isDefault: boolean;
+        statusOptionId: string;
+        statusName: string;
+        color: string;
+        completionState: "incomplete" | "complete";
+        enabled: boolean;
+        position: number;
+      }>(sql`
+      select type.work_custom_task_type_id as "customTaskTypeId",
+        type.name, type.icon, type.source_platform as "sourcePlatform",
+        association.is_default as "isDefault",
+        status.work_custom_task_status_option_id as "statusOptionId",
+        status.name as "statusName", status.color,
+        status.completion_state as "completionState",
+        status.enabled, status.position
+      from public.work_project_custom_task_type association
+      join public.work_custom_task_type type
+        on type.work_custom_task_type_id = association.work_custom_task_type_id
+        and type.archived_at is null
+      join public.work_custom_task_status_option status
+        on status.work_custom_task_type_id = type.work_custom_task_type_id
+      where association.work_project_id = ${projectId}::uuid
+      order by lower(type.name), status.position, status.created_at
+    `),
+      db.execute<{
+        name: string;
+        triggerType: WorkRule["triggerType"];
+        scheduleMinutes: number | null;
+        branches: unknown;
+      }>(sql`
       select name, trigger_type as "triggerType",
         schedule_minutes as "scheduleMinutes", branches
       from public.work_rule
       where work_project_id = ${projectId}::uuid order by created_at
     `),
-    db.execute<{ name: string; blueprint: unknown }>(sql`
+      db.execute<{ name: string; blueprint: unknown }>(sql`
       select name, blueprint from public.work_template
       where work_project_id = ${projectId}::uuid
         and template_type = 'task' and archived_at is null
       order by created_at
     `),
-  ]);
+    ]);
+  const customTaskTypes = new Map<
+    string,
+    z.infer<typeof bundleBlueprintSchema>["customTaskTypes"][number]
+  >();
+  for (const row of customTaskTypeRows) {
+    const type = customTaskTypes.get(row.customTaskTypeId) ?? {
+      customTaskTypeId: row.customTaskTypeId,
+      name: row.name,
+      icon: row.icon,
+      sourcePlatform: row.sourcePlatform,
+      isDefault: row.isDefault,
+      statuses: [],
+    };
+    type.statuses.push({
+      statusOptionId: row.statusOptionId,
+      name: row.statusName,
+      color: row.color,
+      completionState: row.completionState,
+      enabled: row.enabled,
+      position: row.position,
+    });
+    customTaskTypes.set(row.customTaskTypeId, type);
+  }
   return {
     sections,
     sectionRefs: Object.fromEntries(
@@ -2823,6 +3013,7 @@ async function captureBundleBlueprint(
           )
         : [],
     })),
+    customTaskTypes: [...customTaskTypes.values()],
     rules: rules.flatMap((rule) => {
       const branches = z.array(ruleBranchSchema).safeParse(rule.branches);
       return branches.success ? [{ ...rule, branches: branches.data }] : [];
@@ -2836,6 +3027,20 @@ async function captureBundleBlueprint(
         : [];
     }),
   };
+}
+
+async function requireBundleCustomTaskTypeAccess(
+  ctx: TrpcContext,
+  projectId: string,
+  blueprint: z.infer<typeof bundleBlueprintSchema>,
+) {
+  if (!blueprint.customTaskTypes.length) return;
+  await requireScopedFeature(ctx, "work.custom_task_types", projectId);
+  await Promise.all(
+    blueprint.customTaskTypes.map((type) =>
+      requireCustomTaskTypeAccess(ctx, type.customTaskTypeId),
+    ),
+  );
 }
 
 export const workManagementRouter = router({
@@ -4536,7 +4741,7 @@ export const workManagementRouter = router({
                 : [],
             ),
           ]);
-          return [...typeIds]
+          const types = [...typeIds]
             .flatMap((customTaskTypeId) => {
               const type = store.customTaskTypes.get(customTaskTypeId);
               const association = associations.get(customTaskTypeId);
@@ -4551,6 +4756,15 @@ export const workManagementRouter = router({
                 : [];
             })
             .sort((a, b) => a.name.localeCompare(b.name));
+          return Promise.all(
+            types.map(async (type) => ({
+              ...type,
+              accessLevel: await customTaskTypeAccess(
+                ctx,
+                type.customTaskTypeId,
+              ),
+            })),
+          );
         }
         const rows = await db.execute<{
           customTaskTypeId: string;
@@ -4558,6 +4772,7 @@ export const workManagementRouter = router({
           name: string;
           icon: string;
           sourcePlatform: "native" | "asana";
+          defaultAccessLevel: CustomTaskTypeAccessLevel;
           isAssociated: boolean;
           isDefault: boolean;
           statusOptionId: string;
@@ -4570,6 +4785,7 @@ export const workManagementRouter = router({
           select type.work_custom_task_type_id as "customTaskTypeId",
             type.owner_work_project_id as "ownerProjectId", type.name, type.icon,
             type.source_platform as "sourcePlatform",
+            type.default_access_level as "defaultAccessLevel",
             association.work_project_custom_task_type_id is not null as "isAssociated",
             coalesce(association.is_default, false) as "isDefault",
             status.work_custom_task_status_option_id as "statusOptionId",
@@ -4605,6 +4821,7 @@ export const workManagementRouter = router({
             name: row.name,
             icon: row.icon,
             sourcePlatform: row.sourcePlatform,
+            defaultAccessLevel: row.defaultAccessLevel,
             isAssociated: row.isAssociated,
             isDefault: row.isDefault,
             statuses: [],
@@ -4620,7 +4837,292 @@ export const workManagementRouter = router({
           });
           types.set(row.customTaskTypeId, type);
         }
-        return [...types.values()];
+        return Promise.all(
+          [...types.values()].map(async (type) => ({
+            ...type,
+            accessLevel: await customTaskTypeAccess(ctx, type.customTaskTypeId),
+          })),
+        );
+      }),
+
+    access: staffProcedure
+      .input(z.object({ projectId: uuid, customTaskTypeId: uuid }))
+      .query(async ({ input, ctx }) => {
+        await requireScopedFeature(
+          ctx,
+          "work.custom_task_types",
+          input.projectId,
+        );
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        await requireCustomTaskTypeAccess(ctx, input.customTaskTypeId, "admin");
+        const db = getDb();
+        if (!db) {
+          const type = getDemoWork().customTaskTypes.get(
+            input.customTaskTypeId,
+          )!;
+          return {
+            defaultAccessLevel: type.defaultAccessLevel,
+            members: [...getDemoWork().customTaskTypeMembers.values()].filter(
+              (member) => member.customTaskTypeId === input.customTaskTypeId,
+            ),
+          };
+        }
+        const [type] = await db.execute<{
+          defaultAccessLevel: CustomTaskTypeAccessLevel;
+        }>(sql`
+          select default_access_level as "defaultAccessLevel"
+          from public.work_custom_task_type
+          where work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+            and archived_at is null
+        `);
+        if (!type) throw new TRPCError({ code: "NOT_FOUND" });
+        const members = await db.execute<
+          WorkCustomTaskTypeMember & { displayName: string }
+        >(sql`
+          select access.work_custom_task_type_id as "customTaskTypeId",
+            access.member_type as "memberType",
+            coalesce(access.employee_id, access.work_team_id) as "memberId",
+            access.access_level as "accessLevel",
+            coalesce(employee.display_name, team.name) as "displayName"
+          from public.work_custom_task_type_member access
+          left join public.employee employee on employee.employee_id = access.employee_id
+          left join public.work_team team on team.work_team_id = access.work_team_id
+          where access.work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+          order by access.member_type, lower(coalesce(employee.display_name, team.name))
+        `);
+        return { defaultAccessLevel: type.defaultAccessLevel, members };
+      }),
+
+    setDefaultAccess: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          customTaskTypeId: uuid,
+          accessLevel: z.enum(["admin", "editor", "user", "none"]),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireScopedFeature(
+          ctx,
+          "work.custom_task_types",
+          input.projectId,
+        );
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        await requireCustomTaskTypeAccess(ctx, input.customTaskTypeId, "admin");
+        const db = getDb();
+        if (!db) {
+          const type = getDemoWork().customTaskTypes.get(
+            input.customTaskTypeId,
+          )!;
+          const hasAdmin = [
+            ...getDemoWork().customTaskTypeMembers.values(),
+          ].some(
+            (member) =>
+              member.customTaskTypeId === input.customTaskTypeId &&
+              member.memberType === "employee" &&
+              member.accessLevel === "admin",
+          );
+          if (input.accessLevel !== "admin" && !hasAdmin)
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "A custom task type must keep at least one admin",
+            });
+          type.defaultAccessLevel = input.accessLevel;
+        } else {
+          await db.transaction(async (tx) => {
+            const adminMembers = await tx.execute<{ count: number }>(sql`
+              select count(*)::int as count
+              from public.work_custom_task_type_member
+              where work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+                and access_level = 'admin'
+                and (
+                  employee_id is not null or exists (
+                    select 1 from public.work_team_member team_member
+                    where team_member.work_team_id = work_custom_task_type_member.work_team_id
+                  )
+                )
+            `);
+            if (
+              input.accessLevel !== "admin" &&
+              (adminMembers[0]?.count ?? 0) === 0
+            )
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "A custom task type must keep at least one admin",
+              });
+            await tx.execute(sql`
+              update public.work_custom_task_type
+              set default_access_level = ${input.accessLevel}, updated_at = now()
+              where work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+            `);
+          });
+        }
+        await audit(
+          ctx,
+          "work.customTaskType.defaultAccess",
+          "work_custom_task_type",
+          input.customTaskTypeId,
+          { accessLevel: input.accessLevel },
+        );
+        return { ok: true as const };
+      }),
+
+    setMemberAccess: staffProcedure
+      .input(
+        z.object({
+          projectId: uuid,
+          customTaskTypeId: uuid,
+          memberType: z.enum(["employee", "team"]),
+          memberId: uuid,
+          accessLevel: z.enum(["admin", "editor", "user"]).nullable(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        await requireScopedFeature(
+          ctx,
+          "work.custom_task_types",
+          input.projectId,
+        );
+        await requireProjectAccess(ctx, input.projectId, "editor");
+        await requireCustomTaskTypeAccess(ctx, input.customTaskTypeId, "admin");
+        const db = getDb();
+        if (!db) {
+          const store = getDemoWork();
+          const key = customTaskTypeMemberKey(
+            input.customTaskTypeId,
+            input.memberType,
+            input.memberId,
+          );
+          const current = store.customTaskTypeMembers.get(key);
+          const otherAdmin = [...store.customTaskTypeMembers.entries()].some(
+            ([candidateKey, member]) =>
+              candidateKey !== key &&
+              member.customTaskTypeId === input.customTaskTypeId &&
+              member.memberType === "employee" &&
+              member.accessLevel === "admin",
+          );
+          const defaultAdmin =
+            store.customTaskTypes.get(input.customTaskTypeId)
+              ?.defaultAccessLevel === "admin";
+          if (
+            current?.accessLevel === "admin" &&
+            input.accessLevel !== "admin" &&
+            !otherAdmin &&
+            !defaultAdmin
+          )
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "A custom task type must keep at least one admin",
+            });
+          if (input.accessLevel)
+            store.customTaskTypeMembers.set(key, {
+              customTaskTypeId: input.customTaskTypeId,
+              memberType: input.memberType,
+              memberId: input.memberId,
+              accessLevel: input.accessLevel,
+            });
+          else store.customTaskTypeMembers.delete(key);
+        } else {
+          await db.transaction(async (tx) => {
+            const target =
+              input.memberType === "employee"
+                ? await tx.execute(sql`
+                    select 1 from public.employee
+                    where employee_id = ${input.memberId}::uuid and is_active
+                  `)
+                : await tx.execute(sql`
+                    select 1 from public.work_team
+                    where work_team_id = ${input.memberId}::uuid and archived_at is null
+                      and (
+                        privacy <> 'private'
+                        or created_by_employee_id = ${actor(ctx)}::uuid
+                        or exists (
+                          select 1 from public.work_team_member member
+                          where member.work_team_id = work_team.work_team_id
+                            and member.employee_id = ${actor(ctx)}::uuid
+                        )
+                      )
+                  `);
+            if (!target[0])
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `${input.memberType === "employee" ? "Employee" : "Team"} not found`,
+              });
+            if (!input.accessLevel) {
+              await tx.execute(sql`
+                delete from public.work_custom_task_type_member
+                where work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+                  and member_type = ${input.memberType}
+                  and ${
+                    input.memberType === "employee"
+                      ? sql`employee_id = ${input.memberId}::uuid`
+                      : sql`work_team_id = ${input.memberId}::uuid`
+                  }
+              `);
+            } else if (input.memberType === "employee") {
+              await tx.execute(sql`
+                insert into public.work_custom_task_type_member (
+                  work_custom_task_type_id, member_type, employee_id, access_level
+                ) values (
+                  ${input.customTaskTypeId}::uuid, 'employee',
+                  ${input.memberId}::uuid, ${input.accessLevel}
+                ) on conflict (work_custom_task_type_id, employee_id)
+                  where member_type = 'employee'
+                do update set access_level = excluded.access_level, updated_at = now()
+              `);
+            } else {
+              await tx.execute(sql`
+                insert into public.work_custom_task_type_member (
+                  work_custom_task_type_id, member_type, work_team_id, access_level
+                ) values (
+                  ${input.customTaskTypeId}::uuid, 'team',
+                  ${input.memberId}::uuid, ${input.accessLevel}
+                ) on conflict (work_custom_task_type_id, work_team_id)
+                  where member_type = 'team'
+                do update set access_level = excluded.access_level, updated_at = now()
+              `);
+            }
+            const [remaining] = await tx.execute<{
+              defaultAccessLevel: CustomTaskTypeAccessLevel;
+              adminCount: number;
+            }>(sql`
+              select type.default_access_level as "defaultAccessLevel",
+                count(access.work_custom_task_type_member_id) filter (
+                  where access.access_level = 'admin' and (
+                    access.employee_id is not null or exists (
+                      select 1 from public.work_team_member team_member
+                      where team_member.work_team_id = access.work_team_id
+                    )
+                  )
+                )::int as "adminCount"
+              from public.work_custom_task_type type
+              left join public.work_custom_task_type_member access
+                on access.work_custom_task_type_id = type.work_custom_task_type_id
+              where type.work_custom_task_type_id = ${input.customTaskTypeId}::uuid
+              group by type.default_access_level
+            `);
+            if (
+              remaining?.defaultAccessLevel !== "admin" &&
+              (remaining?.adminCount ?? 0) === 0
+            )
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "A custom task type must keep at least one admin",
+              });
+          });
+        }
+        await audit(
+          ctx,
+          "work.customTaskType.memberAccess",
+          "work_custom_task_type",
+          input.customTaskTypeId,
+          {
+            memberType: input.memberType,
+            memberId: input.memberId,
+            accessLevel: input.accessLevel,
+          },
+        );
+        return { ok: true as const };
       }),
 
     assignments: staffProcedure
@@ -4717,6 +5219,7 @@ export const workManagementRouter = router({
             name: input.name,
             icon: input.icon,
             sourcePlatform: "native",
+            defaultAccessLevel: "user",
             isDefault: input.isDefault,
             statuses: input.statuses.map((status, position) => ({
               statusOptionId: status.statusOptionId ?? randomUUID(),
@@ -4729,6 +5232,15 @@ export const workManagementRouter = router({
             })),
           };
           store.customTaskTypes.set(customTaskTypeId, type);
+          store.customTaskTypeMembers.set(
+            customTaskTypeMemberKey(customTaskTypeId, "employee", actor(ctx)),
+            {
+              customTaskTypeId,
+              memberType: "employee",
+              memberId: actor(ctx),
+              accessLevel: "admin",
+            },
+          );
           store.projectCustomTaskTypes.set(
             customTaskTypeProjectKey(input.projectId, customTaskTypeId),
             {
@@ -4751,6 +5263,7 @@ export const workManagementRouter = router({
               name: string;
               icon: string;
               sourcePlatform: "native";
+              defaultAccessLevel: CustomTaskTypeAccessLevel;
             }>(sql`
               insert into public.work_custom_task_type (
                 owner_work_project_id, name, icon, created_by_employee_id
@@ -4758,7 +5271,16 @@ export const workManagementRouter = router({
                 ${input.projectId}::uuid, ${input.name}, ${input.icon}, ${actor(ctx)}::uuid
               ) returning work_custom_task_type_id as "customTaskTypeId",
                 owner_work_project_id as "ownerProjectId", name, icon,
-                source_platform as "sourcePlatform"
+                source_platform as "sourcePlatform",
+                default_access_level as "defaultAccessLevel"
+            `);
+            await tx.execute(sql`
+              insert into public.work_custom_task_type_member (
+                work_custom_task_type_id, member_type, employee_id, access_level
+              ) values (
+                ${created!.customTaskTypeId}::uuid, 'employee',
+                ${actor(ctx)}::uuid, 'admin'
+              )
             `);
             await tx.execute(sql`
               insert into public.work_project_custom_task_type (
@@ -4813,13 +5335,17 @@ export const workManagementRouter = router({
           input.projectId,
         );
         await requireProjectAccess(ctx, input.projectId, "editor");
+        await requireCustomTaskTypeAccess(
+          ctx,
+          input.customTaskTypeId,
+          "editor",
+        );
         validateCustomTaskStatuses(input.statuses);
         const db = getDb();
         if (!db) {
           const store = getDemoWork();
           const type = store.customTaskTypes.get(input.customTaskTypeId);
-          if (!type || type.ownerProjectId !== input.projectId)
-            throw new TRPCError({ code: "NOT_FOUND" });
+          if (!type) throw new TRPCError({ code: "NOT_FOUND" });
           if (type.sourcePlatform !== "native")
             throw new TRPCError({
               code: "PRECONDITION_FAILED",
@@ -4881,8 +5407,7 @@ export const workManagementRouter = router({
               where work_custom_task_type_id = ${input.customTaskTypeId}::uuid
                 and archived_at is null for update
             `);
-            if (!type || type.ownerProjectId !== input.projectId)
-              throw new TRPCError({ code: "NOT_FOUND" });
+            if (!type) throw new TRPCError({ code: "NOT_FOUND" });
             if (type.sourcePlatform !== "native")
               throw new TRPCError({
                 code: "PRECONDITION_FAILED",
@@ -4994,6 +5519,7 @@ export const workManagementRouter = router({
         ]);
         await requireProjectAccess(ctx, input.sourceProjectId, "editor");
         await requireProjectAccess(ctx, input.targetProjectId, "editor");
+        await requireCustomTaskTypeAccess(ctx, input.customTaskTypeId);
         const db = getDb();
         if (!db) {
           const store = getDemoWork();
@@ -5053,6 +5579,8 @@ export const workManagementRouter = router({
           input.projectId,
         );
         await requireProjectAccess(ctx, input.projectId, "editor");
+        if (input.customTaskTypeId)
+          await requireCustomTaskTypeAccess(ctx, input.customTaskTypeId);
         const db = getDb();
         if (!db) {
           const removed = getDemoWork().projectCustomTaskTypes.delete(
@@ -5087,6 +5615,8 @@ export const workManagementRouter = router({
           input.projectId,
         );
         await requireProjectAccess(ctx, input.projectId, "editor");
+        if (input.customTaskTypeId)
+          await requireCustomTaskTypeAccess(ctx, input.customTaskTypeId);
         const db = getDb();
         if (!db) {
           const store = getDemoWork();
@@ -5168,6 +5698,8 @@ export const workManagementRouter = router({
         );
         await requireProjectAccess(ctx, input.projectId, "editor");
         await requireItemInProject(ctx, input.itemId, input.projectId);
+        if (input.customTaskTypeId)
+          await requireCustomTaskTypeAccess(ctx, input.customTaskTypeId);
         const db = getDb();
         let completedAt: string | null = null;
         if (!db) {
@@ -7476,9 +8008,13 @@ export const workManagementRouter = router({
               "work.custom_task_types",
               input.projectId,
             );
-          await validateRuleActions(input.projectId, branch.actions);
+          await validateRuleActions(input.projectId, branch.actions, ctx);
           for (const condition of branch.conditions)
-            await validateCustomTaskRuleCondition(input.projectId, condition);
+            await validateCustomTaskRuleCondition(
+              input.projectId,
+              condition,
+              ctx,
+            );
           const sectionConditions = branch.conditions.flatMap((condition) =>
             condition.field === "sectionId" &&
             typeof condition.value === "string"
@@ -7587,6 +8123,16 @@ export const workManagementRouter = router({
               "work.custom_task_types",
               rule.projectId,
             );
+          if (branches.success)
+            for (const branch of branches.data) {
+              await validateRuleActions(rule.projectId, branch.actions, ctx);
+              for (const condition of branch.conditions)
+                await validateCustomTaskRuleCondition(
+                  rule.projectId,
+                  condition,
+                  ctx,
+                );
+            }
         }
         if (!db)
           getDemoWork().rules.get(input.ruleId)!.isEnabled = input.enabled;
@@ -8213,6 +8759,11 @@ export const workManagementRouter = router({
       .mutation(async ({ input, ctx }) => {
         await requireProjectAccess(ctx, input.projectId, "admin");
         const blueprint = await captureBundleBlueprint(input.projectId);
+        await requireBundleCustomTaskTypeAccess(
+          ctx,
+          input.projectId,
+          blueprint,
+        );
         const bundle: WorkBundle = {
           bundleId: randomUUID(),
           name: input.name,
@@ -8286,6 +8837,11 @@ export const workManagementRouter = router({
             message: "Only the bundle owner can publish",
           });
         const blueprint = await captureBundleBlueprint(input.sourceProjectId);
+        await requireBundleCustomTaskTypeAccess(
+          ctx,
+          input.sourceProjectId,
+          blueprint,
+        );
         const version = bundle.version + 1;
         if (!db) {
           Object.assign(getDemoWork().bundles.get(input.bundleId)!, {
@@ -8345,6 +8901,80 @@ export const workManagementRouter = router({
             code: "PRECONDITION_FAILED",
             message: "Bundle is invalid",
           });
+        await requireBundleCustomTaskTypeAccess(
+          ctx,
+          input.projectId,
+          parsed.data,
+        );
+        const bundledTypeIds = new Set(
+          parsed.data.customTaskTypes.map((type) => type.customTaskTypeId),
+        );
+        const bundledStatusTypeIds = new Map(
+          parsed.data.customTaskTypes.flatMap((type) =>
+            type.statuses
+              .filter((status) => status.enabled)
+              .map((status) => [status.statusOptionId, type.customTaskTypeId]),
+          ),
+        );
+        const bundleHasAction = (action: WorkRuleAction) =>
+          action.type === "set_custom_task_status" &&
+          bundledTypeIds.has(action.customTaskTypeId) &&
+          bundledStatusTypeIds.get(action.statusOptionId) ===
+            action.customTaskTypeId;
+        const bundleHasCondition = (
+          condition: WorkRuleBranch["conditions"][number],
+        ) =>
+          typeof condition.value === "string" &&
+          ((condition.field === "customTaskTypeId" &&
+            bundledTypeIds.has(condition.value)) ||
+            (condition.field === "customTaskStatusOptionId" &&
+              bundledStatusTypeIds.has(condition.value)));
+        if (parsed.data.customTaskTypes.length) {
+          if (!db) {
+            for (const captured of parsed.data.customTaskTypes) {
+              const live = getDemoWork().customTaskTypes.get(
+                captured.customTaskTypeId,
+              );
+              if (
+                !live ||
+                captured.statuses.some(
+                  (status) =>
+                    !live.statuses.some(
+                      (candidate) =>
+                        candidate.statusOptionId === status.statusOptionId,
+                    ),
+                )
+              )
+                throw new TRPCError({
+                  code: "PRECONDITION_FAILED",
+                  message: "A bundled custom task type is no longer available",
+                });
+            }
+          } else {
+            for (const captured of parsed.data.customTaskTypes) {
+              const [live] = await db.execute<{ statusCount: number }>(sql`
+                select count(status.work_custom_task_status_option_id)::int
+                  as "statusCount"
+                from public.work_custom_task_type type
+                join public.work_custom_task_status_option status
+                  on status.work_custom_task_type_id = type.work_custom_task_type_id
+                where type.work_custom_task_type_id = ${captured.customTaskTypeId}::uuid
+                  and type.archived_at is null
+                  and status.work_custom_task_status_option_id in ${sql`(${sql.join(
+                    captured.statuses.map(
+                      (status) => sql`${status.statusOptionId}::uuid`,
+                    ),
+                    sql`, `,
+                  )})`}
+              `);
+              if ((live?.statusCount ?? 0) !== captured.statuses.length)
+                throw new TRPCError({
+                  code: "PRECONDITION_FAILED",
+                  message: "A bundled custom task type is no longer available",
+                });
+            }
+          }
+        }
         for (const rule of parsed.data.rules) {
           await requireRuleTriggerFeature(
             ctx,
@@ -8361,14 +8991,19 @@ export const workManagementRouter = router({
               await validateRuleActions(
                 input.projectId,
                 branch.actions.filter(
-                  (action) => action.type === "set_custom_task_status",
+                  (action) =>
+                    action.type === "set_custom_task_status" &&
+                    !bundleHasAction(action),
                 ),
+                ctx,
               );
               for (const condition of branch.conditions)
-                await validateCustomTaskRuleCondition(
-                  input.projectId,
-                  condition,
-                );
+                if (!bundleHasCondition(condition))
+                  await validateCustomTaskRuleCondition(
+                    input.projectId,
+                    condition,
+                    ctx,
+                  );
             }
           }
         }
@@ -8383,6 +9018,21 @@ export const workManagementRouter = router({
               code: "BAD_REQUEST",
               message: "A project can use up to five bundles",
             });
+          for (const type of parsed.data.customTaskTypes) {
+            const hasDefault = [...store.projectCustomTaskTypes.values()].some(
+              (association) =>
+                association.projectId === input.projectId &&
+                association.isDefault,
+            );
+            store.projectCustomTaskTypes.set(
+              customTaskTypeProjectKey(input.projectId, type.customTaskTypeId),
+              {
+                projectId: input.projectId,
+                customTaskTypeId: type.customTaskTypeId,
+                isDefault: type.isDefault && !hasDefault,
+              },
+            );
+          }
           const sectionIds = new Map(
             [...store.sections.values()]
               .filter((section) => section.projectId === input.projectId)
@@ -8505,6 +9155,22 @@ export const workManagementRouter = router({
                 code: "BAD_REQUEST",
                 message: "A project can use up to five bundles",
               });
+            for (const type of parsed.data.customTaskTypes)
+              await tx.execute(sql`
+                insert into public.work_project_custom_task_type (
+                  work_project_id, work_custom_task_type_id, is_default
+                ) values (
+                  ${input.projectId}::uuid, ${type.customTaskTypeId}::uuid,
+                  ${type.isDefault} and not exists (
+                    select 1 from public.work_project_custom_task_type
+                    where work_project_id = ${input.projectId}::uuid and is_default
+                  )
+                ) on conflict (work_project_id, work_custom_task_type_id)
+                do update set
+                  is_default = work_project_custom_task_type.is_default
+                    or excluded.is_default,
+                  updated_at = now()
+              `);
             const existingSections = await tx.execute<{
               sectionId: string;
               name: string;
@@ -10527,6 +11193,26 @@ export const workManagementRouter = router({
   }),
 
   members: router({
+    listTeams: staffProcedure.query(async ({ ctx }) => {
+      const db = getDb();
+      if (!db) return [] as Array<{ teamId: string; name: string }>;
+      const employeeId = actor(ctx);
+      return db.execute<{ teamId: string; name: string }>(sql`
+        select work_team_id as "teamId", name
+        from public.work_team
+        where archived_at is null
+          and (
+            privacy <> 'private'
+            or created_by_employee_id = ${employeeId}::uuid
+            or exists (
+              select 1 from public.work_team_member member
+              where member.work_team_id = work_team.work_team_id
+                and member.employee_id = ${employeeId}::uuid
+            )
+          )
+        order by lower(name)
+      `);
+    }),
     listEmployees: staffProcedure.query(async ({ ctx }) => {
       const outOfOfficeEnabled = await featureEnabled("work.out_of_office", {
         userId: ctx.employeeId,
