@@ -564,4 +564,30 @@ describe("work migration compatibility", () => {
     expect(migration).toMatch(/DELETE FROM public\.work_my_tasks_membership/i);
     expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
   });
+
+  it("stores secure employee-owned weekly focus history", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0043_work_my_tasks_focus.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0043_work_my_tasks_focus.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0043_work_my_tasks_focus.sql",
+      ),
+    ];
+    const path = candidates.find(existsSync);
+    expect(path).toBeTruthy();
+    const migration = readFileSync(path!, "utf8");
+    expect(migration).toMatch(
+      /CREATE TABLE IF NOT EXISTS public\.work_my_tasks_focus/i,
+    );
+    expect(migration).toMatch(/PRIMARY KEY \(employee_id, week_start\)/i);
+    expect(migration).toMatch(/length\(focus_text\) <= 500/i);
+    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+  });
 });

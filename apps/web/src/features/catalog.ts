@@ -605,6 +605,17 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     route: "/work/my-tasks",
   }),
   feature({
+    key: "work.my_tasks.focus",
+    name: "My Tasks focus",
+    description:
+      "Weekly priority plus a task-bound 25-minute focus timer and interruption state.",
+    group: "Personal productivity",
+    source: "asana",
+    availability: "beta",
+    defaultEnabled: true,
+    route: "/work/my-tasks",
+  }),
+  feature({
     key: "work.inbox",
     name: "Inbox",
     description:
@@ -1329,6 +1340,7 @@ const API_FEATURES: readonly [prefix: string, featureKey: string][] = [
   ["work.customFields.", "work.custom_fields"],
   ["work.attachments.", "work.attachments"],
   ["work.recurrence.", "work.recurring_tasks"],
+  ["work.personal.focus.", "work.my_tasks.focus"],
   ["work.personal.myTaskSections.", "work.my_tasks.sections"],
   ["work.personal.myTasks", "work.my_tasks"],
   ["work.personal.inbox", "work.inbox"],

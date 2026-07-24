@@ -145,6 +145,12 @@ type WorkMyTasksMembership = {
   sectionId: string;
   position: number;
 };
+type WorkMyTasksFocus = {
+  employeeId: string;
+  weekStart: string;
+  focusText: string;
+  updatedAt: string;
+};
 type WorkNotification = {
   notificationId: string;
   itemId: string | null;
@@ -361,6 +367,7 @@ type DemoWork = {
   accessibility: Map<string, WorkAccessibilityPreference>;
   myTasksSections: Map<string, WorkMyTasksSection>;
   myTasksMemberships: Map<string, WorkMyTasksMembership>;
+  myTasksFocus: Map<string, WorkMyTasksFocus>;
   notifications: Map<
     string,
     WorkNotification & { recipientEmployeeId: string }
@@ -485,6 +492,7 @@ export function getDemoWork(): DemoWork {
     accessibility: new Map(),
     myTasksSections: new Map(),
     myTasksMemberships: new Map(),
+    myTasksFocus: new Map(),
     notifications: new Map(),
     messages: new Map(),
     messageComments: new Map(),
@@ -4871,6 +4879,100 @@ export const workManagementRouter = router({
   }),
 
   personal: router({
+    focus: router({
+      get: staffProcedure
+        .input(z.object({ weekStart: z.string().date() }))
+        .query(async ({ input, ctx }) => {
+          const employeeId = actor(ctx);
+          await requireWorkFeature(ctx, "work.my_tasks.focus");
+          const db = getDb();
+          if (!db)
+            return (
+              getDemoWork().myTasksFocus.get(
+                `${employeeId}:${input.weekStart}`,
+              ) ?? {
+                employeeId,
+                weekStart: input.weekStart,
+                focusText: "",
+                updatedAt: new Date().toISOString(),
+              }
+            );
+          const rows = await db.execute<
+            WorkMyTasksFocus & { updatedAt: Date | string }
+          >(sql`
+            select employee_id as "employeeId", week_start as "weekStart",
+              focus_text as "focusText", updated_at as "updatedAt"
+            from public.work_my_tasks_focus
+            where employee_id = ${employeeId}::uuid
+              and week_start = ${input.weekStart}::date
+            limit 1
+          `);
+          return rows[0]
+            ? {
+                ...rows[0],
+                weekStart: String(rows[0].weekStart),
+                updatedAt: iso(rows[0].updatedAt)!,
+              }
+            : {
+                employeeId,
+                weekStart: input.weekStart,
+                focusText: "",
+                updatedAt: new Date().toISOString(),
+              };
+        }),
+
+      save: staffProcedure
+        .input(
+          z.object({
+            weekStart: z.string().date(),
+            focusText: z.string().trim().max(500),
+          }),
+        )
+        .mutation(async ({ input, ctx }) => {
+          const employeeId = actor(ctx);
+          await requireWorkFeature(ctx, "work.my_tasks.focus");
+          const db = getDb();
+          let focus: WorkMyTasksFocus;
+          if (!db) {
+            focus = {
+              employeeId,
+              ...input,
+              updatedAt: new Date().toISOString(),
+            };
+            getDemoWork().myTasksFocus.set(
+              `${employeeId}:${input.weekStart}`,
+              focus,
+            );
+          } else {
+            const rows = await db.execute<
+              WorkMyTasksFocus & { updatedAt: Date | string }
+            >(sql`
+              insert into public.work_my_tasks_focus (
+                employee_id, week_start, focus_text
+              ) values (
+                ${employeeId}::uuid, ${input.weekStart}::date, ${input.focusText}
+              ) on conflict (employee_id, week_start) do update set
+                focus_text = excluded.focus_text, updated_at = now()
+              returning employee_id as "employeeId", week_start as "weekStart",
+                focus_text as "focusText", updated_at as "updatedAt"
+            `);
+            focus = {
+              ...rows[0]!,
+              weekStart: String(rows[0]!.weekStart),
+              updatedAt: iso(rows[0]!.updatedAt)!,
+            };
+          }
+          await audit(
+            ctx,
+            "work.my_tasks.focus.save",
+            "work_my_tasks_focus",
+            employeeId,
+            { weekStart: input.weekStart, hasFocus: Boolean(input.focusText) },
+          );
+          return focus;
+        }),
+    }),
+
     myTaskSections: router({
       list: staffProcedure.query(async ({ ctx }) => {
         const employeeId = actor(ctx);

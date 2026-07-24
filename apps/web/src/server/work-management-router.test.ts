@@ -119,6 +119,36 @@ describe("work management", () => {
     });
   });
 
+  it("persists and governs the employee's weekly focus", async () => {
+    const user = resolveDevUser("partner");
+    const caller = partnerCaller();
+    const weekStart = "2026-07-20";
+    await caller.work.personal.focus.save({
+      weekStart,
+      focusText: "Ship the migration safely",
+    });
+    await expect(
+      caller.work.personal.focus.get({ weekStart }),
+    ).resolves.toMatchObject({
+      employeeId: user.employeeId,
+      weekStart,
+      focusText: "Ship the migration safely",
+    });
+    await setFeatureOverride({
+      featureKey: "work.my_tasks.focus",
+      scopeType: "user",
+      scopeKey: user.employeeId,
+      enabled: false,
+      updatedByEmployeeId: user.employeeId,
+    });
+    await expect(
+      caller.work.personal.focus.get({ weekStart }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.my_tasks.focus",
+    });
+  });
+
   it("creates a project graph with task, subtask, dependency, and comment", async () => {
     const caller = partnerCaller();
     const project = await caller.work.projects.create({
