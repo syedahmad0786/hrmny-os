@@ -3,11 +3,18 @@ import { sql } from "@hrmny/db";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { SessionUser } from "./auth/session";
+import {
+  composioAiConnectedApps,
+  searchComposioConnectedData,
+} from "./composio-connected-data-ai";
 import { getDb } from "./db";
 import { featureEnabled } from "./features";
 import { searchGoogleWorkspace } from "./google-workspace-ai";
 import { writeAudit } from "./m1-persistence";
-import { getGoogleWorkspaceAccessToken } from "./trpc/connections-router";
+import {
+  getGoogleWorkspaceAccessToken,
+  getVerifiedWorkAppConnection,
+} from "./trpc/connections-router";
 import type { TrpcContext } from "./trpc/trpc";
 import {
   getDemoWork,
@@ -36,6 +43,7 @@ const teammateActionTypes = [
   "delete_task",
   "create_subtask",
   "set_custom_field",
+  "set_custom_task_status",
   "add_to_project",
   "add_follower",
   "remove_follower",
@@ -49,7 +57,14 @@ const teammateActionTypes = [
   "create_external_file",
 ] as const;
 type TeammateActionType = (typeof teammateActionTypes)[number];
-const teammateConnectedApps = ["google_workspace"] as const;
+const teammateConnectedApps = [
+  "google_workspace",
+  "one_drive",
+  "outlook",
+  "slack",
+  "microsoft_teams",
+  "jira",
+] as const;
 type TeammateConnectedApp = (typeof teammateConnectedApps)[number];
 type TeammateMemberAccess = "owner" | "editor" | "user";
 type ProjectAccess = "editor" | "commenter" | "viewer";
@@ -204,6 +219,13 @@ async function teammateById(
   return teammate;
 }
 
+async function teammateProjectContext(ctx: TrpcContext, projectId: string) {
+  const project = await requireProjectAccess(ctx, projectId);
+  const scoped = { ...ctx, clientId: project.clientId };
+  await requireWorkAiFeature(scoped, "teammate");
+  return scoped;
+}
+
 export async function listWorkAiTeammates(ctx: TrpcContext) {
   const employeeId = actor(ctx);
   const db = getDb();
@@ -282,8 +304,8 @@ export async function listWorkAiTeammateRuns(
   const visible = [];
   for (const run of runs) {
     try {
+      await teammateProjectContext(ctx, run.projectId);
       if (run.itemId) await requireItemAccess(ctx, run.itemId);
-      else await requireProjectAccess(ctx, run.projectId);
       visible.push(run);
     } catch (error) {
       if (!(error instanceof TRPCError)) throw error;
@@ -298,8 +320,21 @@ export async function interruptWorkAiTeammateRun(input: {
   teammateRunId: string;
 }) {
   const employeeId = actor(input.ctx);
-  const teammate = await teammateById(input.ctx, input.teammateId);
   const db = getDb();
+  const runProjectId = !db
+    ? demoRuns.get(input.teammateRunId)?.projectId
+    : (
+        await db.execute<{ projectId: string }>(sql`
+          select work_project_id as "projectId"
+          from public.work_ai_teammate_run
+          where work_ai_teammate_run_id = ${input.teammateRunId}::uuid
+            and work_ai_teammate_id = ${input.teammateId}::uuid
+          limit 1
+        `)
+      )[0]?.projectId;
+  if (!runProjectId) throw new TRPCError({ code: "NOT_FOUND" });
+  const scoped = await teammateProjectContext(input.ctx, runProjectId);
+  const teammate = await teammateById(scoped, input.teammateId);
   let interrupted = false;
   if (!db) {
     const run = demoRuns.get(input.teammateRunId);
@@ -1146,13 +1181,13 @@ export async function runWorkAiTeammate(input: {
   triggerType: WorkAiTeammateRun["triggerType"];
   eventKey?: string;
 }) {
-  const employeeId = actor(input.ctx);
-  const teammate = await teammateById(input.ctx, input.teammateId);
+  const ctx = await teammateProjectContext(input.ctx, input.projectId);
+  const employeeId = actor(ctx);
+  const teammate = await teammateById(ctx, input.teammateId);
   if (teammate.status !== "active")
     throw new TRPCError({ code: "CONFLICT", message: "AI Teammate is paused" });
-  await requireProjectAccess(input.ctx, input.projectId);
   if (input.itemId)
-    await requireItemInProject(input.ctx, input.projectId, input.itemId);
+    await requireItemInProject(ctx, input.projectId, input.itemId);
   const access = await teammateProjectAccess(teammate, input.projectId);
   if (!access)
     throw new TRPCError({
@@ -1172,17 +1207,17 @@ export async function runWorkAiTeammate(input: {
           : false),
   );
   const skillsEnabled = await featureEnabled("work.ai.teammate_skills", {
-    userId: input.ctx.employeeId,
-    clientId: input.ctx.clientId,
-    roles: input.ctx.roles,
+    userId: ctx.employeeId,
+    clientId: ctx.clientId,
+    roles: ctx.roles,
   });
   const skills = skillsEnabled
-    ? (await listWorkAiTeammateSkills(input.ctx, input.teammateId))
+    ? (await listWorkAiTeammateSkills(ctx, input.teammateId))
         .filter((skill) => skillMatches(skill, input.requestText))
         .slice(0, 5)
     : [];
   const memories = input.itemId
-    ? await listAccessibleMemories(input.ctx, input.teammateId, input.itemId)
+    ? await listAccessibleMemories(ctx, input.teammateId, input.itemId)
     : [];
   const eventKey = input.eventKey ?? `manual:${randomUUID()}`;
   let teammateRunId: string = randomUUID();
@@ -1232,22 +1267,46 @@ export async function runWorkAiTeammate(input: {
   try {
     let externalSources: WorkAiContextSource[] = [];
     if (
-      teammate.allowedConnectedApps.includes("google_workspace") &&
-      (await featureEnabled("work.ai.connectors", {
-        userId: input.ctx.employeeId,
-        clientId: input.ctx.clientId,
-        roles: input.ctx.roles,
-      }))
+      await featureEnabled("work.ai.connectors", {
+        userId: ctx.employeeId,
+        clientId: ctx.clientId,
+        roles: ctx.roles,
+      })
     ) {
-      const accessToken = await getGoogleWorkspaceAccessToken(employeeId);
-      if (accessToken)
-        externalSources = await searchGoogleWorkspace({
-          accessToken,
-          query: input.requestText,
-        });
+      const searches: Promise<WorkAiContextSource[]>[] = [];
+      if (teammate.allowedConnectedApps.includes("google_workspace"))
+        searches.push(
+          getGoogleWorkspaceAccessToken(employeeId).then((accessToken) =>
+            accessToken
+              ? searchGoogleWorkspace({
+                  accessToken,
+                  query: input.requestText,
+                })
+              : [],
+          ),
+        );
+      for (const definition of composioAiConnectedApps) {
+        if (!teammate.allowedConnectedApps.includes(definition.app)) continue;
+        searches.push(
+          getVerifiedWorkAppConnection(employeeId, definition.app, ctx).then(
+            (verified) =>
+              verified
+                ? searchComposioConnectedData({
+                    client: verified.client,
+                    connectedAccountId: verified.account.id,
+                    app: definition.app,
+                    query: input.requestText,
+                  })
+                : [],
+          ),
+        );
+      }
+      externalSources = (await Promise.allSettled(searches)).flatMap(
+        (result) => (result.status === "fulfilled" ? result.value : []),
+      );
     }
     const run = await generateWorkAi({
-      ctx: input.ctx,
+      ctx,
       kind: "teammate",
       requestText: input.requestText,
       projectIds: [input.projectId],
@@ -1305,9 +1364,9 @@ export async function runWorkAiTeammate(input: {
       input.itemId &&
       run.result?.body &&
       (await featureEnabled("work.ai.teammate_memory", {
-        userId: input.ctx.employeeId,
-        clientId: input.ctx.clientId,
-        roles: input.ctx.roles,
+        userId: ctx.employeeId,
+        clientId: ctx.clientId,
+        roles: ctx.roles,
       }))
     ) {
       const memoryId = randomUUID();
@@ -1383,15 +1442,24 @@ export async function runWorkAiTeammateJob(input: {
 }) {
   const ctx = await workAiContextForEmployee(input.actorEmployeeId);
   const projectId = await projectForItem(ctx, input.itemId);
-  return runWorkAiTeammate({
-    ctx,
-    teammateId: input.teammateId,
-    projectId,
-    itemId: input.itemId,
-    requestText: input.requestText,
-    triggerType: input.triggerType,
-    eventKey: input.eventKey,
-  });
+  try {
+    return await runWorkAiTeammate({
+      ctx,
+      teammateId: input.teammateId,
+      projectId,
+      itemId: input.itemId,
+      requestText: input.requestText,
+      triggerType: input.triggerType,
+      eventKey: input.eventKey,
+    });
+  } catch (error) {
+    if (
+      error instanceof TRPCError &&
+      error.message === "FEATURE_DISABLED:work.ai.teammates"
+    )
+      return { disabled: true as const };
+    throw error;
+  }
 }
 
 export async function scheduleWorkAiTeammateFollowUp(input: {

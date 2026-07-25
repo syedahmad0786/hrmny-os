@@ -48,6 +48,7 @@ describe("M6 portal + seams", () => {
 
   it("portal cannot call staff finance/margin/payroll", async () => {
     const portal = callerFor("portal_a");
+    await expect(portal.clients.list()).rejects.toThrow(/FORBIDDEN/);
     await expect(portal.dashboards.margin.list()).rejects.toThrow(/FORBIDDEN/);
     await expect(portal.invoices.list()).rejects.toThrow(/FORBIDDEN/);
     await expect(portal.payroll.runs.list()).rejects.toThrow(/FORBIDDEN/);
@@ -66,7 +67,9 @@ describe("M6 portal + seams", () => {
   it("partner preview persists an approval and audits the actor", async () => {
     const partner = callerFor("partner");
     const preview = await partner.clientPreview.workspace();
-    const approval = preview.approvals.find((item) => item.status === "pending");
+    const approval = preview.approvals.find(
+      (item) => item.status === "pending",
+    );
     expect(preview.clientName).toContain("Demo Co");
     expect(approval).toBeDefined();
 
@@ -75,9 +78,9 @@ describe("M6 portal + seams", () => {
       action: "approve",
     });
 
-    expect(getDemoStore().portalApprovals.get(approval!.approvalId)?.status).toBe(
-      "approved",
-    );
+    expect(
+      getDemoStore().portalApprovals.get(approval!.approvalId)?.status,
+    ).toBe("approved");
     expect(getDemoStore().audits[0]).toMatchObject({
       actorEmployeeId: resolveDevUser("partner").employeeId,
       action: "portal.approvals.act",

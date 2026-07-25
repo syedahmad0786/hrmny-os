@@ -4,6 +4,18 @@ import {
   documentExpiryState,
   lifecycleTaskDueAt,
 } from "./core-hr";
+import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
+import { createCaller } from "./trpc/root";
+
+function callerFor(role: "partner" | "traffic") {
+  const user = resolveDevUser(role);
+  return createCaller({
+    user,
+    employeeId: user.employeeId,
+    roles: user.roles,
+    canViewMargin: sessionCanViewMargin(user),
+  });
+}
 
 describe("core HR access and dates", () => {
   const base = {
@@ -37,5 +49,22 @@ describe("core HR access and dates", () => {
     expect(lifecycleTaskDueAt(today, 3).toISOString()).toBe(
       "2026-07-27T20:00:00.000Z",
     );
+  });
+
+  it("keeps employee invitations HR-admin-only and on the company domain", async () => {
+    await expect(
+      callerFor("traffic").coreHr.inviteEmployee({
+        displayName: "New Employee",
+        email: "new@hrmny.co",
+        roleKey: "staff",
+      }),
+    ).rejects.toThrow(/HR access required/);
+    await expect(
+      callerFor("partner").coreHr.inviteEmployee({
+        displayName: "External User",
+        email: "external@example.com",
+        roleKey: "staff",
+      }),
+    ).rejects.toThrow(/@hrmny.co/);
   });
 });

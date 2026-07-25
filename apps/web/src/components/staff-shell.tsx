@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { initials } from "@/components/crm/format";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { featureForPathname } from "@/features/catalog";
+import { PwaRegister } from "@/components/pwa-register";
 
 const PRIMARY_NAV = [
   {
@@ -22,7 +23,10 @@ const PRIMARY_NAV = [
     index: "02",
     features: ["crm.workspace"],
     match: (p: string) =>
-      p === "/crm" || p.startsWith("/crm/") || p.startsWith("/sales"),
+      p === "/crm" ||
+      p.startsWith("/crm/") ||
+      p.startsWith("/sales") ||
+      p.startsWith("/clients"),
   },
   {
     href: "/work",
@@ -120,6 +124,12 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   const completingGoogle = useRef(false);
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
+  const accessibilityEnabled =
+    session.data?.enabledFeatureKeys.includes("work.accessibility") ?? false;
+  const accessibility = trpc.work.accessibility.get.useQuery(undefined, {
+    enabled: accessibilityEnabled,
+    retry: false,
+  });
   const users = trpc.auth.devUsers.useQuery();
   const saveGoogleWorkspace = trpc.connections.saveGoogleWorkspace.useMutation({
     onSuccess: async (result) => {
@@ -142,6 +152,37 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setRole(getDevRole());
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const preference = accessibilityEnabled ? accessibility.data : null;
+    if (!preference) {
+      delete root.dataset.workTheme;
+      delete root.dataset.workColorblind;
+      delete root.dataset.workReducedMotion;
+      return;
+    }
+    const darkMode = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      root.dataset.workTheme =
+        preference.theme === "system"
+          ? darkMode.matches
+            ? "dark"
+            : "light"
+          : preference.theme;
+    };
+    applyTheme();
+    root.dataset.workColorblind = String(preference.colorblindMode);
+    root.dataset.workReducedMotion = String(preference.reducedMotion);
+    if (preference.theme === "system")
+      darkMode.addEventListener("change", applyTheme);
+    return () => {
+      darkMode.removeEventListener("change", applyTheme);
+      delete root.dataset.workTheme;
+      delete root.dataset.workColorblind;
+      delete root.dataset.workReducedMotion;
+    };
+  }, [accessibility.data, accessibilityEnabled]);
 
   useEffect(() => {
     if (
@@ -222,6 +263,10 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="desk-shell">
+      <PwaRegister enabled={enabledFeatures.has("work.mobile_pwa")} />
+      <a className="work-skip-link" href="#staff-main">
+        Skip to main content
+      </a>
       <aside className="desk-sidebar">
         <Link href="/" className="desk-brand">
           <span className="desk-brand-mark">
@@ -267,46 +312,80 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
 
       <div className="desk-workspace">
         <header className="desk-topbar">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
-              Staff desk
-            </p>
-            <p className="font-display text-sm font-semibold text-ink">
-              {session.data?.displayName ?? "…"}
-            </p>
-          </div>
-          {(users.data ?? []).length > 0 ? (
-            <div className="desk-devbox">
-              <label htmlFor="persona">Persona</label>
-              <select
-                id="persona"
-                value={role}
-                onChange={(e) => void onRoleChange(e.target.value)}
-              >
-                {users.data!.map((u) => (
-                  <option key={u.key} value={u.key}>
-                    {u.displayName}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-          {session.data?.authMode === "supabase" && session.data.employeeId ? (
-            <button
-              type="button"
-              className="text-xs underline"
-              onClick={() => void onSignOut()}
+          <Link href="/work/search" className="desk-search-trigger">
+            <span className="desk-search-icon" aria-hidden>
+              ⌕
+            </span>
+            <span className="desk-search-copy">
+              Search clients, deals, tasks…
+            </span>
+            <kbd>⌘ K</kbd>
+          </Link>
+          <div className="desk-top-actions">
+            {(users.data ?? []).length > 0 ? (
+              <div className="desk-devbox">
+                <label htmlFor="persona">Dev only</label>
+                <select
+                  id="persona"
+                  value={role}
+                  onChange={(e) => void onRoleChange(e.target.value)}
+                >
+                  {users.data!.map((u) => (
+                    <option key={u.key} value={u.key}>
+                      {u.displayName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+            <Link
+              href={
+                pathname.startsWith("/client-preview")
+                  ? "/clients"
+                  : "/client-preview"
+              }
+              className="desk-topbar-primary"
             >
-              Sign out
-            </button>
-          ) : null}
-          <span className="desk-avatar" aria-hidden>
-            {avatar}
-          </span>
+              {pathname.startsWith("/client-preview")
+                ? "← Staff admin"
+                : "View client portal"}
+            </Link>
+            <Link
+              href="/admin/audit"
+              className="desk-icon-btn"
+              aria-label="Open audit activity"
+              title="Audit activity"
+            >
+              A°
+            </Link>
+            {session.data?.authMode === "supabase" &&
+            session.data.employeeId ? (
+              <button
+                type="button"
+                className="desk-avatar"
+                onClick={() => void onSignOut()}
+                aria-label={`Sign out ${session.data.displayName ?? "account"}`}
+                title="Sign out"
+              >
+                {avatar}
+              </button>
+            ) : (
+              <span
+                className="desk-avatar"
+                title={session.data?.displayName ?? "Partner"}
+                aria-hidden
+              >
+                {avatar}
+              </span>
+            )}
+          </div>
         </header>
-        <div className="desk-content">
+        <div className="desk-content" id="staff-main" tabIndex={-1}>
           {connectionMessage ? (
-            <p className="mb-4 rounded border border-sand bg-white/70 p-3 text-sm">
+            <p
+              className="mb-4 rounded border border-sand bg-white/70 p-3 text-sm"
+              aria-live="polite"
+            >
               {connectionMessage}
             </p>
           ) : null}

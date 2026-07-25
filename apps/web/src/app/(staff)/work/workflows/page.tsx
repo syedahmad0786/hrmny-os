@@ -1,20 +1,33 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { WorkNav } from "@/components/work-nav";
 import { trpc } from "@/lib/trpc";
 
 type Answers = Record<string, Record<string, unknown>>;
 
+function fileAnswer(file: File) {
+  return new Promise<{
+    fileName: string;
+    contentType: string;
+    contentBase64: string;
+  }>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.onload = () =>
+      resolve({
+        fileName: file.name,
+        contentType: file.type || "application/octet-stream",
+        contentBase64: String(reader.result).split(",")[1] ?? "",
+      });
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function WorkflowsPage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
-  const enabled = new Set(session.data?.enabledFeatureKeys ?? []);
-  const formsEnabled = enabled.has("work.forms");
-  const rulesEnabled = enabled.has("work.rules");
-  const templatesEnabled = enabled.has("work.templates");
-  const bundlesEnabled = enabled.has("work.bundles");
-  const approvalsEnabled = enabled.has("work.approvals");
   const projects = trpc.work.projects.list.useQuery();
   const [projectId, setProjectId] = useState("");
   useEffect(() => {
@@ -25,7 +38,38 @@ export default function WorkflowsPage() {
     { projectId },
     { enabled: Boolean(projectId) },
   );
-  const employees = trpc.work.members.listEmployees.useQuery();
+  const enabled = new Set(
+    detail.data?.enabledFeatureKeys ??
+      (projectId ? [] : session.data?.enabledFeatureKeys) ??
+      [],
+  );
+  const formsEnabled = enabled.has("work.forms");
+  const publicFormsEnabled = enabled.has("work.forms.public");
+  const emailReceiptsEnabled = enabled.has("work.forms.email_receipts");
+  const rulesEnabled = enabled.has("work.rules");
+  const ruleOwnershipTransferEnabled = enabled.has(
+    "work.rules.ownership_transfer",
+  );
+  const canTransferRuleOwnership =
+    ruleOwnershipTransferEnabled &&
+    ["admin", "editor"].includes(
+      detail.data?.project.accessLevel ?? "viewer",
+    );
+  const scheduledRulesEnabled = enabled.has("work.rules.scheduled");
+  const collaboratorRulesEnabled = enabled.has(
+    "work.rules.collaborator_trigger",
+  );
+  const externalRulesEnabled =
+    enabled.has("work.rules.external_actions") &&
+    enabled.has("work.api_webhooks");
+  const customTaskTypesEnabled = enabled.has("work.custom_task_types");
+  const templatesEnabled = enabled.has("work.templates");
+  const templateRolesEnabled = enabled.has("work.templates.roles");
+  const bundlesEnabled = enabled.has("work.bundles");
+  const approvalsEnabled = enabled.has("work.approvals");
+  const employees = trpc.work.members.listEmployees.useQuery({
+    projectId: projectId || undefined,
+  });
   const tags = trpc.work.tags.list.useQuery(
     { projectId },
     { enabled: Boolean(projectId && rulesEnabled) },
@@ -37,6 +81,18 @@ export default function WorkflowsPage() {
   const rules = trpc.work.rules.list.useQuery(
     { projectId },
     { enabled: Boolean(projectId && rulesEnabled) },
+  );
+  const ruleOwners = trpc.work.rules.owners.useQuery(
+    { projectId },
+    {
+      enabled: Boolean(
+        projectId && rulesEnabled && canTransferRuleOwnership,
+      ),
+    },
+  );
+  const customTaskTypes = trpc.work.customTaskTypes.list.useQuery(
+    { projectId },
+    { enabled: Boolean(projectId && rulesEnabled && customTaskTypesEnabled) },
   );
   const ruleRuns = trpc.work.rules.runs.useQuery(
     { projectId, limit: 20 },
@@ -56,15 +112,24 @@ export default function WorkflowsPage() {
 
   const [formName, setFormName] = useState("");
   const [formQuestions, setFormQuestions] = useState("");
+  const [formAssigneeEmployeeId, setFormAssigneeEmployeeId] = useState("");
+  const [formAccessLevel, setFormAccessLevel] = useState<
+    "organization" | "anyone"
+  >("organization");
+  const [formAttachment, setFormAttachment] = useState(false);
+  const [formEmailReceipt, setFormEmailReceipt] = useState(true);
   const [answers, setAnswers] = useState<Answers>({});
   const createForm = trpc.work.forms.create.useMutation({
     onSuccess: async () => {
       setFormName("");
       setFormQuestions("");
+      setFormAssigneeEmployeeId("");
+      setFormAttachment(false);
+      setFormEmailReceipt(true);
       await utils.work.forms.list.invalidate();
     },
   });
-  const setFormActive = trpc.work.forms.setActive.useMutation({
+  const setFormAccess = trpc.work.forms.setAccess.useMutation({
     onSuccess: () => utils.work.forms.list.invalidate(),
   });
   const submitForm = trpc.work.forms.submit.useMutation({
@@ -76,11 +141,27 @@ export default function WorkflowsPage() {
 
   const [ruleName, setRuleName] = useState("");
   const [triggerType, setTriggerType] = useState<
-    "task_added" | "task_completed" | "task_moved"
+    | "task_added"
+    | "task_completed"
+    | "task_moved"
+    | "priority_changed"
+    | "due_date_set"
+    | "approval_decided"
+    | "custom_status_changed"
+    | "collaborator_added"
+    | "scheduled"
   >("task_added");
+  const [scheduleMinutes, setScheduleMinutes] = useState("1440");
   const [conditionPriority, setConditionPriority] = useState("");
+  const [conditionCustomStatus, setConditionCustomStatus] = useState("");
   const [actionType, setActionType] = useState<
-    "set_priority" | "move_section" | "assign" | "complete" | "add_tag"
+    | "set_priority"
+    | "move_section"
+    | "assign"
+    | "complete"
+    | "add_tag"
+    | "send_webhook"
+    | "set_custom_task_status"
   >("set_priority");
   const [actionValue, setActionValue] = useState("high");
   const createRule = trpc.work.rules.create.useMutation({
@@ -92,12 +173,21 @@ export default function WorkflowsPage() {
   const setRuleEnabled = trpc.work.rules.setEnabled.useMutation({
     onSuccess: () => utils.work.rules.list.invalidate(),
   });
+  const transferRuleOwnership = trpc.work.rules.transferOwnership.useMutation({
+    onSuccess: () => utils.work.rules.list.invalidate(),
+  });
 
   const [taskTemplateName, setTaskTemplateName] = useState("");
   const [taskTemplateTitle, setTaskTemplateTitle] = useState("");
   const [taskDueDays, setTaskDueDays] = useState("7");
   const [projectTemplateName, setProjectTemplateName] = useState("");
   const [newProjectName, setNewProjectName] = useState("");
+  const [projectTemplateRoleNames, setProjectTemplateRoleNames] = useState<
+    Record<string, string>
+  >({});
+  const [templateRoleAssignments, setTemplateRoleAssignments] = useState<
+    Record<string, string>
+  >({});
   const createTaskTemplate = trpc.work.templates.createTask.useMutation({
     onSuccess: () => utils.work.templates.list.invalidate(),
   });
@@ -120,11 +210,19 @@ export default function WorkflowsPage() {
     onSuccess: () => utils.work.bundles.list.invalidate(),
   });
   const publishBundle = trpc.work.bundles.publish.useMutation({
-    onSuccess: () => utils.work.bundles.list.invalidate(),
+    onSuccess: async () => {
+      await Promise.all([
+        utils.work.bundles.list.invalidate(),
+        utils.work.projects.get.invalidate(),
+        utils.work.rules.list.invalidate(),
+        utils.work.templates.list.invalidate(),
+      ]);
+    },
   });
   const applyBundle = trpc.work.bundles.applyToProject.useMutation({
     onSuccess: async () => {
       await Promise.all([
+        utils.work.bundles.list.invalidate(),
         utils.work.projects.get.invalidate(),
         utils.work.rules.list.invalidate(),
         utils.work.templates.list.invalidate(),
@@ -153,10 +251,29 @@ export default function WorkflowsPage() {
   });
 
   const sections = detail.data?.sections ?? [];
+  const projectAssignees = [
+    ...new Map(
+      (detail.data?.items ?? []).flatMap((item) =>
+        item.assigneeEmployeeId
+          ? [
+              [
+                item.assigneeEmployeeId,
+                {
+                  employeeId: item.assigneeEmployeeId,
+                  name: item.assigneeName ?? "Project role",
+                },
+              ] as const,
+            ]
+          : [],
+      ),
+    ).values(),
+  ];
   const error =
     createForm.error ??
+    setFormAccess.error ??
     submitForm.error ??
     createRule.error ??
+    transferRuleOwnership.error ??
     createTaskTemplate.error ??
     captureProjectTemplate.error ??
     instantiateTask.error ??
@@ -203,7 +320,7 @@ export default function WorkflowsPage() {
             Every submission becomes a task in this project.
           </p>
           <form
-            className="mt-4 grid gap-2 md:grid-cols-[1fr_2fr_auto]"
+            className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-[1fr_2fr_1fr_auto_auto_auto_auto]"
             onSubmit={(event) => {
               event.preventDefault();
               const extra = formQuestions
@@ -230,9 +347,36 @@ export default function WorkflowsPage() {
                     required: true,
                     options: [],
                   },
+                  ...(formEmailReceipt && emailReceiptsEnabled
+                    ? [
+                        {
+                          key: "email",
+                          label: "Email",
+                          type: "email" as const,
+                          required: true,
+                          options: [],
+                        },
+                      ]
+                    : []),
                   ...extra,
+                  ...(formAttachment
+                    ? [
+                        {
+                          key: "attachments",
+                          label: "Attachments",
+                          type: "attachment" as const,
+                          required: false,
+                          options: [],
+                          multiple: true,
+                        },
+                      ]
+                    : []),
                 ],
+                defaultAssigneeEmployeeId: formAssigneeEmployeeId || null,
                 confirmationMessage: "Your request was submitted.",
+                accessLevel: publicFormsEnabled
+                  ? formAccessLevel
+                  : "organization",
               });
             }}
           >
@@ -250,6 +394,53 @@ export default function WorkflowsPage() {
               value={formQuestions}
               onChange={(event) => setFormQuestions(event.target.value)}
             />
+            <select
+              aria-label="Default form assignee"
+              className="rounded border border-sand px-3 py-2"
+              value={formAssigneeEmployeeId}
+              onChange={(event) =>
+                setFormAssigneeEmployeeId(event.target.value)
+              }
+            >
+              <option value="">Leave unassigned</option>
+              {(employees.data ?? []).map((employee) => (
+                <option key={employee.employeeId} value={employee.employeeId}>
+                  {employee.displayLabel}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Form access"
+              className="rounded border border-sand px-3 py-2"
+              value={publicFormsEnabled ? formAccessLevel : "organization"}
+              onChange={(event) =>
+                setFormAccessLevel(
+                  event.target.value as "organization" | "anyone",
+                )
+              }
+            >
+              <option value="organization">Organization only</option>
+              <option value="anyone" disabled={!publicFormsEnabled}>
+                Anyone with link
+              </option>
+            </select>
+            <label className="flex items-center gap-2 rounded border border-sand px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={formAttachment}
+                onChange={(event) => setFormAttachment(event.target.checked)}
+              />
+              File upload
+            </label>
+            <label className="flex items-center gap-2 rounded border border-sand px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={emailReceiptsEnabled && formEmailReceipt}
+                disabled={!emailReceiptsEnabled}
+                onChange={(event) => setFormEmailReceipt(event.target.checked)}
+              />
+              Email receipt
+            </label>
             <button
               className="rounded bg-ink px-4 py-2 text-white"
               disabled={!projectId || !formName.trim()}
@@ -267,19 +458,34 @@ export default function WorkflowsPage() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <h3 className="font-semibold">{form.name}</h3>
-                    <button
-                      type="button"
+                    <select
+                      aria-label={`${form.name} access`}
                       className="rounded-full border border-sand px-2 py-1 text-xs"
-                      onClick={() =>
-                        setFormActive.mutate({
+                      value={form.accessLevel}
+                      onChange={(event) =>
+                        setFormAccess.mutate({
                           formId: form.formId,
-                          active: !form.isActive,
+                          accessLevel: event.target.value as
+                            "organization" | "anyone" | "deactivated",
                         })
                       }
                     >
-                      {form.isActive ? "Active" : "Paused"}
-                    </button>
+                      <option value="organization">Organization only</option>
+                      <option value="anyone" disabled={!publicFormsEnabled}>
+                        Anyone with link
+                      </option>
+                      <option value="deactivated">Deactivated</option>
+                    </select>
                   </div>
+                  {form.accessLevel === "anyone" && publicFormsEnabled ? (
+                    <Link
+                      className="mt-2 inline-block text-xs font-semibold text-ochre underline"
+                      href={`/forms/${form.formId}`}
+                      target="_blank"
+                    >
+                      Open public form
+                    </Link>
+                  ) : null}
                   {form.isActive ? (
                     <form
                       className="mt-3 space-y-2"
@@ -339,6 +545,63 @@ export default function WorkflowsPage() {
                                   <option key={option}>{option}</option>
                                 ))}
                               </select>
+                            ) : question.type === "multi_select" ? (
+                              <select
+                                className="mt-1 min-h-24 w-full rounded border border-sand px-2 py-1.5"
+                                multiple
+                                value={
+                                  (formAnswers[question.key] as
+                                    string[] | undefined) ?? []
+                                }
+                                onChange={(event) =>
+                                  setAnswers((current) => ({
+                                    ...current,
+                                    [form.formId]: {
+                                      ...formAnswers,
+                                      [question.key]: [
+                                        ...event.target.selectedOptions,
+                                      ].map((option) => option.value),
+                                    },
+                                  }))
+                                }
+                              >
+                                {question.options.map((option) => (
+                                  <option key={option}>{option}</option>
+                                ))}
+                              </select>
+                            ) : question.type === "attachment" ? (
+                              <input
+                                className="mt-1 w-full rounded border border-sand px-2 py-1.5"
+                                type="file"
+                                multiple={question.multiple}
+                                onChange={async (event) => {
+                                  const files = [...(event.target.files ?? [])];
+                                  const encoded = await Promise.all(
+                                    files.map(fileAnswer),
+                                  );
+                                  setAnswers((current) => ({
+                                    ...current,
+                                    [form.formId]: {
+                                      ...formAnswers,
+                                      [question.key]: encoded,
+                                    },
+                                  }));
+                                }}
+                              />
+                            ) : question.type === "textarea" ? (
+                              <textarea
+                                className="mt-1 min-h-24 w-full rounded border border-sand px-2 py-1.5"
+                                value={String(formAnswers[question.key] ?? "")}
+                                onChange={(event) =>
+                                  setAnswers((current) => ({
+                                    ...current,
+                                    [form.formId]: {
+                                      ...formAnswers,
+                                      [question.key]: event.target.value,
+                                    },
+                                  }))
+                                }
+                              />
                             ) : (
                               <input
                                 className="mt-1 w-full rounded border border-sand px-2 py-1.5"
@@ -347,7 +610,9 @@ export default function WorkflowsPage() {
                                     ? "number"
                                     : question.type === "date"
                                       ? "date"
-                                      : "text"
+                                      : question.type === "email"
+                                        ? "email"
+                                        : "text"
                                 }
                                 value={String(formAnswers[question.key] ?? "")}
                                 onChange={(event) =>
@@ -386,6 +651,14 @@ export default function WorkflowsPage() {
             className="mt-4 grid gap-2 md:grid-cols-3 lg:grid-cols-6"
             onSubmit={(event) => {
               event.preventDefault();
+              const selectedActionType = (customTaskTypes.data ?? []).find(
+                (type) =>
+                  type.isAssociated &&
+                  type.accessLevel !== "none" &&
+                  type.statuses.some(
+                    (status) => status.statusOptionId === actionValue,
+                  ),
+              );
               const action =
                 actionType === "set_priority"
                   ? {
@@ -399,23 +672,45 @@ export default function WorkflowsPage() {
                       ? { type: actionType, employeeId: actionValue || null }
                       : actionType === "add_tag"
                         ? { type: actionType, tagId: actionValue }
-                        : { type: actionType };
+                        : actionType === "set_custom_task_status"
+                          ? {
+                              type: actionType,
+                              customTaskTypeId:
+                                selectedActionType!.customTaskTypeId,
+                              statusOptionId: actionValue,
+                            }
+                          : actionType === "send_webhook"
+                            ? { type: actionType, message: actionValue }
+                            : { type: actionType };
               createRule.mutate({
                 projectId,
                 name: ruleName,
                 triggerType,
+                scheduleMinutes:
+                  triggerType === "scheduled" ? Number(scheduleMinutes) : null,
                 branches: [
                   {
                     mode: "all",
-                    conditions: conditionPriority
-                      ? [
-                          {
-                            field: "priority",
-                            operator: "equals",
-                            value: conditionPriority,
-                          },
-                        ]
-                      : [],
+                    conditions: [
+                      ...(conditionPriority
+                        ? [
+                            {
+                              field: "priority" as const,
+                              operator: "equals" as const,
+                              value: conditionPriority,
+                            },
+                          ]
+                        : []),
+                      ...(conditionCustomStatus
+                        ? [
+                            {
+                              field: "customTaskStatusOptionId" as const,
+                              operator: "equals" as const,
+                              value: conditionCustomStatus,
+                            },
+                          ]
+                        : []),
+                    ],
                     actions: [action],
                   },
                 ],
@@ -440,7 +735,32 @@ export default function WorkflowsPage() {
               <option value="task_added">Task added</option>
               <option value="task_completed">Task completed</option>
               <option value="task_moved">Task moved</option>
+              <option value="priority_changed">Priority changed</option>
+              <option value="due_date_set">Due date set</option>
+              <option value="approval_decided">Approval decided</option>
+              {customTaskTypesEnabled ? (
+                <option value="custom_status_changed">
+                  Custom status changed
+                </option>
+              ) : null}
+              {collaboratorRulesEnabled ? (
+                <option value="collaborator_added">Collaborator added</option>
+              ) : null}
+              {scheduledRulesEnabled ? (
+                <option value="scheduled">On a schedule</option>
+              ) : null}
             </select>
+            {triggerType === "scheduled" ? (
+              <input
+                aria-label="Schedule interval in minutes"
+                className="rounded border border-sand px-2 py-1.5"
+                type="number"
+                min={15}
+                max={525600}
+                value={scheduleMinutes}
+                onChange={(event) => setScheduleMinutes(event.target.value)}
+              />
+            ) : null}
             <select
               aria-label="Rule priority condition"
               className="rounded border border-sand px-2 py-1.5"
@@ -451,6 +771,34 @@ export default function WorkflowsPage() {
               <option value="high">High priority</option>
               <option value="urgent">Urgent priority</option>
             </select>
+            {customTaskTypesEnabled ? (
+              <select
+                aria-label="Rule custom status condition"
+                className="rounded border border-sand px-2 py-1.5"
+                value={conditionCustomStatus}
+                onChange={(event) =>
+                  setConditionCustomStatus(event.target.value)
+                }
+              >
+                <option value="">Any custom status</option>
+                {(customTaskTypes.data ?? [])
+                  .filter(
+                    (type) => type.isAssociated && type.accessLevel !== "none",
+                  )
+                  .flatMap((type) =>
+                    type.statuses
+                      .filter((status) => status.enabled)
+                      .map((status) => (
+                        <option
+                          key={status.statusOptionId}
+                          value={status.statusOptionId}
+                        >
+                          {type.icon} {type.name}: {status.name}
+                        </option>
+                      )),
+                  )}
+              </select>
+            ) : null}
             <select
               aria-label="Rule action"
               className="rounded border border-sand px-2 py-1.5"
@@ -466,6 +814,14 @@ export default function WorkflowsPage() {
               <option value="assign">Assign</option>
               <option value="complete">Complete</option>
               <option value="add_tag">Add tag</option>
+              {customTaskTypesEnabled ? (
+                <option value="set_custom_task_status">
+                  Set custom status
+                </option>
+              ) : null}
+              {externalRulesEnabled ? (
+                <option value="send_webhook">Send signed webhook</option>
+              ) : null}
             </select>
             {actionType === "set_priority" ? (
               <select
@@ -502,7 +858,7 @@ export default function WorkflowsPage() {
                 <option value="">Unassigned</option>
                 {(employees.data ?? []).map((employee) => (
                   <option key={employee.employeeId} value={employee.employeeId}>
-                    {employee.displayName}
+                    {employee.displayLabel}
                   </option>
                 ))}
               </select>
@@ -520,6 +876,40 @@ export default function WorkflowsPage() {
                   </option>
                 ))}
               </select>
+            ) : actionType === "set_custom_task_status" ? (
+              <select
+                aria-label="Custom task status to set"
+                className="rounded border border-sand px-2 py-1.5"
+                value={actionValue}
+                onChange={(event) => setActionValue(event.target.value)}
+              >
+                <option value="">Choose status</option>
+                {(customTaskTypes.data ?? [])
+                  .filter(
+                    (type) => type.isAssociated && type.accessLevel !== "none",
+                  )
+                  .flatMap((type) =>
+                    type.statuses
+                      .filter((status) => status.enabled)
+                      .map((status) => (
+                        <option
+                          key={status.statusOptionId}
+                          value={status.statusOptionId}
+                        >
+                          {type.icon} {type.name}: {status.name}
+                        </option>
+                      )),
+                  )}
+              </select>
+            ) : actionType === "send_webhook" ? (
+              <input
+                aria-label="Webhook message"
+                className="rounded border border-sand px-2 py-1.5"
+                maxLength={2000}
+                placeholder="Message for the external workflow"
+                value={actionValue}
+                onChange={(event) => setActionValue(event.target.value)}
+              />
             ) : (
               <span />
             )}
@@ -527,7 +917,16 @@ export default function WorkflowsPage() {
               className="rounded bg-ink px-3 py-1.5 text-white"
               disabled={
                 !ruleName.trim() ||
-                (["move_section", "add_tag"].includes(actionType) &&
+                (triggerType === "scheduled" &&
+                  (!Number.isInteger(Number(scheduleMinutes)) ||
+                    Number(scheduleMinutes) < 15 ||
+                    Number(scheduleMinutes) > 525600)) ||
+                ([
+                  "move_section",
+                  "add_tag",
+                  "set_custom_task_status",
+                  "send_webhook",
+                ].includes(actionType) &&
                   !actionValue)
               }
             >
@@ -539,23 +938,58 @@ export default function WorkflowsPage() {
               {(rules.data ?? []).map((rule) => (
                 <div
                   key={rule.ruleId}
-                  className="flex items-center justify-between rounded border border-sand bg-white p-3 text-sm"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded border border-sand bg-white p-3 text-sm"
                 >
                   <span>
                     <strong>{rule.name}</strong> ·{" "}
                     {rule.triggerType.replaceAll("_", " ")}
+                    {rule.scheduleMinutes
+                      ? ` · every ${rule.scheduleMinutes} minutes`
+                      : ""}
                   </span>
-                  <button
-                    className="rounded-full border border-sand px-2 py-1 text-xs"
-                    onClick={() =>
-                      setRuleEnabled.mutate({
-                        ruleId: rule.ruleId,
-                        enabled: !rule.isEnabled,
-                      })
-                    }
-                  >
-                    {rule.isEnabled ? "On" : "Off"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {canTransferRuleOwnership ? (
+                      <select
+                        aria-label={`Owner of ${rule.name}`}
+                        className="rounded border border-sand px-2 py-1 text-xs"
+                        value={rule.ownerEmployeeId ?? ""}
+                        onChange={(event) =>
+                          transferRuleOwnership.mutate({
+                            ruleId: rule.ruleId,
+                            ownerEmployeeId: event.target.value,
+                          })
+                        }
+                      >
+                        {rule.ownerEmployeeId &&
+                        !(ruleOwners.data ?? []).some(
+                          (owner) => owner.employeeId === rule.ownerEmployeeId,
+                        ) ? (
+                          <option value={rule.ownerEmployeeId} disabled>
+                            {rule.ownerName ?? "Former owner"}
+                          </option>
+                        ) : null}
+                        {(ruleOwners.data ?? []).map((owner) => (
+                          <option
+                            key={owner.employeeId}
+                            value={owner.employeeId}
+                          >
+                            {owner.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
+                    <button
+                      className="rounded-full border border-sand px-2 py-1 text-xs"
+                      onClick={() =>
+                        setRuleEnabled.mutate({
+                          ruleId: rule.ruleId,
+                          enabled: !rule.isEnabled,
+                        })
+                      }
+                    >
+                      {rule.isEnabled ? "On" : "Off"}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -634,6 +1068,15 @@ export default function WorkflowsPage() {
                 captureProjectTemplate.mutate({
                   projectId,
                   name: projectTemplateName,
+                  roles: templateRolesEnabled
+                    ? projectAssignees.map((assignee) => ({
+                        employeeId: assignee.employeeId,
+                        name:
+                          projectTemplateRoleNames[
+                            assignee.employeeId
+                          ]?.trim() || assignee.name,
+                      }))
+                    : [],
                 });
               }}
             >
@@ -645,6 +1088,39 @@ export default function WorkflowsPage() {
                 value={projectTemplateName}
                 onChange={(event) => setProjectTemplateName(event.target.value)}
               />
+              {templateRolesEnabled && projectAssignees.length ? (
+                <fieldset className="grid gap-2 rounded border border-sand p-3">
+                  <legend className="px-1 text-sm font-semibold">
+                    Task assignment roles
+                  </legend>
+                  <p className="text-xs text-muted">
+                    Name each placeholder. Choose the person when this template
+                    is used.
+                  </p>
+                  {projectAssignees.map((assignee) => (
+                    <label
+                      key={assignee.employeeId}
+                      className="grid gap-1 text-xs"
+                    >
+                      Tasks currently assigned to {assignee.name}
+                      <input
+                        aria-label={`Template role for ${assignee.name}`}
+                        className="rounded border border-sand px-2 py-1.5 text-sm"
+                        value={
+                          projectTemplateRoleNames[assignee.employeeId] ??
+                          assignee.name
+                        }
+                        onChange={(event) =>
+                          setProjectTemplateRoleNames((current) => ({
+                            ...current,
+                            [assignee.employeeId]: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  ))}
+                </fieldset>
+              ) : null}
               <button
                 className="rounded bg-ink px-3 py-1.5 text-white"
                 disabled={!projectTemplateName.trim()}
@@ -677,29 +1153,77 @@ export default function WorkflowsPage() {
                     Create task
                   </button>
                 ) : (
-                  <div className="mt-2 flex gap-2">
-                    <input
-                      aria-label={`New project name for ${template.name}`}
-                      className="min-w-0 flex-1 rounded border border-sand px-2 py-1 text-sm"
-                      placeholder="New project name"
-                      value={newProjectName}
-                      onChange={(event) =>
-                        setNewProjectName(event.target.value)
-                      }
-                    />
-                    <button
-                      className="rounded border border-sand px-3 py-1 text-sm"
-                      disabled={!newProjectName.trim()}
-                      onClick={() =>
-                        instantiateProject.mutate({
-                          templateId: template.templateId,
-                          name: newProjectName,
-                          referenceDate: new Date().toISOString().slice(0, 10),
-                        })
-                      }
-                    >
-                      Use
-                    </button>
+                  <div className="mt-2 grid gap-2">
+                    {templateRolesEnabled
+                      ? template.rolePlaceholders.map((role) => (
+                          <label
+                            key={role.roleId}
+                            className="grid gap-1 text-xs"
+                          >
+                            {role.name}
+                            <select
+                              aria-label={`${role.name} for ${template.name}`}
+                              className="rounded border border-sand px-2 py-1 text-sm"
+                              value={
+                                templateRoleAssignments[
+                                  `${template.templateId}:${role.roleId}`
+                                ] ?? ""
+                              }
+                              onChange={(event) =>
+                                setTemplateRoleAssignments((current) => ({
+                                  ...current,
+                                  [`${template.templateId}:${role.roleId}`]:
+                                    event.target.value,
+                                }))
+                              }
+                            >
+                              <option value="">Leave unassigned</option>
+                              {(employees.data ?? []).map((employee) => (
+                                <option
+                                  key={employee.employeeId}
+                                  value={employee.employeeId}
+                                >
+                                  {employee.displayLabel}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ))
+                      : null}
+                    <div className="flex gap-2">
+                      <input
+                        aria-label={`New project name for ${template.name}`}
+                        className="min-w-0 flex-1 rounded border border-sand px-2 py-1 text-sm"
+                        placeholder="New project name"
+                        value={newProjectName}
+                        onChange={(event) =>
+                          setNewProjectName(event.target.value)
+                        }
+                      />
+                      <button
+                        className="rounded border border-sand px-3 py-1 text-sm"
+                        disabled={!newProjectName.trim()}
+                        onClick={() =>
+                          instantiateProject.mutate({
+                            templateId: template.templateId,
+                            name: newProjectName,
+                            referenceDate: new Date()
+                              .toISOString()
+                              .slice(0, 10),
+                            roleAssignments: Object.fromEntries(
+                              template.rolePlaceholders.map((role) => [
+                                role.roleId,
+                                templateRoleAssignments[
+                                  `${template.templateId}:${role.roleId}`
+                                ] || null,
+                              ]),
+                            ),
+                          })
+                        }
+                      >
+                        Use
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -712,9 +1236,19 @@ export default function WorkflowsPage() {
         <section className="rounded-xl border border-sand bg-white/70 p-5">
           <h2 className="font-display text-xl">Bundles</h2>
           <p className="mt-1 text-sm text-muted">
-            Package sections, fields, rules, and task templates, then apply
-            updates to projects.
+            Package sections, fields, rules, custom task types, and task
+            templates. Published changes update every installed project.
           </p>
+          {publishBundle.data ? (
+            <p className="mt-2 text-sm" role="status">
+              Updated {publishBundle.data.rollout.updatedProjectCount} of{" "}
+              {publishBundle.data.rollout.installedProjectCount} installed
+              projects
+              {publishBundle.data.rollout.failures.length
+                ? `; ${publishBundle.data.rollout.failures.length} need attention.`
+                : "."}
+            </p>
+          ) : null}
           <form
             className="mt-4 flex gap-2"
             onSubmit={(event) => {
@@ -750,6 +1284,17 @@ export default function WorkflowsPage() {
                 <p className="font-semibold">
                   {bundle.name}{" "}
                   <span className="text-xs text-muted">v{bundle.version}</span>
+                </p>
+                <p
+                  className={`mt-1 text-xs ${
+                    (bundle.currentProjectCount ?? 0) <
+                    (bundle.installedProjectCount ?? 0)
+                      ? "text-amber-700"
+                      : "text-muted"
+                  }`}
+                >
+                  {bundle.currentProjectCount ?? 0} of{" "}
+                  {bundle.installedProjectCount ?? 0} installed projects current
                 </p>
                 <div className="mt-2 flex gap-2">
                   <button

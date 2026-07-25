@@ -21,6 +21,7 @@ import {
   listWorkAiRuns,
   rejectWorkAiRun,
   requireWorkAiFeature,
+  type WorkAiContextSource,
   workAiKinds,
 } from "../work-ai";
 import { getGoogleWorkspaceAccessToken } from "./connections-router";
@@ -34,6 +35,27 @@ import {
 
 const uuid = z.string().uuid();
 const createWorkCaller = createCallerFactory(workManagementRouter);
+const imageMediaType = z.enum([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+
+function detectImageMediaType(body: Buffer) {
+  if (body.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")))
+    return "image/png";
+  if (body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff)
+    return "image/jpeg";
+  if (["GIF87a", "GIF89a"].includes(body.subarray(0, 6).toString("ascii")))
+    return "image/gif";
+  if (
+    body.subarray(0, 4).toString("ascii") === "RIFF" &&
+    body.subarray(8, 12).toString("ascii") === "WEBP"
+  )
+    return "image/webp";
+  return null;
+}
 
 function actor(ctx: TrpcContext) {
   if (!ctx.employeeId) throw new TRPCError({ code: "UNAUTHORIZED" });
@@ -80,9 +102,240 @@ export const workAiRouter = router({
         requestText: z.string().trim().min(1).max(10_000),
         projectIds: z.array(uuid).max(10).default([]),
         itemId: uuid.nullable().default(null),
+        statusTarget: z
+          .object({
+            targetType: z.enum(["project", "portfolio", "goal"]),
+            targetId: uuid,
+          })
+          .nullable()
+          .default(null),
+        summaryPortfolioId: uuid.nullable().default(null),
+        includeInbox: z.boolean().default(false),
+        images: z
+          .array(
+            z.object({
+              name: z.string().trim().min(1).max(255),
+              mediaType: imageMediaType,
+              dataBase64: z
+                .string()
+                .min(1)
+                .max(4_000_000)
+                .regex(
+                  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
+                ),
+            }),
+          )
+          .max(3)
+          .default([]),
+        allProjects: z.boolean().default(false),
       }),
     )
-    .mutation(({ input, ctx }) => generateWorkAi({ ...input, ctx })),
+    .mutation(async ({ input, ctx }) => {
+      await requireWorkAiFeature(ctx, input.kind);
+      const {
+        summaryPortfolioId,
+        includeInbox,
+        images: requestedImages,
+        allProjects,
+        projectIds: selectedProjectIds,
+        ...generation
+      } = input;
+      const projectIds = [...selectedProjectIds];
+      const externalSources: WorkAiContextSource[] = [];
+      let imageBytes = 0;
+      const images = requestedImages.map((image, index) => {
+        const body = Buffer.from(image.dataBase64, "base64");
+        imageBytes += body.byteLength;
+        if (detectImageMediaType(body) !== image.mediaType)
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Invalid image: ${image.name}`,
+          });
+        externalSources.push({
+          id: `image:${index}`,
+          type: "image",
+          label: image.name,
+          content: JSON.stringify({
+            mediaType: image.mediaType,
+            sizeBytes: body.byteLength,
+          }),
+        });
+        return {
+          mediaType: image.mediaType,
+          dataBase64: image.dataBase64,
+        };
+      });
+      if (images.length) {
+        if (input.kind !== "smart_chat")
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Image analysis is available in Smart Chat",
+          });
+        // ponytail: 3 MB raw stays below Vercel's 4.5 MB request cap; use direct uploads if larger images become necessary.
+        if (imageBytes > 3_000_000)
+          throw new TRPCError({
+            code: "PAYLOAD_TOO_LARGE",
+            message: "Images are limited to 3 MB per request",
+          });
+        await requireFeature(ctx, "work.attachments");
+      }
+      if (input.kind === "smart_summaries") {
+        const work = createWorkCaller(ctx);
+        if (summaryPortfolioId) {
+          await requireFeature(ctx, "work.portfolios");
+          const [portfolios, projects] = await Promise.all([
+            work.portfolios.list(),
+            work.projects.list(),
+          ]);
+          const portfolio = portfolios.find(
+            (candidate) => candidate.portfolioId === summaryPortfolioId,
+          );
+          if (!portfolio) throw new TRPCError({ code: "NOT_FOUND" });
+          const visibleProjectIds = new Set(
+            projects.map((project) => project.projectId),
+          );
+          const portfolioProjectIds = portfolio.projectIds.filter((projectId) =>
+            visibleProjectIds.has(projectId),
+          );
+          for (const projectId of portfolioProjectIds)
+            if (!projectIds.includes(projectId) && projectIds.length < 10)
+              projectIds.push(projectId);
+          externalSources.push({
+            id: portfolio.portfolioId,
+            type: "portfolio" as const,
+            label: portfolio.name,
+            content: JSON.stringify({
+              description: portfolio.description,
+              progress: portfolio.progress,
+              health: portfolio.health,
+              projectIds: portfolioProjectIds,
+            }),
+          });
+        }
+        if (includeInbox) {
+          await requireFeature(ctx, "work.inbox");
+          const notifications = await work.personal.inbox({});
+          externalSources.push({
+            id: `inbox:${actor(ctx)}`,
+            type: "inbox" as const,
+            label: "Inbox",
+            content: JSON.stringify(
+              notifications.map(
+                ({ eventType, message, readAt, createdAt, projectId }) => ({
+                  eventType,
+                  message,
+                  readAt,
+                  createdAt,
+                  projectId,
+                }),
+              ),
+            ),
+          });
+        }
+      }
+      if (allProjects) {
+        if (
+          !["smart_chat", "smart_summaries", "risk_reports", "dash"].includes(
+            input.kind,
+          )
+        )
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Workspace context is unavailable for this capability",
+          });
+        await requireFeature(ctx, "work.projects");
+        const work = createWorkCaller(ctx);
+        const terms = [
+          ...new Set(
+            input.requestText
+              .toLowerCase()
+              .match(/[a-z0-9]+/g)
+              ?.filter((term) => term.length > 2) ?? [],
+          ),
+        ];
+        const visibleProjects = await work.projects.list();
+        const eligibleProjects = (
+          await Promise.all(
+            visibleProjects.map(async (project) => {
+              const featureScope = {
+                userId: ctx.employeeId,
+                clientId: project.clientId,
+                roles: ctx.roles,
+              };
+              return (await featureEnabled(
+                featureKeyForWorkAiKind(input.kind),
+                featureScope,
+              )) &&
+                (!images.length ||
+                  (await featureEnabled("work.attachments", featureScope)))
+                ? project
+                : null;
+            }),
+          )
+        ).filter((project) => project !== null);
+        const projects = eligibleProjects
+          .map((project) => ({
+            project,
+            score: terms.reduce(
+              (score, term) =>
+                score +
+                Number(project.description.toLowerCase().includes(term)) +
+                Number(project.name.toLowerCase().includes(term)) * 5,
+              0,
+            ),
+          }))
+          .sort(
+            (left, right) =>
+              right.score - left.score ||
+              left.project.name.localeCompare(right.project.name),
+          );
+        for (const { project } of projects)
+          if (!projectIds.includes(project.projectId) && projectIds.length < 10)
+            projectIds.push(project.projectId);
+        const countBy = (value: (typeof projects)[number]["project"]) => ({
+          health: value.health ?? "unset",
+          privacy: value.privacy,
+          source: value.sourcePlatform ?? "native",
+        });
+        const counts = {
+          health: {} as Record<string, number>,
+          privacy: {} as Record<string, number>,
+          source: {} as Record<string, number>,
+        };
+        for (const { project } of projects)
+          for (const [group, value] of Object.entries(countBy(project)))
+            counts[group as keyof typeof counts][value] =
+              (counts[group as keyof typeof counts][value] ?? 0) + 1;
+        // ponytail: every visible project is ranked and counted; keep 100 lexical summaries until synonym misses justify embeddings.
+        externalSources.push({
+          id: "workspace:projects",
+          type: "external_file",
+          label: "Workspace project overview",
+          content: JSON.stringify({
+            totalProjects: projects.length,
+            matchingProjects: projects.filter(({ score }) => score > 0).length,
+            counts,
+            relevantProjects: projects.slice(0, 100).map(({ project }) => ({
+              projectId: project.projectId,
+              name: project.name,
+              description: project.description.slice(0, 300),
+              health: project.health,
+              startDate: project.startDate,
+              dueDate: project.dueDate,
+              privacy: project.privacy,
+              sourcePlatform: project.sourcePlatform,
+            })),
+          }),
+        });
+      }
+      return generateWorkAi({
+        ...generation,
+        ctx,
+        projectIds,
+        externalSources,
+        images,
+      });
+    }),
 
   reject: staffProcedure
     .input(z.object({ runId: uuid }))
@@ -193,6 +446,10 @@ export const workAiRouter = router({
               customFieldId: action.customFieldId,
               value: action.value,
             });
+            break;
+          case "set_custom_task_status":
+            await requireFeature(ctx, "work.custom_task_types");
+            result = await work.customTaskTypes.setForTask(action);
             break;
           case "add_to_project":
             await requireFeature(ctx, "work.multi_home");
@@ -314,14 +571,24 @@ export const workAiRouter = router({
           }
           case "create_status":
             await requireFeature(ctx, "work.status_updates");
-            result = await work.statusUpdates.create({
-              targetType: "project",
-              targetId: action.projectId,
-              health: action.health,
-              progress: action.progress,
-              title: action.title,
-              body: action.body,
-            });
+            {
+              const targetId =
+                action.targetId ??
+                (action.targetType === "project" ? action.projectId : null);
+              if (!targetId)
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: "Status proposal has no target",
+                });
+              result = await work.statusUpdates.create({
+                targetType: action.targetType,
+                targetId,
+                health: action.health,
+                progress: action.progress,
+                title: action.title,
+                body: action.body,
+              });
+            }
             break;
           case "create_goal":
             await requireFeature(ctx, "work.goals");

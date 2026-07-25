@@ -15,6 +15,25 @@ export type AsanaUser = {
   workspaces?: AsanaWorkspace[];
 };
 
+export type AsanaCustomField = Record<string, unknown> & {
+  gid: string;
+  name: string;
+  resource_subtype?: string;
+  type?: string;
+  enum_options?: Array<{
+    gid: string;
+    name: string;
+    enabled?: boolean;
+    color?: string;
+  }>;
+};
+
+export type AsanaCustomFieldSetting = {
+  gid: string;
+  is_important?: boolean;
+  custom_field: AsanaCustomField;
+};
+
 export type AsanaProject = {
   gid: string;
   name: string;
@@ -28,12 +47,35 @@ export type AsanaProject = {
   due_on?: string | null;
   created_at?: string;
   modified_at?: string;
+  custom_field_settings?: AsanaCustomFieldSetting[];
+  custom_fields?: AsanaCustomField[];
 };
 
 export type AsanaSection = {
   gid: string;
   name: string;
   created_at?: string;
+};
+
+export type AsanaUserTaskList = {
+  gid: string;
+  name: string;
+  owner: AsanaUser;
+  workspace: AsanaWorkspace;
+};
+
+export type AsanaCustomTypeStatusOption = {
+  gid: string;
+  name: string;
+  color?: string;
+  completion_state: "incomplete" | "complete";
+  enabled?: boolean;
+};
+
+export type AsanaCustomType = {
+  gid: string;
+  name: string;
+  status_options: AsanaCustomTypeStatusOption[];
 };
 
 export type AsanaTask = {
@@ -51,6 +93,7 @@ export type AsanaTask = {
   num_subtasks?: number;
   estimated_minutes?: number | null;
   assignee?: AsanaUser | null;
+  assignee_section?: { gid: string; name?: string } | null;
   parent?: { gid: string; name?: string } | null;
   memberships?: Array<{
     project: { gid: string; name?: string };
@@ -59,9 +102,9 @@ export type AsanaTask = {
   dependencies?: Array<{ gid: string; name?: string }>;
   followers?: AsanaUser[];
   tags?: Array<{ gid: string; name: string; color?: string }>;
-  custom_fields?: Array<
-    Record<string, unknown> & { gid: string; name: string }
-  >;
+  custom_fields?: AsanaCustomField[];
+  custom_type?: { gid: string; name?: string } | null;
+  custom_type_status_option?: { gid: string; name?: string } | null;
 };
 
 export type AsanaTeam = {
@@ -86,7 +129,7 @@ export type AsanaMembership = {
   resource_subtype?: string;
   parent: { gid: string; name?: string; resource_type?: string };
   member: AsanaUser & { resource_type?: "user" | "team" };
-  access_level?: "admin" | "editor" | "commenter" | "viewer";
+  access_level?: "admin" | "editor" | "user" | "commenter" | "viewer";
 };
 
 export type AsanaGoal = {
@@ -110,6 +153,8 @@ export type AsanaGoal = {
   } | null;
   created_at?: string;
   modified_at?: string;
+  custom_field_settings?: AsanaCustomFieldSetting[];
+  custom_fields?: AsanaCustomField[];
 };
 
 export type AsanaGoalRelationship = {
@@ -135,6 +180,8 @@ export type AsanaPortfolio = {
   public?: boolean;
   privacy_setting?: string;
   created_at?: string;
+  custom_field_settings?: AsanaCustomFieldSetting[];
+  custom_fields?: AsanaCustomField[];
 };
 
 export type AsanaProjectTemplate = Record<string, unknown> & {
@@ -252,8 +299,17 @@ export interface AsanaAdapter {
   listTeams(workspaceGid: string): Promise<AsanaTeam[]>;
   listTeamMemberships(teamGid: string): Promise<AsanaTeamMembership[]>;
   listProjectMemberships(projectGid: string): Promise<AsanaMembership[]>;
+  listCustomFieldMemberships?(customFieldGid: string): Promise<AsanaMembership[]>;
+  listCustomTypeMemberships?(customTypeGid: string): Promise<AsanaMembership[]>;
   listSections(projectGid: string): Promise<AsanaSection[]>;
   listProjectTasks(projectGid: string): Promise<AsanaTask[]>;
+  listCustomTypes(projectGid: string): Promise<AsanaCustomType[]>;
+  getCustomType(customTypeGid: string): Promise<AsanaCustomType>;
+  getUserTaskList(
+    userGid: string,
+    workspaceGid: string,
+  ): Promise<AsanaUserTaskList>;
+  listUserTaskListTasks(userTaskListGid: string): Promise<AsanaTask[]>;
   listSubtasks(taskGid: string): Promise<AsanaTask[]>;
   listStories(taskGid: string): Promise<AsanaStory[]>;
   listAttachments(taskGid: string): Promise<AsanaAttachment[]>;
@@ -280,6 +336,53 @@ type AsanaTransport = {
   delete(path: string): Promise<void>;
 };
 
+const CUSTOM_FIELD_FIELDS = [
+  "gid",
+  "name",
+  "resource_subtype",
+  "type",
+  "representation_type",
+  "description",
+  "precision",
+  "format",
+  "currency_code",
+  "custom_label",
+  "custom_label_position",
+  "is_global_to_workspace",
+  "is_formula_field",
+  "is_value_read_only",
+  "privacy_setting",
+  "default_access_level",
+  "display_value",
+  "number_value",
+  "text_value",
+  "date_value.date",
+  "date_value.date_time",
+  "enum_options.gid",
+  "enum_options.name",
+  "enum_options.enabled",
+  "enum_options.color",
+  "enum_value.gid",
+  "enum_value.name",
+  "multi_enum_values.gid",
+  "multi_enum_values.name",
+  "people_value.gid",
+  "people_value.name",
+  "people_value.email",
+  "reference_value.gid",
+  "reference_value.name",
+  "reference_value.resource_type",
+] as const;
+
+const customFieldFields = (prefix: string) =>
+  CUSTOM_FIELD_FIELDS.map((field) => `${prefix}.${field}`);
+
+const customFieldSettingFields = (prefix: string) => [
+  `${prefix}.gid`,
+  `${prefix}.is_important`,
+  ...customFieldFields(`${prefix}.custom_field`),
+];
+
 const TASK_FIELDS = [
   "gid",
   "name",
@@ -297,6 +400,8 @@ const TASK_FIELDS = [
   "assignee.gid",
   "assignee.name",
   "assignee.email",
+  "assignee_section.gid",
+  "assignee_section.name",
   "parent.gid",
   "memberships.project.gid",
   "memberships.project.name",
@@ -310,7 +415,11 @@ const TASK_FIELDS = [
   "tags.gid",
   "tags.name",
   "tags.color",
-  "custom_fields",
+  ...customFieldFields("custom_fields"),
+  "custom_type.gid",
+  "custom_type.name",
+  "custom_type_status_option.gid",
+  "custom_type_status_option.name",
 ].join(",");
 
 function directTransport(input: {
@@ -452,8 +561,25 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         new URLSearchParams({
           workspace: workspaceGid,
           archived: String(archived),
-          opt_fields:
-            "gid,name,notes,archived,color,privacy_setting,owner.gid,owner.name,owner.email,team.gid,team.name,start_on,due_on,created_at,modified_at",
+          opt_fields: [
+            "gid",
+            "name",
+            "notes",
+            "archived",
+            "color",
+            "privacy_setting",
+            "owner.gid",
+            "owner.name",
+            "owner.email",
+            "team.gid",
+            "team.name",
+            "start_on",
+            "due_on",
+            "created_at",
+            "modified_at",
+            ...customFieldSettingFields("custom_field_settings"),
+            ...customFieldFields("custom_fields"),
+          ].join(","),
         });
       const pages = await Promise.all([
         list<AsanaProject>("/projects", projectQuery(false)),
@@ -489,6 +615,24 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
             "gid,resource_subtype,parent.gid,parent.name,parent.resource_type,member.gid,member.name,member.email,member.resource_type,access_level",
         }),
       ),
+    listCustomFieldMemberships: (customFieldGid) =>
+      list<AsanaMembership>(
+        "/memberships",
+        new URLSearchParams({
+          parent: customFieldGid,
+          opt_fields:
+            "gid,resource_subtype,parent.gid,parent.name,parent.resource_type,member.gid,member.name,member.email,member.resource_type,access_level",
+        }),
+      ),
+    listCustomTypeMemberships: (customTypeGid) =>
+      list<AsanaMembership>(
+        "/memberships",
+        new URLSearchParams({
+          parent: customTypeGid,
+          opt_fields:
+            "gid,resource_subtype,parent.gid,parent.name,parent.resource_type,member.gid,member.name,member.email,member.resource_type,access_level",
+        }),
+      ),
     listSections: (projectGid) =>
       list<AsanaSection>(
         `/projects/${encodeURIComponent(projectGid)}/sections`,
@@ -497,6 +641,44 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
     listProjectTasks: (projectGid) =>
       list<AsanaTask>(
         `/projects/${encodeURIComponent(projectGid)}/tasks`,
+        new URLSearchParams({
+          completed_since: "1970-01-01T00:00:00.000Z",
+          opt_fields: TASK_FIELDS,
+        }),
+      ),
+    listCustomTypes: (projectGid) =>
+      list<AsanaCustomType>(
+        "/custom_types",
+        new URLSearchParams({
+          project: projectGid,
+          opt_fields:
+            "gid,name,status_options.gid,status_options.name,status_options.color,status_options.completion_state,status_options.enabled",
+        }),
+      ),
+    async getCustomType(customTypeGid) {
+      const response = await transport.get<AsanaSingle<AsanaCustomType>>(
+        `/custom_types/${encodeURIComponent(customTypeGid)}`,
+        new URLSearchParams({
+          opt_fields:
+            "gid,name,status_options.gid,status_options.name,status_options.color,status_options.completion_state,status_options.enabled",
+        }),
+      );
+      return response.data;
+    },
+    async getUserTaskList(userGid, workspaceGid) {
+      const response = await transport.get<AsanaSingle<AsanaUserTaskList>>(
+        `/users/${encodeURIComponent(userGid)}/user_task_list`,
+        new URLSearchParams({
+          workspace: workspaceGid,
+          opt_fields:
+            "gid,name,owner.gid,owner.name,owner.email,workspace.gid,workspace.name",
+        }),
+      );
+      return response.data;
+    },
+    listUserTaskListTasks: (userTaskListGid) =>
+      list<AsanaTask>(
+        `/user_task_lists/${encodeURIComponent(userTaskListGid)}/tasks`,
         new URLSearchParams({
           completed_since: "1970-01-01T00:00:00.000Z",
           opt_fields: TASK_FIELDS,
@@ -528,8 +710,31 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         "/goals",
         new URLSearchParams({
           workspace: workspaceGid,
-          opt_fields:
-            "gid,name,notes,html_notes,start_on,due_on,is_workspace_level,team.gid,team.name,owner.gid,owner.name,owner.email,status,privacy_setting,metric.initial_number_value,metric.target_number_value,metric.current_number_value,metric.current_display_value,metric.progress_source,created_at,modified_at",
+          opt_fields: [
+            "gid",
+            "name",
+            "notes",
+            "html_notes",
+            "start_on",
+            "due_on",
+            "is_workspace_level",
+            "team.gid",
+            "team.name",
+            "owner.gid",
+            "owner.name",
+            "owner.email",
+            "status",
+            "privacy_setting",
+            "metric.initial_number_value",
+            "metric.target_number_value",
+            "metric.current_number_value",
+            "metric.current_display_value",
+            "metric.progress_source",
+            "created_at",
+            "modified_at",
+            ...customFieldSettingFields("custom_field_settings"),
+            ...customFieldFields("custom_fields"),
+          ].join(","),
         }),
       ),
     listGoalRelationships: (goalGid) =>
@@ -546,8 +751,22 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         "/portfolios",
         new URLSearchParams({
           workspace: workspaceGid,
-          opt_fields:
-            "gid,name,archived,color,start_on,due_on,owner.gid,owner.name,owner.email,public,privacy_setting,created_at",
+          opt_fields: [
+            "gid",
+            "name",
+            "archived",
+            "color",
+            "start_on",
+            "due_on",
+            "owner.gid",
+            "owner.name",
+            "owner.email",
+            "public",
+            "privacy_setting",
+            "created_at",
+            ...customFieldSettingFields("custom_field_settings"),
+            ...customFieldFields("custom_fields"),
+          ].join(","),
         }),
       ),
     listPortfolioItems: (portfolioGid) =>

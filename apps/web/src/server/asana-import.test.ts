@@ -5,6 +5,8 @@ import {
   asanaGoalProgress,
   asanaGoalStatus,
   asanaItemType,
+  asanaObjectFieldDisplayValue,
+  asanaObjectFieldValue,
   importAsanaWorkspace,
 } from "./asana-import";
 
@@ -33,6 +35,27 @@ describe("Asana import mapping", () => {
         },
       }),
     ).toBe(75);
+    expect(
+      asanaObjectFieldValue({
+        gid: "cf1",
+        name: "Markets",
+        multi_enum_values: [{ name: "UAE" }, { name: "KSA" }],
+      }),
+    ).toEqual(["UAE", "KSA"]);
+    expect(
+      asanaObjectFieldDisplayValue({
+        gid: "cf2",
+        name: "Budget",
+        number_value: 0,
+      }),
+    ).toBe("0");
+    expect(
+      asanaObjectFieldValue({
+        gid: "cf3",
+        name: "Launch",
+        date_value: { date: "2026-08-01", date_time: null },
+      }),
+    ).toBe("2026-08-01");
   });
 
   it("refuses a partial scan before reconciliation can change data", async () => {

@@ -260,6 +260,146 @@
       "when": 1784977200000,
       "tag": "0036_work_sandbox",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1784980800000,
+      "tag": "0037_work_scheduled_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1784984400000,
+      "tag": "0038_work_messages_likes",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1784988000000,
+      "tag": "0039_work_proofing",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1784991600000,
+      "tag": "0040_work_out_of_office",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1784995200000,
+      "tag": "0041_work_accessibility",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1784998800000,
+      "tag": "0042_work_my_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1785002400000,
+      "tag": "0043_work_my_tasks_focus",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1785006000000,
+      "tag": "0044_work_personal_projects",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1785009600000,
+      "tag": "0045_asana_my_tasks_import",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1785013200000,
+      "tag": "0046_work_custom_task_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1785016800000,
+      "tag": "0047_work_custom_task_type_automation",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1785020400000,
+      "tag": "0048_work_custom_task_type_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1785024000000,
+      "tag": "0049_work_public_forms",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1785027600000,
+      "tag": "0050_work_rule_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1785031200000,
+      "tag": "0051_work_dashboard_sharing",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1785034800000,
+      "tag": "0052_work_project_rates",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1785038400000,
+      "tag": "0053_work_object_custom_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1785042000000,
+      "tag": "0054_work_custom_field_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1785045600000,
+      "tag": "0055_work_status_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1785049200000,
+      "tag": "0056_work_rule_owner_notifications",
+      "breakpoints": true
     }
   ]
 }

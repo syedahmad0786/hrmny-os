@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { sql } from "@hrmny/db";
+import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import {
   canAccessEmployeeRecord,
@@ -8,6 +9,7 @@ import {
 } from "../core-hr";
 import { getDb } from "../db";
 import { writeAudit } from "../m1-persistence";
+import { getSupabaseAdminConfig } from "../supabase-admin-config";
 import { router, staffProcedure, type TrpcContext } from "./trpc";
 
 type EmployeeAccessRow = {
@@ -130,6 +132,112 @@ export const coreHrRouter = router({
       order by e.display_name
     `);
   }),
+
+  inviteEmployee: staffProcedure
+    .input(
+      z.object({
+        displayName: z.string().trim().min(2).max(160),
+        email: z
+          .string()
+          .trim()
+          .email()
+          .max(320)
+          .refine(
+            (email) => email.toLowerCase().endsWith("@hrmny.co"),
+            "Use an @hrmny.co email address",
+          ),
+        jobTitle: z.string().trim().max(160).optional(),
+        department: z.string().trim().max(160).optional(),
+        roleKey: z
+          .enum([
+            "staff",
+            "am",
+            "traffic",
+            "creative",
+            "finance",
+            "hiring",
+            "director",
+            "partner",
+            "hr",
+          ])
+          .default("staff"),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const current = actor(ctx);
+      requireAdmin(current.roles);
+      const email = input.email.toLowerCase();
+      const employee = await requireDb().transaction(async (tx) => {
+        const roles = await tx.execute<{ roleId: string }>(sql`
+          select role_id as "roleId" from public.role
+          where key = ${input.roleKey} limit 1
+        `);
+        if (!roles[0]) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Role ${input.roleKey} is not configured`,
+          });
+        }
+        const employees = await tx.execute<{
+          employeeId: string;
+          displayName: string;
+          email: string;
+        }>(sql`
+          insert into public.employee (
+            display_name, email, job_title, department,
+            lifecycle_status, capacity_hours_per_week, is_active
+          ) values (
+            ${input.displayName}, ${email}, ${input.jobTitle || null},
+            ${input.department || null}, 'active', 40, true
+          )
+          on conflict (email) do update set
+            display_name = excluded.display_name,
+            job_title = excluded.job_title,
+            department = excluded.department,
+            lifecycle_status = 'active',
+            is_active = true,
+            updated_at = now()
+          returning employee_id as "employeeId", display_name as "displayName", email
+        `);
+        const created = employees[0]!;
+        await tx.execute(sql`
+          insert into public.employee_role (employee_id, role_id)
+          values (${created.employeeId}::uuid, ${roles[0]!.roleId}::uuid)
+          on conflict (employee_id, role_id) do nothing
+        `);
+        await tx.execute(sql`
+          insert into public.audit_event (
+            actor_employee_id, action, entity_type, entity_id, before, after
+          ) values (
+            ${current.employeeId}::uuid, 'core_hr.employee.invite', 'employee',
+            ${created.employeeId}::uuid, null,
+            ${JSON.stringify({ email, roleKey: input.roleKey })}::jsonb
+          )
+        `);
+        return created;
+      });
+
+      const config = getSupabaseAdminConfig();
+      if (!config) {
+        return {
+          ...employee,
+          invited: false as const,
+          inviteMessage:
+            "Employee added; Supabase email invitations are not configured",
+        };
+      }
+      const supabase = createClient(config.url, config.key, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { error } = await supabase.auth.admin.inviteUserByEmail(email);
+      return {
+        ...employee,
+        invited: !error,
+        inviteMessage: error
+          ? `Employee added; invitation email was not sent: ${error.message}`
+          : "Employee added and invitation sent",
+      };
+    }),
 
   profile: router({
     get: staffProcedure

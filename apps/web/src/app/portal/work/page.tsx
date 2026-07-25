@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import {
+  WorkRichText,
+  WorkRichTextEditor,
+  type WorkMentionOption,
+} from "@/components/work-rich-text";
 
 export default function PortalWorkPage() {
   const utils = trpc.useUtils();
@@ -16,6 +21,8 @@ export default function PortalWorkPage() {
   );
   const commentsEnabled =
     session.data?.enabledFeatureKeys.includes("work.comments") ?? false;
+  const richTextEnabled =
+    session.data?.enabledFeatureKeys.includes("work.rich_text") ?? false;
   const comments = trpc.portal.work.comments.list.useQuery(
     { itemId },
     { enabled: Boolean(itemId) && commentsEnabled },
@@ -40,6 +47,21 @@ export default function PortalWorkPage() {
   const selectedProject = projects.data?.find(
     (project) => project.projectId === projectId,
   );
+  const selectedItem = detail.data?.items.find(
+    (item) => String(item.itemId) === itemId,
+  );
+  const mentionOptions: WorkMentionOption[] = [
+    ...(projects.data ?? []).map((project) => ({
+      id: project.projectId,
+      label: project.name,
+      type: "project" as const,
+    })),
+    ...(detail.data?.items ?? []).map((item) => ({
+      id: String(item.itemId),
+      label: String(item.title),
+      type: "task" as const,
+    })),
+  ];
 
   return (
     <main className="flex flex-col gap-6">
@@ -81,9 +103,16 @@ export default function PortalWorkPage() {
           <h2 className="font-display text-xl font-semibold">
             {selectedProject.name}
           </h2>
-          <p className="mt-1 text-sm text-muted">
-            {selectedProject.description || "No project description"}
-          </p>
+          {richTextEnabled && selectedProject.description ? (
+            <WorkRichText
+              className="mt-1 text-sm text-muted"
+              value={selectedProject.description}
+            />
+          ) : (
+            <p className="mt-1 whitespace-pre-wrap text-sm text-muted">
+              {selectedProject.description || "No project description"}
+            </p>
+          )}
           <div className="mt-5 grid gap-4 md:grid-cols-[1fr_1.1fr]">
             <div>
               <h3 className="text-sm font-semibold">Tasks</h3>
@@ -111,6 +140,18 @@ export default function PortalWorkPage() {
 
             <div>
               <h3 className="text-sm font-semibold">Conversation</h3>
+              {selectedItem?.description ? (
+                richTextEnabled ? (
+                  <WorkRichText
+                    className="mt-2 rounded-lg border border-[#D9D0C4] bg-white p-3 text-sm"
+                    value={String(selectedItem.description)}
+                  />
+                ) : (
+                  <p className="mt-2 whitespace-pre-wrap rounded-lg border border-[#D9D0C4] bg-white p-3 text-sm">
+                    {String(selectedItem.description)}
+                  </p>
+                )
+              ) : null}
               {!commentsEnabled ? (
                 <p className="mt-2 text-sm text-muted">
                   Comments are not included for this portal.
@@ -126,15 +167,22 @@ export default function PortalWorkPage() {
                         <p className="font-medium">
                           {String(entry.authorName)}
                         </p>
-                        <p className="mt-1 whitespace-pre-wrap text-muted">
-                          {String(entry.body)}
-                        </p>
+                        {richTextEnabled ? (
+                          <WorkRichText
+                            className="mt-1 text-muted"
+                            value={String(entry.body)}
+                          />
+                        ) : (
+                          <p className="mt-1 whitespace-pre-wrap text-muted">
+                            {String(entry.body)}
+                          </p>
+                        )}
                       </article>
                     ))}
                   </div>
                   {selectedProject.accessLevel === "commenter" && itemId ? (
                     <form
-                      className="mt-3 flex gap-2"
+                      className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end"
                       onSubmit={(event) => {
                         event.preventDefault();
                         if (comment.trim()) {
@@ -145,13 +193,25 @@ export default function PortalWorkPage() {
                         }
                       }}
                     >
-                      <input
-                        className="min-w-0 flex-1 rounded-lg border border-[#D9D0C4] bg-white px-3 py-2 text-sm"
-                        value={comment}
-                        onChange={(event) => setComment(event.target.value)}
-                        placeholder="Add a comment"
-                        maxLength={20_000}
-                      />
+                      {richTextEnabled ? (
+                        <WorkRichTextEditor
+                          ariaLabel="Comment"
+                          maxLength={20_000}
+                          mentions={mentionOptions}
+                          placeholder="Add a comment"
+                          value={comment}
+                          onChange={setComment}
+                        />
+                      ) : (
+                        <input
+                          aria-label="Comment"
+                          className="min-w-0 flex-1 rounded-lg border border-[#D9D0C4] bg-white px-3 py-2 text-sm"
+                          value={comment}
+                          onChange={(event) => setComment(event.target.value)}
+                          placeholder="Add a comment"
+                          maxLength={20_000}
+                        />
+                      )}
                       <button
                         type="submit"
                         className="rounded-lg bg-ink px-4 py-2 text-sm text-white disabled:opacity-50"

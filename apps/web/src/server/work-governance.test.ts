@@ -1,7 +1,12 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
-import { clearDemoFeatureOverrides } from "./features";
+import { clearDemoFeatureOverrides, setFeatureOverride } from "./features";
 import { createCaller } from "./trpc/root";
+import {
+  getVerifiedWorkAppConnection,
+  WORK_APP_CATALOG,
+  workIntegrationFeatureKeysForToolkit,
+} from "./trpc/connections-router";
 import { clearDemoWorkAdmin, rowsToCsv } from "./trpc/work-admin-router";
 import {
   clearDemoWorkGovernance,
@@ -38,6 +43,7 @@ describe("Work governance", () => {
 
   it("allows curated apps under the default approved-only policy", async () => {
     expect(await isWorkConnectedAppAllowed("asana")).toBe(true);
+    expect(await isWorkConnectedAppAllowed("slack")).toBe(true);
     expect(await isWorkConnectedAppAllowed("unreviewed_app")).toBe(false);
     await expect(
       caller("partner").connections.authorizeManaged({
@@ -56,6 +62,117 @@ describe("Work governance", () => {
     expect(await isWorkConnectedAppAllowed("asana")).toBe(false);
   });
 
+  it("governs every Work app family before Composio is called", async () => {
+    expect(new Set(WORK_APP_CATALOG.map((item) => item.family))).toEqual(
+      new Set(["files", "communication", "enterprise"]),
+    );
+    expect(workIntegrationFeatureKeysForToolkit("slack")).toEqual([
+      "work.integrations.communication",
+      "work.integrations.communication.slack",
+    ]);
+    const partner = resolveDevUser("partner");
+    await setFeatureOverride({
+      featureKey: "work.integrations.communication.slack",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      updatedByEmployeeId: partner.employeeId,
+    });
+    await expect(
+      caller("partner").connections.startWorkAppLink({ toolkit: "slack" }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.integrations.communication.slack",
+    });
+    clearDemoFeatureOverrides();
+
+    for (const featureKey of [
+      "work.integrations.files",
+      "work.integrations.communication",
+      "work.integrations.enterprise",
+    ]) {
+      await setFeatureOverride({
+        featureKey,
+        scopeType: "global",
+        scopeKey: "global",
+        enabled: false,
+        updatedByEmployeeId: partner.employeeId,
+      });
+    }
+
+    await expect(caller("partner").connections.workApps()).resolves.toEqual({
+      bridgeAllowed: true,
+      bridgeConfigured: false,
+      bridgeError: null,
+      apps: [],
+    });
+    await expect(
+      caller("partner").connections.startWorkAppLink({ toolkit: "slack" }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "FEATURE_DISABLED:work.integrations.communication",
+    });
+  });
+
+  it("accepts only the current employee's matching Composio account", async () => {
+    const employee = resolveDevUser("partner");
+    const previousKey = process.env.COMPOSIO_API_KEY;
+    process.env.COMPOSIO_API_KEY = "test-key";
+    let items = [
+      {
+        id: "ca_other_user",
+        status: "ACTIVE",
+        toolkit: { slug: "slack" },
+        user_id: "other-employee",
+      },
+      {
+        id: "ca_wrong_toolkit",
+        status: "ACTIVE",
+        toolkit: { slug: "outlook" },
+        user_id: employee.employeeId,
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ items, next_cursor: null }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    try {
+      await expect(
+        getVerifiedWorkAppConnection(employee.employeeId, "slack", {
+          clientId: null,
+          roles: employee.roles,
+        }),
+      ).resolves.toBeNull();
+      items = [
+        ...items,
+        {
+          id: "ca_employee_slack",
+          status: "ACTIVE",
+          toolkit: { slug: "slack" },
+          user_id: employee.employeeId,
+        },
+      ];
+      await expect(
+        getVerifiedWorkAppConnection(employee.employeeId, "slack", {
+          clientId: null,
+          roles: employee.roles,
+        }),
+      ).resolves.toMatchObject({
+        account: { id: "ca_employee_slack" },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+      if (previousKey === undefined) delete process.env.COMPOSIO_API_KEY;
+      else process.env.COMPOSIO_API_KEY = previousKey;
+    }
+  });
+
   it("manages teams and denies every Work mutation for a view-only member", async () => {
     const admin = caller("partner");
     const project = (await admin.work.projects.list())[0]!;
@@ -69,10 +186,17 @@ describe("Work governance", () => {
       projectId: project.projectId,
       included: true,
     });
+    await admin.workAdmin.teams.setMessagePermission({
+      teamId: team.teamId,
+      permission: "admins",
+    });
     expect((await admin.workAdmin.teams.list())[0]?.projects).toContainEqual({
       projectId: project.projectId,
       name: project.name,
       accessLevel: "editor",
+    });
+    expect((await admin.workAdmin.teams.list())[0]).toMatchObject({
+      messageSendPermission: "admins",
     });
 
     const am = resolveDevUser("am");

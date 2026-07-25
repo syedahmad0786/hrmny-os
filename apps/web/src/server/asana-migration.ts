@@ -1,6 +1,8 @@
 import type {
   AsanaAdapter,
   AsanaAttachment,
+  AsanaCustomField,
+  AsanaCustomType,
   AsanaGoal,
   AsanaGoalRelationship,
   AsanaMembership,
@@ -16,6 +18,7 @@ import type {
   AsanaTeamMembership,
   AsanaTimeTrackingEntry,
   AsanaUser,
+  AsanaUserTaskList,
 } from "@hrmny/integrations";
 
 export type AsanaScanDepth = "structure" | "full";
@@ -52,11 +55,32 @@ export type AsanaWorkspaceScan = {
     membership: AsanaMembership;
   }>;
   sections: Array<AsanaSection & { projectGid: string }>;
+  myTaskList: AsanaUserTaskList;
+  myTaskSections: AsanaSection[];
+  myTasks: Array<{
+    taskGid: string;
+    sectionGid: string | null;
+    position: number;
+    projectless: boolean;
+  }>;
   tasks: AsanaTask[];
   projectTasks: Array<{
     projectGid: string;
     taskGid: string;
     sectionGid: string | null;
+  }>;
+  customTaskTypes: AsanaCustomType[];
+  customFieldMemberships: Array<{
+    customFieldGid: string;
+    membership: AsanaMembership;
+  }>;
+  customTaskTypeMemberships: Array<{
+    customTaskTypeGid: string;
+    membership: AsanaMembership;
+  }>;
+  projectCustomTaskTypes: Array<{
+    projectGid: string;
+    customTaskTypeGid: string;
   }>;
   stories: Array<{ taskGid: string; story: AsanaStory }> | null;
   attachments: Array<{ taskGid: string; attachment: AsanaAttachment }> | null;
@@ -85,6 +109,9 @@ export type AsanaWorkspaceScan = {
     projects: number;
     projectMemberships: number;
     sections: number;
+    myTaskSections: number;
+    myTasks: number;
+    myTasksOnly: number;
     topLevelTasks: number;
     subtasks: number;
     tasks: number;
@@ -92,6 +119,12 @@ export type AsanaWorkspaceScan = {
     multiHomedTasks: number;
     tags: number;
     customFields: number;
+    customFieldMemberships: number;
+    objectCustomFieldValues: number;
+    customTaskTypes: number;
+    customTaskTypeMemberships: number;
+    customTaskStatuses: number;
+    projectCustomTaskTypes: number;
     stories: number | null;
     comments: number | null;
     attachments: number | null;
@@ -111,32 +144,47 @@ export async function scanAsanaWorkspace(
   workspaceGid: string,
   depth: AsanaScanDepth = "full",
 ): Promise<AsanaWorkspaceScan> {
-  const [users, teams, projects, goals, portfolios, projectTemplates] =
-    await Promise.all([
-      adapter.listUsers(workspaceGid),
-      adapter.listTeams(workspaceGid),
-      adapter.listProjects(workspaceGid),
-      adapter.listGoals(workspaceGid),
-      adapter.listPortfolios(workspaceGid),
-      adapter.listProjectTemplates(workspaceGid),
-    ]);
+  const [
+    users,
+    teams,
+    projects,
+    goals,
+    portfolios,
+    projectTemplates,
+    myTaskList,
+  ] = await Promise.all([
+    adapter.listUsers(workspaceGid),
+    adapter.listTeams(workspaceGid),
+    adapter.listProjects(workspaceGid),
+    adapter.listGoals(workspaceGid),
+    adapter.listPortfolios(workspaceGid),
+    adapter.listProjectTemplates(workspaceGid),
+    adapter.getUserTaskList("me", workspaceGid),
+  ]);
+  const [myTaskSections, myTaskValues] = await Promise.all([
+    adapter.listSections(myTaskList.gid),
+    adapter.listUserTaskListTasks(myTaskList.gid),
+  ]);
   const teamRows = await mapLimit(teams, 4, async (team) => ({
     teamGid: team.gid,
     memberships: await adapter.listTeamMemberships(team.gid),
   }));
   const projectRows = await mapLimit(projects, 4, async (project) => {
-    const [sections, tasks, memberships, taskTemplates] = await Promise.all([
-      adapter.listSections(project.gid),
-      adapter.listProjectTasks(project.gid),
-      adapter.listProjectMemberships(project.gid),
-      adapter.listTaskTemplates(project.gid),
-    ]);
+    const [sections, tasks, memberships, taskTemplates, customTaskTypes] =
+      await Promise.all([
+        adapter.listSections(project.gid),
+        adapter.listProjectTasks(project.gid),
+        adapter.listProjectMemberships(project.gid),
+        adapter.listTaskTemplates(project.gid),
+        adapter.listCustomTypes(project.gid),
+      ]);
     return {
       projectGid: project.gid,
       sections,
       tasks,
       memberships,
       taskTemplates,
+      customTaskTypes,
     };
   });
   const goalRows = await mapLimit(goals, 4, async (goal) => ({
@@ -154,6 +202,9 @@ export async function scanAsanaWorkspace(
       tasks.set(task.gid, task);
     }
   }
+  // The connected user's response is the only one allowed to include
+  // assignee_section, so keep it when the task is also in a project.
+  for (const task of myTaskValues) tasks.set(task.gid, task);
   const topLevelTaskIds = new Set(tasks.keys());
 
   const parents = [...tasks.values()].filter(
@@ -181,6 +232,32 @@ export async function scanAsanaWorkspace(
   }
 
   const taskValues = [...tasks.values()];
+  const customTaskTypes = new Map<string, AsanaCustomType>();
+  for (const row of projectRows)
+    for (const type of row.customTaskTypes) customTaskTypes.set(type.gid, type);
+  const missingCustomTaskTypeGids = [
+    ...new Set(
+      taskValues.flatMap((task) =>
+        task.custom_type && !customTaskTypes.has(task.custom_type.gid)
+          ? [task.custom_type.gid]
+          : [],
+      ),
+    ),
+  ];
+  for (const type of await mapLimit(missingCustomTaskTypeGids, 4, (gid) =>
+    adapter.getCustomType(gid),
+  ))
+    customTaskTypes.set(type.gid, type);
+  const customTaskTypeMembershipRows = await mapLimit(
+    [...customTaskTypes.values()],
+    4,
+    async (type) => ({
+      customTaskTypeGid: type.gid,
+      memberships: adapter.listCustomTypeMemberships
+        ? await adapter.listCustomTypeMemberships(type.gid)
+        : [],
+    }),
+  );
   let stories: Array<{ taskGid: string; story: AsanaStory }> | null = null;
   let attachments: Array<{
     taskGid: string;
@@ -236,13 +313,48 @@ export async function scanAsanaWorkspace(
   }
 
   const tags = new Set<string>();
-  const customFields = new Set<string>();
+  const customFields = new Map<string, AsanaCustomField>();
+  const addCustomField = (field: AsanaCustomField) =>
+    customFields.set(field.gid, {
+      ...(customFields.get(field.gid) ?? {}),
+      ...field,
+    });
   for (const task of tasks.values()) {
     for (const tag of task.tags ?? []) tags.add(tag.gid);
-    for (const field of task.custom_fields ?? []) customFields.add(field.gid);
+    for (const field of task.custom_fields ?? []) addCustomField(field);
   }
+  for (const project of projects) {
+    for (const setting of project.custom_field_settings ?? [])
+      addCustomField(setting.custom_field);
+    for (const field of project.custom_fields ?? [])
+      addCustomField(field);
+  }
+  for (const portfolio of portfolios) {
+    for (const setting of portfolio.custom_field_settings ?? [])
+      addCustomField(setting.custom_field);
+    for (const field of portfolio.custom_fields ?? [])
+      addCustomField(field);
+  }
+  for (const goal of goals) {
+    for (const setting of goal.custom_field_settings ?? [])
+      addCustomField(setting.custom_field);
+    for (const field of goal.custom_fields ?? []) addCustomField(field);
+  }
+  const customFieldMembershipRows = await mapLimit(
+    [...customFields.values()],
+    4,
+    async (field) => ({
+      customFieldGid: field.gid,
+      memberships: adapter.listCustomFieldMemberships
+        ? await adapter.listCustomFieldMemberships(field.gid)
+        : [],
+    }),
+  );
 
   const selectedProjects = new Set(projects.map((project) => project.gid));
+  const projectTaskIds = new Set(
+    projectRows.flatMap((row) => row.tasks.map((task) => task.gid)),
+  );
   const projectTasks = new Map<
     string,
     { projectGid: string; taskGid: string; sectionGid: string | null }
@@ -300,8 +412,35 @@ export async function scanAsanaWorkspace(
         projectGid: row.projectGid,
       })),
     ),
+    myTaskList,
+    myTaskSections,
+    myTasks: myTaskValues.map((task, position) => ({
+      taskGid: task.gid,
+      sectionGid: task.assignee_section?.gid ?? null,
+      position,
+      projectless: !projectTaskIds.has(task.gid),
+    })),
     tasks: taskValues,
     projectTasks: [...projectTasks.values()],
+    customTaskTypes: [...customTaskTypes.values()],
+    customFieldMemberships: customFieldMembershipRows.flatMap((row) =>
+      row.memberships.map((membership) => ({
+        customFieldGid: row.customFieldGid,
+        membership,
+      })),
+    ),
+    customTaskTypeMemberships: customTaskTypeMembershipRows.flatMap((row) =>
+      row.memberships.map((membership) => ({
+        customTaskTypeGid: row.customTaskTypeGid,
+        membership,
+      })),
+    ),
+    projectCustomTaskTypes: projectRows.flatMap((row) =>
+      row.customTaskTypes.map((type) => ({
+        projectGid: row.projectGid,
+        customTaskTypeGid: type.gid,
+      })),
+    ),
     stories,
     attachments,
     timeTrackingEntries,
@@ -335,6 +474,10 @@ export async function scanAsanaWorkspace(
         0,
       ),
       sections: projectRows.reduce((sum, row) => sum + row.sections.length, 0),
+      myTaskSections: myTaskSections.length,
+      myTasks: myTaskValues.length,
+      myTasksOnly: myTaskValues.filter((task) => !projectTaskIds.has(task.gid))
+        .length,
       topLevelTasks: topLevelTaskIds.size,
       subtasks: tasks.size - topLevelTaskIds.size,
       tasks: tasks.size,
@@ -344,6 +487,33 @@ export async function scanAsanaWorkspace(
       ).length,
       tags: tags.size,
       customFields: customFields.size,
+      customFieldMemberships: customFieldMembershipRows.reduce(
+        (sum, row) => sum + row.memberships.length,
+        0,
+      ),
+      objectCustomFieldValues:
+        projects.reduce(
+          (sum, project) => sum + (project.custom_fields?.length ?? 0),
+          0,
+        ) +
+        portfolios.reduce(
+          (sum, portfolio) => sum + (portfolio.custom_fields?.length ?? 0),
+          0,
+        ) +
+        goals.reduce((sum, goal) => sum + (goal.custom_fields?.length ?? 0), 0),
+      customTaskTypes: customTaskTypes.size,
+      customTaskTypeMemberships: customTaskTypeMembershipRows.reduce(
+        (sum, row) => sum + row.memberships.length,
+        0,
+      ),
+      customTaskStatuses: [...customTaskTypes.values()].reduce(
+        (sum, type) => sum + type.status_options.length,
+        0,
+      ),
+      projectCustomTaskTypes: projectRows.reduce(
+        (sum, row) => sum + row.customTaskTypes.length,
+        0,
+      ),
       stories: stories?.length ?? null,
       comments:
         stories?.filter(

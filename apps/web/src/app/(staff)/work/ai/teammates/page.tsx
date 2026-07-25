@@ -14,6 +14,7 @@ const actionTypes = [
   ["delete_task", "Archive tasks"],
   ["create_subtask", "Create subtasks"],
   ["set_custom_field", "Update custom fields"],
+  ["set_custom_task_status", "Set custom task status"],
   ["add_to_project", "Add tasks to projects"],
   ["add_follower", "Add collaborators"],
   ["remove_follower", "Remove collaborators"],
@@ -27,6 +28,54 @@ const actionTypes = [
   ["create_external_file", "Create a Google Doc or Sheet"],
 ] as const;
 type ActionType = (typeof actionTypes)[number][0];
+const connectedApps = [
+  {
+    value: "google_workspace",
+    label: "Google Workspace (Drive, Gmail, Calendar, Docs, and Sheets)",
+    featureKeys: [],
+  },
+  {
+    value: "one_drive",
+    label: "OneDrive",
+    featureKeys: [
+      "work.integrations.files",
+      "work.integrations.files.one_drive",
+    ],
+  },
+  {
+    value: "outlook",
+    label: "Outlook",
+    featureKeys: [
+      "work.integrations.communication",
+      "work.integrations.communication.outlook",
+    ],
+  },
+  {
+    value: "slack",
+    label: "Slack",
+    featureKeys: [
+      "work.integrations.communication",
+      "work.integrations.communication.slack",
+    ],
+  },
+  {
+    value: "microsoft_teams",
+    label: "Microsoft Teams",
+    featureKeys: [
+      "work.integrations.communication",
+      "work.integrations.communication.teams",
+    ],
+  },
+  {
+    value: "jira",
+    label: "Jira",
+    featureKeys: [
+      "work.integrations.enterprise",
+      "work.integrations.enterprise.jira",
+    ],
+  },
+] as const;
+type ConnectedApp = (typeof connectedApps)[number]["value"];
 const card = "rounded-xl border border-sand bg-white/80 p-5";
 const input = "w-full rounded-lg border border-sand bg-white px-3 py-2";
 
@@ -72,7 +121,7 @@ export default function WorkAiTeammatesPage() {
     "create_comment",
   ]);
   const [allowedConnectedApps, setAllowedConnectedApps] = useState<
-    "google_workspace"[]
+    ConnectedApp[]
   >([]);
   const [model, setModel] = useState("");
   const [shareEmployeeId, setShareEmployeeId] = useState("");
@@ -94,6 +143,11 @@ export default function WorkAiTeammatesPage() {
     { projectId: runProjectId || ZERO },
     { enabled: Boolean(runProjectId) },
   );
+  const runEnabled = new Set(
+    runProject.data?.enabledFeatureKeys ??
+      (runProjectId ? [] : session.data?.enabledFeatureKeys) ??
+      [],
+  ).has("work.ai.teammates");
   const canEdit = !selected || selected.memberAccess !== "user";
   const canOwn = selected?.memberAccess === "owner";
 
@@ -322,51 +376,72 @@ export default function WorkAiTeammatesPage() {
                   Actions this teammate may propose
                 </legend>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {actionTypes.map(([value, label]) => (
-                    <label
-                      key={value}
-                      className="flex items-center gap-2 text-sm"
-                    >
-                      <input
-                        type="checkbox"
-                        disabled={!canEdit}
-                        checked={allowedActionTypes.includes(value)}
-                        onChange={() =>
-                          setAllowedActionTypes((current) =>
-                            current.includes(value)
-                              ? current.filter((item) => item !== value)
-                              : [...current, value],
-                          )
-                        }
-                      />
-                      {label}
-                    </label>
-                  ))}
+                  {actionTypes
+                    .filter(
+                      ([value]) =>
+                        enabled.has("work.custom_task_types") ||
+                        value !== "set_custom_task_status",
+                    )
+                    .map(([value, label]) => (
+                      <label
+                        key={value}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={!canEdit}
+                          checked={allowedActionTypes.includes(value)}
+                          onChange={() =>
+                            setAllowedActionTypes((current) =>
+                              current.includes(value)
+                                ? current.filter((item) => item !== value)
+                                : [...current, value],
+                            )
+                          }
+                        />
+                        {label}
+                      </label>
+                    ))}
                 </div>
               </fieldset>
               <fieldset className="md:col-span-2">
                 <legend className="text-sm font-medium">Connected data</legend>
                 <p className="mt-1 text-xs text-muted">
                   The teammate can search only through the running user&apos;s
-                  own connection. Creating a file still needs approval. Older
-                  Google connections may need to be reconnected for Drive search
-                  permission.
+                  own connection. Each source also needs its provider switch and
+                  AI connectors enabled in Feature Lab. Creating a Google file
+                  still needs approval.
                 </p>
-                <label className="mt-2 flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    disabled={!canEdit || !enabled.has("work.ai.connectors")}
-                    checked={allowedConnectedApps.includes("google_workspace")}
-                    onChange={() =>
-                      setAllowedConnectedApps((current) =>
-                        current.includes("google_workspace")
-                          ? []
-                          : ["google_workspace"],
-                      )
-                    }
-                  />
-                  Google Workspace (Drive, Docs, and Sheets)
-                </label>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {connectedApps
+                    .filter((app) =>
+                      app.featureKeys.every((featureKey) =>
+                        enabled.has(featureKey),
+                      ),
+                    )
+                    .map((app) => (
+                      <label
+                        key={app.value}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={
+                            !canEdit || !enabled.has("work.ai.connectors")
+                          }
+                          checked={allowedConnectedApps.includes(app.value)}
+                          onChange={() =>
+                            setAllowedConnectedApps((current) =>
+                              current.includes(app.value)
+                                ? current.filter((item) => item !== app.value)
+                                : [...current, app.value],
+                            )
+                          }
+                        />
+                        {app.label}
+                      </label>
+                    ))}
+                </div>
                 {!enabled.has("work.ai.connectors") ? (
                   <p className="mt-1 text-xs text-muted">
                     Enable AI connectors in Feature Lab to grant access.
@@ -443,6 +518,11 @@ export default function WorkAiTeammatesPage() {
                         </option>
                       ))}
                     </select>
+                    {runProjectId && !runEnabled ? (
+                      <span className="mt-1 block text-xs text-amber-700">
+                        AI Teammates are disabled for this client.
+                      </span>
+                    ) : null}
                   </label>
                   <label className="block text-sm">
                     <span className="mb-1 block font-medium">
@@ -477,7 +557,10 @@ export default function WorkAiTeammatesPage() {
                   type="button"
                   className="mt-3 rounded-lg bg-ochre px-4 py-2 text-sm text-white disabled:opacity-50"
                   disabled={
-                    run.isPending || !runProjectId || !requestText.trim()
+                    run.isPending ||
+                    !runProjectId ||
+                    !requestText.trim() ||
+                    !runEnabled
                   }
                   onClick={() =>
                     run.mutate({

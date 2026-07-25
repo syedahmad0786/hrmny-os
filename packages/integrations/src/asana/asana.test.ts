@@ -79,6 +79,101 @@ describe("Asana integration", () => {
     });
   });
 
+  it("uses live Composio auth configs for connect and revoke", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = vi.fn(
+      async (request: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(request);
+        requests.push({ url, init });
+        if (url.includes("/auth_configs"))
+          return json({
+            items: [
+              {
+                id: "ac_slack",
+                toolkit: { slug: "slack" },
+                name: "Slack managed auth",
+                auth_scheme: "OAUTH2",
+                is_composio_managed: true,
+                status: "ENABLED",
+              },
+            ],
+            next_cursor: null,
+          });
+        if (url.endsWith("/connected_accounts/link"))
+          return json(
+            {
+              redirect_url: "https://backend.composio.dev/link/token",
+              connected_account_id: "ca_slack",
+              expires_at: "2026-07-24T12:00:00Z",
+            },
+            201,
+          );
+        return json({ success: true });
+      },
+    ) as typeof fetch;
+    const composio = createComposioLive({ apiKey: "key", fetchImpl });
+
+    const configs = await composio.listAuthConfigs({ toolkits: ["slack"] });
+    const link = await composio.createConnectLink({
+      authConfigId: configs[0]!.id,
+      userId: "employee-1",
+      callbackUrl: "https://portal.hrmny.co/settings/connections",
+    });
+    await composio.deleteConnectedAccount({
+      connectedAccountId: link.connected_account_id,
+    });
+
+    expect(requests[0]!.url).toContain("toolkit_slug=slack");
+    expect(JSON.parse(String(requests[1]!.init?.body))).toEqual({
+      auth_config_id: "ac_slack",
+      user_id: "employee-1",
+      callback_url: "https://portal.hrmny.co/settings/connections",
+    });
+    expect(requests[2]).toMatchObject({
+      url: expect.stringContaining(
+        "/connected_accounts/ca_slack?revoke_on_delete=true",
+      ),
+      init: { method: "DELETE" },
+    });
+  });
+
+  it("executes a versioned read-only Composio tool for one account", async () => {
+    const fetchMock = vi.fn(
+      async (_request: RequestInfo | URL, init?: RequestInit) => {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          connected_account_id: "ca_outlook",
+          text: "Search Outlook for Acme renewal and return at most 5 results.",
+          version: "latest",
+        });
+        return json({
+          successful: true,
+          data: { value: [{ subject: "Acme renewal" }] },
+        });
+      },
+    );
+    const fetchImpl = fetchMock as typeof fetch;
+    const composio = createComposioLive({ apiKey: "key", fetchImpl });
+
+    await expect(
+      composio.executeTool({
+        connectedAccountId: "ca_outlook",
+        toolSlug: "OUTLOOK_SEARCH_MESSAGES",
+        text: "Search Outlook for Acme renewal and return at most 5 results.",
+      }),
+    ).resolves.toEqual({ value: [{ subject: "Acme renewal" }] });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/tools/execute/OUTLOOK_SEARCH_MESSAGES",
+    );
+    await expect(
+      composio.executeTool({
+        connectedAccountId: "ca_outlook",
+        toolSlug: "OUTLOOK_SEND_EMAIL",
+        text: "Send an email",
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("discovers active and archived projects and requests completed tasks", async () => {
     const requests: string[] = [];
     const fetchImpl = vi.fn(async (request: RequestInfo | URL) => {
@@ -101,9 +196,17 @@ describe("Asana integration", () => {
     await expect(asana.listProjects("w1")).resolves.toHaveLength(2);
     await asana.listProjectTasks("p1");
 
-    expect(requests.filter((url) => url.includes("/projects?"))).toHaveLength(
-      2,
+    const projectRequests = requests.filter((url) =>
+      url.includes("/projects?"),
     );
+    expect(projectRequests).toHaveLength(2);
+    const projectFields = new URL(projectRequests[0]!).searchParams.get(
+      "opt_fields",
+    );
+    expect(projectFields).toContain(
+      "custom_field_settings.custom_field.enum_options.name",
+    );
+    expect(projectFields).toContain("custom_fields.display_value");
     expect(requests.at(-1)).toContain(
       "completed_since=1970-01-01T00%3A00%3A00.000Z",
     );
@@ -121,6 +224,10 @@ describe("Asana integration", () => {
       asana.listTeams("w1"),
       asana.listTeamMemberships("team1"),
       asana.listProjectMemberships("p1"),
+      asana.listCustomFieldMemberships!("cf1"),
+      asana.listCustomTypeMemberships!("ct1"),
+      asana.listCustomTypes("p1"),
+      asana.getCustomType("ct1"),
       asana.listGoals("w1"),
       asana.listGoalRelationships("g1"),
       asana.listPortfolios("w1"),
@@ -136,6 +243,10 @@ describe("Asana integration", () => {
         expect.stringContaining("/workspaces/w1/teams?"),
         expect.stringContaining("/teams/team1/team_memberships?"),
         expect.stringContaining("/memberships?parent=p1"),
+        expect.stringContaining("/memberships?parent=cf1"),
+        expect.stringContaining("/memberships?parent=ct1"),
+        expect.stringContaining("/custom_types?project=p1"),
+        expect.stringContaining("/custom_types/ct1?"),
         expect.stringContaining("/goals?workspace=w1"),
         expect.stringContaining("/goal_relationships?supported_goal=g1"),
         expect.stringContaining("/portfolios?workspace=w1"),
@@ -145,6 +256,52 @@ describe("Asana integration", () => {
         expect.stringContaining("/status_updates?parent=p1"),
         expect.stringContaining("/tasks/t1/time_tracking_entries?"),
       ]),
+    );
+    const portfolioFields = new URL(
+      requests.find((url) => url.includes("/portfolios?workspace=w1"))!,
+    ).searchParams.get("opt_fields");
+    expect(portfolioFields).toContain(
+      "custom_field_settings.custom_field.enum_options.name",
+    );
+    expect(portfolioFields).toContain("custom_fields.display_value");
+    const goalFields = new URL(
+      requests.find((url) => url.includes("/goals?workspace=w1"))!,
+    ).searchParams.get("opt_fields");
+    expect(goalFields).toContain(
+      "custom_field_settings.custom_field.enum_options.name",
+    );
+    expect(goalFields).toContain("custom_fields.display_value");
+  });
+
+  it("reads the connected user's complete My Tasks list", async () => {
+    const requests: string[] = [];
+    const fetchImpl = vi.fn(async (request: RequestInfo | URL) => {
+      const url = String(request);
+      requests.push(url);
+      if (url.includes("/users/me/user_task_list?"))
+        return json({
+          data: {
+            gid: "utl1",
+            name: "My Tasks",
+            owner: { gid: "u1", name: "Developer" },
+            workspace: { gid: "w1", name: "Main" },
+          },
+        });
+      return json({ data: [] });
+    }) as unknown as typeof fetch;
+    const asana = createAsanaDirect({ accessToken: "token", fetchImpl });
+
+    await expect(asana.getUserTaskList("me", "w1")).resolves.toMatchObject({
+      gid: "utl1",
+      owner: { gid: "u1" },
+    });
+    await asana.listUserTaskListTasks("utl1");
+
+    expect(requests[0]).toContain("/users/me/user_task_list?workspace=w1");
+    expect(requests[1]).toContain("/user_task_lists/utl1/tasks?");
+    expect(requests[1]).toContain("assignee_section.gid");
+    expect(requests[1]).toContain(
+      "completed_since=1970-01-01T00%3A00%3A00.000Z",
     );
   });
 

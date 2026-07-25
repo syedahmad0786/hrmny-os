@@ -4,11 +4,31 @@ import { scanAsanaWorkspace } from "./asana-migration";
 
 describe("Asana migration scan", () => {
   it("deduplicates multi-homed tasks and follows nested subtasks", async () => {
-    const shared = { gid: "t1", name: "Shared", num_subtasks: 1 };
+    const shared = {
+      gid: "t1",
+      name: "Shared",
+      num_subtasks: 1,
+      custom_type: { gid: "ct1", name: "Request" },
+      custom_type_status_option: { gid: "cts1", name: "Open" },
+    };
+    const sharedInMyTasks = {
+      ...shared,
+      assignee_section: { gid: "ms1", name: "Today" },
+    };
+    const personal = {
+      gid: "t4",
+      name: "Private",
+      assignee: { gid: "u1", name: "Ayham", email: "ayham@hrmny.co" },
+      assignee_section: { gid: "ms1", name: "Today" },
+    };
     const adapter: AsanaAdapter = {
       me: vi.fn(),
       listWorkspaces: vi.fn(),
-      listUsers: vi.fn().mockResolvedValue([{ gid: "u1", name: "Ayham" }]),
+      listUsers: vi
+        .fn()
+        .mockResolvedValue([
+          { gid: "u1", name: "Ayham", email: "ayham@hrmny.co" },
+        ]),
       listTeams: vi.fn().mockResolvedValue([{ gid: "team1", name: "Ops" }]),
       listTeamMemberships: vi.fn().mockResolvedValue([
         {
@@ -19,7 +39,23 @@ describe("Asana migration scan", () => {
         },
       ]),
       listProjects: vi.fn().mockResolvedValue([
-        { gid: "p1", name: "One" },
+        {
+          gid: "p1",
+          name: "One",
+          custom_field_settings: [
+            {
+              gid: "setting1",
+              custom_field: {
+                gid: "cf1",
+                name: "Priority",
+                privacy_setting: "private",
+              },
+            },
+          ],
+          custom_fields: [
+            { gid: "portfolio-field", name: "Risk", display_value: "High" },
+          ],
+        },
         { gid: "p2", name: "Two" },
       ]),
       listProjectMemberships: vi.fn().mockResolvedValue([
@@ -30,8 +66,71 @@ describe("Asana migration scan", () => {
           access_level: "editor",
         },
       ]),
-      listSections: vi.fn().mockResolvedValue([{ gid: "s1", name: "Doing" }]),
+      listCustomFieldMemberships: vi.fn((gid) =>
+        Promise.resolve(
+          gid === "cf1"
+            ? [
+                {
+                  gid: "cfm1",
+                  parent: {
+                    gid: "cf1",
+                    resource_type: "custom_field" as const,
+                  },
+                  member: {
+                    gid: "team1",
+                    name: "Ops",
+                    resource_type: "team" as const,
+                  },
+                  access_level: "user" as const,
+                },
+              ]
+            : [],
+        ),
+      ),
+      listCustomTypeMemberships: vi.fn().mockResolvedValue([
+        {
+          gid: "ctm1",
+          parent: { gid: "ct1", resource_type: "custom_type" },
+          member: { gid: "team1", name: "Ops", resource_type: "team" },
+          access_level: "editor",
+        },
+      ]),
+      listSections: vi.fn((gid) =>
+        Promise.resolve(
+          gid === "utl1"
+            ? [{ gid: "ms1", name: "Today" }]
+            : [{ gid: "s1", name: "Doing" }],
+        ),
+      ),
       listProjectTasks: vi.fn().mockResolvedValue([shared]),
+      listCustomTypes: vi.fn().mockResolvedValue([
+        {
+          gid: "ct1",
+          name: "Request",
+          status_options: [
+            {
+              gid: "cts1",
+              name: "Open",
+              completion_state: "incomplete",
+            },
+            {
+              gid: "cts2",
+              name: "Resolved",
+              completion_state: "complete",
+            },
+          ],
+        },
+      ]),
+      getCustomType: vi.fn(),
+      getUserTaskList: vi.fn().mockResolvedValue({
+        gid: "utl1",
+        name: "My Tasks",
+        owner: { gid: "u1", name: "Ayham", email: "ayham@hrmny.co" },
+        workspace: { gid: "w1", name: "Main" },
+      }),
+      listUserTaskListTasks: vi
+        .fn()
+        .mockResolvedValue([sharedInMyTasks, personal]),
       listSubtasks: vi
         .fn()
         .mockResolvedValueOnce([{ gid: "t2", name: "Child", num_subtasks: 1 }])
@@ -44,7 +143,15 @@ describe("Asana migration scan", () => {
       listAttachments: vi
         .fn()
         .mockResolvedValue([{ gid: "file1", name: "brief.pdf" }]),
-      listGoals: vi.fn().mockResolvedValue([{ gid: "g1", name: "Grow" }]),
+      listGoals: vi.fn().mockResolvedValue([
+        {
+          gid: "g1",
+          name: "Grow",
+          custom_fields: [
+            { gid: "goal-region", name: "Region", display_value: "UAE" },
+          ],
+        },
+      ]),
       listGoalRelationships: vi.fn().mockResolvedValue([
         {
           gid: "gr1",
@@ -52,9 +159,19 @@ describe("Asana migration scan", () => {
           supporting_resource: { gid: "p1", resource_type: "project" },
         },
       ]),
-      listPortfolios: vi
-        .fn()
-        .mockResolvedValue([{ gid: "pf1", name: "Roadmap" }]),
+      listPortfolios: vi.fn().mockResolvedValue([
+        {
+          gid: "pf1",
+          name: "Roadmap",
+          custom_fields: [
+            {
+              gid: "portfolio-health",
+              name: "Executive health",
+              display_value: "Green",
+            },
+          ],
+        },
+      ]),
       listPortfolioItems: vi
         .fn()
         .mockResolvedValue([{ gid: "p1", name: "One" }]),
@@ -91,15 +208,25 @@ describe("Asana migration scan", () => {
       projects: 2,
       projectMemberships: 2,
       sections: 2,
-      topLevelTasks: 1,
+      myTaskSections: 1,
+      myTasks: 2,
+      myTasksOnly: 1,
+      topLevelTasks: 2,
       subtasks: 2,
-      tasks: 3,
+      tasks: 4,
       projectTaskLinks: 2,
       multiHomedTasks: 1,
-      stories: 3,
-      comments: 3,
-      attachments: 3,
-      timeTrackingEntries: 3,
+      customFields: 4,
+      customFieldMemberships: 1,
+      objectCustomFieldValues: 3,
+      customTaskTypes: 1,
+      customTaskTypeMemberships: 1,
+      customTaskStatuses: 2,
+      projectCustomTaskTypes: 2,
+      stories: 4,
+      comments: 4,
+      attachments: 4,
+      timeTrackingEntries: 4,
       goals: 1,
       goalRelationships: 1,
       portfolios: 1,
@@ -109,5 +236,39 @@ describe("Asana migration scan", () => {
       statusUpdates: 4,
     });
     expect(adapter.listSubtasks).toHaveBeenCalledTimes(2);
+    expect(adapter.listCustomTypes).toHaveBeenCalledTimes(2);
+    expect(adapter.listCustomFieldMemberships).toHaveBeenCalledTimes(4);
+    expect(adapter.listCustomTypeMemberships).toHaveBeenCalledTimes(1);
+    expect(adapter.getCustomType).not.toHaveBeenCalled();
+    expect(result.myTasks).toEqual([
+      {
+        taskGid: "t1",
+        sectionGid: "ms1",
+        position: 0,
+        projectless: false,
+      },
+      {
+        taskGid: "t4",
+        sectionGid: "ms1",
+        position: 1,
+        projectless: true,
+      },
+    ]);
+    expect(result.tasks.filter((task) => task.gid === "t1")).toHaveLength(1);
+    expect(result.tasks.find((task) => task.gid === "t1")).toMatchObject({
+      assignee_section: { gid: "ms1" },
+    });
+    expect(result.customTaskTypeMemberships).toEqual([
+      expect.objectContaining({
+        customTaskTypeGid: "ct1",
+        membership: expect.objectContaining({ gid: "ctm1" }),
+      }),
+    ]);
+    expect(result.customFieldMemberships).toEqual([
+      expect.objectContaining({
+        customFieldGid: "cf1",
+        membership: expect.objectContaining({ gid: "cfm1" }),
+      }),
+    ]);
   });
 });

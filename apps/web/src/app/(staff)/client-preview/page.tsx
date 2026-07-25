@@ -2,25 +2,39 @@
 
 import Link from "next/link";
 import { Button, Card } from "@hrmny/ui";
+import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 
 const readable = (value: string) => value.replaceAll("_", " ");
 
 export default function ClientPreviewPage() {
   const utils = trpc.useUtils();
-  const workspace = trpc.clientPreview.workspace.useQuery();
+  const clients = trpc.clients.list.useQuery();
+  const [clientId, setClientId] = useState<string | undefined>();
+  useEffect(() => {
+    setClientId(
+      new URLSearchParams(window.location.search).get("client") ?? undefined,
+    );
+  }, []);
+  const workspace = trpc.clientPreview.workspace.useQuery(
+    clientId ? { clientId } : undefined,
+  );
   const act = trpc.clientPreview.act.useMutation({
     onSuccess: () => void utils.clientPreview.workspace.invalidate(),
   });
 
   if (workspace.isLoading) {
-    return <main className="py-12 text-center text-muted">Loading client preview…</main>;
+    return (
+      <main className="py-12 text-center text-muted">
+        Loading client preview…
+      </main>
+    );
   }
   if (workspace.error || !workspace.data) {
     return (
       <main className="space-y-4 rounded-xl border border-red-200 bg-red-50 p-6 text-red-800">
         <p>{workspace.error?.message ?? "Client preview is unavailable."}</p>
-        <Link className="underline" href="/">
+        <Link className="underline" href="/clients">
           Back to Admin
         </Link>
       </main>
@@ -36,14 +50,37 @@ export default function ClientPreviewPage() {
             Secure partner preview
           </p>
           <p className="text-sm text-ink">
-            This is exactly what the client can review. Finance fields are excluded.
+            This is exactly what the client can review. Finance fields are
+            excluded.
           </p>
         </div>
-        <Link href="/">
-          <Button type="button" variant="ghost">
-            ← Back to Admin
-          </Button>
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="Preview client portal"
+            className="rounded-lg border border-ochre/30 bg-white px-3 py-2 text-sm"
+            value={clientId ?? workspace.data.clientId}
+            onChange={(event) => {
+              const next = event.target.value;
+              setClientId(next);
+              window.history.replaceState(
+                null,
+                "",
+                `/client-preview?client=${next}`,
+              );
+            }}
+          >
+            {(clients.data ?? []).map((client) => (
+              <option key={client.clientId} value={client.clientId}>
+                {client.name}
+              </option>
+            ))}
+          </select>
+          <Link href="/clients">
+            <Button type="button" variant="ghost">
+              ← Back to Admin
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <section>
@@ -54,7 +91,8 @@ export default function ClientPreviewPage() {
           {data.clientName}
         </h1>
         <p className="mt-2 text-muted">
-          Delivery is <strong className="text-ink">{data.delivery.deliveryStatus}</strong>.
+          Delivery is{" "}
+          <strong className="text-ink">{data.delivery.deliveryStatus}</strong>.
           Review briefs, current work, assets, and approvals below.
         </p>
       </section>
@@ -62,15 +100,21 @@ export default function ClientPreviewPage() {
       <section className="grid gap-4 sm:grid-cols-3">
         <Card>
           <p className="text-sm text-muted">Deliverables</p>
-          <p className="mt-1 font-display text-3xl text-ink">{data.tasks.length}</p>
+          <p className="mt-1 font-display text-3xl text-ink">
+            {data.tasks.length}
+          </p>
         </Card>
         <Card>
           <p className="text-sm text-muted">Assets</p>
-          <p className="mt-1 font-display text-3xl text-ink">{data.assets.length}</p>
+          <p className="mt-1 font-display text-3xl text-ink">
+            {data.assets.length}
+          </p>
         </Card>
         <Card>
           <p className="text-sm text-muted">Awaiting approval</p>
-          <p className="mt-1 font-display text-3xl text-ink">{data.approvals.length}</p>
+          <p className="mt-1 font-display text-3xl text-ink">
+            {data.approvals.length}
+          </p>
         </Card>
       </section>
 
@@ -83,7 +127,8 @@ export default function ClientPreviewPage() {
                 <div>
                   <p className="font-medium text-ink">{approval.title}</p>
                   <p className="mt-1 text-sm text-muted">
-                    {readable(approval.kind)} · response requested within {approval.slaHours}h
+                    {readable(approval.kind)} · response requested within{" "}
+                    {approval.slaHours}h
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -91,7 +136,11 @@ export default function ClientPreviewPage() {
                     type="button"
                     disabled={act.isPending}
                     onClick={() =>
-                      act.mutate({ id: approval.approvalId, action: "approve" })
+                      act.mutate({
+                        id: approval.approvalId,
+                        clientId: data.clientId,
+                        action: "approve",
+                      })
                     }
                   >
                     Approve
@@ -103,6 +152,7 @@ export default function ClientPreviewPage() {
                     onClick={() =>
                       act.mutate({
                         id: approval.approvalId,
+                        clientId: data.clientId,
                         action: "reject",
                         feedback: "Needs revision",
                       })
@@ -116,11 +166,13 @@ export default function ClientPreviewPage() {
           ))}
           {data.approvals.length === 0 ? (
             <Card className="!p-5 text-sm text-muted">
-              Nothing is waiting for approval. The current decision is reflected in
-              the delivery status below.
+              Nothing is waiting for approval. The current decision is reflected
+              in the delivery status below.
             </Card>
           ) : null}
-          {act.error ? <p className="text-sm text-red-700">{act.error.message}</p> : null}
+          {act.error ? (
+            <p className="text-sm text-red-700">{act.error.message}</p>
+          ) : null}
         </div>
       </section>
 
@@ -140,7 +192,10 @@ export default function ClientPreviewPage() {
           <h2 className="font-display text-xl text-ink">Assets</h2>
           <ul className="mt-3 divide-y divide-sand text-sm">
             {data.assets.map((asset) => (
-              <li key={asset.assetId} className="flex justify-between gap-4 py-3">
+              <li
+                key={asset.assetId}
+                className="flex justify-between gap-4 py-3"
+              >
                 <span>{asset.title}</span>
                 <span className="text-muted">
                   {readable(asset.status)} · v{asset.versionCount}

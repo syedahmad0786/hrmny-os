@@ -3,8 +3,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { WorkNav } from "@/components/work-nav";
+import { WorkLikeButton } from "@/components/work-like-button";
+import { WorkProofingDialog } from "@/components/work-proofing-dialog";
+import {
+  WorkRichText,
+  WorkRichTextEditor,
+  type WorkMentionOption,
+} from "@/components/work-rich-text";
+import { visibleSubtasks, type SubtaskSort } from "@/lib/work-subtasks";
 
 type View = "list" | "board" | "calendar" | "timeline" | "files";
+type EditableCustomTaskStatus = {
+  statusOptionId?: string;
+  name: string;
+  color: string;
+  completionState: "incomplete" | "complete";
+  enabled: boolean;
+};
+type CustomTaskTypeAccessLevel = "admin" | "editor" | "user" | "none";
+
+function canUseCustomTaskType(
+  accessLevel: CustomTaskTypeAccessLevel,
+  minimum: Exclude<CustomTaskTypeAccessLevel, "none"> = "user",
+) {
+  const rank = { none: 0, user: 1, editor: 2, admin: 3 } as const;
+  return rank[accessLevel] >= rank[minimum];
+}
 
 function dateInputValue(value: string | null | undefined) {
   return value ? value.slice(0, 10) : "";
@@ -20,14 +44,34 @@ function fileAsBase64(file: File): Promise<string> {
   });
 }
 
+function isProofableAttachment(attachment: {
+  name: string;
+  contentType: string | null;
+}) {
+  return (
+    [
+      "application/pdf",
+      "image/png",
+      "image/jpeg",
+      "image/gif",
+      "image/bmp",
+    ].includes(attachment.contentType?.toLowerCase() ?? "") ||
+    /\.(?:pdf|png|jpe?g|gif|bmp)$/i.test(attachment.name)
+  );
+}
+
 export default function WorkPage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
   const projects = trpc.work.projects.list.useQuery();
-  const employees = trpc.work.members.listEmployees.useQuery(undefined, {
+  const teams = trpc.work.members.listTeams.useQuery(undefined, {
     retry: false,
   });
   const [projectId, setProjectId] = useState<string | null>(null);
+  const employees = trpc.work.members.listEmployees.useQuery(
+    { projectId: projectId ?? undefined },
+    { retry: false },
+  );
   const [view, setView] = useState<View>("list");
   const [calendarMonth, setCalendarMonth] = useState(
     () =>
@@ -38,13 +82,21 @@ export default function WorkPage() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [newProject, setNewProject] = useState(false);
   const [projectName, setProjectName] = useState("");
+  const [projectDescription, setProjectDescription] = useState("");
   const [projectPrivacy, setProjectPrivacy] = useState<
     "organization" | "private"
   >("organization");
   const [sectionName, setSectionName] = useState("");
   const [quickTasks, setQuickTasks] = useState<Record<string, string>>({});
+  const [headerTaskTitle, setHeaderTaskTitle] = useState("");
+  const [dragItemId, setDragItemId] = useState<string | null>(null);
+  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(
+    null,
+  );
   const [comment, setComment] = useState("");
   const [subtask, setSubtask] = useState("");
+  const [subtaskSort, setSubtaskSort] = useState<SubtaskSort>("manual");
+  const [showCompletedSubtasks, setShowCompletedSubtasks] = useState(true);
   const [dependencyId, setDependencyId] = useState("");
   const [tagName, setTagName] = useState("");
   const [fieldName, setFieldName] = useState("");
@@ -58,8 +110,43 @@ export default function WorkPage() {
     | "people"
   >("text");
   const [fieldOptions, setFieldOptions] = useState("");
+  const [customTaskTypeName, setCustomTaskTypeName] = useState("");
+  const [customTaskTypeIcon, setCustomTaskTypeIcon] = useState("◆");
+  const [customTaskIncompleteStatuses, setCustomTaskIncompleteStatuses] =
+    useState("Backlog, In progress");
+  const [customTaskCompleteStatus, setCustomTaskCompleteStatus] =
+    useState("Done");
+  const [customTaskTypeFilter, setCustomTaskTypeFilter] = useState("");
+  const [customTaskStatusFilter, setCustomTaskStatusFilter] = useState("");
+  const [sortByCustomTaskType, setSortByCustomTaskType] = useState(false);
+  const [groupByCustomTaskType, setGroupByCustomTaskType] = useState(false);
+  const [shareTargetProjectId, setShareTargetProjectId] = useState("");
+  const [editingCustomTaskTypeId, setEditingCustomTaskTypeId] = useState<
+    string | null
+  >(null);
+  const [accessCustomTaskTypeId, setAccessCustomTaskTypeId] = useState<
+    string | null
+  >(null);
+  const [customTaskTypeMemberType, setCustomTaskTypeMemberType] = useState<
+    "employee" | "team"
+  >("employee");
+  const [customTaskTypeMemberId, setCustomTaskTypeMemberId] = useState("");
+  const [customTaskTypeMemberAccess, setCustomTaskTypeMemberAccess] = useState<
+    "admin" | "editor" | "user"
+  >("user");
+  const [customTaskTypeEditName, setCustomTaskTypeEditName] = useState("");
+  const [customTaskTypeEditIcon, setCustomTaskTypeEditIcon] = useState("");
+  const [customTaskTypeEditStatuses, setCustomTaskTypeEditStatuses] = useState<
+    EditableCustomTaskStatus[]
+  >([]);
   const [attachmentName, setAttachmentName] = useState("");
   const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [proofingAttachment, setProofingAttachment] = useState<{
+    attachmentId: string;
+    name: string;
+    contentType: string | null;
+  } | null>(null);
 
   useEffect(() => {
     if (!projectId && projects.data?.[0])
@@ -70,38 +157,53 @@ export default function WorkPage() {
     { projectId: projectId! },
     { enabled: Boolean(projectId) },
   );
+  const enabled = useMemo(
+    () =>
+      new Set(
+        detail.data?.enabledFeatureKeys ??
+          (projectId ? [] : session.data?.enabledFeatureKeys) ??
+          [],
+      ),
+    [
+      detail.data?.enabledFeatureKeys,
+      projectId,
+      session.data?.enabledFeatureKeys,
+    ],
+  );
   const selectedItem =
     detail.data?.items.find((item) => item.itemId === selectedItemId) ?? null;
-  const commentsEnabled =
-    session.data?.enabledFeatureKeys.includes("work.comments") ?? false;
-  const dependenciesEnabled =
-    session.data?.enabledFeatureKeys.includes("work.dependencies") ?? false;
-  const subtasksEnabled =
-    session.data?.enabledFeatureKeys.includes("work.subtasks") ?? false;
-  const sectionsEnabled =
-    session.data?.enabledFeatureKeys.includes("work.sections") ?? false;
-  const boardEnabled =
-    session.data?.enabledFeatureKeys.includes("work.views.board") ?? false;
-  const listEnabled =
-    session.data?.enabledFeatureKeys.includes("work.views.list") ?? false;
-  const calendarEnabled =
-    session.data?.enabledFeatureKeys.includes("work.views.calendar") ?? false;
-  const timelineEnabled =
-    session.data?.enabledFeatureKeys.includes("work.views.timeline") ?? false;
-  const filesViewEnabled =
-    session.data?.enabledFeatureKeys.includes("work.views.files") ?? false;
-  const followersEnabled =
-    session.data?.enabledFeatureKeys.includes("work.followers") ?? false;
-  const tagsEnabled =
-    session.data?.enabledFeatureKeys.includes("work.tags") ?? false;
-  const customFieldsEnabled =
-    session.data?.enabledFeatureKeys.includes("work.custom_fields") ?? false;
-  const attachmentsEnabled =
-    session.data?.enabledFeatureKeys.includes("work.attachments") ?? false;
-  const recurrenceEnabled =
-    session.data?.enabledFeatureKeys.includes("work.recurring_tasks") ?? false;
-  const timeEnabled =
-    session.data?.enabledFeatureKeys.includes("work.time_tracking") ?? false;
+  useEffect(() => {
+    setDescriptionDraft(selectedItem?.description ?? "");
+  }, [selectedItem?.description, selectedItem?.itemId]);
+  const employeeById = useMemo(
+    () =>
+      new Map(
+        (employees.data ?? []).map((employee) => [
+          employee.employeeId,
+          employee,
+        ]),
+      ),
+    [employees.data],
+  );
+  const commentsEnabled = enabled.has("work.comments");
+  const dependenciesEnabled = enabled.has("work.dependencies");
+  const subtasksEnabled = enabled.has("work.subtasks");
+  const subtaskViewControlsEnabled = enabled.has("work.subtasks.view_controls");
+  const sectionsEnabled = enabled.has("work.sections");
+  const boardEnabled = enabled.has("work.views.board");
+  const listEnabled = enabled.has("work.views.list");
+  const calendarEnabled = enabled.has("work.views.calendar");
+  const timelineEnabled = enabled.has("work.views.timeline");
+  const filesViewEnabled = enabled.has("work.views.files");
+  const followersEnabled = enabled.has("work.followers");
+  const tagsEnabled = enabled.has("work.tags");
+  const customFieldsEnabled = enabled.has("work.custom_fields");
+  const customTaskTypesEnabled = enabled.has("work.custom_task_types");
+  const attachmentsEnabled = enabled.has("work.attachments");
+  const proofingEnabled = enabled.has("work.proofing");
+  const recurrenceEnabled = enabled.has("work.recurring_tasks");
+  const timeEnabled = enabled.has("work.time_tracking");
+  const richTextEnabled = enabled.has("work.rich_text");
   const comments = trpc.work.comments.list.useQuery(
     { itemId: selectedItemId! },
     { enabled: Boolean(selectedItemId && commentsEnabled) },
@@ -126,6 +228,25 @@ export default function WorkPage() {
     { itemId: selectedItemId! },
     { enabled: Boolean(selectedItemId && customFieldsEnabled) },
   );
+  const customTaskTypes = trpc.work.customTaskTypes.list.useQuery(
+    { projectId: projectId! },
+    { enabled: Boolean(projectId && customTaskTypesEnabled) },
+  );
+  const customTaskAssignments = trpc.work.customTaskTypes.assignments.useQuery(
+    { projectId: projectId! },
+    { enabled: Boolean(projectId && customTaskTypesEnabled) },
+  );
+  const customTaskTypeAccess = trpc.work.customTaskTypes.access.useQuery(
+    {
+      projectId: projectId!,
+      customTaskTypeId: accessCustomTaskTypeId!,
+    },
+    {
+      enabled: Boolean(
+        projectId && accessCustomTaskTypeId && customTaskTypesEnabled,
+      ),
+    },
+  );
   const attachments = trpc.work.attachments.list.useQuery(
     { itemId: selectedItemId! },
     { enabled: Boolean(selectedItemId && attachmentsEnabled) },
@@ -145,6 +266,7 @@ export default function WorkPage() {
     onSuccess: async (created) => {
       setProjectId(created.projectId);
       setProjectName("");
+      setProjectDescription("");
       setNewProject(false);
       await refreshProject();
     },
@@ -158,11 +280,18 @@ export default function WorkPage() {
   const createTask = trpc.work.tasks.create.useMutation({
     onSuccess: async () => {
       setSubtask("");
-      await utils.work.projects.get.invalidate();
+      await Promise.all([
+        utils.work.projects.get.invalidate(),
+        utils.work.customTaskTypes.assignments.invalidate(),
+      ]);
     },
   });
   const completeTask = trpc.work.tasks.complete.useMutation({
-    onSuccess: () => utils.work.projects.get.invalidate(),
+    onSuccess: () =>
+      Promise.all([
+        utils.work.projects.get.invalidate(),
+        utils.work.customTaskTypes.assignments.invalidate(),
+      ]),
   });
   const updateTask = trpc.work.tasks.update.useMutation({
     onSuccess: () => utils.work.projects.get.invalidate(),
@@ -210,6 +339,59 @@ export default function WorkPage() {
   const setCustomField = trpc.work.customFields.setValue.useMutation({
     onSuccess: () => utils.work.customFields.values.invalidate(),
   });
+  const createCustomTaskType = trpc.work.customTaskTypes.create.useMutation({
+    onSuccess: async () => {
+      setCustomTaskTypeName("");
+      await utils.work.customTaskTypes.list.invalidate();
+    },
+  });
+  const setCustomTaskType = trpc.work.customTaskTypes.setForTask.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.work.customTaskTypes.assignments.invalidate(),
+        utils.work.projects.get.invalidate(),
+      ]);
+    },
+  });
+  const setDefaultCustomTaskType =
+    trpc.work.customTaskTypes.setDefault.useMutation({
+      onSuccess: () => utils.work.customTaskTypes.list.invalidate(),
+    });
+  const shareCustomTaskType = trpc.work.customTaskTypes.share.useMutation({
+    onSuccess: () => utils.work.customTaskTypes.list.invalidate(),
+  });
+  const updateCustomTaskType = trpc.work.customTaskTypes.update.useMutation({
+    onSuccess: async () => {
+      setEditingCustomTaskTypeId(null);
+      await Promise.all([
+        utils.work.customTaskTypes.list.invalidate(),
+        utils.work.customTaskTypes.assignments.invalidate(),
+        utils.work.projects.get.invalidate(),
+      ]);
+    },
+  });
+  const removeCustomTaskTypeFromProject =
+    trpc.work.customTaskTypes.removeFromProject.useMutation({
+      onSuccess: () => utils.work.customTaskTypes.list.invalidate(),
+    });
+  const setCustomTaskTypeDefaultAccess =
+    trpc.work.customTaskTypes.setDefaultAccess.useMutation({
+      onSuccess: () =>
+        Promise.all([
+          utils.work.customTaskTypes.access.invalidate(),
+          utils.work.customTaskTypes.list.invalidate(),
+        ]),
+    });
+  const updateCustomTaskTypeMemberAccess =
+    trpc.work.customTaskTypes.setMemberAccess.useMutation({
+      onSuccess: async () => {
+        setCustomTaskTypeMemberId("");
+        await Promise.all([
+          utils.work.customTaskTypes.access.invalidate(),
+          utils.work.customTaskTypes.list.invalidate(),
+        ]);
+      },
+    });
   const addAttachmentLink = trpc.work.attachments.addLink.useMutation({
     onSuccess: async () => {
       setAttachmentName("");
@@ -232,8 +414,68 @@ export default function WorkPage() {
   });
 
   const sections = detail.data?.sections ?? [];
+  const boardSections: Array<{ sectionId: string | null; name: string }> = [
+    { sectionId: null, name: "No section" },
+    ...sections,
+  ];
   const items = detail.data?.items ?? [];
-  const topLevelItems = items.filter((item) => !item.parentItemId);
+  const mentionOptions = useMemo<WorkMentionOption[]>(
+    () => [
+      ...(employees.data ?? []).map((employee) => ({
+        id: employee.employeeId,
+        label: employee.displayName,
+        type: "person" as const,
+      })),
+      ...(projects.data ?? []).map((project) => ({
+        id: project.projectId,
+        label: project.name,
+        type: "project" as const,
+      })),
+      ...items.map((item) => ({
+        id: item.itemId,
+        label: item.title,
+        type: "task" as const,
+      })),
+    ],
+    [employees.data, items, projects.data],
+  );
+  const customTaskAssignmentByItem = useMemo(
+    () =>
+      new Map(
+        (customTaskAssignments.data ?? []).map((assignment) => [
+          assignment.itemId,
+          assignment,
+        ]),
+      ),
+    [customTaskAssignments.data],
+  );
+  const topLevelItems = useMemo(() => {
+    const filtered = items.filter((item) => {
+      if (item.parentItemId) return false;
+      const assignment = customTaskAssignmentByItem.get(item.itemId);
+      return (
+        (!customTaskTypeFilter ||
+          assignment?.customTaskTypeId === customTaskTypeFilter) &&
+        (!customTaskStatusFilter ||
+          assignment?.statusOptionId === customTaskStatusFilter)
+      );
+    });
+    return sortByCustomTaskType
+      ? filtered.sort((a, b) => {
+          const left = customTaskAssignmentByItem.get(a.itemId);
+          const right = customTaskAssignmentByItem.get(b.itemId);
+          return `${left?.typeName ?? ""}:${left?.statusName ?? ""}`.localeCompare(
+            `${right?.typeName ?? ""}:${right?.statusName ?? ""}`,
+          );
+        })
+      : filtered;
+  }, [
+    customTaskAssignmentByItem,
+    customTaskStatusFilter,
+    customTaskTypeFilter,
+    items,
+    sortByCustomTaskType,
+  ]);
   const canEdit = ["admin", "editor"].includes(
     detail.data?.project.accessLevel ?? "viewer",
   );
@@ -258,6 +500,46 @@ export default function WorkPage() {
       entry.value,
     ]),
   );
+  const selectedCustomTaskAssignment = selectedItemId
+    ? customTaskAssignmentByItem.get(selectedItemId)
+    : undefined;
+  const selectedCustomTaskType = (customTaskTypes.data ?? []).find(
+    (type) =>
+      type.customTaskTypeId === selectedCustomTaskAssignment?.customTaskTypeId,
+  );
+  const listGroups = groupByCustomTaskType
+    ? [
+        {
+          id: "standard",
+          name: "Standard tasks",
+          sectionId: null,
+          items: topLevelItems.filter(
+            (item) =>
+              !customTaskAssignmentByItem.get(item.itemId)?.customTaskTypeId,
+          ),
+          quickAdd: false,
+        },
+        ...(customTaskTypes.data ?? []).map((type) => ({
+          id: type.customTaskTypeId,
+          name: `${type.icon} ${type.name}`,
+          sectionId: null,
+          items: topLevelItems.filter(
+            (item) =>
+              customTaskAssignmentByItem.get(item.itemId)?.customTaskTypeId ===
+              type.customTaskTypeId,
+          ),
+          quickAdd: false,
+        })),
+      ]
+    : sections.map((section) => ({
+        id: section.sectionId,
+        name: section.name,
+        sectionId: section.sectionId,
+        items: topLevelItems.filter(
+          (item) => item.sectionId === section.sectionId,
+        ),
+        quickAdd: true,
+      }));
   const calendarDays = useMemo(() => {
     const first = new Date(calendarMonth);
     first.setUTCDate(first.getUTCDate() - first.getUTCDay());
@@ -293,6 +575,12 @@ export default function WorkPage() {
     setTags.error ??
     createCustomField.error ??
     setCustomField.error ??
+    createCustomTaskType.error ??
+    setCustomTaskType.error ??
+    setDefaultCustomTaskType.error ??
+    shareCustomTaskType.error ??
+    updateCustomTaskType.error ??
+    removeCustomTaskTypeFromProject.error ??
     addAttachmentLink.error ??
     uploadAttachment.error ??
     openAttachment.error ??
@@ -308,8 +596,23 @@ export default function WorkPage() {
     setQuickTasks((current) => ({ ...current, [key]: "" }));
   }
 
+  function moveDraggedTask(sectionId: string | null) {
+    if (!projectId || !dragItemId || !canEdit) return;
+    const item = items.find((candidate) => candidate.itemId === dragItemId);
+    if (!item || item.sectionId === sectionId) return;
+    moveTask.mutate({
+      itemId: item.itemId,
+      projectId,
+      sectionId,
+      position: topLevelItems.filter(
+        (candidate) => candidate.sectionId === sectionId,
+      ).length,
+    });
+  }
+
   function taskRow(item: (typeof items)[number]) {
     const blockedBy = dependencies.get(item.itemId) ?? [];
+    const customTaskAssignment = customTaskAssignmentByItem.get(item.itemId);
     const blocked = blockedBy.some(
       (id) => !items.find((candidate) => candidate.itemId === id)?.completedAt,
     );
@@ -341,6 +644,18 @@ export default function WorkPage() {
           </p>
           <div className="mt-0.5 flex gap-2 text-[10px] uppercase tracking-[0.08em] text-muted">
             {item.itemType !== "task" ? <span>{item.itemType}</span> : null}
+            {customTaskAssignment?.typeName ? (
+              <span>
+                {customTaskAssignment.typeIcon} {customTaskAssignment.typeName}
+              </span>
+            ) : null}
+            {customTaskAssignment?.statusName ? (
+              <span
+                style={{ color: customTaskAssignment.statusColor ?? undefined }}
+              >
+                {customTaskAssignment.statusName}
+              </span>
+            ) : null}
             {blocked ? <span className="text-red-700">Blocked</span> : null}
             {items.some(
               (candidate) => candidate.parentItemId === item.itemId,
@@ -357,7 +672,9 @@ export default function WorkPage() {
           </div>
         </div>
         <span className="truncate text-xs text-muted">
-          {item.assigneeName ?? "Unassigned"}
+          {employeeById.get(item.assigneeEmployeeId ?? "")?.displayLabel ??
+            item.assigneeName ??
+            "Unassigned"}
         </span>
         <span className="text-xs text-muted">
           {item.dueAt
@@ -388,13 +705,46 @@ export default function WorkPage() {
             One work graph for native hrmny projects and imported Asana work.
           </p>
         </div>
-        <button
-          type="button"
-          className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-white"
-          onClick={() => setNewProject((value) => !value)}
-        >
-          + New project
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {projectId && canEdit ? (
+            <form
+              className="flex"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const title = headerTaskTitle.trim();
+                if (!title) return;
+                createTask.mutate({
+                  projectId,
+                  sectionId: sections[0]?.sectionId ?? null,
+                  title,
+                  description: "",
+                });
+                setHeaderTaskTitle("");
+              }}
+            >
+              <input
+                aria-label="New task title"
+                className="rounded-l-full border border-sand bg-white px-4 py-2 text-sm"
+                placeholder="Task title"
+                value={headerTaskTitle}
+                onChange={(event) => setHeaderTaskTitle(event.target.value)}
+              />
+              <button
+                className="rounded-r-full bg-ochre px-4 py-2 text-sm font-medium text-white"
+                disabled={!headerTaskTitle.trim() || createTask.isPending}
+              >
+                + Add task
+              </button>
+            </form>
+          ) : null}
+          <button
+            type="button"
+            className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-white"
+            onClick={() => setNewProject((value) => !value)}
+          >
+            + New project
+          </button>
+        </div>
       </header>
 
       {mutationError ? (
@@ -410,7 +760,7 @@ export default function WorkPage() {
             event.preventDefault();
             createProject.mutate({
               name: projectName,
-              description: "",
+              description: projectDescription,
               privacy: projectPrivacy,
             });
           }}
@@ -438,6 +788,27 @@ export default function WorkPage() {
           >
             Create
           </button>
+          <div className="md:col-span-3">
+            {richTextEnabled ? (
+              <WorkRichTextEditor
+                ariaLabel="Project description"
+                maxLength={20_000}
+                mentions={mentionOptions}
+                placeholder="Project description (optional)"
+                value={projectDescription}
+                onChange={setProjectDescription}
+              />
+            ) : (
+              <textarea
+                aria-label="Project description"
+                className="min-h-20 w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+                maxLength={20_000}
+                placeholder="Project description (optional)"
+                value={projectDescription}
+                onChange={(event) => setProjectDescription(event.target.value)}
+              />
+            )}
+          </div>
         </form>
       ) : null}
 
@@ -483,10 +854,17 @@ export default function WorkPage() {
                       {detail.data.project.name}
                     </h2>
                   </div>
-                  <p className="mt-1 text-sm text-muted">
-                    {detail.data.project.description ||
-                      "No project description yet."}
-                  </p>
+                  {richTextEnabled && detail.data.project.description ? (
+                    <WorkRichText
+                      className="mt-1 text-sm text-muted"
+                      value={detail.data.project.description}
+                    />
+                  ) : (
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted">
+                      {detail.data.project.description ||
+                        "No project description yet."}
+                    </p>
+                  )}
                   <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">
                     {detail.data.project.privacy} ·{" "}
                     {detail.data.project.accessLevel}
@@ -541,16 +919,117 @@ export default function WorkPage() {
                 </div>
               </div>
 
+              {customTaskTypesEnabled ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-sand bg-white/70 p-2 text-xs">
+                  <label>
+                    <span className="sr-only">Filter by task type</span>
+                    <select
+                      className="rounded border border-sand bg-white px-2 py-1.5"
+                      value={customTaskTypeFilter}
+                      onChange={(event) => {
+                        setCustomTaskTypeFilter(event.target.value);
+                        setCustomTaskStatusFilter("");
+                      }}
+                    >
+                      <option value="">All task types</option>
+                      {(customTaskTypes.data ?? [])
+                        .filter(
+                          (type) =>
+                            type.isAssociated ||
+                            type.customTaskTypeId ===
+                              selectedCustomTaskAssignment?.customTaskTypeId,
+                        )
+                        .map((type) => (
+                          <option
+                            key={type.customTaskTypeId}
+                            value={type.customTaskTypeId}
+                          >
+                            {type.icon} {type.name}
+                            {!type.isAssociated ? " (task only)" : ""}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="sr-only">Filter by task status</span>
+                    <select
+                      className="rounded border border-sand bg-white px-2 py-1.5"
+                      value={customTaskStatusFilter}
+                      onChange={(event) =>
+                        setCustomTaskStatusFilter(event.target.value)
+                      }
+                    >
+                      <option value="">All statuses</option>
+                      {(customTaskTypes.data ?? [])
+                        .filter(
+                          (type) =>
+                            !customTaskTypeFilter ||
+                            type.customTaskTypeId === customTaskTypeFilter,
+                        )
+                        .flatMap((type) =>
+                          type.statuses
+                            .filter((status) => status.enabled)
+                            .map((status) => (
+                              <option
+                                key={status.statusOptionId}
+                                value={status.statusOptionId}
+                              >
+                                {type.name}: {status.name}
+                              </option>
+                            )),
+                        )}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={sortByCustomTaskType}
+                      onChange={(event) =>
+                        setSortByCustomTaskType(event.target.checked)
+                      }
+                    />
+                    Sort by type
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={groupByCustomTaskType}
+                      onChange={(event) =>
+                        setGroupByCustomTaskType(event.target.checked)
+                      }
+                    />
+                    Group by type
+                  </label>
+                </div>
+              ) : null}
+
               {view === "board" && boardEnabled ? (
                 <div className="mt-4 flex gap-4 overflow-x-auto pb-4">
-                  {sections.map((section) => {
+                  {boardSections.map((section) => {
                     const sectionItems = topLevelItems.filter(
                       (item) => item.sectionId === section.sectionId,
                     );
+                    const sectionKey = section.sectionId ?? "none";
                     return (
                       <div
-                        key={section.sectionId}
-                        className="w-72 shrink-0 rounded-xl bg-[var(--paper)] p-3"
+                        key={sectionKey}
+                        className={`w-72 shrink-0 rounded-xl border p-3 ${dragOverSectionId === sectionKey ? "border-ochre bg-ochre/10" : "border-transparent bg-[var(--paper)]"}`}
+                        onDragEnter={() => setDragOverSectionId(sectionKey)}
+                        onDragLeave={(event) => {
+                          if (
+                            !event.currentTarget.contains(
+                              event.relatedTarget as Node,
+                            )
+                          )
+                            setDragOverSectionId(null);
+                        }}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          moveDraggedTask(section.sectionId);
+                          setDragItemId(null);
+                          setDragOverSectionId(null);
+                        }}
                       >
                         <div className="flex items-center justify-between">
                           <h3 className="text-sm font-semibold">
@@ -565,7 +1044,20 @@ export default function WorkPage() {
                             <button
                               key={item.itemId}
                               type="button"
-                              className="rounded-lg border border-sand bg-white p-3 text-left shadow-sm"
+                              draggable={canEdit}
+                              className="cursor-grab rounded-lg border border-sand bg-white p-3 text-left shadow-sm active:cursor-grabbing"
+                              onDragStart={(event) => {
+                                setDragItemId(item.itemId);
+                                event.dataTransfer.effectAllowed = "move";
+                                event.dataTransfer.setData(
+                                  "text/plain",
+                                  item.itemId,
+                                );
+                              }}
+                              onDragEnd={() => {
+                                setDragItemId(null);
+                                setDragOverSectionId(null);
+                              }}
                               onClick={() => setSelectedItemId(item.itemId)}
                             >
                               <p
@@ -574,7 +1066,13 @@ export default function WorkPage() {
                                 {item.title}
                               </p>
                               <div className="mt-3 flex items-center justify-between text-[10px] text-muted">
-                                <span>{item.assigneeName ?? "Unassigned"}</span>
+                                <span>
+                                  {employeeById.get(
+                                    item.assigneeEmployeeId ?? "",
+                                  )?.displayLabel ??
+                                    item.assigneeName ??
+                                    "Unassigned"}
+                                </span>
                                 <span>
                                   {item.dueAt
                                     ? new Date(item.dueAt).toLocaleDateString()
@@ -595,11 +1093,11 @@ export default function WorkPage() {
                             <input
                               className="w-full rounded-lg border border-dashed border-sand bg-white/70 px-3 py-2 text-sm"
                               placeholder="+ Add task"
-                              value={quickTasks[section.sectionId] ?? ""}
+                              value={quickTasks[sectionKey] ?? ""}
                               onChange={(event) =>
                                 setQuickTasks((current) => ({
                                   ...current,
-                                  [section.sectionId]: event.target.value,
+                                  [sectionKey]: event.target.value,
                                 }))
                               }
                             />
@@ -780,40 +1278,37 @@ export default function WorkPage() {
                 </section>
               ) : (
                 <div className="mt-4 flex flex-col gap-4">
-                  {sections.map((section) => {
-                    const sectionItems = topLevelItems.filter(
-                      (item) => item.sectionId === section.sectionId,
-                    );
+                  {listGroups.map((group) => {
                     return (
                       <section
-                        key={section.sectionId}
+                        key={group.id}
                         className="overflow-hidden rounded-lg border border-sand"
                       >
                         <div className="flex items-center justify-between bg-[var(--paper)] px-3 py-2">
                           <h3 className="text-xs font-bold uppercase tracking-[0.1em]">
-                            {section.name}
+                            {group.name}
                           </h3>
                           <span className="text-xs text-muted">
-                            {sectionItems.length}
+                            {group.items.length}
                           </span>
                         </div>
-                        {sectionItems.map(taskRow)}
-                        {canEdit ? (
+                        {group.items.map(taskRow)}
+                        {canEdit && group.quickAdd ? (
                           <form
                             className="border-t border-sand bg-white/50 p-2"
                             onSubmit={(event) => {
                               event.preventDefault();
-                              addQuickTask(section.sectionId);
+                              addQuickTask(group.sectionId);
                             }}
                           >
                             <input
                               className="w-full bg-transparent px-2 py-1 text-sm outline-none"
                               placeholder="+ Add task"
-                              value={quickTasks[section.sectionId] ?? ""}
+                              value={quickTasks[group.sectionId!] ?? ""}
                               onChange={(event) =>
                                 setQuickTasks((current) => ({
                                   ...current,
-                                  [section.sectionId]: event.target.value,
+                                  [group.sectionId!]: event.target.value,
                                 }))
                               }
                             />
@@ -822,7 +1317,7 @@ export default function WorkPage() {
                       </section>
                     );
                   })}
-                  {sectionsEnabled && canEdit ? (
+                  {sectionsEnabled && canEdit && !groupByCustomTaskType ? (
                     <form
                       className="flex gap-2"
                       onSubmit={(event) => {
@@ -891,6 +1386,12 @@ export default function WorkPage() {
                   <p className="mt-1 text-xs text-muted">
                     {detail.data?.project.name}
                   </p>
+                  <div className="mt-2">
+                    <WorkLikeButton
+                      targetType="item"
+                      targetId={selectedItem.itemId}
+                    />
+                  </div>
                 </div>
               </div>
               <button
@@ -922,7 +1423,7 @@ export default function WorkPage() {
                       key={employee.employeeId}
                       value={employee.employeeId}
                     >
-                      {employee.displayName}
+                      {employee.displayLabel}
                     </option>
                   ))}
                 </select>
@@ -967,6 +1468,104 @@ export default function WorkPage() {
                   <option value="urgent">Urgent</option>
                 </select>
               </label>
+              {customTaskTypesEnabled && selectedItem.itemType === "task" ? (
+                <>
+                  <label className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
+                    Task type
+                    <select
+                      className="mt-1 w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-ink"
+                      value={
+                        selectedCustomTaskAssignment?.customTaskTypeId ?? ""
+                      }
+                      disabled={!canEdit}
+                      onChange={(event) => {
+                        const type = (customTaskTypes.data ?? []).find(
+                          (candidate) =>
+                            candidate.customTaskTypeId === event.target.value,
+                        );
+                        const status = type?.statuses.find(
+                          (candidate) =>
+                            candidate.enabled &&
+                            candidate.completionState === "incomplete",
+                        );
+                        if (projectId)
+                          setCustomTaskType.mutate({
+                            projectId,
+                            itemId: selectedItem.itemId,
+                            customTaskTypeId: type?.customTaskTypeId ?? null,
+                            statusOptionId: status?.statusOptionId ?? null,
+                          });
+                      }}
+                    >
+                      <option value="">Standard task</option>
+                      {(customTaskTypes.data ?? [])
+                        .filter(
+                          (type) =>
+                            (type.isAssociated &&
+                              canUseCustomTaskType(type.accessLevel)) ||
+                            type.customTaskTypeId ===
+                              selectedCustomTaskAssignment?.customTaskTypeId,
+                        )
+                        .map((type) => (
+                          <option
+                            key={type.customTaskTypeId}
+                            value={type.customTaskTypeId}
+                          >
+                            {type.icon} {type.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
+                    Type status
+                    <select
+                      className="mt-1 w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-ink"
+                      value={selectedCustomTaskAssignment?.statusOptionId ?? ""}
+                      disabled={
+                        !canEdit ||
+                        !selectedCustomTaskAssignment?.customTaskTypeId ||
+                        !selectedCustomTaskType ||
+                        !canUseCustomTaskType(
+                          selectedCustomTaskType.accessLevel,
+                        )
+                      }
+                      onChange={(event) => {
+                        if (
+                          projectId &&
+                          selectedCustomTaskAssignment?.customTaskTypeId
+                        )
+                          setCustomTaskType.mutate({
+                            projectId,
+                            itemId: selectedItem.itemId,
+                            customTaskTypeId:
+                              selectedCustomTaskAssignment.customTaskTypeId,
+                            statusOptionId: event.target.value,
+                          });
+                      }}
+                    >
+                      <option value="">Choose status</option>
+                      {(customTaskTypes.data ?? [])
+                        .find(
+                          (type) =>
+                            type.customTaskTypeId ===
+                            selectedCustomTaskAssignment?.customTaskTypeId,
+                        )
+                        ?.statuses.filter((status) => status.enabled)
+                        .map((status) => (
+                          <option
+                            key={status.statusOptionId}
+                            value={status.statusOptionId}
+                          >
+                            {status.name}
+                            {status.completionState === "complete"
+                              ? " (complete)"
+                              : ""}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                </>
+              ) : null}
               {timeEnabled ? (
                 <label className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
                   Estimated minutes
@@ -1014,21 +1613,47 @@ export default function WorkPage() {
               </label>
             </div>
 
-            <label className="mt-5 block text-xs font-bold uppercase tracking-[0.1em] text-muted">
+            <div className="mt-5 text-xs font-bold uppercase tracking-[0.1em] text-muted">
               Description
-              <textarea
-                className="mt-1 min-h-28 w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-ink"
-                defaultValue={selectedItem.description}
-                readOnly={!canEdit}
-                onBlur={(event) => {
-                  if (event.target.value !== selectedItem.description)
-                    updateTask.mutate({
-                      itemId: selectedItem.itemId,
-                      description: event.target.value,
-                    });
-                }}
-              />
-            </label>
+              {richTextEnabled && canEdit ? (
+                <WorkRichTextEditor
+                  ariaLabel="Task description"
+                  className="mt-1 font-normal normal-case tracking-normal text-ink"
+                  maxLength={20_000}
+                  mentions={mentionOptions}
+                  value={descriptionDraft}
+                  onChange={setDescriptionDraft}
+                  onBlur={() => {
+                    if (descriptionDraft !== selectedItem.description)
+                      updateTask.mutate({
+                        itemId: selectedItem.itemId,
+                        description: descriptionDraft,
+                      });
+                  }}
+                />
+              ) : richTextEnabled ? (
+                <WorkRichText
+                  className="mt-1 rounded-lg border border-sand bg-white p-3 text-sm font-normal normal-case tracking-normal text-ink"
+                  value={selectedItem.description}
+                />
+              ) : (
+                <textarea
+                  aria-label="Task description"
+                  className="mt-1 min-h-28 w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-ink"
+                  maxLength={20_000}
+                  readOnly={!canEdit}
+                  value={descriptionDraft}
+                  onBlur={() => {
+                    if (descriptionDraft !== selectedItem.description)
+                      updateTask.mutate({
+                        itemId: selectedItem.itemId,
+                        description: descriptionDraft,
+                      });
+                  }}
+                  onChange={(event) => setDescriptionDraft(event.target.value)}
+                />
+              )}
+            </div>
 
             {followersEnabled ? (
               <section className="mt-6 border-t border-sand pt-5">
@@ -1194,7 +1819,7 @@ export default function WorkPage() {
                             {(field.fieldType === "people"
                               ? (employees.data ?? []).map((employee) => ({
                                   value: employee.employeeId,
-                                  label: employee.displayName,
+                                  label: employee.displayLabel,
                                 }))
                               : field.options.map((option) => ({
                                   value: option,
@@ -1299,6 +1924,566 @@ export default function WorkPage() {
               </section>
             ) : null}
 
+            {customTaskTypesEnabled ? (
+              <section className="mt-6 border-t border-sand pt-5">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
+                    Custom task types
+                  </h3>
+                  <select
+                    aria-label="Project to share task type with"
+                    className="rounded border border-sand bg-white px-2 py-1 text-xs"
+                    value={shareTargetProjectId}
+                    onChange={(event) =>
+                      setShareTargetProjectId(event.target.value)
+                    }
+                  >
+                    <option value="">Share with project…</option>
+                    {(projects.data ?? [])
+                      .filter((project) => project.projectId !== projectId)
+                      .map((project) => (
+                        <option
+                          key={project.projectId}
+                          value={project.projectId}
+                        >
+                          {project.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {(customTaskTypes.data ?? []).map((type) => (
+                    <div
+                      key={type.customTaskTypeId}
+                      className="rounded-lg border border-sand bg-white p-3"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-medium">
+                          {type.icon} {type.name}
+                          {type.sourcePlatform === "asana" ? (
+                            <span className="ml-2 text-[10px] uppercase text-muted">
+                              Asana
+                            </span>
+                          ) : null}
+                          {!type.isAssociated ? (
+                            <span className="ml-2 text-[10px] uppercase text-muted">
+                              Task only
+                            </span>
+                          ) : null}
+                        </p>
+                        {canEdit &&
+                        projectId &&
+                        canUseCustomTaskType(type.accessLevel) ? (
+                          <div className="flex flex-wrap gap-2">
+                            {type.isAssociated ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-sand px-2.5 py-1 text-xs"
+                                  onClick={() =>
+                                    setDefaultCustomTaskType.mutate({
+                                      projectId,
+                                      customTaskTypeId: type.isDefault
+                                        ? null
+                                        : type.customTaskTypeId,
+                                    })
+                                  }
+                                >
+                                  {type.isDefault
+                                    ? "Default ✓"
+                                    : "Make default"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-sand px-2.5 py-1 text-xs"
+                                  disabled={!shareTargetProjectId}
+                                  onClick={() =>
+                                    shareCustomTaskType.mutate({
+                                      sourceProjectId: projectId,
+                                      targetProjectId: shareTargetProjectId,
+                                      customTaskTypeId: type.customTaskTypeId,
+                                    })
+                                  }
+                                >
+                                  Share
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-sand px-2.5 py-1 text-xs"
+                                  onClick={() => {
+                                    if (
+                                      window.confirm(
+                                        "Remove this task type from the project? Tasks already using it will keep their type and status.",
+                                      )
+                                    )
+                                      removeCustomTaskTypeFromProject.mutate({
+                                        projectId,
+                                        customTaskTypeId: type.customTaskTypeId,
+                                      });
+                                  }}
+                                >
+                                  Remove
+                                </button>
+                              </>
+                            ) : null}
+                            {type.sourcePlatform === "native" &&
+                            canUseCustomTaskType(type.accessLevel, "editor") ? (
+                              <button
+                                type="button"
+                                className="rounded-full border border-sand px-2.5 py-1 text-xs"
+                                onClick={() => {
+                                  setEditingCustomTaskTypeId(
+                                    type.customTaskTypeId,
+                                  );
+                                  setCustomTaskTypeEditName(type.name);
+                                  setCustomTaskTypeEditIcon(type.icon);
+                                  setCustomTaskTypeEditStatuses(
+                                    type.statuses.map((status) => ({
+                                      statusOptionId: status.statusOptionId,
+                                      name: status.name,
+                                      color: status.color,
+                                      completionState: status.completionState,
+                                      enabled: status.enabled,
+                                    })),
+                                  );
+                                }}
+                              >
+                                Edit
+                              </button>
+                            ) : null}
+                            {type.accessLevel === "admin" ? (
+                              <button
+                                type="button"
+                                className="rounded-full border border-sand px-2.5 py-1 text-xs"
+                                onClick={() =>
+                                  setAccessCustomTaskTypeId((current) =>
+                                    current === type.customTaskTypeId
+                                      ? null
+                                      : type.customTaskTypeId,
+                                  )
+                                }
+                              >
+                                Manage access
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {type.statuses.map((status) => (
+                          <span
+                            key={status.statusOptionId}
+                            className={`rounded-full border px-2 py-0.5 text-[10px] ${status.enabled ? "" : "opacity-50"}`}
+                            style={{ borderColor: status.color }}
+                          >
+                            {status.name}
+                            {status.completionState === "complete" ? " ✓" : ""}
+                          </span>
+                        ))}
+                      </div>
+                      {accessCustomTaskTypeId === type.customTaskTypeId &&
+                      projectId &&
+                      customTaskTypeAccess.data ? (
+                        <div className="mt-3 space-y-3 border-t border-sand pt-3 text-xs">
+                          <label className="grid gap-1 sm:grid-cols-[10rem_1fr] sm:items-center">
+                            Organization access
+                            <select
+                              aria-label="Organization task type access"
+                              className="rounded border border-sand bg-white px-2 py-1"
+                              value={
+                                customTaskTypeAccess.data.defaultAccessLevel
+                              }
+                              onChange={(event) =>
+                                setCustomTaskTypeDefaultAccess.mutate({
+                                  projectId,
+                                  customTaskTypeId: type.customTaskTypeId,
+                                  accessLevel: event.target
+                                    .value as CustomTaskTypeAccessLevel,
+                                })
+                              }
+                            >
+                              <option value="admin">Admin</option>
+                              <option value="editor">Editor</option>
+                              <option value="user">User</option>
+                              <option value="none">No access</option>
+                            </select>
+                          </label>
+                          <div className="space-y-1">
+                            {customTaskTypeAccess.data.members.map((member) => (
+                              <div
+                                key={`${member.memberType}:${member.memberId}`}
+                                className="flex flex-wrap items-center justify-between gap-2 rounded border border-sand px-2 py-1"
+                              >
+                                <span>
+                                  {member.memberType === "employee"
+                                    ? (employeeById.get(member.memberId)
+                                        ?.displayName ?? member.memberId)
+                                    : (teams.data?.find(
+                                        (team) =>
+                                          team.teamId === member.memberId,
+                                      )?.name ?? member.memberId)}
+                                  {` · ${member.accessLevel}`}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="rounded border border-sand px-2 py-0.5"
+                                  onClick={() =>
+                                    updateCustomTaskTypeMemberAccess.mutate({
+                                      projectId,
+                                      customTaskTypeId: type.customTaskTypeId,
+                                      memberType: member.memberType,
+                                      memberId: member.memberId,
+                                      accessLevel: null,
+                                    })
+                                  }
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <form
+                            className="grid gap-2 sm:grid-cols-[7rem_1fr_7rem_auto]"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              if (!customTaskTypeMemberId) return;
+                              updateCustomTaskTypeMemberAccess.mutate({
+                                projectId,
+                                customTaskTypeId: type.customTaskTypeId,
+                                memberType: customTaskTypeMemberType,
+                                memberId: customTaskTypeMemberId,
+                                accessLevel: customTaskTypeMemberAccess,
+                              });
+                            }}
+                          >
+                            <select
+                              aria-label="Task type member kind"
+                              className="rounded border border-sand bg-white px-2 py-1"
+                              value={customTaskTypeMemberType}
+                              onChange={(event) => {
+                                setCustomTaskTypeMemberType(
+                                  event.target.value as "employee" | "team",
+                                );
+                                setCustomTaskTypeMemberId("");
+                              }}
+                            >
+                              <option value="employee">Person</option>
+                              <option value="team">Team</option>
+                            </select>
+                            <select
+                              aria-label="Task type member"
+                              className="rounded border border-sand bg-white px-2 py-1"
+                              value={customTaskTypeMemberId}
+                              onChange={(event) =>
+                                setCustomTaskTypeMemberId(event.target.value)
+                              }
+                            >
+                              <option value="">Choose…</option>
+                              {customTaskTypeMemberType === "employee"
+                                ? (employees.data ?? []).map((employee) => (
+                                    <option
+                                      key={employee.employeeId}
+                                      value={employee.employeeId}
+                                    >
+                                      {employee.displayName}
+                                    </option>
+                                  ))
+                                : (teams.data ?? []).map((team) => (
+                                    <option
+                                      key={team.teamId}
+                                      value={team.teamId}
+                                    >
+                                      {team.name}
+                                    </option>
+                                  ))}
+                            </select>
+                            <select
+                              aria-label="Task type member access"
+                              className="rounded border border-sand bg-white px-2 py-1"
+                              value={customTaskTypeMemberAccess}
+                              onChange={(event) =>
+                                setCustomTaskTypeMemberAccess(
+                                  event.target.value as
+                                    "admin" | "editor" | "user",
+                                )
+                              }
+                            >
+                              <option value="admin">Admin</option>
+                              <option value="editor">Editor</option>
+                              <option value="user">User</option>
+                            </select>
+                            <button
+                              className="rounded bg-ink px-3 py-1 text-white"
+                              disabled={!customTaskTypeMemberId}
+                            >
+                              Add
+                            </button>
+                          </form>
+                        </div>
+                      ) : null}
+                      {editingCustomTaskTypeId === type.customTaskTypeId &&
+                      projectId ? (
+                        <form
+                          className="mt-3 space-y-2 border-t border-sand pt-3"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            updateCustomTaskType.mutate({
+                              projectId,
+                              customTaskTypeId: type.customTaskTypeId,
+                              name: customTaskTypeEditName,
+                              icon: customTaskTypeEditIcon,
+                              statuses: customTaskTypeEditStatuses
+                                .filter((status) => status.enabled)
+                                .map(
+                                  ({ enabled: _enabled, ...status }) => status,
+                                ),
+                            });
+                          }}
+                        >
+                          <div className="grid grid-cols-[4rem_1fr] gap-2">
+                            <input
+                              aria-label="Edit task type icon"
+                              className="rounded border border-sand px-2 py-1 text-center text-sm"
+                              maxLength={16}
+                              value={customTaskTypeEditIcon}
+                              onChange={(event) =>
+                                setCustomTaskTypeEditIcon(event.target.value)
+                              }
+                            />
+                            <input
+                              aria-label="Edit task type name"
+                              className="rounded border border-sand px-2 py-1 text-sm"
+                              maxLength={120}
+                              value={customTaskTypeEditName}
+                              onChange={(event) =>
+                                setCustomTaskTypeEditName(event.target.value)
+                              }
+                            />
+                          </div>
+                          {customTaskTypeEditStatuses.map((status, index) => (
+                            <div
+                              key={status.statusOptionId ?? `new-${index}`}
+                              className="grid gap-2 sm:grid-cols-[auto_1fr_3rem_8rem]"
+                            >
+                              <input
+                                aria-label={`Enable status ${status.name || index + 1}`}
+                                type="checkbox"
+                                checked={status.enabled}
+                                onChange={(event) =>
+                                  setCustomTaskTypeEditStatuses((current) =>
+                                    current.map((candidate, candidateIndex) =>
+                                      candidateIndex === index
+                                        ? {
+                                            ...candidate,
+                                            enabled: event.target.checked,
+                                          }
+                                        : candidate,
+                                    ),
+                                  )
+                                }
+                              />
+                              <input
+                                aria-label={`Status ${index + 1} name`}
+                                className="rounded border border-sand px-2 py-1 text-sm"
+                                maxLength={120}
+                                value={status.name}
+                                onChange={(event) =>
+                                  setCustomTaskTypeEditStatuses((current) =>
+                                    current.map((candidate, candidateIndex) =>
+                                      candidateIndex === index
+                                        ? {
+                                            ...candidate,
+                                            name: event.target.value,
+                                          }
+                                        : candidate,
+                                    ),
+                                  )
+                                }
+                              />
+                              <input
+                                aria-label={`Status ${index + 1} color`}
+                                className="h-8 w-12 rounded border border-sand"
+                                type="color"
+                                value={status.color}
+                                onChange={(event) =>
+                                  setCustomTaskTypeEditStatuses((current) =>
+                                    current.map((candidate, candidateIndex) =>
+                                      candidateIndex === index
+                                        ? {
+                                            ...candidate,
+                                            color: event.target.value,
+                                          }
+                                        : candidate,
+                                    ),
+                                  )
+                                }
+                              />
+                              <select
+                                aria-label={`Status ${index + 1} completion`}
+                                className="rounded border border-sand px-2 py-1 text-sm"
+                                value={status.completionState}
+                                onChange={(event) =>
+                                  setCustomTaskTypeEditStatuses((current) =>
+                                    current.map((candidate, candidateIndex) =>
+                                      candidateIndex === index
+                                        ? {
+                                            ...candidate,
+                                            completionState: event.target
+                                              .value as
+                                              "incomplete" | "complete",
+                                          }
+                                        : candidate,
+                                    ),
+                                  )
+                                }
+                              >
+                                <option value="incomplete">Incomplete</option>
+                                <option value="complete">Complete</option>
+                              </select>
+                            </div>
+                          ))}
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="rounded border border-sand px-3 py-1 text-xs"
+                              onClick={() =>
+                                setCustomTaskTypeEditStatuses((current) => [
+                                  ...current,
+                                  {
+                                    name: "",
+                                    color: "#6B7280",
+                                    completionState: "incomplete",
+                                    enabled: true,
+                                  },
+                                ])
+                              }
+                            >
+                              Add status
+                            </button>
+                            <button
+                              className="rounded bg-ink px-3 py-1 text-xs text-white"
+                              disabled={
+                                !customTaskTypeEditName.trim() ||
+                                !customTaskTypeEditIcon.trim() ||
+                                customTaskTypeEditStatuses.filter(
+                                  (status) => status.enabled,
+                                ).length < 2 ||
+                                customTaskTypeEditStatuses.some(
+                                  (status) =>
+                                    status.enabled && !status.name.trim(),
+                                ) ||
+                                !customTaskTypeEditStatuses.some(
+                                  (status) =>
+                                    status.enabled &&
+                                    status.completionState === "incomplete",
+                                ) ||
+                                !customTaskTypeEditStatuses.some(
+                                  (status) =>
+                                    status.enabled &&
+                                    status.completionState === "complete",
+                                )
+                              }
+                            >
+                              Save changes
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded border border-sand px-3 py-1 text-xs"
+                              onClick={() => setEditingCustomTaskTypeId(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+                {canEdit && projectId ? (
+                  <form
+                    className="mt-3 grid gap-2 sm:grid-cols-[4rem_1fr]"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const incomplete = customTaskIncompleteStatuses
+                        .split(",")
+                        .map((name) => name.trim())
+                        .filter(Boolean);
+                      if (
+                        !incomplete.length ||
+                        !customTaskCompleteStatus.trim()
+                      )
+                        return;
+                      createCustomTaskType.mutate({
+                        projectId,
+                        name: customTaskTypeName,
+                        icon: customTaskTypeIcon,
+                        isDefault: false,
+                        statuses: [
+                          ...incomplete.map((name) => ({
+                            name,
+                            color: "#6B7280",
+                            completionState: "incomplete" as const,
+                          })),
+                          {
+                            name: customTaskCompleteStatus.trim(),
+                            color: "#2E7D5B",
+                            completionState: "complete" as const,
+                          },
+                        ],
+                      });
+                    }}
+                  >
+                    <input
+                      aria-label="Task type icon"
+                      className="rounded border border-sand bg-white px-2 py-1 text-center text-sm"
+                      maxLength={16}
+                      value={customTaskTypeIcon}
+                      onChange={(event) =>
+                        setCustomTaskTypeIcon(event.target.value)
+                      }
+                    />
+                    <input
+                      aria-label="Task type name"
+                      className="rounded border border-sand bg-white px-2 py-1 text-sm"
+                      placeholder="Type name, e.g. Request"
+                      value={customTaskTypeName}
+                      onChange={(event) =>
+                        setCustomTaskTypeName(event.target.value)
+                      }
+                    />
+                    <input
+                      aria-label="Incomplete statuses"
+                      className="rounded border border-sand bg-white px-2 py-1 text-sm sm:col-span-2"
+                      placeholder="Incomplete statuses, comma separated"
+                      value={customTaskIncompleteStatuses}
+                      onChange={(event) =>
+                        setCustomTaskIncompleteStatuses(event.target.value)
+                      }
+                    />
+                    <input
+                      aria-label="Complete status"
+                      className="rounded border border-sand bg-white px-2 py-1 text-sm sm:col-span-2"
+                      placeholder="Complete status"
+                      value={customTaskCompleteStatus}
+                      onChange={(event) =>
+                        setCustomTaskCompleteStatus(event.target.value)
+                      }
+                    />
+                    <button
+                      className="rounded border border-sand bg-white px-3 py-1 text-sm sm:col-span-2"
+                      disabled={
+                        !customTaskTypeName.trim() ||
+                        !customTaskIncompleteStatuses.trim() ||
+                        !customTaskCompleteStatus.trim()
+                      }
+                    >
+                      Add task type
+                    </button>
+                  </form>
+                ) : null}
+              </section>
+            ) : null}
+
             {recurrenceEnabled ? (
               <section className="mt-6 border-t border-sand pt-5">
                 <label className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
@@ -1365,19 +2550,36 @@ export default function WorkPage() {
                       >
                         📎 {attachment.name}
                       </button>
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          aria-label={`Remove ${attachment.name}`}
-                          onClick={() =>
-                            removeAttachment.mutate({
-                              attachmentId: attachment.attachmentId,
-                            })
-                          }
-                        >
-                          ×
-                        </button>
-                      ) : null}
+                      <div className="flex items-center gap-2">
+                        {proofingEnabled &&
+                        canComment &&
+                        isProofableAttachment(attachment) ? (
+                          <button
+                            type="button"
+                            className="rounded-full border border-sand px-2.5 py-1 text-xs text-muted"
+                            onClick={() => setProofingAttachment(attachment)}
+                          >
+                            Proof
+                          </button>
+                        ) : null}
+                        <WorkLikeButton
+                          targetType="attachment"
+                          targetId={attachment.attachmentId}
+                        />
+                        {canEdit ? (
+                          <button
+                            type="button"
+                            aria-label={`Remove ${attachment.name}`}
+                            onClick={() =>
+                              removeAttachment.mutate({
+                                attachmentId: attachment.attachmentId,
+                              })
+                            }
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1450,13 +2652,44 @@ export default function WorkPage() {
 
             {subtasksEnabled ? (
               <section className="mt-6">
-                <h3 className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
-                  Subtasks
-                </h3>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
+                    Subtasks
+                  </h3>
+                  {subtaskViewControlsEnabled ? (
+                    <div className="flex items-center gap-2 text-xs text-muted">
+                      <label className="flex items-center gap-1">
+                        <input
+                          type="checkbox"
+                          checked={showCompletedSubtasks}
+                          onChange={(event) =>
+                            setShowCompletedSubtasks(event.target.checked)
+                          }
+                        />
+                        Show completed
+                      </label>
+                      <select
+                        aria-label="Sort subtasks"
+                        className="rounded border border-sand bg-white px-2 py-1"
+                        value={subtaskSort}
+                        onChange={(event) =>
+                          setSubtaskSort(event.target.value as SubtaskSort)
+                        }
+                      >
+                        <option value="manual">Manual order</option>
+                        <option value="due_date">Due date</option>
+                        <option value="assignee">Assignee</option>
+                        <option value="title">Title</option>
+                      </select>
+                    </div>
+                  ) : null}
+                </div>
                 <div className="mt-2 overflow-hidden rounded-lg border border-sand">
-                  {items
-                    .filter((item) => item.parentItemId === selectedItem.itemId)
-                    .map(taskRow)}
+                  {visibleSubtasks(items, selectedItem.itemId, {
+                    showCompleted:
+                      !subtaskViewControlsEnabled || showCompletedSubtasks,
+                    sort: subtaskViewControlsEnabled ? subtaskSort : "manual",
+                  }).map(taskRow)}
                   {canEdit && projectId ? (
                     <form
                       className="flex gap-2 border-t border-sand bg-white/50 p-2"
@@ -1578,15 +2811,28 @@ export default function WorkPage() {
                           {new Date(entry.createdAt).toLocaleString()}
                         </span>
                       </div>
-                      <p className="mt-2 whitespace-pre-wrap text-sm">
-                        {entry.body}
-                      </p>
+                      {richTextEnabled ? (
+                        <WorkRichText
+                          className="mt-2 text-sm"
+                          value={entry.body}
+                        />
+                      ) : (
+                        <p className="mt-2 whitespace-pre-wrap text-sm">
+                          {entry.body}
+                        </p>
+                      )}
+                      <div className="mt-2">
+                        <WorkLikeButton
+                          targetType="comment"
+                          targetId={entry.commentId}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
                 {canComment ? (
                   <form
-                    className="mt-3 flex gap-2"
+                    className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end"
                     onSubmit={(event) => {
                       event.preventDefault();
                       createComment.mutate({
@@ -1595,12 +2841,25 @@ export default function WorkPage() {
                       });
                     }}
                   >
-                    <textarea
-                      className="min-h-20 min-w-0 flex-1 rounded-lg border border-sand bg-white px-3 py-2 text-sm"
-                      placeholder="Write a comment"
-                      value={comment}
-                      onChange={(event) => setComment(event.target.value)}
-                    />
+                    {richTextEnabled ? (
+                      <WorkRichTextEditor
+                        ariaLabel="Comment"
+                        maxLength={20_000}
+                        mentions={mentionOptions}
+                        placeholder="Write a comment"
+                        value={comment}
+                        onChange={setComment}
+                      />
+                    ) : (
+                      <textarea
+                        aria-label="Comment"
+                        className="min-h-20 min-w-0 flex-1 rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+                        maxLength={20_000}
+                        placeholder="Write a comment"
+                        value={comment}
+                        onChange={(event) => setComment(event.target.value)}
+                      />
+                    )}
                     <button
                       className="self-end rounded-lg bg-ochre px-4 py-2 text-sm font-medium text-white"
                       disabled={!comment.trim()}
@@ -1613,6 +2872,18 @@ export default function WorkPage() {
             ) : null}
           </aside>
         </div>
+      ) : null}
+      {proofingAttachment ? (
+        <WorkProofingDialog
+          attachment={proofingAttachment}
+          employees={employees.data ?? []}
+          onClose={() => setProofingAttachment(null)}
+          onChanged={refreshProject}
+          onOpenTask={(itemId) => {
+            setProofingAttachment(null);
+            setSelectedItemId(itemId);
+          }}
+        />
       ) : null}
     </main>
   );

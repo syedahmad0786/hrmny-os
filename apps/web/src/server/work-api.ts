@@ -27,6 +27,7 @@ export const WORK_WEBHOOK_EVENTS = [
   "task.moved",
   "task.removed",
   "comment.created",
+  "rule.triggered",
 ] as const;
 export type WorkWebhookEvent = (typeof WORK_WEBHOOK_EVENTS)[number];
 
@@ -604,25 +605,31 @@ export async function deliverPendingWorkWebhooks(limit = 20) {
         tokenId: delivery.subscriptionId,
         scopes: [],
       });
-      const enabled = await featureEnabled("work.api_webhooks", {
-        userId: identity.employeeId,
-        roles: identity.roles,
-      });
-      if (!enabled) {
+      let project;
+      try {
+        project = await requireProjectAccess(context, delivery.projectId);
+      } catch {
         await db.execute(sql`
           update public.work_webhook_delivery set status = 'suppressed',
-            locked_at = null, last_error = 'Feature disabled', updated_at = now()
+            locked_at = null, last_error = 'Project access removed', updated_at = now()
           where work_webhook_delivery_id = ${delivery.deliveryId}::uuid
         `);
         suppressed += 1;
         continue;
       }
-      try {
-        await requireProjectAccess(context, delivery.projectId);
-      } catch {
+      const scope = {
+        userId: identity.employeeId,
+        clientId: project.clientId,
+        roles: identity.roles,
+      };
+      const enabled =
+        (await featureEnabled("work.api_webhooks", scope)) &&
+        (delivery.eventType !== "rule.triggered" ||
+          (await featureEnabled("work.rules.external_actions", scope)));
+      if (!enabled) {
         await db.execute(sql`
           update public.work_webhook_delivery set status = 'suppressed',
-            locked_at = null, last_error = 'Project access removed', updated_at = now()
+            locked_at = null, last_error = 'Feature disabled', updated_at = now()
           where work_webhook_delivery_id = ${delivery.deliveryId}::uuid
         `);
         suppressed += 1;

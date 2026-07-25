@@ -23,6 +23,8 @@ describe("work workflow rules", () => {
           completed: false,
           sectionId: null,
           itemType: "task",
+          customTaskTypeId: null,
+          customTaskStatusOptionId: null,
         },
       ),
     ).toBe(true);
@@ -65,5 +67,35 @@ describe("work workflow rules", () => {
         { type: "Invalid" },
       ),
     ).toThrow();
+    expect(
+      normalizeFormAnswers(
+        [
+          {
+            key: "brief",
+            label: "Brief",
+            type: "attachment",
+            required: true,
+            options: [],
+            multiple: true,
+          },
+        ],
+        {
+          brief: [
+            {
+              fileName: "brief.txt",
+              contentType: "text/plain",
+              contentBase64: Buffer.from("Campaign brief").toString("base64"),
+            },
+          ],
+        },
+      ),
+    ).toEqual({
+      brief: [
+        expect.objectContaining({
+          fileName: "brief.txt",
+          contentType: "text/plain",
+        }),
+      ],
+    });
   });
 });

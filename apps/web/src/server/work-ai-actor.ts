@@ -13,6 +13,10 @@ export function unregisterDemoWorkAiActor(employeeId: string) {
   demoActors.delete(employeeId);
 }
 
+export function isDemoWorkAiActor(employeeId: string) {
+  return demoActors.has(employeeId);
+}
+
 export function clearDemoWorkAiActors() {
   demoActors.clear();
 }

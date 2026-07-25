@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { WorkNav } from "@/components/work-nav";
 import { trpc } from "@/lib/trpc";
 
+const ZERO = "00000000-0000-0000-0000-000000000000";
 const triggers = [
   ["manual", "Run manually"],
   ["task_added", "Task added"],
@@ -13,6 +14,7 @@ const triggers = [
   ["priority_changed", "Priority changed"],
   ["due_date_set", "Due date set"],
   ["approval_decided", "Approval decided"],
+  ["custom_status_changed", "Custom status changed"],
   ["scheduled", "On a schedule"],
 ] as const;
 const actionTypes = [
@@ -27,6 +29,7 @@ const actionTypes = [
   ["delete_task", "Archive task"],
   ["create_subtask", "Create subtask"],
   ["set_custom_field", "Update custom field"],
+  ["set_custom_task_status", "Set custom task status"],
   ["add_to_project", "Add task to project"],
   ["add_follower", "Add collaborator"],
   ["remove_follower", "Remove collaborator"],
@@ -43,10 +46,22 @@ const card = "rounded-xl border border-sand bg-white/80 p-5";
 const input = "w-full rounded-lg border border-sand bg-white px-3 py-2";
 
 export default function WorkAiStudioPage() {
+  const session = trpc.auth.session.useQuery();
   const projects = trpc.work.projects.list.useQuery();
   const workflows = trpc.workAiStudio.list.useQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [projectId, setProjectId] = useState("");
+  const project = trpc.work.projects.get.useQuery(
+    { projectId: projectId || ZERO },
+    { enabled: Boolean(projectId) },
+  );
+  const projectFeatures = new Set(
+    project.data?.enabledFeatureKeys ??
+      (projectId ? [] : session.data?.enabledFeatureKeys) ??
+      [],
+  );
+  const studioEnabled = projectFeatures.has("work.ai.studio");
+  const customTaskTypesEnabled = projectFeatures.has("work.custom_task_types");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [triggerType, setTriggerType] = useState<Trigger>("manual");
@@ -261,6 +276,11 @@ export default function WorkAiStudioPage() {
                   </option>
                 ))}
               </select>
+              {projectId && !studioEnabled ? (
+                <span className="mt-1 block text-xs text-amber-700">
+                  AI Studio is disabled for this client.
+                </span>
+              ) : null}
             </label>
             <label className="block text-sm">
               <span className="mb-1 block font-medium">Name</span>
@@ -290,11 +310,17 @@ export default function WorkAiStudioPage() {
                   setTriggerType(event.target.value as Trigger)
                 }
               >
-                {triggers.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
+                {triggers
+                  .filter(
+                    ([value]) =>
+                      customTaskTypesEnabled ||
+                      value !== "custom_status_changed",
+                  )
+                  .map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
               </select>
             </label>
             {triggerType === "scheduled" ? (
@@ -353,25 +379,31 @@ export default function WorkAiStudioPage() {
                 Actions AI may propose
               </legend>
               <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {actionTypes.map(([value, label]) => (
-                  <label
-                    key={value}
-                    className="flex items-center gap-2 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={allowedActionTypes.includes(value)}
-                      onChange={() =>
-                        setAllowedActionTypes((current) =>
-                          current.includes(value)
-                            ? current.filter((item) => item !== value)
-                            : [...current, value],
-                        )
-                      }
-                    />
-                    {label}
-                  </label>
-                ))}
+                {actionTypes
+                  .filter(
+                    ([value]) =>
+                      customTaskTypesEnabled ||
+                      value !== "set_custom_task_status",
+                  )
+                  .map(([value, label]) => (
+                    <label
+                      key={value}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={allowedActionTypes.includes(value)}
+                        onChange={() =>
+                          setAllowedActionTypes((current) =>
+                            current.includes(value)
+                              ? current.filter((item) => item !== value)
+                              : [...current, value],
+                          )
+                        }
+                      />
+                      {label}
+                    </label>
+                  ))}
               </div>
             </fieldset>
             <label className="block text-sm md:col-span-2">
@@ -392,7 +424,7 @@ export default function WorkAiStudioPage() {
             <button
               type="submit"
               className="rounded-lg bg-ink px-4 py-2 text-sm text-white disabled:opacity-50"
-              disabled={create.isPending || update.isPending}
+              disabled={create.isPending || update.isPending || !studioEnabled}
             >
               {selectedId ? "Save workflow" : "Create draft"}
             </button>
@@ -401,7 +433,7 @@ export default function WorkAiStudioPage() {
                 <button
                   type="button"
                   className="rounded-lg border border-sand bg-white px-4 py-2 text-sm"
-                  disabled={setStatus.isPending}
+                  disabled={setStatus.isPending || !studioEnabled}
                   onClick={() =>
                     setStatus.mutate({
                       workflowId: selected.workflowId,
@@ -417,7 +449,7 @@ export default function WorkAiStudioPage() {
                 <button
                   type="button"
                   className="rounded-lg border border-sand bg-white px-4 py-2 text-sm"
-                  disabled={run.isPending}
+                  disabled={run.isPending || !studioEnabled}
                   onClick={() =>
                     run.mutate({
                       workflowId: selected.workflowId,
@@ -430,7 +462,7 @@ export default function WorkAiStudioPage() {
                 <button
                   type="button"
                   className="text-sm text-[var(--hrmny-danger)] underline"
-                  disabled={archive.isPending}
+                  disabled={archive.isPending || !studioEnabled}
                   onClick={() => {
                     if (window.confirm("Archive this workflow?"))
                       archive.mutate({ workflowId: selected.workflowId });

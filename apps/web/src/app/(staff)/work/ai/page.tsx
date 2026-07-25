@@ -21,7 +21,7 @@ const capabilities = [
   [
     "smart_status",
     "Smart status",
-    "Draft a sourced project update",
+    "Draft a sourced project, portfolio, or goal update",
     "work.ai.smart_status",
   ],
   [
@@ -69,7 +69,30 @@ const capabilities = [
 ] as const;
 
 type Kind = (typeof capabilities)[number][0];
+type AiImage = {
+  name: string;
+  mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  dataBase64: string;
+  size: number;
+};
 const card = "rounded-xl border border-sand bg-white/80 p-5";
+
+function readImage(file: File): Promise<AiImage> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.onload = () => {
+      const result = String(reader.result);
+      resolve({
+        name: file.name,
+        mediaType: file.type as AiImage["mediaType"],
+        dataBase64: result.slice(result.indexOf(",") + 1),
+        size: file.size,
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function WorkAiPage() {
   const session = trpc.auth.session.useQuery();
@@ -84,10 +107,24 @@ export default function WorkAiPage() {
   );
   const [kind, setKind] = useState<Kind>("smart_chat");
   const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [statusTarget, setStatusTarget] = useState("");
+  const [summaryPortfolioId, setSummaryPortfolioId] = useState("");
+  const [includeInbox, setIncludeInbox] = useState(false);
+  const [images, setImages] = useState<AiImage[]>([]);
+  const [imageError, setImageError] = useState("");
+  const [allProjects, setAllProjects] = useState(false);
   const [itemId, setItemId] = useState("");
   const [requestText, setRequestText] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [applied, setApplied] = useState<number[]>([]);
+  const goals = trpc.work.goals.list.useQuery(undefined, {
+    enabled: kind === "smart_status" && enabled.has("work.goals"),
+  });
+  const portfolios = trpc.work.portfolios.list.useQuery(undefined, {
+    enabled:
+      (kind === "smart_status" || kind === "smart_summaries") &&
+      enabled.has("work.portfolios"),
+  });
   const generate = trpc.workAi.generate.useMutation({
     onSuccess: async (run) => {
       setSelectedRunId(run.runId);
@@ -134,8 +171,8 @@ export default function WorkAiPage() {
             Work intelligence
           </h1>
           <p className="mt-2 max-w-3xl text-sm text-muted">
-            AI sees only projects you can already open. Answers cite their
-            sources, and every proposed change waits for your approval.
+            AI sees only work you can already open. Answers cite their sources,
+            and every proposed change waits for your approval.
           </p>
         </div>
         {enabled.has("work.ai.studio") ? (
@@ -179,6 +216,36 @@ export default function WorkAiPage() {
                   requestText,
                   projectIds,
                   itemId: itemId.trim() || null,
+                  statusTarget:
+                    kind === "smart_status" && statusTarget
+                      ? {
+                          targetType: statusTarget.split(":", 1)[0] as
+                            "project" | "portfolio" | "goal",
+                          targetId: statusTarget.slice(
+                            statusTarget.indexOf(":") + 1,
+                          ),
+                        }
+                      : null,
+                  summaryPortfolioId:
+                    kind === "smart_summaries" && summaryPortfolioId
+                      ? summaryPortfolioId
+                      : null,
+                  includeInbox: kind === "smart_summaries" && includeInbox,
+                  images:
+                    kind === "smart_chat"
+                      ? images.map(({ name, mediaType, dataBase64 }) => ({
+                          name,
+                          mediaType,
+                          dataBase64,
+                        }))
+                      : [],
+                  allProjects:
+                    [
+                      "smart_chat",
+                      "smart_summaries",
+                      "risk_reports",
+                      "dash",
+                    ].includes(kind) && allProjects,
                 });
               }}
             >
@@ -200,8 +267,23 @@ export default function WorkAiPage() {
               <fieldset>
                 <legend className="text-sm font-medium">Project context</legend>
                 <p className="mt-1 text-xs text-muted">
-                  Select only the work this request needs.
+                  Selected projects are always prioritized for detailed context.
                 </p>
+                {[
+                  "smart_chat",
+                  "smart_summaries",
+                  "risk_reports",
+                  "dash",
+                ].includes(kind) ? (
+                  <label className="mt-2 flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={allProjects}
+                      onChange={(event) => setAllProjects(event.target.checked)}
+                    />
+                    Add workspace overview (up to 100 visible projects)
+                  </label>
+                ) : null}
                 <div className="mt-2 grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-sand bg-white p-3 sm:grid-cols-2">
                   {(projects.data ?? []).map((project) => (
                     <label
@@ -224,6 +306,173 @@ export default function WorkAiPage() {
                   ))}
                 </div>
               </fieldset>
+
+              {kind === "smart_status" ? (
+                <label className="block text-sm">
+                  <span className="mb-1 block font-medium">Status target</span>
+                  <select
+                    className="w-full rounded-lg border border-sand bg-white px-3 py-2"
+                    required
+                    value={statusTarget}
+                    onChange={(event) => setStatusTarget(event.target.value)}
+                  >
+                    <option value="">
+                      Choose a project, portfolio, or goal
+                    </option>
+                    {(projects.data ?? []).map((project) => (
+                      <option
+                        key={`project:${project.projectId}`}
+                        value={`project:${project.projectId}`}
+                      >
+                        Project — {project.name}
+                      </option>
+                    ))}
+                    {(portfolios.data ?? []).map((portfolio) => (
+                      <option
+                        key={`portfolio:${portfolio.portfolioId}`}
+                        value={`portfolio:${portfolio.portfolioId}`}
+                      >
+                        Portfolio — {portfolio.name}
+                      </option>
+                    ))}
+                    {(goals.data ?? []).map((goal) => (
+                      <option
+                        key={`goal:${goal.goalId}`}
+                        value={`goal:${goal.goalId}`}
+                      >
+                        Goal — {goal.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-muted">
+                    The draft uses the selected project context as supporting
+                    evidence and still waits for your approval.
+                  </p>
+                </label>
+              ) : null}
+
+              {kind === "smart_summaries" ? (
+                <fieldset className="space-y-3">
+                  <legend className="text-sm font-medium">
+                    Summary sources
+                  </legend>
+                  {enabled.has("work.portfolios") ? (
+                    <label className="block text-sm">
+                      <span className="mb-1 block">Portfolio (optional)</span>
+                      <select
+                        className="w-full rounded-lg border border-sand bg-white px-3 py-2"
+                        value={summaryPortfolioId}
+                        onChange={(event) =>
+                          setSummaryPortfolioId(event.target.value)
+                        }
+                      >
+                        <option value="">No portfolio roll-up</option>
+                        {(portfolios.data ?? []).map((portfolio) => (
+                          <option
+                            key={portfolio.portfolioId}
+                            value={portfolio.portfolioId}
+                          >
+                            {portfolio.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  {enabled.has("work.inbox") ? (
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={includeInbox}
+                        onChange={(event) =>
+                          setIncludeInbox(event.target.checked)
+                        }
+                      />
+                      Include my permission-filtered Inbox
+                    </label>
+                  ) : null}
+                </fieldset>
+              ) : null}
+
+              {kind === "smart_chat" && enabled.has("work.attachments") ? (
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">Images</legend>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    multiple
+                    onChange={async (event) => {
+                      const files = [...(event.target.files ?? [])];
+                      setImageError("");
+                      setImages([]);
+                      if (files.length > 3) {
+                        setImageError("Choose up to three images.");
+                        return;
+                      }
+                      if (
+                        files.some(
+                          (file) =>
+                            ![
+                              "image/png",
+                              "image/jpeg",
+                              "image/webp",
+                              "image/gif",
+                            ].includes(file.type),
+                        )
+                      ) {
+                        setImageError(
+                          "Use PNG, JPEG, WebP, or GIF images only.",
+                        );
+                        return;
+                      }
+                      if (
+                        files.reduce((total, file) => total + file.size, 0) >
+                        3_000_000
+                      ) {
+                        setImageError(
+                          "Images are limited to 3 MB per request.",
+                        );
+                        return;
+                      }
+                      try {
+                        setImages(await Promise.all(files.map(readImage)));
+                      } catch (error) {
+                        setImageError(
+                          error instanceof Error
+                            ? error.message
+                            : "Could not read the selected images.",
+                        );
+                      }
+                    }}
+                  />
+                  {images.length ? (
+                    <div className="flex items-start justify-between gap-3">
+                      <ul className="space-y-1 text-xs text-muted">
+                        {images.map((image, index) => (
+                          <li key={`${image.name}:${index}`}>
+                            {image.name} · {(image.size / 1_000_000).toFixed(1)}{" "}
+                            MB
+                          </li>
+                        ))}
+                      </ul>
+                      <button
+                        type="button"
+                        className="text-xs underline"
+                        onClick={() => setImages([])}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  ) : null}
+                  {imageError ? (
+                    <p
+                      role="alert"
+                      className="text-sm text-[var(--hrmny-danger)]"
+                    >
+                      {imageError}
+                    </p>
+                  ) : null}
+                </fieldset>
+              ) : null}
 
               {kind === "smart_editor" ? (
                 <label className="block text-sm">
@@ -253,7 +502,11 @@ export default function WorkAiPage() {
               <button
                 className="rounded-lg bg-ink px-5 py-2.5 text-sm text-white disabled:opacity-50"
                 type="submit"
-                disabled={generate.isPending || !requestText.trim()}
+                disabled={
+                  generate.isPending ||
+                  !requestText.trim() ||
+                  (kind === "smart_status" && !statusTarget)
+                }
               >
                 {generate.isPending
                   ? "Reviewing accessible work…"

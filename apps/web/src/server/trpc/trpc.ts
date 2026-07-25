@@ -21,6 +21,10 @@ export type TrpcContext = {
   canViewMargin: boolean;
   /** Set when actorType is portal (app-layer RLS). */
   clientId?: string | null;
+  /** Internal-only context used to propagate a published bundle. */
+  workBundleRollout?: { bundleId: string };
+  /** Feature selected from the current tRPC path for resource-scope checks. */
+  requestedFeatureKey?: string | null;
 };
 
 export async function createContext(
@@ -129,7 +133,7 @@ const requireEnabledFeature = t.middleware(async ({ ctx, next, path }) => {
       message: `FEATURE_DISABLED:${featureKey}`,
     });
   }
-  return next({ ctx });
+  return next({ ctx: { ...ctx, requestedFeatureKey: featureKey } });
 });
 
 export const protectedProcedure = t.procedure
