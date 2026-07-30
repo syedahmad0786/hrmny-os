@@ -79,7 +79,7 @@ export const ROUTES: RouteEntry[] = [
   staff("/admin/features"),
   staff("/admin/work"),
   staff("/approvals"),
-  staff("/assets"),
+  staff("/assets"), // dev-only DAM probe — 404s unless getAuthMode()==="dev"
   staff("/benefits"),
   staff("/billing"),
   staff("/client-preview"),
@@ -101,6 +101,8 @@ export const ROUTES: RouteEntry[] = [
   staff("/dashboards"),
   staff("/delivery"),
   staff("/finance"),
+  // Dev-only probes: page.tsx 404s (notFound) unless getAuthMode()==="dev".
+  // The CI crawler runs in dev auth, so both still render "ok" there.
   staff("/gate"),
   staff("/hr", { redirectsTo: "/people" }),
   staff("/margin"),
@@ -109,13 +111,11 @@ export const ROUTES: RouteEntry[] = [
   staff("/people"),
   staff("/requests"),
   staff("/roles"),
-  staff("/sales"),
-  staff("/sales/[id]", {
-    sample: `/sales/${DEMO_DEAL_ID}`,
-    redirectsTo: "/crm/deals/[id]",
-  }),
-  staff("/sales/inbound"),
-  staff("/sales/outreach"),
+  // Legacy alias kept only because server dashboards.hub / build-status still
+  // emit href:"/sales"; safe to delete once those repoint to /crm. The
+  // /sales/[id] · /sales/inbound · /sales/outreach subroutes had no inbound
+  // references and were removed in this pass.
+  staff("/sales", { redirectsTo: "/crm" }),
   staff("/settings/ai"),
   staff("/settings/asana-migration"),
   staff("/settings/connections"),

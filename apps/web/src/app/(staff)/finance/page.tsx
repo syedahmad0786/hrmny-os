@@ -1,11 +1,14 @@
 "use client";
 
 import { Button } from "@hrmny/ui";
+import Link from "next/link";
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 
 export default function FinanceQueuePage() {
   const utils = trpc.useUtils();
+  const session = trpc.auth.session.useQuery();
+  const canViewMargin = session.data?.canViewMargin ?? false;
   const proposals = trpc.invoices.proposals.useQuery();
   const invoices = trpc.invoices.list.useQuery();
   const intake = trpc.invoices.intake.useMutation({
@@ -42,6 +45,19 @@ export default function FinanceQueuePage() {
       <p className="text-muted">
         Module B: email intake → AI propose (HITL) → approve → post to Xero
         mock. Unknown TRN is held, never guessed.
+      </p>
+      <p className="text-sm">
+        <Link className="underline" href="/billing">
+          Billing & invoices
+        </Link>
+        {canViewMargin ? (
+          <>
+            {" · "}
+            <Link className="underline" href="/margin">
+              Margin
+            </Link>
+          </>
+        ) : null}
       </p>
 
       <label className="flex flex-col gap-1 text-sm">

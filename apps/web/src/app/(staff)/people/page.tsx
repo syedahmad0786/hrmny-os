@@ -102,6 +102,10 @@ export default function PeoplePage() {
             ·{" "}
             <Link className="underline" href="/workplace">
               Workplace
+            </Link>{" "}
+            ·{" "}
+            <Link className="underline" href="/my-card">
+              Digital card
             </Link>
           </p>
         </div>
