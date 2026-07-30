@@ -1371,3 +1371,60 @@ export const reportRuns = pgTable(
     ),
   ],
 );
+
+/**
+ * Import lineage (slot 0065) — one row per source row consumed by an importer,
+ * mapping it to the CRM row it produced. The unique (source_system, source_table,
+ * source_id) is the idempotency key: a re-run finds the row and skips.
+ */
+export const importLineage = pgTable(
+  "import_lineage",
+  {
+    importLineageId: uuid("import_lineage_id").defaultRandom().primaryKey(),
+    sourceSystem: text("source_system").notNull(),
+    sourceTable: text("source_table").notNull(),
+    sourceId: text("source_id").notNull(),
+    targetTable: text("target_table").notNull(),
+    targetId: uuid("target_id").notNull(),
+    checksum: text("checksum").notNull(),
+    importedAt: timestamp("imported_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("import_lineage_source_uniq").on(
+      table.sourceSystem,
+      table.sourceTable,
+      table.sourceId,
+    ),
+    index("import_lineage_target_idx").on(table.targetTable, table.targetId),
+    index("import_lineage_system_idx").on(table.sourceSystem, table.sourceTable),
+  ],
+);
+
+/**
+ * Sales & Growth raw staging (slot 0065) — the JSON export intermediate kept
+ * verbatim as reconciliation evidence. Upserted on (source_table, source_id).
+ */
+export const salesgrowthImportStaging = pgTable(
+  "salesgrowth_import_staging",
+  {
+    salesgrowthImportStagingId: uuid("salesgrowth_import_staging_id")
+      .defaultRandom()
+      .primaryKey(),
+    sourceTable: text("source_table").notNull(),
+    sourceId: text("source_id").notNull(),
+    raw: jsonb("raw").$type<Record<string, unknown>>().default({}).notNull(),
+    checksum: text("checksum").notNull(),
+    importedAt: timestamp("imported_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("salesgrowth_import_staging_source_uniq").on(
+      table.sourceTable,
+      table.sourceId,
+    ),
+    index("salesgrowth_import_staging_table_idx").on(table.sourceTable),
+  ],
+);

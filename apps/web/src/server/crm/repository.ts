@@ -682,7 +682,10 @@ export async function createActivity(input: {
   dealId?: string | null;
   actorEmployeeId?: string | null;
   metadata?: Record<string, unknown>;
+  /** Historical timestamp (e.g. importing a past outreach). Defaults to now. */
+  occurredAt?: Date | string | null;
 }): Promise<ActivityRow> {
+  const occurredAt = parseOccurredAt(input.occurredAt);
   return withDb(
     async (db) => {
       const [row] = await db
@@ -696,6 +699,7 @@ export async function createActivity(input: {
           dealId: input.dealId ?? null,
           actorEmployeeId: input.actorEmployeeId ?? null,
           metadata: input.metadata ?? {},
+          ...(occurredAt ? { occurredAt } : {}),
         })
         .returning();
       return mapActivity(row!);
@@ -711,7 +715,7 @@ export async function createActivity(input: {
         contactId: input.contactId ?? null,
         dealId: input.dealId ?? null,
         actorEmployeeId: input.actorEmployeeId ?? null,
-        occurredAt: t,
+        occurredAt: occurredAt ? occurredAt.toISOString() : t,
         metadata: input.metadata ?? {},
         createdAt: t,
         updatedAt: t,
@@ -720,6 +724,13 @@ export async function createActivity(input: {
       return row;
     },
   );
+}
+
+/** Parse a caller-supplied historical timestamp; ignore unparseable values. */
+function parseOccurredAt(v: Date | string | null | undefined): Date | null {
+  if (!v) return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 // ── Notes ──────────────────────────────────────────────────
