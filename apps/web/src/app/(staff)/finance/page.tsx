@@ -4,11 +4,14 @@ import { Button } from "@hrmny/ui";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
+import { usePageTitle } from "@/components/use-page-title";
 
 export default function FinanceQueuePage() {
+  usePageTitle("Money");
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
   const canViewMargin = session.data?.canViewMargin ?? false;
+  const isDemo = session.data?.authMode !== "supabase";
   const proposals = trpc.invoices.proposals.useQuery();
   const invoices = trpc.invoices.list.useQuery();
   const intake = trpc.invoices.intake.useMutation({
@@ -41,24 +44,46 @@ export default function FinanceQueuePage() {
 
   return (
     <main className="flex flex-col gap-6">
-      <h1 className="font-display text-3xl font-semibold">Finance queue</h1>
-      <p className="text-muted">
-        Module B: email intake → AI propose (HITL) → approve → post to Xero
-        mock. Unknown TRN is held, never guessed.
-      </p>
-      <p className="text-sm">
-        <Link className="underline" href="/billing">
-          Billing & invoices
+      <div>
+        <p className="text-xs font-bold uppercase tracking-[0.16em] text-ochre">
+          Money
+        </p>
+        <h1 className="mt-1 font-display text-3xl font-semibold">
+          Invoice intake
+        </h1>
+        <p className="mt-2 text-muted">
+          Email intake → AI propose → human approve → post to Xero. Unknown TRN
+          is held, never guessed.
+        </p>
+      </div>
+      <nav className="flex flex-wrap gap-2 text-sm" aria-label="Money sections">
+        <Link
+          className="rounded-full bg-ink px-4 py-2 text-white"
+          href="/finance"
+        >
+          Intake
+        </Link>
+        <Link
+          className="rounded-full border border-sand bg-paper px-4 py-2"
+          href="/billing"
+        >
+          Billing & retainers
         </Link>
         {canViewMargin ? (
-          <>
-            {" · "}
-            <Link className="underline" href="/margin">
-              Margin
-            </Link>
-          </>
+          <Link
+            className="rounded-full border border-sand bg-paper px-4 py-2"
+            href="/margin"
+          >
+            Margin
+          </Link>
         ) : null}
-      </p>
+        <Link
+          className="rounded-full border border-sand bg-paper px-4 py-2"
+          href="/dashboards"
+        >
+          Dashboards
+        </Link>
+      </nav>
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-muted">Invoice email body hint</span>
@@ -73,13 +98,15 @@ export default function FinanceQueuePage() {
         <Button type="button" onClick={() => void runIntake()} disabled={intake.isPending}>
           1. Intake (AI propose)
         </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => void reset.mutateAsync()}
-        >
-          Reset M2 finance
-        </Button>
+        {isDemo ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => void reset.mutateAsync()}
+          >
+            Reset demo finance
+          </Button>
+        ) : null}
       </div>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">

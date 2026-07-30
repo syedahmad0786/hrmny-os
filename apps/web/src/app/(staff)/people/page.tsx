@@ -4,6 +4,7 @@ import { Button } from "@hrmny/ui";
 import Link from "next/link";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { usePageTitle } from "@/components/use-page-title";
 
 type EmployeeRow = {
   employee_id: string;
@@ -28,6 +29,7 @@ type LetterRow = {
 };
 
 export default function PeoplePage() {
+  usePageTitle("People");
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
   const employeeQuery = trpc.coreHr.employees.useQuery();
@@ -74,40 +76,75 @@ export default function PeoplePage() {
     <main className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl font-semibold">People</h1>
-          <p className="mt-1 text-sm text-muted">
-            Employee records, company assets, onboarding tasks, documents, and
-            letters.
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-ochre">
+            People
           </p>
-          <p className="mt-2 text-sm">
-            <Link className="underline" href="/time">
+          <h1 className="mt-1 font-display text-3xl font-semibold">
+            Team directory
+          </h1>
+          <p className="mt-1 text-sm text-muted">
+            Employees, assets, letters — use the links below for leave, pay, and
+            workplace ops.
+          </p>
+          <nav
+            className="mt-3 flex flex-wrap gap-2 text-sm"
+            aria-label="People sections"
+          >
+            <Link
+              className="rounded-full bg-ink px-3 py-1.5 text-white"
+              href="/people"
+            >
+              Directory
+            </Link>
+            <Link
+              className="rounded-full border border-sand bg-paper px-3 py-1.5"
+              href="/time"
+            >
               Leave & attendance
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/work-schedule">
-              Schedule & time
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/talent">
-              Talent & performance
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/workforce-payroll">
+            </Link>
+            <Link
+              className="rounded-full border border-sand bg-paper px-3 py-1.5"
+              href="/work-schedule"
+            >
+              Schedule
+            </Link>
+            <Link
+              className="rounded-full border border-sand bg-paper px-3 py-1.5"
+              href="/talent"
+            >
+              Talent
+            </Link>
+            <Link
+              className="rounded-full border border-sand bg-paper px-3 py-1.5"
+              href="/workforce-payroll"
+            >
               Pay & expenses
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/benefits">
+            </Link>
+            <Link
+              className="rounded-full border border-sand bg-paper px-3 py-1.5"
+              href="/payroll"
+            >
+              Payroll run
+            </Link>
+            <Link
+              className="rounded-full border border-sand bg-paper px-3 py-1.5"
+              href="/benefits"
+            >
               Benefits
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/workplace">
+            </Link>
+            <Link
+              className="rounded-full border border-sand bg-paper px-3 py-1.5"
+              href="/workplace"
+            >
               Workplace
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/my-card">
+            </Link>
+            <Link
+              className="rounded-full border border-sand bg-paper px-3 py-1.5"
+              href="/my-card"
+            >
               Digital card
             </Link>
-          </p>
+          </nav>
         </div>
         {canAddEmployee ? (
           <Button

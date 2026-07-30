@@ -20,7 +20,10 @@ const syne = Syne({
 });
 
 export const metadata: Metadata = {
-  title: "hrmny OS",
+  title: {
+    default: "hrmny OS",
+    template: "hrmny OS · %s",
+  },
   description: "Creative Harmony internal operating system",
 };
 

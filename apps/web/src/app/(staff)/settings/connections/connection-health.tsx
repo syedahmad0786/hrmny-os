@@ -114,8 +114,8 @@ export function ConnectionHealth() {
             Every external account, one place
           </h2>
           <p className="mt-1 text-sm text-muted">
-            Connect, disconnect, or change any integration from here. Each card
-            shows its last health check.
+            Preview statuses only — live health probes are not wired yet. Use
+            the connection forms below for real connect / disconnect actions.
           </p>
         </div>
         <p className="text-sm text-muted">

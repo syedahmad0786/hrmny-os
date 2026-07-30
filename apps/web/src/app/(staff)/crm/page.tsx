@@ -17,8 +17,10 @@ import {
   initials,
   tagKindForTemp,
 } from "@/components/crm/format";
+import { usePageTitle } from "@/components/use-page-title";
 
 export default function CrmPipelinePage() {
+  usePageTitle("Pipeline");
   const utils = trpc.useUtils();
   const stages = trpc.crm.stages.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
@@ -56,8 +58,9 @@ export default function CrmPipelinePage() {
   return (
     <main>
       <CrmPageHeader
-        title="Pipeline"
-        description="Move opportunities through guarded stages, from first signal to handover."
+        kicker="Pipeline"
+        title="Move deals forward"
+        description="Drag opportunities through guarded stages — from first signal to handover. Create a deal when a new prospect appears."
         actions={
           <>
             <CrmBtn

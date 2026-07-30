@@ -47,6 +47,22 @@ body::before {
   outline-offset: 2px;
 }
 
+html[data-work-theme="light"] {
+  color-scheme: light;
+  --ink: #0a0908;
+  --ink-2: #211f1c;
+  --paper: #f7f4ef;
+  --paper-2: #fcfaf6;
+  --cream: #f3eee6;
+  --sand: #e8e0d4;
+  --sand-2: #d7ccbe;
+  --muted: #6b6560;
+  --ochre-soft: #f4d7b9;
+  --line: rgba(10, 9, 8, 0.12);
+  --line-strong: rgba(10, 9, 8, 0.22);
+  --shadow: 0 18px 50px rgba(33, 25, 17, 0.1);
+}
+
 html[data-work-theme="dark"] {
   color-scheme: dark;
   --ink: #f7f4ef;
@@ -55,8 +71,16 @@ html[data-work-theme="dark"] {
   --paper-2: #211f1c;
   --cream: #2a2723;
   --sand: #514a43;
+  --sand-2: #6a625a;
   --muted: #b8afa6;
   --ochre-soft: #5a3517;
+  --line: rgba(247, 244, 239, 0.12);
+  --line-strong: rgba(247, 244, 239, 0.22);
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  --success-bg: #1f3a2e;
+  --warn-bg: #3a2f14;
+  --danger-bg: #3a1f1c;
+  --info-bg: #1c2e35;
 }
 
 html[data-work-theme="dark"] body::before {
