@@ -1326,3 +1326,48 @@ export const portalFeedback = pgTable(
     index("portal_feedback_client_idx").on(table.clientId),
   ],
 );
+
+export const reportSchedules = pgTable(
+  "report_schedules",
+  {
+    reportScheduleId: uuid("report_schedule_id").defaultRandom().primaryKey(),
+    reportKey: text("report_key").notNull(),
+    /** Interval cadence keyword ('daily' | 'weekly' | 'monthly'); see reports/store.ts. */
+    cadence: text("cadence").default("weekly").notNull(),
+    recipients: jsonb("recipients").$type<string[]>().default([]).notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    createdBy: uuid("created_by"),
+    ...timestamps,
+  },
+  (table) => [
+    index("report_schedules_due_idx").on(table.enabled, table.lastRunAt),
+  ],
+);
+
+export const reportRuns = pgTable(
+  "report_runs",
+  {
+    reportRunId: uuid("report_run_id").defaultRandom().primaryKey(),
+    reportScheduleId: uuid("report_schedule_id").references(
+      () => reportSchedules.reportScheduleId,
+      { onDelete: "set null" },
+    ),
+    reportKey: text("report_key").notNull(),
+    status: text("status").default("pending").notNull(),
+    /** Assembled {title, sections, generatedAt, markdown} + delivery receipt. */
+    artifact: jsonb("artifact")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("report_runs_schedule_idx").on(
+      table.reportScheduleId,
+      table.createdAt,
+    ),
+  ],
+);

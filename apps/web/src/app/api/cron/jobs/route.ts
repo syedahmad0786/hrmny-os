@@ -12,6 +12,7 @@ import { runWorkAiStudioJob } from "@/server/work-ai-studio";
 import { runWorkAiTeammateJob } from "@/server/work-ai-teammates";
 import { runWorkFormReceiptJob } from "@/server/work-form-receipts";
 import { runScheduledWorkRuleJob } from "@/server/trpc/work-management-router";
+import { runDueReports } from "@/server/inngest/report-scheduler";
 
 export const dynamic = "force-dynamic";
 
@@ -207,9 +208,12 @@ export async function GET(request: Request) {
       delayedJobs: Number(lag!.count),
     });
   }
-  const [workWebhooks, expiredAiRuns] = await Promise.all([
+  const [workWebhooks, expiredAiRuns, dueReports] = await Promise.all([
     deliverPendingWorkWebhooks(),
     cleanupExpiredWorkAiRuns(),
+    // Scheduled reports: interval-based due-check filters to what should send
+    // this tick (mock Resend until RESEND_MODE=live). Never fatal to the job run.
+    runDueReports().catch((error) => ({ error: String(error).slice(0, 500) })),
   ]);
   return Response.json({
     claimed: claimed.length,
@@ -217,5 +221,6 @@ export async function GET(request: Request) {
     failed,
     workWebhooks,
     expiredAiRuns,
+    dueReports,
   });
 }
