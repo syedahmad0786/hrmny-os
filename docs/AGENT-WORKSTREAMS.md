@@ -49,13 +49,11 @@ Also standing repo rules: verify `git branch --show-current` before every commit
 | Slot | Owner | Content |
 |---|---|---|
 | 0056 | — | latest committed on `main` |
-| 0057 | RESERVED — in-flight `ahmadbukhari097/codex/asana-feature-lab` | work_goal_saved_views (uncommitted in local clone) |
+| 0057 | RETIRED slot; the in-flight asana-feature-lab branch must renumber its migration to the next free slot (0062+) when it rebases — journal order must always equal sorted filename order (enforced by `packages/db/src/migration-security.test.ts`) | — |
 | 0058 | M7 | `agent_runs` |
 | 0059 | M8 | `outreach_items` |
 | 0060 | M8 | `lead_intel` (`contact_edges`, `win_loss_notes`, `competitor_findings`) |
 | 0061 | Orchestrator | `campaigns` (lands with the root.ts wiring PR after M7 merges) |
-
-Journal note (M8, 2026-07-30): 0061 was generated + journaled before M8's slots, so `meta/_journal.json` orders them `…0058, 0061, 0059, 0060` (idx 57–60) — numeric filename order diverges from journal order, accepted. `packages/db/src/migration-security.test.ts`'s "journals … in order" check assumes journal order == sorted-filename order and needs a sort-before-compare tweak (orchestrator-owned test) to stay green with this divergence.
 
 Rulings:
 - **`m3-routers.ts` is M7/orchestrator-owned exclusively** (BUAF-on-live-LLM edit). M8 does NOT touch it — M8 procedures live in a new `leadgen-router.ts` and consume `crm/repository` exports.
