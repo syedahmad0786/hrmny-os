@@ -18,6 +18,10 @@ import {
   type DemoDeal,
   type DemoQuoteLine,
 } from "../demo-store";
+import {
+  listImmersionsByClient,
+  upsertImmersion,
+} from "../crm/immersion-store";
 import { getDb } from "../db";
 import {
   protectedProcedure,
@@ -1169,12 +1173,12 @@ export const clientsRouter = router({
           complete: z.boolean().default(false),
         }),
       )
-      .mutation(({ input, ctx }) => {
+      .mutation(async ({ input, ctx }) => {
         const store = getDemoStore();
         if (!store.clients.has(input.clientId)) throw new Error("NOT_FOUND");
-        const existing = [...store.immersions.values()].find(
-          (i) => i.clientId === input.clientId,
-        );
+        const existing = (
+          await listImmersionsByClient(input.clientId)
+        )[0];
         const immersion = {
           immersionId: existing?.immersionId ?? randomUUID(),
           clientId: input.clientId,
@@ -1192,7 +1196,7 @@ export const clientsRouter = router({
             ? new Date().toISOString()
             : (existing?.completedAt ?? null),
         };
-        store.immersions.set(immersion.immersionId, immersion);
+        await upsertImmersion(immersion);
         if (input.complete) {
           store.pushHealth("immersion.completed", "info", {
             clientId: input.clientId,
@@ -1213,11 +1217,7 @@ export const clientsRouter = router({
 
     get: protectedProcedure
       .input(z.object({ clientId: z.string().uuid() }))
-      .query(({ input }) =>
-        [...getDemoStore().immersions.values()].filter(
-          (i) => i.clientId === input.clientId,
-        ),
-      ),
+      .query(({ input }) => listImmersionsByClient(input.clientId)),
   }),
 
   onboarding: router({
