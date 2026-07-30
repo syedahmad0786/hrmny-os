@@ -29,7 +29,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${montserrat.variable} ${syne.variable}`}>
+    <html lang="en" className={`${montserrat.variable} ${syne.variable}`} suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var p=localStorage.getItem("hrmny-theme")||"system";var d=window.matchMedia("(prefers-color-scheme: dark)").matches;var r=p==="dark"||(p==="system"&&d)?"dark":"light";document.documentElement.dataset.workTheme=r;}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body
         className="min-h-screen bg-paper font-body text-ink antialiased"
         style={
