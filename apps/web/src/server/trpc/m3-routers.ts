@@ -22,6 +22,11 @@ import {
   listImmersionsByClient,
   upsertImmersion,
 } from "../crm/immersion-store";
+import {
+  getScope,
+  listScopesByClient,
+  upsertScope,
+} from "../crm/scope-store";
 import { getDb } from "../db";
 import {
   protectedProcedure,
@@ -742,8 +747,7 @@ export const scopesRouter = router({
         lines: z.array(quoteLineSchema).default([]),
       }),
     )
-    .mutation(({ input }) => {
-      const store = getDemoStore();
+    .mutation(async ({ input }) => {
       const scope = {
         scopeId: randomUUID(),
         clientId: input.clientId,
@@ -763,13 +767,12 @@ export const scopesRouter = router({
           isVendor: l.isVendor,
         })),
       };
-      store.scopes.set(scope.scopeId, scope);
-      return scope;
+      return upsertScope(scope);
     }),
 
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => getDemoStore().scopes.get(input.id) ?? null),
+    .query(({ input }) => getScope(input.id)),
 
   update: protectedProcedure
     .input(
@@ -777,13 +780,12 @@ export const scopesRouter = router({
         id: z.string().uuid(),
         title: z.string().optional(),
         value: z.number().optional(),
-        status: z.string().optional(),
+        status: z.enum(["draft", "active", "renewing", "closed"]).optional(),
         terms: z.string().nullable().optional(),
       }),
     )
-    .mutation(({ input }) => {
-      const store = getDemoStore();
-      const scope = store.scopes.get(input.id);
+    .mutation(async ({ input }) => {
+      const scope = await getScope(input.id);
       if (!scope) return null;
       const next = {
         ...scope,
@@ -792,17 +794,12 @@ export const scopesRouter = router({
         status: input.status ?? scope.status,
         terms: input.terms === undefined ? scope.terms : input.terms,
       };
-      store.scopes.set(scope.scopeId, next);
-      return next;
+      return upsertScope(next);
     }),
 
   listByClient: protectedProcedure
     .input(z.object({ clientId: z.string() }))
-    .query(({ input }) =>
-      [...getDemoStore().scopes.values()].filter(
-        (s) => s.clientId === input.clientId,
-      ),
-    ),
+    .query(({ input }) => listScopesByClient(input.clientId)),
 });
 
 export const clientsRouter = router({
