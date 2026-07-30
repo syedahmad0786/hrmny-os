@@ -10,6 +10,14 @@ import {
   isAgentEnabled,
 } from "./agents/registry";
 import {
+  assertScheduledAllowed,
+  defaultAutonomyPolicy,
+  PolicyViolationError,
+  policyViolationRefusal,
+  type AutonomyPolicy,
+  type ScheduledAllowedAction,
+} from "./policy";
+import {
   createProvider,
   estimateCostAed,
   withMetering,
@@ -29,6 +37,9 @@ import {
  */
 export type RunAgent = (input: AgentRunInput) => Promise<AgentRunOutput>;
 
+/** Where this run originated. Scheduled runs are held to the autonomy policy. */
+export type InvocationContext = { trigger: "user" | "scheduled" };
+
 export type RunAgentDeps = {
   /** Defaults to createProvider() (mock without keys). */
   provider?: LLMProvider;
@@ -37,6 +48,10 @@ export type RunAgentDeps = {
   /** Month-to-date spend source that arms the cap breaker. */
   getMonthlySpendAed?: MeteringOptions["getMonthlySpendAed"];
   monthlyCapAed?: number;
+  /** Defaults to a user-triggered run (no policy enforcement). */
+  invocationContext?: InvocationContext;
+  /** Governance policy for scheduled runs; defaults to manual (fail closed). */
+  policy?: AutonomyPolicy;
 };
 
 /** Mock task hint so the mock/eval provider returns structured output. */
@@ -69,6 +84,32 @@ export async function runAgent(
       costAed: 0,
       gateOutcome: "blocked",
     };
+  }
+
+  // Scheduled runs are internal-only: a cron may research/draft, never side-effect.
+  // A scheduled agent's own action is bounded by whether it drafts; sends/spend/
+  // etc. cross the gate later with a human, so they never reach runAgent.
+  if ((deps.invocationContext?.trigger ?? "user") === "scheduled") {
+    const policy = deps.policy ?? defaultAutonomyPolicy();
+    const action: ScheduledAllowedAction = AGENT_REGISTRY[agent].producesDrafts
+      ? "draft"
+      : "research";
+    try {
+      assertScheduledAllowed(policy, agent, action);
+    } catch (err) {
+      if (err instanceof PolicyViolationError) {
+        return {
+          agent,
+          model,
+          output: policyViolationRefusal(err),
+          inputTokens: 0,
+          outputTokens: 0,
+          costAed: 0,
+          gateOutcome: "blocked",
+        };
+      }
+      throw err;
+    }
   }
 
   const provider = withMetering(
