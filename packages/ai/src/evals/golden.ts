@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ReplyIntentSchema, type ReplyIntent } from "../agent-io";
 import type { LLMProvider } from "../provider";
 
 /**
@@ -14,22 +15,9 @@ export const OutreachDraftSchema = z.object({
   cta: z.string().min(1),
 });
 
-/**
- * Reply-intent values mirror the frozen `ReplyIntentSchema` (packages/ai
- * agent-io.ts, PR #4). Kept local so the harness compiles before that lands;
- * swap for the imported schema on rebase once the contract-freeze merges.
- */
-export const REPLY_INTENTS = [
-  "interested",
-  "not_now",
-  "unsubscribe",
-  "question",
-  "other",
-] as const;
-export type ReplyIntent = (typeof REPLY_INTENTS)[number];
-
-const ReplyIntentResultSchema = z.object({
-  intent: z.enum(REPLY_INTENTS),
+// Grades the mock classifier output against the frozen intent enum.
+const replyIntentResultSchema = z.object({
+  intent: ReplyIntentSchema,
   confidence: z.number().min(0).max(1),
 });
 
@@ -141,7 +129,7 @@ export async function runReplyIntentEval(
       task: "reply_intent",
       messages: [{ role: "user", content: testCase.input }],
     });
-    const parsed = ReplyIntentResultSchema.safeParse(generated.object);
+    const parsed = replyIntentResultSchema.safeParse(generated.object);
     const checks: EvalCheck[] = [
       { name: "valid-shape", passed: parsed.success },
       {
