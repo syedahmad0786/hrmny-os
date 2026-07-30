@@ -12,6 +12,11 @@ const NAV = [
   { href: "/portal/work", label: "Shared work", feature: "work.guests" },
   { href: "/portal/deliveries", label: "Deliveries", feature: "portal.client" },
   { href: "/portal/approvals", label: "Approvals", feature: "portal.client" },
+  {
+    href: "/portal/campaign-approvals",
+    label: "Campaigns",
+    feature: "portal.client",
+  },
   { href: "/portal/reports", label: "Reports", feature: "portal.client" },
 ];
 

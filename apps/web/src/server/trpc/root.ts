@@ -26,6 +26,7 @@ import {
 import {
   createCallerFactory,
   protectedProcedure,
+  mergeRouters,
   publicProcedure,
   requirePermission,
   router,
@@ -50,6 +51,7 @@ import { automationRouter } from "./automation-router";
 import { aiAdminRouter } from "./ai-admin-router";
 import { campaignsRouter } from "./campaigns-router";
 import { analyticsRouter } from "./analytics-router";
+import { portalApprovalsRouter } from "./portal-approvals-router";
 import { connectionsRouter } from "./connections-router";
 import { featureRequestsRouter } from "./feature-requests-router";
 import { coreHrRouter } from "./core-hr-router";
@@ -729,7 +731,12 @@ export { invoicesRouter, payrollRouter, employeesRouter, requisitionsRouter };
 
 export const vatRouter = m5VatRouter;
 
-export const portalRouter = m6PortalRouter;
+/** Portal actors can only reach `portal.*` paths (portalStaffBoundary), so
+ * client-facing routers must merge into this namespace, never top-level. */
+export const portalRouter = mergeRouters(
+  m6PortalRouter,
+  router({ campaignApprovals: portalApprovalsRouter }),
+);
 
 export const appRouter = router({
   auth: authRouter,
