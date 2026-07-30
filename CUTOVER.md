@@ -18,7 +18,7 @@
 
 | # | Item | Owner | Done |
 |---|---|---|---|
-| 1 | Supabase prod project + migrations applied (`packages/db/APPLY.md`) | Eng | ☐ |
+| 1 | Supabase prod project + migrations applied through **0069** (`packages/db/APPLY.md`, staging dry-run in `docs/STAGING-GO-LIVE.md`) | Eng | ☐ |
 | 2 | Vercel prod + preview; env from `.env.example` (no secrets in git) | Eng | ☐ |
 | 3 | Google Workspace SSO for staff; portal magic-link allowlist | Eng + IT | ☐ |
 | 4 | Composio OAuth apps (Gmail, LinkedIn, Canva, Calendar) redirect URLs | Eng | ☐ |
