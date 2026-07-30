@@ -116,6 +116,15 @@ export {
   type N8nAdapterConfig,
 } from "./n8n";
 export {
+  createResendMock,
+  createResendLive,
+  createResendAdapter,
+  type EmailSendAdapter,
+  type EmailSendInput,
+  type EmailSendResult,
+  type ResendConfig,
+} from "./resend";
+export {
   createWpsMock,
   createWpsAdapter,
   createCorporateCardsMock,
