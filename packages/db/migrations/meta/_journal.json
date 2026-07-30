@@ -428,6 +428,13 @@
       "when": 1785063600000,
       "tag": "0061_campaigns",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1785067200000,
+      "tag": "0062_scorecards",
+      "breakpoints": true
     }
   ]
 }

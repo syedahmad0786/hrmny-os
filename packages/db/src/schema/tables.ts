@@ -1215,3 +1215,91 @@ export const campaignItems = pgTable(
     index("campaign_items_scheduled_idx").on(table.scheduledFor),
   ],
 );
+
+/**
+ * Explainable ratings v1 (migration 0062). A definition owns the weighted
+ * factors; a snapshot is one computed 0–100 score with a per-factor breakdown;
+ * an override is a justified human correction. Scoring/validation (including the
+ * hard "no employee/person kind" rule) lives in apps/web scorecards service.
+ */
+export const scorecardDefinitions = pgTable(
+  "scorecard_definitions",
+  {
+    scorecardDefinitionId: uuid("scorecard_definition_id")
+      .defaultRandom()
+      .primaryKey(),
+    key: text("key").notNull(),
+    entityKind: text("entity_kind").notNull(),
+    version: integer("version").default(1).notNull(),
+    weights: jsonb("weights")
+      .$type<Array<{ key: string; label?: string; weight: number }>>()
+      .default([])
+      .notNull(),
+    active: boolean("active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("scorecard_definitions_key_version_unique").on(
+      table.key,
+      table.version,
+    ),
+    index("scorecard_definitions_key_active_idx").on(table.key, table.active),
+  ],
+);
+
+export const scorecardSnapshots = pgTable(
+  "scorecard_snapshots",
+  {
+    scorecardSnapshotId: uuid("scorecard_snapshot_id")
+      .defaultRandom()
+      .primaryKey(),
+    definitionId: uuid("definition_id").notNull(),
+    definitionKey: text("definition_key").notNull(),
+    version: integer("version").notNull(),
+    entityKind: text("entity_kind").notNull(),
+    entityId: text("entity_id").notNull(),
+    score: integer("score").notNull(),
+    breakdown: jsonb("breakdown")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("scorecard_snapshots_entity_idx").on(
+      table.entityKind,
+      table.entityId,
+      table.createdAt,
+    ),
+    index("scorecard_snapshots_definition_idx").on(table.definitionId),
+  ],
+);
+
+export const scorecardOverrides = pgTable(
+  "scorecard_overrides",
+  {
+    scorecardOverrideId: uuid("scorecard_override_id")
+      .defaultRandom()
+      .primaryKey(),
+    snapshotId: uuid("snapshot_id").notNull(),
+    actor: text("actor").notNull(),
+    reason: text("reason").notNull(),
+    newScore: integer("new_score").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("scorecard_overrides_snapshot_idx").on(
+      table.snapshotId,
+      table.createdAt,
+    ),
+  ],
+);
