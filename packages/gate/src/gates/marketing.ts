@@ -94,10 +94,11 @@ export const portalItemLegalTransitionGate: GateFn = async ({ entity, request })
 /** Approve/reject is the client's decision — a staff actor cannot self-approve. */
 export const portalItemClientApproverGate: GateFn = async ({ actor, request }) => {
   if (request.to !== "approved" && request.to !== "rejected") return null;
-  if (!actor.roles.includes("portal")) {
+  // Portal sessions carry roles: ["portal_client"] (see auth/session.ts).
+  if (!actor.roles.includes("portal_client")) {
     return {
       gate: "portal_item.client_approver",
-      reason: "Only the client (portal actor) may approve or reject portal items",
+      reason: "Only the client (portal_client actor) may approve or reject portal items",
     };
   }
   return null;

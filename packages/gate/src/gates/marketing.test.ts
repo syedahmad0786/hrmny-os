@@ -5,12 +5,12 @@ import type { ActorContext, EntitySnapshot } from "../types";
 
 const staff: ActorContext = {
   employeeId: "sales-1",
-  roles: ["sales"],
+  roles: ["account_manager"],
   permissions: [],
 };
 const client: ActorContext = {
   employeeId: "portal-1",
-  roles: ["portal"],
+  roles: ["portal_client"],
   permissions: [],
 };
 
