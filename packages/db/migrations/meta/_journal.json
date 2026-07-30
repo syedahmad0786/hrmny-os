@@ -412,6 +412,20 @@
       "idx": 58,
       "version": "7",
       "when": 1785056400000,
+      "tag": "0059_outreach_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1785060000000,
+      "tag": "0060_lead_intel",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1785063600000,
       "tag": "0061_campaigns",
       "breakpoints": true
     }
