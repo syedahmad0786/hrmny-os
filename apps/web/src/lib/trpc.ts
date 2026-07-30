@@ -25,11 +25,18 @@ export function createTrpcClient() {
           const headers: Record<string, string> = {
             "x-dev-role": getDevRole(),
           };
-          const { data } =
-            (await getSupabaseBrowserClient()?.auth.getSession()) ??
-            { data: { session: null } };
-          if (data.session?.access_token) {
-            headers.authorization = `Bearer ${data.session.access_token}`;
+          const client = getSupabaseBrowserClient();
+          if (client) {
+            // getSession() can queue behind the OAuth hash-processing auth
+            // lock on the landing page; a bounded wait keeps every query
+            // progressing (the shell's auth listener refetches once the
+            // session settles).
+            const result = await Promise.race([
+              client.auth.getSession(),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+            ]);
+            const token = result?.data.session?.access_token;
+            if (token) headers.authorization = `Bearer ${token}`;
           }
           return headers;
         },
