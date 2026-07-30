@@ -144,6 +144,7 @@ export const ROUTES: RouteEntry[] = [
   portal("/portal/reports"),
   portal("/portal/work"),
   pub("/portal/login"), // login page — renders for anyone (session query is skipped here)
+  pub("/portal/login/verify"), // magic-link verify landing — public, token in query; shows error state without one
 
   // ── public ──
   pub("/login"),
