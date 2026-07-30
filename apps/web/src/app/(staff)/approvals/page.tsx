@@ -2,11 +2,12 @@
 
 import { Button } from "@hrmny/ui";
 import { useMemo, useState } from "react";
-import { formatAed, formatRelative } from "@/components/crm/format";
+import { trpc } from "@/lib/trpc";
+import { formatRelative } from "@/components/crm/format";
 import { DraftPreview } from "./draft-preview";
-import { KIND_LABELS, useApprovalQueue, type ApprovalKind } from "./mock-data";
+import { KIND_LABELS, type ApprovalItem, type ApprovalKind } from "./types";
 
-type Decision = "approved" | "rejected";
+type Feedback = { tone: "ok" | "blocked"; text: string };
 
 const KIND_TONE: Record<ApprovalKind, string> = {
   outreach_send: "bg-amber-100 text-amber-800",
@@ -15,25 +16,147 @@ const KIND_TONE: Record<ApprovalKind, string> = {
 };
 
 export default function ApprovalsPage() {
-  const queue = useApprovalQueue();
-  // mock local state — real approve/reject is a gate transition via the
-  // `approvals` router; decisions here are optimistic and non-persisting.
-  const [decisions, setDecisions] = useState<Record<string, Decision>>({});
-  const [selectedId, setSelectedId] = useState<string | null>(
-    queue[0]?.id ?? null,
-  );
+  const utils = trpc.useUtils();
+  // Outreach drafts awaiting a human send (leadgen router, gate: draft→approved→sent).
+  const outreach = trpc.leadgen.outreach.list.useQuery({ state: "draft" });
+  // Campaign items approved and awaiting publish (campaigns router, gate: approved→published).
+  const campaigns = trpc.campaigns.list.useQuery();
+  // Items sitting in the client portal awaiting client sign-off — staff-visible, no staff action.
+  const portal = trpc.campaigns.pendingApproval.useQuery();
 
-  const pending = useMemo(
-    () => queue.filter((item) => !decisions[item.id]),
-    [queue, decisions],
-  );
-  const selected = queue.find((item) => item.id === selectedId) ?? null;
-  const pendingCostAed = pending.reduce((sum, item) => sum + item.costAed, 0);
+  const approveOutreach = trpc.leadgen.outreach.approve.useMutation();
+  const sendOutreach = trpc.leadgen.outreach.send.useMutation();
+  const moveCampaign = trpc.campaigns.transition.useMutation();
 
-  function decide(id: string, decision: Decision) {
-    setDecisions((current) => ({ ...current, [id]: decision }));
-    const next = pending.find((item) => item.id !== id);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Record<string, Feedback>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const queue = useMemo<ApprovalItem[]>(() => {
+    const outreachItems: ApprovalItem[] = (outreach.data ?? []).map((o) => ({
+      id: o.id,
+      kind: "outreach_send",
+      title: o.subject || `Outreach — ${o.recipient || o.channel}`,
+      summary: `Draft ready to send via ${o.channel}${o.recipient ? ` to ${o.recipient}` : ""}.`,
+      target: o.recipient || o.channel,
+      agent: "outreach-draft",
+      meta: o.channel,
+      proposedAt: o.createdAt,
+      draft: o.body,
+    }));
+
+    const campaignItems: ApprovalItem[] = (campaigns.data ?? [])
+      .filter((c) => c.status === "approved")
+      .map((c) => ({
+        id: c.id,
+        kind: "campaign_publish",
+        title: c.title,
+        summary: `${c.channel} campaign${c.scheduledFor ? `, scheduled ${c.scheduledFor}` : ""} — approved and ready to publish.`,
+        target: c.channel,
+        agent: "creative",
+        meta: c.channel,
+        proposedAt: c.scheduledFor || "",
+        draft: c.title,
+      }));
+
+    const portalItems: ApprovalItem[] = (portal.data ?? [])
+      .filter((v) => v.state === "pending_client")
+      .map((v) => ({
+        id: v.campaignItemId,
+        kind: "portal_item",
+        title: v.title,
+        summary: `${v.channel} item awaiting client sign-off in the portal.${v.feedback ? ` Client note: ${v.feedback}` : ""}`,
+        target: v.clientId ? `Portal · ${v.clientId}` : "Client portal",
+        agent: "creative",
+        meta: v.channel,
+        proposedAt: v.scheduledFor || "",
+        draft: v.title,
+      }));
+
+    return [...outreachItems, ...campaignItems, ...portalItems].sort((a, b) =>
+      b.proposedAt.localeCompare(a.proposedAt),
+    );
+  }, [outreach.data, campaigns.data, portal.data]);
+
+  const isLoading =
+    outreach.isLoading || campaigns.isLoading || portal.isLoading;
+  const error = outreach.error ?? campaigns.error ?? portal.error;
+
+  const selected = queue.find((i) => i.id === selectedId) ?? queue[0] ?? null;
+  const outreachCount = queue.filter((i) => i.kind === "outreach_send").length;
+  const actedCount = Object.keys(feedback).length;
+
+  function advanceFrom(id: string) {
+    const next = queue.find((i) => i.id !== id);
     if (id === selectedId) setSelectedId(next?.id ?? null);
+  }
+
+  async function approve(item: ApprovalItem) {
+    setBusyId(item.id);
+    try {
+      if (item.kind === "outreach_send") {
+        const approved = await approveOutreach.mutateAsync({ id: item.id });
+        if (!approved.ok) {
+          setFeedback((f) => ({
+            ...f,
+            [item.id]: { tone: "blocked", text: `Approve blocked (${approved.code})` },
+          }));
+          return;
+        }
+        const sent = await sendOutreach.mutateAsync({ id: item.id });
+        setFeedback((f) => ({
+          ...f,
+          [item.id]: sent.ok
+            ? { tone: "ok", text: `Sent${sent.externalId ? ` · ${sent.externalId}` : ""}` }
+            : { tone: "blocked", text: `Send blocked (${sent.code})` },
+        }));
+        await utils.leadgen.outreach.list.invalidate();
+      } else if (item.kind === "campaign_publish") {
+        const res = await moveCampaign.mutateAsync({ id: item.id, to: "published" });
+        setFeedback((f) => ({
+          ...f,
+          [item.id]: res.ok
+            ? { tone: "ok", text: "Published" }
+            : { tone: "blocked", text: res.reason },
+        }));
+        await utils.campaigns.list.invalidate();
+        await utils.campaigns.pendingApproval.invalidate();
+      }
+      advanceFrom(item.id);
+    } catch (e) {
+      setFeedback((f) => ({
+        ...f,
+        [item.id]: { tone: "blocked", text: e instanceof Error ? e.message : "Failed" },
+      }));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Only campaigns have a real reject path (gate: →archived). Outreach exposes
+  // no discard/reject procedure, so those items carry no Reject control.
+  async function reject(item: ApprovalItem) {
+    if (item.kind !== "campaign_publish") return;
+    setBusyId(item.id);
+    try {
+      const res = await moveCampaign.mutateAsync({ id: item.id, to: "archived" });
+      setFeedback((f) => ({
+        ...f,
+        [item.id]: res.ok
+          ? { tone: "ok", text: "Archived" }
+          : { tone: "blocked", text: res.reason },
+      }));
+      await utils.campaigns.list.invalidate();
+      await utils.campaigns.pendingApproval.invalidate();
+      advanceFrom(item.id);
+    } catch (e) {
+      setFeedback((f) => ({
+        ...f,
+        [item.id]: { tone: "blocked", text: e instanceof Error ? e.message : "Failed" },
+      }));
+    } finally {
+      setBusyId(null);
+    }
   }
 
   return (
@@ -56,9 +179,9 @@ export default function ApprovalsPage() {
 
       <section className="grid gap-3 sm:grid-cols-3">
         {[
-          ["Awaiting you", String(pending.length)],
-          ["Est. cost pending", formatAed(pendingCostAed)],
-          ["Decided this session", String(Object.keys(decisions).length)],
+          ["Awaiting you", String(queue.length)],
+          ["Outreach drafts", String(outreachCount)],
+          ["Acted this session", String(actedCount)],
         ].map(([label, value]) => (
           <div
             key={label}
@@ -72,7 +195,27 @@ export default function ApprovalsPage() {
         ))}
       </section>
 
-      {pending.length === 0 ? (
+      {isLoading ? (
+        <div className="rounded-xl border border-sand bg-white/60 p-10 text-center text-sm text-muted">
+          Loading the approval inbox…
+        </div>
+      ) : error ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-800">
+          <p className="font-medium">Couldn’t load pending approvals.</p>
+          <p className="mt-1">{error.message}</p>
+          <button
+            type="button"
+            className="mt-3 rounded-full border border-red-300 bg-white px-4 py-1.5 font-medium"
+            onClick={() => {
+              void outreach.refetch();
+              void campaigns.refetch();
+              void portal.refetch();
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      ) : queue.length === 0 ? (
         <div className="rounded-xl border border-dashed border-sand bg-white/60 p-10 text-center">
           <p className="font-display text-xl font-semibold">Inbox zero</p>
           <p className="mt-2 text-sm text-muted">
@@ -83,8 +226,9 @@ export default function ApprovalsPage() {
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           <ul className="flex flex-col gap-3">
-            {pending.map((item) => {
-              const active = item.id === selectedId;
+            {queue.map((item) => {
+              const active = item.id === selected?.id;
+              const fb = feedback[item.id];
               return (
                 <li key={item.id}>
                   <button
@@ -115,8 +259,19 @@ export default function ApprovalsPage() {
                         {item.agent}
                       </span>
                       <span className="rounded-full border border-sand px-2 py-0.5 font-medium text-muted">
-                        {formatAed(item.costAed)}
+                        {item.meta}
                       </span>
+                      {fb ? (
+                        <span
+                          className={`rounded-full px-2 py-0.5 font-medium ${
+                            fb.tone === "ok"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-red-100 text-red-800"
+                          }`}
+                        >
+                          {fb.text}
+                        </span>
+                      ) : null}
                     </div>
                   </button>
                 </li>
@@ -143,12 +298,11 @@ export default function ApprovalsPage() {
                 <p className="mt-1 text-sm text-muted">{selected.summary}</p>
               </div>
 
-              <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+              <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
                 {[
                   ["Target", selected.target],
                   ["Agent", selected.agent],
-                  ["Model", selected.model],
-                  ["Est. cost", formatAed(selected.costAed)],
+                  ["Channel", selected.meta],
                 ].map(([label, value]) => (
                   <div key={label}>
                     <dt className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">
@@ -166,20 +320,46 @@ export default function ApprovalsPage() {
                 <DraftPreview proposal={selected} />
               </div>
 
+              {feedback[selected.id] ? (
+                <p
+                  className={`text-sm ${
+                    feedback[selected.id]!.tone === "ok"
+                      ? "text-emerald-700"
+                      : "text-red-700"
+                  }`}
+                >
+                  {feedback[selected.id]!.text}
+                </p>
+              ) : null}
+
               <div className="mt-auto flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  onClick={() => decide(selected.id, "approved")}
-                >
-                  Approve &amp; queue send
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => decide(selected.id, "rejected")}
-                >
-                  Reject
-                </Button>
+                {selected.kind === "portal_item" ? (
+                  <p className="text-sm text-muted">
+                    Awaiting client sign-off in the portal — no staff action.
+                  </p>
+                ) : (
+                  <>
+                    <Button
+                      type="button"
+                      disabled={busyId === selected.id}
+                      onClick={() => void approve(selected)}
+                    >
+                      {selected.kind === "outreach_send"
+                        ? "Approve & send"
+                        : "Approve & publish"}
+                    </Button>
+                    {selected.kind === "campaign_publish" ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        disabled={busyId === selected.id}
+                        onClick={() => void reject(selected)}
+                      >
+                        Reject
+                      </Button>
+                    ) : null}
+                  </>
+                )}
               </div>
             </section>
           ) : (
