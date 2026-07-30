@@ -1,4 +1,4 @@
-import type { ApprovalProposal } from "./mock-data";
+import type { ApprovalItem } from "./types";
 
 // ponytail: naive set-based line diff (no LCS) — a line is "added" if the draft
 // has it and the baseline doesn't, "removed" the other way. Good enough for a
@@ -19,7 +19,11 @@ export function lineDiff(baseline: string, draft: string) {
   ];
 }
 
-export function DraftPreview({ proposal }: { proposal: ApprovalProposal }) {
+export function DraftPreview({
+  proposal,
+}: {
+  proposal: Pick<ApprovalItem, "draft" | "baseline">;
+}) {
   if (!proposal.baseline) {
     return (
       <pre className="whitespace-pre-wrap rounded-lg border border-sand bg-white/70 p-4 font-body text-sm text-ink">
