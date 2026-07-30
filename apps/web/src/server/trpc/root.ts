@@ -52,6 +52,7 @@ import { aiAdminRouter } from "./ai-admin-router";
 import { campaignsRouter } from "./campaigns-router";
 import { analyticsRouter } from "./analytics-router";
 import { portalApprovalsRouter } from "./portal-approvals-router";
+import { leadgenRouter } from "./leadgen-router";
 import { connectionsRouter } from "./connections-router";
 import { featureRequestsRouter } from "./feature-requests-router";
 import { coreHrRouter } from "./core-hr-router";
@@ -791,6 +792,7 @@ export const appRouter = router({
   aiAdmin: aiAdminRouter,
   campaigns: campaignsRouter,
   analytics: analyticsRouter,
+  leadgen: leadgenRouter,
 });
 
 export type AppRouter = typeof appRouter;
