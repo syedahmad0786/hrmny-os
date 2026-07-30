@@ -5,7 +5,12 @@ import { createComposioStub } from "@hrmny/integrations";
 import { resetCrmMemory } from "../crm/memory";
 import { createCompany, createContact, createDeal } from "../crm/repository";
 import { getOutreach, resetLeadgenStore } from "../leadgen/store";
-import { approveOutreach, draftOutreach, sendOutreach } from "./leadgen-router";
+import {
+  approveOutreach,
+  discardOutreach,
+  draftOutreach,
+  sendOutreach,
+} from "./leadgen-router";
 
 const staff: ActorContext = { employeeId: "emp-1", roles: ["partner"], permissions: [] };
 const portal: ActorContext = { employeeId: "cli-1", roles: ["portal_client"], permissions: [] };
@@ -100,5 +105,20 @@ describe("outreach HITL gate flow", () => {
     expect(res.ok).toBe(false);
     expect(composio.sends).toBe(0);
     expect(getOutreach(item.id)!.state).toBe("approved");
+  });
+
+  it("discards a draft — and a sent item can never be discarded", async () => {
+    const deal = await seedDeal();
+    const item = await draftOutreach({ dealId: deal.dealId, body: "Bye" });
+    const res = await discardOutreach({ id: item.id, actor: staff, audit, emit });
+    expect(res.ok).toBe(true);
+    expect(getOutreach(item.id)?.state).toBe("discarded");
+
+    const item2 = await draftOutreach({ dealId: deal.dealId, body: "Go" });
+    await approveOutreach({ id: item2.id, actor: staff, audit, emit });
+    await sendOutreach({ id: item2.id, actor: staff, composio: countingComposio(), audit, emit });
+    const blocked = await discardOutreach({ id: item2.id, actor: staff, audit, emit });
+    expect(blocked.ok).toBe(false);
+    expect(getOutreach(item2.id)?.state).toBe("sent");
   });
 });
