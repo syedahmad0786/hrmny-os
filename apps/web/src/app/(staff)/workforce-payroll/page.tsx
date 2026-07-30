@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 
@@ -155,7 +156,12 @@ export default function WorkforcePayrollPage() {
 
       {admin ? (
         <section className="rounded-lg border border-sand bg-white/70 p-4">
-          <h2 className="font-semibold">Payroll runs</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-semibold">Payroll runs</h2>
+            <Link className="text-sm underline" href="/payroll">
+              Open run workflow →
+            </Link>
+          </div>
           <div className="mt-3 space-y-2 text-sm">
             {(runs.data ?? []).map((run) => (
               <div

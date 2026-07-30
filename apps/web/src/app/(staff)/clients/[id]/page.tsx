@@ -27,8 +27,8 @@ export default function ClientOnboardingPage() {
   return (
     <main className="flex flex-col gap-6">
       <div>
-        <Link href="/sales" className="text-sm text-ochre underline">
-          ← Sales
+        <Link href="/clients" className="text-sm text-ochre underline">
+          ← Clients
         </Link>
         <h1 className="font-display text-3xl font-semibold">
           {client.data?.name ?? "Client"}
