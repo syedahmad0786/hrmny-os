@@ -7,3 +7,4 @@ export {
 export * from "./memory";
 export * from "./agents";
 export * from "./agent-io";
+export * from "./evals";

@@ -1161,3 +1161,34 @@ export const payslip = pgTable(
     ),
   ],
 );
+
+/**
+ * M7: append-only audit of every LLM agent run — input/output, tokens, cost in
+ * AED, and the gate decision. Feeds the ai-admin cost panel and the monthly cap.
+ */
+export const agentRuns = pgTable(
+  "agent_runs",
+  {
+    agentRunId: uuid("agent_run_id").defaultRandom().primaryKey(),
+    agent: text("agent").notNull(),
+    model: text("model").notNull(),
+    input: jsonb("input").$type<Record<string, unknown>>().default({}).notNull(),
+    output: jsonb("output")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    tokensIn: integer("tokens_in").default(0).notNull(),
+    tokensOut: integer("tokens_out").default(0).notNull(),
+    costAed: numeric("cost_aed", { precision: 12, scale: 4 })
+      .default("0")
+      .notNull(),
+    gateOutcome: text("gate_outcome"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("agent_runs_agent_created_idx").on(table.agent, table.createdAt),
+    index("agent_runs_created_idx").on(table.createdAt),
+  ],
+);
