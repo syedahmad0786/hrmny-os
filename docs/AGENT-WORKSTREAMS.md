@@ -34,7 +34,8 @@ Downstream agents build against these; live implementations swap in behind env f
 | M9 content | `packages/ai/src/agents/*` prompt content, new `campaigns` router + migration, publish adapter | m3/crm routers |
 | M10 analytics | new `analytics-router.ts` — **read-only queries** over m3/m5/work data | writes to any domain table |
 | M11 ads | `packages/integrations/{meta,google-ads}`, pacing job, nurture sequence in `automation-router.ts` | m3/crm routers |
-| UI | `apps/web/src/app/*` pages/components only | `apps/web/src/server/*` |
+| n8n automations | n8n workflows (via n8n MCP/API) + `docs/AUTOMATIONS.md` | repo code |
+| UI | `apps/web/src/app/*` pages/components only — includes connections manager, HITL inbox, portal approvals | `apps/web/src/server/*` |
 
 ## 4. Serialization rules (the two known collision points)
 

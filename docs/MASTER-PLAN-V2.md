@@ -4,6 +4,10 @@
 **Supersedes:** the M1–M6 phase plan in `hrmny-aios` (2026-06-30 snapshot) for everything after M6.
 **Companion docs:** `AGENT-WORKSTREAMS.md` (parallel-agent build architecture), `CREDENTIALS-NEEDED.md` (activation keys), `PRODUCTION-OWNERSHIP-ACCESS-REGISTER.md` (ownership sign-off).
 
+## Goal statement (Ahmad, 2026-07-30)
+
+Production-ready CRM + operating system powered by AI, with: reporting, analytics, research, lead generation, outreach, and **competitor research**; production-grade backend, frontend, and storage/database systems; **every external account connectable / disconnectable / changeable from the frontend**; a **client portal where clients see and approve things**; and **all required automations built and tested in both n8n and GitHub Actions**.
+
 ## 0. Where we stand (verified 2026-07-30)
 
 | Milestone | Scope | Status |
@@ -47,8 +51,9 @@ No milestone below starts until its row here is green. Key sources: `CREDENTIALS
 - BUAF G1–G6 scoring (`m3-routers.ts` + `packages/gate/src/gates/deal.ts`) runs on live LLM.
 - Reply-intent classifier — first new live task; feeds M8.
 - Eval harness: ~10 golden cases per active agent, `LLM_PROVIDER=mock` in CI + nightly live-eval job.
+- Connections management UI v2: extend `/settings/connections` (Composio flows already exist in `connections-router.ts`) so **every** external account — Composio apps, Apollo, Hunter, Xero, n8n — can be connected, disconnected, and swapped from the frontend, with health status per connection. No env-only integrations for anything user-facing.
 
-**Acceptance demo:** live BUAF score + outreach draft + reply-intent classification in prod; cost visible in an admin panel; full audit trail.
+**Acceptance demo:** live BUAF score + outreach draft + reply-intent classification in prod; cost visible in an admin panel; a connection connected + disconnected from the UI; full audit trail.
 **Depends:** 0.1, 0.2.
 
 ## M8 — Lead-Gen Engine (Weeks 3–6, ~3 wk) — the June-prototype differentiator, restored
@@ -60,6 +65,7 @@ No milestone below starts until its row here is green. Key sources: `CREDENTIALS
 - Reply-intent classification drives deal-stage transitions through the gate engine.
 - Intelligence graph v1: `contact_edges` (who-knows-whom) + `win_loss_notes` tables; retrieval via existing pgvector memory. Postgres tables + embeddings — no graph DB at 25-staff scale.
 - Self-evolution v1: weekly job summarizes win/loss memory into updated retrieved agent context (context injection, **not** instruction-set rewriting — that is V2).
+- **Competitor research agent**: extends the existing `research` agent instruction set — scheduled competitor scans (site/social/ads-library), structured findings into pgvector memory, weekly competitor digest per active pitch/client.
 
 **Acceptance demo:** morning digest of N scored fresh leads; one approved send delivered; a reply classified and the deal auto-transitioned; win-loss note retrievable.
 **Depends:** M7; keys 0.3–0.6.
@@ -69,8 +75,9 @@ No milestone below starts until its row here is green. Key sources: `CREDENTIALS
 - `creative` agent live; Canva/Midjourney/Higgsfield adapters activated where keys exist (mock-first stays for the rest).
 - One-channel social publish MVP: LinkedIn via Composio, HITL-gated exactly like outreach.
 - `campaigns` table + campaign router; content-calendar view; campaign report v1 (posts + engagement pulled back via Composio).
+- **Portal approvals v1**: clients approve creative/content and campaign items from `/portal` (approve action is a gate transition with audit; portal stays finance/margin-free). Extends the existing M6 portal read surface into a see-and-approve surface.
 
-**Acceptance demo:** brief → drafted post + visual → approve → published to LinkedIn → engagement appears in campaign report.
+**Acceptance demo:** brief → drafted post + visual → client approves it in the portal → published to LinkedIn → engagement appears in campaign report.
 **Depends:** M7; Composio LinkedIn connection.
 
 ## M10 — Analytics & Scoring v2 (Weeks 7–10, ~2.5 wk)
@@ -95,6 +102,16 @@ Per the capacity blocker (2026-07-02 review: milestone windows 2–5× over), th
 **Acceptance demo:** live ad-spend dashboard with a pacing alert firing; nurture sequence advancing a real lead.
 **Depends:** M8, M9; ads platform tokens.
 **Cut rule:** if capacity still doesn't fit, M11 moves to V2 entirely before M8 loses anything — M8 is the product's differentiator.
+
+## Cross-cutting — Automations in n8n + GitHub Actions (Weeks 1–12)
+
+Every operational automation is built and **tested** in one of two engines, chosen by trigger type, and inventoried in `docs/AUTOMATIONS.md` (created with the first automation):
+
+- **n8n** (`hrmny.app.n8n.cloud`): external-event and integration glue — lead-source ingestion, webhook fan-out, Slack/Chat notifications, client-facing sequences. Each workflow ships with a pinned test execution + a validation run before `N8N_ALLOW_PRODUCTION_TRIGGER` flips true.
+- **GitHub Actions**: repo-native schedules — CI (exists), 5-min cron → `api/cron/jobs` (exists), nightly live-eval (M7), weekly report trigger (M10). Each workflow has a `workflow_dispatch` path so it is testable on demand.
+- **Inngest**: long-running AI pipelines (M8 daily lead-gen, M9 publish loops, M11 pacing alerts) — these are code-owned, tested in Vitest with mock providers.
+
+Rule: no untested automation reaches prod; every automation's failure path alerts Google Chat.
 
 ## M12 — Hardening / UAT / Cutover (Weeks 12–14, ~2 wk)
 
