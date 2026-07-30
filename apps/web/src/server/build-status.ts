@@ -62,7 +62,7 @@ export async function getBuildStatus() {
           ? "done"
           : "live_pending",
       summary: "BUAF, quotes, HITL outreach, Won→Handover",
-      href: "/sales",
+      href: "/crm",
       demoReady: true,
     },
     {

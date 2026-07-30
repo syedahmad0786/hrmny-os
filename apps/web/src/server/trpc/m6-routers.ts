@@ -623,7 +623,7 @@ export const dashboardsHubRouter = router({
         {
           key: "commercial",
           title: "Commercial",
-          href: "/sales",
+          href: "/crm",
           summary: `${store.deals.size} deals · ${store.clients.size} clients`,
         },
         {
