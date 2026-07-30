@@ -162,7 +162,11 @@ export default function CrmContactsPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <select value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
+        <select
+          aria-label="Filter by company"
+          value={companyId}
+          onChange={(e) => setCompanyId(e.target.value)}
+        >
           <option value="all">All companies</option>
           {(companies.data ?? []).map((c) => (
             <option key={c.companyId} value={c.companyId}>
@@ -170,7 +174,11 @@ export default function CrmContactsPage() {
             </option>
           ))}
         </select>
-        <select value={verify} onChange={(e) => setVerify(e.target.value)}>
+        <select
+          aria-label="Email verification filter"
+          value={verify}
+          onChange={(e) => setVerify(e.target.value)}
+        >
           <option value="all">Verification: any</option>
           <option value="verified">Verified</option>
           <option value="unverified">Unverified</option>

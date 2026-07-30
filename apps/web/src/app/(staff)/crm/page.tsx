@@ -92,14 +92,22 @@ export default function CrmPipelinePage() {
           value={companyName}
           onChange={(e) => setCompanyName(e.target.value)}
         />
-        <select value={lane} onChange={(e) => setLane(e.target.value)}>
+        <select
+          aria-label="Lead source lane"
+          value={lane}
+          onChange={(e) => setLane(e.target.value)}
+        >
           <option value="all">All lanes</option>
           <option value="relationship_led">Relationship led</option>
           <option value="apollo_intent">Apollo intent</option>
           <option value="industry_scanning">Industry scanning</option>
           <option value="tejari">Tejari</option>
         </select>
-        <select value={temp} onChange={(e) => setTemp(e.target.value)}>
+        <select
+          aria-label="BUAF temperature"
+          value={temp}
+          onChange={(e) => setTemp(e.target.value)}
+        >
           <option value="all">All temperatures</option>
           <option value="hot">Hot</option>
           <option value="warm">Warm</option>

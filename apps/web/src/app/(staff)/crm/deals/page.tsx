@@ -77,7 +77,11 @@ export default function CrmDealsPage() {
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
-        <select value={stage} onChange={(e) => setStage(e.target.value)}>
+        <select
+          aria-label="Filter by stage"
+          value={stage}
+          onChange={(e) => setStage(e.target.value)}
+        >
           <option value="all">All stages</option>
           {(stages.data ?? []).map((s) => (
             <option key={s.key} value={s.key}>

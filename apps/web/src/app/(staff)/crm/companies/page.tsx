@@ -112,7 +112,11 @@ export default function CrmCompaniesPage() {
           value={sector}
           onChange={(e) => setSector(e.target.value)}
         />
-        <select value={market} onChange={(e) => setMarket(e.target.value)}>
+        <select
+          aria-label="Filter by market"
+          value={market}
+          onChange={(e) => setMarket(e.target.value)}
+        >
           <option value="all">UAE + KSA</option>
           <option value="UAE">UAE</option>
           <option value="KSA">KSA</option>
