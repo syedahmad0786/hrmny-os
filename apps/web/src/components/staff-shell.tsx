@@ -184,14 +184,37 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     };
   }, [accessibility.data, accessibilityEnabled]);
 
+  // Refetch the session whenever Supabase auth settles — the OAuth landing
+  // exchanges tokens asynchronously, so the first session query can race it
+  // and cache "anonymous" (the root cause of the stuck "Checking access…").
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (
+        event === "INITIAL_SESSION" ||
+        event === "SIGNED_IN" ||
+        event === "TOKEN_REFRESHED" ||
+        event === "SIGNED_OUT"
+      ) {
+        void utils.auth.session.invalidate();
+      }
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [utils]);
+
+  // Truly anonymous (no Supabase identity at all) → go sign in. A signed-in
+  // user with no employee row gets the explicit denied screen below instead —
+  // bouncing them to /login would loop them through Google forever.
   useEffect(() => {
     if (
-      session.isError ||
-      (session.data?.authMode === "supabase" && !session.data.employeeId)
+      session.data?.authMode === "supabase" &&
+      !session.data.employeeId &&
+      !session.data.email
     ) {
       router.replace("/login");
     }
-  }, [router, session.data, session.isError]);
+  }, [router, session.data]);
 
   // A portal actor must never render staff chrome. The tRPC layer already denies
   // portal callers on staff procedures (portalStaffBoundary); this closes the soft
@@ -258,9 +281,49 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   const requiredFeature = featureForPathname(pathname);
   const pageEnabled = !requiredFeature || enabledFeatures.has(requiredFeature);
 
+  if (session.isError) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-3 text-sm text-muted">
+        <p>Could not reach the server.</p>
+        <button
+          type="button"
+          className="rounded border border-sand bg-white px-4 py-2 text-ink"
+          onClick={() => void session.refetch()}
+        >
+          Retry
+        </button>
+      </main>
+    );
+  }
+
+  if (
+    session.data?.authMode === "supabase" &&
+    !session.data.employeeId &&
+    session.data.email
+  ) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-3 text-sm text-muted">
+        <p className="text-ink">
+          Signed in as <strong>{session.data.email}</strong>
+        </p>
+        <p>This account does not have staff access to hrmny OS.</p>
+        <button
+          type="button"
+          className="rounded border border-sand bg-white px-4 py-2 text-ink"
+          onClick={() =>
+            void getSupabaseBrowserClient()
+              ?.auth.signOut()
+              .then(() => router.replace("/login"))
+          }
+        >
+          Sign out and try another account
+        </button>
+      </main>
+    );
+  }
+
   if (
     session.isLoading ||
-    session.isError ||
     session.data?.actorType === "portal" ||
     (session.data?.authMode === "supabase" && !session.data.employeeId)
   ) {

@@ -1,13 +1,28 @@
 "use client";
 
 import { Button } from "@hrmny/ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 export default function StaffLoginPage() {
+  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [ssoEmail, setSsoEmail] = useState("");
+
+  // If a session already exists (or appears) while on the login page, enter
+  // the app — covers signed-in users revisiting /login after OAuth settles.
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (s && (event === "INITIAL_SESSION" || event === "SIGNED_IN")) {
+        router.replace("/");
+      }
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [router]);
 
   async function signIn() {
     const supabase = getSupabaseBrowserClient();
