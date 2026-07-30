@@ -1096,6 +1096,10 @@ html[data-work-theme="dark"] {
   box-shadow: none;
 }
 
+.crm-row-selected td {
+  background: color-mix(in srgb, var(--ochre) 12%, var(--paper-2));
+}
+
 .crm-nav-stack {
   display: flex;
   flex-direction: column;
