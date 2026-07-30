@@ -209,6 +209,16 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     route: "/portal",
   }),
   feature({
+    key: "portal.magic_link",
+    name: "Portal magic-link access",
+    description:
+      "Invite-only client sign-in via allowlisted email magic links; off keeps existing portal auth.",
+    group: "Portal",
+    source: "native",
+    availability: "available",
+    defaultEnabled: false,
+  }),
+  feature({
     key: "integrations.connections",
     name: "Connections",
     description: "Managed OAuth and API-key connections.",

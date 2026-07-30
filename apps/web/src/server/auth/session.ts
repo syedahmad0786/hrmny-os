@@ -19,6 +19,11 @@ import {
 import { getWorkOrganizationPolicy } from "../work-governance";
 import { featureEnabled } from "../features";
 import { getSupabasePublicConfig } from "@/lib/supabase-config";
+import {
+  PORTAL_MAGIC_LINK_FEATURE,
+  PORTAL_PERMISSIONS,
+  resolvePortalSessionForEmail,
+} from "./portal-magic-link";
 
 export type AuthMode = "dev" | "supabase";
 
@@ -305,6 +310,16 @@ export async function resolveSupabaseUser(
   }
 
   if (!email || !data.user.email_confirmed_at) return null;
+
+  // Magic-link portal access (flag on): the invite allowlist is the source of
+  // truth for the client binding. Flag off falls through to the table below.
+  if (
+    await featureEnabled(PORTAL_MAGIC_LINK_FEATURE, { roles: ["portal_client"] })
+  ) {
+    const viaAllowlist = await resolvePortalSessionForEmail(email);
+    if (viaAllowlist) return viaAllowlist;
+  }
+
   const portalUsers = await db
     .select({
       portalUserId: clientPortalUser.clientPortalUserId,
@@ -335,13 +350,7 @@ export async function resolveSupabaseUser(
     email: portal.email,
     displayName: portal.displayName,
     roles: ["portal_client"],
-    permissions: [
-      "allow:portal:read",
-      "allow:portal:approve",
-      "deny:margin:view",
-      "deny:invoice:*",
-      "deny:payroll:*",
-    ],
+    permissions: [...PORTAL_PERMISSIONS],
     actorType: "portal",
     clientId: portal.clientId,
   };

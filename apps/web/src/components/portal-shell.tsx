@@ -24,10 +24,13 @@ const NAV = [
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  // Login + magic-link verify are pre-auth: no session gate, no redirect.
+  const isAuthPage =
+    pathname === "/portal/login" || pathname.startsWith("/portal/login/");
   const [role, setRole] = useState("portal_a");
   const utils = trpc.useUtils();
   const session = trpc.portal.auth.session.useQuery(undefined, {
-    enabled: pathname !== "/portal/login",
+    enabled: !isAuthPage,
     retry: false,
   });
   const users = trpc.auth.devUsers.useQuery();
@@ -36,7 +39,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
-    if (pathname === "/portal/login") return;
+    if (isAuthPage) return;
     const current = getDevRole();
     if (!current.startsWith("portal")) {
       setDevRole("portal_a");
@@ -47,10 +50,10 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   useEffect(() => {
-    if (pathname !== "/portal/login" && session.isError) {
+    if (!isAuthPage && session.isError) {
       router.replace("/portal/login");
     }
-  }, [pathname, router, session.isError]);
+  }, [isAuthPage, router, session.isError]);
 
   async function onRoleChange(next: string) {
     setDevRole(next);
@@ -65,7 +68,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     router.replace("/portal/login");
   }
 
-  if (pathname === "/portal/login") return children;
+  if (isAuthPage) return children;
 
   if (session.isLoading || session.isError) {
     return (
