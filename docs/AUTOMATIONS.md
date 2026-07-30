@@ -20,10 +20,12 @@ Rule (MASTER-PLAN-V2 cross-cutting): every operational automation is built and *
 
 ## n8n (`hrmny.app.n8n.cloud` — external-event glue)
 
-Blocked on the hrmny n8n Cloud API key (CREDENTIALS-NEEDED.md Tier 3 #11). Planned first workflows, to be built + tested with pinned executions before `N8N_ALLOW_PRODUCTION_TRIGGER` flips:
+Blocked on the hrmny n8n Cloud API key (CREDENTIALS-NEEDED.md Tier 3 #11). Because the tenant has no API key yet, the first two workflows were authored and validated in a **staging** tenant (personal `ahmadbukhari.app.n8n.cloud`, named `hrmny-STAGING — …`, left inactive) and exported to `docs/automations/n8n/`. All target URLs/secrets are `$env` expressions so the exports import cleanly into the real tenant. Import per `docs/automations/n8n/README.md`, pin-test in-tenant, then activate (and flip `N8N_ALLOW_PRODUCTION_TRIGGER`).
 
-1. Lead-source webhook ingestion → OS inbound endpoint
-2. Google Chat notification fan-out (job failures, cap alerts)
-3. Client-facing nurture sequence trigger (consumes M8 send infra, HITL-gated)
+| # | Workflow | Export | Status |
+|---|---|---|---|
+| 1 | Lead-source webhook ingestion → OS inbound endpoint | `docs/automations/n8n/lead-source-webhook-ingestion.json` | built + validated in staging; tenant import pending API key |
+| 2 | Google Chat notification fan-out (job failures, cap alerts) | `docs/automations/n8n/ops-alert-fanout.json` | built + validated in staging; tenant import pending API key |
+| 3 | Client-facing nurture sequence trigger (consumes M8 send infra, HITL-gated) | — | planned |
 
-Do not build hrmny workflows in any personal n8n tenant.
+Do not build hrmny workflows in any personal n8n tenant as production. The staging drafts above are inactive, `hrmny-STAGING —` prefixed, and exist only to validate node logic and produce the importable JSON — they are never activated in the personal tenant.
