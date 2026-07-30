@@ -9,11 +9,13 @@ import { portalProcedure, router } from "./trpc";
 
 /**
  * M9 portal approvals — client-facing surface over the campaign items awaiting
- * sign-off. NOT registered in root.ts by design: the orchestrator wires it (see
- * the note returned to the orchestrator). Campaign items are surfaced as
- * `portal_item` entities scoped to the caller's clientId; approve/reject route
- * through the gate engine, where portalItemClientApproverGate enforces the
- * portal_client role. Finance/margin never enter this tree.
+ * sign-off. NOT registered in root.ts by design: the orchestrator wires it
+ * UNDER the portal namespace (as `portal.campaignApprovals`) — the
+ * portalStaffBoundary middleware only lets portal sessions reach paths starting
+ * with `portal.`, so a top-level mount would be blocked. Campaign items are
+ * surfaced as `portal_item` entities scoped to the caller's clientId;
+ * approve/reject route through the gate engine, where portalItemClientApproverGate
+ * enforces the portal_client role. Finance/margin never enter this tree.
  */
 
 function actorFromCtx(ctx: {

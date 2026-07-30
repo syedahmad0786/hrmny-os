@@ -8,18 +8,20 @@ import { Button } from "@hrmny/ui";
  *
  * ─── WIRING POINT ───────────────────────────────────────────────────────────
  * The backend (apps/web/src/server/trpc/portal-approvals-router.ts) is built
- * but intentionally NOT yet registered in root.ts (orchestrator-owned). Until
- * it is wired as `portal.campaignApprovals` (or a top-level `portalApprovals`),
+ * but intentionally NOT yet registered in root.ts (orchestrator-owned). It must
+ * be wired UNDER the portal namespace (path `portal.campaignApprovals.*`) — the
+ * portalStaffBoundary middleware only lets portal sessions call paths starting
+ * with `portal.`, so a top-level `portalApprovals` would be blocked. Until then
  * this page uses local placeholder rows so the route type-checks. Once the
  * orchestrator registers the router, replace the placeholder block below with:
  *
  *   const utils = trpc.useUtils();
- *   const list = trpc.portalApprovals.list.useQuery();
- *   const approve = trpc.portalApprovals.approve.useMutation({
- *     onSuccess: () => void utils.portalApprovals.list.invalidate(),
+ *   const list = trpc.portal.campaignApprovals.list.useQuery();
+ *   const approve = trpc.portal.campaignApprovals.approve.useMutation({
+ *     onSuccess: () => void utils.portal.campaignApprovals.list.invalidate(),
  *   });
- *   const reject = trpc.portalApprovals.reject.useMutation({
- *     onSuccess: () => void utils.portalApprovals.list.invalidate(),
+ *   const reject = trpc.portal.campaignApprovals.reject.useMutation({
+ *     onSuccess: () => void utils.portal.campaignApprovals.list.invalidate(),
  *   });
  *
  * and swap the button handlers to approve.mutate({ id }) / reject.mutate({ id }).
