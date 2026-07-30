@@ -3,8 +3,10 @@ import { TRPCError } from "@trpc/server";
 import type { ActorContext } from "@hrmny/gate";
 import {
   decidePortalItem,
+  getCampaign,
   listApprovalViews,
 } from "../campaigns/repository";
+import { addFeedback, listFeedbackByItem } from "../campaigns/feedback";
 import { portalProcedure, router } from "./trpc";
 
 /**
@@ -38,6 +40,19 @@ function requireClientId(ctx: { clientId?: string | null }): string {
   return ctx.clientId;
 }
 
+/** Client trust boundary: a portal actor may only touch a thread whose item
+ *  belongs to their bound client. Returns the item once the scope is proven. */
+async function requireOwnedItem(id: string, clientId: string) {
+  const item = await getCampaign(id);
+  if (!item || item.clientId !== clientId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "FORBIDDEN: item not in this client scope",
+    });
+  }
+  return item;
+}
+
 export const portalApprovalsRouter = router({
   /** Items for the caller's client only — pending, approved, and rejected. */
   list: portalProcedure
@@ -60,11 +75,13 @@ export const portalApprovalsRouter = router({
       }),
     ),
 
+  /** Request changes: a rejection must carry a feedback body (recorded as the
+   *  first client comment on the thread, alongside the gate transition). */
   reject: portalProcedure
     .input(
       z.object({
         id: z.string().uuid(),
-        feedback: z.string().max(2000).optional(),
+        feedback: z.string().min(1).max(2000),
       }),
     )
     .mutation(({ input, ctx }) =>
@@ -76,4 +93,35 @@ export const portalApprovalsRouter = router({
         feedback: input.feedback,
       }),
     ),
+
+  /** Consolidated proofing thread for one of the caller's items. */
+  feedback: router({
+    list: portalProcedure
+      .input(z.object({ campaignItemId: z.string().uuid() }))
+      .query(async ({ input, ctx }) => {
+        await requireOwnedItem(input.campaignItemId, requireClientId(ctx));
+        return listFeedbackByItem(input.campaignItemId);
+      }),
+
+    add: portalProcedure
+      .input(
+        z.object({
+          campaignItemId: z.string().uuid(),
+          body: z.string().min(1).max(2000),
+          anchor: z.record(z.unknown()).nullable().optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const clientId = requireClientId(ctx);
+        await requireOwnedItem(input.campaignItemId, clientId);
+        return addFeedback({
+          campaignItemId: input.campaignItemId,
+          authorKind: "client",
+          authorId: ctx.employeeId,
+          clientId,
+          body: input.body,
+          anchor: input.anchor ?? null,
+        });
+      }),
+  }),
 });
