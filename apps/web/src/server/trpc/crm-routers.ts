@@ -375,12 +375,29 @@ export const crmNotesRouter = router({
         dealId: z.string().uuid().nullable().optional(),
       }),
     )
-    .mutation(({ input, ctx }) =>
-      createNote({
+    .mutation(async ({ input, ctx }) => {
+      const note = await createNote({
         ...input,
         authorEmployeeId: ctx.employeeId,
-      }),
-    ),
+      });
+      // Best-effort semantic memory — CRM note remains SoT even if embed fails.
+      try {
+        const { rememberChunk } = await import("../memory/postgres");
+        await rememberChunk({
+          sourceType: "note",
+          sourceId: note.crmNoteId,
+          content: note.body,
+          metadata: {
+            dealId: note.dealId,
+            companyId: note.companyId,
+            contactId: note.contactId,
+          },
+        });
+      } catch {
+        /* memory optional when DATABASE_URL / embeddings unavailable */
+      }
+      return note;
+    }),
 });
 
 export const crmTasksRouter = router({

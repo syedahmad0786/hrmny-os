@@ -533,6 +533,18 @@ export const dealsRouter = router({
         after: { stage: "close", closeOutcome: input.outcome },
         reason: input.lostReason ?? null,
       });
+      try {
+        const { recordWinLossNote } = await import("../memory/postgres");
+        await recordWinLossNote({
+          dealId: input.id,
+          outcome: input.outcome,
+          note:
+            input.lostReason?.trim() ||
+            `Deal closed as ${input.outcome} for ${deal.companyName}`,
+        });
+      } catch {
+        /* win/loss memory is additive — close still succeeds */
+      }
       return {
         ok: true as const,
         newState: "close",
