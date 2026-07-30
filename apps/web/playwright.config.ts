@@ -6,6 +6,9 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e",
+  // Only *.spec.ts here — *.test.ts under e2e/ (e.g. route-manifest.test.ts) is a
+  // vitest file, not a Playwright test.
+  testMatch: "**/*.spec.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
