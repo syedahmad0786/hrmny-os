@@ -22,7 +22,7 @@ function VerifyInner() {
     if (started.current) return;
     started.current = true;
     void run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // run once on mount for magic-link exchange
   }, []);
 
   async function run() {

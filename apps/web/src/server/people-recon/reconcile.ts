@@ -92,13 +92,6 @@ export type ReconInput = {
   payrollRunActor?: string | null;
 };
 
-const ZERO: PayrollFigures = {
-  gross: "0.00",
-  net: "0.00",
-  allowances: "0.00",
-  deductions: "0.00",
-};
-
 const FIELDS = ["gross", "net", "allowances", "deductions"] as const;
 
 function figuresToFils(f: PayrollFigures) {
