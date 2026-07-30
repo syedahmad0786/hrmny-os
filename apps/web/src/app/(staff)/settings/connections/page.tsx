@@ -5,6 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import Link from "next/link";
 import { useState } from "react";
+import { ConnectionHealth } from "./connection-health";
 
 const GOOGLE_WORKSPACE_SCOPES = [
   "https://www.googleapis.com/auth/gmail.modify",
@@ -107,6 +108,8 @@ export default function ConnectionsPage() {
           browser.
         </p>
       </div>
+
+      <ConnectionHealth />
 
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
