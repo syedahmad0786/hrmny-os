@@ -111,11 +111,7 @@ export const ROUTES: RouteEntry[] = [
   staff("/people"),
   staff("/requests"),
   staff("/roles"),
-  // Legacy alias kept only because server dashboards.hub / build-status still
-  // emit href:"/sales"; safe to delete once those repoint to /crm. The
-  // /sales/[id] · /sales/inbound · /sales/outreach subroutes had no inbound
-  // references and were removed in this pass.
-  staff("/sales", { redirectsTo: "/crm" }),
+  // Legacy /sales tree fully removed; server hrefs repoint to /crm.
   staff("/settings/ai"),
   staff("/settings/asana-migration"),
   staff("/settings/connections"),
