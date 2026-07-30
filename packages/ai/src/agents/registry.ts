@@ -232,6 +232,62 @@ export function getAgent(id: AgentId): AgentDefinition {
   return AGENT_REGISTRY[id];
 }
 
+// --- Kill switch ---------------------------------------------------------
+// `AGENT_DISABLED_LIST` (comma-separated agent ids) seeds the disabled set at
+// boot; `setAgentEnabled` layers per-process runtime overrides on top (what the
+// ai-admin toggle drives). ponytail: process-local, not durable across
+// restarts — promote to an agent_settings table if a persisted toggle is needed.
+
+const runtimeOverrides = new Map<AgentId, boolean>();
+
+function envDisabledIds(): Set<string> {
+  return new Set(
+    (process.env.AGENT_DISABLED_LIST ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+}
+
+export function isAgentEnabled(id: AgentId): boolean {
+  const override = runtimeOverrides.get(id);
+  if (override !== undefined) return override;
+  return !envDisabledIds().has(id);
+}
+
+export function setAgentEnabled(id: AgentId, enabled: boolean): void {
+  runtimeOverrides.set(id, enabled);
+}
+
+/** Drop all runtime overrides, reverting every agent to its env-list default. */
+export function resetAgentOverrides(): void {
+  runtimeOverrides.clear();
+}
+
+export type AgentRefusal = {
+  ok: false;
+  refused: true;
+  agentId: AgentId;
+  reason: "agent_disabled";
+  message: string;
+};
+
+/** Typed refusal for a disabled agent — callers return this, never throw. */
+export function agentDisabledRefusal(id: AgentId): AgentRefusal {
+  return {
+    ok: false,
+    refused: true,
+    agentId: id,
+    reason: "agent_disabled",
+    message: `Agent "${id}" is disabled by the kill switch.`,
+  };
+}
+
+/** Enabled-state snapshot for every agent — feeds the admin panel. */
+export function agentEnabledStates(): Array<{ id: AgentId; enabled: boolean }> {
+  return AgentIdSchema.options.map((id) => ({ id, enabled: isAgentEnabled(id) }));
+}
+
 export function listAgents(): AgentDefinition[] {
   return Object.values(AGENT_REGISTRY);
 }

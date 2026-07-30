@@ -1,11 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   AGENT_REGISTRY,
   CreativeSubagentIdSchema,
+  agentDisabledRefusal,
+  agentEnabledStates,
+  isAgentEnabled,
   listAgents,
   listCreativeSubagents,
   listParentAgents,
   ORCHESTRATION_HITL_NOTE,
+  resetAgentOverrides,
+  setAgentEnabled,
 } from "./registry";
 
 describe("agent registry", () => {
@@ -27,5 +32,42 @@ describe("agent registry", () => {
     );
     expect(AGENT_REGISTRY["ticket-assist"].producesDrafts).toBe(true);
     expect(ORCHESTRATION_HITL_NOTE).toMatch(/HITL/);
+  });
+});
+
+describe("agent kill switch", () => {
+  afterEach(() => {
+    delete process.env.AGENT_DISABLED_LIST;
+    resetAgentOverrides();
+  });
+
+  it("enables every agent by default", () => {
+    expect(agentEnabledStates().every((a) => a.enabled)).toBe(true);
+    expect(isAgentEnabled("research")).toBe(true);
+  });
+
+  it("disables agents listed in AGENT_DISABLED_LIST", () => {
+    process.env.AGENT_DISABLED_LIST = "research, creative";
+    expect(isAgentEnabled("research")).toBe(false);
+    expect(isAgentEnabled("creative")).toBe(false);
+    expect(isAgentEnabled("hr")).toBe(true);
+  });
+
+  it("runtime override wins over the env list", () => {
+    process.env.AGENT_DISABLED_LIST = "research";
+    setAgentEnabled("research", true);
+    expect(isAgentEnabled("research")).toBe(true);
+    setAgentEnabled("hr", false);
+    expect(isAgentEnabled("hr")).toBe(false);
+  });
+
+  it("returns a typed refusal that never throws", () => {
+    const refusal = agentDisabledRefusal("outreach-draft");
+    expect(refusal).toMatchObject({
+      ok: false,
+      refused: true,
+      agentId: "outreach-draft",
+      reason: "agent_disabled",
+    });
   });
 });

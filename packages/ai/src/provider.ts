@@ -20,7 +20,7 @@ export type LLMGenerateOptions = {
   temperature?: number;
   images?: LLMImageInput[];
   /** Optional task hint for mock structured outputs. */
-  task?: "invoice_extract" | "generic";
+  task?: "invoice_extract" | "outreach_draft" | "reply_intent" | "generic";
 };
 
 export type LLMGenerateResult = {
@@ -165,6 +165,26 @@ export function createMockProvider(
         };
       }
 
+      if (task === "outreach_draft") {
+        const object = mockOutreachDraft(userText);
+        return {
+          text: JSON.stringify(object),
+          object,
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+
+      if (task === "reply_intent") {
+        const object = mockReplyIntent(userText);
+        return {
+          text: JSON.stringify(object),
+          object,
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+
       return {
         text: `[mock:${options.model ?? defaultModel}] stub response`,
         provider: "mock",
@@ -172,6 +192,39 @@ export function createMockProvider(
       };
     },
   };
+}
+
+function field(userText: string, key: string): string | undefined {
+  return userText.match(new RegExp(`${key}[:=]\\s*([^\\n]+)`, "i"))?.[1]?.trim();
+}
+
+/** Deterministic outreach draft for mock/eval — never invents a send, HITL only. */
+export function mockOutreachDraft(userText: string) {
+  const firstName = field(userText, "firstName") ?? "there";
+  const company = field(userText, "company") ?? "your team";
+  return {
+    channel: "email" as const,
+    subject: `Quick idea for ${company}`,
+    body:
+      `Hi ${firstName}, I was looking at ${company} and had one concrete idea ` +
+      `worth 10 minutes. Reply "yes" if useful and I'll send specifics — ` +
+      `no obligation.`,
+    cta: "Open to a quick call next week?",
+  };
+}
+
+// Values match the frozen ReplyIntentSchema in agent-io.ts (M7 contract).
+const REPLY_INTENT_RULES: Array<[RegExp, string]> = [
+  [/unsubscribe|opt\s?out|remove me|stop emailing|take me off/i, "unsubscribe"],
+  [/not interested|no thanks|no thank you|we'?ll pass|not a fit|already have|maybe later|not right now/i, "not_now"],
+  [/interested|sounds good|let'?s (talk|chat|connect)|book|schedule|demo|call me|keen|works for me/i, "interested"],
+  [/\?|how much|pricing|what.*cost|when can|could you|can you|tell me more/i, "question"],
+];
+
+/** Keyword classifier for mock/eval. ponytail: heuristic map, swap for the live model in prod. */
+export function mockReplyIntent(userText: string) {
+  const match = REPLY_INTENT_RULES.find(([pattern]) => pattern.test(userText));
+  return { intent: match?.[1] ?? "other", confidence: match ? 0.8 : 0.4 };
 }
 
 export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
@@ -326,6 +379,146 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
         inputTokens: Number(raw.prompt_eval_count ?? 0) || undefined,
         outputTokens: Number(raw.eval_count ?? 0) || undefined,
       });
+    },
+  };
+}
+
+// --- Cost metering + monthly-cap circuit breaker -------------------------
+
+export type ModelPrice = {
+  /** AED per 1M input tokens. */ inputPerMTokAed: number;
+  /** AED per 1M output tokens. */ outputPerMTokAed: number;
+};
+
+/**
+ * Model → price in AED per 1M tokens. Vendor prices are USD; AED ≈ USD × 3.6725.
+ * ponytail: hand-maintained snapshot — vendor pricing drifts, so re-check when a
+ * model is added or a bill looks off. Unknown models fall back to `default`.
+ */
+export const MODEL_PRICES_AED: Record<string, ModelPrice> = {
+  "openai/gpt-4o": { inputPerMTokAed: 9.18, outputPerMTokAed: 36.73 },
+  "openai/gpt-4o-mini": { inputPerMTokAed: 0.55, outputPerMTokAed: 2.2 },
+  "anthropic/claude-3.5-sonnet": { inputPerMTokAed: 11.02, outputPerMTokAed: 55.09 },
+  "anthropic/claude-3.5-haiku": { inputPerMTokAed: 2.94, outputPerMTokAed: 14.69 },
+  "google/gemini-2.0-flash": { inputPerMTokAed: 0.37, outputPerMTokAed: 1.47 },
+  "meta-llama/llama-3.1-70b-instruct": { inputPerMTokAed: 1.29, outputPerMTokAed: 1.29 },
+  default: { inputPerMTokAed: 5, outputPerMTokAed: 15 },
+};
+
+export function priceForModel(model: string): ModelPrice {
+  if (MODEL_PRICES_AED[model]) return MODEL_PRICES_AED[model];
+  // Longest match wins so "gpt-4o-mini:free" beats the shorter "gpt-4o" key.
+  const key = Object.keys(MODEL_PRICES_AED)
+    .filter((candidate) => candidate !== "default" && model.includes(candidate))
+    .sort((a, b) => b.length - a.length)[0];
+  return (key && MODEL_PRICES_AED[key]) || MODEL_PRICES_AED.default!;
+}
+
+/** Cost in AED for a call, rounded to 4dp. Missing token counts cost 0. */
+export function estimateCostAed(
+  model: string,
+  inputTokens = 0,
+  outputTokens = 0,
+): number {
+  const price = priceForModel(model);
+  const raw =
+    (inputTokens / 1_000_000) * price.inputPerMTokAed +
+    (outputTokens / 1_000_000) * price.outputPerMTokAed;
+  return Math.round(raw * 10_000) / 10_000;
+}
+
+/** Emitted to the metering hook after every call — one `agent_runs` row. */
+export type CostEvent = {
+  agent?: string;
+  provider: LLMProviderName;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costAed: number;
+  requestId?: string;
+};
+
+/** Structured alert instead of a direct Chat/Slack call (wired by the app layer). */
+export type CapAlertEvent = {
+  type: "llm_monthly_cap_exceeded";
+  capAed: number;
+  spentAed: number;
+  attemptedModel: string;
+  agent?: string;
+  at: string;
+};
+
+export class MonthlyCapExceededError extends Error {
+  readonly code = "LLM_MONTHLY_CAP_EXCEEDED" as const;
+  readonly alert: CapAlertEvent;
+  constructor(alert: CapAlertEvent) {
+    super(
+      `LLM monthly cap reached: ${alert.spentAed} / ${alert.capAed} AED (model ${alert.attemptedModel})`,
+    );
+    this.name = "MonthlyCapExceededError";
+    this.alert = alert;
+  }
+}
+
+export type MeteringOptions = {
+  /** Agent making the call — recorded on the cost event. */
+  agent?: string;
+  /** Called after each successful generate with the computed cost. */
+  onCost?: (event: CostEvent) => void | Promise<void>;
+  /** Month-to-date spend in AED. Cap check is skipped when omitted. */
+  getMonthlySpendAed?: () => number | Promise<number>;
+  /** Defaults to `LLM_MONTHLY_CAP_AED`. Cap check is skipped when unset/≤0. */
+  monthlyCapAed?: number;
+};
+
+function envCapAed(): number | undefined {
+  const raw = process.env.LLM_MONTHLY_CAP_AED?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * Wraps a provider with per-call cost logging and a fail-closed monthly-cap
+ * breaker. Leaves the mock provider fully functional — costs 0 when the mock
+ * omits token counts, so evals and demos never trip the cap.
+ */
+export function withMetering(
+  provider: LLMProvider,
+  options: MeteringOptions = {},
+): LLMProvider {
+  const cap = options.monthlyCapAed ?? envCapAed();
+  return {
+    name: provider.name,
+    async generate(genOptions) {
+      if (cap != null && options.getMonthlySpendAed) {
+        const spentAed = await options.getMonthlySpendAed();
+        if (spentAed >= cap) {
+          throw new MonthlyCapExceededError({
+            type: "llm_monthly_cap_exceeded",
+            capAed: cap,
+            spentAed,
+            attemptedModel: genOptions.model ?? "(default)",
+            agent: options.agent,
+            at: new Date().toISOString(),
+          });
+        }
+      }
+      const result = await provider.generate(genOptions);
+      const inputTokens = result.inputTokens ?? 0;
+      const outputTokens = result.outputTokens ?? 0;
+      if (options.onCost) {
+        await options.onCost({
+          agent: options.agent,
+          provider: result.provider,
+          model: result.model,
+          inputTokens,
+          outputTokens,
+          costAed: estimateCostAed(result.model, inputTokens, outputTokens),
+          requestId: result.requestId,
+        });
+      }
+      return result;
     },
   };
 }
