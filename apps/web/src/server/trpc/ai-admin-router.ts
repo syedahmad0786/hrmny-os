@@ -1,10 +1,10 @@
 import { sql } from "@hrmny/db";
 import {
   AgentIdSchema,
-  agentEnabledStates,
-  getAgent,
   isAgentEnabled,
+  listParentAgents,
   setAgentEnabled,
+  type AgentGateOutcome,
 } from "@hrmny/ai";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -13,9 +13,9 @@ import { writeAudit } from "../m1-persistence";
 import { router, staffProcedure, type TrpcContext } from "./trpc";
 
 /**
- * M7 AI admin surface: agent roster + kill switch, run log with cost totals,
- * and monthly LLM spend. Read paths return empty in mock mode (no DATABASE_URL)
- * so the panel stays functional before the AI layer is live.
+ * M7 AI admin surface — shaped to satisfy the settings/ai page's useAiAdmin()
+ * hook (agents w/ enabled + spend/runs, recent runs, monthly cap). Read paths
+ * return empty/zero in mock mode (no DATABASE_URL) so the panel still renders.
  *
  * Module only — the orchestrator registers this on appRouter (see PR notes).
  */
@@ -33,43 +33,96 @@ function requireAiAdmin(ctx: TrpcContext) {
   return { employeeId: ctx.employeeId, roles: ctx.roles };
 }
 
+/** Bridge the frozen gate enum to the settings/ai page's presentation vocab. */
+const GATE_TO_UI: Record<
+  AgentGateOutcome,
+  "approved" | "auto" | "pending" | "rejected"
+> = {
+  approved: "approved",
+  pending: "pending",
+  blocked: "rejected",
+  not_applicable: "auto",
+};
+
+type RollupRow = { agent: string; runs: number; spend_aed: number };
 type RunRow = {
-  agent_run_id: string;
+  id: string;
   agent: string;
   model: string;
   tokens_in: number;
   tokens_out: number;
   cost_aed: number;
-  gate_outcome: string | null;
+  gate_outcome: AgentGateOutcome | null;
   created_at: string;
 };
 
-const monthSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}$/, "month must be YYYY-MM")
-  .optional();
-
-function currentMonth(): string {
-  return new Date().toISOString().slice(0, 7);
+function monthlyCapAed(): number | null {
+  const cap = Number(process.env.LLM_MONTHLY_CAP_AED);
+  return Number.isFinite(cap) && cap > 0 ? cap : null;
 }
 
 export const aiAdminRouter = router({
-  /** Agent roster with live kill-switch state. */
-  listAgents: staffProcedure.query(({ ctx }) => {
-    requireAiAdmin(ctx);
-    return agentEnabledStates().map(({ id, enabled }) => {
-      const agent = getAgent(id);
-      return {
-        id,
-        displayName: agent.displayName,
-        responsibility: agent.responsibility,
-        parentId: agent.parentId ?? null,
-        enabled,
-      };
-    });
-  }),
+  /** Everything the AI control panel renders in one call. */
+  dashboard: staffProcedure
+    .input(
+      z.object({ runsLimit: z.number().int().min(1).max(200).default(20) }),
+    )
+    .query(async ({ ctx, input }) => {
+      requireAiAdmin(ctx);
+      const db = getDb();
 
-  /** Flip an agent on/off. Disabled agents return a typed refusal at call time. */
+      const rollup = new Map<string, RollupRow>();
+      let runs: RunRow[] = [];
+      if (db) {
+        // Current-month spend + run count per agent.
+        const rollupRows = (await db.execute(sql`
+          SELECT agent, COUNT(*)::int AS runs,
+                 COALESCE(SUM(cost_aed), 0)::float8 AS spend_aed
+          FROM public.agent_runs
+          WHERE created_at >= date_trunc('month', now())
+          GROUP BY agent
+        `)) as unknown as RollupRow[];
+        for (const row of rollupRows) rollup.set(row.agent, row);
+
+        runs = (await db.execute(sql`
+          SELECT agent_run_id AS id, agent, model, tokens_in, tokens_out,
+                 cost_aed::float8 AS cost_aed, gate_outcome,
+                 created_at::text AS created_at
+          FROM public.agent_runs
+          ORDER BY created_at DESC
+          LIMIT ${input.runsLimit}
+        `)) as unknown as RunRow[];
+      }
+
+      const agents = listParentAgents().map((agent) => {
+        const stats = rollup.get(agent.id);
+        return {
+          key: agent.id,
+          name: agent.displayName,
+          purpose: agent.responsibility,
+          enabled: isAgentEnabled(agent.id),
+          spendAed: stats?.spend_aed ?? 0,
+          runs: stats?.runs ?? 0,
+        };
+      });
+
+      return {
+        agents,
+        runs: runs.map((run) => ({
+          id: run.id,
+          agent: run.agent,
+          model: run.model,
+          tokensIn: run.tokens_in,
+          tokensOut: run.tokens_out,
+          costAed: run.cost_aed,
+          gate: GATE_TO_UI[run.gate_outcome ?? "not_applicable"],
+          at: run.created_at,
+        })),
+        monthlyCapAed: monthlyCapAed(),
+      };
+    }),
+
+  /** Kill switch. Disabled agents return a typed refusal at call time. */
   toggleAgent: staffProcedure
     .input(z.object({ agentId: AgentIdSchema, enabled: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
@@ -85,84 +138,5 @@ export const aiAdminRouter = router({
         reason: null,
       });
       return { agentId: input.agentId, enabled: isAgentEnabled(input.agentId) };
-    }),
-
-  /** Recent runs (newest first) plus cost/token totals over the same filter. */
-  listRuns: staffProcedure
-    .input(
-      z.object({
-        agent: AgentIdSchema.optional(),
-        limit: z.number().int().min(1).max(200).default(50),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      requireAiAdmin(ctx);
-      const db = getDb();
-      if (!db) return { runs: [], totals: { runs: 0, costAed: 0 } };
-
-      const agentFilter = input.agent
-        ? sql`WHERE agent = ${input.agent}`
-        : sql``;
-      const rows = (await db.execute(sql`
-        SELECT agent_run_id, agent, model, tokens_in, tokens_out,
-               cost_aed::float8 AS cost_aed, gate_outcome,
-               created_at::text AS created_at
-        FROM public.agent_runs
-        ${agentFilter}
-        ORDER BY created_at DESC
-        LIMIT ${input.limit}
-      `)) as unknown as RunRow[];
-
-      const [totals] = (await db.execute(sql`
-        SELECT COUNT(*)::int AS runs,
-               COALESCE(SUM(cost_aed), 0)::float8 AS cost_aed
-        FROM public.agent_runs
-        ${agentFilter}
-      `)) as unknown as Array<{ runs: number; cost_aed: number }>;
-
-      return {
-        runs: rows,
-        totals: { runs: totals?.runs ?? 0, costAed: totals?.cost_aed ?? 0 },
-      };
-    }),
-
-  /** Monthly spend vs. the configured cap, with a per-agent breakdown. */
-  monthlySpend: staffProcedure
-    .input(z.object({ month: monthSchema }))
-    .query(async ({ ctx, input }) => {
-      requireAiAdmin(ctx);
-      const month = input.month ?? currentMonth();
-      const capRaw = Number(process.env.LLM_MONTHLY_CAP_AED);
-      const capAed = Number.isFinite(capRaw) && capRaw > 0 ? capRaw : null;
-
-      const db = getDb();
-      if (!db) {
-        return { month, capAed, totalCostAed: 0, runCount: 0, byAgent: [] };
-      }
-
-      const start = sql`(${`${month}-01`})::date`;
-      const byAgent = (await db.execute(sql`
-        SELECT agent, COUNT(*)::int AS runs,
-               COALESCE(SUM(cost_aed), 0)::float8 AS cost_aed
-        FROM public.agent_runs
-        WHERE created_at >= ${start}
-          AND created_at < (${start} + interval '1 month')
-        GROUP BY agent
-        ORDER BY SUM(cost_aed) DESC NULLS LAST
-      `)) as unknown as Array<{ agent: string; runs: number; cost_aed: number }>;
-
-      const totalCostAed = byAgent.reduce((sum, row) => sum + row.cost_aed, 0);
-      const runCount = byAgent.reduce((sum, row) => sum + row.runs, 0);
-      return {
-        month,
-        capAed,
-        totalCostAed: Math.round(totalCostAed * 10_000) / 10_000,
-        runCount,
-        byAgent: byAgent.map((row) => ({
-          agent: row.agent,
-          runs: row.runs,
-          costAed: row.cost_aed,
-        })),
-      };
     }),
 });
