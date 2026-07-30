@@ -2,11 +2,11 @@
 
 _Phase 1 baseline (commit `be160d3`). Aggregated from the defects sweep (docs, audits, risk register) plus the critique pass that found surfaces missing from the structured sweeps._
 
-**41 defects** — P0 **0** · P1 **21** · P2 **15** · P3 **5**. (No P0 in the sweep; the critique pass surfaces several latent security/trust-boundary items — see the last section.)
+**42 defects** (41 from the `be160d3` sweep + 1 post-baseline finding from the route-acceptance crawler, PR #22) — P0 **0** · P1 **22** · P2 **15** · P3 **5**. (No P0 in the sweep; the critique pass surfaces several latent security/trust-boundary items — see the last section.)
 
 Severity: **P0** launch-blocking / data-loss now · **P1** must fix before controlled launch · **P2** fix during hardening · **P3** deferred / V2.
 
-## P1 (21)
+## P1 (22)
 
 | Defect | Status | Source | Detail |
 |--------|--------|--------|--------|
@@ -31,6 +31,7 @@ Severity: **P0** launch-blocking / data-loss now · **P1** must fix before contr
 | `bayzat-payroll-not-durable` | mock | `BAYZAT-REPLACEMENT-PLAN.md` | P1 — payroll status: 'Approval/SoD demo exists but is not durable payroll; full engine next'; shifts/timesheets/UAE payroll/expenses/loans are the next batch with the highest operational and cutover risk; WPS SIF, EOS, proration, payslips all unbuilt. |
 | `bayzat-compliance-signoff` | unknown | `BAYZAT-REPLACEMENT-PLAN.md` | P1 compliance — UAE legal/payroll rules (MOHRE, WPS SIF, gratuity/EOS, visa/EID expiry, AED snapshots, bilingual docs) must be approved by hrmny's UAE HR/payroll owner before production calculations are relied upon; no signatory or approved policy set supplied yet. |
 | `asana-cutover-reconciliation-open` | partial | `CUTOVER.md` | P1 — Asana residual export → OS task-board reconciliation (pre-cutover item 6) and the source-migration/reconciliation rows of the signed Module 1 DoD are open; Asana writes cannot be disabled and cutover cannot start until source data is reconciled and adoption evidence exists. |
+| `portal-staff-soft-boundary` | real | `PR #22 (route-acceptance crawler design notes)` | Portal→staff route access is soft: a portal actor can load any (staff) route's shell chrome because auth.session is a public procedure and there is no page-level group guard; denial happens only at the tRPC data layer (portalStaffBoundary). Staff→portal direction hard-redirects. Hardening: add a route-group-level guard in the (staff) layout for actorType=portal. Source: route-acceptance crawler design notes (PR #22). |
 
 ## P2 (15)
 

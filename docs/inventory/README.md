@@ -21,7 +21,7 @@ This folder is the **Phase 1 deliverable** for hrmny-os: a complete, evidence-ba
 | Mock surfaces | 48 | mock 32 · dev-only 16 |
 | Dead controls | 13 | dead 4 · mock 3 · real 3 · dev-only 2 · partial 1 |
 | **Kill-list (Phase 7)** | **61** | mock-surfaces + dead-controls; 59 action items |
-| Defects | 41 | **P0 0 · P1 21 · P2 15 · P3 5** |
+| Defects | 42 | **P0 0 · P1 22 · P2 15 · P3 5** (41 from the `be160d3` sweep + 1 post-baseline crawler finding) |
 | Critique findings | 19 | inventory gaps + latent security/trust-boundary defects |
 
 ## Files
@@ -44,7 +44,7 @@ This folder is the **Phase 1 deliverable** for hrmny-os: a complete, evidence-ba
 
 ## Delta since baseline (`be160d3`)
 
-This inventory was captured at `be160d3`. The following PRs merged to `main` **after** the baseline and are therefore **not** reflected in the tables above (except where explicitly called out, e.g. the unregistered routers). Re-run the sweeps to fold them in.
+This inventory was captured at `be160d3`. **PRs #19–#25 merged to `main` after the baseline snapshot** and are therefore **not** reflected in the tables above (except where explicitly called out, e.g. the unregistered routers and the one post-baseline crawler defect). Re-run the sweeps to fold them in.
 
 | PR | Title |
 |----|-------|
@@ -52,7 +52,9 @@ This inventory was captured at `be160d3`. The following PRs merged to `main` **a
 | #19 | feat(scorecards): explainable ratings vertical slice (migration 0062) — adds unregistered `scorecardsRouter` |
 | #20 | feat(people): parallel-payroll reconciliation + Bayzat retirement gates — adds unregistered `peopleReconRouter` |
 | #21 | feat(ai): autonomy governance layer (manual default + scheduled_research) — adds unregistered `aiPolicyRouter` |
-| #22 | test(web): route-and-action acceptance crawler + manifest gate |
+| #22 | test(web): route-and-action acceptance crawler + manifest gate — surfaced defect `portal-staff-soft-boundary` (see DEFECTS.md) |
 | #23 | feat(portal): consolidated proofing feedback threads on campaign approvals (migration 0063) — portal-feedback surface |
+| #24 | feat(reports): scheduled reporting engine (schedules, registry, runner, Resend) — realises the planned `reports` surface |
+| #25 | feat(portal): invite-only magic-link client access (feature-flagged) — moves portal auth toward the `gap-live-auth-rls` fix |
 
-> These add new surfaces (scorecards, reconciliation, AI-policy, portal feedback) and a crawler/manifest gate; the unregistered routers from #19–#21 are documented in [API-SURFACE.md](./API-SURFACE.md). All other tables reflect `be160d3` exactly.
+> These add new surfaces (scorecards, reconciliation, AI-policy, portal feedback, scheduled reports, magic-link portal auth) and a crawler/manifest gate; the unregistered routers from #19–#21 are documented in [API-SURFACE.md](./API-SURFACE.md), and the crawler finding from #22 is filed as P1 `portal-staff-soft-boundary` in [DEFECTS.md](./DEFECTS.md). All other tables reflect `be160d3` exactly.
