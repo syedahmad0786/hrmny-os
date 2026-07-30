@@ -74,3 +74,14 @@ export {
   calendarLegalTransitionGate,
   type ShootLockStatus,
 } from "./gates/calendar";
+export {
+  OUTREACH_TRANSITIONS,
+  CAMPAIGN_TRANSITIONS,
+  PORTAL_ITEM_TRANSITIONS,
+  outreachLegalTransitionGate,
+  outreachApproveBeforeSendGate,
+  campaignLegalTransitionGate,
+  campaignApproveBeforePublishGate,
+  portalItemLegalTransitionGate,
+  portalItemClientApproverGate,
+} from "./gates/marketing";

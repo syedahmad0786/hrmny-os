@@ -31,6 +31,14 @@ import {
   taskQcGate,
   taskRevisionBoundaryGate,
 } from "./gates/task";
+import {
+  outreachLegalTransitionGate,
+  outreachApproveBeforeSendGate,
+  campaignLegalTransitionGate,
+  campaignApproveBeforePublishGate,
+  portalItemLegalTransitionGate,
+  portalItemClientApproverGate,
+} from "./gates/marketing";
 
 /** Register entity gate sets. Call once at process start. */
 export function bootstrapGateRegistry(): void {
@@ -65,5 +73,17 @@ export function bootstrapGateRegistry(): void {
   registerGates("calendar", [
     calendarLegalTransitionGate,
     calendarT48ShootLockGate,
+  ]);
+  registerGates("outreach", [
+    outreachLegalTransitionGate,
+    outreachApproveBeforeSendGate,
+  ]);
+  registerGates("campaign", [
+    campaignLegalTransitionGate,
+    campaignApproveBeforePublishGate,
+  ]);
+  registerGates("portal_item", [
+    portalItemLegalTransitionGate,
+    portalItemClientApproverGate,
   ]);
 }
