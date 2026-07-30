@@ -1,69 +1,22 @@
 "use client";
 
-import { useState } from "react";
 import { Button } from "@hrmny/ui";
+import { trpc } from "@/lib/trpc";
 
-/**
- * Portal campaign approvals — clients approve/reject campaign items here.
- *
- * ─── WIRING POINT ───────────────────────────────────────────────────────────
- * The backend (apps/web/src/server/trpc/portal-approvals-router.ts) is built
- * but intentionally NOT yet registered in root.ts (orchestrator-owned). Until
- * it is wired as `portal.campaignApprovals` (or a top-level `portalApprovals`),
- * this page uses local placeholder rows so the route type-checks. Once the
- * orchestrator registers the router, replace the placeholder block below with:
- *
- *   const utils = trpc.useUtils();
- *   const list = trpc.portalApprovals.list.useQuery();
- *   const approve = trpc.portalApprovals.approve.useMutation({
- *     onSuccess: () => void utils.portalApprovals.list.invalidate(),
- *   });
- *   const reject = trpc.portalApprovals.reject.useMutation({
- *     onSuccess: () => void utils.portalApprovals.list.invalidate(),
- *   });
- *
- * and swap the button handlers to approve.mutate({ id }) / reject.mutate({ id }).
- * The row shape below matches PortalItemView from the repository exactly.
- * ────────────────────────────────────────────────────────────────────────────
- */
-
-type PortalItemState = "pending_client" | "approved" | "rejected";
-
-type PortalItemView = {
-  campaignItemId: string;
-  title: string;
-  channel: string;
-  state: PortalItemState;
-  scheduledFor: string | null;
-  feedback: string | null;
-};
-
-const PLACEHOLDER_ITEMS: PortalItemView[] = [
-  {
-    campaignItemId: "c9000000-0000-4000-8000-000000000001",
-    title: "Ramadan teaser — carousel",
-    channel: "linkedin",
-    state: "pending_client",
-    scheduledFor: "2026-08-03",
-    feedback: null,
-  },
-  {
-    campaignItemId: "c9000000-0000-4000-8000-000000000002",
-    title: "Product launch reel",
-    channel: "instagram",
-    state: "pending_client",
-    scheduledFor: "2026-08-07",
-    feedback: null,
-  },
-];
-
+/** Portal campaign approvals — clients approve/reject campaign items here.
+ * Approve/reject route through the portal_item gate (portal_client only). */
 export default function PortalCampaignApprovalsPage() {
-  // Placeholder local state — replace with the trpc query/mutations above.
-  const [items, setItems] = useState<PortalItemView[]>(PLACEHOLDER_ITEMS);
-  const decide = (id: string, state: PortalItemState) =>
-    setItems((prev) =>
-      prev.map((it) => (it.campaignItemId === id ? { ...it, state } : it)),
-    );
+  const utils = trpc.useUtils();
+  const list = trpc.portal.campaignApprovals.list.useQuery();
+  const approve = trpc.portal.campaignApprovals.approve.useMutation({
+    onSuccess: () => void utils.portal.campaignApprovals.list.invalidate(),
+  });
+  const reject = trpc.portal.campaignApprovals.reject.useMutation({
+    onSuccess: () => void utils.portal.campaignApprovals.list.invalidate(),
+  });
+  const items = list.data ?? [];
+  const decide = (id: string, state: "approved" | "rejected") =>
+    state === "approved" ? approve.mutate({ id }) : reject.mutate({ id });
 
   return (
     <main className="flex flex-col gap-6">
