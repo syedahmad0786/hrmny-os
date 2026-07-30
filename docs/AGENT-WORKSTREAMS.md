@@ -39,10 +39,27 @@ Downstream agents build against these; live implementations swap in behind env f
 
 ## 4. Serialization rules (the two known collision points)
 
-1. **Migrations:** only the orchestrator assigns `00NN` numbers (currently at 0057). Workstream agents request a slot in their spec; never self-number.
+1. **Migrations:** only the orchestrator assigns `00NN` numbers. Workstream agents request a slot in their spec; never self-number.
 2. **`appRouter` composition + shared `trpc.ts`:** orchestrator-only edits. Workstreams deliver routers as importable modules.
 
 Also standing repo rules: verify `git branch --show-current` before every commit; push immediately after committing (the local worktree is shared across sessions).
+
+### Migration ledger + ownership rulings (orchestrator, 2026-07-30)
+
+| Slot | Owner | Content |
+|---|---|---|
+| 0056 | — | latest committed on `main` |
+| 0057 | RESERVED — in-flight `ahmadbukhari097/codex/asana-feature-lab` | work_goal_saved_views (uncommitted in local clone) |
+| 0058 | M7 | `agent_runs` |
+| 0059 | M8 | `outreach_items` |
+| 0060 | M8 | `lead_intel` (`contact_edges`, `win_loss_notes`) |
+| 0061 | Orchestrator | `campaigns` (lands with the root.ts wiring PR after M7 merges) |
+
+Rulings:
+- **`m3-routers.ts` is M7/orchestrator-owned exclusively** (BUAF-on-live-LLM edit). M8 does NOT touch it — M8 procedures live in a new `leadgen-router.ts` and consume `crm/repository` exports.
+- **Campaigns table + router implementation are orchestrator-owned** (M9/Grok is prompt-content only; the stub router from the contract freeze gets its implementation with slot 0061).
+- **Canonical agent-runner seam:** M7 exports `runAgent(input: AgentRunInput): Promise<AgentRunOutput>` from `@hrmny/ai`. M8/M10 accept a `RunAgent` dependency (mock until M7 merges) and bind to the M7 export at wiring time — one seam, no drift.
+- **Reply-intent classifier is M7's**; M8 consumes `ReplyIntent` and owns only the intent→deal-stage mapping.
 
 ## 5. Model/tool assignment matrix
 
