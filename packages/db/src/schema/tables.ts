@@ -1192,3 +1192,26 @@ export const agentRuns = pgTable(
     index("agent_runs_created_idx").on(table.createdAt),
   ],
 );
+
+export const campaignItems = pgTable(
+  "campaign_items",
+  {
+    campaignItemId: uuid("campaign_item_id").defaultRandom().primaryKey(),
+    title: text("title").notNull(),
+    channel: text("channel").notNull(),
+    status: text("status").default("draft").notNull(),
+    scheduledFor: date("scheduled_for"),
+    clientId: uuid("client_id"),
+    body: jsonb("body").$type<Record<string, unknown>>().default({}).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("campaign_items_client_idx").on(table.clientId, table.status),
+    index("campaign_items_scheduled_idx").on(table.scheduledFor),
+  ],
+);

@@ -47,6 +47,9 @@ import {
 import { crmRouter } from "./crm-routers";
 import { ticketsRouter } from "./tickets-router";
 import { automationRouter } from "./automation-router";
+import { aiAdminRouter } from "./ai-admin-router";
+import { campaignsRouter } from "./campaigns-router";
+import { analyticsRouter } from "./analytics-router";
 import { connectionsRouter } from "./connections-router";
 import { featureRequestsRouter } from "./feature-requests-router";
 import { coreHrRouter } from "./core-hr-router";
@@ -778,6 +781,9 @@ export const appRouter = router({
   m5: m5DemoRouter,
   m6: m6DemoRouter,
   ops: opsRouter,
+  aiAdmin: aiAdminRouter,
+  campaigns: campaignsRouter,
+  analytics: analyticsRouter,
 });
 
 export type AppRouter = typeof appRouter;
