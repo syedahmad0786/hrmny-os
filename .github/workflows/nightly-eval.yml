@@ -1,0 +1,29 @@
+name: hrmny OS nightly AI eval
+
+on:
+  schedule:
+    - cron: "30 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run agent eval harness
+        # Mock provider by default; flips to live automatically once the
+        # OPENROUTER_API_KEY secret is set (Phase 0 activation).
+        env:
+          LLM_PROVIDER: ${{ secrets.OPENROUTER_API_KEY != '' && 'openrouter' || 'mock' }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LLM_MONTHLY_CAP_AED: "1500"
+        run: pnpm --filter @hrmny/ai test
