@@ -27,6 +27,11 @@ import {
   listScopesByClient,
   upsertScope,
 } from "../crm/scope-store";
+import {
+  ensureOnboarding,
+  getOnboarding,
+  saveOnboarding,
+} from "../crm/onboarding-store";
 import { getDb } from "../db";
 import {
   protectedProcedure,
@@ -727,7 +732,7 @@ export const dealsRouter = router({
         ok: true as const,
         pack,
         client,
-        onboarding: store.onboarding.get(client.clientId) ?? [],
+        onboarding: await ensureOnboarding(client.clientId),
         fired,
       };
     }),
@@ -1220,9 +1225,7 @@ export const clientsRouter = router({
   onboarding: router({
     get: protectedProcedure
       .input(z.object({ clientId: z.string().uuid() }))
-      .query(
-        ({ input }) => getDemoStore().onboarding.get(input.clientId) ?? [],
-      ),
+      .query(({ input }) => ensureOnboarding(input.clientId)),
 
     signoff: protectedProcedure
       .input(
@@ -1232,10 +1235,9 @@ export const clientsRouter = router({
           signoffType: z.string().default("phase"),
         }),
       )
-      .mutation(({ input, ctx }) => {
+      .mutation(async ({ input, ctx }) => {
         const store = getDemoStore();
-        const phases = store.onboarding.get(input.clientId);
-        if (!phases) throw new Error("NOT_FOUND");
+        const phases = await ensureOnboarding(input.clientId);
         const phase = phases.find((p) => p.phaseIndex === input.phaseIndex);
         if (!phase) throw new Error("NOT_FOUND");
         phase.status = "signed_off";
@@ -1247,7 +1249,7 @@ export const clientsRouter = router({
           next.status = "active";
           advanced = true;
         }
-        store.onboarding.set(input.clientId, [...phases]);
+        await saveOnboarding(input.clientId, [...phases]);
         store.appendAudit({
           actorEmployeeId: ctx.employeeId!,
           action: "clients.onboarding.signoff",
@@ -1261,7 +1263,10 @@ export const clientsRouter = router({
           },
           reason: null,
         });
-        return { advanced, phases: store.onboarding.get(input.clientId) };
+        return {
+          advanced,
+          phases: await getOnboarding(input.clientId),
+        };
       }),
   }),
 });

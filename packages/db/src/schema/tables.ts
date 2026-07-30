@@ -584,6 +584,34 @@ export const invoice = pgTable("invoice", {
   ...timestamps,
 });
 
+/** Client 7-phase onboarding pack (0069). */
+export const clientOnboardingPhase = pgTable(
+  "client_onboarding_phase",
+  {
+    phaseId: uuid("phase_id").defaultRandom().primaryKey(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => client.clientId),
+    phaseIndex: integer("phase_index").notNull(),
+    name: text("name").notNull(),
+    status: text("status").default("pending").notNull(),
+    steps: jsonb("steps")
+      .$type<
+        Array<{
+          stepId: string;
+          title: string;
+          raci: string;
+          done: boolean;
+        }>
+      >()
+      .default([])
+      .notNull(),
+    signedOffAt: timestamp("signed_off_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("client_onboarding_phase_client_idx_uniq").on(t.clientId, t.phaseIndex)],
+);
+
 /** Invoice intake HITL proposals (0066). */
 export const invoiceProposal = pgTable("invoice_proposal", {
   proposalId: uuid("proposal_id").defaultRandom().primaryKey(),

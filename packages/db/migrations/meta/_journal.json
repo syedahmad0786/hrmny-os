@@ -477,6 +477,13 @@
       "when": 1785092400000,
       "tag": "0068_memory_chunk_hnsw",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1785096000000,
+      "tag": "0069_client_onboarding",
+      "breakpoints": true
     }
   ]
 }
