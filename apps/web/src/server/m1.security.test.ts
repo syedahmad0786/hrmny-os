@@ -65,6 +65,21 @@ describe("M1 security insurance", () => {
     expect("marginPct" in session).toBe(false);
   });
 
+  it("portal actor is blocked from staff data at the tRPC boundary", async () => {
+    const user = resolveDevUser("portal_a");
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: false,
+      clientId: user.clientId,
+    });
+    // Staff procedure — portalStaffBoundary must FORBID before any resolver/DB.
+    await expect(caller.crm.deals.list()).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
   it("magic-link stub issues token and verify is single-use", async () => {
     const user = resolveDevUser("partner");
     const caller = createCaller({
