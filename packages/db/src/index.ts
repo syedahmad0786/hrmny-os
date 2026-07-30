@@ -16,6 +16,11 @@ export function createDb(connectionString: string) {
     prepare: false,
     ssl: "require",
     max: 1,
+    // Fail fast when the DB is unreachable (e.g. IPv6-only direct host from a
+    // serverless function) — a bounded error reaches the UI's retry screen;
+    // an unbounded connect hangs the request forever.
+    connect_timeout: 10,
+    idle_timeout: 20,
   });
   return drizzle(client, { schema });
 }
