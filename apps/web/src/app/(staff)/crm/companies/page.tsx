@@ -17,8 +17,10 @@ import {
   initials,
   relationshipSummary,
 } from "@/components/crm/format";
+import { usePageTitle } from "@/components/use-page-title";
 
 export default function CrmCompaniesPage() {
+  usePageTitle("Directory");
   const utils = trpc.useUtils();
   const companies = trpc.crm.companies.list.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
