@@ -19,6 +19,16 @@ import {
   type DemoCalendar,
   type DemoTask,
 } from "../demo-store";
+import {
+  getBrief,
+  getCalendar,
+  getTask,
+  listCalendarsByClient,
+  listTasks,
+  upsertBrief,
+  upsertCalendar,
+  upsertTask,
+} from "../delivery/store";
 import { driveSeam } from "../seams";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
 
@@ -34,10 +44,11 @@ function actorFrom(ctx: {
   };
 }
 
-function taskSnapshot(task: DemoTask): EntitySnapshot {
+async function taskSnapshot(task: DemoTask): Promise<EntitySnapshot> {
   const waived = Boolean(
     (task as DemoTask & { qcWaived?: boolean }).qcWaived,
   );
+  const brief = task.briefId ? await getBrief(task.briefId) : null;
   return {
     entityType: "task",
     entityId: task.taskId,
@@ -47,9 +58,7 @@ function taskSnapshot(task: DemoTask): EntitySnapshot {
       qcWaived: waived,
       clientRevisionCount: task.clientRevisionCount,
       revisionBoundaryAck: task.revisionBoundaryAck,
-      missingRequiredCount: task.briefId
-        ? (getDemoStore().briefs.get(task.briefId)?.missingRequiredCount ?? 0)
-        : 0,
+      missingRequiredCount: brief?.missingRequiredCount ?? 0,
     },
   };
 }
@@ -66,7 +75,7 @@ async function applyTaskTransition(
   overrideReason?: string | null,
 ) {
   const store = getDemoStore();
-  return transition(actorFrom(ctx), taskSnapshot(task), {
+  return transition(actorFrom(ctx), await taskSnapshot(task), {
     to,
     from: task.status,
     payload,
@@ -76,8 +85,8 @@ async function applyTaskTransition(
     apply: async ({ request }) => {
       task.status = request.to;
       if (request.payload?.qcPassed === true) task.qcPassed = true;
-      store.tasks.set(task.taskId, task);
-      return taskSnapshot(task);
+      await upsertTask(task);
+      return await taskSnapshot(task);
     },
     audit: async (event) => {
       const row = store.appendAudit({
@@ -94,9 +103,23 @@ async function applyTaskTransition(
   });
 }
 
+async function syncM4SeedToDeliveryStore() {
+  const store = getDemoStore();
+  for (const calendar of store.calendars.values()) {
+    await upsertCalendar(calendar);
+  }
+  for (const task of store.tasks.values()) {
+    await upsertTask(task);
+  }
+  for (const brief of store.briefs.values()) {
+    await upsertBrief(brief);
+  }
+}
+
 export const m4DemoRouter = router({
-  reset: publicProcedure.mutation(() => {
+  reset: publicProcedure.mutation(async () => {
     getDemoStore().resetM4Demo();
+    await syncM4SeedToDeliveryStore();
     return {
       ok: true as const,
       clientId: DEMO_CLIENT_ID,
@@ -106,9 +129,10 @@ export const m4DemoRouter = router({
       creativeTaskId: DEMO_CREATIVE_TASK_ID,
     };
   }),
-  seedIds: publicProcedure.query(() => {
+  seedIds: publicProcedure.query(async () => {
     const store = getDemoStore();
     if (store.calendars.size === 0) store.seedM4Demo();
+    await syncM4SeedToDeliveryStore();
     return {
       clientId: DEMO_CLIENT_ID,
       calendarId: DEMO_CALENDAR_ID,
@@ -122,10 +146,8 @@ export const m4DemoRouter = router({
 export const calendarsRouter = router({
   listByClient: protectedProcedure
     .input(z.object({ clientId: z.string(), month: z.string().optional() }))
-    .query(({ input }) => {
-      let rows = [...getDemoStore().calendars.values()].filter(
-        (c) => c.clientId === input.clientId,
-      );
+    .query(async ({ input }) => {
+      let rows = await listCalendarsByClient(input.clientId);
       if (input.month) rows = rows.filter((c) => c.month === input.month);
       return rows.map((c) => ({
         ...c,
@@ -138,8 +160,8 @@ export const calendarsRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => {
-      const c = getDemoStore().calendars.get(input.id);
+    .query(async ({ input }) => {
+      const c = await getCalendar(input.id);
       if (!c) return null;
       return {
         ...c,
@@ -158,7 +180,7 @@ export const calendarsRouter = router({
         focusPoints: z.array(z.unknown()).default([]),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
       if (!store.clients.has(input.clientId)) throw new Error("NOT_FOUND");
       const calendar: DemoCalendar = {
@@ -172,7 +194,7 @@ export const calendarsRouter = router({
         state: "draft",
         slots: [],
       };
-      store.calendars.set(calendar.calendarId, calendar);
+      await upsertCalendar(calendar);
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "calendars.create",
@@ -195,8 +217,8 @@ export const calendarsRouter = router({
         position: z.number().default(0),
       }),
     )
-    .mutation(({ input }) => {
-      const cal = getDemoStore().calendars.get(input.calendarId);
+    .mutation(async ({ input }) => {
+      const cal = await getCalendar(input.calendarId);
       if (!cal) throw new Error("NOT_FOUND");
       const slot = {
         calendarSlotId: randomUUID(),
@@ -207,17 +229,19 @@ export const calendarsRouter = router({
         position: input.position,
       };
       cal.slots = [...cal.slots, slot];
+      await upsertCalendar(cal);
       return slot;
     }),
 
   refApprove: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const cal = store.calendars.get(input.id);
+      const cal = await getCalendar(input.id);
       if (!cal) throw new Error("NOT_FOUND");
       cal.refApprovalState = "approved";
       cal.state = "ref_approved";
+      await upsertCalendar(cal);
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "calendars.refApprove",
@@ -238,9 +262,9 @@ export const calendarsRouter = router({
         rescheduleEdge: z.boolean().optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const cal = store.calendars.get(input.id);
+      const cal = await getCalendar(input.id);
       if (!cal) throw new Error("NOT_FOUND");
 
       const changing =
@@ -304,6 +328,7 @@ export const calendarsRouter = router({
         });
       }
 
+      await upsertCalendar(cal);
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "calendars.shoot",
@@ -326,11 +351,12 @@ export const calendarsRouter = router({
 
   finalApprove: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input, ctx }) => {
-      const cal = getDemoStore().calendars.get(input.id);
+    .mutation(async ({ input, ctx }) => {
+      const cal = await getCalendar(input.id);
       if (!cal) throw new Error("NOT_FOUND");
       cal.finalApprovalState = "approved";
       cal.state = "final_approved";
+      await upsertCalendar(cal);
       getDemoStore().appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "calendars.finalApprove",
@@ -345,8 +371,8 @@ export const calendarsRouter = router({
 
   evaluateLock: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => {
-      const cal = getDemoStore().calendars.get(input.id);
+    .query(async ({ input }) => {
+      const cal = await getCalendar(input.id);
       if (!cal) return null;
       return evaluateShootLock({
         shootDate: cal.shootDate,
@@ -362,7 +388,7 @@ export const calendarsRouter = router({
 export const briefsRouter = router({
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => getDemoStore().briefs.get(input.id) ?? null),
+    .query(({ input }) => getBrief(input.id)),
 
   createForTask: protectedProcedure
     .input(
@@ -371,9 +397,9 @@ export const briefsRouter = router({
         body: z.record(z.unknown()).default({}),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const task = store.tasks.get(input.taskId);
+      const task = await getTask(input.taskId);
       if (!task) throw new Error("NOT_FOUND");
       const dor = validateDor(input.body);
       const brief: DemoBrief = {
@@ -385,9 +411,10 @@ export const briefsRouter = router({
         missing: [...dor.missing],
         lockedAt: null,
       };
-      store.briefs.set(brief.briefId, brief);
+      await upsertBrief(brief);
       task.briefId = brief.briefId;
       task.status = "briefing";
+      await upsertTask(task);
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "briefs.createForTask",
@@ -407,8 +434,8 @@ export const briefsRouter = router({
         body: z.record(z.unknown()),
       }),
     )
-    .mutation(({ input }) => {
-      const brief = getDemoStore().briefs.get(input.id);
+    .mutation(async ({ input }) => {
+      const brief = await getBrief(input.id);
       if (!brief) throw new Error("NOT_FOUND");
       if (brief.lockedAt) throw new Error("BRIEF_LOCKED");
       const dor = validateDor(input.body);
@@ -416,18 +443,20 @@ export const briefsRouter = router({
       brief.dorComplete = dor.dorComplete;
       brief.missingRequiredCount = dor.missingRequiredCount;
       brief.missing = [...dor.missing];
+      await upsertBrief(brief);
       return brief;
     }),
 
   validateDor: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input }) => {
-      const brief = getDemoStore().briefs.get(input.id);
+    .mutation(async ({ input }) => {
+      const brief = await getBrief(input.id);
       if (!brief) throw new Error("NOT_FOUND");
       const dor = validateDor(brief.body);
       brief.dorComplete = dor.dorComplete;
       brief.missingRequiredCount = dor.missingRequiredCount;
       brief.missing = [...dor.missing];
+      await upsertBrief(brief);
       return {
         missingRequiredCount: dor.missingRequiredCount,
         dorComplete: dor.dorComplete,
@@ -438,9 +467,9 @@ export const briefsRouter = router({
 
   lock: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const brief = store.briefs.get(input.id);
+      const brief = await getBrief(input.id);
       if (!brief) throw new Error("NOT_FOUND");
       const dor = validateDor(brief.body);
       brief.missingRequiredCount = dor.missingRequiredCount;
@@ -458,9 +487,11 @@ export const briefsRouter = router({
         };
       }
       brief.lockedAt = new Date().toISOString();
-      const task = store.tasks.get(brief.taskId);
+      await upsertBrief(brief);
+      const task = await getTask(brief.taskId);
       if (task) {
         task.status = "brief_ready";
+        await upsertTask(task);
         store.pushHealth("brief.dor_complete", "info", {
           briefId: brief.briefId,
           taskId: task.taskId,
@@ -505,11 +536,10 @@ export const tasksRouter = router({
         })
         .optional(),
     )
-    .query(({ input }) => {
-      let rows = [...getDemoStore().tasks.values()];
-      if (input?.clientId) {
-        rows = rows.filter((t) => t.clientId === input.clientId);
-      }
+    .query(async ({ input }) => {
+      let rows = await listTasks(
+        input?.clientId ? { clientId: input.clientId } : undefined,
+      );
       if (input?.status) {
         rows = rows.filter((t) => t.status === input.status);
       }
@@ -518,7 +548,7 @@ export const tasksRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => getDemoStore().tasks.get(input.id) ?? null),
+    .query(({ input }) => getTask(input.id)),
 
   create: protectedProcedure
     .input(
@@ -532,7 +562,7 @@ export const tasksRouter = router({
         priority: z.string().optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
       if (!store.clients.has(input.clientId)) throw new Error("NOT_FOUND");
       const task: DemoTask = {
@@ -553,7 +583,7 @@ export const tasksRouter = router({
         revisionBoundaryAck: false,
         briefId: null,
       };
-      store.tasks.set(task.taskId, task);
+      await upsertTask(task);
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "tasks.create",
@@ -573,12 +603,12 @@ export const tasksRouter = router({
         ownerEmployeeId: z.string().uuid(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const task = store.tasks.get(input.id);
+      const task = await getTask(input.id);
       if (!task) throw new Error("NOT_FOUND");
       if (task.briefId) {
-        const brief = store.briefs.get(task.briefId);
+        const brief = await getBrief(task.briefId);
         if (brief && brief.missingRequiredCount > 2) {
           return {
             ok: false as const,
@@ -589,6 +619,7 @@ export const tasksRouter = router({
         }
       }
       task.ownerEmployeeId = input.ownerEmployeeId;
+      await upsertTask(task);
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "tasks.assign",
@@ -612,7 +643,7 @@ export const tasksRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const task = getDemoStore().tasks.get(input.id);
+      const task = await getTask(input.id);
       if (!task) throw new Error("NOT_FOUND");
       return applyTaskTransition(
         ctx,
@@ -630,10 +661,11 @@ export const tasksRouter = router({
         situationalState: z.string().nullable(),
       }),
     )
-    .mutation(({ input }) => {
-      const task = getDemoStore().tasks.get(input.id);
+    .mutation(async ({ input }) => {
+      const task = await getTask(input.id);
       if (!task) throw new Error("NOT_FOUND");
       task.situationalState = input.situationalState;
+      await upsertTask(task);
       return task;
     }),
 
@@ -645,9 +677,9 @@ export const tasksRouter = router({
         notes: z.string().optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const task = store.tasks.get(input.id);
+      const task = await getTask(input.id);
       if (!task) throw new Error("NOT_FOUND");
       const isCd =
         ctx.roles.includes("creative_director") ||
@@ -665,6 +697,7 @@ export const tasksRouter = router({
       if (input.decision === "waive") {
         (task as DemoTask & { qcWaived?: boolean }).qcWaived = true;
       }
+      await upsertTask(task);
       let seam = null as ReturnType<typeof driveSeam> | null;
       if (task.qcPassed) {
         const asset = [...store.assets.values()].find(
@@ -699,8 +732,8 @@ export const tasksRouter = router({
 });
 
 export const deliveryDashboardsRouter = router({
-  capacity: protectedProcedure.query(() => {
-    const tasks = [...getDemoStore().tasks.values()];
+  capacity: protectedProcedure.query(async () => {
+    const tasks = await listTasks();
     const weeks = [0, 1, 2].map((offset) => {
       const start = new Date();
       start.setDate(start.getDate() + offset * 7);
@@ -716,8 +749,8 @@ export const deliveryDashboardsRouter = router({
     return { weeks };
   }),
 
-  delivery: protectedProcedure.query(() => {
-    const tasks = [...getDemoStore().tasks.values()];
+  delivery: protectedProcedure.query(async () => {
+    const tasks = await listTasks();
     const columns = [
       "backlog",
       "briefing",

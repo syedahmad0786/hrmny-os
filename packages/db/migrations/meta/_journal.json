@@ -463,6 +463,13 @@
       "when": 1785085200000,
       "tag": "0066_invoice_ops_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1785088800000,
+      "tag": "0067_delivery_ops_fields",
+      "breakpoints": true
     }
   ]
 }
