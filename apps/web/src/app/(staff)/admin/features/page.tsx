@@ -147,6 +147,18 @@ export default function FeatureLabPage() {
           </Link>
           <Link
             className="rounded-full border border-sand bg-white px-4 py-2"
+            href="/settings/ai"
+          >
+            AI
+          </Link>
+          <Link
+            className="rounded-full border border-sand bg-white px-4 py-2"
+            href="/approvals"
+          >
+            Approvals
+          </Link>
+          <Link
+            className="rounded-full border border-sand bg-white px-4 py-2"
             href="/roles"
           >
             Roles
