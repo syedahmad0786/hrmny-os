@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./contracts";
+export * as salesgrowth from "./salesgrowth";
 export {
   createComposioStub,
   type ComposioSendAdapter,
