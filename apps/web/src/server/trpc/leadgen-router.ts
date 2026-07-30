@@ -163,6 +163,30 @@ export async function approveOutreach(input: {
   );
 }
 
+export async function discardOutreach(input: {
+  id: string;
+  actor: ActorContext;
+  audit?: AuditWriter;
+  emit?: EmitHook;
+}): Promise<TransitionResult> {
+  const item = getOutreach(input.id);
+  if (!item) throw new Error(`Outreach not found: ${input.id}`);
+  return transition(
+    input.actor,
+    outreachEntity(item),
+    { to: "discarded", from: item.state },
+    {
+      authorize: async (a) => authorizeStaff(a),
+      apply: async () => {
+        const next = patchOutreach(input.id, { state: "discarded" });
+        return outreachEntity(next!);
+      },
+      audit: input.audit ?? defaultAudit,
+      emit: input.emit ?? defaultEmit,
+    },
+  );
+}
+
 export async function sendOutreach(input: {
   id: string;
   actor: ActorContext;
@@ -246,6 +270,12 @@ const outreachRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(({ input, ctx }) =>
       sendOutreach({ id: input.id, actor: actorFromCtx(ctx) }),
+    ),
+
+  discard: staffProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(({ input, ctx }) =>
+      discardOutreach({ id: input.id, actor: actorFromCtx(ctx) }),
     ),
 });
 
