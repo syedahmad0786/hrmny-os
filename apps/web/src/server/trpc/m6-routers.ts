@@ -4,6 +4,12 @@ import { sql } from "@hrmny/db";
 import { z } from "zod";
 import { getDemoStore } from "../demo-store";
 import { getAuthMode } from "../auth/session";
+import {
+  portalMagicLinkEnabled,
+  requestPortalMagicLink,
+  verifyPortalMagicToken,
+} from "../auth/portal-magic-link";
+import { getSupabasePublicConfig } from "@/lib/supabase-config";
 import { getDb } from "../db";
 import {
   featureEnabled,
@@ -130,9 +136,31 @@ async function requireGuestItem(
 
 export const portalRouter = router({
   auth: router({
+    /** Pre-auth config so the login page picks the right sign-in path. */
+    config: publicProcedure.query(async () => ({
+      magicLinkEnabled: await portalMagicLinkEnabled(),
+      supabaseConfigured: Boolean(getSupabasePublicConfig()),
+    })),
     magicLink: publicProcedure
-      .input(z.object({ email: z.string().email() }))
-      .mutation(({ input }) => {
+      .input(
+        z.object({
+          email: z.string().email(),
+          redirectTo: z.string().url().optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        // Flag on: enumeration-safe allowlist path (identical response for any
+        // email; only invited contacts get an OTP / mock token).
+        if (await portalMagicLinkEnabled()) {
+          await requestPortalMagicLink(input.email, {
+            redirectTo: input.redirectTo,
+          });
+          return {
+            sent: true as const,
+            stubToken: undefined,
+            reason: undefined,
+          };
+        }
         if (getAuthMode() === "supabase") {
           return {
             sent: false as const,
@@ -177,7 +205,14 @@ export const portalRouter = router({
     /** Consume magic-link token (dev) or rely on x-dev-role persona. */
     verify: publicProcedure
       .input(z.object({ token: z.string().optional() }).optional())
-      .mutation(({ input, ctx }) => {
+      .mutation(async ({ input, ctx }) => {
+        // Flag on: single-use allowlist-bound token verification.
+        if (input?.token && (await portalMagicLinkEnabled())) {
+          const result = verifyPortalMagicToken(input.token);
+          return result.ok
+            ? { ...result, displayName: result.email || "Portal contact" }
+            : result;
+        }
         const store = getDemoStore();
         if (input?.token) {
           if (getAuthMode() === "supabase") {

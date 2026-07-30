@@ -572,10 +572,29 @@ class MemoryDemoStore {
         updatedByEmployeeId: null,
       },
     ],
+    [
+      // Invited portal contacts for magic-link access (email → clientId).
+      "portal.allowed_contacts",
+      {
+        ruleKey: "portal.allowed_contacts",
+        version: 1,
+        payload: {
+          contacts: {
+            "alex@democo.example": DEMO_CLIENT_ID,
+            "ops@otherco.example": DEMO_CLIENT_B_ID,
+          },
+        },
+        updatedAt: new Date().toISOString(),
+        updatedByEmployeeId: null,
+      },
+    ],
   ]);
 
-  /** Dev portal magic-link tokens (email → token). */
-  portalMagicTokens = new Map<string, { token: string; clientId: string; expiresAt: number }>();
+  /** Dev portal magic-link tokens (token → clientId binding, single-use). */
+  portalMagicTokens = new Map<
+    string,
+    { token: string; clientId: string; email?: string; expiresAt: number }
+  >();
 
   invoices = new Map<string, DemoInvoice>();
   proposals = new Map<string, DemoInvoiceProposal>();
