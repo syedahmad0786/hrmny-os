@@ -497,7 +497,7 @@ export const briefsRouter = router({
           taskId: task.taskId,
         });
       }
-      const seam = driveSeam("brief.lock", `brief.lock:${brief.briefId}`, {
+      const seam = await driveSeam("brief.lock", `brief.lock:${brief.briefId}`, {
         briefId: brief.briefId,
         taskId: brief.taskId,
         clientId: task?.clientId ?? null,
@@ -698,12 +698,12 @@ export const tasksRouter = router({
         (task as DemoTask & { qcWaived?: boolean }).qcWaived = true;
       }
       await upsertTask(task);
-      let seam = null as ReturnType<typeof driveSeam> | null;
+      let seam = null as Awaited<ReturnType<typeof driveSeam>> | null;
       if (task.qcPassed) {
         const asset = [...store.assets.values()].find(
           (a) => a.taskId === task.taskId,
         );
-        seam = driveSeam(
+        seam = await driveSeam(
           "creative.approved",
           `creative.approved:${task.taskId}`,
           {

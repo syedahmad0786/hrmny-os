@@ -608,7 +608,7 @@ export const seamsRouter = router({
         ...input.payload,
         actorEmployeeId: ctx.employeeId,
       }),
-    ),
+    ), // async Promise returned to tRPC
 });
 
 export const dashboardsHubRouter = router({
