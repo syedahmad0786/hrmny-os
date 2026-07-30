@@ -1935,7 +1935,7 @@ export async function requireGoalAccess(
   goalId: string,
   manage = false,
 ): Promise<WorkGoal> {
-  const employeeId = actor(ctx);
+  actor(ctx); // require authenticated staff actor
   const db = getDb();
   let goal: WorkGoal | undefined;
   if (!db) goal = getDemoWork().goals.get(goalId);

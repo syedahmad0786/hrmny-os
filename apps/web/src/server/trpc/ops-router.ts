@@ -1,6 +1,7 @@
 import { sql } from "@hrmny/db";
 import { getBuildStatus } from "../build-status";
 import { getDb } from "../db";
+import { listTasks } from "../delivery/store";
 import { getDemoStore } from "../demo-store";
 import { publicProcedure, router, staffProcedure } from "./trpc";
 
@@ -19,13 +20,14 @@ export const opsRouter = router({
     const db = getDb();
     if (!db) {
       const store = getDemoStore();
+      const openTasks = (await listTasks()).filter(
+        (task) => !["delivered", "archived"].includes(task.status),
+      ).length;
       return {
         activePeople: store.employees.size,
         openDeals: store.deals.size,
         activeClients: store.clients.size,
-        openTasks: [...store.tasks.values()].filter(
-          (task) => !["delivered", "archived"].includes(task.status),
-        ).length,
+        openTasks,
         connectedTools: store.connections.filter(
           (connection) => connection.status === "connected",
         ).length,

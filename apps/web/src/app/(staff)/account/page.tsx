@@ -3,12 +3,14 @@
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { type FormEvent, useState } from "react";
+import { useTheme, type ThemePreference } from "@/components/theme-provider";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function AccountRhythmPage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
+  const { preference, setPreference } = useTheme();
   const ids = trpc.m4.seedIds.useQuery();
   const reset = trpc.m4.reset.useMutation({
     onSuccess: () => void utils.invalidate(),
@@ -268,14 +270,16 @@ export default function AccountRhythmPage() {
             <label className="grid gap-1 text-sm">
               Theme
               <select
-                className="rounded-md border border-sand bg-white px-3 py-2"
-                value={accessibility.data.theme}
-                onChange={(event) =>
+                className="rounded-md border border-sand bg-paper px-3 py-2"
+                value={preference}
+                onChange={(event) => {
+                  const theme = event.target.value as ThemePreference;
+                  setPreference(theme);
                   saveAccessibility.mutate({
                     ...accessibility.data!,
-                    theme: event.target.value as "system" | "light" | "dark",
-                  })
-                }
+                    theme,
+                  });
+                }}
               >
                 <option value="system">Use device setting</option>
                 <option value="light">Light</option>

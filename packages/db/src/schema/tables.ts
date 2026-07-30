@@ -483,6 +483,7 @@ export const calendar = pgTable("calendar", {
   refApprovalState: text("ref_approval_state"),
   finalApprovalState: text("final_approval_state"),
   shootDate: date("shoot_date"),
+  state: text("state").default("draft").notNull(),
   ...timestamps,
 });
 
@@ -495,6 +496,7 @@ export const task = pgTable("task", {
   calendarId: uuid("calendar_id").references(() => calendar.calendarId),
   month: text("month"),
   taskType: text("task_type").notNull(),
+  title: text("title"),
   status: taskStatusEnum("status").default("backlog").notNull(),
   situationalState: text("situational_state"),
   ownerEmployeeId: uuid("owner_employee_id").references(
@@ -502,6 +504,13 @@ export const task = pgTable("task", {
   ),
   deadline: date("deadline"),
   priority: text("priority"),
+  qcPassed: boolean("qc_passed").default(false).notNull(),
+  qcNotes: text("qc_notes"),
+  clientRevisionCount: integer("client_revision_count").default(0).notNull(),
+  revisionBoundaryAck: boolean("revision_boundary_ack")
+    .default(false)
+    .notNull(),
+  briefId: uuid("brief_id"),
   ...timestamps,
 });
 
@@ -531,6 +540,7 @@ export const brief = pgTable("brief", {
     precision: 4,
     scale: 0,
   }).default("0"),
+  missing: jsonb("missing").$type<string[]>().default([]).notNull(),
   lockedAt: timestamp("locked_at", { withTimezone: true }),
   ...timestamps,
 });
@@ -560,7 +570,64 @@ export const invoice = pgTable("invoice", {
   currency: text("currency").default("AED").notNull(),
   xeroInvoiceId: text("xero_invoice_id"),
   period: text("period"),
+  contactName: text("contact_name"),
+  billingKind: text("billing_kind"),
+  trn: text("trn"),
+  trnStatus: text("trn_status"),
+  ruleCited: text("rule_cited"),
+  sourceAttached: jsonb("source_attached")
+    .$type<Record<string, unknown>>()
+    .default({})
+    .notNull(),
+  proposedByEmployeeId: uuid("proposed_by_employee_id"),
+  approvedByEmployeeId: uuid("approved_by_employee_id"),
   ...timestamps,
+});
+
+/** Client 7-phase onboarding pack (0069). */
+export const clientOnboardingPhase = pgTable(
+  "client_onboarding_phase",
+  {
+    phaseId: uuid("phase_id").defaultRandom().primaryKey(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => client.clientId),
+    phaseIndex: integer("phase_index").notNull(),
+    name: text("name").notNull(),
+    status: text("status").default("pending").notNull(),
+    steps: jsonb("steps")
+      .$type<
+        Array<{
+          stepId: string;
+          title: string;
+          raci: string;
+          done: boolean;
+        }>
+      >()
+      .default([])
+      .notNull(),
+    signedOffAt: timestamp("signed_off_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("client_onboarding_phase_client_idx_uniq").on(t.clientId, t.phaseIndex)],
+);
+
+/** Invoice intake HITL proposals (0066). */
+export const invoiceProposal = pgTable("invoice_proposal", {
+  proposalId: uuid("proposal_id").defaultRandom().primaryKey(),
+  emailRef: text("email_ref").notNull(),
+  status: text("status").default("pending").notNull(),
+  payload: jsonb("payload")
+    .$type<Record<string, unknown>>()
+    .default({})
+    .notNull(),
+  invoiceId: uuid("invoice_id").references(() => invoice.invoiceId),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 
 /** 14. xero_invoice_mirror */

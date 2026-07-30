@@ -2,8 +2,41 @@ import { tryCreateDb, type Db } from "@hrmny/db";
 
 let cached: Db | null | undefined;
 
+/**
+ * Silent in-memory fallback is allowed only for local/dev demos.
+ * Production with live auth (or explicit REQUIRE_DATABASE) must have DATABASE_URL.
+ * Escape hatch: ALLOW_MEMORY_STORE=true (emergency demos only).
+ */
+function memoryStoreForbidden(): boolean {
+  if (process.env.ALLOW_MEMORY_STORE === "true") return false;
+  if (process.env.REQUIRE_DATABASE === "true") return true;
+  if (process.env.AUTH_MODE === "supabase") return true;
+  return false;
+}
+
 export function getDb(): Db | null {
   if (cached !== undefined) return cached;
-  cached = tryCreateDb(process.env.DATABASE_URL);
+  const url = process.env.DATABASE_URL?.trim();
+  if (!url) {
+    if (memoryStoreForbidden()) {
+      throw new Error(
+        "DATABASE_URL is required when AUTH_MODE=supabase (or REQUIRE_DATABASE=true). Set ALLOW_MEMORY_STORE=true only for emergency demos.",
+      );
+    }
+    cached = null;
+    return null;
+  }
+  cached = tryCreateDb(url);
   return cached;
+}
+
+/** Hard requirement — never returns null. */
+export function requireDb(): Db {
+  const db = getDb();
+  if (!db) {
+    throw new Error(
+      "DATABASE_URL is required for this operation (memory store cannot satisfy it).",
+    );
+  }
+  return db;
 }

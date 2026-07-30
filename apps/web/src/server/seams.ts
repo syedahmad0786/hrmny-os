@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getDemoStore, type DemoTask } from "./demo-store";
+import { getBrief, getTask, listTasks, upsertTask } from "./delivery/store";
 
 /** Cross-system seam event names (Inngest-style stub). */
 export type SeamName =
@@ -30,14 +31,14 @@ function ensureTaskTitle(briefId: string, taskId: string): string {
 }
 
 /**
- * Apply seam side-effects into the demo store.
+ * Apply seam side-effects into the delivery store (Postgres when available).
  * Idempotent: same `idempotencyKey` returns the prior event without re-applying.
  */
-export function driveSeam(
+export async function driveSeam(
   name: SeamName,
   idempotencyKey: string,
   payload: Record<string, unknown>,
-): SeamDriveResult {
+): Promise<SeamDriveResult> {
   const store = getDemoStore();
   const existing = store.seamOutbox.find(
     (e) => e.idempotencyKey === idempotencyKey,
@@ -63,9 +64,9 @@ export function driveSeam(
   let result: Record<string, unknown> = {};
 
   if (name === "brief.lock") {
-    result = applyBriefLock(payload);
+    result = await applyBriefLock(payload);
   } else if (name === "creative.approved") {
-    result = applyCreativeApproved(payload);
+    result = await applyCreativeApproved(payload);
   } else if (name === "deal.won") {
     result = { noted: true, clientId: payload.clientId ?? null };
   } else if (name === "hire.packet_complete") {
@@ -91,25 +92,27 @@ export function driveSeam(
   return { ok: true, duplicate: false, event };
 }
 
-function applyBriefLock(payload: Record<string, unknown>): Record<string, unknown> {
+async function applyBriefLock(
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
   const store = getDemoStore();
   const briefId = String(payload.briefId ?? "");
   const taskId = String(payload.taskId ?? "");
   const clientId = String(payload.clientId ?? "");
-  const brief = store.briefs.get(briefId);
-  const sourceTask = store.tasks.get(taskId);
+  const brief = await getBrief(briefId);
+  const sourceTask = await getTask(taskId);
 
   if (!brief || !sourceTask) {
     return { spawned: false, reason: "brief_or_task_missing" };
   }
 
-  // Prefer updating the linked DoR task; spawn a sibling creative task once.
   const spawnKey = `spawn:${briefId}`;
-  const already = [...store.tasks.values()].find(
+  const already = (await listTasks()).find(
     (t) => t.briefId === briefId && t.taskType === "creative_spawn",
   );
   if (already) {
     already.status = "brief_ready";
+    await upsertTask(already);
     store.clientDeliveryStatus.set(clientId, {
       clientId,
       status: "brief_locked",
@@ -142,8 +145,9 @@ function applyBriefLock(payload: Record<string, unknown>): Record<string, unknow
     revisionBoundaryAck: false,
     briefId,
   };
-  store.tasks.set(spawned.taskId, spawned);
+  await upsertTask(spawned);
   sourceTask.status = "brief_ready";
+  await upsertTask(sourceTask);
   store.clientDeliveryStatus.set(spawned.clientId, {
     clientId: spawned.clientId,
     status: "brief_locked",
@@ -158,19 +162,17 @@ function applyBriefLock(payload: Record<string, unknown>): Record<string, unknow
   };
 }
 
-function applyCreativeApproved(
+async function applyCreativeApproved(
   payload: Record<string, unknown>,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const store = getDemoStore();
   const taskId = String(payload.taskId ?? "");
   const assetId = payload.assetId ? String(payload.assetId) : null;
-  const task = store.tasks.get(taskId);
+  const task = await getTask(taskId);
   if (!task) {
     return { deliveryStatus: null, reason: "task_missing" };
   }
 
-  // Do not force task.state here — gate transition remains source of truth.
-  // Seam updates portal-visible delivery status (+ optional asset label).
   if (assetId) {
     const asset = store.assets.get(assetId);
     if (asset && asset.qcPassed) asset.status = "client_review";

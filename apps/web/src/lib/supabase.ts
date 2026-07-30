@@ -1,13 +1,5 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { getSupabasePublicConfig } from "@/lib/supabase-config";
-
-let browserClient: SupabaseClient | null | undefined;
-
-export function getSupabaseBrowserClient(): SupabaseClient | null {
-  if (typeof window === "undefined") return null;
-  if (browserClient !== undefined) return browserClient;
-
-  const config = getSupabasePublicConfig();
-  browserClient = config ? createClient(config.url, config.key) : null;
-  return browserClient;
-}
+/**
+ * Browser Supabase client — cookie-backed via @supabase/ssr so edge middleware
+ * and server components share the same session.
+ */
+export { getSupabaseBrowserClient } from "@/lib/supabase/browser";

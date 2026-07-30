@@ -127,7 +127,7 @@ export async function draftOutreach(input: {
           : JSON.stringify(run.output);
   }
 
-  return insertOutreach({
+  return await insertOutreach({
     dealId: input.dealId,
     channel: input.channel ?? "gmail",
     recipient,
@@ -142,7 +142,7 @@ export async function approveOutreach(input: {
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<TransitionResult> {
-  const item = getOutreach(input.id);
+  const item = await getOutreach(input.id);
   if (!item) throw new Error(`Outreach not found: ${input.id}`);
   return transition(
     input.actor,
@@ -151,7 +151,7 @@ export async function approveOutreach(input: {
     {
       authorize: async (a) => authorizeStaff(a),
       apply: async () => {
-        const next = patchOutreach(input.id, {
+        const next = await patchOutreach(input.id, {
           state: "approved",
           approvedBy: input.actor.employeeId,
         });
@@ -169,7 +169,7 @@ export async function discardOutreach(input: {
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<TransitionResult> {
-  const item = getOutreach(input.id);
+  const item = await getOutreach(input.id);
   if (!item) throw new Error(`Outreach not found: ${input.id}`);
   return transition(
     input.actor,
@@ -178,7 +178,7 @@ export async function discardOutreach(input: {
     {
       authorize: async (a) => authorizeStaff(a),
       apply: async () => {
-        const next = patchOutreach(input.id, { state: "discarded" });
+        const next = await patchOutreach(input.id, { state: "discarded" });
         return outreachEntity(next!);
       },
       audit: input.audit ?? defaultAudit,
@@ -194,7 +194,7 @@ export async function sendOutreach(input: {
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<TransitionResult & { externalId?: string }> {
-  const item = getOutreach(input.id);
+  const item = await getOutreach(input.id);
   if (!item) throw new Error(`Outreach not found: ${input.id}`);
   const composio = input.composio ?? createComposioStub();
   let externalId: string | undefined;
@@ -216,7 +216,7 @@ export async function sendOutreach(input: {
           body: item.body,
         });
         externalId = res.externalId;
-        const next = patchOutreach(input.id, {
+        const next = await patchOutreach(input.id, {
           state: "sent",
           sentAt: new Date().toISOString(),
           externalId: res.externalId,

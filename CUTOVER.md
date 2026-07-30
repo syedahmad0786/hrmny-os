@@ -18,7 +18,7 @@
 
 | # | Item | Owner | Done |
 |---|---|---|---|
-| 1 | Supabase prod project + migrations applied (`packages/db/APPLY.md`) | Eng | ☐ |
+| 1 | Supabase prod project + migrations applied through **0069** (`packages/db/APPLY.md`, staging dry-run in `docs/STAGING-GO-LIVE.md`) | Eng | ☐ |
 | 2 | Vercel prod + preview; env from `.env.example` (no secrets in git) | Eng | ☐ |
 | 3 | Google Workspace SSO for staff; portal magic-link allowlist | Eng + IT | ☐ |
 | 4 | Composio OAuth apps (Gmail, LinkedIn, Canva, Calendar) redirect URLs | Eng | ☐ |
@@ -26,7 +26,7 @@
 | 6 | Asana residual export → OS task boards reconciled | Ops | ☐ |
 | 7 | Role matrix signed (AM margin deny, payroll SoD, portal scopes) | Partners | ☐ |
 | 8 | Freeze list of live seams (idempotency keys agreed) | Eng | ☐ |
-| 9 | Backup + DR: daily dump, RTO &lt; 24h documented | Ops | ☐ |
+| 9 | Backup + DR: daily dump, RTO &lt; 24h documented — procedure in `docs/BACKUP-AND-DR.md`; ☐ until restore drill evidence attached | Ops | ☐ |
 | 10 | Feature flags / rollback: previous Vercel deployment known-good | Eng | ☐ |
 
 ---

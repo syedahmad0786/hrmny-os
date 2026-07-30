@@ -1,13 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  isPublicPath,
+  updateSession,
+} from "@/lib/supabase/middleware";
 
 /**
- * Edge middleware — baseline security headers on every app/API response.
+ * Edge middleware — security headers + optional Supabase session gate.
  *
- * Deliberately headers-only: auth stays enforced per-handler (tRPC context +
- * webhook signature checks), so this cannot fail-open or break the dev-role
- * header / Supabase bearer flows. Deferred: edge-level auth enforcement and a
- * tuned Content-Security-Policy (both need per-route calibration — a wrong CSP
- * silently breaks the app).
+ * When AUTH_MODE=supabase, anonymous visitors are redirected to /login
+ * (or /portal/login for portal routes). AUTH_MODE=dev keeps the x-dev-role
+ * demo path open (no cookie gate).
  */
 const SECURITY_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
@@ -15,19 +17,30 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "X-DNS-Prefetch-Control": "off",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-  // Ignored by browsers over plain http (local dev), enforced on HTTPS prod.
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
 };
 
-export function middleware(_request: NextRequest) {
-  const response = NextResponse.next();
+export async function middleware(request: NextRequest) {
+  const { response, user } = await updateSession(request);
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
     response.headers.set(key, value);
   }
+
+  if (process.env.AUTH_MODE === "supabase" && !user) {
+    const { pathname } = request.nextUrl;
+    if (!isPublicPath(pathname)) {
+      const login = request.nextUrl.clone();
+      login.pathname = pathname.startsWith("/portal")
+        ? "/portal/login"
+        : "/login";
+      login.searchParams.set("next", pathname);
+      return NextResponse.redirect(login);
+    }
+  }
+
   return response;
 }
 
 export const config = {
-  // Everything except Next internals and static assets.
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
