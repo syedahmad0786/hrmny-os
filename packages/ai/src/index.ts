@@ -7,5 +7,6 @@ export {
 export * from "./memory";
 export * from "./agents";
 export * from "./agent-io";
+export * from "./policy";
 export * from "./run-agent";
 export * from "./evals";
