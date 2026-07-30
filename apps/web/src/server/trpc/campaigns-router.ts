@@ -1,13 +1,26 @@
 import { z } from "zod";
-import { CAMPAIGN_TRANSITIONS } from "@hrmny/gate";
+import { CAMPAIGN_TRANSITIONS, type ActorContext } from "@hrmny/gate";
 import type { SocialChannel, SocialPublishResult } from "@hrmny/integrations";
+import {
+  campaignBackendMode,
+  campaignHealth,
+  createCampaignDraft,
+  getCampaign,
+  listApprovalViews,
+  listCampaigns,
+  transitionCampaign,
+  type CampaignItemRow,
+} from "../campaigns/repository";
 import { router, staffProcedure } from "./trpc";
 
 /**
- * M9 content & marketing — STUB router (mock data, frozen signatures).
- * Wiring into appRouter is orchestrator-only (root.ts). Live publish swaps in
- * behind env flags via the SocialPublishAdapter contract; publish is a
- * `campaign` gate transition (approve → published), never auto-fired here.
+ * M9 content & marketing — campaigns router. Frozen procedure signatures
+ * (list/get/createDraft/calendar/report) preserved from the contract-freeze
+ * stub; internals are now DB-backed (campaign_items) with an in-memory
+ * fallback via ../campaigns/repository. Every status change routes through the
+ * gate engine; publish stays HITL (approved→published only) and fires a
+ * SocialPublishAdapter stub from inside the gate. Wiring into appRouter stays
+ * orchestrator-only (root.ts).
  */
 
 type CampaignStatus = keyof typeof CAMPAIGN_TRANSITIONS;
@@ -17,44 +30,54 @@ type CampaignItem = {
   title: string;
   channel: SocialChannel;
   status: CampaignStatus;
-  /** ISO date the item is scheduled to publish. */
   scheduledFor: string;
   clientId: string;
 };
 
-const MOCK_CAMPAIGNS: CampaignItem[] = [
-  {
-    id: "cmp_0001",
-    title: "Ramadan teaser — carousel",
-    channel: "linkedin",
-    status: "approved",
-    scheduledFor: "2026-08-03",
-    clientId: "00000000-0000-4000-8000-0000000000a1",
-  },
-  {
-    id: "cmp_0002",
-    title: "Product launch reel",
-    channel: "instagram",
-    status: "draft",
-    scheduledFor: "2026-08-07",
-    clientId: "00000000-0000-4000-8000-0000000000a1",
-  },
-];
+function toCampaignItem(row: CampaignItemRow): CampaignItem {
+  return {
+    id: row.campaignItemId,
+    title: row.title,
+    channel: row.channel,
+    status: row.status,
+    scheduledFor: row.scheduledFor ?? "",
+    clientId: row.clientId ?? "",
+  };
+}
+
+function actorFromCtx(ctx: {
+  employeeId: string | null;
+  roles: string[];
+  user: { permissions: string[] } | null;
+}): ActorContext {
+  return {
+    employeeId: ctx.employeeId!,
+    roles: ctx.roles,
+    permissions: ctx.user?.permissions ?? [],
+  };
+}
 
 export const campaignsRouter = router({
+  health: staffProcedure.query(async () => ({
+    ...(await campaignHealth()),
+    mode: campaignBackendMode(),
+  })),
+
   list: staffProcedure
     .input(z.object({ clientId: z.string().uuid().optional() }).optional())
-    .query(({ input }): CampaignItem[] =>
-      input?.clientId
-        ? MOCK_CAMPAIGNS.filter((c) => c.clientId === input.clientId)
-        : MOCK_CAMPAIGNS,
-    ),
+    .query(async ({ input }): Promise<CampaignItem[]> => {
+      const rows = await listCampaigns(
+        input?.clientId ? { clientId: input.clientId } : undefined,
+      );
+      return rows.map(toCampaignItem);
+    }),
 
   get: staffProcedure
     .input(z.object({ id: z.string() }))
-    .query(({ input }): CampaignItem | null =>
-      MOCK_CAMPAIGNS.find((c) => c.id === input.id) ?? null,
-    ),
+    .query(async ({ input }): Promise<CampaignItem | null> => {
+      const row = await getCampaign(input.id);
+      return row ? toCampaignItem(row) : null;
+    }),
 
   createDraft: staffProcedure
     .input(
@@ -65,43 +88,96 @@ export const campaignsRouter = router({
         clientId: z.string().uuid(),
       }),
     )
-    .mutation(({ input }): CampaignItem => ({
-      id: `cmp_stub_${Date.now()}`,
-      status: "draft",
-      ...input,
-    })),
+    .mutation(async ({ input }): Promise<CampaignItem> => {
+      const row = await createCampaignDraft({
+        title: input.title,
+        channel: input.channel,
+        scheduledFor: input.scheduledFor,
+        clientId: input.clientId,
+      });
+      return toCampaignItem(row);
+    }),
+
+  /**
+   * Gate-routed status change (approve / publish / archive). Publish
+   * (approved→published) is HITL: the gate blocks any publish that skips a
+   * prior approve, and the external post is a SocialPublishAdapter stub fired
+   * inside the apply step.
+   */
+  transition: staffProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        to: z.enum(["approved", "published", "draft", "archived"]),
+        overrideReason: z.string().nullable().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const result = await transitionCampaign({
+        actor: actorFromCtx(ctx),
+        id: input.id,
+        to: input.to,
+        overrideReason: input.overrideReason,
+      });
+      if (!result.ok) {
+        return {
+          ok: false as const,
+          reason: result.reason,
+          code: result.code,
+          blockedBy: result.blockedBy,
+          auditId: result.auditId,
+        };
+      }
+      return {
+        ok: true as const,
+        item: toCampaignItem(result.item),
+        auditId: result.auditId,
+      };
+    }),
+
+  /** Staff view of items awaiting client sign-off in the portal. */
+  pendingApproval: staffProcedure
+    .input(z.object({ clientId: z.string().uuid().optional() }).optional())
+    .query(({ input }) =>
+      listApprovalViews({ clientId: input?.clientId, state: "pending_client" }),
+    ),
 
   /** Content-calendar view — items grouped by scheduled date. */
   calendar: staffProcedure
     .input(z.object({ month: z.string().optional() }).optional())
-    .query(({ input }) => ({
-      month: input?.month ?? new Date().toISOString().slice(0, 7),
-      items: MOCK_CAMPAIGNS.map((c) => ({
-        id: c.id,
-        title: c.title,
-        channel: c.channel,
-        date: c.scheduledFor,
-        status: c.status,
-      })),
-    })),
+    .query(async ({ input }) => {
+      const rows = await listCampaigns();
+      return {
+        month: input?.month ?? new Date().toISOString().slice(0, 7),
+        items: rows.map((c) => ({
+          id: c.campaignItemId,
+          title: c.title,
+          channel: c.channel,
+          date: c.scheduledFor ?? "",
+          status: c.status,
+        })),
+      };
+    }),
 
   /** Campaign report v1 — posts + engagement pulled back post-publish (mock). */
   report: staffProcedure
     .input(z.object({ id: z.string() }))
-    .query(({ input }) => {
-      const preview: SocialPublishResult = {
-        published: true,
+    .query(async ({ input }) => {
+      const row = await getCampaign(input.id);
+      const stored = row?.body.publish as SocialPublishResult | undefined;
+      const lastPublish: SocialPublishResult = stored ?? {
+        published: false,
         mode: "stub",
         externalId: `stub-post-${input.id}`,
-        channel: "linkedin",
+        channel: row?.channel ?? "linkedin",
         url: "https://example.invalid/post/stub",
       };
       return {
         campaignId: input.id,
-        posts: 1,
+        posts: row?.status === "published" ? 1 : 0,
         impressions: 1240,
         engagements: 87,
-        lastPublish: preview,
+        lastPublish,
         note: "Mock engagement — live figures arrive via Composio at M9",
       };
     }),
