@@ -6,3 +6,4 @@ export {
 } from "./invoice-extract";
 export * from "./memory";
 export * from "./agents";
+export * from "./agent-io";
