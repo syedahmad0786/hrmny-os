@@ -1,0 +1,77 @@
+{
+  "name": "hrmny-STAGING — ops alert fan-out",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "7bcf78e9-28fd-4c48-97b0-bd8bbc32c8f1",
+      "name": "Ops Alert Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "webhookId": "a6163fa0-b695-485e-90e4-975a01a038e2",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hrmny-ops-alert",
+        "authentication": "none",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "e8915956-5698-4a4d-88e2-9bffd3037809",
+      "name": "Build Google Chat Card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [224, 0],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const b = $json.body ?? $json;\nconst severity = (b.severity ?? \"info\").toString().toLowerCase();\nconst source = (b.source ?? \"unknown\").toString();\nconst message = (b.message ?? \"\").toString();\nconst timestamp = (b.timestamp ?? $now.toISO()).toString();\nconst label = severity.toUpperCase();\nconst payload = {\n  text: \"[\" + label + \"] hrmny ops alert from \" + source + \": \" + message,\n  cardsV2: [{\n    cardId: \"hrmny-ops-alert\",\n    card: {\n      header: { title: \"hrmny Ops Alert\", subtitle: label + \" - \" + source },\n      sections: [{ widgets: [\n        { decoratedText: { topLabel: \"Severity\", text: label } },\n        { decoratedText: { topLabel: \"Source\", text: source } },\n        { decoratedText: { topLabel: \"Message\", text: message, wrapText: true } },\n        { decoratedText: { topLabel: \"Timestamp\", text: timestamp } }\n      ] }]\n    }\n  }]\n};\nreturn { json: { severity: severity, source: source, message: message, timestamp: timestamp, payload: payload } };"
+      }
+    },
+    {
+      "id": "41ce54ce-4322-45b5-a120-afdc0f25a72f",
+      "name": "Post to Google Chat",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [448, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GOOGLE_CHAT_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.payload }}",
+        "options": { "timeout": 10000 }
+      }
+    },
+    {
+      "id": "8a61c7c3-a236-4ba8-970e-13fde9791174",
+      "name": "Respond 200 Sent",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [672, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"sent\" } }}",
+        "options": { "responseCode": 200 }
+      }
+    }
+  ],
+  "connections": {
+    "Ops Alert Webhook": {
+      "main": [[{ "node": "Build Google Chat Card", "type": "main", "index": 0 }]]
+    },
+    "Build Google Chat Card": {
+      "main": [[{ "node": "Post to Google Chat", "type": "main", "index": 0 }]]
+    },
+    "Post to Google Chat": {
+      "main": [[{ "node": "Respond 200 Sent", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": {}
+}

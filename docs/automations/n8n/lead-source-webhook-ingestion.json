@@ -1,0 +1,162 @@
+{
+  "name": "hrmny-STAGING — lead-source webhook ingestion",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "3494435a-1768-479f-b400-7c7681d682b2",
+      "name": "Lead Inbound Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 192],
+      "webhookId": "39e052b4-bfb6-49cf-aa6f-cb62cb6bde35",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hrmny-lead-inbound",
+        "authentication": "none",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "e5c9ce7c-dc0a-4637-ba2b-564707b0f918",
+      "name": "Normalize Lead",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [224, 192],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "name", "value": "={{ ($json.body?.name ?? $json.name ?? \"\").toString().trim() }}", "type": "string" },
+            { "id": "a2", "name": "email", "value": "={{ ($json.body?.email ?? $json.email ?? \"\").toString().trim().toLowerCase() }}", "type": "string" },
+            { "id": "a3", "name": "company", "value": "={{ ($json.body?.company ?? $json.company ?? \"\").toString().trim() }}", "type": "string" },
+            { "id": "a4", "name": "source", "value": "={{ ($json.body?.source ?? $json.source ?? \"unknown\").toString().trim() }}", "type": "string" },
+            { "id": "a5", "name": "receivedAt", "value": "={{ $now.toISO() }}", "type": "string" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "2a07a8a4-6119-4e7c-b0ea-ebff7c118f51",
+      "name": "Has Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [448, 192],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            { "leftValue": "={{ $json.email }}", "operator": { "type": "string", "operation": "notEmpty" }, "rightValue": "" }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "9562d171-2d6b-474e-bc99-19f1e8317792",
+      "name": "Forward to hrmny OS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [672, 96],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.HRMNY_OS_BASE_URL }}/api/inbound/lead",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Webhook-Secret", "value": "={{ $env.HRMNY_N8N_WEBHOOK_SECRET }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": { "timeout": 10000 }
+      }
+    },
+    {
+      "id": "deafc902-14ec-4a0a-9546-a4f18b4afefc",
+      "name": "Respond 200 Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [896, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"accepted\" } }}",
+        "options": { "responseCode": 200 }
+      }
+    },
+    {
+      "id": "796ba561-7bb7-4393-990b-6f2facc5b194",
+      "name": "Notify Ops on Error",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [896, 192],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GOOGLE_CHAT_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"text\": \"hrmny lead ingestion FAILED for \" + ($(\"Normalize Lead\").item.json.email || \"unknown\") + \" — /api/inbound/lead returned an error\" } }}",
+        "options": { "timeout": 10000 }
+      }
+    },
+    {
+      "id": "0f8d7652-6e8e-47e8-bff1-81b64540aa32",
+      "name": "Respond 502 Ingestion Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1120, 192],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"error\", \"reason\": \"downstream ingestion failed\" } }}",
+        "options": { "responseCode": 502 }
+      }
+    },
+    {
+      "id": "02f0f8b7-9464-4974-84c1-c273e8b00a5e",
+      "name": "Respond 400 Missing Email",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [672, 288],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"rejected\", \"reason\": \"email is required\" } }}",
+        "options": { "responseCode": 400 }
+      }
+    }
+  ],
+  "connections": {
+    "Lead Inbound Webhook": {
+      "main": [[{ "node": "Normalize Lead", "type": "main", "index": 0 }]]
+    },
+    "Normalize Lead": {
+      "main": [[{ "node": "Has Email?", "type": "main", "index": 0 }]]
+    },
+    "Has Email?": {
+      "main": [
+        [{ "node": "Forward to hrmny OS", "type": "main", "index": 0 }],
+        [{ "node": "Respond 400 Missing Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Forward to hrmny OS": {
+      "main": [
+        [{ "node": "Respond 200 Accepted", "type": "main", "index": 0 }],
+        [{ "node": "Notify Ops on Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify Ops on Error": {
+      "main": [[{ "node": "Respond 502 Ingestion Error", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": {}
+}
