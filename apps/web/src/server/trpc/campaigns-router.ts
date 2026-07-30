@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { CAMPAIGN_TRANSITIONS, type ActorContext } from "@hrmny/gate";
 import type { SocialChannel, SocialPublishResult } from "@hrmny/integrations";
 import {
@@ -11,6 +12,11 @@ import {
   transitionCampaign,
   type CampaignItemRow,
 } from "../campaigns/repository";
+import {
+  addFeedback,
+  listFeedbackByItem,
+  resolveFeedback,
+} from "../campaigns/feedback";
 import { router, staffProcedure } from "./trpc";
 
 /**
@@ -134,6 +140,44 @@ export const campaignsRouter = router({
         auditId: result.auditId,
       };
     }),
+
+  /** Consolidated proofing feedback — staff see the full thread across both
+   *  authors; a staff comment is scoped to the item's client so the client
+   *  sees it in the portal. Resolve is staff-only (staffProcedure). */
+  feedback: router({
+    list: staffProcedure
+      .input(z.object({ campaignItemId: z.string().uuid() }))
+      .query(({ input }) => listFeedbackByItem(input.campaignItemId)),
+
+    add: staffProcedure
+      .input(
+        z.object({
+          campaignItemId: z.string().uuid(),
+          body: z.string().min(1).max(2000),
+          anchor: z.record(z.unknown()).nullable().optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const item = await getCampaign(input.campaignItemId);
+        if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+        return addFeedback({
+          campaignItemId: input.campaignItemId,
+          authorKind: "staff",
+          authorId: ctx.employeeId,
+          clientId: item.clientId,
+          body: input.body,
+          anchor: input.anchor ?? null,
+        });
+      }),
+
+    resolve: staffProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input }) => {
+        const row = await resolveFeedback(input.id);
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        return row;
+      }),
+  }),
 
   /** Staff view of items awaiting client sign-off in the portal. */
   pendingApproval: staffProcedure

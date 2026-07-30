@@ -1303,3 +1303,26 @@ export const scorecardOverrides = pgTable(
     ),
   ],
 );
+
+export const portalFeedback = pgTable(
+  "portal_feedback",
+  {
+    portalFeedbackId: uuid("portal_feedback_id").defaultRandom().primaryKey(),
+    campaignItemId: uuid("campaign_item_id")
+      .notNull()
+      .references(() => campaignItems.campaignItemId, { onDelete: "cascade" }),
+    authorKind: text("author_kind").notNull(),
+    authorId: uuid("author_id"),
+    clientId: uuid("client_id"),
+    body: text("body").notNull(),
+    anchor: jsonb("anchor").$type<Record<string, unknown>>(),
+    resolved: boolean("resolved").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("portal_feedback_item_idx").on(table.campaignItemId, table.createdAt),
+    index("portal_feedback_client_idx").on(table.clientId),
+  ],
+);

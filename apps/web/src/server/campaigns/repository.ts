@@ -11,6 +11,7 @@ import type {
   SocialPublishAdapter,
 } from "@hrmny/integrations";
 import { getDb } from "../db";
+import { addFeedback } from "./feedback";
 import { emitHealthSignal, writeAudit } from "../m1-persistence";
 import {
   getCampaignMemory,
@@ -406,6 +407,13 @@ export async function decidePortalItem(opts: {
   bootstrapGateRegistry();
   const existing = await getCampaign(opts.id);
   if (!existing) return { ok: false, reason: "Portal item not found" };
+  // Reject-with-feedback: a rejection must carry a reason. The gate transition
+  // itself is unchanged; the body is recorded alongside as a client thread
+  // comment (below) and in the audit trail via the gate's audit hook.
+  const feedback = opts.feedback?.trim();
+  if (opts.to === "rejected" && !feedback) {
+    return { ok: false, reason: "FEEDBACK_REQUIRED", code: "FEEDBACK_REQUIRED" };
+  }
   const fromState = portalStateOf(existing);
 
   const result = await transition(
@@ -455,6 +463,15 @@ export async function decidePortalItem(opts: {
   }
   const item = await getCampaign(opts.id);
   if (!item) return { ok: false, reason: "Portal item missing after apply" };
+  if (opts.to === "rejected" && feedback) {
+    await addFeedback({
+      campaignItemId: item.campaignItemId,
+      authorKind: "client",
+      authorId: opts.actor.employeeId,
+      clientId: item.clientId,
+      body: feedback,
+    });
+  }
   return { ok: true, item, state: portalStateOf(item), auditId: result.auditId };
 }
 
