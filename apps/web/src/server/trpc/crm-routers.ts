@@ -29,6 +29,7 @@ import {
   updateCrmTask,
   updateDeal,
 } from "../crm/repository";
+import { listContactEdges, upsertContactEdge } from "../crm/contact-edges";
 import { redactDealMargin } from "../crm/types";
 import { emitHealthSignal, writeAudit } from "../m1-persistence";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
@@ -155,6 +156,21 @@ export const crmContactsRouter = router({
       const { id, ...patch } = input;
       return updateContact(id, patch);
     }),
+  edges: router({
+    list: protectedProcedure
+      .input(z.object({ contactId: z.string().uuid() }))
+      .query(({ input }) => listContactEdges(input.contactId)),
+    upsert: protectedProcedure
+      .input(
+        z.object({
+          fromContact: z.string().uuid(),
+          toContact: z.string().uuid(),
+          relation: z.string().trim().min(1).max(80),
+          weight: z.number().min(0).max(1).optional(),
+        }),
+      )
+      .mutation(({ input }) => upsertContactEdge(input)),
+  }),
 });
 
 export const crmDealsRouter = router({
