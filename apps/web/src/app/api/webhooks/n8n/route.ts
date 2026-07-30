@@ -1,39 +1,16 @@
 /**
  * POST /api/webhooks/n8n — callback ingress from hrmny n8n Cloud.
  *
- * Plan:
- * - Verify `X-Hrmny-N8n-Signature` (or N8N_WEBHOOK_SECRET header) — stub for now
- * - Route by `event` / `workflowName` into CRM / tickets / memory / health
- * - Never trust body without signature in production
+ * Verify `X-Hrmny-N8n-Signature` (or `X-N8n-Signature`) against N8N_WEBHOOK_SECRET:
+ * - `sha256=<hex>` → HMAC-SHA256 of the raw body (preferred; add a Crypto node in n8n)
+ * - otherwise → the shared secret sent verbatim as a static header token
+ * Both compares are constant-time. Fails closed: no secret configured ⇒ reject in
+ * production; unsigned bodies are never trusted.
  *
  * Instance: https://hrmny.app.n8n.cloud (see 11-N8N-SETUP.md)
  */
 import { NextResponse } from "next/server";
-
-function verifySignatureStub(
-  _rawBody: string,
-  signatureHeader: string | null,
-): { ok: boolean; reason: string } {
-  const secret = process.env.N8N_WEBHOOK_SECRET?.trim();
-  if (!secret) {
-    // Dev-friendly: accept when secret unset, but flag unverified.
-    return {
-      ok: true,
-      reason: "N8N_WEBHOOK_SECRET unset — signature verify stubbed (dev only)",
-    };
-  }
-  if (!signatureHeader) {
-    return { ok: false, reason: "missing signature header" };
-  }
-  // Stub: constant-time compare not implemented — reject unless exact match placeholder.
-  if (signatureHeader === secret || signatureHeader === `sha256=${secret}`) {
-    return { ok: true, reason: "stub match" };
-  }
-  return {
-    ok: false,
-    reason: "signature mismatch (stub verifier — replace with HMAC)",
-  };
-}
+import { verifyN8nSignature } from "./verify";
 
 export async function POST(request: Request) {
   const raw = await request.text();
@@ -41,7 +18,7 @@ export async function POST(request: Request) {
     request.headers.get("x-hrmny-n8n-signature") ??
     request.headers.get("x-n8n-signature");
 
-  const verify = verifySignatureStub(raw, signature);
+  const verify = verifyN8nSignature(raw, signature);
   if (!verify.ok) {
     return NextResponse.json(
       { ok: false, code: "UNAUTHORIZED", reason: verify.reason },
@@ -81,7 +58,7 @@ export async function GET() {
     ok: true,
     endpoint: "/api/webhooks/n8n",
     methods: ["POST"],
-    signature: "X-Hrmny-N8n-Signature or X-N8n-Signature (stub)",
+    signature: "X-Hrmny-N8n-Signature or X-N8n-Signature (HMAC-SHA256 or shared secret)",
     docs: "hrmny_OS_Execution/11-N8N-SETUP.md",
   });
 }

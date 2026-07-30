@@ -193,6 +193,15 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     }
   }, [router, session.data, session.isError]);
 
+  // A portal actor must never render staff chrome. The tRPC layer already denies
+  // portal callers on staff procedures (portalStaffBoundary); this closes the soft
+  // UI boundary where the (staff) shell rendered before that data-layer denial.
+  useEffect(() => {
+    if (session.data?.actorType === "portal") {
+      router.replace("/portal");
+    }
+  }, [router, session.data?.actorType]);
+
   useEffect(() => {
     if (
       !session.data?.employeeId ||
@@ -252,6 +261,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   if (
     session.isLoading ||
     session.isError ||
+    session.data?.actorType === "portal" ||
     (session.data?.authMode === "supabase" && !session.data.employeeId)
   ) {
     return (
