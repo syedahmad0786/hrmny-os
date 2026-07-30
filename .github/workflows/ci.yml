@@ -25,3 +25,29 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @hrmny/web build
+      - run: pnpm --filter @hrmny/web exec playwright install chromium --with-deps
+      - name: Start production server
+        run: |
+          (cd apps/web && pnpm exec next start --port 3000 &)
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:3000/login && break; sleep 2; done
+      - name: Run Playwright e2e
+        env:
+          PLAYWRIGHT_SKIP_WEBSERVER: "1"
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          CI: "true"
+        run: pnpm --filter @hrmny/web e2e
