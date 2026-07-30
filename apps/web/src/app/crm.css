@@ -1,7 +1,8 @@
 /* Harmony CRM redesign — desk chrome + CRM surfaces */
 :root {
   --ochre: #e47300;
-  --ochre-dark: #b95d00;
+  /* Darker for WCAG AA on cream / ochre-soft chips (was #b95d00 ~4.1:1). */
+  --ochre-dark: #7a3f00;
   --ochre-soft: #f4d7b9;
   --ink: #0a0908;
   --ink-2: #211f1c;
@@ -114,7 +115,7 @@ html[data-work-theme="dark"] {
 
 .desk-side-context span {
   display: block;
-  color: rgba(247, 244, 239, 0.45);
+  color: #c9c0b6;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.13em;
@@ -131,7 +132,7 @@ html[data-work-theme="dark"] {
 
 .desk-nav-label {
   margin: 11px 10px 7px;
-  color: rgba(247, 244, 239, 0.32);
+  color: #c9c0b6;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.15em;
@@ -172,7 +173,7 @@ html[data-work-theme="dark"] {
 }
 
 .desk-nav-index {
-  color: rgba(247, 244, 239, 0.32);
+  color: #c9c0b6;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -206,7 +207,7 @@ html[data-work-theme="dark"] {
 .desk-side-meta {
   padding: 14px 10px 4px;
   border-top: 1px solid rgba(247, 244, 239, 0.1);
-  color: rgba(247, 244, 239, 0.38);
+  color: #c9c0b6;
   font-size: 9px;
   line-height: 1.7;
 }

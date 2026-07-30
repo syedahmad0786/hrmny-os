@@ -1,5 +1,6 @@
 :root {
-  --hrmny-ochre: #e47300;
+  /* Darker ochre so white button labels meet WCAG AA (~4.5:1). */
+  --hrmny-ochre: #b85c00;
   --hrmny-ink: #0a0908;
   --hrmny-paper: #f7f4ef;
   --hrmny-sand: #e8e0d4;

@@ -40,14 +40,14 @@ test.describe("accessibility smoke (axe)", () => {
     const outPath = path.join(artifacts, "a11y-axe-report.json");
     writeFileSync(outPath, JSON.stringify({ generatedAt: new Date().toISOString(), report }, null, 2));
 
-    const critical = report.flatMap((r) =>
-      r.violations.filter((v) => v.impact === "critical"),
+    const blockers = report.flatMap((r) =>
+      r.violations.filter(
+        (v) => v.impact === "critical" || v.impact === "serious",
+      ),
     );
-    // Fail CI on critical only; serious (often contrast on decorative chrome)
-    // is tracked in a11y-axe-report.json for follow-up.
     expect(
-      critical,
-      `Critical a11y issues:\n${JSON.stringify(critical, null, 2)}`,
+      blockers,
+      `Critical/serious a11y issues:\n${JSON.stringify(blockers, null, 2)}`,
     ).toEqual([]);
   });
 });
