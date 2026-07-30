@@ -407,6 +407,13 @@
       "when": 1785052800000,
       "tag": "0058_agent_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1785056400000,
+      "tag": "0061_campaigns",
+      "breakpoints": true
     }
   ]
 }
