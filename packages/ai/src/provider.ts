@@ -213,10 +213,10 @@ export function mockOutreachDraft(userText: string) {
   };
 }
 
+// Values match the frozen ReplyIntentSchema in agent-io.ts (M7 contract).
 const REPLY_INTENT_RULES: Array<[RegExp, string]> = [
   [/unsubscribe|opt\s?out|remove me|stop emailing|take me off/i, "unsubscribe"],
-  [/out of office|ooo|on (leave|vacation|holiday|annual leave)|away until/i, "auto_reply"],
-  [/not interested|no thanks|no thank you|we'?ll pass|not a fit|already have/i, "not_interested"],
+  [/not interested|no thanks|no thank you|we'?ll pass|not a fit|already have|maybe later|not right now/i, "not_now"],
   [/interested|sounds good|let'?s (talk|chat|connect)|book|schedule|demo|call me|keen|works for me/i, "interested"],
   [/\?|how much|pricing|what.*cost|when can|could you|can you|tell me more/i, "question"],
 ];
@@ -224,7 +224,7 @@ const REPLY_INTENT_RULES: Array<[RegExp, string]> = [
 /** Keyword classifier for mock/eval. ponytail: heuristic map, swap for the live model in prod. */
 export function mockReplyIntent(userText: string) {
   const match = REPLY_INTENT_RULES.find(([pattern]) => pattern.test(userText));
-  return { intent: match?.[1] ?? "neutral", confidence: match ? 0.8 : 0.4 };
+  return { intent: match?.[1] ?? "other", confidence: match ? 0.8 : 0.4 };
 }
 
 export function createProvider(config: CreateProviderConfig = {}): LLMProvider {

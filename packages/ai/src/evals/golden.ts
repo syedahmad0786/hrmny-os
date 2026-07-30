@@ -14,19 +14,24 @@ export const OutreachDraftSchema = z.object({
   cta: z.string().min(1),
 });
 
-export const ReplyIntentSchema = z.object({
-  intent: z.enum([
-    "interested",
-    "not_interested",
-    "question",
-    "auto_reply",
-    "unsubscribe",
-    "neutral",
-  ]),
+/**
+ * Reply-intent values mirror the frozen `ReplyIntentSchema` (packages/ai
+ * agent-io.ts, PR #4). Kept local so the harness compiles before that lands;
+ * swap for the imported schema on rebase once the contract-freeze merges.
+ */
+export const REPLY_INTENTS = [
+  "interested",
+  "not_now",
+  "unsubscribe",
+  "question",
+  "other",
+] as const;
+export type ReplyIntent = (typeof REPLY_INTENTS)[number];
+
+const ReplyIntentResultSchema = z.object({
+  intent: z.enum(REPLY_INTENTS),
   confidence: z.number().min(0).max(1),
 });
-
-export type ReplyIntent = z.infer<typeof ReplyIntentSchema>["intent"];
 
 export type EvalCheck = { name: string; passed: boolean };
 export type CaseResult = { name: string; passed: boolean; checks: EvalCheck[] };
@@ -119,12 +124,12 @@ export const REPLY_INTENT_CASES: ReplyIntentCase[] = [
   { name: "call-me-interested", input: "Interested — call me Thursday.", expected: "interested" },
   { name: "pricing-question", input: "How much does this cost for a team of 20?", expected: "question" },
   { name: "tell-me-more-question", input: "Could you tell me more about the onboarding?", expected: "question" },
-  { name: "hard-no", input: "Not interested, thanks.", expected: "not_interested" },
-  { name: "already-have", input: "We already have a vendor for this, we'll pass.", expected: "not_interested" },
-  { name: "ooo-auto", input: "I am out of office until Monday with no email access.", expected: "auto_reply" },
-  { name: "on-leave-auto", input: "On annual leave, back next week.", expected: "auto_reply" },
+  { name: "hard-no", input: "Not interested, thanks.", expected: "not_now" },
+  { name: "already-have", input: "We already have a vendor for this, we'll pass.", expected: "not_now" },
+  { name: "maybe-later", input: "Not right now, maybe later this year.", expected: "not_now" },
   { name: "unsubscribe", input: "Please unsubscribe me and remove me from your list.", expected: "unsubscribe" },
-  { name: "neutral-noise", input: "Received.", expected: "neutral" },
+  { name: "ooo-other", input: "I am out of office until Monday with no email access.", expected: "other" },
+  { name: "neutral-noise", input: "Received.", expected: "other" },
 ];
 
 export async function runReplyIntentEval(
@@ -136,7 +141,7 @@ export async function runReplyIntentEval(
       task: "reply_intent",
       messages: [{ role: "user", content: testCase.input }],
     });
-    const parsed = ReplyIntentSchema.safeParse(generated.object);
+    const parsed = ReplyIntentResultSchema.safeParse(generated.object);
     const checks: EvalCheck[] = [
       { name: "valid-shape", passed: parsed.success },
       {

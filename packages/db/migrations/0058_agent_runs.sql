@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS public.agent_runs (
   cost_aed numeric(12, 4) NOT NULL DEFAULT 0 CHECK (cost_aed >= 0),
   gate_outcome text
     CHECK (gate_outcome IN (
-      'authorized', 'denied', 'skipped', 'not_applicable', 'error'
+      'pending', 'approved', 'blocked', 'not_applicable'
     )),
   created_at timestamptz NOT NULL DEFAULT now()
 );
