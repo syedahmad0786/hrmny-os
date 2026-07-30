@@ -53,6 +53,10 @@ import { campaignsRouter } from "./campaigns-router";
 import { analyticsRouter } from "./analytics-router";
 import { portalApprovalsRouter } from "./portal-approvals-router";
 import { leadgenRouter } from "./leadgen-router";
+import { scorecardsRouter } from "./scorecards-router";
+import { aiPolicyRouter } from "./ai-policy-router";
+import { peopleReconRouter } from "./people-recon-router";
+import { reportsRouter } from "./reports-router";
 import { connectionsRouter } from "./connections-router";
 import { featureRequestsRouter } from "./feature-requests-router";
 import { coreHrRouter } from "./core-hr-router";
@@ -793,6 +797,10 @@ export const appRouter = router({
   campaigns: campaignsRouter,
   analytics: analyticsRouter,
   leadgen: leadgenRouter,
+  scorecards: scorecardsRouter,
+  aiPolicy: aiPolicyRouter,
+  peopleRecon: peopleReconRouter,
+  reports: reportsRouter,
 });
 
 export type AppRouter = typeof appRouter;
