@@ -145,11 +145,11 @@ export default function StaffHomePage() {
     <main className="ops-home">
       <section className="ops-today-hero">
         <p className="ops-eyebrow">{dubaiDate} · Dubai</p>
-        <h1>What needs you today</h1>
+        <h1>Your queue today</h1>
         <p className="ops-hero-copy">
           {data.openTasks} open tasks · {data.openDeals} deals in motion ·{" "}
-          {data.activeClients} active clients. Start with the queue below — not
-          the orbit.
+          {data.activeClients} active clients. Start here — pick the next action,
+          not another module.
         </p>
         <div className="ops-hero-actions">
           <Link href="/work/my-tasks" className="ops-btn ops-btn-ochre">

@@ -22,7 +22,7 @@ test.describe("UX IA smoke", () => {
     await expect(primary.getByText("Admin")).toBeVisible();
 
     await expect(
-      page.getByRole("heading", { name: /What needs you today/i }),
+      page.getByRole("heading", { name: /Your queue today/i }),
     ).toBeVisible();
     await expect(page.getByText("Action queue")).toBeVisible();
     await expect(page.getByLabel("Color theme")).toBeVisible();
