@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const pages = [
@@ -14,7 +14,7 @@ const pages = [
   "/conventions",
   "/portal",
 ] as const;
-const artifacts = "/opt/cursor/artifacts";
+const artifacts = path.join(process.cwd(), "test-results", "artifacts");
 
 test.describe("accessibility smoke (axe)", () => {
   test("scan primary surfaces and write report", async ({ page }) => {
@@ -48,6 +48,7 @@ test.describe("accessibility smoke (axe)", () => {
     }
 
     const outPath = path.join(artifacts, "a11y-axe-report.json");
+    mkdirSync(artifacts, { recursive: true });
     writeFileSync(
       outPath,
       JSON.stringify(

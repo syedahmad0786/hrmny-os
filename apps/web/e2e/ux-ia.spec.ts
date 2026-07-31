@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
 
-const artifacts = "/opt/cursor/artifacts";
+const artifacts = path.join(process.cwd(), "test-results", "artifacts");
 
 test.describe("UX IA smoke", () => {
   test("Today nav, action queue, CRM hierarchy, theme control", async ({
