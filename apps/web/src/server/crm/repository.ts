@@ -1,6 +1,7 @@
 import {
   activity,
   and,
+  auditEvent,
   company,
   contact,
   crmNote,
@@ -14,6 +15,7 @@ import {
   type Db,
 } from "@hrmny/db";
 import { getDb } from "../db";
+import { getDemoStore } from "../demo-store";
 import { getCrmMemory, newId } from "./memory";
 import type {
   ActivityRow,
@@ -579,6 +581,134 @@ export async function updateDeal(
       return next;
     },
   );
+}
+
+type DealTransitionAudit = {
+  actorEmployeeId: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  reason?: string | null;
+};
+
+type DealTransitionUnit = {
+  deal: DealRow;
+  applyStage: (to: string, actorEmployeeId: string | null) => Promise<DealRow>;
+  audit: (event: DealTransitionAudit) => Promise<{ auditId: string }>;
+};
+
+const memoryDealTransitionTails = new Map<string, Promise<void>>();
+
+async function withMemoryDealLock<T>(dealId: string, run: () => Promise<T>) {
+  const predecessor = memoryDealTransitionTails.get(dealId) ?? Promise.resolve();
+  let release!: () => void;
+  const lock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = predecessor.then(() => lock);
+  memoryDealTransitionTails.set(dealId, tail);
+  await predecessor;
+  try {
+    return await run();
+  } finally {
+    release();
+    if (memoryDealTransitionTails.get(dealId) === tail) {
+      memoryDealTransitionTails.delete(dealId);
+    }
+  }
+}
+
+/**
+ * Locks one deal while gates, mutation, activity and audit execute. In Postgres,
+ * any audit failure rolls back the stage and activity in the same transaction.
+ */
+export async function withLockedDealTransition<T>(
+  dealId: string,
+  run: (unit: DealTransitionUnit) => Promise<T>,
+): Promise<T | null> {
+  const db = getDb();
+  if (!db) {
+    return withMemoryDealLock(dealId, async () => {
+      const mem = getCrmMemory();
+      const current = mem.deals.get(dealId);
+      if (!current) return null;
+      return run({
+        deal: current,
+        applyStage: async (to, actorEmployeeId) => {
+          const next = {
+            ...current,
+            stage: to,
+            updatedAt: new Date().toISOString(),
+          };
+          mem.deals.set(dealId, next);
+          await createActivity({
+            type: "stage_change",
+            subject: `Stage ${current.stage} → ${to}`,
+            dealId,
+            companyId: next.companyId,
+            actorEmployeeId,
+            metadata: { from: current.stage, to },
+          });
+          return next;
+        },
+        audit: async (event) => {
+          const row = getDemoStore().appendAudit({
+            ...event,
+            reason: event.reason ?? null,
+          });
+          return { auditId: row.auditEventId };
+        },
+      });
+    });
+  }
+
+  return db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select()
+      .from(deal)
+      .where(eq(deal.dealId, dealId))
+      .limit(1)
+      .for("update");
+    if (!locked) return null;
+    const current = mapDeal(locked);
+    return run({
+      deal: current,
+      applyStage: async (to, actorEmployeeId) => {
+        const [updated] = await tx
+          .update(deal)
+          .set({
+            stage: to as typeof deal.$inferInsert.stage,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(deal.dealId, dealId),
+              eq(deal.stage, current.stage as typeof deal.$inferSelect.stage),
+            ),
+          )
+          .returning();
+        if (!updated) throw new Error("Deal stage changed while locked");
+        await tx.insert(activity).values({
+          type: "stage_change",
+          subject: `Stage ${current.stage} → ${to}`,
+          dealId,
+          companyId: updated.companyId,
+          actorEmployeeId,
+          metadata: { from: current.stage, to },
+        });
+        return mapDeal(updated);
+      },
+      audit: async (event) => {
+        const [row] = await tx
+          .insert(auditEvent)
+          .values({ ...event, reason: event.reason ?? null })
+          .returning({ auditId: auditEvent.auditEventId });
+        return row!;
+      },
+    });
+  });
 }
 
 export async function moveDealStage(input: {

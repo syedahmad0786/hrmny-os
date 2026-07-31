@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "../auth/session";
 import { createCaller } from "../trpc/root";
+import { getDemoStore } from "../demo-store";
 import { resetCrmMemory } from "./memory";
 import {
   createCompany,
   createContact,
   createDeal,
+  listActivities,
   listDeals,
   moveDealStage,
   pipelineStages,
@@ -135,5 +137,91 @@ describe("CRM durable layer", () => {
       to: "qualify",
     });
     expect(legal.ok).toBe(true);
+  });
+
+  it("serializes repeated stage changes and audits a stale second click", async () => {
+    const user = resolveDevUser("partner");
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: sessionCanViewMargin(user),
+    });
+    const deal = await caller.crm.deals.create({
+      companyName: "Concurrent transition test",
+      leadSourceLane: "relationship_led",
+    });
+
+    const results = await Promise.all([
+      caller.crm.deals.moveStage({
+        id: deal.dealId,
+        from: "discover",
+        to: "qualify",
+      }),
+      caller.crm.deals.moveStage({
+        id: deal.dealId,
+        from: "discover",
+        to: "qualify",
+      }),
+    ]);
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    const stale = results.find((result) => !result.ok);
+    expect(stale?.ok).toBe(false);
+    if (stale && !stale.ok) {
+      expect(stale.code).toBe("GATE_BLOCKED");
+      expect(stale.blockedBy?.[0]?.gate).toBe("validate");
+    }
+    expect((await caller.crm.deals.get({ id: deal.dealId }))?.stage).toBe(
+      "qualify",
+    );
+    expect(
+      (await listActivities({ dealId: deal.dealId })).filter(
+        (row) => row.type === "stage_change",
+      ),
+    ).toHaveLength(1);
+    expect(
+      getDemoStore().audits.filter(
+        (row) =>
+          row.entityId === deal.dealId &&
+          ["deal.transition", "deal.transition.blocked"].includes(row.action),
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("audits and rejects a transition without deal permission", async () => {
+    const partner = resolveDevUser("partner");
+    const partnerCaller = createCaller({
+      user: partner,
+      employeeId: partner.employeeId,
+      roles: partner.roles,
+      canViewMargin: sessionCanViewMargin(partner),
+    });
+    const deal = await partnerCaller.crm.deals.create({
+      companyName: "Permission boundary test",
+      leadSourceLane: "relationship_led",
+    });
+    const hr = resolveDevUser("hr");
+    const hrCaller = createCaller({
+      user: hr,
+      employeeId: hr.employeeId,
+      roles: hr.roles,
+      canViewMargin: sessionCanViewMargin(hr),
+    });
+
+    const result = await hrCaller.crm.deals.moveStage({
+      id: deal.dealId,
+      from: "discover",
+      to: "qualify",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.blockedBy?.[0]?.gate).toBe("authorize");
+      expect(result.auditId).toBeTruthy();
+    }
+    expect((await partnerCaller.crm.deals.get({ id: deal.dealId }))?.stage).toBe(
+      "discover",
+    );
   });
 });

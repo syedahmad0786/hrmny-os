@@ -147,7 +147,8 @@ export default function CrmPipelinePage() {
                     setDragOver(null);
                     const id = dragId ?? e.dataTransfer.getData("text/deal-id");
                     if (!id) return;
-                    void move.mutateAsync({ id, to: stage.key });
+                    const from = deals.data?.find((deal) => deal.dealId === id)?.stage;
+                    void move.mutateAsync({ id, to: stage.key, from });
                     setDragId(null);
                   }}
                 >

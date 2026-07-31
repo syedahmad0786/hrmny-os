@@ -32,6 +32,7 @@ export default function GateDemoPage() {
     const result = await transition.mutateAsync({
       id: deal.dealId,
       to,
+      from: deal.stage,
     });
     setLast(result);
     await utils.admin.audit.list.invalidate();
