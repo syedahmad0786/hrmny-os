@@ -15,7 +15,9 @@ export function createDb(connectionString: string) {
   const client = postgres(connectionString, {
     prepare: false,
     ssl: "require",
-    max: 1,
+    // A tRPC batch executes procedures concurrently; one connection can
+    // deadlock otherwise independent reads behind a stalled request.
+    max: 5,
     // Fail fast when the DB is unreachable (e.g. IPv6-only direct host from a
     // serverless function) — a bounded error reaches the UI's retry screen;
     // an unbounded connect hangs the request forever.
