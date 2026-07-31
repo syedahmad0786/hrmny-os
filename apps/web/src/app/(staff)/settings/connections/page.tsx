@@ -75,6 +75,36 @@ export default function ConnectionsPage() {
   });
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [redirect, setRedirect] = useState<string | null>(null);
+  const error =
+    saveKey.error ??
+    disconnect.error ??
+    startOAuth.error ??
+    list.error ??
+    asanaStatus.error ??
+    managedToolkits.error ??
+    managedAccounts.error ??
+    authorizeManaged.error ??
+    disconnectManaged.error ??
+    startWorkApp.error ??
+    disconnectWorkApp.error ??
+    workApps.error;
+
+  async function retry() {
+    saveKey.reset();
+    disconnect.reset();
+    startOAuth.reset();
+    authorizeManaged.reset();
+    disconnectManaged.reset();
+    startWorkApp.reset();
+    disconnectWorkApp.reset();
+    await Promise.all([
+      list.refetch(),
+      asanaStatus.refetch(),
+      managedToolkits.refetch(),
+      managedAccounts.refetch(),
+      workApps.refetch(),
+    ]);
+  }
 
   async function connectGoogleWorkspace() {
     const supabase = getSupabaseBrowserClient();
@@ -255,6 +285,11 @@ export default function ConnectionsPage() {
           );
         })}
       </div>
+      {!list.isLoading && !list.error && list.data?.length === 0 ? (
+        <p className="rounded-lg border border-sand p-4 text-sm text-muted">
+          No direct business connections are configured.
+        </p>
+      ) : null}
 
       <section className="rounded-xl border border-sand bg-white/70 p-5">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -516,34 +551,18 @@ export default function ConnectionsPage() {
           </a>
         </p>
       ) : null}
-      {saveKey.error ||
-      disconnect.error ||
-      startOAuth.error ||
-      asanaStatus.error ||
-      managedToolkits.error ||
-      managedAccounts.error ||
-      authorizeManaged.error ||
-      disconnectManaged.error ||
-      startWorkApp.error ||
-      disconnectWorkApp.error ||
-      workApps.error ? (
-        <p className="text-sm text-red-700">
-          {
-            (
-              saveKey.error ??
-              disconnect.error ??
-              startOAuth.error ??
-              asanaStatus.error ??
-              managedToolkits.error ??
-              managedAccounts.error ??
-              authorizeManaged.error ??
-              disconnectManaged.error ??
-              startWorkApp.error ??
-              disconnectWorkApp.error ??
-              workApps.error
-            )?.message
-          }
-        </p>
+      {error ? (
+        <section className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p>{error.message}</p>
+          <Button
+            className="mt-2"
+            type="button"
+            variant="ghost"
+            onClick={() => void retry()}
+          >
+            Retry
+          </Button>
+        </section>
       ) : null}
     </main>
   );

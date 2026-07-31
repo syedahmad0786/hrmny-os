@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@hrmny/ui";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -95,7 +96,16 @@ export default function FeatureLabPage() {
     setScopeKey(options?.[0]?.key ?? "");
   }
 
-  const error = setOverride.error ?? removeOverride.error ?? list.error;
+  const error =
+    setOverride.error ??
+    removeOverride.error ??
+    list.error ??
+    selectedResolution.error;
+  const retry = async () => {
+    setOverride.reset();
+    removeOverride.reset();
+    await Promise.all([list.refetch(), selectedResolution.refetch()]);
+  };
   const viewerEnabled = new Set(
     list.data?.resolvedForViewer
       .filter((item) => item.enabled)
@@ -290,13 +300,25 @@ export default function FeatureLabPage() {
       </section>
 
       {error ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-          {error.message}
-        </p>
+        <section className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p>{error.message}</p>
+          <Button
+            className="mt-2"
+            type="button"
+            variant="ghost"
+            onClick={() => void retry()}
+          >
+            Retry
+          </Button>
+        </section>
       ) : null}
 
       {list.isLoading ? (
         <p className="text-sm text-muted">Loading feature catalogue…</p>
+      ) : groups.length === 0 ? (
+        <p className="rounded-lg border border-sand bg-white/75 p-4 text-sm text-muted">
+          No features match these filters.
+        </p>
       ) : (
         <div className="flex flex-col gap-6">
           {groups.map(({ group, items }) => (

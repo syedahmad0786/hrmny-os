@@ -27,13 +27,13 @@ Lead-to-Cash outcome remains a later multi-milestone commercial deliverable.
 
 | Surface | Current evidence | Status |
 | --- | --- | --- |
-| Candidate branch | PR #39; exact promoted commit must match the final green CI run | Software work in progress |
-| Existing candidate preview | `dpl_B9rLnbKVH1hPJ1Fp61r9PxaSnW1M`, commit `6b851e061a92eb0559717f93f6dc9e793a35e093`, Ready | Superseded when this audit change receives a new preview |
+| Candidate branch | PR #39 current head; exact SHA is recorded in the release register after CI | Draft and not promoted |
+| Candidate preview | Vercel preview generated from the current head; exact deployment ID is recorded in the release register | Vercel Deployment Protection access required for browser proof |
 | Production | `https://hrmny-os-web.vercel.app`, `dpl_Fv17vS8cQULcwNew2Euiz7pCJTzG`, commit `3b3c65dcc0bf20254332dfe6ce45ef8d16af87b5`, `sin1` | Known-good rollback deployment; candidate not promoted |
 | Production errors | Vercel grouped runtime errors, last 24 hours | No clusters reported at audit time |
 | Target Supabase | `klrugedztqxlvyghyzxs`, Singapore | Operator permission denied; `0070` target proof unavailable |
-| Automated quality | Node 24, pnpm 9.15.9, frozen install, zero-warning lint, typecheck, tests, build, Playwright and Axe | Green on the last candidate; rerun required for final commit |
-| Migration quality | Pinned `supabase/postgres:17.6.1.141`; all 70 journal entries from empty; 0069→0070; second 0070 apply; RLS/Data API/trigger/schema assertions | Green locally; independent CI database job required |
+| Automated quality | Node 24, pnpm 9.15.9, frozen install, zero-warning lint, typecheck, 468 unit/integration tests, build, Playwright and Axe; exact run ID is recorded in the release register | Must be green on the promoted head |
+| Migration quality | Pinned `supabase/postgres:17.6.1.141`; all 70 journal entries from empty; 0069→0070; second 0070 apply; RLS/Data API/trigger/schema assertions; exact job ID is recorded in the release register | Must be green on the promoted head |
 
 ## Software-controlled M1 scope
 
@@ -87,6 +87,7 @@ related software path is green:
 | Hold | Owner | Missing input | Affected proof |
 | --- | --- | --- | --- |
 | Target Supabase project authority | HRMNY technical owner | Grant project access or apply `0070` and return dated results | Target migration, persistence and production promotion |
+| Vercel protected-preview access | HRMNY Vercel owner | Grant Deployment Protection access to the release browser account | Authenticated preview route/control and full-thread browser proof |
 | Workspace persona accounts | HRMNY IT / Ayham / Molham | Approved AM, Finance, Partner and Director test accounts | Live SSO, margin redaction and separation-of-duties browser proof |
 | Google Chat webhook | HRMNY technical owner | Rotated webhook and visible test message | Live Chat delivery only |
 | Secret-manager rotation | HRMNY technical owner | Keeper/approved-store entry and rotation record | Team-controlled credential proof |
