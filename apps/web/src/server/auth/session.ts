@@ -212,6 +212,12 @@ export function sessionHas(
 export async function resolveSupabaseUser(
   accessToken: string,
 ): Promise<SessionUser | null> {
+  const startedAt = Date.now();
+  const mark = (stage: string) => {
+    if (process.env.VERCEL_ENV === "preview") {
+      console.info(`[auth-session] ${stage} ${Date.now() - startedAt}ms`);
+    }
+  };
   const config = getSupabasePublicConfig();
   if (!config) {
     throw new Error(
@@ -227,6 +233,7 @@ export async function resolveSupabaseUser(
     },
   });
   const { data, error } = await supabase.auth.getUser(accessToken);
+  mark("token_verified");
   if (error || !data.user) return null;
 
   const db = getDb();
@@ -239,6 +246,7 @@ export async function resolveSupabaseUser(
     getWorkSsoConfiguration(),
     getWorkOrganizationPolicy(),
   ]);
+  mark("policies_loaded");
   const lastSignInAt = Date.parse(data.user.last_sign_in_at ?? "");
   const sessionExpired =
     Number.isFinite(lastSignInAt) &&
@@ -271,6 +279,7 @@ export async function resolveSupabaseUser(
       )
       .limit(1);
   }
+  mark("identity_loaded");
 
   if (staff?.isActive) {
     const access = await db
@@ -287,6 +296,7 @@ export async function resolveSupabaseUser(
         eq(employeeRole.roleId, permissionPolicy.roleId),
       )
       .where(eq(employeeRole.employeeId, staff.employeeId));
+    mark("access_loaded");
 
     const roles = [...new Set(access.map((row) => row.role))];
     const featureSubject = { userId: staff.employeeId, roles };
@@ -294,6 +304,7 @@ export async function resolveSupabaseUser(
       featureEnabled("work.sso_scim", featureSubject),
       featureEnabled("work.domain_controls", featureSubject),
     ]);
+    mark("features_loaded");
     if (ssoEnabled && !ssoAccessAllowed(sso, data.user)) return null;
     if (sessionControlsEnabled && sessionExpired) return null;
 
