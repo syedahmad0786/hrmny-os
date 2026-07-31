@@ -1,5 +1,5 @@
 import { createTRPCReact } from "@trpc/react-query";
-import { httpBatchLink } from "@trpc/client";
+import { httpLink } from "@trpc/client";
 import superjson from "superjson";
 import type { AppRouter } from "@/server/trpc/root";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
@@ -18,7 +18,7 @@ export function setDevRole(role: string) {
 export function createTrpcClient() {
   return trpc.createClient({
     links: [
-      httpBatchLink({
+      httpLink({
         url: "/api/trpc",
         transformer: superjson,
         async headers() {
