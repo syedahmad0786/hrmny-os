@@ -1,6 +1,7 @@
 # hrmny OS — Cutover, training & hypercare
 
-**Milestone:** M6 · **Status:** Demo-ready (dev/mocks) · **Date:** 2026-07-16  
+**Milestone:** M6 · **Status:** M1 candidate verified; production cutover pending · **Evidence updated:** 2026-07-31
+
 **Owner:** Lead engineer + client ops sponsor
 
 ---
@@ -18,8 +19,8 @@
 
 | # | Item | Owner | Done |
 |---|---|---|---|
-| 1 | Supabase prod project + migrations applied through **0070** after fresh/upgrade CI proof (`packages/db/APPLY.md`, staging dry-run in `docs/STAGING-GO-LIVE.md`) | Eng | ☐ |
-| 2 | Vercel prod + preview; env from `.env.example` (no secrets in git) | Eng | ☐ |
+| 1 | Target Supabase `klrugedztqxlvyghyzxs` is at **0070**; fresh, 0069→0070, second-apply, RLS/Data API/constraint/index/trigger and target postchecks passed | Eng | ☑ |
+| 2 | Exact `9019c48a…` has two successful previews and two fully green CI runs; the `hrmny-os` functions are verified in `sin1`, while authoritative production remains on `3b3c65d…` pending owner promotion | Eng + Vercel owner | ☐ |
 | 3 | Google Workspace SSO for staff; portal magic-link allowlist | Eng + IT | ☐ |
 | 4 | Composio OAuth apps (Gmail, LinkedIn, Canva, Calendar) redirect URLs | Eng | ☐ |
 | 5 | Xero / Bayzat / Apollo / Hunter keys in Keeper → Vercel env | Client | ☐ |
@@ -27,7 +28,7 @@
 | 7 | Role matrix signed (AM margin deny, payroll SoD, portal scopes) | Partners | ☐ |
 | 8 | Freeze list of live seams (idempotency keys agreed) | Eng | ☐ |
 | 9 | Backup + DR: daily dump, RTO &lt; 24h documented — procedure in `docs/BACKUP-AND-DR.md`; ☐ until restore drill evidence attached | Ops | ☐ |
-| 10 | Feature flags / rollback: previous Vercel deployment known-good | Eng | ☐ |
+| 10 | Known-good Vercel target retained and exact rollback procedure documented below; production rollback rehearsal still required | Eng + Vercel owner | ☐ |
 
 ---
 
@@ -78,13 +79,79 @@
 
 ## 7. Rollback
 
-1. Vercel: promote previous production deployment.
-2. Supabase: restore last daily dump if migration fault (prefer forward-fix).
-3. Re-enable Asana write for affected boards only.
-4. Disable seam workers / Inngest if double-fire suspected; drain outbox manually.
+### M1 authoritative Vercel rollback
+
+Command syntax was verified against Vercel's current
+[`rollback`](https://vercel.com/docs/cli/rollback) and
+[`promote`](https://vercel.com/docs/cli/promote) CLI references. The
+authoritative project is `hrmny-os-web` in scope
+`ahmad-bukharis-projects-74a52414`. Do not run these commands against the
+similarly named `hrmny-os` project. The retained known-good production target
+is `dpl_Fv17vS8cQULcwNew2Euiz7pCJTzG` at commit
+`3b3c65dcc0bf20254332dfe6ce45ef8d16af87b5`.
+
+1. Before promotion, inspect and retain the known-good deployment:
+
+   ```powershell
+   vercel inspect dpl_Fv17vS8cQULcwNew2Euiz7pCJTzG --scope ahmad-bukharis-projects-74a52414
+   ```
+
+   Stop if it is not READY, is not from `hrmny-os-web`, or does not match the
+   recorded commit. Record the candidate deployment ID before changing traffic.
+
+2. If the promoted candidate fails the smoke gate, request an explicit rollback
+   to that deployment and scope:
+
+   ```powershell
+   vercel rollback dpl_Fv17vS8cQULcwNew2Euiz7pCJTzG --scope ahmad-bukharis-projects-74a52414 --timeout=3m
+   ```
+
+   Do not add an undocumented non-interactive flag. If the CLI requests
+   confirmation, confirm only when it names `hrmny-os-web` and its production
+   domains; otherwise abort.
+
+3. Wait for rollback completion and verify the public target:
+
+   ```powershell
+   vercel rollback status hrmny-os-web --scope ahmad-bukharis-projects-74a52414 --timeout=3m
+   vercel inspect https://hrmny-os-web.vercel.app --scope ahmad-bukharis-projects-74a52414
+   vercel httpstat / --deployment https://hrmny-os-web.vercel.app --scope ahmad-bukharis-projects-74a52414
+   vercel logs --deployment https://hrmny-os-web.vercel.app --level error --since 5m --scope ahmad-bukharis-projects-74a52414
+   ```
+
+   Repeat login/protected-route and database-read smoke checks. Record the
+   rollback timestamp, operator, deployment ID, HTTP result and error-log result.
+
+4. Leave migration 0070 applied during an application rollback. It is additive
+   and the retained application deployment must be rechecked against it before
+   promotion. Never restore or destructively downgrade the database as part of
+   this application procedure. Use a separately approved, tested restore only
+   for a confirmed data incident; prefer a forward schema fix.
+
+5. A Vercel instant rollback disables automatic production-domain assignment.
+   After the repaired deployment passes all gates, restore normal delivery with:
+
+   ```powershell
+   vercel promote <repaired-production-deployment-id-or-url> --scope ahmad-bukharis-projects-74a52414
+   ```
+
+   Verify `vercel promote status hrmny-os-web --scope
+   ahmad-bukharis-projects-74a52414` before closing the incident.
+
+### Wider M6 operational rollback
+
+1. Re-enable Asana writes only for affected boards if the full cutover had
+   already disabled them.
+2. Disable seam workers / Inngest if a double-fire is suspected, then reconcile
+   and drain the outbox with an audit record.
 
 ---
 
 ## 8. Production gaps (post-demo)
 
-Tracked in repo README — live Supabase Auth, durable Xero webhooks, Composio keys, Inngest crons, Bayzat API vs CSV, UAE residency migrate path (not V1 blocker).
+Tracked in repo README. Exact `9019c48a…` has green CI, successful previews,
+fail-closed HTTP assertions, and a clean `hrmny-os` runtime smoke window. The
+remaining M1 release gaps are the exact-head authenticated browser thread and
+owner-controlled promotion/rollback proof on `hrmny-os-web`. Later-milestone
+gaps include durable Xero webhooks, Composio keys, Inngest crons, Bayzat API
+versus CSV, and the UAE-residency migration path.
