@@ -3,7 +3,17 @@ import { expect, test } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 
-const pages = ["/", "/crm", "/work", "/finance", "/login", "/portal"] as const;
+const pages = [
+  "/",
+  "/login",
+  "/roles",
+  "/work",
+  "/admin/audit",
+  "/admin/features",
+  "/settings/connections",
+  "/conventions",
+  "/portal",
+] as const;
 const artifacts = "/opt/cursor/artifacts";
 
 test.describe("accessibility smoke (axe)", () => {
@@ -38,7 +48,14 @@ test.describe("accessibility smoke (axe)", () => {
     }
 
     const outPath = path.join(artifacts, "a11y-axe-report.json");
-    writeFileSync(outPath, JSON.stringify({ generatedAt: new Date().toISOString(), report }, null, 2));
+    writeFileSync(
+      outPath,
+      JSON.stringify(
+        { generatedAt: new Date().toISOString(), report },
+        null,
+        2,
+      ),
+    );
 
     const blockers = report.flatMap((r) =>
       r.violations.filter(

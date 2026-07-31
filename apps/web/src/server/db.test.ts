@@ -23,11 +23,12 @@ describe("getDb production fail-loud", () => {
     expect(() => getDb()).toThrow(/DATABASE_URL is required/);
   });
 
-  it("allows memory when ALLOW_MEMORY_STORE=true even with supabase auth", async () => {
+  it("does not allow ALLOW_MEMORY_STORE to override hosted safety", async () => {
     vi.stubEnv("DATABASE_URL", "");
     vi.stubEnv("AUTH_MODE", "supabase");
     vi.stubEnv("ALLOW_MEMORY_STORE", "true");
+    vi.stubEnv("VERCEL_ENV", "preview");
     const { getDb } = await import("./db");
-    expect(getDb()).toBeNull();
+    expect(() => getDb()).toThrow(/DATABASE_URL is required/);
   });
 });

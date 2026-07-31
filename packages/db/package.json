@@ -19,7 +19,7 @@
     "studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "echo \"lint stub\""
+    "lint": "eslint src --max-warnings 0"
   },
   "dependencies": {
     "drizzle-orm": "^0.38.3",

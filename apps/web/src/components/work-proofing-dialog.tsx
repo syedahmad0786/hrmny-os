@@ -131,6 +131,7 @@ export function WorkProofingDialog({
                 />
               ) : (
                 // native img: proofing needs exact pixel frame, not next/image
+                // eslint-disable-next-line @next/next/no-img-element -- signed URLs and annotation coordinates require the file's native aspect ratio
                 <img
                   className="block h-auto w-full select-none"
                   src={previewUrl}

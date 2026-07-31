@@ -21,6 +21,7 @@
  */
 
 export type Actor = "staff" | "portal" | "public";
+export type RouteExposure = "all" | "development-only";
 
 export interface RouteEntry {
   /** URL path with [param] placeholders preserved (matches the src/app tree). */
@@ -37,6 +38,8 @@ export interface RouteEntry {
    *                        used for public [param] pages with no seeded record.
    */
   expect?: "notFound";
+  /** Hosted preview/production exposure. Omitted means available everywhere. */
+  exposure?: RouteExposure;
   /** Final path after a server-side redirect() alias (for humans reading this). */
   redirectsTo?: string;
 }
@@ -56,7 +59,10 @@ const staff = (route: string, extra: Partial<RouteEntry> = {}): RouteEntry => ({
   roles: ["staff"],
   ...extra,
 });
-const portal = (route: string, extra: Partial<RouteEntry> = {}): RouteEntry => ({
+const portal = (
+  route: string,
+  extra: Partial<RouteEntry> = {},
+): RouteEntry => ({
   route,
   actor: "portal",
   sample: route,
@@ -79,7 +85,7 @@ export const ROUTES: RouteEntry[] = [
   staff("/admin/features"),
   staff("/admin/work"),
   staff("/approvals"),
-  staff("/assets"), // dev-only DAM probe — 404s unless getAuthMode()==="dev"
+  staff("/assets", { exposure: "development-only" }),
   staff("/benefits"),
   staff("/billing"),
   staff("/client-preview"),
@@ -103,7 +109,7 @@ export const ROUTES: RouteEntry[] = [
   staff("/finance"),
   // Dev-only probes: page.tsx 404s (notFound) unless getAuthMode()==="dev".
   // The CI crawler runs in dev auth, so both still render "ok" there.
-  staff("/gate"),
+  staff("/gate", { exposure: "development-only" }),
   staff("/hr", { redirectsTo: "/people" }),
   staff("/margin"),
   staff("/my-card"),
@@ -178,7 +184,7 @@ export function routeToRegex(route: string): RegExp {
 export function matchesManifest(path: string): boolean {
   let p = path.split(/[?#]/)[0] ?? path;
   if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
-  if (p === "" ) p = "/";
+  if (p === "") p = "/";
   if (p === "/") return true;
   if (p.startsWith("/api/")) return true; // API routes live in the app tree as route.ts
   if (STATIC_ROUTES.has(p)) return true;

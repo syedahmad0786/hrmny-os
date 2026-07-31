@@ -1,7 +1,8 @@
 import eslint from "@eslint/js";
+import nextPlugin from "@next/eslint-plugin-next";
 import tseslint from "typescript-eslint";
 
-/** Minimal monorepo lint — errors only; warnings allowed while we harden. */
+/** One real zero-warning lint policy for every production package. */
 export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
@@ -15,6 +16,14 @@ export default tseslint.config(
       "desk-site/**",
       "packages/db/migrations/**",
     ],
+  },
+  {
+    files: ["apps/web/**/*.{js,jsx,ts,tsx}"],
+    plugins: { "@next/next": nextPlugin },
+    rules: {
+      ...nextPlugin.configs.recommended.rules,
+      ...nextPlugin.configs["core-web-vitals"].rules,
+    },
   },
   {
     rules: {

@@ -29,12 +29,22 @@ export type DemoConvention = {
   updatedByEmployeeId: string | null;
 };
 
-/** DAM_STORAGE=memory (default) | supabase — live server-side Storage. */
-export function createObjectStoreFromEnv(): ObjectStore {
-  const mode = (process.env.DAM_STORAGE ?? "memory").toLowerCase();
+/** DAM_STORAGE=memory (local only) | supabase (required on Vercel). */
+export function createObjectStoreFromEnv(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): ObjectStore {
+  const mode = (env.DAM_STORAGE ?? "memory").toLowerCase();
+  const hosted = ["preview", "production"].includes(
+    env.VERCEL_ENV?.toLowerCase() ?? "",
+  );
+  if (hosted && mode !== "supabase") {
+    throw new Error(
+      "DAM_STORAGE=supabase is required for preview and production deployments",
+    );
+  }
   if (mode === "supabase") {
-    const config = getSupabaseAdminConfig();
-    const bucket = process.env.DAM_BUCKET ?? "hrmny-dam";
+    const config = getSupabaseAdminConfig(env);
+    const bucket = env.DAM_BUCKET ?? "hrmny-dam";
     if (!config) {
       throw new Error(
         "DAM_STORAGE=supabase requires NEXT_PUBLIC_SUPABASE_URL and a Supabase server secret key",
@@ -43,6 +53,8 @@ export function createObjectStoreFromEnv(): ObjectStore {
     const client = createClient(config.url, config.key);
     return createSupabaseObjectStore(client, bucket);
   }
+  if (mode !== "memory")
+    throw new Error(`Unsupported DAM_STORAGE mode: ${mode}`);
   return createMemoryObjectStore();
 }
 
@@ -101,6 +113,7 @@ export type DemoAsset = {
   status: string;
   clientId: string | null;
   taskId: string | null;
+  workItemId: string | null;
   qcPassed: boolean;
   versions: DemoAssetVersion[];
 };
@@ -115,7 +128,7 @@ export type DemoAssetVersion = {
   createdAt: string;
 };
 
-export type DemoRole = { key: string; displayName: string };
+export type DemoRole = { roleId?: string; key: string; displayName: string };
 
 export type DemoConnection = {
   connectionAccountId: string;
@@ -130,6 +143,9 @@ export type HealthSignal = {
   severity: string;
   payload: Record<string, unknown>;
   notifiedAt: string | null;
+  deliveryStatus: "not_configured" | "pending" | "delivered" | "failed";
+  notificationAttempts: number;
+  lastError: string | null;
   createdAt: string;
 };
 
@@ -651,15 +667,51 @@ class MemoryDemoStore {
   >();
 
   readonly roles: DemoRole[] = [
-    { key: "partner", displayName: "Partner" },
-    { key: "finance", displayName: "Finance" },
-    { key: "am", displayName: "Account Manager" },
-    { key: "director", displayName: "Director" },
-    { key: "hr", displayName: "HR" },
-    { key: "creative", displayName: "Creative" },
-    { key: "creative_director", displayName: "Creative Director" },
-    { key: "traffic", displayName: "Traffic" },
-    { key: "developer", displayName: "Developer" },
+    {
+      roleId: "a0000000-0000-4000-8000-000000000001",
+      key: "partner",
+      displayName: "Partner",
+    },
+    {
+      roleId: "a0000000-0000-4000-8000-000000000002",
+      key: "finance",
+      displayName: "Finance",
+    },
+    {
+      roleId: "a0000000-0000-4000-8000-000000000003",
+      key: "am",
+      displayName: "Account Manager",
+    },
+    {
+      roleId: "a0000000-0000-4000-8000-000000000004",
+      key: "director",
+      displayName: "Director",
+    },
+    {
+      roleId: "a0000000-0000-4000-8000-000000000007",
+      key: "hr",
+      displayName: "HR",
+    },
+    {
+      roleId: "a0000000-0000-4000-8000-000000000005",
+      key: "creative",
+      displayName: "Creative",
+    },
+    {
+      roleId: "a0000000-0000-4000-8000-000000000008",
+      key: "creative_director",
+      displayName: "Creative Director",
+    },
+    {
+      roleId: "a0000000-0000-4000-8000-000000000009",
+      key: "traffic",
+      displayName: "Traffic",
+    },
+    {
+      roleId: "a0000000-0000-4000-8000-000000000006",
+      key: "developer",
+      displayName: "Developer",
+    },
   ];
 
   resetDemoDeal() {
@@ -711,7 +763,9 @@ class MemoryDemoStore {
       contractValue: "50000.00",
       currency: "AED",
       startDate: new Date().toISOString().slice(0, 10),
-      renewalDate: new Date(Date.now() + 130 * 86400000).toISOString().slice(0, 10),
+      renewalDate: new Date(Date.now() + 130 * 86400000)
+        .toISOString()
+        .slice(0, 10),
       fee: "50000.00",
       lifecycleStatus: "active",
       contacts: { primary: { email: "alex@democo.example" } },
@@ -869,7 +923,10 @@ class MemoryDemoStore {
       briefId: null,
     };
     this.tasks.set(taskB.taskId, taskB);
-    const assetB = this.createAsset("Other Co confidential cut", DEMO_CLIENT_B_ID);
+    const assetB = this.createAsset(
+      "Other Co confidential cut",
+      DEMO_CLIENT_B_ID,
+    );
     assetB.status = "internal_review";
     this.clientDeliveryStatus.set(DEMO_CLIENT_B_ID, {
       clientId: DEMO_CLIENT_B_ID,
@@ -1018,7 +1075,9 @@ class MemoryDemoStore {
         revenueToDate > 0
           ? (((revenueToDate - deliveryCost) / revenueToDate) * 100).toFixed(2)
           : "0.00";
-      const scope = [...this.scopes.values()].find((s) => s.clientId === c.clientId);
+      const scope = [...this.scopes.values()].find(
+        (s) => s.clientId === c.clientId,
+      );
       const overServicing = deliveryCost > fee;
       const scopeVsActualPct =
         fee > 0 ? ((deliveryCost / fee) * 100).toFixed(2) : "0.00";
@@ -1081,6 +1140,7 @@ class MemoryDemoStore {
     title: string,
     clientId: string | null,
     taskId: string | null = null,
+    workItemId: string | null = null,
   ) {
     const assetId = randomUUID();
     const asset: DemoAsset = {
@@ -1089,6 +1149,7 @@ class MemoryDemoStore {
       status: "draft",
       clientId,
       taskId,
+      workItemId,
       qcPassed: false,
       versions: [],
     };
@@ -1126,7 +1187,8 @@ class MemoryDemoStore {
     };
     asset.versions = [...asset.versions, version];
     this.appendAudit({
-      actorEmployeeId: opts.employeeId ?? "00000000-0000-4000-8000-000000000000",
+      actorEmployeeId:
+        opts.employeeId ?? "00000000-0000-4000-8000-000000000000",
       action: "assets.uploadVersion",
       entityType: "asset",
       entityId: opts.assetId,
@@ -1137,29 +1199,24 @@ class MemoryDemoStore {
     return version;
   }
 
-  pushHealth(signalKey: string, severity: string, payload: Record<string, unknown>) {
+  pushHealth(
+    signalKey: string,
+    severity: string,
+    payload: Record<string, unknown>,
+  ) {
     const row: HealthSignal = {
       signalKey,
       severity,
       payload,
       notifiedAt: null,
+      deliveryStatus: process.env.GOOGLE_CHAT_WEBHOOK_URL
+        ? "pending"
+        : "not_configured",
+      notificationAttempts: 0,
+      lastError: null,
       createdAt: new Date().toISOString(),
     };
     this.healthSignals.unshift(row);
-    const webhook = process.env.GOOGLE_CHAT_WEBHOOK_URL;
-    if (webhook) {
-      row.notifiedAt = new Date().toISOString();
-      // Fire-and-forget — never block the request path on Chat latency.
-      void fetch(webhook, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: `[hrmny OS] ${severity.toUpperCase()} · ${signalKey}\n${JSON.stringify(payload)}`,
-        }),
-      }).catch(() => {
-        /* stub / network failure — signal already recorded */
-      });
-    }
     return row;
   }
 

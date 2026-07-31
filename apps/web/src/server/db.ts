@@ -8,6 +8,10 @@ let cached: Db | null | undefined;
  * Escape hatch: ALLOW_MEMORY_STORE=true (emergency demos only).
  */
 function memoryStoreForbidden(): boolean {
+  const hosted = ["preview", "production"].includes(
+    process.env.VERCEL_ENV?.toLowerCase() ?? "",
+  );
+  if (hosted) return true;
   if (process.env.ALLOW_MEMORY_STORE === "true") return false;
   if (process.env.REQUIRE_DATABASE === "true") return true;
   if (process.env.AUTH_MODE === "supabase") return true;
@@ -20,7 +24,7 @@ export function getDb(): Db | null {
   if (!url) {
     if (memoryStoreForbidden()) {
       throw new Error(
-        "DATABASE_URL is required when AUTH_MODE=supabase (or REQUIRE_DATABASE=true). Set ALLOW_MEMORY_STORE=true only for emergency demos.",
+        "DATABASE_URL is required for hosted deployments and live authentication. Memory storage is local-development only.",
       );
     }
     cached = null;

@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabasePublicConfig } from "@/lib/supabase-config";
+import { getAuthModeFromEnv } from "@/lib/auth-mode";
 
 /**
  * Refresh the Supabase auth cookie session on the edge and optionally redirect
@@ -9,7 +10,7 @@ import { getSupabasePublicConfig } from "@/lib/supabase-config";
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const config = getSupabasePublicConfig();
-  if (!config || process.env.AUTH_MODE !== "supabase") {
+  if (!config || getAuthModeFromEnv() !== "supabase") {
     return { response, user: null as null | { id: string } };
   }
 

@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "echo \"lint stub\""
+    "lint": "eslint src --max-warnings 0"
   },
   "dependencies": {
     "@composio/core": "0.14.0",

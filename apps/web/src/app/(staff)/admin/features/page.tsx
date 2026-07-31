@@ -177,27 +177,9 @@ export default function FeatureLabPage() {
           </Link>
           <Link
             className="rounded-full border border-sand bg-white px-4 py-2"
-            href="/approvals"
-          >
-            Approvals
-          </Link>
-          <Link
-            className="rounded-full border border-sand bg-white px-4 py-2"
-            href="/roles"
-          >
-            Roles
-          </Link>
-          <Link
-            className="rounded-full border border-sand bg-white px-4 py-2"
             href="/conventions"
           >
             Conventions
-          </Link>
-          <Link
-            className="rounded-full border border-sand bg-white px-4 py-2"
-            href="/dashboards"
-          >
-            Dashboards
           </Link>
           <Link
             className="rounded-full border border-sand bg-white px-4 py-2"

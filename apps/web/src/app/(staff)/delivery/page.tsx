@@ -42,7 +42,10 @@ export default function DeliveryBoardPage() {
         ) : null}
       </div>
 
-      <nav className="flex flex-wrap gap-2 text-sm" aria-label="Delivery sections">
+      <nav
+        className="flex flex-wrap gap-2 text-sm"
+        aria-label="Delivery sections"
+      >
         <Link
           className="rounded-full bg-ink px-4 py-2 text-white"
           href="/delivery"
@@ -69,9 +72,9 @@ export default function DeliveryBoardPage() {
         </Link>
         <Link
           className="rounded-full border border-sand bg-paper px-4 py-2"
-          href="/assets"
+          href="/work"
         >
-          Assets (DAM)
+          Work Files (DAM)
         </Link>
         <Link
           className="rounded-full border border-sand bg-paper px-4 py-2"
@@ -85,8 +88,7 @@ export default function DeliveryBoardPage() {
         Bottleneck:{" "}
         <span className="text-ink">
           {board.data?.bottleneck.status ?? "—"} (
-          {board.data?.bottleneck.count ?? 0}) · ratio{" "}
-          {board.data?.ratio ?? 0}
+          {board.data?.bottleneck.count ?? 0}) · ratio {board.data?.ratio ?? 0}
         </span>
         {capacity.data ? (
           <>

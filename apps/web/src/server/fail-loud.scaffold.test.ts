@@ -35,16 +35,26 @@ describe("M1 fail-loud + idempotency scaffolding", () => {
     expect(() => createObjectStoreFromEnv()).toThrow(/DAM_STORAGE=supabase/);
   });
 
+  it("hosted deployments cannot use memory DAM", async () => {
+    const { createObjectStoreFromEnv } = await import("./demo-store");
+    expect(() =>
+      createObjectStoreFromEnv({
+        VERCEL_ENV: "production",
+        DAM_STORAGE: "memory",
+      }),
+    ).toThrow(/required for preview and production/);
+  });
+
   it("health emit always records a signal (never silent)", async () => {
     const partner = callerFor();
     const before = (await partner.admin.health.get()).signals.length;
-    await partner.admin.health.emitStub({
-      signalKey: "fail_loud_check",
+    await partner.admin.health.sendTest({
+      signalKey: "m1_test",
       severity: "critical",
     });
     const after = await partner.admin.health.get();
     expect(after.signals.length).toBeGreaterThan(before);
-    expect(after.signals[0]?.signalKey).toBe("fail_loud_check");
+    expect(after.signals[0]?.signalKey).toBe("m1_test");
   });
 
   it("blocked CRM stage does not mutate deal (no silent apply)", async () => {

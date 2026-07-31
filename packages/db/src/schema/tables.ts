@@ -609,7 +609,12 @@ export const clientOnboardingPhase = pgTable(
     signedOffAt: timestamp("signed_off_at", { withTimezone: true }),
     ...timestamps,
   },
-  (t) => [uniqueIndex("client_onboarding_phase_client_idx_uniq").on(t.clientId, t.phaseIndex)],
+  (t) => [
+    uniqueIndex("client_onboarding_phase_client_idx_uniq").on(
+      t.clientId,
+      t.phaseIndex,
+    ),
+  ],
 );
 
 /** Invoice intake HITL proposals (0066). */
@@ -704,6 +709,8 @@ export const clientPortalUser = pgTable("client_portal_user", {
 export const asset = pgTable("asset", {
   assetId: uuid("asset_id").defaultRandom().primaryKey(),
   taskId: uuid("task_id").references(() => task.taskId),
+  /** Native Work task; kept nullable for legacy M4 assets. */
+  workItemId: uuid("work_item_id"),
   clientId: uuid("client_id").references(() => client.clientId),
   title: text("title").notNull(),
   status: text("status").default("draft").notNull(),
@@ -834,6 +841,9 @@ export const healthSignal = pgTable("health_signal", {
   severity: text("severity").notNull(), // info | warn | critical
   payload: jsonb("payload").$type<Record<string, unknown>>().default({}),
   notifiedAt: timestamp("notified_at", { withTimezone: true }),
+  deliveryStatus: text("delivery_status").default("not_configured").notNull(),
+  notificationAttempts: integer("notification_attempts").default(0).notNull(),
+  lastError: text("last_error"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -1239,7 +1249,10 @@ export const agentRuns = pgTable(
     agentRunId: uuid("agent_run_id").defaultRandom().primaryKey(),
     agent: text("agent").notNull(),
     model: text("model").notNull(),
-    input: jsonb("input").$type<Record<string, unknown>>().default({}).notNull(),
+    input: jsonb("input")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
     output: jsonb("output")
       .$type<Record<string, unknown>>()
       .default({})
@@ -1465,7 +1478,10 @@ export const importLineage = pgTable(
       table.sourceId,
     ),
     index("import_lineage_target_idx").on(table.targetTable, table.targetId),
-    index("import_lineage_system_idx").on(table.sourceSystem, table.sourceTable),
+    index("import_lineage_system_idx").on(
+      table.sourceSystem,
+      table.sourceTable,
+    ),
   ],
 );
 

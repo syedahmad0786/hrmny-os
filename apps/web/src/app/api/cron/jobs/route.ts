@@ -1,7 +1,7 @@
 import { eq, scheduledJob, sql } from "@hrmny/db";
 import { z } from "zod";
 import { getDb } from "@/server/db";
-import { emitHealthSignal } from "@/server/m1-persistence";
+import { deliverHealthSignal, emitHealthSignal } from "@/server/m1-persistence";
 import { featureEnabled } from "@/server/features";
 import { syncAsanaWorkspace } from "@/server/asana-sync";
 import { getVerifiedAsanaConnection } from "@/server/trpc/connections-router";
@@ -20,6 +20,9 @@ const HealthJobSchema = z.object({
   signalKey: z.string().min(1).max(120),
   severity: z.enum(["info", "warn", "critical"]),
   payload: z.record(z.unknown()).default({}),
+});
+const HealthDeliveryJobSchema = z.object({
+  healthSignalId: z.string().uuid(),
 });
 const AsanaSyncJobSchema = z.object({
   workspaceGid: z.string().min(1).max(120),
@@ -95,6 +98,9 @@ export async function GET(request: Request) {
           payload.severity,
           payload.payload,
         );
+      } else if (job.kind === "health_delivery") {
+        const payload = HealthDeliveryJobSchema.parse(job.payload);
+        result = await deliverHealthSignal(payload.healthSignalId);
       } else if (job.kind === "asana_sync") {
         const payload = AsanaSyncJobSchema.parse(job.payload);
         const roles = await db.execute<{ key: string }>(sql`

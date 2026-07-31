@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createCaller } from "./trpc/root";
 import { getDemoStore } from "./demo-store";
-import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
+import {
+  DEV_USERS,
+  resolveDevUser,
+  sessionCanViewMargin,
+} from "./auth/session";
 
 function callerFor(role: "partner" | "am" | "finance" | "director") {
   const user = resolveDevUser(role);
@@ -70,12 +74,18 @@ describe("M1 tRPC RBAC + gate", () => {
 
   it("uploads asset version and returns signed URL", async () => {
     const creative = callerFor("partner");
-    const asset = await creative.assets.create({ title: "test" });
+    const projects = await creative.work.projects.list();
+    const project = await creative.work.projects.get({
+      projectId: projects[0]!.projectId,
+    });
+    const workItemId = project.items[0]!.itemId;
+    const asset = await creative.assets.create({ title: "test", workItemId });
     const version = await creative.assets.uploadVersion({
       assetId: asset.assetId,
-      fileName: "a.txt",
-      contentType: "text/plain",
-      contentBase64: Buffer.from("hello").toString("base64"),
+      fileName: "a.png",
+      contentType: "image/png",
+      contentBase64:
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
     });
     expect(version.versionNumber).toBe(1);
     const signed = await creative.assets.signedUrl({
@@ -85,14 +95,37 @@ describe("M1 tRPC RBAC + gate", () => {
     expect(signed?.url).toContain("memory://dam/");
   });
 
-  it("trips health signal stub and starts Gmail OAuth without crash", async () => {
+  it("rejects mismatched asset bytes and QC fail without notes", async () => {
     const partner = callerFor("partner");
-    const health = await partner.admin.health.emitStub({
-      signalKey: "m1_demo_trip",
+    const projects = await partner.work.projects.list();
+    const project = await partner.work.projects.get({
+      projectId: projects[0]!.projectId,
+    });
+    const asset = await partner.assets.create({
+      title: "invalid upload",
+      workItemId: project.items[0]!.itemId,
+    });
+    await expect(
+      partner.assets.uploadVersion({
+        assetId: asset.assetId,
+        fileName: "fake.png",
+        contentType: "image/png",
+        contentBase64: Buffer.from("not a png").toString("base64"),
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      partner.assets.qc({ id: asset.assetId, decision: "fail" }),
+    ).rejects.toBeTruthy();
+  });
+
+  it("records a test health signal and starts Gmail OAuth without crash", async () => {
+    const partner = callerFor("partner");
+    const health = await partner.admin.health.sendTest({
+      signalKey: "m1_test",
       severity: "warn",
     });
-    expect(health.signalKey).toBe("m1_demo_trip");
-    expect(health.chat).toBe("stubbed");
+    expect(health.signalKey).toBe("m1_test");
+    expect(["not_configured", "pending"]).toContain(health.chat);
 
     const oauth = await partner.connections.startOAuth({ toolkit: "gmail" });
     expect(oauth.redirectUrl).toBeTruthy();
@@ -123,6 +156,69 @@ describe("M1 tRPC RBAC + gate", () => {
       payload: { floorPct: 25, targetPct: 42 },
     });
     expect(updated.version).toBeGreaterThanOrEqual(2);
-    expect(updated.payload.targetPct).toBe(42);
+    expect(updated.payload).toMatchObject({ floorPct: 25, targetPct: 42 });
+  });
+
+  it("rejects invalid convention payload without replacing the active version", async () => {
+    const director = callerFor("director");
+    const [before] = await director.conventions.list({
+      ruleKey: "margin.floor",
+    });
+    await expect(
+      director.conventions.upsert({
+        ruleKey: "margin.floor",
+        payload: { floorPct: 60, targetPct: 40 },
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const [after] = await director.conventions.list({
+      ruleKey: "margin.floor",
+    });
+    expect(after).toEqual(before);
+  });
+
+  it("audits role changes, denies AM escalation and protects the final Partner", async () => {
+    const partner = callerFor("partner");
+    const am = callerFor("am");
+    const originalRoles = [...DEV_USERS.am!.roles];
+    const roles = await partner.admin.roles.list();
+    const directorRole = roles.find((item) => item.key === "director")!;
+    const partnerRole = roles.find((item) => item.key === "partner")!;
+    try {
+      await expect(
+        am.admin.roles.assignEmployee({
+          employeeId: DEV_USERS.am!.employeeId,
+          roleId: directorRole.roleId!,
+          reason: "Attempted self escalation",
+        }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+      const before = (await partner.admin.audit.list({ limit: 100 })).filter(
+        (row) => row.action === "admin.roles.assignEmployee",
+      ).length;
+      await partner.admin.roles.assignEmployee({
+        employeeId: DEV_USERS.am!.employeeId,
+        roleId: directorRole.roleId!,
+        reason: "M1 role assignment proof",
+      });
+      await partner.admin.roles.assignEmployee({
+        employeeId: DEV_USERS.am!.employeeId,
+        roleId: directorRole.roleId!,
+        reason: "Repeated click proof",
+      });
+      const after = (await partner.admin.audit.list({ limit: 100 })).filter(
+        (row) => row.action === "admin.roles.assignEmployee",
+      ).length;
+      expect(after - before).toBe(1);
+
+      await expect(
+        partner.admin.roles.revokeEmployee({
+          employeeId: DEV_USERS.partner!.employeeId,
+          roleId: partnerRole.roleId!,
+          reason: "M1 final partner protection proof",
+        }),
+      ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    } finally {
+      DEV_USERS.am!.roles = originalRoles;
+    }
   });
 });

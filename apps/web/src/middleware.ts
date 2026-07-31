@@ -1,8 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import {
-  isPublicPath,
-  updateSession,
-} from "@/lib/supabase/middleware";
+import { isPublicPath, updateSession } from "@/lib/supabase/middleware";
+import { getAuthModeFromEnv } from "@/lib/auth-mode";
 
 /**
  * Edge middleware — security headers + optional Supabase session gate.
@@ -26,7 +24,7 @@ export async function middleware(request: NextRequest) {
     response.headers.set(key, value);
   }
 
-  if (process.env.AUTH_MODE === "supabase" && !user) {
+  if (getAuthModeFromEnv() === "supabase" && !user) {
     const { pathname } = request.nextUrl;
     if (!isPublicPath(pathname)) {
       const login = request.nextUrl.clone();

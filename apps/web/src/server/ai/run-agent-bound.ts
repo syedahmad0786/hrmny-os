@@ -1,4 +1,5 @@
 import {
+  MonthlyCapExceededError,
   runAgent as baseRunAgent,
   type AgentRunInput,
   type AgentRunOutput,
@@ -7,6 +8,7 @@ import {
 import { sql } from "@hrmny/db";
 import { getDb } from "../db";
 import { recallMemory } from "../memory/postgres";
+import { emitHealthSignal } from "../m1-persistence";
 
 async function getMonthlySpendAed(): Promise<number> {
   const db = getDb();
@@ -86,13 +88,23 @@ export const boundRunAgent: RunAgent = async (input) => {
     },
   };
 
-  const output = await baseRunAgent(enriched, {
-    onCost: async () => {
-      // Persistence happens after the full run so gateOutcome is known.
-    },
-    getMonthlySpendAed,
-    monthlyCapAed: Number(process.env.LLM_MONTHLY_CAP_AED) || 1500,
-  });
+  let output: AgentRunOutput;
+  try {
+    output = await baseRunAgent(enriched, {
+      onCost: async () => {
+        // Persistence happens after the full run so gateOutcome is known.
+      },
+      getMonthlySpendAed,
+      monthlyCapAed: Number(process.env.LLM_MONTHLY_CAP_AED) || 1500,
+    });
+  } catch (error) {
+    if (error instanceof MonthlyCapExceededError) {
+      await emitHealthSignal("spend_cap", "critical", error.alert).catch(
+        () => undefined,
+      );
+    }
+    throw error;
+  }
 
   try {
     await persistAgentRun(enriched, output);
