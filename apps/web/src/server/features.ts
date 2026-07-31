@@ -1,10 +1,11 @@
-import { sql } from "@hrmny/db";
+import { auditEvent, sql } from "@hrmny/db";
 import {
   FEATURE_BY_KEY,
   FEATURE_CATALOG,
   type FeatureDefinition,
 } from "@/features/catalog";
 import { getDb } from "./db";
+import { getDemoStore } from "./demo-store";
 
 export type FeatureScope = "global" | "client" | "role" | "user";
 
@@ -157,21 +158,32 @@ function mapOverride(row: FeatureOverrideRow): FeatureOverride {
 export async function listFeatureOverrides(): Promise<FeatureOverride[]> {
   const db = getDb();
   if (!db) return [...demoOverrides.values()];
-  const current =
-    overrideListInFlight ??=
-      db
-        .execute<FeatureOverrideRow>(sql`
+  const current = (overrideListInFlight ??= db
+    .execute<FeatureOverrideRow>(
+      sql`
           select feature_override_id, feature_key, scope_type, scope_key,
             enabled, reason, updated_by_employee_id, updated_at
           from public.feature_override
           order by feature_key, scope_type, scope_key
-        `)
-        .then((rows) => rows.map(mapOverride));
+        `,
+    )
+    .then((rows) => rows.map(mapOverride)));
   try {
     return await current;
   } finally {
     if (overrideListInFlight === current) overrideListInFlight = null;
   }
+}
+
+function auditSnapshot(row: FeatureOverride | null) {
+  return row
+    ? {
+        featureKey: row.featureKey,
+        scopeType: row.scopeType,
+        scopeKey: row.scopeKey,
+        enabled: row.enabled,
+      }
+    : null;
 }
 
 export async function setFeatureOverride(input: {
@@ -207,46 +219,108 @@ export async function setFeatureOverride(input: {
       updatedAt: new Date().toISOString(),
     };
     demoOverrides.set(key, row);
+    getDemoStore().appendAudit({
+      actorEmployeeId: input.updatedByEmployeeId,
+      action: "feature_override.upsert",
+      entityType: "feature_override",
+      entityId: row.featureOverrideId,
+      before: auditSnapshot(current ?? null),
+      after: auditSnapshot(row),
+      reason: input.reason ?? null,
+    });
     return row;
   }
 
-  const rows = await db.execute<FeatureOverrideRow>(sql`
-    insert into public.feature_override (
-      feature_key, scope_type, scope_key, enabled, reason,
-      updated_by_employee_id
-    ) values (
-      ${input.featureKey}, ${input.scopeType}, ${input.scopeKey},
-      ${input.enabled}, ${input.reason ?? null},
-      ${input.updatedByEmployeeId}::uuid
-    )
-    on conflict (feature_key, scope_type, scope_key)
-    do update set enabled = excluded.enabled, reason = excluded.reason,
-      updated_by_employee_id = excluded.updated_by_employee_id,
-      updated_at = now()
-    returning feature_override_id, feature_key, scope_type, scope_key,
-      enabled, reason, updated_by_employee_id, updated_at
-  `);
-  return mapOverride(rows[0]!);
+  return db.transaction(async (tx) => {
+    const beforeRows = await tx.execute<FeatureOverrideRow>(sql`
+      select feature_override_id, feature_key, scope_type, scope_key,
+        enabled, reason, updated_by_employee_id, updated_at
+      from public.feature_override
+      where feature_key = ${input.featureKey}
+        and scope_type = ${input.scopeType}
+        and scope_key = ${input.scopeKey}
+      limit 1
+    `);
+    const rows = await tx.execute<FeatureOverrideRow>(sql`
+      insert into public.feature_override (
+        feature_key, scope_type, scope_key, enabled, reason,
+        updated_by_employee_id
+      ) values (
+        ${input.featureKey}, ${input.scopeType}, ${input.scopeKey},
+        ${input.enabled}, ${input.reason ?? null},
+        ${input.updatedByEmployeeId}::uuid
+      )
+      on conflict (feature_key, scope_type, scope_key)
+      do update set enabled = excluded.enabled, reason = excluded.reason,
+        updated_by_employee_id = excluded.updated_by_employee_id,
+        updated_at = now()
+      returning feature_override_id, feature_key, scope_type, scope_key,
+        enabled, reason, updated_by_employee_id, updated_at
+    `);
+    const saved = mapOverride(rows[0]!);
+    await tx.insert(auditEvent).values({
+      actorEmployeeId: input.updatedByEmployeeId,
+      action: "feature_override.upsert",
+      entityType: "feature_override",
+      entityId: saved.featureOverrideId,
+      before: beforeRows[0] ? auditSnapshot(mapOverride(beforeRows[0])) : null,
+      after: auditSnapshot(saved),
+      reason: input.reason ?? null,
+    });
+    return saved;
+  });
 }
 
 export async function removeFeatureOverride(input: {
   featureKey: string;
   scopeType: FeatureScope;
   scopeKey: string;
+  updatedByEmployeeId: string;
+  reason?: string | null;
 }) {
   const db = getDb();
   if (!db) {
-    demoOverrides.delete(
-      overrideKey(input.featureKey, input.scopeType, input.scopeKey),
-    );
+    const key = overrideKey(input.featureKey, input.scopeType, input.scopeKey);
+    const existing = demoOverrides.get(key) ?? null;
+    demoOverrides.delete(key);
+    getDemoStore().appendAudit({
+      actorEmployeeId: input.updatedByEmployeeId,
+      action: "feature_override.remove",
+      entityType: "feature_override",
+      entityId: existing?.featureOverrideId ?? crypto.randomUUID(),
+      before: auditSnapshot(existing),
+      after: null,
+      reason: input.reason ?? "Return to inherited access",
+    });
     return;
   }
-  await db.execute(sql`
-    delete from public.feature_override
-    where feature_key = ${input.featureKey}
-      and scope_type = ${input.scopeType}
-      and scope_key = ${input.scopeKey}
-  `);
+  await db.transaction(async (tx) => {
+    const rows = await tx.execute<FeatureOverrideRow>(sql`
+      select feature_override_id, feature_key, scope_type, scope_key,
+        enabled, reason, updated_by_employee_id, updated_at
+      from public.feature_override
+      where feature_key = ${input.featureKey}
+        and scope_type = ${input.scopeType}
+        and scope_key = ${input.scopeKey}
+      limit 1
+    `);
+    const existing = rows[0] ? mapOverride(rows[0]) : null;
+    await tx.execute(sql`
+      delete from public.feature_override
+      where feature_key = ${input.featureKey}
+        and scope_type = ${input.scopeType}
+        and scope_key = ${input.scopeKey}
+    `);
+    await tx.insert(auditEvent).values({
+      actorEmployeeId: input.updatedByEmployeeId,
+      action: "feature_override.remove",
+      entityType: "feature_override",
+      entityId: existing?.featureOverrideId ?? null,
+      before: auditSnapshot(existing),
+      after: null,
+      reason: input.reason ?? "Return to inherited access",
+    });
+  });
 }
 
 export async function featureEnabled(

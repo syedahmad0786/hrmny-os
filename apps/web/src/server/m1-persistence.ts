@@ -79,9 +79,7 @@ export async function emitHealthSignal(
   options?: { incidentKey?: string; audit?: AuditInput },
 ) {
   const incidentKey = options?.incidentKey?.trim();
-  const storedPayload = incidentKey
-    ? { ...payload, incidentKey }
-    : payload;
+  const storedPayload = incidentKey ? { ...payload, incidentKey } : payload;
   const db = getDb();
   if (!db) {
     const store = getDemoStore();
@@ -97,9 +95,8 @@ export async function emitHealthSignal(
     if (options?.audit) {
       store.appendAudit({
         ...options.audit,
-        actorEmployeeId:
-          options.audit.actorEmployeeId ?? SYSTEM_EMPLOYEE_ID,
-        entityId: options.audit.entityId ?? SYSTEM_EMPLOYEE_ID,
+        actorEmployeeId: options.audit.actorEmployeeId ?? SYSTEM_EMPLOYEE_ID,
+        entityId: options.audit.entityId ?? row.healthSignalId,
       });
     }
     return row;
@@ -142,7 +139,11 @@ export async function emitHealthSignal(
         payload: { healthSignalId: row!.healthSignalId },
       });
     }
-    if (options?.audit) await tx.insert(auditEvent).values(options.audit);
+    if (options?.audit)
+      await tx.insert(auditEvent).values({
+        ...options.audit,
+        entityId: options.audit.entityId ?? row!.healthSignalId,
+      });
     return { row: row!, inserted: true };
   });
   return {

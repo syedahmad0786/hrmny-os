@@ -19,7 +19,10 @@ function callerFor(role: "partner" | "am" | "finance" | "director") {
 
 describe("M1 tRPC RBAC + gate", () => {
   beforeEach(() => {
-    getDemoStore().resetDemoDeal();
+    const store = getDemoStore();
+    store.resetDemoDeal();
+    store.audits = [];
+    store.healthSignals = [];
   });
 
   it("strips margin from deals.get for AM", async () => {
@@ -126,6 +129,18 @@ describe("M1 tRPC RBAC + gate", () => {
     });
     expect(health.signalKey).toBe("m1_test");
     expect(["not_configured", "pending"]).toContain(health.chat);
+    expect(
+      (
+        await partner.admin.audit.list({
+          limit: 10,
+          action: "admin.health.sendTest",
+        })
+      )[0],
+    ).toMatchObject({
+      entityType: "health_signal",
+      entityId: health.healthSignalId,
+      reason: "Manual operational signal test",
+    });
 
     const oauth = await partner.connections.startOAuth({ toolkit: "gmail" });
     expect(oauth.redirectUrl).toBeTruthy();
@@ -147,6 +162,31 @@ describe("M1 tRPC RBAC + gate", () => {
     }
     const still = await partner.crm.deals.get({ id: deal!.dealId });
     expect(still?.stage).toBe(deal!.stage);
+    expect(
+      (await partner.admin.health.get()).signals.some(
+        (signal) => signal.signalKey === "gate_blocked",
+      ),
+    ).toBe(true);
+  });
+
+  it("emits auth_denied from a real protected API rejection", async () => {
+    const anonymous = createCaller({
+      user: null,
+      employeeId: null,
+      roles: [],
+      canViewMargin: false,
+    });
+    await expect(anonymous.admin.health.get()).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    });
+    const partner = callerFor("partner");
+    expect(
+      (await partner.admin.health.get()).signals.some(
+        (signal) =>
+          signal.signalKey === "auth_denied" &&
+          signal.payload?.reason === "unauthenticated",
+      ),
+    ).toBe(true);
   });
 
   it("Director can upsert conventions", async () => {
@@ -194,6 +234,7 @@ describe("M1 tRPC RBAC + gate", () => {
 
   it("audits role changes, denies AM escalation and protects the final Partner", async () => {
     const partner = callerFor("partner");
+    const director = callerFor("director");
     const am = callerFor("am");
     const originalRoles = [...DEV_USERS.am!.roles];
     const roles = await partner.admin.roles.list();
@@ -225,6 +266,24 @@ describe("M1 tRPC RBAC + gate", () => {
         (row) => row.action === "admin.roles.assignEmployee",
       ).length;
       expect(after - before).toBe(1);
+
+      await director.admin.roles.revokeEmployee({
+        employeeId: DEV_USERS.am!.employeeId,
+        roleId: directorRole.roleId!,
+        reason: "Director revoke acceptance proof",
+      });
+      await director.admin.roles.assignEmployee({
+        employeeId: DEV_USERS.am!.employeeId,
+        roleId: directorRole.roleId!,
+        reason: "Director assign acceptance proof",
+      });
+      expect(
+        (await director.admin.audit.list({ limit: 100 })).filter(
+          (row) =>
+            row.actorEmployeeId === DEV_USERS.director!.employeeId &&
+            row.entityId === DEV_USERS.am!.employeeId,
+        ),
+      ).toHaveLength(2);
 
       await expect(
         partner.admin.roles.revokeEmployee({

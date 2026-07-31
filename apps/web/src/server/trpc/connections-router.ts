@@ -679,9 +679,9 @@ export const connectionsRouter = router({
           label: input.toolkit,
           secretId,
           externalConnectionId: existing?.externalConnectionId,
-          status: "connected",
-          lastTestedAt: new Date(),
-          lastError: null,
+          status: "pending",
+          lastTestedAt: null,
+          lastError: "Key stored; live provider verification has not run.",
           updatedAt: new Date(),
         };
         const [saved] = existing
@@ -705,7 +705,7 @@ export const connectionsRouter = router({
           entityType: "connection_account",
           entityId: saved!.connectionAccountId,
           before: existing ? { status: existing.status } : null,
-          after: { toolkit: input.toolkit, status: "connected" },
+          after: { toolkit: input.toolkit, status: "pending" },
         });
         return saved!;
       });

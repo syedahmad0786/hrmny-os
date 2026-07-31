@@ -497,10 +497,24 @@ export const adminRouter = router({
           severity: z.enum(["info", "warn", "critical"]).default("info"),
         }),
       )
-      .mutation(async ({ input }) => {
-        const row = await emitHealthSignal(input.signalKey, input.severity, {
-          source: "admin.health.sendTest",
-        });
+      .mutation(async ({ input, ctx }) => {
+        const source = "admin.health.sendTest";
+        const row = await emitHealthSignal(
+          input.signalKey,
+          input.severity,
+          { source },
+          {
+            audit: {
+              actorEmployeeId: ctx.employeeId,
+              action: source,
+              entityType: "health_signal",
+              entityId: null,
+              before: null,
+              after: { signalKey: input.signalKey, severity: input.severity },
+              reason: "Manual operational signal test",
+            },
+          },
+        );
         const webhookConfigured = Boolean(
           process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim(),
         );

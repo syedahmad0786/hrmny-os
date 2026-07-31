@@ -42,11 +42,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @hrmny/web build
       - run: pnpm --filter @hrmny/web exec playwright install chromium --with-deps
-      - name: Start production server
+      - name: Start local acceptance server
         env:
-          ALLOW_DEV_AUTH: "true"
+          AUTH_MODE: "dev"
+          ALLOW_MEMORY_STORE: "true"
+          DAM_STORAGE: "memory"
+          VERCEL_ENV: "development"
         run: |
-          (cd apps/web && pnpm exec next start --port 3000 &)
+          (cd apps/web && pnpm exec next dev --port 3000 &)
           for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:3000/login && break; sleep 2; done
       - name: Run Playwright e2e
         env:

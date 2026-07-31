@@ -140,6 +140,7 @@ export type DemoConnection = {
 };
 
 export type HealthSignal = {
+  healthSignalId: string;
   signalKey: string;
   severity: string;
   payload: Record<string, unknown>;
@@ -1234,6 +1235,7 @@ class MemoryDemoStore {
     payload: Record<string, unknown>,
   ) {
     const row: HealthSignal = {
+      healthSignalId: randomUUID(),
       signalKey,
       severity,
       payload,

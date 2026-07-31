@@ -75,6 +75,7 @@ export default function ConnectionsPage() {
   });
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [redirect, setRedirect] = useState<string | null>(null);
+  const [googleError, setGoogleError] = useState<string | null>(null);
   const error =
     saveKey.error ??
     disconnect.error ??
@@ -88,8 +89,10 @@ export default function ConnectionsPage() {
     startWorkApp.error ??
     disconnectWorkApp.error ??
     workApps.error;
+  const errorMessage = googleError ?? error?.message ?? null;
 
   async function retry() {
+    setGoogleError(null);
     saveKey.reset();
     disconnect.reset();
     startOAuth.reset();
@@ -107,8 +110,12 @@ export default function ConnectionsPage() {
   }
 
   async function connectGoogleWorkspace() {
+    setGoogleError(null);
     const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
+    if (!supabase) {
+      setGoogleError("Supabase is not configured for this deployment.");
+      return;
+    }
     localStorage.setItem("hrmny-google-workspace-connect", "pending");
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
@@ -124,7 +131,7 @@ export default function ConnectionsPage() {
     });
     if (error) {
       localStorage.removeItem("hrmny-google-workspace-connect");
-      throw error;
+      setGoogleError(error.message);
     }
   }
 
@@ -230,14 +237,18 @@ export default function ConnectionsPage() {
                       saveKey.isPending
                     }
                     onClick={() => {
-                      saveKey.mutate({
-                        toolkit: item.toolkit as "apollo" | "hunter" | "bayzat",
-                        apiKey: keys[item.toolkit]!,
-                      });
-                      setKeys((current) => ({
-                        ...current,
-                        [item.toolkit]: "",
-                      }));
+                      void saveKey
+                        .mutateAsync({
+                          toolkit: item.toolkit as
+                            "apollo" | "hunter" | "bayzat",
+                          apiKey: keys[item.toolkit]!,
+                        })
+                        .then(() =>
+                          setKeys((current) => ({
+                            ...current,
+                            [item.toolkit]: "",
+                          })),
+                        );
                     }}
                   >
                     {item.hasSecret ? "Replace" : "Connect"}
@@ -555,9 +566,9 @@ export default function ConnectionsPage() {
           </a>
         </p>
       ) : null}
-      {error ? (
+      {errorMessage ? (
         <section className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-          <p>{error.message}</p>
+          <p>{errorMessage}</p>
           <Button
             className="mt-2"
             type="button"

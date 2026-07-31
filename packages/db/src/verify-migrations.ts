@@ -27,7 +27,11 @@ const journal = JSON.parse(
 ) as { entries: Array<{ tag: string }> };
 const head = "0070_m1_production_readiness";
 
-assert.equal(journal.entries.at(-1)?.tag, head, "Migration journal head drifted.");
+assert.equal(
+  journal.entries.at(-1)?.tag,
+  head,
+  "Migration journal head drifted.",
+);
 
 const options = { max: 1, onnotice: () => undefined } as const;
 const admin = postgres(adminUrl.toString(), options);
@@ -132,6 +136,84 @@ async function assertDatabaseHead(sql: Sql): Promise<void> {
   }
 }
 
+async function assertConcurrentLastPartnerProtection(url: string) {
+  const setup = postgres(url, options);
+  const partnerRole = await setup<
+    Array<{ role_id: string }>
+  >`SELECT role_id FROM public.role WHERE key = 'partner'`;
+  assert(partnerRole[0]?.role_id, "Partner role must exist.");
+  await setup`
+    DELETE FROM public.employee_role
+    WHERE role_id = ${partnerRole[0]!.role_id}::uuid
+  `;
+  const employees = [
+    "71000000-0000-4000-8000-000000000001",
+    "71000000-0000-4000-8000-000000000002",
+  ];
+  for (const [index, employeeId] of employees.entries()) {
+    await setup`
+      INSERT INTO public.employee (employee_id, display_name, email)
+      VALUES (
+        ${employeeId}::uuid,
+        ${`Partner proof ${index + 1}`},
+        ${`partner-proof-${index + 1}@hrmny.test`}
+      )
+    `;
+    await setup`
+      INSERT INTO public.employee_role (employee_id, role_id)
+      VALUES (${employeeId}::uuid, ${partnerRole[0]!.role_id}::uuid)
+    `;
+  }
+
+  const first = postgres(url, options);
+  const second = postgres(url, options);
+  const revoke = (connection: Sql, employeeId: string) =>
+    connection.begin(async (tx) => {
+      await tx`
+        SELECT employee_role_id FROM public.employee_role
+        WHERE employee_id = ${employeeId}::uuid
+          AND role_id = ${partnerRole[0]!.role_id}::uuid
+        FOR UPDATE
+      `;
+      await tx`SELECT pg_advisory_xact_lock(hashtext('employee_role:partner'))`;
+      const [partners] = await tx<Array<{ count: number }>>`
+        SELECT count(distinct membership.employee_id)::int AS count
+        FROM public.employee_role membership
+        JOIN public.role role ON role.role_id = membership.role_id
+        JOIN public.employee employee
+          ON employee.employee_id = membership.employee_id
+        WHERE role.key = 'partner' AND employee.is_active = true
+      `;
+      if (Number(partners?.count ?? 0) <= 1) return false;
+      await tx`
+        DELETE FROM public.employee_role
+        WHERE employee_id = ${employeeId}::uuid
+          AND role_id = ${partnerRole[0]!.role_id}::uuid
+      `;
+      return true;
+    });
+  try {
+    const outcomes = await Promise.all([
+      revoke(first, employees[0]!),
+      revoke(second, employees[1]!),
+    ]);
+    assert.deepEqual(
+      outcomes.sort(),
+      [false, true],
+      "Concurrent Partner revokes must leave one active Partner.",
+    );
+    const [remaining] = await setup<Array<{ count: number }>>`
+      SELECT count(*)::int AS count FROM public.employee_role
+      WHERE role_id = ${partnerRole[0]!.role_id}::uuid
+    `;
+    assert.equal(remaining?.count, 1, "Exactly one Partner must remain.");
+  } finally {
+    await first.end({ timeout: 5 });
+    await second.end({ timeout: 5 });
+    await setup.end({ timeout: 5 });
+  }
+}
+
 let fresh: Sql | undefined;
 let upgrade: Sql | undefined;
 
@@ -142,6 +224,7 @@ try {
   await prepareSupabaseDatabase(fresh);
   for (const { tag } of journal.entries) await applyMigration(fresh, tag);
   await assertDatabaseHead(fresh);
+  await assertConcurrentLastPartnerProtection(databaseUrl(databaseNames[0]!));
 
   upgrade = postgres(databaseUrl(databaseNames[1]!), options);
   await prepareSupabaseDatabase(upgrade);
