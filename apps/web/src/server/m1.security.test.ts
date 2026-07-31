@@ -87,6 +87,16 @@ describe("M1 security insurance", () => {
     expect(listResolver).not.toContain("result: scheduledJob.result");
   });
 
+  it("binds UUID lists as PostgreSQL arrays rather than records", () => {
+    const source = readFileSync(
+      join(__dirname, "trpc/work-management-router.ts"),
+      "utf8",
+    );
+    expect(source).toContain("function uuidArray(values: readonly string[])");
+    expect(source).toContain("any(${uuidArray(targetIds)})");
+    expect(source).not.toMatch(/\$\{[A-Za-z_$][\w$]*\}::uuid\[\]/);
+  });
+
   it("gitignore keeps secrets out of the monorepo", () => {
     const candidates = [
       join(process.cwd(), ".gitignore"),
