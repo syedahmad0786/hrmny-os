@@ -300,10 +300,12 @@ export async function resolveSupabaseUser(
 
     const roles = [...new Set(access.map((row) => row.role))];
     const featureSubject = { userId: staff.employeeId, roles };
-    const [ssoEnabled, sessionControlsEnabled] = await Promise.all([
-      featureEnabled("work.sso_scim", featureSubject),
-      featureEnabled("work.domain_controls", featureSubject),
-    ]);
+    const ssoEnabled = await featureEnabled("work.sso_scim", featureSubject);
+    mark("sso_feature_loaded");
+    const sessionControlsEnabled = await featureEnabled(
+      "work.domain_controls",
+      featureSubject,
+    );
     mark("features_loaded");
     if (ssoEnabled && !ssoAccessAllowed(sso, data.user)) return null;
     if (sessionControlsEnabled && sessionExpired) return null;
