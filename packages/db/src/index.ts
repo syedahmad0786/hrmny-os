@@ -23,6 +23,11 @@ export function createDb(connectionString: string) {
     // an unbounded connect hangs the request forever.
     connect_timeout: 10,
     idle_timeout: 20,
+    connection: {
+      statement_timeout: 15_000,
+      lock_timeout: 5_000,
+      idle_in_transaction_session_timeout: 15_000,
+    },
   });
   return drizzle(client, { schema });
 }
@@ -36,7 +41,12 @@ export async function pingDatabase(connectionString: string | undefined) {
   const url = connectionString?.trim();
   if (!url) return { ok: false as const, error: "DATABASE_URL not set" };
 
-  const sql = postgres(url, { ssl: "require", max: 1, connect_timeout: 10 });
+  const sql = postgres(url, {
+    ssl: "require",
+    max: 1,
+    connect_timeout: 10,
+    connection: { statement_timeout: 15_000 },
+  });
   try {
     await sql`select 1`;
     const tables = await sql`
