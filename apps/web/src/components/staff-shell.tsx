@@ -127,7 +127,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   );
   const completingGoogle = useRef(false);
   const utils = trpc.useUtils();
-  const session = trpc.auth.session.useQuery();
+  const session = trpc.auth.session.useQuery(undefined, { retry: false });
   const accessibilityEnabled =
     session.data?.enabledFeatureKeys.includes("work.accessibility") ?? false;
   const accessibility = trpc.work.accessibility.get.useQuery(undefined, {

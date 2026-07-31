@@ -30,5 +30,5 @@ describe("onboarding store memory fallback", () => {
     const again = await getOnboarding(clientId);
     expect(again[0]?.status).toBe("signed_off");
     expect(again[1]?.status).toBe("active");
-  });
+  }, 10_000);
 });

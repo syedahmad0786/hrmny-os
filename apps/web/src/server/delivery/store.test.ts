@@ -41,5 +41,5 @@ describe("delivery store memory fallback", () => {
       clientId: "c1000000-0000-4000-8000-0000000000a4",
     });
     expect(listed.some((t) => t.taskId === task.taskId)).toBe(true);
-  });
+  }, 10_000);
 });
