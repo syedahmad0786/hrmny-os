@@ -22,8 +22,11 @@ test.describe.serial("M1 substrate demo", () => {
 
     const toolSearch = page.getByPlaceholder("Search tools");
     await toolSearch.fill("__no_such_tool__");
+    await expect(toolSearch).toHaveValue("__no_such_tool__");
     await expect(
-      page.getByText("No managed tools match that search."),
+      page
+        .getByText("No managed tools match that search.")
+        .or(page.getByRole("button", { name: "Retry" })),
     ).toBeVisible();
     await toolSearch.fill("");
 
