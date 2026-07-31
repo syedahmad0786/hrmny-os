@@ -195,10 +195,15 @@ async function assertConcurrentLastPartnerProtection(url: string) {
       return true;
     });
   try {
-    await Promise.all([
+    const outcomes = await Promise.all([
       revoke(first, employees[0]!),
       revoke(second, employees[1]!),
     ]);
+    assert.deepEqual(
+      outcomes.sort(),
+      [false, true],
+      "Concurrent Partner revokes must permit exactly one removal.",
+    );
     const [remaining] = await setup<Array<{ count: number }>>`
       SELECT count(*)::int AS count FROM public.employee_role
       WHERE role_id = ${partnerRole[0]!.role_id}::uuid
