@@ -8,12 +8,18 @@ import {
 import { createContext } from "./trpc/trpc";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { isPublicPath } from "@/lib/supabase/middleware";
 
 /**
  * M1 security / insurance checks — RLS SQL grants, margin strip, secrets hygiene.
  */
 describe("M1 security insurance", () => {
   afterEach(() => vi.unstubAllEnvs());
+
+  it("lets hosted development probes reach their intentional 404 pages", () => {
+    expect(isPublicPath("/gate")).toBe(true);
+    expect(isPublicPath("/assets")).toBe(true);
+  });
 
   it("Data API lockdown protects audit and asset history", () => {
     const candidates = [

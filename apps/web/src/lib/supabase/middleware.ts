@@ -48,6 +48,9 @@ export function isPublicPath(pathname: string): boolean {
   if (
     pathname === "/login" ||
     pathname === "/portal/login" ||
+    // Hosted builds deliberately expose these development probes only as 404s.
+    pathname === "/gate" ||
+    pathname === "/assets" ||
     pathname.startsWith("/portal/login/") ||
     pathname.startsWith("/forms/") ||
     pathname.startsWith("/card/") ||
