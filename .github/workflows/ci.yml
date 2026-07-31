@@ -50,13 +50,13 @@ jobs:
       - run: pnpm --filter @hrmny/web build
       - run: pnpm --filter @hrmny/web exec playwright install chromium --with-deps
       - name: Run core, action, accessibility and boundary acceptance
-        run: pnpm --filter @hrmny/web exec playwright test --grep-invert "routes ·|link integrity"
+        run: pnpm --filter @hrmny/web exec playwright test --output=test-results/core --grep-invert "routes ·|link integrity"
       - name: Run Partner route and link acceptance
-        run: pnpm --filter @hrmny/web exec playwright test --grep "routes · partner|link integrity"
+        run: pnpm --filter @hrmny/web exec playwright test --output=test-results/partner --grep "routes · partner|link integrity"
       - name: Run Finance route acceptance
-        run: pnpm --filter @hrmny/web exec playwright test --grep "routes · finance"
+        run: pnpm --filter @hrmny/web exec playwright test --output=test-results/finance --grep "routes · finance"
       - name: Run portal route acceptance
-        run: pnpm --filter @hrmny/web exec playwright test --grep "routes · portal_a"
+        run: pnpm --filter @hrmny/web exec playwright test --output=test-results/portal --grep "routes · portal_a"
       - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@v6
