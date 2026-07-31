@@ -158,7 +158,7 @@ const requireWorkWriteLicense = t.middleware(
   async ({ ctx, next, path, type }) => {
     if (
       type === "mutation" &&
-      path.startsWith("work.") &&
+      (path.startsWith("work.") || path.startsWith("assets.")) &&
       (await isWorkViewOnlyMember(ctx.employeeId))
     ) {
       await recordAuthDenied(path, "work_view_only", ctx.employeeId);

@@ -115,6 +115,7 @@ export type DemoAsset = {
   taskId: string | null;
   workItemId: string | null;
   qcPassed: boolean;
+  approvedVersionId: string | null;
   versions: DemoAssetVersion[];
 };
 
@@ -1151,6 +1152,7 @@ class MemoryDemoStore {
       taskId,
       workItemId,
       qcPassed: false,
+      approvedVersionId: null,
       versions: [],
     };
     this.assets.set(assetId, asset);
@@ -1167,6 +1169,11 @@ class MemoryDemoStore {
   }) {
     const asset = this.assets.get(opts.assetId);
     if (!asset) throw new Error("NOT_FOUND");
+    const before = {
+      status: asset.status,
+      qcPassed: asset.qcPassed,
+      approvedVersionId: asset.approvedVersionId,
+    };
     const versionNumber =
       Math.max(0, ...asset.versions.map((version) => version.versionNumber)) +
       1;
@@ -1200,14 +1207,22 @@ class MemoryDemoStore {
       }
       throw error;
     }
+    asset.status = "draft";
+    asset.qcPassed = false;
+    asset.approvedVersionId = null;
     this.appendAudit({
       actorEmployeeId:
         opts.employeeId ?? "00000000-0000-4000-8000-000000000000",
       action: "assets.uploadVersion",
       entityType: "asset",
       entityId: opts.assetId,
-      before: null,
-      after: { ...version },
+      before,
+      after: {
+        ...version,
+        status: asset.status,
+        qcPassed: asset.qcPassed,
+        approvedVersionId: asset.approvedVersionId,
+      },
       reason: null,
     });
     return version;

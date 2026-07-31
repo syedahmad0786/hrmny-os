@@ -142,7 +142,7 @@ export default function WorkPage() {
   const [attachmentName, setAttachmentName] = useState("");
   const [attachmentUrl, setAttachmentUrl] = useState("");
   const [assetTitle, setAssetTitle] = useState("");
-  const [assetQcNotes, setAssetQcNotes] = useState("");
+  const [assetQcNotes, setAssetQcNotes] = useState<Record<string, string>>({});
   const [assetError, setAssetError] = useState<string | null>(null);
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [proofingAttachment, setProofingAttachment] = useState<{
@@ -255,8 +255,11 @@ export default function WorkPage() {
     { enabled: Boolean(selectedItemId && attachmentsEnabled) },
   );
   const assets = trpc.assets.list.useQuery(
-    { workItemId: selectedItemId! },
-    { enabled: Boolean(selectedItemId && attachmentsEnabled), retry: false },
+    { workItemId: selectedItemId!, projectId: projectId! },
+    {
+      enabled: Boolean(selectedItemId && projectId && attachmentsEnabled),
+      retry: false,
+    },
   );
   const projectFiles = trpc.work.attachments.listProject.useQuery(
     { projectId: projectId! },
@@ -435,8 +438,12 @@ export default function WorkPage() {
     onError: (error) => setAssetError(error.message),
   });
   const qcAsset = trpc.assets.qc.useMutation({
-    onSuccess: async () => {
-      setAssetQcNotes("");
+    onSuccess: async (_result, input) => {
+      setAssetQcNotes((current) => {
+        const next = { ...current };
+        delete next[input.id];
+        return next;
+      });
       setAssetError(null);
       await utils.assets.list.invalidate();
     },
@@ -2581,6 +2588,7 @@ export default function WorkPage() {
                           createAsset.mutate({
                             title: assetTitle,
                             workItemId: selectedItem.itemId,
+                            projectId: projectId!,
                           });
                         }}
                       >
@@ -2622,6 +2630,8 @@ export default function WorkPage() {
                   ) : assets.data?.length ? (
                     <div className="mt-3 space-y-3">
                       {assets.data.map((creativeAsset) => {
+                        const qcNotes =
+                          assetQcNotes[creativeAsset.assetId] ?? "";
                         const latest = [...creativeAsset.versions]
                           .sort(
                             (left, right) =>
@@ -2684,23 +2694,35 @@ export default function WorkPage() {
                                       accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
                                       disabled={uploadAssetVersion.isPending}
                                       onChange={(event) => {
+                                        const input = event.currentTarget;
                                         const file = event.target.files?.[0];
                                         if (!file) return;
                                         if (file.size > 10_000_000) {
                                           setAssetError(
                                             "Asset versions are limited to 10 MB",
                                           );
+                                          input.value = "";
                                           return;
                                         }
-                                        void fileAsBase64(file).then(
-                                          (contentBase64) =>
+                                        void fileAsBase64(file)
+                                          .then((contentBase64) =>
                                             uploadAssetVersion.mutate({
                                               assetId: creativeAsset.assetId,
                                               fileName: file.name,
                                               contentType: file.type,
                                               contentBase64,
                                             }),
-                                        );
+                                          )
+                                          .catch((error: unknown) =>
+                                            setAssetError(
+                                              error instanceof Error
+                                                ? error.message
+                                                : "File read failed",
+                                            ),
+                                          )
+                                          .finally(() => {
+                                            input.value = "";
+                                          });
                                       }}
                                     />
                                   </label>
@@ -2713,9 +2735,13 @@ export default function WorkPage() {
                                   aria-label={`QC notes for ${creativeAsset.title}`}
                                   className="rounded border border-sand px-2 py-1 text-xs"
                                   placeholder="QC notes (required for fail or waive)"
-                                  value={assetQcNotes}
+                                  value={qcNotes}
                                   onChange={(event) =>
-                                    setAssetQcNotes(event.target.value)
+                                    setAssetQcNotes((current) => ({
+                                      ...current,
+                                      [creativeAsset.assetId]:
+                                        event.target.value,
+                                    }))
                                   }
                                 />
                                 <div className="flex gap-1">
@@ -2727,7 +2753,7 @@ export default function WorkPage() {
                                       qcAsset.mutate({
                                         id: creativeAsset.assetId,
                                         decision: "pass",
-                                        notes: assetQcNotes || undefined,
+                                        notes: qcNotes || undefined,
                                       })
                                     }
                                   >
@@ -2737,13 +2763,13 @@ export default function WorkPage() {
                                     type="button"
                                     className="rounded border border-sand px-2 py-1 text-xs"
                                     disabled={
-                                      qcAsset.isPending || !assetQcNotes.trim()
+                                      qcAsset.isPending || !qcNotes.trim()
                                     }
                                     onClick={() =>
                                       qcAsset.mutate({
                                         id: creativeAsset.assetId,
                                         decision: "fail",
-                                        notes: assetQcNotes,
+                                        notes: qcNotes,
                                       })
                                     }
                                   >
@@ -2753,13 +2779,13 @@ export default function WorkPage() {
                                     type="button"
                                     className="rounded border border-sand px-2 py-1 text-xs"
                                     disabled={
-                                      qcAsset.isPending || !assetQcNotes.trim()
+                                      qcAsset.isPending || !qcNotes.trim()
                                     }
                                     onClick={() =>
                                       qcAsset.mutate({
                                         id: creativeAsset.assetId,
                                         decision: "waive",
-                                        notes: assetQcNotes,
+                                        notes: qcNotes,
                                       })
                                     }
                                   >

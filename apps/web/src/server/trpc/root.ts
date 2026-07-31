@@ -74,7 +74,7 @@ import { featureLabRouter } from "./feature-lab-router";
 import { listFeatureOverrides, resolveFeatureCatalog } from "../features";
 import {
   getDemoWork,
-  requireItemAccess,
+  requireProjectAccess,
   workManagementRouter,
 } from "./work-management-router";
 import { workAdminRouter } from "./work-admin-router";
@@ -748,6 +748,90 @@ const ASSET_CONTENT_TYPES = new Set([
 const safeAssetFileName = (fileName: string) =>
   fileName.replace(/[^a-zA-Z0-9._-]/g, "-");
 
+type AssetProjectScope = { projectId: string; clientId: string | null };
+
+export function selectAssetProjectScopes(
+  scopes: AssetProjectScope[],
+  selection: {
+    projectId?: string;
+    clientScope?: { clientId: string | null };
+    requireSingleClient?: boolean;
+  } = {},
+) {
+  if (selection.projectId) {
+    const selected = scopes.filter(
+      (scope) => scope.projectId === selection.projectId,
+    );
+    if (!selected.length) throw new TRPCError({ code: "NOT_FOUND" });
+    return selected;
+  }
+  if (selection.clientScope) {
+    const selected = scopes.filter(
+      (scope) => scope.clientId === selection.clientScope!.clientId,
+    );
+    if (!selected.length) throw new TRPCError({ code: "NOT_FOUND" });
+    return selected;
+  }
+  if (
+    selection.requireSingleClient &&
+    new Set(scopes.map((scope) => scope.clientId ?? "organization")).size > 1
+  )
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message:
+        "Select a project before using assets on a task shared across client scopes",
+    });
+  if (!scopes.length) throw new TRPCError({ code: "NOT_FOUND" });
+  return scopes;
+}
+
+async function requireAssetWorkScope(
+  ctx: TrpcContext,
+  workItemId: string,
+  minimum: "viewer" | "editor" = "viewer",
+  selection: {
+    projectId?: string;
+    clientScope?: { clientId: string | null };
+    requireSingleClient?: boolean;
+  } = {},
+) {
+  const db = getDb();
+  const scopes: AssetProjectScope[] = db
+    ? await db.execute<AssetProjectScope>(sql`
+        select membership.work_project_id as "projectId",
+          project.client_id as "clientId"
+        from public.work_project_item membership
+        join public.work_project project
+          on project.work_project_id = membership.work_project_id
+        where membership.work_item_id = ${workItemId}::uuid
+          and project.archived_at is null
+      `)
+    : (() => {
+        const item = getDemoWork().items.get(workItemId);
+        const project = item
+          ? getDemoWork().projects.get(item.projectId)
+          : undefined;
+        return item && project
+          ? [{ projectId: project.projectId, clientId: project.clientId }]
+          : [];
+      })();
+  const candidates = selectAssetProjectScopes(scopes, selection);
+  for (const candidate of candidates) {
+    try {
+      await requireProjectAccess(ctx, candidate.projectId, minimum);
+      return candidate;
+    } catch (error) {
+      if (
+        error instanceof TRPCError &&
+        (error.code === "NOT_FOUND" || error.code === "FORBIDDEN")
+      )
+        continue;
+      throw error;
+    }
+  }
+  throw new TRPCError({ code: "NOT_FOUND" });
+}
+
 function decodeAssetBody(contentBase64: string, contentType: string) {
   if (contentBase64.length % 4 !== 0)
     throw new TRPCError({
@@ -803,7 +887,9 @@ async function requireAssetAccess(
     const row = getDemoStore().assets.get(assetId);
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     if (!row.workItemId) throw new TRPCError({ code: "NOT_FOUND" });
-    await requireItemAccess(ctx, row.workItemId, minimum);
+    await requireAssetWorkScope(ctx, row.workItemId, minimum, {
+      clientScope: { clientId: row.clientId },
+    });
     return row;
   }
   const [row] = await db
@@ -817,7 +903,9 @@ async function requireAssetAccess(
     .limit(1);
   if (!row) throw new TRPCError({ code: "NOT_FOUND" });
   if (!row.workItemId) throw new TRPCError({ code: "NOT_FOUND" });
-  await requireItemAccess(ctx, row.workItemId, minimum);
+  await requireAssetWorkScope(ctx, row.workItemId, minimum, {
+    clientScope: { clientId: row.clientId },
+  });
   return row;
 }
 
@@ -827,21 +915,20 @@ export const assetsRouter = router({
       z.object({
         title: z.string().trim().min(1).max(200),
         workItemId: z.string().uuid(),
+        projectId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const access = await requireItemAccess(ctx, input.workItemId, "editor");
+      const scope = await requireAssetWorkScope(
+        ctx,
+        input.workItemId,
+        "editor",
+        input.projectId
+          ? { projectId: input.projectId }
+          : { requireSingleClient: true },
+      );
       const db = getDb();
       if (db) {
-        const [scope] = await db.execute<{ clientId: string | null }>(sql`
-          select project.client_id as "clientId"
-          from public.work_project_item membership
-          join public.work_project project
-            on project.work_project_id = membership.work_project_id
-          where membership.work_item_id = ${input.workItemId}::uuid
-            and membership.work_project_id = ${access.projectId}::uuid
-          limit 1
-        `);
         return db.transaction(async (tx) => {
           const [created] = await tx
             .insert(asset)
@@ -868,7 +955,7 @@ export const assetsRouter = router({
       const store = getDemoStore();
       const demoAsset = store.createAsset(
         input.title,
-        getDemoWork().projects.get(access.projectId)?.clientId ?? null,
+        scope.clientId,
         null,
         input.workItemId,
       );
@@ -912,11 +999,16 @@ export const assetsRouter = router({
         let version: typeof assetVersion.$inferSelect | null = null;
         try {
           version = await db.transaction(async (tx) => {
-            await tx.execute(sql`
-              select asset_id from public.asset
+            const [locked] = await tx.execute<{
+              status: string;
+              approvedVersionId: string | null;
+            }>(sql`
+              select status, approved_version_id as "approvedVersionId"
+              from public.asset
               where asset_id = ${input.assetId}::uuid
               for update
             `);
+            if (!locked) throw new TRPCError({ code: "NOT_FOUND" });
             const [latest] = await tx
               .select({
                 version: sql<number>`coalesce(max(${assetVersion.versionNumber}), 0)::int`,
@@ -940,15 +1032,29 @@ export const assetsRouter = router({
                 uploadedByEmployeeId: ctx.employeeId,
               })
               .returning();
+            await tx
+              .update(asset)
+              .set({
+                status: "draft",
+                approvedVersionId: null,
+                updatedAt: new Date(),
+              })
+              .where(eq(asset.assetId, input.assetId));
             await tx.insert(auditEvent).values({
               actorEmployeeId: ctx.employeeId,
               action: "assets.uploadVersion",
               entityType: "asset",
               entityId: input.assetId,
+              before: {
+                status: locked.status,
+                approvedVersionId: locked.approvedVersionId,
+              },
               after: {
                 assetVersionId: created!.assetVersionId,
                 storagePath,
                 versionNumber,
+                status: "draft",
+                approvedVersionId: null,
               },
             });
             return created!;
@@ -1064,19 +1170,38 @@ export const assetsRouter = router({
       return signed;
     }),
   list: staffProcedure
-    .input(z.object({ workItemId: z.string().uuid() }))
+    .input(
+      z.object({
+        workItemId: z.string().uuid(),
+        projectId: z.string().uuid().optional(),
+      }),
+    )
     .query(async ({ input, ctx }) => {
-      await requireItemAccess(ctx, input.workItemId);
+      const scope = await requireAssetWorkScope(
+        ctx,
+        input.workItemId,
+        "viewer",
+        input.projectId
+          ? { projectId: input.projectId }
+          : { requireSingleClient: true },
+      );
       const db = getDb();
       if (!db)
         return [...getDemoStore().assets.values()].filter(
-          (row) => row.workItemId === input.workItemId,
+          (row) =>
+            row.workItemId === input.workItemId &&
+            row.clientId === scope.clientId,
         );
       const [assets, versions] = await Promise.all([
         db
           .select()
           .from(asset)
-          .where(eq(asset.workItemId, input.workItemId))
+          .where(
+            and(
+              eq(asset.workItemId, input.workItemId),
+              sql`${asset.clientId} is not distinct from ${scope.clientId}`,
+            ),
+          )
           .orderBy(desc(asset.createdAt)),
         db.select().from(assetVersion).orderBy(assetVersion.versionNumber),
       ]);
@@ -1138,6 +1263,32 @@ export const assetsRouter = router({
         };
       }
       const db = getDb();
+      const hasVersion = db
+        ? Boolean(
+            (
+              await db
+                .select({ assetVersionId: assetVersion.assetVersionId })
+                .from(assetVersion)
+                .where(eq(assetVersion.assetId, input.id))
+                .limit(1)
+            )[0],
+          )
+        : Boolean(getDemoStore().assets.get(input.id)?.versions.length);
+      if (!hasVersion) {
+        await writeAudit({
+          actorEmployeeId: ctx.employeeId,
+          action: "assets.qc.blocked",
+          entityType: "asset",
+          entityId: input.id,
+          before: null,
+          after: { decision: input.decision },
+          reason: "At least one asset version is required before QC",
+        });
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Upload an asset version before QC",
+        });
+      }
       if (db) {
         return db.transaction(async (tx) => {
           const [existing] = await tx
@@ -1195,6 +1346,9 @@ export const assetsRouter = router({
       };
       demoAsset.qcPassed =
         input.decision === "pass" || input.decision === "waive";
+      demoAsset.approvedVersionId = demoAsset.qcPassed
+        ? (demoAsset.versions.at(-1)?.assetVersionId ?? null)
+        : null;
       demoAsset.status =
         input.decision === "fail"
           ? "internal_review"

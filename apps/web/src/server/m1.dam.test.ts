@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryObjectStore } from "@hrmny/integrations";
 import { getDemoStore } from "./demo-store";
-import { DEV_USERS, resolveDevUser, sessionCanViewMargin } from "./auth/session";
-import { createCaller } from "./trpc/root";
+import {
+  DEV_USERS,
+  resolveDevUser,
+  sessionCanViewMargin,
+} from "./auth/session";
+import { createCaller, selectAssetProjectScopes } from "./trpc/root";
 import { getDemoWork } from "./trpc/work-management-router";
+import { clearDemoWorkGovernance, setDemoWorkLicense } from "./work-governance";
 
 const CLIENT_ID = "b1000000-0000-4000-8000-000000000001";
 const PROJECT_ID = "b2000000-0000-4000-8000-000000000001";
@@ -11,9 +16,7 @@ const ITEM_ID = "b3000000-0000-4000-8000-000000000001";
 const PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
-function callerFor(
-  role: "partner" | "am" | "creative_director" | "portal_a",
-) {
+function callerFor(role: "partner" | "am" | "creative_director" | "portal_a") {
   const user = resolveDevUser(role);
   return createCaller({
     user,
@@ -64,6 +67,7 @@ describe("M1 Work Files DAM acceptance", () => {
     store.audits = [];
     store.healthSignals = [];
     store.objectStore = createMemoryObjectStore();
+    clearDemoWorkGovernance();
     seedPrivateClientWork();
   });
 
@@ -72,6 +76,28 @@ describe("M1 Work Files DAM acceptance", () => {
     work.projects.delete(PROJECT_ID);
     work.items.delete(ITEM_ID);
     getDemoStore().objectStore = createMemoryObjectStore();
+    clearDemoWorkGovernance();
+  });
+
+  it("requires an explicit project or matching client scope for multi-client work items", () => {
+    const scopes = [
+      { projectId: PROJECT_ID, clientId: CLIENT_ID },
+      {
+        projectId: "b2000000-0000-4000-8000-000000000002",
+        clientId: "b1000000-0000-4000-8000-000000000002",
+      },
+    ];
+    expect(() =>
+      selectAssetProjectScopes(scopes, { requireSingleClient: true }),
+    ).toThrow("Select a project");
+    expect(selectAssetProjectScopes(scopes, { projectId: PROJECT_ID })).toEqual(
+      [scopes[0]],
+    );
+    expect(
+      selectAssetProjectScopes(scopes, {
+        clientScope: { clientId: CLIENT_ID },
+      }),
+    ).toEqual([scopes[0]]);
   });
 
   it("derives client ownership from Work and denies other staff and portal users", async () => {
@@ -90,9 +116,11 @@ describe("M1 Work Files DAM acceptance", () => {
     expect(await partner.assets.list({ workItemId: ITEM_ID })).toHaveLength(1);
 
     const am = callerFor("am");
-    await expect(am.assets.list({ workItemId: ITEM_ID })).rejects.toMatchObject({
-      code: "NOT_FOUND",
-    });
+    await expect(am.assets.list({ workItemId: ITEM_ID })).rejects.toMatchObject(
+      {
+        code: "NOT_FOUND",
+      },
+    );
     await expect(am.assets.get({ id: asset.assetId })).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
@@ -173,9 +201,11 @@ describe("M1 Work Files DAM acceptance", () => {
     });
     const stored = await partner.assets.get({ id: asset.assetId });
     expect(stored?.versions).toHaveLength(3);
-    expect(stored?.versions.find((row) => row.assetVersionId === first.assetVersionId)).toEqual(
-      before,
-    );
+    expect(
+      stored?.versions.find(
+        (row) => row.assetVersionId === first.assetVersionId,
+      ),
+    ).toEqual(before);
 
     for (const version of [first, second]) {
       const startedAt = Date.now();
@@ -184,13 +214,73 @@ describe("M1 Work Files DAM acceptance", () => {
         versionId: version.assetVersionId,
       });
       expect(signed?.url).toContain("memory://dam/");
-      expect(new Date(signed!.expiresAt).getTime() - startedAt).toBeGreaterThanOrEqual(
-        299_000,
-      );
-      expect(new Date(signed!.expiresAt).getTime() - startedAt).toBeLessThanOrEqual(
-        301_000,
-      );
+      expect(
+        new Date(signed!.expiresAt).getTime() - startedAt,
+      ).toBeGreaterThanOrEqual(299_000);
+      expect(
+        new Date(signed!.expiresAt).getTime() - startedAt,
+      ).toBeLessThanOrEqual(301_000);
     }
+  });
+
+  it("resets QC approval when a new version is uploaded", async () => {
+    const partner = callerFor("partner");
+    const asset = await createOrganizationAsset("Revision approval");
+    const first = await partner.assets.uploadVersion({
+      assetId: asset.assetId,
+      fileName: "approved.png",
+      contentType: "image/png",
+      contentBase64: PNG,
+    });
+    await partner.assets.qc({ id: asset.assetId, decision: "pass" });
+    expect(await partner.assets.get({ id: asset.assetId })).toMatchObject({
+      status: "qc_passed",
+      approvedVersionId: first.assetVersionId,
+    });
+
+    await partner.assets.uploadVersion({
+      assetId: asset.assetId,
+      fileName: "revision.png",
+      contentType: "image/png",
+      contentBase64: PNG,
+    });
+    expect(await partner.assets.get({ id: asset.assetId })).toMatchObject({
+      status: "draft",
+      qcPassed: false,
+      approvedVersionId: null,
+      versions: [{ versionNumber: 1 }, { versionNumber: 2 }],
+    });
+  });
+
+  it("denies asset mutations to Work view-only members", async () => {
+    const partner = callerFor("partner");
+    const project = (await partner.work.projects.list())[0]!;
+    const detail = await partner.work.projects.get({
+      projectId: project.projectId,
+    });
+    setDemoWorkLicense(DEV_USERS.partner!.employeeId, "view_only");
+    await expect(
+      partner.assets.create({
+        title: "Forbidden view-only asset",
+        workItemId: detail.items[0]!.itemId,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("rejects QC before the first version and audits the blocked attempt", async () => {
+    const partner = callerFor("partner");
+    const asset = await createOrganizationAsset("Empty QC asset");
+    await expect(
+      partner.assets.qc({ id: asset.assetId, decision: "pass" }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    expect(
+      getDemoStore().audits.some(
+        (row) =>
+          row.action === "assets.qc.blocked" &&
+          row.entityId === asset.assetId &&
+          row.reason === "At least one asset version is required before QC",
+      ),
+    ).toBe(true);
   });
 
   it("requires QC authority and notes while auditing blocked and completed decisions", async () => {
@@ -217,7 +307,8 @@ describe("M1 Work Files DAM acceptance", () => {
     expect(blocked).toMatchObject({ ok: false, code: "GATE_BLOCKED" });
     expect(
       getDemoStore().audits.some(
-        (row) => row.action === "assets.qc.blocked" && row.entityId === asset.assetId,
+        (row) =>
+          row.action === "assets.qc.blocked" && row.entityId === asset.assetId,
       ),
     ).toBe(true);
 
@@ -276,7 +367,9 @@ describe("M1 Work Files DAM acceptance", () => {
       [],
     );
     expect(
-      getDemoStore().audits.some((row) => row.action === "assets.uploadVersion"),
+      getDemoStore().audits.some(
+        (row) => row.action === "assets.uploadVersion",
+      ),
     ).toBe(false);
   });
 });
