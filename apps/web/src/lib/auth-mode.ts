@@ -5,7 +5,6 @@ export function getAuthModeFromEnv(
 ): AuthMode {
   if (["preview", "production"].includes(env.VERCEL_ENV ?? ""))
     return "supabase";
-  if (env.NODE_ENV === "production" && env.ALLOW_DEV_AUTH !== "true")
-    return "supabase";
+  if (env.NODE_ENV === "production") return "supabase";
   return env.AUTH_MODE?.toLowerCase() === "supabase" ? "supabase" : "dev";
 }

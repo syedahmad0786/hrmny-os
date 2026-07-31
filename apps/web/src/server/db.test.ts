@@ -31,4 +31,14 @@ describe("getDb production fail-loud", () => {
     const { getDb } = await import("./db");
     expect(() => getDb()).toThrow(/DATABASE_URL is required/);
   });
+
+  it("does not allow ALLOW_MEMORY_STORE in non-Vercel production", async () => {
+    vi.stubEnv("DATABASE_URL", "");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("AUTH_MODE", "dev");
+    vi.stubEnv("ALLOW_MEMORY_STORE", "true");
+    const { getDb } = await import("./db");
+    expect(() => getDb()).toThrow(/DATABASE_URL is required/);
+  });
 });

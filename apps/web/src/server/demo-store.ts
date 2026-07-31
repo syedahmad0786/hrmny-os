@@ -29,14 +29,14 @@ export type DemoConvention = {
   updatedByEmployeeId: string | null;
 };
 
-/** DAM_STORAGE=memory (local only) | supabase (required on Vercel). */
+/** DAM_STORAGE=memory (local only) | supabase (required when hosted). */
 export function createObjectStoreFromEnv(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): ObjectStore {
   const mode = (env.DAM_STORAGE ?? "memory").toLowerCase();
-  const hosted = ["preview", "production"].includes(
-    env.VERCEL_ENV?.toLowerCase() ?? "",
-  );
+  const hosted =
+    ["preview", "production"].includes(env.VERCEL_ENV?.toLowerCase() ?? "") ||
+    env.NODE_ENV?.toLowerCase() === "production";
   if (hosted && mode !== "supabase") {
     throw new Error(
       "DAM_STORAGE=supabase is required for preview and production deployments",
@@ -1168,7 +1168,8 @@ class MemoryDemoStore {
     const asset = this.assets.get(opts.assetId);
     if (!asset) throw new Error("NOT_FOUND");
     const versionNumber =
-      Math.max(0, ...asset.versions.map((version) => version.versionNumber)) + 1;
+      Math.max(0, ...asset.versions.map((version) => version.versionNumber)) +
+      1;
     const storagePath = `dam/${opts.assetId}/v${versionNumber}-${opts.fileName}`;
     const raw = Buffer.from(opts.contentBase64, "base64");
     const body = new Uint8Array(raw);

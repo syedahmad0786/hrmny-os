@@ -11,7 +11,8 @@ function memoryStoreForbidden(): boolean {
   const hosted = ["preview", "production"].includes(
     process.env.VERCEL_ENV?.toLowerCase() ?? "",
   );
-  if (hosted) return true;
+  if (hosted || process.env.NODE_ENV?.toLowerCase() === "production")
+    return true;
   if (process.env.ALLOW_MEMORY_STORE === "true") return false;
   if (process.env.REQUIRE_DATABASE === "true") return true;
   if (process.env.AUTH_MODE === "supabase") return true;

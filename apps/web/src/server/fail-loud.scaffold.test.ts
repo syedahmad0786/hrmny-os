@@ -45,6 +45,16 @@ describe("M1 fail-loud + idempotency scaffolding", () => {
     ).toThrow(/required for preview and production/);
   });
 
+  it("non-Vercel production cannot use memory DAM", async () => {
+    const { createObjectStoreFromEnv } = await import("./demo-store");
+    expect(() =>
+      createObjectStoreFromEnv({
+        NODE_ENV: "production",
+        DAM_STORAGE: "memory",
+      }),
+    ).toThrow(/required for preview and production/);
+  });
+
   it("health emit always records a signal (never silent)", async () => {
     const partner = callerFor();
     const before = (await partner.admin.health.get()).signals.length;
