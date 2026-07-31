@@ -19,21 +19,29 @@ const SECURITY_HEADERS: Record<string, string> = {
 };
 
 export async function middleware(request: NextRequest) {
-  const { response, user } = await updateSession(request);
+  const { pathname } = request.nextUrl;
+  const authMode = getAuthModeFromEnv();
+  const publicPath = isPublicPath(pathname);
+  let response = NextResponse.next({ request });
+  let user: null | { id: string } = null;
+
+  // API handlers authenticate their bearer token themselves. Calling Supabase
+  // from edge middleware as well can stall every API request before its handler.
+  if (authMode === "supabase" && !publicPath) {
+    ({ response, user } = await updateSession(request));
+  }
+
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
     response.headers.set(key, value);
   }
 
-  if (getAuthModeFromEnv() === "supabase" && !user) {
-    const { pathname } = request.nextUrl;
-    if (!isPublicPath(pathname)) {
-      const login = request.nextUrl.clone();
-      login.pathname = pathname.startsWith("/portal")
-        ? "/portal/login"
-        : "/login";
-      login.searchParams.set("next", pathname);
-      return NextResponse.redirect(login);
-    }
+  if (authMode === "supabase" && !publicPath && !user) {
+    const login = request.nextUrl.clone();
+    login.pathname = pathname.startsWith("/portal")
+      ? "/portal/login"
+      : "/login";
+    login.searchParams.set("next", pathname);
+    return NextResponse.redirect(login);
   }
 
   return response;
