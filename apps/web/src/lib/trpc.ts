@@ -21,6 +21,14 @@ export function createTrpcClient() {
       httpLink({
         url: "/api/trpc",
         transformer: superjson,
+        fetch(url, options) {
+          const signal = AbortSignal.any(
+            [options?.signal, AbortSignal.timeout(20_000)].filter(
+              (item): item is AbortSignal => Boolean(item),
+            ),
+          );
+          return fetch(url, { ...options, signal });
+        },
         async headers() {
           const headers: Record<string, string> = {
             "x-dev-role": getDevRole(),

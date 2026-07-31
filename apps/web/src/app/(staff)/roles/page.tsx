@@ -216,6 +216,8 @@ export default function RolesPage() {
             <label className="text-sm">
               Employee
               <select
+                id="role-employee"
+                name="employeeId"
                 className="mt-1 w-full rounded border border-sand bg-white px-3 py-2"
                 value={employeeId}
                 onChange={(event) => setEmployeeId(event.target.value)}
@@ -233,6 +235,8 @@ export default function RolesPage() {
             <label className="text-sm">
               Role
               <select
+                id="role-assignment"
+                name="roleId"
                 className="mt-1 w-full rounded border border-sand bg-white px-3 py-2"
                 value={roleId}
                 onChange={(event) => setRoleId(event.target.value)}
@@ -252,6 +256,8 @@ export default function RolesPage() {
             <label className="text-sm">
               Audit reason
               <input
+                id="role-audit-reason"
+                name="reason"
                 className="mt-1 w-full rounded border border-sand bg-white px-3 py-2"
                 value={reason}
                 minLength={5}

@@ -405,6 +405,8 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
             <label className="desk-theme-control">
               <span className="sr-only">Theme</span>
               <select
+                id="color-theme"
+                name="color-theme"
                 aria-label="Color theme"
                 value={preference}
                 onChange={(e) =>

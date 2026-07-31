@@ -15,8 +15,9 @@ export function createDb(connectionString: string) {
   const client = postgres(connectionString, {
     prepare: false,
     ssl: "require",
-    // Work detail views intentionally load up to three independent reads.
-    max: 3,
+    // One connection per serverless isolate prevents warm functions from
+    // exhausting Supabase's pool; postgres-js still queues parallel reads.
+    max: 1,
     // Fail fast when the DB is unreachable (e.g. IPv6-only direct host from a
     // serverless function) — a bounded error reaches the UI's retry screen;
     // an unbounded connect hangs the request forever.

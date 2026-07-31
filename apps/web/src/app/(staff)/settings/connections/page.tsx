@@ -205,6 +205,8 @@ export default function ConnectionsPage() {
               {item.authType === "api_key" ? (
                 <div className="mt-4 flex gap-2">
                   <input
+                    name={`api-key-${item.toolkit}`}
+                    aria-label={`${item.label} API key`}
                     className="min-w-0 flex-1 rounded border border-sand bg-white px-3 py-2"
                     type="password"
                     disabled={!item.allowed}
@@ -306,6 +308,8 @@ export default function ConnectionsPage() {
             </p>
           </div>
           <input
+            name="tool-search"
+            aria-label="Search personal tools"
             className="w-full rounded border border-sand bg-white px-3 py-2 text-sm sm:w-72"
             type="search"
             placeholder="Search tools"
