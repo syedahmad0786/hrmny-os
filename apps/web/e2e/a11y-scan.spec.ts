@@ -26,6 +26,7 @@ test.describe("accessibility smoke (axe)", () => {
         impact: string | null | undefined;
         description: string;
         nodes: number;
+        targets: string[];
       }>;
     }> = [];
 
@@ -43,6 +44,7 @@ test.describe("accessibility smoke (axe)", () => {
           impact: v.impact,
           description: v.description,
           nodes: v.nodes.length,
+          targets: v.nodes.flatMap((node) => node.target.map(String)),
         })),
       });
     }

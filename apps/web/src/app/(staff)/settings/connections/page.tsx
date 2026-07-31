@@ -440,10 +440,11 @@ export default function ConnectionsPage() {
                           </div>
                           <span
                             className={`mt-1 size-2.5 rounded-full ${item.connected ? "bg-green-600" : "bg-sand"}`}
-                            aria-label={
-                              item.connected ? "Connected" : "Not connected"
-                            }
+                            aria-hidden="true"
                           />
+                          <span className="sr-only">
+                            {item.connected ? "Connected" : "Not connected"}
+                          </span>
                         </div>
                         <p className="mt-2 flex-1 text-xs text-muted">
                           {item.note}

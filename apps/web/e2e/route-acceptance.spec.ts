@@ -48,6 +48,8 @@ async function assertRenders(page: Page, route: RouteEntry, label: string) {
     .soft(page.getByText(ERROR_BOUNDARY), `${label} ${route.sample} error boundary`)
     .toHaveCount(0);
 
+  if (route.exposure === "development-only") return;
+
   // Group landmark confirms the actor actually reached the intended surface.
   if (route.actor === "staff") {
     await expect

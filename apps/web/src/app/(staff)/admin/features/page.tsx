@@ -228,7 +228,7 @@ export default function FeatureLabPage() {
                 <button
                   key={item}
                   type="button"
-                  className={`rounded-full px-4 py-2 text-sm capitalize ${scope === item ? "bg-ochre text-white" : "border border-sand bg-white"}`}
+                  className={`rounded-full px-4 py-2 text-sm capitalize ${scope === item ? "bg-ink text-white" : "border border-sand bg-white"}`}
                   onClick={() => selectScope(item)}
                 >
                   {item}
@@ -265,6 +265,7 @@ export default function FeatureLabPage() {
           onChange={(event) => setSearch(event.target.value)}
         />
         <select
+          aria-label="Feature source"
           className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
           value={source}
           onChange={(event) => setSource(event.target.value)}
@@ -276,6 +277,7 @@ export default function FeatureLabPage() {
           <option value="integration">Integrations</option>
         </select>
         <select
+          aria-label="Feature availability"
           className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
           value={availability}
           onChange={(event) => setAvailability(event.target.value)}
