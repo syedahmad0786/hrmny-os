@@ -16,7 +16,7 @@ export function CrmTag({
 }
 
 export function CrmPageHeader({
-  kicker = "CRM · Team only",
+  kicker = "Pipeline",
   title,
   description,
   actions,

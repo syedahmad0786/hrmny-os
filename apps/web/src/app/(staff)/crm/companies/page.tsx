@@ -17,8 +17,10 @@ import {
   initials,
   relationshipSummary,
 } from "@/components/crm/format";
+import { usePageTitle } from "@/components/use-page-title";
 
 export default function CrmCompaniesPage() {
+  usePageTitle("Directory");
   const utils = trpc.useUtils();
   const companies = trpc.crm.companies.list.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
@@ -110,7 +112,11 @@ export default function CrmCompaniesPage() {
           value={sector}
           onChange={(e) => setSector(e.target.value)}
         />
-        <select value={market} onChange={(e) => setMarket(e.target.value)}>
+        <select
+          aria-label="Filter by market"
+          value={market}
+          onChange={(e) => setMarket(e.target.value)}
+        >
           <option value="all">UAE + KSA</option>
           <option value="UAE">UAE</option>
           <option value="KSA">KSA</option>

@@ -8,12 +8,23 @@ import {
 import { createContext } from "./trpc/trpc";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { isPublicPath } from "@/lib/supabase/middleware";
 
 /**
  * M1 security / insurance checks — RLS SQL grants, margin strip, secrets hygiene.
  */
 describe("M1 security insurance", () => {
   afterEach(() => vi.unstubAllEnvs());
+
+  it("lets hosted development probes reach their intentional 404 pages", () => {
+    expect(isPublicPath("/gate")).toBe(true);
+    expect(isPublicPath("/assets")).toBe(true);
+    expect(existsSync(join(process.cwd(), "src/app/gate/page.tsx"))).toBe(true);
+    expect(existsSync(join(process.cwd(), "src/app/assets/page.tsx"))).toBe(true);
+    expect(existsSync(join(process.cwd(), "src/app/(staff)/gate/page.tsx"))).toBe(
+      false,
+    );
+  });
 
   it("Data API lockdown protects audit and asset history", () => {
     const candidates = [
@@ -36,6 +47,54 @@ describe("M1 security insurance", () => {
     );
     expect(sql).toMatch(/'audit_event'/);
     expect(sql).toMatch(/'asset_version'/);
+  });
+
+  it("M1 migration adds Work-scoped DAM, durable delivery and role uniqueness", () => {
+    const candidates = [
+      join(
+        process.cwd(),
+        "packages/db/migrations/0070_m1_production_readiness.sql",
+      ),
+      join(
+        process.cwd(),
+        "../../packages/db/migrations/0070_m1_production_readiness.sql",
+      ),
+      join(
+        __dirname,
+        "../../../../packages/db/migrations/0070_m1_production_readiness.sql",
+      ),
+    ];
+    const path = candidates.find((candidate) => existsSync(candidate));
+    expect(path, "M1 readiness migration not found").toBeTruthy();
+    const sql = readFileSync(path!, "utf8");
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS work_item_id uuid/i);
+    expect(sql).toMatch(/REFERENCES public\.work_item\(work_item_id\)/i);
+    expect(sql).toMatch(/employee_role_employee_role_uniq/i);
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS delivery_status/i);
+    expect(sql).toMatch(/notification_attempts >= 0/i);
+  });
+
+  it("redacts scheduled-job payloads and results from the admin API", () => {
+    const source = readFileSync(join(__dirname, "trpc/root.ts"), "utf8");
+    const listResolver = source.slice(
+      source.indexOf("jobs: router({"),
+      source.indexOf("scheduleHealth:", source.indexOf("jobs: router({")),
+    );
+    expect(listResolver).toContain(
+      "scheduledJobId: scheduledJob.scheduledJobId",
+    );
+    expect(listResolver).not.toContain("payload: scheduledJob.payload");
+    expect(listResolver).not.toContain("result: scheduledJob.result");
+  });
+
+  it("binds UUID lists as PostgreSQL arrays rather than records", () => {
+    const source = readFileSync(
+      join(__dirname, "trpc/work-management-router.ts"),
+      "utf8",
+    );
+    expect(source).toContain("function uuidArray(values: readonly string[])");
+    expect(source).toContain("any(${uuidArray(targetIds)})");
+    expect(source).not.toMatch(/\$\{[A-Za-z_$][\w$]*\}::uuid\[\]/);
   });
 
   it("gitignore keeps secrets out of the monorepo", () => {
@@ -127,6 +186,14 @@ describe("M1 security insurance", () => {
     });
     expect(magic.sent).toBe(false);
     expect(magic.stubToken).toBeUndefined();
+  });
+
+  it("never enables dev persona impersonation on Vercel", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("AUTH_MODE", "dev");
+    vi.stubEnv("ALLOW_DEV_AUTH", "true");
+    expect(getAuthMode()).toBe("supabase");
   });
 
   it("reports the configured monthly LLM cap", async () => {

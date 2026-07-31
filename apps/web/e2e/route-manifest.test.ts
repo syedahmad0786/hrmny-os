@@ -43,19 +43,35 @@ describe("route manifest coverage", () => {
 
   it("has an entry for every page.tsx under src/app", () => {
     const missing = [...discovered].filter((r) => !manifest.has(r)).sort();
-    expect(missing, `pages missing from route-manifest.ts:\n${missing.join("\n")}`).toEqual([]);
+    expect(
+      missing,
+      `pages missing from route-manifest.ts:\n${missing.join("\n")}`,
+    ).toEqual([]);
   });
 
   it("has no stale entries pointing at pages that no longer exist", () => {
     const stale = [...manifest].filter((r) => !discovered.has(r)).sort();
-    expect(stale, `manifest routes with no page.tsx:\n${stale.join("\n")}`).toEqual([]);
+    expect(
+      stale,
+      `manifest routes with no page.tsx:\n${stale.join("\n")}`,
+    ).toEqual([]);
   });
 
   it("every dynamic route has a concrete sample distinct from its pattern", () => {
     for (const r of ROUTES) {
       if (r.route.includes("[")) {
-        expect(r.sample, `${r.route} needs a concrete sample`).not.toContain("[");
+        expect(r.sample, `${r.route} needs a concrete sample`).not.toContain(
+          "[",
+        );
       }
+    }
+  });
+
+  it("marks production-hidden probes as development-only", () => {
+    for (const route of ["/assets", "/gate"]) {
+      expect(ROUTES.find((entry) => entry.route === route)?.exposure).toBe(
+        "development-only",
+      );
     }
   });
 });

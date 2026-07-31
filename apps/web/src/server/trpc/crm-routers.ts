@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { hasPermission } from "@hrmny/db";
 import {
   bootstrapGateRegistry,
   transition,
@@ -22,15 +23,16 @@ import {
   listCrmTasks,
   listDeals,
   listNotes,
-  moveDealStage,
   pipelineStages,
   updateCompany,
   updateContact,
   updateCrmTask,
   updateDeal,
+  withLockedDealTransition,
 } from "../crm/repository";
+import { listContactEdges, upsertContactEdge } from "../crm/contact-edges";
 import { redactDealMargin } from "../crm/types";
-import { emitHealthSignal, writeAudit } from "../m1-persistence";
+import { emitHealthSignal } from "../m1-persistence";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
 
 bootstrapGateRegistry();
@@ -155,6 +157,21 @@ export const crmContactsRouter = router({
       const { id, ...patch } = input;
       return updateContact(id, patch);
     }),
+  edges: router({
+    list: protectedProcedure
+      .input(z.object({ contactId: z.string().uuid() }))
+      .query(({ input }) => listContactEdges(input.contactId)),
+    upsert: protectedProcedure
+      .input(
+        z.object({
+          fromContact: z.string().uuid(),
+          toContact: z.string().uuid(),
+          relation: z.string().trim().min(1).max(80),
+          weight: z.number().min(0).max(1).optional(),
+        }),
+      )
+      .mutation(({ input }) => upsertContactEdge(input)),
+  }),
 });
 
 export const crmDealsRouter = router({
@@ -235,70 +252,67 @@ export const crmDealsRouter = router({
       z.object({
         id: z.string().uuid(),
         to: z.string().min(1),
+        from: z.string().min(1).optional(),
         overrideReason: z.string().nullable().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const existing = await getDeal(input.id);
-      if (!existing) return { ok: false as const, reason: "Deal not found" };
-
-      const gateResult = await transition(
-        actorFromCtx(ctx),
-        {
-          entityType: "deal",
-          entityId: existing.dealId,
-          state: existing.stage,
-          data: { ...existing },
-        },
-        {
-          to: input.to,
-          from: existing.stage,
-          overrideReason: input.overrideReason,
-        },
-        {
-          authorize: async (a) =>
-            a.roles.some((r) =>
-              ["partner", "am", "finance", "director"].includes(r),
-            ),
-          apply: async ({ request }) => {
-            const moved = await moveDealStage({
-              dealId: existing.dealId,
-              to: request.to,
-              actorEmployeeId: ctx.employeeId,
-            });
-            if (!moved.ok) {
-              throw new Error(moved.reason);
-            }
-            return {
+      const pendingSignals: Array<{
+        name: string;
+        payload: Record<string, unknown>;
+      }> = [];
+      let movedDeal: Awaited<ReturnType<typeof getDeal>> = null;
+      const gateResult = await withLockedDealTransition(
+        input.id,
+        async ({ deal: existing, applyStage, audit }) =>
+          transition(
+            actorFromCtx(ctx),
+            {
               entityType: "deal",
-              entityId: moved.deal.dealId,
-              state: moved.deal.stage,
-              data: { ...moved.deal },
-            };
-          },
-          audit: async (event) => {
-            const row = await writeAudit({
-              actorEmployeeId: event.actorEmployeeId,
-              action: event.action,
-              entityType: event.entityType,
-              entityId: event.entityId,
-              before: event.before,
-              after: event.after,
-              reason: event.reason ?? null,
-            });
-            return { auditId: row.auditEventId };
-          },
-          emit: async (event) => {
-            await emitHealthSignal(
-              event.name.endsWith("transition_blocked")
-                ? "gate_blocked"
-                : "crm_deal_transition",
-              event.name.endsWith("transition_blocked") ? "warn" : "info",
-              event.payload,
-            );
-          },
-        },
+              entityId: existing.dealId,
+              state: existing.stage,
+              data: { ...existing },
+            },
+            {
+              to: input.to,
+              from: input.from ?? existing.stage,
+              overrideReason: input.overrideReason,
+            },
+            {
+              authorize: async (a) =>
+                hasPermission(a.permissions, "deal", "transition") &&
+                a.roles.some((r) =>
+                  ["partner", "am", "finance", "director"].includes(r),
+                ),
+              apply: async ({ request }) => {
+                movedDeal = await applyStage(request.to, ctx.employeeId);
+                return {
+                  entityType: "deal",
+                  entityId: movedDeal.dealId,
+                  state: movedDeal.stage,
+                  data: { ...movedDeal },
+                };
+              },
+              audit,
+              emit: async (event) => {
+                pendingSignals.push(event);
+              },
+            },
+          ),
       );
+
+      if (!gateResult)
+        return { ok: false as const, reason: "Deal not found" };
+
+      for (const event of pendingSignals) {
+        await emitHealthSignal(
+          event.name.endsWith("transition_blocked")
+            ? "gate_blocked"
+            : "crm_deal_transition",
+          event.name.endsWith("transition_blocked") ? "warn" : "info",
+          event.payload,
+        );
+      }
 
       if (!gateResult.ok) {
         return {
@@ -310,12 +324,11 @@ export const crmDealsRouter = router({
         };
       }
 
-      const deal = await getDeal(input.id);
-      if (!deal)
+      if (!movedDeal)
         return { ok: false as const, reason: "Deal missing after apply" };
       return {
         ok: true as const,
-        deal: redactDealMargin(deal, ctx.canViewMargin),
+        deal: redactDealMargin(movedDeal, ctx.canViewMargin),
         auditId: gateResult.auditId,
       };
     }),
@@ -375,12 +388,29 @@ export const crmNotesRouter = router({
         dealId: z.string().uuid().nullable().optional(),
       }),
     )
-    .mutation(({ input, ctx }) =>
-      createNote({
+    .mutation(async ({ input, ctx }) => {
+      const note = await createNote({
         ...input,
         authorEmployeeId: ctx.employeeId,
-      }),
-    ),
+      });
+      // Best-effort semantic memory — CRM note remains SoT even if embed fails.
+      try {
+        const { rememberChunk } = await import("../memory/postgres");
+        await rememberChunk({
+          sourceType: "note",
+          sourceId: note.crmNoteId,
+          content: note.body,
+          metadata: {
+            dealId: note.dealId,
+            companyId: note.companyId,
+            contactId: note.contactId,
+          },
+        });
+      } catch {
+        /* memory optional when DATABASE_URL / embeddings unavailable */
+      }
+      return note;
+    }),
 });
 
 export const crmTasksRouter = router({

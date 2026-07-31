@@ -76,7 +76,11 @@ export default function CrmTasksPage() {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select
+          aria-label="Filter by status"
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+        >
           <option value="openish">Open + in progress</option>
           <option value="all">All statuses</option>
           <option value="open">Open</option>

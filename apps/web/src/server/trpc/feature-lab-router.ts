@@ -12,7 +12,6 @@ import {
   setFeatureOverride,
   type FeatureScope,
 } from "../features";
-import { writeAudit } from "../m1-persistence";
 import { requirePermission, router, staffProcedure } from "./trpc";
 
 const featureAdminProcedure = staffProcedure.use(
@@ -187,25 +186,10 @@ export const featureLabRouter = router({
       if (!definition) throw new TRPCError({ code: "NOT_FOUND" });
       await assertTarget(input.scopeType, input.scopeKey);
       try {
-        const saved = await setFeatureOverride({
+        return await setFeatureOverride({
           ...input,
           updatedByEmployeeId: ctx.employeeId,
         });
-        await writeAudit({
-          actorEmployeeId: ctx.employeeId,
-          action: "feature_override.upsert",
-          entityType: "feature_override",
-          entityId: saved.featureOverrideId,
-          before: null,
-          after: {
-            featureKey: input.featureKey,
-            scopeType: input.scopeType,
-            scopeKey: input.scopeKey,
-            enabled: input.enabled,
-          },
-          reason: input.reason ?? null,
-        });
-        return saved;
       } catch (error) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -219,27 +203,9 @@ export const featureLabRouter = router({
     .input(overrideInput)
     .mutation(async ({ input, ctx }) => {
       await assertTarget(input.scopeType, input.scopeKey);
-      const existing = (await listFeatureOverrides()).find(
-        (item) =>
-          item.featureKey === input.featureKey &&
-          item.scopeType === input.scopeType &&
-          item.scopeKey === input.scopeKey,
-      );
-      await removeFeatureOverride(input);
-      await writeAudit({
-        actorEmployeeId: ctx.employeeId,
-        action: "feature_override.remove",
-        entityType: "feature_override",
-        entityId: existing?.featureOverrideId ?? null,
-        before: existing
-          ? {
-              featureKey: existing.featureKey,
-              scopeType: existing.scopeType,
-              scopeKey: existing.scopeKey,
-              enabled: existing.enabled,
-            }
-          : null,
-        after: null,
+      await removeFeatureOverride({
+        ...input,
+        updatedByEmployeeId: ctx.employeeId!,
         reason: "Return to inherited access",
       });
       return { ok: true as const };

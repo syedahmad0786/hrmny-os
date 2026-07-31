@@ -101,7 +101,11 @@ export default function CrmDealDetailPage() {
                 variant="primary"
                 disabled={move.isPending}
                 onClick={async () => {
-                  const r = await move.mutateAsync({ id, to: nextStage });
+                  const r = await move.mutateAsync({
+                    id,
+                    to: nextStage,
+                    from: d.stage,
+                  });
                   setLast(r);
                 }}
               >

@@ -3,9 +3,13 @@
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import Link from "next/link";
+import { usePageTitle } from "@/components/use-page-title";
 
 export default function DeliveryBoardPage() {
+  usePageTitle("Delivery");
   const utils = trpc.useUtils();
+  const session = trpc.auth.session.useQuery();
+  const isDemo = session.data?.authMode !== "supabase";
   const reset = trpc.m4.reset.useMutation({
     onSuccess: () => void utils.invalidate(),
   });
@@ -16,42 +20,82 @@ export default function DeliveryBoardPage() {
     <main className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl font-semibold">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-ochre">
+            Work · Delivery
+          </p>
+          <h1 className="mt-1 font-display text-3xl font-semibold">
             Delivery board
           </h1>
           <p className="text-muted">
-            In-house task board (Asana replace) · 11-state creative machine
+            Creative states, capacity, and client delivery — open a lane below.
           </p>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => void reset.mutateAsync()}
-          disabled={reset.isPending}
-        >
-          Reset M4 demo
-        </Button>
+        {isDemo ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => void reset.mutateAsync()}
+            disabled={reset.isPending}
+          >
+            Reset demo board
+          </Button>
+        ) : null}
       </div>
+
+      <nav
+        className="flex flex-wrap gap-2 text-sm"
+        aria-label="Delivery sections"
+      >
+        <Link
+          className="rounded-full bg-ink px-4 py-2 text-white"
+          href="/delivery"
+        >
+          Board
+        </Link>
+        <Link
+          className="rounded-full border border-sand bg-paper px-4 py-2"
+          href="/traffic"
+        >
+          Traffic / DoR
+        </Link>
+        <Link
+          className="rounded-full border border-sand bg-paper px-4 py-2"
+          href="/creative"
+        >
+          Creative QC
+        </Link>
+        <Link
+          className="rounded-full border border-sand bg-paper px-4 py-2"
+          href="/account"
+        >
+          Account rhythm
+        </Link>
+        <Link
+          className="rounded-full border border-sand bg-paper px-4 py-2"
+          href="/work"
+        >
+          Work Files (DAM)
+        </Link>
+        <Link
+          className="rounded-full border border-sand bg-paper px-4 py-2"
+          href="/work"
+        >
+          Projects
+        </Link>
+      </nav>
 
       <p className="text-sm text-muted">
         Bottleneck:{" "}
         <span className="text-ink">
           {board.data?.bottleneck.status ?? "—"} (
-          {board.data?.bottleneck.count ?? 0}) · ratio{" "}
-          {board.data?.ratio ?? 0}
+          {board.data?.bottleneck.count ?? 0}) · ratio {board.data?.ratio ?? 0}
         </span>
-        {" · "}
-        <Link href="/traffic" className="text-ochre underline">
-          Traffic / DoR
-        </Link>
-        {" · "}
-        <Link href="/creative" className="text-ochre underline">
-          Creative QC
-        </Link>
-        {" · "}
-        <Link href="/account" className="text-ochre underline">
-          Account rhythm
-        </Link>
+        {capacity.data ? (
+          <>
+            {" · "}
+            Capacity loaded
+          </>
+        ) : null}
       </p>
 
       <section className="overflow-x-auto">

@@ -18,7 +18,7 @@ export default function GateDemoPage() {
   const transition = trpc.crm.deals.moveStage.useMutation({
     onSuccess: () => void utils.crm.deals.invalidate(),
   });
-  const emitHealth = trpc.admin.health.emitStub.useMutation({
+  const emitHealth = trpc.admin.health.sendTest.useMutation({
     onSuccess: () => void utils.admin.health.get.invalidate(),
   });
   const scheduleHealth = trpc.admin.jobs.scheduleHealth.useMutation({
@@ -32,6 +32,7 @@ export default function GateDemoPage() {
     const result = await transition.mutateAsync({
       id: deal.dealId,
       to,
+      from: deal.stage,
     });
     setLast(result);
     await utils.admin.audit.list.invalidate();
@@ -54,7 +55,7 @@ export default function GateDemoPage() {
 
   async function tripHealth() {
     const result = await emitHealth.mutateAsync({
-      signalKey: "m1_demo_trip",
+      signalKey: "m1_test",
       severity: "warn",
     });
     setHealthLast(result);

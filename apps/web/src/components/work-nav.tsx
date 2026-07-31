@@ -8,6 +8,11 @@ const ITEMS = [
   { href: "/work", label: "Projects", features: ["work.projects"] },
   { href: "/work/my-tasks", label: "My tasks", features: ["work.my_tasks"] },
   {
+    href: "/delivery",
+    label: "Delivery",
+    features: ["delivery.workspace"],
+  },
+  {
     href: "/work/messages",
     label: "Messages",
     features: ["work.project_messages"],
@@ -73,7 +78,7 @@ export function WorkNav() {
         <Link
           key={item.href}
           href={item.href}
-          className={`rounded-full border px-3 py-1.5 text-sm ${pathname === item.href || (item.href !== "/work" && pathname.startsWith(`${item.href}/`)) ? "border-ink bg-ink text-white" : "border-sand bg-white/70"}`}
+          className={`rounded-full border px-3 py-1.5 text-sm ${pathname === item.href || (item.href !== "/work" && pathname.startsWith(`${item.href}/`)) ? "border-ink bg-ink text-white" : "border-sand bg-paper/70"}`}
         >
           {item.label}
         </Link>

@@ -2,16 +2,38 @@
 
 import Link from "next/link";
 import { trpc } from "@/lib/trpc";
+import { usePageTitle } from "@/components/use-page-title";
+
+type ActionItem = {
+  id: string;
+  title: string;
+  detail: string;
+  href: string;
+  urgency: "now" | "soon" | "watch";
+  tag: string;
+};
 
 export default function StaffHomePage() {
+  usePageTitle("Today");
   const overview = trpc.ops.overview.useQuery(undefined, {
     refetchInterval: 30_000,
+  });
+  const myTasks = trpc.work.personal.myTasks.useQuery(
+    { includeCompleted: false },
+    {
+      retry: false,
+      staleTime: 30_000,
+    },
+  );
+  const deals = trpc.crm.deals.list.useQuery(undefined, {
+    retry: false,
+    staleTime: 30_000,
   });
 
   if (overview.isLoading) {
     return (
       <main className="flex min-h-[40vh] items-center justify-center text-muted">
-        Loading live operations…
+        Loading your action queue…
       </main>
     );
   }
@@ -24,109 +46,154 @@ export default function StaffHomePage() {
   }
 
   const data = overview.data;
-  const metrics = [
-    {
-      label: "Active team",
-      value: String(data.activePeople).padStart(2, "0"),
-      detail: "People in the directory",
-      href: "/people",
-    },
-    {
-      label: "Open pipeline",
-      value: String(data.openDeals).padStart(2, "0"),
-      detail: "Commercial opportunities",
-      href: "/crm",
-    },
-    {
-      label: "Client work",
-      value: String(data.openTasks).padStart(2, "0"),
-      detail: `${data.activeClients} active clients`,
-      href: "/delivery",
-    },
-    {
-      label: "Connections",
-      value: String(data.connectedTools).padStart(2, "0"),
-      detail: "Tools connected securely",
-      href: "/settings/connections",
-    },
-    {
-      label: "Audit pulse",
-      value: String(data.recentAudits).padStart(2, "0"),
-      detail: "Recorded this week",
-      href: "/admin/audit",
-    },
-  ];
   const dubaiDate = new Intl.DateTimeFormat("en-GB", {
     weekday: "long",
     day: "numeric",
     month: "long",
     timeZone: "Asia/Dubai",
   }).format(new Date());
-  const latestActivity =
-    data.latestAudit?.action.replace(/[._]/g, " ") ?? "No recent activity";
+
+  const openDeals = (deals.data ?? []).filter((d) => !d.closeOutcome);
+  const stalledDeals = openDeals.slice(0, 3);
+  const taskRows = myTasks.data ?? [];
+  const dueTasks = taskRows.slice(0, 5);
+
+  const actions: ActionItem[] = [];
+
+  for (const task of dueTasks) {
+    actions.push({
+      id: `task-${task.itemId}`,
+      title: task.title,
+      detail: task.dueAt
+        ? `Due ${new Date(task.dueAt).toLocaleDateString()}`
+        : "In your My tasks queue",
+      href: "/work/my-tasks",
+      urgency: "now",
+      tag: "Task",
+    });
+  }
+
+  for (const deal of stalledDeals) {
+    actions.push({
+      id: `deal-${deal.dealId}`,
+      title: deal.companyName,
+      detail: `Move ${deal.stage ?? "pipeline"} deal forward`,
+      href: `/crm/deals/${deal.dealId}`,
+      urgency: "soon",
+      tag: "Deal",
+    });
+  }
+
+  if (data.connectedTools === 0) {
+    actions.push({
+      id: "connections",
+      title: "Connect your tools",
+      detail: "Gmail, calendar, and CRM enrichment need a connection",
+      href: "/settings/connections",
+      urgency: "watch",
+      tag: "Setup",
+    });
+  }
+
+  if (actions.length === 0) {
+    actions.push({
+      id: "pipeline",
+      title: "Review the pipeline",
+      detail: `${data.openDeals} open opportunities`,
+      href: "/crm",
+      urgency: "soon",
+      tag: "CRM",
+    });
+    actions.push({
+      id: "work",
+      title: "Open My tasks",
+      detail: `${data.openTasks} delivery tasks across clients`,
+      href: "/work/my-tasks",
+      urgency: "now",
+      tag: "Work",
+    });
+  }
+
+  const metrics = [
+    {
+      label: "Open deals",
+      value: String(data.openDeals),
+      detail: "Need a next step",
+      href: "/crm",
+    },
+    {
+      label: "Open tasks",
+      value: String(data.openTasks),
+      detail: `${data.activeClients} active clients`,
+      href: "/work/my-tasks",
+    },
+    {
+      label: "Approvals / audit",
+      value: String(data.recentAudits),
+      detail: "Recorded this week",
+      href: "/approvals",
+    },
+    {
+      label: "Connections",
+      value: String(data.connectedTools),
+      detail: "Tools ready to use",
+      href: "/settings/connections",
+    },
+  ];
 
   return (
     <main className="ops-home">
-      <section className="ops-hero">
-        <div className="ops-hero-brand">
-          hrmny <span>OS</span>
-        </div>
-        <div className="ops-hero-grid">
-          <div className="ops-hero-copy-wrap">
-            <p className="ops-eyebrow">{dubaiDate} · Dubai</p>
-            <h1>
-              One rhythm for <em>every</em> client relationship.
-            </h1>
-            <p className="ops-hero-copy">
-              Good morning. {data.openTasks} open tasks are moving across{" "}
-              {data.activeClients} active clients, with {data.openDeals}{" "}
-              opportunities in the pipeline.
-            </p>
-            <div className="ops-hero-actions">
-              <Link href="/client-preview" className="ops-btn ops-btn-ochre">
-                Review client work →
-              </Link>
-              <Link href="/work" className="ops-btn">
-                Open command center
-              </Link>
-            </div>
-          </div>
-          <div className="ops-orbit" aria-label="Live operating rhythm">
-            <div className="ops-orbit-path" />
-            <div className="ops-orbit-ring ops-orbit-ring-outer" />
-            <div className="ops-orbit-ring ops-orbit-ring-inner" />
-            <div className="ops-orbit-ring ops-orbit-ring-core" />
-            <div className="ops-orbit-core">h</div>
-            <div className="ops-orbit-node ops-orbit-node-1">
-              CRM
-              <br />
-              {data.openDeals} open
-            </div>
-            <div className="ops-orbit-node ops-orbit-node-2">
-              Delivery
-              <br />
-              {data.openTasks} open
-            </div>
-            <div className="ops-orbit-node ops-orbit-node-3">
-              Tools
-              <br />
-              {data.connectedTools} live
-            </div>
-            <div className="ops-orbit-node ops-orbit-node-4">
-              People
-              <br />
-              {data.activePeople} active
-            </div>
-          </div>
-        </div>
-        <div className="ops-hero-signal">
-          <span /> all systems in rhythm
+      <section className="ops-today-hero">
+        <p className="ops-eyebrow">{dubaiDate} · Dubai</p>
+        <h1>Your queue today</h1>
+        <p className="ops-hero-copy">
+          {data.openTasks} open tasks · {data.openDeals} deals in motion ·{" "}
+          {data.activeClients} active clients. Start here — pick the next action,
+          not another module.
+        </p>
+        <div className="ops-hero-actions">
+          <Link href="/work/my-tasks" className="ops-btn ops-btn-ochre">
+            My tasks →
+          </Link>
+          <Link href="/crm" className="ops-btn">
+            Open pipeline
+          </Link>
+          <Link href="/approvals" className="ops-btn">
+            Approvals
+          </Link>
         </div>
       </section>
 
       <div className="ops-section-kicker">
-        <h2>Pulse, not noise</h2>
-        <Link href="/crm">Open full pipeline →</Link>
+        <h2>Action queue</h2>
+        <Link href="/work/my-tasks">Full task list →</Link>
+      </div>
+      <section className="ops-action-queue" aria-label="Actions needing you">
+        {actions.map((action) => (
+          <Link
+            key={action.id}
+            href={action.href}
+            className={`ops-action-row urgency-${action.urgency}`}
+          >
+            <span className="ops-tag ops-tag-ochre">{action.tag}</span>
+            <span>
+              <strong>{action.title}</strong>
+              <small>{action.detail}</small>
+            </span>
+            <span className="ops-action-go">Open →</span>
+          </Link>
+        ))}
+      </section>
+
+      <div className="ops-section-kicker">
+        <h2>Pulse</h2>
+        <span>
+          Updated{" "}
+          {new Date(data.updatedAt).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
       </div>
       <section className="ops-metric-grid">
         {metrics.map((metric) => (
@@ -138,116 +205,27 @@ export default function StaffHomePage() {
         ))}
       </section>
 
-      <div className="ops-section-kicker ops-section-kicker-rhythm">
-        <h2>Today’s operating rhythm</h2>
-        <span>
-          Updated{" "}
-          {new Date(data.updatedAt).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </span>
+      <div className="ops-section-kicker">
+        <h2>Jump back in</h2>
+        <Link href="/dashboards">All dashboards →</Link>
       </div>
-      <section className="ops-split">
-        <article className="ops-panel">
-          <header className="ops-panel-head">
-            <div>
-              <h3>Work moving today</h3>
-              <p>Across the live operating system</p>
-            </div>
-            <Link href="/work">View board →</Link>
-          </header>
-          <div className="ops-panel-body ops-rhythm-list">
-            <Link href="/people" className="ops-rhythm-row">
-              <span className="ops-date-box">
-                01<small>Team</small>
-              </span>
-              <span>
-                <strong>People directory</strong>
-                <small>{data.activePeople} active employees are visible</small>
-              </span>
-              <span className="ops-tag ops-tag-success">Live</span>
-            </Link>
-            <Link href="/crm" className="ops-rhythm-row">
-              <span className="ops-date-box">
-                02<small>CRM</small>
-              </span>
-              <span>
-                <strong>Commercial pipeline</strong>
-                <small>{data.openDeals} open opportunities need momentum</small>
-              </span>
-              <span className="ops-tag ops-tag-info">Open</span>
-            </Link>
-            <Link href="/delivery" className="ops-rhythm-row">
-              <span className="ops-date-box">
-                03<small>Work</small>
-              </span>
-              <span>
-                <strong>Client delivery</strong>
-                <small>
-                  {data.openTasks} tasks across {data.activeClients} clients
-                </small>
-              </span>
-              <span className="ops-tag ops-tag-ochre">Moving</span>
-            </Link>
-            <Link href="/settings/connections" className="ops-rhythm-row">
-              <span className="ops-date-box">
-                04<small>Tools</small>
-              </span>
-              <span>
-                <strong>Connected workspace</strong>
-                <small>
-                  {data.connectedTools} authorized connections available
-                </small>
-              </span>
-              <span className="ops-tag">Review</span>
-            </Link>
-          </div>
-        </article>
-
-        <article className="ops-panel">
-          <header className="ops-panel-head">
-            <div>
-              <h3>Waiting on you</h3>
-              <p>Human approval, always</p>
-            </div>
-          </header>
-          <div className="ops-panel-body ops-approval-stack">
-            <Link href="/client-preview" className="ops-approval-mini">
-              <div>
-                <span className="ops-tag ops-tag-ochre">Client</span>
-                <small>Preview</small>
-              </div>
-              <h4>Demo Co · delivery approval</h4>
-              <p>Review the client-safe experience and persistent decision.</p>
-              <span className="ops-progress">
-                <i style={{ width: "76%" }} />
-              </span>
-            </Link>
-            <Link href="/settings/connections" className="ops-approval-mini">
-              <div>
-                <span className="ops-tag ops-tag-info">Tools</span>
-                <small>{data.connectedTools} live</small>
-              </div>
-              <h4>Personal connections</h4>
-              <p>Connect, verify, or disconnect approved business tools.</p>
-              <span className="ops-progress">
-                <i style={{ width: "52%" }} />
-              </span>
-            </Link>
-            <Link href="/admin/audit" className="ops-approval-mini">
-              <div>
-                <span className="ops-tag ops-tag-success">Audit</span>
-                <small>{data.recentAudits} this week</small>
-              </div>
-              <h4>{latestActivity}</h4>
-              <p>Latest recorded operational activity.</p>
-              <span className="ops-progress">
-                <i style={{ width: "88%" }} />
-              </span>
-            </Link>
-          </div>
-        </article>
+      <section className="ops-jump-grid">
+        <Link href="/delivery" className="ops-jump-card">
+          <strong>Delivery board</strong>
+          <small>Traffic, creative QC, account rhythm</small>
+        </Link>
+        <Link href="/finance" className="ops-jump-card">
+          <strong>Money</strong>
+          <small>Intake, billing, margin</small>
+        </Link>
+        <Link href="/people" className="ops-jump-card">
+          <strong>People</strong>
+          <small>Directory, leave, payroll prep</small>
+        </Link>
+        <Link href="/settings/connections" className="ops-jump-card">
+          <strong>Connections</strong>
+          <small>Gmail, Apollo, Xero, Composio</small>
+        </Link>
       </section>
     </main>
   );

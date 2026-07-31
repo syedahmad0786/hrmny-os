@@ -19,13 +19,12 @@ import {
 import { getWorkOrganizationPolicy } from "../work-governance";
 import { featureEnabled } from "../features";
 import { getSupabasePublicConfig } from "@/lib/supabase-config";
+import { getAuthModeFromEnv, type AuthMode } from "@/lib/auth-mode";
 import {
   PORTAL_MAGIC_LINK_FEATURE,
   PORTAL_PERMISSIONS,
   resolvePortalSessionForEmail,
 } from "./portal-magic-link";
-
-export type AuthMode = "dev" | "supabase";
 
 export type SessionUser = {
   employeeId: string;
@@ -48,6 +47,10 @@ export const DEV_USERS: Record<string, SessionUser> = {
       "allow:deal:transition",
       "allow:audit:view",
       "allow:admin:roles",
+      "allow:role:view",
+      "allow:role:manage",
+      "allow:health:view",
+      "allow:health:manage",
       "allow:*:*",
     ],
     actorType: "staff",
@@ -111,6 +114,10 @@ export const DEV_USERS: Record<string, SessionUser> = {
       "allow:convention:view",
       "allow:admin:features",
       "allow:admin:work",
+      "allow:role:view",
+      "allow:role:manage",
+      "allow:health:view",
+      "allow:health:manage",
     ],
     actorType: "staff",
     clientId: null,
@@ -178,11 +185,7 @@ export const DEV_USERS: Record<string, SessionUser> = {
 };
 
 export function getAuthMode(): AuthMode {
-  const mode = process.env.AUTH_MODE?.toLowerCase();
-  // Never expose dev persona impersonation from a production deployment.
-  if (process.env.NODE_ENV === "production") return "supabase";
-  if (mode === "supabase") return "supabase";
-  return "dev";
+  return getAuthModeFromEnv();
 }
 
 export function resolveDevUser(
@@ -232,10 +235,8 @@ export async function resolveSupabaseUser(
   }
 
   const email = data.user.email?.trim().toLowerCase();
-  const [sso, workPolicy] = await Promise.all([
-    getWorkSsoConfiguration(),
-    getWorkOrganizationPolicy(),
-  ]);
+  const sso = await getWorkSsoConfiguration();
+  const workPolicy = await getWorkOrganizationPolicy();
   const lastSignInAt = Date.parse(data.user.last_sign_in_at ?? "");
   const sessionExpired =
     Number.isFinite(lastSignInAt) &&
@@ -287,10 +288,11 @@ export async function resolveSupabaseUser(
 
     const roles = [...new Set(access.map((row) => row.role))];
     const featureSubject = { userId: staff.employeeId, roles };
-    const [ssoEnabled, sessionControlsEnabled] = await Promise.all([
-      featureEnabled("work.sso_scim", featureSubject),
-      featureEnabled("work.domain_controls", featureSubject),
-    ]);
+    const ssoEnabled = await featureEnabled("work.sso_scim", featureSubject);
+    const sessionControlsEnabled = await featureEnabled(
+      "work.domain_controls",
+      featureSubject,
+    );
     if (ssoEnabled && !ssoAccessAllowed(sso, data.user)) return null;
     if (sessionControlsEnabled && sessionExpired) return null;
 
@@ -314,7 +316,9 @@ export async function resolveSupabaseUser(
   // Magic-link portal access (flag on): the invite allowlist is the source of
   // truth for the client binding. Flag off falls through to the table below.
   if (
-    await featureEnabled(PORTAL_MAGIC_LINK_FEATURE, { roles: ["portal_client"] })
+    await featureEnabled(PORTAL_MAGIC_LINK_FEATURE, {
+      roles: ["portal_client"],
+    })
   ) {
     const viaAllowlist = await resolvePortalSessionForEmail(email);
     if (viaAllowlist) return viaAllowlist;

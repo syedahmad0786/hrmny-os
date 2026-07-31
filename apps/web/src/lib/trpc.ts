@@ -1,5 +1,5 @@
 import { createTRPCReact } from "@trpc/react-query";
-import { httpBatchLink } from "@trpc/client";
+import { httpLink } from "@trpc/client";
 import superjson from "superjson";
 import type { AppRouter } from "@/server/trpc/root";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
@@ -18,9 +18,17 @@ export function setDevRole(role: string) {
 export function createTrpcClient() {
   return trpc.createClient({
     links: [
-      httpBatchLink({
+      httpLink({
         url: "/api/trpc",
         transformer: superjson,
+        fetch(url, options) {
+          const signal = AbortSignal.any(
+            [options?.signal, AbortSignal.timeout(20_000)].filter(
+              (item): item is AbortSignal => Boolean(item),
+            ),
+          );
+          return fetch(url, { ...options, signal });
+        },
         async headers() {
           const headers: Record<string, string> = {
             "x-dev-role": getDevRole(),

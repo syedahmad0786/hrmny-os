@@ -39,7 +39,7 @@ export function WorkProofingDialog({
   useEffect(() => {
     open.mutate({ attachmentId: attachment.attachmentId });
     // The attachment ID is the complete preview identity.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // attachment/page deps intentionally omitted — reload only when dialog opens
   }, [attachment.attachmentId]);
 
   const annotations = trpc.work.proofing.list.useQuery({
@@ -130,7 +130,8 @@ export function WorkProofingDialog({
                   src={`${previewUrl}#page=${pageNumber}&toolbar=0`}
                 />
               ) : (
-                // eslint-disable-next-line @next/next/no-img-element
+                // native img: proofing needs exact pixel frame, not next/image
+                // eslint-disable-next-line @next/next/no-img-element -- signed URLs and annotation coordinates require the file's native aspect ratio
                 <img
                   className="block h-auto w-full select-none"
                   src={previewUrl}

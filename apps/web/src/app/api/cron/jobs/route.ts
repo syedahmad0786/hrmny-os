@@ -1,7 +1,7 @@
 import { eq, scheduledJob, sql } from "@hrmny/db";
 import { z } from "zod";
 import { getDb } from "@/server/db";
-import { emitHealthSignal } from "@/server/m1-persistence";
+import { deliverHealthSignal, emitHealthSignal } from "@/server/m1-persistence";
 import { featureEnabled } from "@/server/features";
 import { syncAsanaWorkspace } from "@/server/asana-sync";
 import { getVerifiedAsanaConnection } from "@/server/trpc/connections-router";
@@ -20,6 +20,9 @@ const HealthJobSchema = z.object({
   signalKey: z.string().min(1).max(120),
   severity: z.enum(["info", "warn", "critical"]),
   payload: z.record(z.unknown()).default({}),
+});
+const HealthDeliveryJobSchema = z.object({
+  healthSignalId: z.string().uuid(),
 });
 const AsanaSyncJobSchema = z.object({
   workspaceGid: z.string().min(1).max(120),
@@ -60,14 +63,16 @@ export async function GET(request: Request) {
 
   await db.execute(sql`
     update scheduled_job
-    set status = 'pending', locked_at = null, updated_at = now()
-    where status = 'running' and locked_at < now() - interval '10 minutes'
+    set status = case when attempts >= 3 then 'failed' else 'pending' end,
+        locked_at = null, updated_at = now()
+    where (status = 'running' and locked_at < now() - interval '10 minutes')
+       or (status = 'pending' and attempts >= 3)
   `);
   const claimedResult = await db.execute(sql`
     with due as (
       select scheduled_job_id
       from scheduled_job
-      where status = 'pending' and run_at <= now()
+      where status = 'pending' and attempts < 3 and run_at <= now()
       order by run_at
       for update skip locked
       limit 20
@@ -95,6 +100,9 @@ export async function GET(request: Request) {
           payload.severity,
           payload.payload,
         );
+      } else if (job.kind === "health_delivery") {
+        const payload = HealthDeliveryJobSchema.parse(job.payload);
+        result = await deliverHealthSignal(payload.healthSignalId);
       } else if (job.kind === "asana_sync") {
         const payload = AsanaSyncJobSchema.parse(job.payload);
         const roles = await db.execute<{ key: string }>(sql`
@@ -198,15 +206,28 @@ export async function GET(request: Request) {
     }
   }
 
-  const [lag] = await db.execute(sql<{ count: number }>`
-    select count(*)::int as count
+  const [lag] = await db.execute(
+    sql<{ count: number; oldestJobId: string | null }>`
+    select count(*)::int as count,
+      (
+        select overdue.scheduled_job_id::text
+        from scheduled_job overdue
+        where overdue.status = 'pending'
+          and overdue.run_at < now() - interval '5 minutes'
+        order by overdue.run_at, overdue.scheduled_job_id
+        limit 1
+      ) as "oldestJobId"
     from scheduled_job
     where status = 'pending' and run_at < now() - interval '5 minutes'
-  `);
-  if (Number(lag?.count ?? 0) > 0) {
-    await emitHealthSignal("job_lag", "warn", {
-      delayedJobs: Number(lag!.count),
-    });
+  `,
+  );
+  if (Number(lag?.count ?? 0) > 0 && lag?.oldestJobId) {
+    await emitHealthSignal(
+      "job_lag",
+      "warn",
+      { delayedJobs: Number(lag!.count) },
+      { incidentKey: `job-lag:${lag.oldestJobId}` },
+    );
   }
   const [workWebhooks, expiredAiRuns, dueReports] = await Promise.all([
     deliverPendingWorkWebhooks(),

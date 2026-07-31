@@ -124,7 +124,7 @@ describe("M6 portal + seams", () => {
       "brief_locked",
     );
 
-    const again = driveSeam("brief.lock", `brief.lock:${DEMO_BRIEF_ID}`, {
+    const again = await driveSeam("brief.lock", `brief.lock:${DEMO_BRIEF_ID}`, {
       briefId: DEMO_BRIEF_ID,
       taskId: brief.taskId,
       clientId: DEMO_CLIENT_ID,

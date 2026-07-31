@@ -18,6 +18,20 @@ import {
   type DemoDeal,
   type DemoQuoteLine,
 } from "../demo-store";
+import {
+  listImmersionsByClient,
+  upsertImmersion,
+} from "../crm/immersion-store";
+import {
+  getScope,
+  listScopesByClient,
+  upsertScope,
+} from "../crm/scope-store";
+import {
+  ensureOnboarding,
+  getOnboarding,
+  saveOnboarding,
+} from "../crm/onboarding-store";
 import { getDb } from "../db";
 import {
   protectedProcedure,
@@ -533,6 +547,18 @@ export const dealsRouter = router({
         after: { stage: "close", closeOutcome: input.outcome },
         reason: input.lostReason ?? null,
       });
+      try {
+        const { recordWinLossNote } = await import("../memory/postgres");
+        await recordWinLossNote({
+          dealId: input.id,
+          outcome: input.outcome,
+          note:
+            input.lostReason?.trim() ||
+            `Deal closed as ${input.outcome} for ${deal.companyName}`,
+        });
+      } catch {
+        /* win/loss memory is additive — close still succeeds */
+      }
       return {
         ok: true as const,
         newState: "close",
@@ -706,7 +732,7 @@ export const dealsRouter = router({
         ok: true as const,
         pack,
         client,
-        onboarding: store.onboarding.get(client.clientId) ?? [],
+        onboarding: await ensureOnboarding(client.clientId),
         fired,
       };
     }),
@@ -726,8 +752,7 @@ export const scopesRouter = router({
         lines: z.array(quoteLineSchema).default([]),
       }),
     )
-    .mutation(({ input }) => {
-      const store = getDemoStore();
+    .mutation(async ({ input }) => {
       const scope = {
         scopeId: randomUUID(),
         clientId: input.clientId,
@@ -747,13 +772,12 @@ export const scopesRouter = router({
           isVendor: l.isVendor,
         })),
       };
-      store.scopes.set(scope.scopeId, scope);
-      return scope;
+      return upsertScope(scope);
     }),
 
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => getDemoStore().scopes.get(input.id) ?? null),
+    .query(({ input }) => getScope(input.id)),
 
   update: protectedProcedure
     .input(
@@ -761,13 +785,12 @@ export const scopesRouter = router({
         id: z.string().uuid(),
         title: z.string().optional(),
         value: z.number().optional(),
-        status: z.string().optional(),
+        status: z.enum(["draft", "active", "renewing", "closed"]).optional(),
         terms: z.string().nullable().optional(),
       }),
     )
-    .mutation(({ input }) => {
-      const store = getDemoStore();
-      const scope = store.scopes.get(input.id);
+    .mutation(async ({ input }) => {
+      const scope = await getScope(input.id);
       if (!scope) return null;
       const next = {
         ...scope,
@@ -776,17 +799,12 @@ export const scopesRouter = router({
         status: input.status ?? scope.status,
         terms: input.terms === undefined ? scope.terms : input.terms,
       };
-      store.scopes.set(scope.scopeId, next);
-      return next;
+      return upsertScope(next);
     }),
 
   listByClient: protectedProcedure
     .input(z.object({ clientId: z.string() }))
-    .query(({ input }) =>
-      [...getDemoStore().scopes.values()].filter(
-        (s) => s.clientId === input.clientId,
-      ),
-    ),
+    .query(({ input }) => listScopesByClient(input.clientId)),
 });
 
 export const clientsRouter = router({
@@ -1157,12 +1175,12 @@ export const clientsRouter = router({
           complete: z.boolean().default(false),
         }),
       )
-      .mutation(({ input, ctx }) => {
+      .mutation(async ({ input, ctx }) => {
         const store = getDemoStore();
         if (!store.clients.has(input.clientId)) throw new Error("NOT_FOUND");
-        const existing = [...store.immersions.values()].find(
-          (i) => i.clientId === input.clientId,
-        );
+        const existing = (
+          await listImmersionsByClient(input.clientId)
+        )[0];
         const immersion = {
           immersionId: existing?.immersionId ?? randomUUID(),
           clientId: input.clientId,
@@ -1180,7 +1198,7 @@ export const clientsRouter = router({
             ? new Date().toISOString()
             : (existing?.completedAt ?? null),
         };
-        store.immersions.set(immersion.immersionId, immersion);
+        await upsertImmersion(immersion);
         if (input.complete) {
           store.pushHealth("immersion.completed", "info", {
             clientId: input.clientId,
@@ -1201,19 +1219,13 @@ export const clientsRouter = router({
 
     get: protectedProcedure
       .input(z.object({ clientId: z.string().uuid() }))
-      .query(({ input }) =>
-        [...getDemoStore().immersions.values()].filter(
-          (i) => i.clientId === input.clientId,
-        ),
-      ),
+      .query(({ input }) => listImmersionsByClient(input.clientId)),
   }),
 
   onboarding: router({
     get: protectedProcedure
       .input(z.object({ clientId: z.string().uuid() }))
-      .query(
-        ({ input }) => getDemoStore().onboarding.get(input.clientId) ?? [],
-      ),
+      .query(({ input }) => ensureOnboarding(input.clientId)),
 
     signoff: protectedProcedure
       .input(
@@ -1223,10 +1235,9 @@ export const clientsRouter = router({
           signoffType: z.string().default("phase"),
         }),
       )
-      .mutation(({ input, ctx }) => {
+      .mutation(async ({ input, ctx }) => {
         const store = getDemoStore();
-        const phases = store.onboarding.get(input.clientId);
-        if (!phases) throw new Error("NOT_FOUND");
+        const phases = await ensureOnboarding(input.clientId);
         const phase = phases.find((p) => p.phaseIndex === input.phaseIndex);
         if (!phase) throw new Error("NOT_FOUND");
         phase.status = "signed_off";
@@ -1238,7 +1249,7 @@ export const clientsRouter = router({
           next.status = "active";
           advanced = true;
         }
-        store.onboarding.set(input.clientId, [...phases]);
+        await saveOnboarding(input.clientId, [...phases]);
         store.appendAudit({
           actorEmployeeId: ctx.employeeId!,
           action: "clients.onboarding.signoff",
@@ -1252,7 +1263,10 @@ export const clientsRouter = router({
           },
           reason: null,
         });
-        return { advanced, phases: store.onboarding.get(input.clientId) };
+        return {
+          advanced,
+          phases: await getOnboarding(input.clientId),
+        };
       }),
   }),
 });

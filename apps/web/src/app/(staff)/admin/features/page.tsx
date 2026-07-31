@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@hrmny/ui";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -95,7 +96,16 @@ export default function FeatureLabPage() {
     setScopeKey(options?.[0]?.key ?? "");
   }
 
-  const error = setOverride.error ?? removeOverride.error ?? list.error;
+  const error =
+    setOverride.error ??
+    removeOverride.error ??
+    list.error ??
+    selectedResolution.error;
+  const retry = async () => {
+    setOverride.reset();
+    removeOverride.reset();
+    await Promise.all([list.refetch(), selectedResolution.refetch()]);
+  };
   const viewerEnabled = new Set(
     list.data?.resolvedForViewer
       .filter((item) => item.enabled)
@@ -147,9 +157,15 @@ export default function FeatureLabPage() {
           </Link>
           <Link
             className="rounded-full border border-sand bg-white px-4 py-2"
-            href="/settings/ai"
+            href="/dashboards"
           >
-            AI
+            Dashboards
+          </Link>
+          <Link
+            className="rounded-full border border-sand bg-white px-4 py-2"
+            href="/requests"
+          >
+            Requests
           </Link>
           <Link
             className="rounded-full border border-sand bg-white px-4 py-2"
@@ -165,15 +181,15 @@ export default function FeatureLabPage() {
           </Link>
           <Link
             className="rounded-full border border-sand bg-white px-4 py-2"
-            href="/conventions"
+            href="/settings/ai"
           >
-            Conventions
+            AI
           </Link>
           <Link
             className="rounded-full border border-sand bg-white px-4 py-2"
-            href="/dashboards"
+            href="/conventions"
           >
-            Dashboards
+            Conventions
           </Link>
           <Link
             className="rounded-full border border-sand bg-white px-4 py-2"
@@ -222,7 +238,7 @@ export default function FeatureLabPage() {
                 <button
                   key={item}
                   type="button"
-                  className={`rounded-full px-4 py-2 text-sm capitalize ${scope === item ? "bg-ochre text-white" : "border border-sand bg-white"}`}
+                  className={`rounded-full px-4 py-2 text-sm capitalize ${scope === item ? "bg-ink text-white" : "border border-sand bg-white"}`}
                   onClick={() => selectScope(item)}
                 >
                   {item}
@@ -259,6 +275,7 @@ export default function FeatureLabPage() {
           onChange={(event) => setSearch(event.target.value)}
         />
         <select
+          aria-label="Feature source"
           className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
           value={source}
           onChange={(event) => setSource(event.target.value)}
@@ -270,6 +287,7 @@ export default function FeatureLabPage() {
           <option value="integration">Integrations</option>
         </select>
         <select
+          aria-label="Feature availability"
           className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
           value={availability}
           onChange={(event) => setAvailability(event.target.value)}
@@ -282,13 +300,25 @@ export default function FeatureLabPage() {
       </section>
 
       {error ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-          {error.message}
-        </p>
+        <section className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p>{error.message}</p>
+          <Button
+            className="mt-2"
+            type="button"
+            variant="ghost"
+            onClick={() => void retry()}
+          >
+            Retry
+          </Button>
+        </section>
       ) : null}
 
       {list.isLoading ? (
         <p className="text-sm text-muted">Loading feature catalogue…</p>
+      ) : groups.length === 0 ? (
+        <p className="rounded-lg border border-sand bg-white/75 p-4 text-sm text-muted">
+          No features match these filters.
+        </p>
       ) : (
         <div className="flex flex-col gap-6">
           {groups.map(({ group, items }) => (

@@ -19,9 +19,10 @@ jobs:
           version: 9.15.9
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
@@ -29,6 +30,13 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      AUTH_MODE: "dev"
+      ALLOW_MEMORY_STORE: "true"
+      DAM_STORAGE: "memory"
+      VERCEL_ENV: "development"
+      PLAYWRIGHT_BASE_URL: http://localhost:3000
+      CI: "true"
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -36,18 +44,53 @@ jobs:
           version: 9.15.9
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @hrmny/web build
       - run: pnpm --filter @hrmny/web exec playwright install chromium --with-deps
-      - name: Start production server
-        run: |
-          (cd apps/web && pnpm exec next start --port 3000 &)
-          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:3000/login && break; sleep 2; done
-      - name: Run Playwright e2e
+      - name: Run core, action, accessibility and boundary acceptance
+        run: pnpm --filter @hrmny/web exec playwright test --output=test-results/core --grep-invert "routes ·|link integrity"
+      - name: Run Partner route and link acceptance
+        run: pnpm --filter @hrmny/web exec playwright test --output=test-results/partner --grep "routes · partner|link integrity"
+      - name: Run Finance route acceptance
+        run: pnpm --filter @hrmny/web exec playwright test --output=test-results/finance --grep "routes · finance"
+      - name: Run portal route acceptance
+        run: pnpm --filter @hrmny/web exec playwright test --output=test-results/portal --grep "routes · portal_a"
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: m1-browser-evidence
+          path: apps/web/test-results
+
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: supabase/postgres:17.6.1.141
         env:
-          PLAYWRIGHT_SKIP_WEBSERVER: "1"
-          PLAYWRIGHT_BASE_URL: http://localhost:3000
-          CI: "true"
-        run: pnpm --filter @hrmny/web e2e
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify fresh and upgrade migrations
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          MIGRATION_TEST_ALLOW_DROP: "true"
+        run: pnpm db:verify

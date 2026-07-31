@@ -1,112 +1,124 @@
-# M1 Completion Audit
+# M1 Substrate Completion Audit
 
-Audit date: 2026-07-24
+Audit date: 2026-07-31
+
+Release register: `M1 Acceptance` and `Implementation Queue` in the production-readiness workbook
+
+Candidate: PR #39, `ahmadbukhari097/codex/m1-production-readiness`
 
 ## Executive conclusion
 
-The documents use “M1” for two different deliverables:
+M1 is **not yet complete**. Migration
+`0070_m1_production_readiness.sql` has been applied to the target Supabase
+project and its schema, constraint, index, RLS, Data API, append-only, storage,
+and second-apply postchecks passed. Target database access is therefore no
+longer an M1 blocker.
 
-1. **Current M1 — Substrate:** the first 15-day milestone in the active 90-day build plan.
-2. **Old signed Module 1 — Lead-to-Cash:** the much larger commercial system from lead discovery through the Won Deal Handover Pack.
+The exact candidate `9019c48aec431f674cd8208920ef8cad3dec2dfc` is green in
+both CI runs and has two successful previews. Exact-head HTTP proof confirms a
+protected staff route redirects to login, development probes remain hidden, and
+unauthorized cron access is denied. A persisted Work Files asset with two
+immutable versions and QC pass loaded successfully through the authenticated UI
+on predecessor `0557639664b01674ea7960659b606b87a292a16a` after redeployment.
+The remaining internal browser gap is to repeat the authenticated thread on
+exact `9019c48a…`. Production M1 proof (`M1-GATE-001`) and promotion/rollback
+evidence (`M1-SYS-06`) remain open because the authoritative production project
+has not been promoted. No predecessor-preview proof may be relabelled as
+final-head or production proof.
 
-The **current M1 engineering scope is complete and live**. The only remaining closeout is client UAT from the Dubai office and Ayham/Molham's acceptance record. Supabase Singapore and manual Vercel deployment are accepted project exceptions for now.
+M2+ features, Creative Hub, Canva, client-portal expansion, and AI creative
+production do not block this M1 substrate milestone. The old signed Module 1
+Lead-to-Cash outcome remains a later multi-milestone commercial deliverable.
 
-The **old signed Module 1 is not complete**. Its remaining lead-to-cash integrations, migration, reconciliation, reporting, adoption, and sign-off work are scheduled across the later milestones in the active plan.
+## Authoritative current state
 
-## Production evidence
+| Surface | Current evidence | Status |
+| --- | --- | --- |
+| Candidate branch | PR #39, exact `9019c48aec431f674cd8208920ef8cad3dec2dfc` | Draft; both CI runs green; not promoted |
+| CI | Runs `30630322017` and `30630325063`: verify, database and E2E jobs all passed on exact `9019c48a…` | Green |
+| HRMNY-team preview | `https://hrmny-j4o3vx9as-hrmnyco.vercel.app`, `dpl_DogRZzfMSWNuqccRX46uW1K4UGpV`, exact `9019c48a…`, READY; functions inspected in `sin1` | Deployment green; exact-head anonymous/probe assertions passed; authenticated thread not yet recorded |
+| Authoritative preview | `https://hrmny-os-e694z751p-ahmad-bukharis-projects-74a52414.vercel.app`, `dpl_A1yvv9AoPNudccTZYLPoVskfFRGX`, exact `9019c48a…`, GitHub deployment success; repository config targets `sin1` | Deployment green; supplied Vercel credential cannot inspect this project's runtime logs |
+| Exact-head HTTP proof | `9019c48a…` on `hrmny-os`: `/roles` returned 307 to `/login?next=%2Froles`; `/gate` and `/assets` returned 404; unauthenticated `/api/cron/jobs` returned 401 | Green security assertions |
+| Authenticated Work Files proof | Exact predecessor `0557639664b01674ea7960659b606b87a292a16a`: persisted `[M1-PROOF]` Work asset reloaded in authenticated UI with QC pass and versions 1 and 2; the original create/upload/QC/signed-download/audit thread passed on `a274725…` | Valid redeploy regression evidence; repeat the authenticated thread on exact `9019c48a…` before promotion |
+| Production | `https://hrmny-os-web.vercel.app`, `dpl_Fv17vS8cQULcwNew2Euiz7pCJTzG`, commit `3b3c65dcc0bf20254332dfe6ce45ef8d16af87b5`, `sin1` | Known-good rollback deployment; candidate not promoted |
+| Candidate runtime errors | Exact `9019c48a…` `hrmny-os` smoke window: four expected requests (307, 401, 404, 404), zero 5xx, zero error/fatal entries, and no timeout/database-reset signature | Green for observed preview window; repeat on authoritative production after promotion |
+| Target Supabase | `klrugedztqxlvyghyzxs`, Singapore; journal at 0070; private `hrmny-dam` bucket present | Migration and postchecks passed |
+| Automated quality | Exact `9019c48a…`: both CI runs completed successfully with zero-warning lint, typecheck, tests, build, database proof and 11 Playwright tests; the web suite reports 76 files and 362 tests passed | Green; retain both run URLs in the release register |
+| Migration quality | Pinned `supabase/postgres:17.6.1.141`; all 70 journal entries from empty; 0069→0070; target apply; second target apply; RLS/Data API/trigger/schema assertions | Green; retain dated target output in the release register |
 
-- Production app: `https://hrmny-os.vercel.app`
-- Release: `36d7b51b869267a370cff6b67346f8ce0c0b4ef0`
-- Deployment: `dpl_5RhpAU5T7LVKF4tUg8dS8QGZWA9y`, Ready, functions in `sin1`
-- Authentication: Supabase Google SSO restricted to approved active `@hrmny.co` employees
-- Google Workspace: connected and tested for `developer@hrmny.co`
-- Database: 36 public tables; all 36 have RLS enabled
-- Database region: Supabase `ap-southeast-1` (Singapore), accepted for the current project
-- Team directory: 21 active employees, 10 roles, and 21 exact role assignments
-- Live evidence: 11 immutable audit events, 5 health signals, 2 completed scheduled jobs, 0 failed jobs, and 1 connected account
-- Google Chat: production scheduler acceptance alert delivered successfully
-- AI setting: active `llm.spend_cap` convention is AED 10/month; authorized admins can publish a higher version from Conventions
-- Verification: 107/107 automated tests, all-package typecheck, and the production build pass
+## Software-controlled M1 scope
 
-## Current M1 — Substrate
+The candidate implements and tests:
 
-Source: `hrmny_OS_Build_Docs/90-Day-Build-Plan.md`, Sprint 1, and `L7-BACKLOG-epic-story-backlog.md`, E1.
+- hosted fail-closed authentication and database behavior;
+- production role and permission management with audit and last-Partner protection;
+- real gate-transition proof while `/gate` stays hidden in production;
+- append-only audit and filtered admin audit UI;
+- Work Files DAM with Work-item authorization, immutable versions, private
+  storage, five-minute signed access, QC, validation, race protection, and
+  orphan cleanup;
+- persisted `gate_blocked`, `auth_denied`, `dam_upload`, `spend_cap`, and
+  `job_lag` health signals with durable Chat delivery attempts;
+- protected, idempotent cron processing with bounded retries and visible lag;
+- real admin features, connection status, conventions, roles, health, and Work
+  UI states;
+- explicit route exposure rules that keep `/gate` and `/assets` unavailable in
+  production while DAM is accepted through Work Files;
+- additive migration `0070`, plus a clean-database and upgrade verifier that
+  proves RLS, Data API denial, append-only triggers, Work-DAM linkage, role
+  uniqueness, and durable health delivery state.
 
-| Requirement                                     | Status                       | Evidence / accepted exception                                                                                                                                                                                                                                                                                             |
-| ----------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hosting, environments, CI/CD, secrets           | Done with exception          | Vercel production, GitHub Actions CI/scheduler, encrypted Vercel variables, and tested manual production deployment are live. Direct Vercel/GitHub linking is unavailable under the current account arrangement, so release deployment is manual for now. A separate staging environment remains optional follow-up work. |
-| UAE-resident PostgreSQL, reconciled model, RLS  | Done with accepted exception | The 36-table schema, migrations, margin view, and full-table RLS are live. Supabase is in Singapore; the client accepted this for now and any UAE migration will be a separate project.                                                                                                                                   |
-| Central state-transition and gate engine        | Done                         | Durable CRM transitions, blocked attempts, immutable audit rows, and health signals are database-backed. Legal and illegal transitions passed production acceptance.                                                                                                                                                      |
-| Google SSO and Workspace connection             | Done                         | SSO is restricted to the active roster. Google Workspace OAuth is connected, tested, replaceable, and removable from the frontend.                                                                                                                                                                                        |
-| RBAC, margin restrictions, separation of duties | Done for provisioning        | The 21-person roster was imported from the supplied workbook with title, department, reporting line, and one least-privilege role per employee. Automated RBAC and AM margin-denial tests pass; real-user UAT remains a client acceptance action.                                                                         |
-| Append-only audit                               | Done                         | Core gate, convention, scheduler, health, DAM, connector, roster, and request paths persist audit records. Database triggers prohibit updating or deleting audit and asset-version history.                                                                                                                               |
-| DAM: versioned storage and signed URLs          | Done                         | Metadata persists in PostgreSQL, files persist in Supabase Storage, versions are immutable, signed URLs work, and QC is database-backed.                                                                                                                                                                                  |
-| Durable jobs and scheduler                      | Done                         | PostgreSQL jobs use atomic claims, stale-lock recovery, retries, and lag monitoring. GitHub Actions invokes the secured worker every five minutes.                                                                                                                                                                        |
-| Health signals to Google Chat                   | Done for M1                  | Signals persist in PostgreSQL. A production scheduled alert completed on its first attempt and has a non-null notification timestamp. The AED 10 cap is configured; paid-provider cost metering is intentionally deferred until a paid LLM is enabled.                                                                    |
-| App shell, navigation, design system            | Done                         | Implemented and production-built.                                                                                                                                                                                                                                                                                         |
-| Versioned conventions-as-data                   | Done                         | Active rules and new versions persist with one-active-version behavior, UI management, and audit history.                                                                                                                                                                                                                 |
-| Gate/RBAC/security test harness                 | Done                         | 107 automated tests pass.                                                                                                                                                                                                                                                                                                 |
-| No-silent-failure / no-double-send substrate    | Done for M1                  | Durable retry, audit, scheduler, alerting, and scaffold checks pass. Provider-specific reconciliation is added with each later live integration.                                                                                                                                                                          |
+## Required release sequence
 
-### Current M1 acceptance status
+1. Repeat sign-in, employee mapping, permission resolution, logout, expiry,
+   protected redirects and the authenticated Work Files/audit thread on exact
+   `9019c48a…`; verify its records survive a redeploy. Retain the successful
+   `0557639…` persistence load and `a274725…` full browser flow as predecessor
+   regression evidence only.
+2. Retain the two green exact-head CI runs, READY `sin1` deployment evidence and
+   their URLs in the release register. Rerun the full gate if the candidate SHA
+   changes.
+3. Confirm the already-applied target journal remains at `0070` and attach the
+   dated target RLS/Data API/constraint/index/trigger postcheck output. Do not
+   manufacture a second migration blocker.
+4. Validate production environment-variable presence without reading secret
+   values. Hosted runtime must require Supabase auth, database, private storage,
+   server credentials, and `CRON_SECRET`.
+5. Promote the exact green candidate to `hrmny-os-web.vercel.app` while
+   retaining `dpl_Fv17vS8cQULcwNew2Euiz7pCJTzG` as the rollback target.
+6. Run the dedicated `[M1-PROOF]` production thread: sign in, inspect
+   permissions, create a Work asset, upload versions 1 and 2, QC, open a signed
+   download, then inspect audit and health.
+7. Verify deployment ID, commit, `sin1`, HTTP and authenticated redirects,
+   persistence across redeploy, and no unresolved Critical/High runtime cluster
+   during the smoke window.
+8. Execute and record the exact rollback rehearsal in `CUTOVER.md`; migration
+   0070 remains applied because it is additive and backward-compatible.
+9. Record exact evidence in the existing `M1 Acceptance` and
+   `Implementation Queue` sheets. M1 software readiness becomes green only when
+   zero internal rows remain Partial/Failed and rollback evidence is present.
 
-| Acceptance check                                           | Status                                                               |
-| ---------------------------------------------------------- | -------------------------------------------------------------------- |
-| Entity transition → gate → immutable database audit        | Passed in production for allowed and blocked transitions.            |
-| Real roster and role mapping, including AM margin denial   | Provisioned and automated tests passed; Dubai real-user UAT pending. |
-| Versioned DAM asset with signed URL                        | Passed in production; Dubai office upload/open test pending.         |
-| Scheduled failure/health event creates a Google Chat alert | Passed in production.                                                |
-| Client milestone acceptance                                | Pending Ayham/Molham confirmation after UAT.                         |
+## External holds
 
-## Old signed Module 1 — Lead-to-Cash
+These holds are excluded from the software-readiness score only after the
+related software path is green:
 
-Source: `hrmny_OS_Module1_LeadToCash_Discovery_Brief`, Definition of Done §15.3.
+| Hold | Owner | Missing input | Affected proof |
+| --- | --- | --- | --- |
+| Authoritative production-promotion authority | HRMNY Vercel owner | Promote exact `9019c48a…` to `hrmny-os-web` or grant scoped production authority | Production proof and rollback rehearsal |
+| Authoritative Vercel runtime access | `hrmny-os-web` project owner | Grant the release operator scoped inspect/log access; supplied credential only accesses `hrmnyco` | Authoritative-preview and post-promotion runtime-log proof |
+| Google OAuth redirect allowlist | HRMNY Google/Supabase owner | Allow the authoritative preview callback/return URL | Real preview Google sign-in proof |
+| Workspace persona accounts | HRMNY IT / Ayham / Molham | Approved AM, Finance, Partner and Director test accounts | Live SSO, margin redaction and separation-of-duties browser proof |
+| Google Chat webhook | HRMNY technical owner | Rotated webhook and visible test message | Live Chat delivery only |
+| Secret-manager rotation | HRMNY technical owner | Keeper/approved-store entry and rotation record | Team-controlled credential proof |
+| Commercial acceptance/payment | Ayham and Molham | Written acceptance/payment approval | External milestone acceptance only |
 
-| Signed definition-of-done item                                                          | Status  | Remaining work                                                                                                                    |
-| --------------------------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Eight-stage lead-to-cash arc for retainers and projects                                 | Partial | Native stages and gates exist; the complete live-integrated journey is later commercial-engine work.                              |
-| BUAF, lanes, Apollo→Hunter, rate cards/margin, voice, intelligence graph, proposal + QC | Partial | Core rules/interfaces exist. Apollo/Hunter credentials, production voice, graph, and client-ready proposal generation/QC remain.  |
-| Asana replaced and source data reconciled                                               | Open    | Source migration, reconciliation, cutover, and adoption evidence remain.                                                          |
-| Whole Dubai team authenticated and provisioned                                          | Partial | All 21 employees are provisioned; each real user still needs to complete first-login UAT.                                         |
-| All commercial guardrails enforced                                                      | Partial | Existing gates pass; remaining authority, live-send, reconciliation, and client-output checks ship with the related integrations. |
-| No crashes, silent failures, or double sends                                            | Partial | The substrate is live; each external provider still needs its own delivery/reconciliation acceptance test.                        |
-| Data trustworthy and Won totals reconciled                                              | Open    | Source-system migration and reconciliation remain.                                                                                |
-| Measurable learning/self-evolution loop                                                 | Open    | No attributable commercial experiment is live yet.                                                                                |
-| Live commercial KPIs                                                                    | Partial | Dashboard scaffolding exists; KPIs need reconciled live sales and advertising feeds.                                              |
-| Ayham and Molham sign-off                                                               | Open    | No acceptance record supplied yet.                                                                                                |
+No external hold may conceal unfinished code, CI, migration logic, UI behavior,
+or internally obtainable evidence.
 
-Result: the old signed Module 1 remains a multi-milestone outcome; it should not be represented as completed by the current substrate milestone.
+## Completion rule
 
-## Connection readiness
-
-| Connection            | State                      | Next action                                                                                                                          |
-| --------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Supabase Google SSO   | Live                       | Dubai staff perform first-login UAT.                                                                                                 |
-| Google Workspace APIs | Live for developer account | Other users connect their own Workspace account only when their role needs it.                                                       |
-| Google Chat           | Live                       | Rotate the webhook after acceptance because the original credential was pasted into chat, then update the encrypted Vercel variable. |
-| Bayzat                | Workbook import complete   | API access is optional later; CSV/XLSX remains the fallback.                                                                         |
-| Apollo                | Backend/UI ready           | Paste a key in Settings when available.                                                                                              |
-| Hunter                | Backend/UI ready           | Paste a key in Settings when available.                                                                                              |
-| Xero                  | Mock only                  | Provide OAuth app and tenant access when finance integration starts.                                                                 |
-| Canva                 | Placeholder                | Provide an approved app/integration when creative automation starts.                                                                 |
-| Asana/Airtable        | Not connected              | Provide source access and confirm final cutover sequence.                                                                            |
-| LinkedIn              | Draft/copy only            | Keep V1 human-sent unless approved platform access changes the design.                                                               |
-
-## Dubai office acceptance script
-
-1. On Dubai office Wi-Fi, open `https://hrmny-os.vercel.app` in Chrome and sign in with one Account Manager account and one Director/Partner account.
-2. Confirm both reach the app; confirm the Account Manager cannot see margin/cost while the Director/Partner can access their authorized views.
-3. In Assets, upload one non-sensitive JPG or PDF, create a new version, and open its signed link.
-4. In CRM, move a test deal through one legal next stage, then attempt an illegal stage jump and confirm it is blocked.
-5. Ask the Director/Partner to open Audit and confirm the upload, legal transition, and blocked attempt are recorded.
-6. Confirm the Hrmny Google Chat space contains the M1 production acceptance alert.
-7. Repeat login and signed-file opening once on a phone using mobile data.
-8. Send back the tester names, timestamps, browser/device, screenshots, and any error text. Do not send client-confidential production material for this test.
-
-## Remaining closeout
-
-1. Dubai office completes the acceptance script.
-2. Ayham and Molham confirm current M1 acceptance in writing.
-3. Rotate the Google Chat webhook and replace the encrypted production value.
-
-Apollo/Hunter keys, Xero/Canva access, automatic Vercel Git deployment, staging, and any future UAE data migration are later work and do not block current M1 acceptance.
+Do not call M1 complete until the production commit equals the recorded evidence,
+`M1-GATE-001` and `M1-SYS-06` are no longer Partial, all other internal rows
+remain green, rollback proof is recorded, and every unavailable third-party or
+owner proof is separately labelled `EXTERNAL HOLD`.

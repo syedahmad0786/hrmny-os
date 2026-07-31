@@ -483,6 +483,7 @@ export const calendar = pgTable("calendar", {
   refApprovalState: text("ref_approval_state"),
   finalApprovalState: text("final_approval_state"),
   shootDate: date("shoot_date"),
+  state: text("state").default("draft").notNull(),
   ...timestamps,
 });
 
@@ -495,6 +496,7 @@ export const task = pgTable("task", {
   calendarId: uuid("calendar_id").references(() => calendar.calendarId),
   month: text("month"),
   taskType: text("task_type").notNull(),
+  title: text("title"),
   status: taskStatusEnum("status").default("backlog").notNull(),
   situationalState: text("situational_state"),
   ownerEmployeeId: uuid("owner_employee_id").references(
@@ -502,6 +504,13 @@ export const task = pgTable("task", {
   ),
   deadline: date("deadline"),
   priority: text("priority"),
+  qcPassed: boolean("qc_passed").default(false).notNull(),
+  qcNotes: text("qc_notes"),
+  clientRevisionCount: integer("client_revision_count").default(0).notNull(),
+  revisionBoundaryAck: boolean("revision_boundary_ack")
+    .default(false)
+    .notNull(),
+  briefId: uuid("brief_id"),
   ...timestamps,
 });
 
@@ -531,6 +540,7 @@ export const brief = pgTable("brief", {
     precision: 4,
     scale: 0,
   }).default("0"),
+  missing: jsonb("missing").$type<string[]>().default([]).notNull(),
   lockedAt: timestamp("locked_at", { withTimezone: true }),
   ...timestamps,
 });
@@ -560,7 +570,69 @@ export const invoice = pgTable("invoice", {
   currency: text("currency").default("AED").notNull(),
   xeroInvoiceId: text("xero_invoice_id"),
   period: text("period"),
+  contactName: text("contact_name"),
+  billingKind: text("billing_kind"),
+  trn: text("trn"),
+  trnStatus: text("trn_status"),
+  ruleCited: text("rule_cited"),
+  sourceAttached: jsonb("source_attached")
+    .$type<Record<string, unknown>>()
+    .default({})
+    .notNull(),
+  proposedByEmployeeId: uuid("proposed_by_employee_id"),
+  approvedByEmployeeId: uuid("approved_by_employee_id"),
   ...timestamps,
+});
+
+/** Client 7-phase onboarding pack (0069). */
+export const clientOnboardingPhase = pgTable(
+  "client_onboarding_phase",
+  {
+    phaseId: uuid("phase_id").defaultRandom().primaryKey(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => client.clientId),
+    phaseIndex: integer("phase_index").notNull(),
+    name: text("name").notNull(),
+    status: text("status").default("pending").notNull(),
+    steps: jsonb("steps")
+      .$type<
+        Array<{
+          stepId: string;
+          title: string;
+          raci: string;
+          done: boolean;
+        }>
+      >()
+      .default([])
+      .notNull(),
+    signedOffAt: timestamp("signed_off_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("client_onboarding_phase_client_idx_uniq").on(
+      t.clientId,
+      t.phaseIndex,
+    ),
+  ],
+);
+
+/** Invoice intake HITL proposals (0066). */
+export const invoiceProposal = pgTable("invoice_proposal", {
+  proposalId: uuid("proposal_id").defaultRandom().primaryKey(),
+  emailRef: text("email_ref").notNull(),
+  status: text("status").default("pending").notNull(),
+  payload: jsonb("payload")
+    .$type<Record<string, unknown>>()
+    .default({})
+    .notNull(),
+  invoiceId: uuid("invoice_id").references(() => invoice.invoiceId),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 
 /** 14. xero_invoice_mirror */
@@ -637,6 +709,8 @@ export const clientPortalUser = pgTable("client_portal_user", {
 export const asset = pgTable("asset", {
   assetId: uuid("asset_id").defaultRandom().primaryKey(),
   taskId: uuid("task_id").references(() => task.taskId),
+  /** Native Work task; kept nullable for legacy M4 assets. */
+  workItemId: uuid("work_item_id"),
   clientId: uuid("client_id").references(() => client.clientId),
   title: text("title").notNull(),
   status: text("status").default("draft").notNull(),
@@ -767,6 +841,9 @@ export const healthSignal = pgTable("health_signal", {
   severity: text("severity").notNull(), // info | warn | critical
   payload: jsonb("payload").$type<Record<string, unknown>>().default({}),
   notifiedAt: timestamp("notified_at", { withTimezone: true }),
+  deliveryStatus: text("delivery_status").default("not_configured").notNull(),
+  notificationAttempts: integer("notification_attempts").default(0).notNull(),
+  lastError: text("last_error"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -1172,7 +1249,10 @@ export const agentRuns = pgTable(
     agentRunId: uuid("agent_run_id").defaultRandom().primaryKey(),
     agent: text("agent").notNull(),
     model: text("model").notNull(),
-    input: jsonb("input").$type<Record<string, unknown>>().default({}).notNull(),
+    input: jsonb("input")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
     output: jsonb("output")
       .$type<Record<string, unknown>>()
       .default({})
@@ -1398,7 +1478,10 @@ export const importLineage = pgTable(
       table.sourceId,
     ),
     index("import_lineage_target_idx").on(table.targetTable, table.targetId),
-    index("import_lineage_system_idx").on(table.sourceSystem, table.sourceTable),
+    index("import_lineage_system_idx").on(
+      table.sourceSystem,
+      table.sourceTable,
+    ),
   ],
 );
 

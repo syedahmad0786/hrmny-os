@@ -75,10 +75,47 @@ export default function ConnectionsPage() {
   });
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [redirect, setRedirect] = useState<string | null>(null);
+  const [googleError, setGoogleError] = useState<string | null>(null);
+  const error =
+    saveKey.error ??
+    disconnect.error ??
+    startOAuth.error ??
+    list.error ??
+    asanaStatus.error ??
+    managedToolkits.error ??
+    managedAccounts.error ??
+    authorizeManaged.error ??
+    disconnectManaged.error ??
+    startWorkApp.error ??
+    disconnectWorkApp.error ??
+    workApps.error;
+  const errorMessage = googleError ?? error?.message ?? null;
+
+  async function retry() {
+    setGoogleError(null);
+    saveKey.reset();
+    disconnect.reset();
+    startOAuth.reset();
+    authorizeManaged.reset();
+    disconnectManaged.reset();
+    startWorkApp.reset();
+    disconnectWorkApp.reset();
+    await Promise.all([
+      list.refetch(),
+      asanaStatus.refetch(),
+      managedToolkits.refetch(),
+      managedAccounts.refetch(),
+      workApps.refetch(),
+    ]);
+  }
 
   async function connectGoogleWorkspace() {
+    setGoogleError(null);
     const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
+    if (!supabase) {
+      setGoogleError("Supabase is not configured for this deployment.");
+      return;
+    }
     localStorage.setItem("hrmny-google-workspace-connect", "pending");
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
@@ -94,7 +131,7 @@ export default function ConnectionsPage() {
     });
     if (error) {
       localStorage.removeItem("hrmny-google-workspace-connect");
-      throw error;
+      setGoogleError(error.message);
     }
   }
 
@@ -175,6 +212,8 @@ export default function ConnectionsPage() {
               {item.authType === "api_key" ? (
                 <div className="mt-4 flex gap-2">
                   <input
+                    name={`api-key-${item.toolkit}`}
+                    aria-label={`${item.label} API key`}
                     className="min-w-0 flex-1 rounded border border-sand bg-white px-3 py-2"
                     type="password"
                     disabled={!item.allowed}
@@ -198,14 +237,18 @@ export default function ConnectionsPage() {
                       saveKey.isPending
                     }
                     onClick={() => {
-                      saveKey.mutate({
-                        toolkit: item.toolkit as "apollo" | "hunter" | "bayzat",
-                        apiKey: keys[item.toolkit]!,
-                      });
-                      setKeys((current) => ({
-                        ...current,
-                        [item.toolkit]: "",
-                      }));
+                      void saveKey
+                        .mutateAsync({
+                          toolkit: item.toolkit as
+                            "apollo" | "hunter" | "bayzat",
+                          apiKey: keys[item.toolkit]!,
+                        })
+                        .then(() =>
+                          setKeys((current) => ({
+                            ...current,
+                            [item.toolkit]: "",
+                          })),
+                        );
                     }}
                   >
                     {item.hasSecret ? "Replace" : "Connect"}
@@ -255,6 +298,11 @@ export default function ConnectionsPage() {
           );
         })}
       </div>
+      {!list.isLoading && !list.error && list.data?.length === 0 ? (
+        <p className="rounded-lg border border-sand p-4 text-sm text-muted">
+          No direct business connections are configured.
+        </p>
+      ) : null}
 
       <section className="rounded-xl border border-sand bg-white/70 p-5">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -271,6 +319,8 @@ export default function ConnectionsPage() {
             </p>
           </div>
           <input
+            name="tool-search"
+            aria-label="Search personal tools"
             className="w-full rounded border border-sand bg-white px-3 py-2 text-sm sm:w-72"
             type="search"
             placeholder="Search tools"
@@ -440,10 +490,11 @@ export default function ConnectionsPage() {
                           </div>
                           <span
                             className={`mt-1 size-2.5 rounded-full ${item.connected ? "bg-green-600" : "bg-sand"}`}
-                            aria-label={
-                              item.connected ? "Connected" : "Not connected"
-                            }
+                            aria-hidden="true"
                           />
+                          <span className="sr-only">
+                            {item.connected ? "Connected" : "Not connected"}
+                          </span>
                         </div>
                         <p className="mt-2 flex-1 text-xs text-muted">
                           {item.note}
@@ -515,34 +566,18 @@ export default function ConnectionsPage() {
           </a>
         </p>
       ) : null}
-      {saveKey.error ||
-      disconnect.error ||
-      startOAuth.error ||
-      asanaStatus.error ||
-      managedToolkits.error ||
-      managedAccounts.error ||
-      authorizeManaged.error ||
-      disconnectManaged.error ||
-      startWorkApp.error ||
-      disconnectWorkApp.error ||
-      workApps.error ? (
-        <p className="text-sm text-red-700">
-          {
-            (
-              saveKey.error ??
-              disconnect.error ??
-              startOAuth.error ??
-              asanaStatus.error ??
-              managedToolkits.error ??
-              managedAccounts.error ??
-              authorizeManaged.error ??
-              disconnectManaged.error ??
-              startWorkApp.error ??
-              disconnectWorkApp.error ??
-              workApps.error
-            )?.message
-          }
-        </p>
+      {errorMessage ? (
+        <section className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p>{errorMessage}</p>
+          <Button
+            className="mt-2"
+            type="button"
+            variant="ghost"
+            onClick={() => void retry()}
+          >
+            Retry
+          </Button>
+        </section>
       ) : null}
     </main>
   );

@@ -1,4 +1,13 @@
-import { auditEvent, desc, eq, healthSignal } from "@hrmny/db";
+import {
+  and,
+  auditEvent,
+  desc,
+  eq,
+  healthSignal,
+  ilike,
+  scheduledJob,
+  sql,
+} from "@hrmny/db";
 import { getDb } from "./db";
 import { getDemoStore } from "./demo-store";
 
@@ -27,14 +36,36 @@ export async function writeAudit(input: AuditInput) {
   return { ...row!, createdAt: row!.createdAt.toISOString() };
 }
 
-export async function listAudit(limit: number) {
+export async function listAudit(input: {
+  limit: number;
+  action?: string;
+  entityType?: string;
+}) {
   const db = getDb();
-  if (!db) return getDemoStore().audits.slice(0, limit);
+  if (!db)
+    return getDemoStore()
+      .audits.filter(
+        (row) =>
+          (!input.action ||
+            row.action.toLowerCase().includes(input.action.toLowerCase())) &&
+          (!input.entityType || row.entityType === input.entityType),
+      )
+      .slice(0, input.limit);
   const rows = await db
     .select()
     .from(auditEvent)
+    .where(
+      and(
+        input.action
+          ? ilike(auditEvent.action, `%${input.action}%`)
+          : undefined,
+        input.entityType
+          ? eq(auditEvent.entityType, input.entityType)
+          : undefined,
+      ),
+    )
     .orderBy(desc(auditEvent.createdAt))
-    .limit(limit);
+    .limit(input.limit);
   return rows.map((row) => ({
     ...row,
     createdAt: row.createdAt.toISOString(),
@@ -45,38 +76,141 @@ export async function emitHealthSignal(
   signalKey: string,
   severity: "info" | "warn" | "critical",
   payload: Record<string, unknown>,
+  options?: { incidentKey?: string; audit?: AuditInput },
 ) {
+  const incidentKey = options?.incidentKey?.trim();
+  const storedPayload = incidentKey ? { ...payload, incidentKey } : payload;
   const db = getDb();
-  if (!db) return getDemoStore().pushHealth(signalKey, severity, payload);
+  if (!db) {
+    const store = getDemoStore();
+    const existing = incidentKey
+      ? store.healthSignals.find(
+          (row) =>
+            row.signalKey === signalKey &&
+            row.payload.incidentKey === incidentKey,
+        )
+      : undefined;
+    if (existing) return existing;
+    const row = store.pushHealth(signalKey, severity, storedPayload);
+    if (options?.audit) {
+      store.appendAudit({
+        ...options.audit,
+        actorEmployeeId: options.audit.actorEmployeeId ?? SYSTEM_EMPLOYEE_ID,
+        entityId: options.audit.entityId ?? row.healthSignalId,
+      });
+    }
+    return row;
+  }
 
-  const [created] = await db
-    .insert(healthSignal)
-    .values({ signalKey, severity, payload })
-    .returning();
+  const webhookConfigured = Boolean(
+    process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim(),
+  );
+  const { row: created } = await db.transaction(async (tx) => {
+    if (incidentKey) {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`health:${signalKey}:${incidentKey}`}))`,
+      );
+      const [existing] = await tx
+        .select()
+        .from(healthSignal)
+        .where(
+          and(
+            eq(healthSignal.signalKey, signalKey),
+            sql`${healthSignal.payload} ->> 'incidentKey' = ${incidentKey}`,
+          ),
+        )
+        .limit(1);
+      if (existing) return { row: existing, inserted: false };
+    }
+    const [row] = await tx
+      .insert(healthSignal)
+      .values({
+        signalKey,
+        severity,
+        payload: storedPayload,
+        deliveryStatus: webhookConfigured ? "pending" : "not_configured",
+      })
+      .returning();
+    if (webhookConfigured) {
+      await tx.insert(scheduledJob).values({
+        jobKey: `health-delivery:${row!.healthSignalId}`,
+        kind: "health_delivery",
+        runAt: new Date(),
+        payload: { healthSignalId: row!.healthSignalId },
+      });
+    }
+    if (options?.audit)
+      await tx.insert(auditEvent).values({
+        ...options.audit,
+        entityId: options.audit.entityId ?? row!.healthSignalId,
+      });
+    return { row: row!, inserted: true };
+  });
+  return {
+    ...created,
+    notifiedAt: created.notifiedAt?.toISOString() ?? null,
+    createdAt: created.createdAt.toISOString(),
+  };
+}
+
+/** Deliver one durable health notification. The scheduled worker owns retries. */
+export async function deliverHealthSignal(healthSignalId: string) {
+  const db = getDb();
+  if (!db) throw new Error("DATABASE_URL is required for health delivery");
+  const [row] = await db
+    .select()
+    .from(healthSignal)
+    .where(eq(healthSignal.healthSignalId, healthSignalId))
+    .limit(1);
+  if (!row) throw new Error("Health signal not found");
+  if (row.deliveryStatus === "delivered")
+    return { ok: true as const, alreadyDelivered: true };
+  if (row.deliveryStatus === "failed" || row.notificationAttempts >= 3)
+    return { ok: false as const, exhausted: true };
+
   const webhook = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
-  let notifiedAt: Date | null = null;
-  if (webhook) {
+  if (!webhook) {
+    await db
+      .update(healthSignal)
+      .set({ deliveryStatus: "not_configured", lastError: null })
+      .where(eq(healthSignal.healthSignalId, healthSignalId));
+    return { ok: true as const, notConfigured: true };
+  }
+
+  const attempts = Math.min(row.notificationAttempts + 1, 3);
+  try {
     const response = await fetch(webhook, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        text: `[hrmny OS] ${severity.toUpperCase()} · ${signalKey}\n${JSON.stringify(payload)}`,
+        text: `[hrmny OS] ${row.severity.toUpperCase()} · ${row.signalKey}\n${JSON.stringify(row.payload ?? {})}`,
       }),
     });
-    if (!response.ok) {
+    if (!response.ok)
       throw new Error(`Google Chat webhook failed (${response.status})`);
-    }
-    notifiedAt = new Date();
+    const notifiedAt = new Date();
     await db
       .update(healthSignal)
-      .set({ notifiedAt })
-      .where(eq(healthSignal.healthSignalId, created!.healthSignalId));
+      .set({
+        deliveryStatus: "delivered",
+        notificationAttempts: attempts,
+        notifiedAt,
+        lastError: null,
+      })
+      .where(eq(healthSignal.healthSignalId, healthSignalId));
+    return { ok: true as const, notifiedAt: notifiedAt.toISOString() };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await db
+      .update(healthSignal)
+      .set({
+        deliveryStatus: attempts >= 3 ? "failed" : "pending",
+        notificationAttempts: attempts,
+        lastError: message.slice(0, 2_000),
+      })
+      .where(eq(healthSignal.healthSignalId, healthSignalId));
+    throw error;
   }
-  return {
-    ...created!,
-    notifiedAt: notifiedAt?.toISOString() ?? null,
-    createdAt: created!.createdAt.toISOString(),
-  };
 }
 
 export async function listHealthSignals(limit: number) {

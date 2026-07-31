@@ -141,6 +141,9 @@ export default function WorkPage() {
   >([]);
   const [attachmentName, setAttachmentName] = useState("");
   const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [assetTitle, setAssetTitle] = useState("");
+  const [assetQcNotes, setAssetQcNotes] = useState<Record<string, string>>({});
+  const [assetError, setAssetError] = useState<string | null>(null);
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [proofingAttachment, setProofingAttachment] = useState<{
     attachmentId: string;
@@ -250,6 +253,13 @@ export default function WorkPage() {
   const attachments = trpc.work.attachments.list.useQuery(
     { itemId: selectedItemId! },
     { enabled: Boolean(selectedItemId && attachmentsEnabled) },
+  );
+  const assets = trpc.assets.list.useQuery(
+    { workItemId: selectedItemId!, projectId: projectId! },
+    {
+      enabled: Boolean(selectedItemId && projectId && attachmentsEnabled),
+      retry: false,
+    },
   );
   const projectFiles = trpc.work.attachments.listProject.useQuery(
     { projectId: projectId! },
@@ -409,11 +419,46 @@ export default function WorkPage() {
   const removeAttachment = trpc.work.attachments.remove.useMutation({
     onSuccess: () => utils.work.attachments.invalidate(),
   });
+  const createAsset = trpc.assets.create.useMutation({
+    onSuccess: async () => {
+      setAssetTitle("");
+      setAssetError(null);
+      await utils.assets.list.invalidate();
+    },
+    onError: (error) => setAssetError(error.message),
+  });
+  const uploadAssetVersion = trpc.assets.uploadVersion.useMutation({
+    onSuccess: async () => {
+      setAssetError(null);
+      await utils.assets.list.invalidate();
+    },
+    onError: (error) => setAssetError(error.message),
+  });
+  const openAssetVersion = trpc.assets.signedUrl.useMutation({
+    onError: (error) => setAssetError(error.message),
+  });
+  const qcAsset = trpc.assets.qc.useMutation({
+    onSuccess: async (_result, input) => {
+      setAssetQcNotes((current) => {
+        const next = { ...current };
+        delete next[input.id];
+        return next;
+      });
+      setAssetError(null);
+      await utils.assets.list.invalidate();
+    },
+    onError: (error) => setAssetError(error.message),
+  });
   const setRecurrence = trpc.work.recurrence.set.useMutation({
     onSuccess: () => utils.work.projects.get.invalidate(),
   });
 
   const sections = detail.data?.sections ?? [];
+  const canQcAssets = Boolean(
+    session.data?.roles.some((role) =>
+      ["creative_director", "director", "partner"].includes(role),
+    ),
+  );
   const boardSections: Array<{ sectionId: string | null; name: string }> = [
     { sectionId: null, name: "No section" },
     ...sections,
@@ -2523,8 +2568,249 @@ export default function WorkPage() {
             {attachmentsEnabled ? (
               <section className="mt-6 border-t border-sand pt-5">
                 <h3 className="text-xs font-bold uppercase tracking-[0.1em] text-muted">
-                  Attachments
+                  Files &amp; creative assets
                 </h3>
+                <div className="mt-3 rounded-lg border border-sand bg-white/60 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="font-medium">Versioned creative assets</h4>
+                      <p className="text-xs text-muted">
+                        Private files with immutable versions, signed access and
+                        QC.
+                      </p>
+                    </div>
+                    {canEdit ? (
+                      <form
+                        className="flex gap-2"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          if (!assetTitle.trim()) return;
+                          createAsset.mutate({
+                            title: assetTitle,
+                            workItemId: selectedItem.itemId,
+                            projectId: projectId!,
+                          });
+                        }}
+                      >
+                        <label className="sr-only" htmlFor="new-asset-title">
+                          Asset title
+                        </label>
+                        <input
+                          id="new-asset-title"
+                          className="rounded border border-sand bg-white px-2 py-1 text-sm"
+                          placeholder="Asset title"
+                          value={assetTitle}
+                          onChange={(event) =>
+                            setAssetTitle(event.target.value)
+                          }
+                        />
+                        <button
+                          className="rounded bg-ochre px-3 py-1 text-sm text-white disabled:opacity-50"
+                          disabled={!assetTitle.trim() || createAsset.isPending}
+                        >
+                          {createAsset.isPending ? "Creating…" : "Create asset"}
+                        </button>
+                      </form>
+                    ) : null}
+                  </div>
+
+                  {assets.isLoading ? (
+                    <p className="mt-3 text-sm text-muted">Loading assets…</p>
+                  ) : assets.isError ? (
+                    <div className="mt-3 flex items-center gap-2 text-sm text-red-700">
+                      <span>{assets.error.message}</span>
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() => void assets.refetch()}
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : assets.data?.length ? (
+                    <div className="mt-3 space-y-3">
+                      {assets.data.map((creativeAsset) => {
+                        const qcNotes =
+                          assetQcNotes[creativeAsset.assetId] ?? "";
+                        const latest = [...creativeAsset.versions]
+                          .sort(
+                            (left, right) =>
+                              Number(left.versionNumber) -
+                              Number(right.versionNumber),
+                          )
+                          .at(-1);
+                        return (
+                          <article
+                            key={creativeAsset.assetId}
+                            className="rounded border border-sand bg-white p-3"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <p className="font-medium">
+                                  {creativeAsset.title}
+                                </p>
+                                <p className="text-xs text-muted">
+                                  {creativeAsset.status} ·{" "}
+                                  {creativeAsset.versions.length} version
+                                  {creativeAsset.versions.length === 1
+                                    ? ""
+                                    : "s"}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {latest ? (
+                                  <button
+                                    type="button"
+                                    className="rounded border border-sand px-2 py-1 text-xs"
+                                    onClick={() =>
+                                      void openAssetVersion
+                                        .mutateAsync({
+                                          assetId: creativeAsset.assetId,
+                                          versionId: latest.assetVersionId,
+                                        })
+                                        .then((result) => {
+                                          if (result?.url)
+                                            window.open(
+                                              result.url,
+                                              "_blank",
+                                              "noopener,noreferrer",
+                                            );
+                                        })
+                                    }
+                                  >
+                                    Open v{latest.versionNumber}
+                                  </button>
+                                ) : null}
+                                {canEdit ? (
+                                  <label className="rounded border border-sand px-2 py-1 text-xs">
+                                    {uploadAssetVersion.isPending
+                                      ? "Uploading…"
+                                      : latest
+                                        ? "Upload new version"
+                                        : "Upload first version"}
+                                    <input
+                                      className="sr-only"
+                                      type="file"
+                                      accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+                                      disabled={uploadAssetVersion.isPending}
+                                      onChange={(event) => {
+                                        const input = event.currentTarget;
+                                        const file = event.target.files?.[0];
+                                        if (!file) return;
+                                        if (file.size > 10_000_000) {
+                                          setAssetError(
+                                            "Asset versions are limited to 10 MB",
+                                          );
+                                          input.value = "";
+                                          return;
+                                        }
+                                        void fileAsBase64(file)
+                                          .then((contentBase64) =>
+                                            uploadAssetVersion.mutate({
+                                              assetId: creativeAsset.assetId,
+                                              fileName: file.name,
+                                              contentType: file.type,
+                                              contentBase64,
+                                            }),
+                                          )
+                                          .catch((error: unknown) =>
+                                            setAssetError(
+                                              error instanceof Error
+                                                ? error.message
+                                                : "File read failed",
+                                            ),
+                                          )
+                                          .finally(() => {
+                                            input.value = "";
+                                          });
+                                      }}
+                                    />
+                                  </label>
+                                ) : null}
+                              </div>
+                            </div>
+                            {canQcAssets && latest ? (
+                              <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+                                <input
+                                  aria-label={`QC notes for ${creativeAsset.title}`}
+                                  className="rounded border border-sand px-2 py-1 text-xs"
+                                  placeholder="QC notes (required for fail or waive)"
+                                  value={qcNotes}
+                                  onChange={(event) =>
+                                    setAssetQcNotes((current) => ({
+                                      ...current,
+                                      [creativeAsset.assetId]:
+                                        event.target.value,
+                                    }))
+                                  }
+                                />
+                                <div className="flex gap-1">
+                                  <button
+                                    type="button"
+                                    className="rounded border border-sand px-2 py-1 text-xs"
+                                    disabled={qcAsset.isPending}
+                                    onClick={() =>
+                                      qcAsset.mutate({
+                                        id: creativeAsset.assetId,
+                                        decision: "pass",
+                                        notes: qcNotes || undefined,
+                                      })
+                                    }
+                                  >
+                                    Pass QC
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="rounded border border-sand px-2 py-1 text-xs"
+                                    disabled={
+                                      qcAsset.isPending || !qcNotes.trim()
+                                    }
+                                    onClick={() =>
+                                      qcAsset.mutate({
+                                        id: creativeAsset.assetId,
+                                        decision: "fail",
+                                        notes: qcNotes,
+                                      })
+                                    }
+                                  >
+                                    Fail
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="rounded border border-sand px-2 py-1 text-xs"
+                                    disabled={
+                                      qcAsset.isPending || !qcNotes.trim()
+                                    }
+                                    onClick={() =>
+                                      qcAsset.mutate({
+                                        id: creativeAsset.assetId,
+                                        decision: "waive",
+                                        notes: qcNotes,
+                                      })
+                                    }
+                                  >
+                                    Waive
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-muted">
+                      No versioned assets for this task yet.
+                    </p>
+                  )}
+                  {assetError ? (
+                    <p className="mt-2 text-sm text-red-700">{assetError}</p>
+                  ) : null}
+                </div>
+
+                <h4 className="mt-5 text-xs font-bold uppercase tracking-[0.1em] text-muted">
+                  General attachments and links
+                </h4>
                 <div className="mt-2 space-y-2">
                   {(attachments.data ?? []).map((attachment) => (
                     <div

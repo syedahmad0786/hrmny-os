@@ -41,7 +41,7 @@ export async function getBuildStatus() {
       fee: "$1,500",
       status: "live_pending",
       summary: "Core live; durable jobs, Chat alert, and team rollout remain",
-      href: "/gate",
+      href: "/work",
       demoReady: true,
     },
     {

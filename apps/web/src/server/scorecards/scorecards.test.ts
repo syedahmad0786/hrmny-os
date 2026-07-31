@@ -5,7 +5,6 @@ import {
   compute,
   dealBuafEvidence,
   DEAL_BUAF_V1,
-  validateWeights,
   type Evidence,
 } from "./engine";
 import {

@@ -8,56 +8,66 @@ import { initials } from "@/components/crm/format";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { featureForPathname } from "@/features/catalog";
 import { PwaRegister } from "@/components/pwa-register";
+import { useTheme, type ThemePreference } from "@/components/theme-provider";
 
+/**
+ * Job-oriented primary nav (IA):
+ * Today → Pipeline → Clients → Work → Money → People → Admin
+ * Delivery lives under Work; Requests/Client preview live in Admin / topbar.
+ */
 const PRIMARY_NAV = [
   {
     href: "/",
-    label: "Home",
+    label: "Today",
     index: "01",
     features: ["core.home"],
     match: (p: string) => p === "/",
+    countKey: null as null | "deals",
   },
   {
     href: "/crm",
-    label: "CRM",
+    label: "Pipeline",
     index: "02",
     features: ["crm.workspace"],
     match: (p: string) =>
-      p === "/crm" ||
-      p.startsWith("/crm/") ||
-      p.startsWith("/sales") ||
-      p.startsWith("/clients"),
+      p === "/crm" || p.startsWith("/crm/") || p.startsWith("/sales"),
+    countKey: "deals" as const,
+  },
+  {
+    href: "/clients",
+    label: "Clients",
+    index: "03",
+    features: ["crm.workspace"],
+    match: (p: string) => p === "/clients" || p.startsWith("/clients/"),
+    countKey: null,
   },
   {
     href: "/work",
     label: "Work",
-    index: "03",
-    features: ["work.projects"],
-    match: (p: string) => p === "/work" || p.startsWith("/work/"),
-  },
-  {
-    href: "/delivery",
-    label: "Delivery",
     index: "04",
-    features: ["delivery.workspace"],
+    features: ["work.projects", "delivery.workspace"],
     match: (p: string) =>
+      p === "/work" ||
+      p.startsWith("/work/") ||
       ["/delivery", "/traffic", "/creative", "/account", "/assets"].some(
         (h) => p === h || p.startsWith(`${h}/`),
       ),
+    countKey: null,
   },
   {
     href: "/finance",
-    label: "Finance",
+    label: "Money",
     index: "05",
     features: ["finance.workspace"],
     match: (p: string) =>
       ["/finance", "/billing", "/margin"].some(
         (h) => p === h || p.startsWith(`${h}/`),
       ),
+    countKey: null,
   },
   {
     href: "/people",
-    label: "People / HR",
+    label: "People",
     index: "06",
     features: [
       "people.core_hr",
@@ -79,51 +89,45 @@ const PRIMARY_NAV = [
         "/workforce-payroll",
         "/hr",
         "/payroll",
-        "/roles",
+        "/my-card",
       ].some((h) => p === h || p.startsWith(`${h}/`)),
-  },
-  {
-    href: "/requests",
-    label: "Requests",
-    index: "07",
-    features: ["requests.feature_intake"],
-    match: (p: string) => p === "/requests" || p.startsWith("/requests/"),
-  },
-  {
-    href: "/client-preview",
-    label: "Client Preview",
-    index: "08",
-    features: ["portal.client"],
-    match: (p: string) => p.startsWith("/client-preview"),
+    countKey: null,
   },
   {
     href: "/admin/features",
     label: "Admin",
-    index: "09",
+    index: "07",
     features: [
       "admin.feature_lab",
       "work.admin_console",
       "integrations.connections",
+      "requests.feature_intake",
     ],
     match: (p: string) =>
       p.startsWith("/settings") ||
       p.startsWith("/admin") ||
       p.startsWith("/gate") ||
       p.startsWith("/conventions") ||
-      p.startsWith("/dashboards"),
+      p.startsWith("/dashboards") ||
+      p.startsWith("/requests") ||
+      p.startsWith("/roles") ||
+      p.startsWith("/approvals") ||
+      p.startsWith("/client-preview"),
+    countKey: null,
   },
 ] as const;
 
 export function StaffShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { preference, setPreference } = useTheme();
   const [role, setRole] = useState("partner");
   const [connectionMessage, setConnectionMessage] = useState<string | null>(
     null,
   );
   const completingGoogle = useRef(false);
   const utils = trpc.useUtils();
-  const session = trpc.auth.session.useQuery();
+  const session = trpc.auth.session.useQuery(undefined, { retry: false });
   const accessibilityEnabled =
     session.data?.enabledFeatureKeys.includes("work.accessibility") ?? false;
   const accessibility = trpc.work.accessibility.get.useQuery(undefined, {
@@ -149,63 +153,48 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     staleTime: 30_000,
   });
 
+  const isProductionAuth = session.data?.authMode === "supabase";
+  const showDevPersona =
+    !isProductionAuth && (users.data ?? []).length > 0;
+
   useEffect(() => {
     setRole(getDevRole());
   }, []);
 
+  // Sync accessibility theme preference into global theme when server prefs load.
+  useEffect(() => {
+    if (!accessibilityEnabled || !accessibility.data?.theme) return;
+    setPreference(accessibility.data.theme as ThemePreference);
+  }, [accessibility.data?.theme, accessibilityEnabled, setPreference]);
+
+  // Colorblind / reduced-motion remain accessibility-feature gated.
   useEffect(() => {
     const root = document.documentElement;
-    const preference = accessibilityEnabled ? accessibility.data : null;
-    if (!preference) {
-      delete root.dataset.workTheme;
+    const preferenceA11y = accessibilityEnabled ? accessibility.data : null;
+    if (!preferenceA11y) {
       delete root.dataset.workColorblind;
       delete root.dataset.workReducedMotion;
       return;
     }
-    const darkMode = window.matchMedia("(prefers-color-scheme: dark)");
-    const applyTheme = () => {
-      root.dataset.workTheme =
-        preference.theme === "system"
-          ? darkMode.matches
-            ? "dark"
-            : "light"
-          : preference.theme;
-    };
-    applyTheme();
-    root.dataset.workColorblind = String(preference.colorblindMode);
-    root.dataset.workReducedMotion = String(preference.reducedMotion);
-    if (preference.theme === "system")
-      darkMode.addEventListener("change", applyTheme);
+    root.dataset.workColorblind = String(preferenceA11y.colorblindMode);
+    root.dataset.workReducedMotion = String(preferenceA11y.reducedMotion);
     return () => {
-      darkMode.removeEventListener("change", applyTheme);
-      delete root.dataset.workTheme;
       delete root.dataset.workColorblind;
       delete root.dataset.workReducedMotion;
     };
   }, [accessibility.data, accessibilityEnabled]);
 
-  // Refetch the session whenever Supabase auth settles — the OAuth landing
-  // exchanges tokens asynchronously, so the first session query can race it
-  // and cache "anonymous" (the root cause of the stuck "Checking access…").
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (
-        event === "INITIAL_SESSION" ||
-        event === "SIGNED_IN" ||
-        event === "TOKEN_REFRESHED" ||
-        event === "SIGNED_OUT"
-      ) {
+      if (event === "SIGNED_OUT") {
         void utils.auth.session.invalidate();
       }
     });
     return () => sub.subscription.unsubscribe();
   }, [utils]);
 
-  // Truly anonymous (no Supabase identity at all) → go sign in. A signed-in
-  // user with no employee row gets the explicit denied screen below instead —
-  // bouncing them to /login would loop them through Google forever.
   useEffect(() => {
     if (
       session.data?.authMode === "supabase" &&
@@ -216,9 +205,6 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     }
   }, [router, session.data]);
 
-  // A portal actor must never render staff chrome. The tRPC layer already denies
-  // portal callers on staff procedures (portalStaffBoundary); this closes the soft
-  // UI boundary where the (staff) shell rendered before that data-layer denial.
   useEffect(() => {
     if (session.data?.actorType === "portal") {
       router.replace("/portal");
@@ -287,7 +273,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         <p>Could not reach the server.</p>
         <button
           type="button"
-          className="rounded border border-sand bg-white px-4 py-2 text-ink"
+          className="rounded border border-sand bg-paper px-4 py-2 text-ink"
           onClick={() => void session.refetch()}
         >
           Retry
@@ -309,7 +295,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         <p>This account does not have staff access to hrmny OS.</p>
         <button
           type="button"
-          className="rounded border border-sand bg-white px-4 py-2 text-ink"
+          className="rounded border border-sand bg-paper px-4 py-2 text-ink"
           onClick={() =>
             void getSupabaseBrowserClient()
               ?.auth.signOut()
@@ -351,7 +337,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
           <span>Workspace</span>
           <strong>Creative Harmony</strong>
         </div>
-        <p className="desk-nav-label">Operate</p>
+        <p className="desk-nav-label">Do the work</p>
         <nav className="desk-nav" aria-label="Primary">
           {PRIMARY_NAV.filter((item) =>
             item.features.some((featureKey) => enabledFeatures.has(featureKey)),
@@ -365,7 +351,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
               >
                 <span className="desk-nav-index">{item.index}</span>
                 <span>{item.label}</span>
-                {item.label === "CRM" && dealCount ? (
+                {item.countKey === "deals" && dealCount ? (
                   <span className="desk-nav-count">{dealCount}</span>
                 ) : (
                   <span />
@@ -395,7 +381,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
             <kbd>⌘ K</kbd>
           </Link>
           <div className="desk-top-actions">
-            {(users.data ?? []).length > 0 ? (
+            {showDevPersona ? (
               <div className="desk-devbox">
                 <label htmlFor="persona">Dev only</label>
                 <select
@@ -411,6 +397,22 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
                 </select>
               </div>
             ) : null}
+            <label className="desk-theme-control">
+              <span className="sr-only">Theme</span>
+              <select
+                id="color-theme"
+                name="color-theme"
+                aria-label="Color theme"
+                value={preference}
+                onChange={(e) =>
+                  setPreference(e.target.value as ThemePreference)
+                }
+              >
+                <option value="system">Theme: System</option>
+                <option value="light">Theme: Light</option>
+                <option value="dark">Theme: Dark</option>
+              </select>
+            </label>
             <Link
               href={
                 pathname.startsWith("/client-preview")
@@ -420,8 +422,8 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
               className="desk-topbar-primary"
             >
               {pathname.startsWith("/client-preview")
-                ? "← Staff admin"
-                : "View client portal"}
+                ? "← Staff view"
+                : "Client portal"}
             </Link>
             <Link
               href="/admin/audit"
@@ -456,7 +458,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         <div className="desk-content" id="staff-main" tabIndex={-1}>
           {connectionMessage ? (
             <p
-              className="mb-4 rounded border border-sand bg-white/70 p-3 text-sm"
+              className="mb-4 rounded border border-sand bg-paper/70 p-3 text-sm"
               aria-live="polite"
             >
               {connectionMessage}
@@ -465,7 +467,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
           {pageEnabled ? (
             children
           ) : (
-            <main className="rounded-lg border border-sand bg-white/70 p-6">
+            <main className="rounded-lg border border-sand bg-paper/70 p-6">
               <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted">
                 Feature unavailable
               </p>

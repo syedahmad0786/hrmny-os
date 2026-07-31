@@ -9,6 +9,15 @@ import {
   type EntitySnapshot,
 } from "@hrmny/gate";
 import { DEMO_EMPLOYEE_ID, getDemoStore, vatOnAmount } from "../demo-store";
+import {
+  getInvoice,
+  getProposal,
+  insertProposal,
+  listInvoices,
+  listProposals,
+  updateProposal,
+  upsertInvoice,
+} from "../finance/invoice-store";
 import { protectedProcedure, router } from "./trpc";
 
 bootstrapGateRegistry();
@@ -88,11 +97,9 @@ async function runTransition(
 }
 
 export const invoicesRouter = router({
-  list: protectedProcedure.query(() => [...getDemoStore().invoices.values()]),
+  list: protectedProcedure.query(() => listInvoices()),
 
-  proposals: protectedProcedure.query(() => [
-    ...getDemoStore().proposals.values(),
-  ]),
+  proposals: protectedProcedure.query(() => listProposals()),
 
   intake: protectedProcedure
     .input(
@@ -126,7 +133,7 @@ export const invoicesRouter = router({
         invoiceId: null,
         createdAt: new Date().toISOString(),
       };
-      store.proposals.set(proposalId, proposal);
+      await insertProposal(proposal);
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "invoices.intake",
@@ -154,13 +161,15 @@ export const invoicesRouter = router({
           .optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const proposal = store.proposals.get(input.proposalId);
+      const proposal = await getProposal(input.proposalId);
       if (!proposal) throw new Error("NOT_FOUND");
       if (input.decision === "reject") {
-        proposal.status = "rejected";
-        return { proposal, invoice: null };
+        const rejected = await updateProposal(input.proposalId, {
+          status: "rejected",
+        });
+        return { proposal: rejected!, invoice: null };
       }
 
       const base = proposal.payload as InvoiceProposePayload;
@@ -200,11 +209,12 @@ export const invoicesRouter = router({
         approvedByEmployeeId: null,
         createdAt: new Date().toISOString(),
       };
-      store.invoices.set(invoiceId, invoice);
-      proposal.status =
-        input.decision === "edit_approve" ? "edited" : "approved";
-      proposal.invoiceId = invoiceId;
-      proposal.payload = { ...merged };
+      await upsertInvoice(invoice);
+      const nextProposal = await updateProposal(input.proposalId, {
+        status: input.decision === "edit_approve" ? "edited" : "approved",
+        invoiceId,
+        payload: { ...merged },
+      });
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "invoices.intakeDecide",
@@ -214,7 +224,7 @@ export const invoicesRouter = router({
         after: { ...invoice },
         reason: merged.ruleCited,
       });
-      return { proposal, invoice };
+      return { proposal: nextProposal!, invoice };
     }),
 
   /** M5: retainer / progress / first invoice draft (VAT 5%). */
@@ -228,7 +238,7 @@ export const invoicesRouter = router({
         contactName: z.string().optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
       const client = store.clients.get(input.clientId);
       if (!client) throw new Error("NOT_FOUND");
@@ -260,7 +270,7 @@ export const invoicesRouter = router({
         approvedByEmployeeId: null as string | null,
         createdAt: new Date().toISOString(),
       };
-      store.invoices.set(invoiceId, invoice);
+      await upsertInvoice(invoice);
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "invoices.draft",
@@ -339,9 +349,9 @@ export const invoicesRouter = router({
         event: z.enum(["invoice.paid"]).optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const inv = [...store.invoices.values()].find(
+      const inv = (await listInvoices()).find(
         (i) => i.xeroInvoiceId === input.xeroInvoiceId,
       );
       if (!inv) throw new Error("NOT_FOUND");
@@ -350,6 +360,7 @@ export const invoicesRouter = router({
       }
       const before = inv.status;
       inv.status = "paid";
+      await upsertInvoice(inv);
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "invoices.markPaidFromWebhook",
@@ -365,8 +376,7 @@ export const invoicesRouter = router({
   approve: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
-      const store = getDemoStore();
-      const inv = store.invoices.get(input.id);
+      const inv = await getInvoice(input.id);
       if (!inv) throw new Error("NOT_FOUND");
       const result = await runTransition(
         "invoice",
@@ -380,6 +390,7 @@ export const invoicesRouter = router({
           inv.approvedByEmployeeId = ctx.employeeId;
         },
       );
+      await upsertInvoice(inv);
       return { result, invoice: inv };
     }),
 
@@ -387,7 +398,7 @@ export const invoicesRouter = router({
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const inv = store.invoices.get(input.id);
+      const inv = await getInvoice(input.id);
       if (!inv) throw new Error("NOT_FOUND");
 
       const result = await runTransition(
@@ -414,6 +425,7 @@ export const invoicesRouter = router({
       });
       inv.status = "issued";
       inv.xeroInvoiceId = posted.xeroInvoiceId;
+      await upsertInvoice(inv);
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "invoices.issue.xero_post",
@@ -436,10 +448,9 @@ export const invoicesRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const store = getDemoStore();
-      const inv = store.invoices.get(input.id);
+      const inv = await getInvoice(input.id);
       if (!inv) throw new Error("NOT_FOUND");
-      return runTransition(
+      const result = await runTransition(
         "invoice",
         inv.invoiceId,
         inv.status,
@@ -450,6 +461,8 @@ export const invoicesRouter = router({
           inv.status = to;
         },
       );
+      await upsertInvoice(inv);
+      return result;
     }),
 
   resetDemo: protectedProcedure.mutation(() => {

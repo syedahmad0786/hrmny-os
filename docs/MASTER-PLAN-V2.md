@@ -12,7 +12,7 @@ Production-ready CRM + operating system powered by AI, with: reporting, analytic
 
 | Milestone | Scope | Status |
 |---|---|---|
-| M1 Substrate | Hosting/CI, Postgres+RLS, gate engine, Google SSO, RBAC, audit, DAM, jobs, health alerts | **DONE, live in prod** (hrmny-os.vercel.app, 107/107 tests; pending only client UAT sign-off) |
+| M1 Substrate | Hosting/CI, Postgres+RLS, gate engine, Google SSO, RBAC, audit, DAM, jobs, health alerts | **RELEASE CANDIDATE** — software-green in CI/preview; target migration `0070`, production promotion/proof and named external holds remain (`M1-COMPLETION-AUDIT.md`) |
 | M2 Finance/HR | Xero adapter, Bayzat CSV, invoice/payroll gates | Built, **mock-first demo** |
 | M3 Sales/CRM | Deal gates G1–G6, BUAF scoring, Apollo/Hunter ifaces, outreach | Built, **mock-first demo** |
 | M4 Delivery/Traffic | Task board, DoR, shoot locks, Canva stub | Built, **mock-first demo** |

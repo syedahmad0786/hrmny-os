@@ -1,8 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * M1 Playwright smoke — run against a local `pnpm --filter @hrmny/web dev`.
- * CI: start web then `pnpm --filter @hrmny/web e2e`.
+ * M1 Playwright smoke — development auth personas require the dev server.
  */
 export default defineConfig({
   testDir: "./e2e",

@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { Button, Card } from "@hrmny/ui";
 import { useState } from "react";
-import { CrmSubnav } from "@/components/crm/subnav";
 import { trpc } from "@/lib/trpc";
+import { usePageTitle } from "@/components/use-page-title";
 
 type ClientRow = {
   clientId: string;
@@ -16,6 +16,7 @@ type ClientRow = {
 };
 
 export default function ClientsPage() {
+  usePageTitle("Clients");
   const utils = trpc.useUtils();
   const clients = trpc.clients.list.useQuery();
   const [showCreate, setShowCreate] = useState(false);
@@ -54,18 +55,21 @@ export default function ClientsPage() {
 
   return (
     <main className="flex flex-col gap-6">
-      <CrmSubnav />
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-ochre">
-            CRM
+            Clients
           </p>
           <h1 className="mt-1 font-display text-3xl font-semibold">
-            Client directory
+            Active accounts
           </h1>
           <p className="mt-2 text-sm text-muted">
-            Create client accounts, grant portal access, and open each client’s
-            exact portal view.
+            Open a client record to continue onboarding, or preview their portal.
+            Pipeline deals live under{" "}
+            <Link className="text-ochre underline" href="/crm">
+              Pipeline
+            </Link>
+            .
           </p>
         </div>
         <Button type="button" onClick={() => setShowCreate((value) => !value)}>
@@ -165,19 +169,19 @@ export default function ClientsPage() {
             <div className="mt-5 flex flex-wrap gap-2">
               <Link
                 className="rounded-lg bg-ink px-3 py-2 text-sm font-medium text-white"
+                href={`/clients/${client.clientId}`}
+              >
+                Open client
+              </Link>
+              <Link
+                className="rounded-lg border border-sand bg-paper px-3 py-2 text-sm"
                 href={`/client-preview?client=${client.clientId}`}
               >
                 Preview portal
               </Link>
-              <Link
-                className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
-                href={`/clients/${client.clientId}`}
-              >
-                Onboarding
-              </Link>
               <button
                 type="button"
-                className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+                className="rounded-lg border border-sand bg-paper px-3 py-2 text-sm"
                 onClick={() => setAccessClientId(client.clientId)}
               >
                 Manage portal access

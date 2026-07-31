@@ -1,7 +1,8 @@
 /* Harmony CRM redesign — desk chrome + CRM surfaces */
 :root {
   --ochre: #e47300;
-  --ochre-dark: #b95d00;
+  /* Darker for WCAG AA on cream / ochre-soft chips (was #b95d00 ~4.1:1). */
+  --ochre-dark: #7a3f00;
   --ochre-soft: #f4d7b9;
   --ink: #0a0908;
   --ink-2: #211f1c;
@@ -9,7 +10,7 @@
   --paper-2: #fcfaf6;
   --sand: #e8e0d4;
   --sand-2: #d7ccbe;
-  --muted: #6b6560;
+  --muted: #534e48;
   --success: #2e6b51;
   --success-bg: #dceae2;
   --warn: #8a5a16;
@@ -22,6 +23,12 @@
   --line-strong: rgba(10, 9, 8, 0.22);
   --shadow: 0 18px 50px rgba(33, 25, 17, 0.1);
   --shadow-soft: 0 8px 28px rgba(33, 25, 17, 0.07);
+  /* Sidebar stays charcoal in both themes — never bind to --ink/--paper. */
+  --sidebar-bg: #0a0908;
+  --sidebar-fg: #f7f4ef;
+  --sidebar-fg-muted: #b8afa6;
+  --sidebar-active-bg: #f7f4ef;
+  --sidebar-active-fg: #0a0908;
   --topbar-surface: rgba(247, 244, 239, 0.88);
   --control-surface: rgba(255, 255, 255, 0.42);
   --glass-surface: rgba(252, 250, 246, 0.72);
@@ -37,6 +44,11 @@
 }
 
 html[data-work-theme="dark"] {
+  --sidebar-bg: #0c0b0a;
+  --sidebar-fg: #f7f4ef;
+  --sidebar-fg-muted: #b8afa6;
+  --sidebar-active-bg: #2a2723;
+  --sidebar-active-fg: #f7f4ef;
   --ochre: #f58b24;
   --ochre-dark: #ffad66;
   --ochre-soft: #593518;
@@ -120,8 +132,8 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
   flex-direction: column;
   padding: 24px 18px 18px;
   overflow: auto;
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--sidebar-bg);
+  color: var(--sidebar-fg);
 }
 
 .desk-brand {
@@ -171,7 +183,7 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 
 .desk-side-context span {
   display: block;
-  color: rgba(247, 244, 239, 0.45);
+  color: #c9c0b6;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.13em;
@@ -188,7 +200,7 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 
 .desk-nav-label {
   margin: 11px 10px 7px;
-  color: rgba(247, 244, 239, 0.32);
+  color: #c9c0b6;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.15em;
@@ -219,17 +231,17 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 
 .desk-nav-btn:hover {
   background: rgba(255, 255, 255, 0.06);
-  color: var(--paper);
+  color: var(--sidebar-fg);
   transform: translateX(2px);
 }
 
 .desk-nav-btn.active {
-  background: var(--paper);
-  color: var(--ink);
+  background: var(--sidebar-active-bg);
+  color: var(--sidebar-active-fg);
 }
 
 .desk-nav-index {
-  color: rgba(247, 244, 239, 0.32);
+  color: #c9c0b6;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -263,7 +275,7 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 .desk-side-meta {
   padding: 14px 10px 4px;
   border-top: 1px solid rgba(247, 244, 239, 0.1);
-  color: rgba(247, 244, 239, 0.38);
+  color: #c9c0b6;
   font-size: 9px;
   line-height: 1.7;
 }
@@ -338,6 +350,18 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
   border: 1px dashed rgba(228, 115, 0, 0.55);
   border-radius: 11px;
   background: rgba(228, 115, 0, 0.06);
+}
+
+.desk-theme-control select {
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--paper-2);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .desk-topbar-primary {
@@ -418,6 +442,96 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 .desk-content {
   min-height: calc(100vh - var(--topbar));
   padding: 26px 28px 46px;
+}
+
+.ops-today-hero {
+  margin-bottom: 8px;
+  padding: 28px 28px 8px;
+}
+
+.ops-today-hero h1 {
+  margin: 8px 0 12px;
+  font-family: var(--font-display), "Syne", sans-serif;
+  font-size: clamp(32px, 5vw, 48px);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+  color: var(--ink);
+}
+
+.ops-action-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+
+.ops-action-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper-2);
+  box-shadow: var(--shadow-soft);
+}
+
+.ops-action-row strong {
+  display: block;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.ops-action-row small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ops-action-row.urgency-now {
+  border-color: color-mix(in srgb, var(--ochre) 55%, var(--line));
+}
+
+.ops-action-go {
+  color: var(--ochre-dark);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ops-jump-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 40px;
+}
+
+.ops-jump-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper-2);
+}
+
+.ops-jump-card strong {
+  color: var(--ink);
+  font-family: var(--font-display), "Syne", sans-serif;
+}
+
+.ops-jump-card small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .ops-jump-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 .ops-home {
@@ -1051,16 +1165,51 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
   box-shadow: none;
 }
 
+.crm-row-selected td {
+  background: color-mix(in srgb, var(--ochre) 12%, var(--paper-2));
+}
+
+.crm-nav-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 20px;
+}
+
 .crm-subnav {
   display: flex;
   gap: 2px;
-  margin: 0 0 20px;
+  margin: 0;
   padding: 5px;
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 13px;
   background: var(--control-surface);
   scrollbar-width: none;
+}
+
+.crm-secondary-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+.crm-secondary-nav a {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.crm-secondary-nav a:hover,
+.crm-secondary-nav a.active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
 }
 
 .crm-subnav::-webkit-scrollbar {
