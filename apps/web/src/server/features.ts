@@ -32,6 +32,7 @@ export type ResolvedFeature = FeatureDefinition & {
 };
 
 const demoOverrides = new Map<string, FeatureOverride>();
+let overrideListInFlight: Promise<FeatureOverride[]> | null = null;
 
 function overrideKey(
   featureKey: string,
@@ -156,13 +157,21 @@ function mapOverride(row: FeatureOverrideRow): FeatureOverride {
 export async function listFeatureOverrides(): Promise<FeatureOverride[]> {
   const db = getDb();
   if (!db) return [...demoOverrides.values()];
-  const rows = await db.execute<FeatureOverrideRow>(sql`
-    select feature_override_id, feature_key, scope_type, scope_key,
-      enabled, reason, updated_by_employee_id, updated_at
-    from public.feature_override
-    order by feature_key, scope_type, scope_key
-  `);
-  return rows.map(mapOverride);
+  const current =
+    overrideListInFlight ??=
+      db
+        .execute<FeatureOverrideRow>(sql`
+          select feature_override_id, feature_key, scope_type, scope_key,
+            enabled, reason, updated_by_employee_id, updated_at
+          from public.feature_override
+          order by feature_key, scope_type, scope_key
+        `)
+        .then((rows) => rows.map(mapOverride));
+  try {
+    return await current;
+  } finally {
+    if (overrideListInFlight === current) overrideListInFlight = null;
+  }
 }
 
 export async function setFeatureOverride(input: {
