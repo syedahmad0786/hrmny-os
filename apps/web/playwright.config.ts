@@ -1,8 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * M1 Playwright smoke — run against a local `pnpm --filter @hrmny/web dev`.
- * CI: start web then `pnpm --filter @hrmny/web e2e`.
+ * M1 Playwright smoke — CI exercises the built app; local runs keep fast-refresh.
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -25,7 +24,9 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
     ? undefined
     : {
-        command: "pnpm exec next dev --port 3000",
+        command: process.env.CI
+          ? "pnpm exec next start --port 3000"
+          : "pnpm exec next dev --port 3000",
         url: "http://localhost:3000",
         reuseExistingServer: !process.env.CI,
         timeout: 180_000,

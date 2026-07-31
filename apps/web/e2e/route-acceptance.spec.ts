@@ -39,13 +39,20 @@ async function assertRenders(page: Page, route: RouteEntry, label: string) {
   const resp = await page.goto(route.sample, { waitUntil: "domcontentloaded" });
   const status = resp?.status() ?? 0;
   if (route.expect === "notFound") {
-    expect.soft(status, `${label} ${route.sample} must not 500`).toBeLessThan(500);
+    expect
+      .soft(status, `${label} ${route.sample} must not 500`)
+      .toBeLessThan(500);
   } else {
     expect.soft(status, `${label} ${route.sample} must not 404`).not.toBe(404);
-    expect.soft(status, `${label} ${route.sample} must not 5xx`).toBeLessThan(500);
+    expect
+      .soft(status, `${label} ${route.sample} must not 5xx`)
+      .toBeLessThan(500);
   }
   await expect
-    .soft(page.getByText(ERROR_BOUNDARY), `${label} ${route.sample} error boundary`)
+    .soft(
+      page.getByText(ERROR_BOUNDARY),
+      `${label} ${route.sample} error boundary`,
+    )
     .toHaveCount(0);
 
   if (route.exposure === "development-only") return;
@@ -53,19 +60,27 @@ async function assertRenders(page: Page, route: RouteEntry, label: string) {
   // Group landmark confirms the actor actually reached the intended surface.
   if (route.actor === "staff") {
     await expect
-      .soft(page.getByRole("navigation", { name: "Primary" }), `${label} ${route.sample} staff shell`)
-      .toBeVisible();
+      .soft(
+        page.getByRole("navigation", { name: "Primary" }),
+        `${label} ${route.sample} staff shell`,
+      )
+      .toBeVisible({ timeout: 15_000 });
   } else if (route.actor === "portal") {
     expect
-      .soft(page.url(), `${label} ${route.sample} should not bounce to portal login`)
+      .soft(
+        page.url(),
+        `${label} ${route.sample} should not bounce to portal login`,
+      )
       .not.toContain("/portal/login");
   }
 }
 
 async function collectLinks(page: Page, seenOn: string) {
-  const hrefs = await page.locator("a[href]").evaluateAll((els) =>
-    els.map((el) => (el as HTMLAnchorElement).getAttribute("href") ?? ""),
-  );
+  const hrefs = await page
+    .locator("a[href]")
+    .evaluateAll((els) =>
+      els.map((el) => (el as HTMLAnchorElement).getAttribute("href") ?? ""),
+    );
   for (const href of hrefs) {
     if (!href.startsWith("/") || href.startsWith("//")) continue; // internal, path-absolute only
     if (!discoveredLinks.has(href)) discoveredLinks.set(href, seenOn);
@@ -89,7 +104,9 @@ for (const role of ROLES) {
         if (route.actor === "portal") {
           // staff → portal: PortalShell hard-redirects to /portal/login.
           await page.goto(route.sample, { waitUntil: "domcontentloaded" });
-          await page.waitForURL(/\/portal\/login/, { timeout: 8_000 }).catch(() => {});
+          await page
+            .waitForURL(/\/portal\/login/, { timeout: 8_000 })
+            .catch(() => {});
           expect
             .soft(page.url(), `${role.key} must be denied ${route.sample}`)
             .toContain("/portal/login");
@@ -99,12 +116,20 @@ for (const role of ROLES) {
           // the page degrades gracefully instead of crashing.
           // ponytail: no per-route data-leak assertion — tRPC batching makes the
           // network status ambiguous; the boundary probe is the authoritative gate.
-          const resp = await page.goto(route.sample, { waitUntil: "domcontentloaded" });
+          const resp = await page.goto(route.sample, {
+            waitUntil: "domcontentloaded",
+          });
           expect
-            .soft(resp?.status() ?? 0, `${role.key} on ${route.sample} must not 5xx`)
+            .soft(
+              resp?.status() ?? 0,
+              `${role.key} on ${route.sample} must not 5xx`,
+            )
             .toBeLessThan(500);
           await expect
-            .soft(page.getByText(ERROR_BOUNDARY), `${role.key} on ${route.sample} error boundary`)
+            .soft(
+              page.getByText(ERROR_BOUNDARY),
+              `${role.key} on ${route.sample} error boundary`,
+            )
             .toHaveCount(0);
         }
       }
