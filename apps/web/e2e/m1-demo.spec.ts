@@ -117,9 +117,11 @@ test.describe.serial("M1 substrate demo", () => {
     const qcNotes = card.getByLabel(`QC notes for ${title}`);
     await qcNotes.fill("M1 browser control proof");
     await card.getByRole("button", { name: "Fail" }).click();
-    await expect(card).toContainText("qc_failed");
+    await expect(card).toContainText("internal_review");
     await card.getByRole("button", { name: "Waive" }).click();
-    await expect(card).toContainText("qc_waived");
+    await expect(card).toContainText("qc_passed");
+    await card.getByRole("button", { name: "Fail" }).click();
+    await expect(card).toContainText("internal_review");
     await card.getByRole("button", { name: "Pass QC" }).click();
     await expect(card).toContainText("qc_passed");
 
