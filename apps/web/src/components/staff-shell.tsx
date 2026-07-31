@@ -189,7 +189,6 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     if (!supabase) return;
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (
-        event === "INITIAL_SESSION" ||
         event === "SIGNED_IN" ||
         event === "TOKEN_REFRESHED" ||
         event === "SIGNED_OUT"
