@@ -176,6 +176,22 @@ describe("M1 tRPC RBAC + gate", () => {
     expect(after).toEqual(before);
   });
 
+  it("rejects unknown convention rule keys", async () => {
+    const director = callerFor("director");
+    await expect(
+      director.conventions.upsert({
+        // @ts-expect-error Deliberately exercise the runtime API boundary.
+        ruleKey: "unknown.rule",
+        payload: { enabled: true },
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(
+      (await director.conventions.list()).some(
+        (row) => row.ruleKey === "unknown.rule",
+      ),
+    ).toBe(false);
+  });
+
   it("audits role changes, denies AM escalation and protects the final Partner", async () => {
     const partner = callerFor("partner");
     const am = callerFor("am");

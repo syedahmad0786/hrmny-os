@@ -74,6 +74,19 @@ describe("M1 security insurance", () => {
     expect(sql).toMatch(/notification_attempts >= 0/i);
   });
 
+  it("redacts scheduled-job payloads and results from the admin API", () => {
+    const source = readFileSync(join(__dirname, "trpc/root.ts"), "utf8");
+    const listResolver = source.slice(
+      source.indexOf("jobs: router({"),
+      source.indexOf("scheduleHealth:", source.indexOf("jobs: router({")),
+    );
+    expect(listResolver).toContain(
+      "scheduledJobId: scheduledJob.scheduledJobId",
+    );
+    expect(listResolver).not.toContain("payload: scheduledJob.payload");
+    expect(listResolver).not.toContain("result: scheduledJob.result");
+  });
+
   it("gitignore keeps secrets out of the monorepo", () => {
     const candidates = [
       join(process.cwd(), ".gitignore"),

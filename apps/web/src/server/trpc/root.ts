@@ -73,6 +73,7 @@ import { digitalCardsRouter } from "./digital-cards-router";
 import { featureLabRouter } from "./feature-lab-router";
 import { listFeatureOverrides, resolveFeatureCatalog } from "../features";
 import {
+  getDemoWork,
   requireItemAccess,
   workManagementRouter,
 } from "./work-management-router";
@@ -516,11 +517,29 @@ export const adminRouter = router({
       .query(async () => {
         const db = getDb();
         if (!db) return [];
-        return db
-          .select()
+        const rows = await db
+          .select({
+            scheduledJobId: scheduledJob.scheduledJobId,
+            kind: scheduledJob.kind,
+            runAt: scheduledJob.runAt,
+            status: scheduledJob.status,
+            attempts: scheduledJob.attempts,
+            lockedAt: scheduledJob.lockedAt,
+            completedAt: scheduledJob.completedAt,
+            createdAt: scheduledJob.createdAt,
+            updatedAt: scheduledJob.updatedAt,
+          })
           .from(scheduledJob)
           .orderBy(desc(scheduledJob.createdAt))
           .limit(20);
+        return rows.map((row) => ({
+          ...row,
+          runAt: row.runAt.toISOString(),
+          lockedAt: row.lockedAt?.toISOString() ?? null,
+          completedAt: row.completedAt?.toISOString() ?? null,
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
+        }));
       }),
     scheduleHealth: staffProcedure
       .use(requirePermission("health", "manage"))
@@ -570,8 +589,15 @@ const healthSignalKey = z.enum([
   "job_lag",
 ]);
 
+const conventionRuleKey = z.enum([
+  "health.signals",
+  "margin.floor",
+  "llm.spend_cap",
+  "portal.allowed_contacts",
+]);
+
 function validateConventionPayload(
-  ruleKey: string,
+  ruleKey: z.infer<typeof conventionRuleKey>,
   payload: Record<string, unknown>,
 ) {
   try {
@@ -601,7 +627,10 @@ function validateConventionPayload(
         .object({ contacts: z.record(z.string().email(), z.string().uuid()) })
         .strict()
         .parse(payload);
-    return payload;
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Unsupported convention rule: ${ruleKey}`,
+    });
   } catch (error) {
     if (error instanceof z.ZodError)
       throw new TRPCError({
@@ -640,7 +669,7 @@ export const conventionsRouter = router({
     .use(requirePermission("convention", "edit"))
     .input(
       z.object({
-        ruleKey: z.string().min(1),
+        ruleKey: conventionRuleKey,
         payload: z.record(z.unknown()),
       }),
     )
@@ -716,21 +745,30 @@ const ASSET_CONTENT_TYPES = new Set([
   "image/webp",
 ]);
 
+const safeAssetFileName = (fileName: string) =>
+  fileName.replace(/[^a-zA-Z0-9._-]/g, "-");
+
 function decodeAssetBody(contentBase64: string, contentType: string) {
-  if (
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
-      contentBase64,
-    )
-  )
+  if (contentBase64.length % 4 !== 0)
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "Asset content is not valid Base64",
     });
-  const raw = Buffer.from(contentBase64, "base64");
-  if (raw.byteLength > 10_000_000)
+  const padding = contentBase64.endsWith("==")
+    ? 2
+    : contentBase64.endsWith("=")
+      ? 1
+      : 0;
+  if ((contentBase64.length / 4) * 3 - padding > 10_000_000)
     throw new TRPCError({
       code: "PAYLOAD_TOO_LARGE",
       message: "Asset versions are limited to 10 MB",
+    });
+  const raw = Buffer.from(contentBase64, "base64");
+  if (raw.toString("base64") !== contentBase64)
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Asset content is not valid Base64",
     });
   const ascii = (start: number, end: number) =>
     raw.subarray(start, end).toString("ascii");
@@ -827,14 +865,14 @@ export const assetsRouter = router({
           return { ...created!, versions: [] };
         });
       }
-      const project = getDemoStore();
-      const demoAsset = project.createAsset(
+      const store = getDemoStore();
+      const demoAsset = store.createAsset(
         input.title,
-        null,
+        getDemoWork().projects.get(access.projectId)?.clientId ?? null,
         null,
         input.workItemId,
       );
-      project.appendAudit({
+      store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "assets.create",
         entityType: "asset",
@@ -853,7 +891,7 @@ export const assetsRouter = router({
     .input(
       z.object({
         assetId: z.string().uuid(),
-        fileName: z.string().min(1).max(180),
+        fileName: z.string().trim().min(1).max(180),
         contentType: z
           .string()
           .refine((value) => ASSET_CONTENT_TYPES.has(value), {
@@ -866,9 +904,9 @@ export const assetsRouter = router({
     .mutation(async ({ input, ctx }) => {
       await requireAssetAccess(ctx, input.assetId, "editor");
       const raw = decodeAssetBody(input.contentBase64, input.contentType);
+      const fileName = safeAssetFileName(input.fileName);
       const db = getDb();
       if (db) {
-        const fileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "-");
         let storagePath: string | null = null;
         let versionNumber = 0;
         let version: typeof assetVersion.$inferSelect | null = null;
@@ -930,7 +968,7 @@ export const assetsRouter = router({
         assetId: input.assetId,
         contentBase64: input.contentBase64,
         contentType: input.contentType,
-        fileName: input.fileName,
+        fileName,
         employeeId: ctx.employeeId,
         isClientRevision: input.isClientRevision,
       });

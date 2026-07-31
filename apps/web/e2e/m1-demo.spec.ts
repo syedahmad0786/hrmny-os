@@ -17,6 +17,7 @@ test.describe.serial("M1 substrate demo", () => {
 
     await goto("/settings/connections");
     await expect(page.locator("body")).toContainText(/current provider state/i);
+    await expect(page.locator("body")).toContainText(/scheduled jobs/i);
     await page.getByRole("button", { name: "Refresh" }).click();
     await expect(page.getByRole("button", { name: "Refresh" })).toBeEnabled();
 
@@ -162,15 +163,21 @@ test.describe.serial("M1 substrate demo", () => {
     await expect(amRow).not.toContainText("director");
 
     await page.goto("/conventions", { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: "Edit" }).first().click();
-    const editor = page.locator("textarea").first();
-    const original = await editor.inputValue();
-    await editor.fill("{");
-    await page.getByRole("button", { name: "Save" }).click();
-    await expect(page.locator('[aria-live="polite"]')).toBeVisible();
-    await editor.fill(original);
-    await page.getByRole("button", { name: "Save" }).click();
-    await expect(editor).toBeHidden();
+    const convention = page.getByTestId("convention-margin.floor");
+    await convention.getByRole("button", { name: "Edit" }).click();
+    const floor = convention.getByLabel("Floor percent");
+    const target = convention.getByLabel("Target percent");
+    const originalFloor = await floor.inputValue();
+    const originalTarget = await target.inputValue();
+    await floor.fill("60");
+    await target.fill("40");
+    await convention.getByRole("button", { name: "Save" }).click();
+    await expect(convention.getByRole("alert")).toBeVisible();
+    await floor.fill(originalFloor);
+    await target.fill(originalTarget);
+    await convention.getByRole("button", { name: "Save" }).click();
+    await expect(floor).toBeHidden();
+    await expect(page.getByRole("status")).toContainText("saved and audited");
 
     await page.goto("/admin/audit", { waitUntil: "domcontentloaded" });
     await page.getByLabel("Action contains").fill("admin.roles");

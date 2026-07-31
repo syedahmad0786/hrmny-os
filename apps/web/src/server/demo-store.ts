@@ -1167,15 +1167,11 @@ class MemoryDemoStore {
   }) {
     const asset = this.assets.get(opts.assetId);
     if (!asset) throw new Error("NOT_FOUND");
-    const versionNumber = asset.versions.length + 1;
+    const versionNumber =
+      Math.max(0, ...asset.versions.map((version) => version.versionNumber)) + 1;
     const storagePath = `dam/${opts.assetId}/v${versionNumber}-${opts.fileName}`;
     const raw = Buffer.from(opts.contentBase64, "base64");
     const body = new Uint8Array(raw);
-    await this.objectStore.put({
-      path: storagePath,
-      body,
-      contentType: opts.contentType,
-    });
     const version: DemoAssetVersion = {
       assetVersionId: randomUUID(),
       assetId: opts.assetId,
@@ -1186,6 +1182,23 @@ class MemoryDemoStore {
       createdAt: new Date().toISOString(),
     };
     asset.versions = [...asset.versions, version];
+    try {
+      await this.objectStore.put({
+        path: storagePath,
+        body,
+        contentType: opts.contentType,
+      });
+    } catch (error) {
+      asset.versions = asset.versions.filter(
+        (candidate) => candidate.assetVersionId !== version.assetVersionId,
+      );
+      try {
+        await this.objectStore.remove?.(storagePath);
+      } catch {
+        // Preserve the upload failure; storage cleanup is best-effort here.
+      }
+      throw error;
+    }
     this.appendAudit({
       actorEmployeeId:
         opts.employeeId ?? "00000000-0000-4000-8000-000000000000",

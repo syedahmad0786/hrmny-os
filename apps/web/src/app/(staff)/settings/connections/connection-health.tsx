@@ -36,11 +36,16 @@ export function ConnectionHealth() {
     enabled: Boolean(session.data?.canManageHealth),
     retry: false,
   });
+  const jobs = trpc.admin.jobs.list.useQuery(undefined, {
+    enabled: Boolean(session.data?.canManageHealth),
+    retry: false,
+  });
 
   async function refresh() {
     await Promise.all([
       connections.refetch(),
       session.data?.canManageHealth ? health.refetch() : Promise.resolve(),
+      session.data?.canManageHealth ? jobs.refetch() : Promise.resolve(),
     ]);
   }
 
@@ -72,9 +77,11 @@ export function ConnectionHealth() {
             type="button"
             variant="ghost"
             onClick={() => void refresh()}
-            disabled={connections.isFetching || health.isFetching}
+            disabled={
+              connections.isFetching || health.isFetching || jobs.isFetching
+            }
           >
-            {connections.isFetching || health.isFetching
+            {connections.isFetching || health.isFetching || jobs.isFetching
               ? "Refreshing…"
               : "Refresh"}
           </Button>
@@ -171,6 +178,41 @@ export function ConnectionHealth() {
                   </li>
                 ))}
               </ul>
+
+              <p className="mt-5 text-sm font-medium">Scheduled jobs</p>
+              {jobs.isLoading ? (
+                <p className="mt-1 text-sm text-muted">Loading jobs…</p>
+              ) : jobs.error ? (
+                <p className="mt-1 text-sm text-red-700">
+                  {jobs.error.message}
+                </p>
+              ) : jobs.data?.length ? (
+                <ul className="mt-3 divide-y divide-sand rounded-lg border border-sand bg-white text-xs">
+                  {jobs.data.map((job) => (
+                    <li
+                      key={job.scheduledJobId}
+                      className="grid gap-1 p-3 sm:grid-cols-[1fr_auto]"
+                    >
+                      <span>
+                        <strong>{job.kind}</strong> · {job.status}
+                      </span>
+                      <span className="text-muted">
+                        {job.attempts} attempt{job.attempts === 1 ? "" : "s"}
+                      </span>
+                      <span className="text-muted sm:col-span-2">
+                        Due {new Date(job.runAt).toLocaleString()}
+                        {job.completedAt
+                          ? ` · completed ${new Date(job.completedAt).toLocaleString()}`
+                          : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-sm text-muted">
+                  No scheduled jobs recorded.
+                </p>
+              )}
             </>
           )}
         </div>
