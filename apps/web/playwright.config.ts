@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * M1 Playwright smoke — CI exercises the built app; local runs keep fast-refresh.
+ * M1 Playwright smoke — development auth personas require the dev server.
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -24,9 +24,7 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
     ? undefined
     : {
-        command: process.env.CI
-          ? "pnpm exec next start --port 3000"
-          : "pnpm exec next dev --port 3000",
+        command: "pnpm exec next dev --port 3000",
         url: "http://localhost:3000",
         reuseExistingServer: !process.env.CI,
         timeout: 180_000,

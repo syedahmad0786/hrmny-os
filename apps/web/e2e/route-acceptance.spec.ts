@@ -92,7 +92,7 @@ for (const role of ROLES) {
     test.use({ extraHTTPHeaders: { "x-dev-role": role.key } });
 
     test(`crawl (${role.group} actor)`, async ({ page }) => {
-      test.setTimeout(240_000);
+      test.setTimeout(480_000);
       for (const route of ROUTES) {
         if (isAllowed(role.group, route)) {
           await assertRenders(page, route, role.key);
