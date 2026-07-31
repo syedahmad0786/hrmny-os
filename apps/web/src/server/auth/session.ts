@@ -242,10 +242,8 @@ export async function resolveSupabaseUser(
   }
 
   const email = data.user.email?.trim().toLowerCase();
-  const [sso, workPolicy] = await Promise.all([
-    getWorkSsoConfiguration(),
-    getWorkOrganizationPolicy(),
-  ]);
+  const sso = await getWorkSsoConfiguration();
+  const workPolicy = await getWorkOrganizationPolicy();
   mark("policies_loaded");
   const lastSignInAt = Date.parse(data.user.last_sign_in_at ?? "");
   const sessionExpired =
