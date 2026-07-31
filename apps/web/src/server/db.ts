@@ -5,7 +5,7 @@ let cached: Db | null | undefined;
 /**
  * Silent in-memory fallback is allowed only for local/dev demos.
  * Production with live auth (or explicit REQUIRE_DATABASE) must have DATABASE_URL.
- * Escape hatch: ALLOW_MEMORY_STORE=true (emergency demos only).
+ * ALLOW_MEMORY_STORE is a local-demo convenience and cannot override hosted safety.
  */
 function memoryStoreForbidden(): boolean {
   const hosted = ["preview", "production"].includes(

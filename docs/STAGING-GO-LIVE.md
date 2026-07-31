@@ -9,7 +9,8 @@ with real credentials and staging access.
 - [ ] Supabase staging project linked (`npx supabase link`)
 - [ ] Extension `vector` enabled
 - [ ] `pnpm db:migrate` against staging (`DIRECT_URL`)
-- [ ] Confirm journal includes **0066–0069**
+- [ ] Run `pnpm db:verify` against disposable local Supabase PostgreSQL
+- [ ] Confirm the target journal includes **0066–0070**
 - [ ] Optional: seed staging only (`packages/db/seed/*`) — never production
 
 Details: `packages/db/APPLY.md`
@@ -63,5 +64,5 @@ Authenticate Notion MCP, then use meeting-intelligence to create:
 
 ## Done when
 
-Staging smoke passes for the flows above, CUTOVER #1 and #9 have evidence,
+Staging smoke passes for the flows above, migration `0070` and CUTOVER #1/#9 have evidence,
 and partners schedule Dubai UAT.

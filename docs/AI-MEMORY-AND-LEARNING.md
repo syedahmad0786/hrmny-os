@@ -51,4 +51,4 @@ Until then, improve quality by:
 | `OPENAI_API_KEY` | Embeddings for pgvector |
 | `OPENROUTER_API_KEY` / `LLM_PROVIDER` | Live generation |
 | `LLM_MONTHLY_CAP_AED` | Hard monthly breaker (default 1500) |
-| `ALLOW_MEMORY_STORE=true` | Emergency only — re-enables silent memory mode |
+| `ALLOW_MEMORY_STORE=true` | Local development only; hosted preview/production still fail closed |

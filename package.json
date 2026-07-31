@@ -14,6 +14,7 @@
     "e2e": "pnpm --filter @hrmny/web e2e",
     "db:generate": "pnpm --filter @hrmny/db generate",
     "db:migrate": "pnpm --filter @hrmny/db migrate",
+    "db:verify": "pnpm --filter @hrmny/db verify:migrations",
     "db:studio": "pnpm --filter @hrmny/db studio"
   },
   "pnpm": {

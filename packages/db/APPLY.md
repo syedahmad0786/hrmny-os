@@ -42,8 +42,9 @@ pnpm db:migrate
 
 Migrations `0000`–`0005` create the M1 schema, CRM, memory, tickets,
 the margin view, and deny-by-default Data API security. Later journaled
-files (`0006`–`0069`) add Work, Asana bridge, leadgen, campaigns, invoices
-ops fields, delivery ops fields, memory HNSW, and client onboarding.
+files (`0006`–`0070`) add Work, Asana bridge, leadgen, campaigns, invoices
+ops fields, delivery ops fields, memory HNSW, client onboarding, Work-scoped
+DAM, role-membership uniqueness, and durable health-delivery state.
 
 **Production durability band (must be applied before invite-only launch):**
 
@@ -53,6 +54,18 @@ ops fields, delivery ops fields, memory HNSW, and client onboarding.
 | `0067_delivery_ops_fields.sql` | Task/brief/calendar ops columns |
 | `0068_memory_chunk_hnsw.sql` | HNSW cosine index for `memory_chunk` |
 | `0069_client_onboarding.sql` | `client_onboarding_phase` 7-phase pack |
+| `0070_m1_production_readiness.sql` | Work-scoped DAM FK/index, role uniqueness, health delivery state, RLS/Data API reaffirmation |
+
+Before applying to preview or production, run the disposable Supabase-Postgres
+fresh/upgrade proof used by CI:
+
+```bash
+MIGRATION_TEST_ALLOW_DROP=true \
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres \
+pnpm db:verify
+```
+
+The verifier refuses non-local hosts and drops only its two fixed test databases.
 
 The browser uses Supabase Auth only; all business data is served by the
 authenticated tRPC API.
@@ -97,8 +110,11 @@ records should be imported from approved source data.
 | Mode | Behaviour |
 |------|-----------|
 | `AUTH_MODE=dev` + empty `DATABASE_URL` | In-memory / demo-store fallback (local demos & CI) |
-| `AUTH_MODE=supabase` | **Requires** `DATABASE_URL` — `getDb()` fails loud (no silent memory). Escape hatch: `ALLOW_MEMORY_STORE=true` (emergency only) |
+| `AUTH_MODE=supabase` | **Requires** `DATABASE_URL` — `getDb()` fails loud (no silent memory) |
 | `REQUIRE_DATABASE=true` | Force fail-loud even in `AUTH_MODE=dev` |
+
+`ALLOW_MEMORY_STORE=true` is local-development only and cannot override preview
+or production safety.
 
 Also set `AUTH_MODE=supabase` so edge middleware redirects anonymous users to `/login` (cookie session via `@supabase/ssr`).
 
