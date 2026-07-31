@@ -118,8 +118,10 @@ test.describe.serial("M1 substrate demo", () => {
     await qcNotes.fill("M1 browser control proof");
     await card.getByRole("button", { name: "Fail" }).click();
     await expect(card).toContainText("internal_review");
+    await qcNotes.fill("M1 browser waiver proof");
     await card.getByRole("button", { name: "Waive" }).click();
     await expect(card).toContainText("qc_passed");
+    await qcNotes.fill("M1 browser fail proof");
     await card.getByRole("button", { name: "Fail" }).click();
     await expect(card).toContainText("internal_review");
     await card.getByRole("button", { name: "Pass QC" }).click();
