@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -126,6 +127,20 @@ describe("scheduled-job cron boundary", () => {
     expect(db.updates[0]).toMatchObject({ status: "completed" });
   });
 
+  it("never resets or claims a stale job after its third attempt", () => {
+    const source = readFileSync(
+      new URL("../app/api/cron/jobs/route.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).toMatch(
+      /status = case when attempts >= 3 then 'failed' else 'pending' end/,
+    );
+    expect(source).toMatch(/status = 'pending' and attempts >= 3/);
+    expect(source).toMatch(
+      /where status = 'pending' and attempts < 3 and run_at <= now\(\)/,
+    );
+  });
+
   it.each([
     { attempts: 2, status: "pending" },
     { attempts: 3, status: "failed" },
@@ -145,11 +160,41 @@ describe("scheduled-job cron boundary", () => {
   );
 
   it("emits job_lag when overdue pending work remains", async () => {
-    mocks.db = fakeDb([[], [], [{ count: 2 }]]);
+    mocks.db = fakeDb([
+      [],
+      [],
+      [
+        {
+          count: 2,
+          oldestJobId: "00000000-0000-4000-8000-000000000003",
+        },
+      ],
+    ]);
 
     expect((await GET(authorizedRequest())).status).toBe(200);
-    expect(mocks.emitHealthSignal).toHaveBeenCalledWith("job_lag", "warn", {
-      delayedJobs: 2,
-    });
+    expect(mocks.emitHealthSignal).toHaveBeenCalledWith(
+      "job_lag",
+      "warn",
+      { delayedJobs: 2 },
+      {
+        incidentKey:
+          "job-lag:00000000-0000-4000-8000-000000000003",
+      },
+    );
+  });
+
+  it("reuses the same incident key while the same oldest job stays late", async () => {
+    const lag = {
+      count: 2,
+      oldestJobId: "00000000-0000-4000-8000-000000000003",
+    };
+    mocks.db = fakeDb([[], [], [lag], [], [], [lag]]);
+
+    expect((await GET(authorizedRequest())).status).toBe(200);
+    expect((await GET(authorizedRequest())).status).toBe(200);
+    expect(mocks.emitHealthSignal).toHaveBeenCalledTimes(2);
+    expect(mocks.emitHealthSignal.mock.calls[0]?.[3]).toEqual(
+      mocks.emitHealthSignal.mock.calls[1]?.[3],
+    );
   });
 });

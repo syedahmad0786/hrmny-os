@@ -6,6 +6,7 @@ import {
   healthSignal,
   ilike,
   scheduledJob,
+  sql,
 } from "@hrmny/db";
 import { getDb } from "./db";
 import { getDemoStore } from "./demo-store";
@@ -75,20 +76,61 @@ export async function emitHealthSignal(
   signalKey: string,
   severity: "info" | "warn" | "critical",
   payload: Record<string, unknown>,
+  options?: { incidentKey?: string; audit?: AuditInput },
 ) {
+  const incidentKey = options?.incidentKey?.trim();
+  const storedPayload = incidentKey
+    ? { ...payload, incidentKey }
+    : payload;
   const db = getDb();
-  if (!db) return getDemoStore().pushHealth(signalKey, severity, payload);
+  if (!db) {
+    const store = getDemoStore();
+    const existing = incidentKey
+      ? store.healthSignals.find(
+          (row) =>
+            row.signalKey === signalKey &&
+            row.payload.incidentKey === incidentKey,
+        )
+      : undefined;
+    if (existing) return existing;
+    const row = store.pushHealth(signalKey, severity, storedPayload);
+    if (options?.audit) {
+      store.appendAudit({
+        ...options.audit,
+        actorEmployeeId:
+          options.audit.actorEmployeeId ?? SYSTEM_EMPLOYEE_ID,
+        entityId: options.audit.entityId ?? SYSTEM_EMPLOYEE_ID,
+      });
+    }
+    return row;
+  }
 
   const webhookConfigured = Boolean(
     process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim(),
   );
-  const created = await db.transaction(async (tx) => {
+  const { row: created } = await db.transaction(async (tx) => {
+    if (incidentKey) {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`health:${signalKey}:${incidentKey}`}))`,
+      );
+      const [existing] = await tx
+        .select()
+        .from(healthSignal)
+        .where(
+          and(
+            eq(healthSignal.signalKey, signalKey),
+            sql`${healthSignal.payload} ->> 'incidentKey' = ${incidentKey}`,
+          ),
+        )
+        .limit(1);
+      if (existing) return { row: existing, inserted: false };
+    }
     const [row] = await tx
       .insert(healthSignal)
       .values({
         signalKey,
         severity,
-        payload,
+        payload: storedPayload,
         deliveryStatus: webhookConfigured ? "pending" : "not_configured",
       })
       .returning();
@@ -100,7 +142,8 @@ export async function emitHealthSignal(
         payload: { healthSignalId: row!.healthSignalId },
       });
     }
-    return row!;
+    if (options?.audit) await tx.insert(auditEvent).values(options.audit);
+    return { row: row!, inserted: true };
   });
   return {
     ...created,
@@ -121,6 +164,8 @@ export async function deliverHealthSignal(healthSignalId: string) {
   if (!row) throw new Error("Health signal not found");
   if (row.deliveryStatus === "delivered")
     return { ok: true as const, alreadyDelivered: true };
+  if (row.deliveryStatus === "failed" || row.notificationAttempts >= 3)
+    return { ok: false as const, exhausted: true };
 
   const webhook = process.env.GOOGLE_CHAT_WEBHOOK_URL?.trim();
   if (!webhook) {
