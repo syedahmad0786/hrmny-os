@@ -30,6 +30,13 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      AUTH_MODE: "dev"
+      ALLOW_MEMORY_STORE: "true"
+      DAM_STORAGE: "memory"
+      VERCEL_ENV: "development"
+      PLAYWRIGHT_BASE_URL: http://localhost:3000
+      CI: "true"
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -42,21 +49,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @hrmny/web build
       - run: pnpm --filter @hrmny/web exec playwright install chromium --with-deps
-      - name: Start local acceptance server
-        env:
-          AUTH_MODE: "dev"
-          ALLOW_MEMORY_STORE: "true"
-          DAM_STORAGE: "memory"
-          VERCEL_ENV: "development"
-        run: |
-          (cd apps/web && pnpm exec next dev --port 3000 &)
-          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:3000/login && break; sleep 2; done
-      - name: Run Playwright e2e
-        env:
-          PLAYWRIGHT_SKIP_WEBSERVER: "1"
-          PLAYWRIGHT_BASE_URL: http://localhost:3000
-          CI: "true"
-        run: pnpm --filter @hrmny/web e2e
+      - name: Run core, action, accessibility and boundary acceptance
+        run: pnpm --filter @hrmny/web exec playwright test --grep-invert "routes ·|link integrity"
+      - name: Run Partner route and link acceptance
+        run: pnpm --filter @hrmny/web exec playwright test --grep "routes · partner|link integrity"
+      - name: Run Finance route acceptance
+        run: pnpm --filter @hrmny/web exec playwright test --grep "routes · finance"
+      - name: Run portal route acceptance
+        run: pnpm --filter @hrmny/web exec playwright test --grep "routes · portal_a"
       - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@v6
