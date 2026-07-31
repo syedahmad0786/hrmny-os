@@ -188,10 +188,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (
-        event === "TOKEN_REFRESHED" ||
-        event === "SIGNED_OUT"
-      ) {
+      if (event === "SIGNED_OUT") {
         void utils.auth.session.invalidate();
       }
     });
