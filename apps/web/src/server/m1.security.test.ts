@@ -19,6 +19,11 @@ describe("M1 security insurance", () => {
   it("lets hosted development probes reach their intentional 404 pages", () => {
     expect(isPublicPath("/gate")).toBe(true);
     expect(isPublicPath("/assets")).toBe(true);
+    expect(existsSync(join(process.cwd(), "src/app/gate/page.tsx"))).toBe(true);
+    expect(existsSync(join(process.cwd(), "src/app/assets/page.tsx"))).toBe(true);
+    expect(existsSync(join(process.cwd(), "src/app/(staff)/gate/page.tsx"))).toBe(
+      false,
+    );
   });
 
   it("Data API lockdown protects audit and asset history", () => {
