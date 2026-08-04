@@ -327,6 +327,35 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
     expect(contacts.errors).toHaveLength(1);
   });
 
+  it("carries unitCost forward when a non-margin role re-saves a quote", async () => {
+    const partner = callerFor("partner");
+    const deal = await partner.crm.deals.create({ companyName: "Cost Co" });
+    const v1 = await partner.crm.quotes.save({
+      dealId: deal.dealId,
+      lineItems: [{ label: "Design", qty: 1, unitSell: 1000, unitCost: 400 }],
+    });
+    expect(v1.ok).toBe(true);
+
+    const am = callerFor("am");
+    const v2 = await am.crm.quotes.save({
+      dealId: deal.dealId,
+      lineItems: [
+        // client echoes redacted cost as 0 — server must restore 400
+        { label: "Design", qty: 2, unitSell: 1000, unitCost: 0 },
+      ],
+    });
+    expect(v2.ok).toBe(true);
+
+    const [latest] = await partner.crm.quotes.listByDeal({
+      dealId: deal.dealId,
+    });
+    expect(latest!.version).toBe(2);
+    // partner caller → unredacted row
+    expect(Number((latest as { internalCost: string }).internalCost)).toBe(
+      800,
+    ); // 2 × 400, not 0
+  });
+
   it("normalizeDomain strips scheme/www/path", () => {
     expect(normalizeDomain("https://www.Foo.COM/bar?x=1")).toBe("foo.com");
     expect(normalizeDomain("foo.com")).toBe("foo.com");

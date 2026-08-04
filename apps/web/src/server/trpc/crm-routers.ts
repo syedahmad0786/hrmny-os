@@ -576,7 +576,20 @@ export const crmQuotesRouter = router({
       const deal = await getDeal(input.dealId);
       if (!deal) return { ok: false as const, reason: "Deal not found" };
 
-      const metrics = computeQuoteMetrics(input.lineItems);
+      // Non-margin roles never see unitCost, so their client echoes 0s back.
+      // Carry costs forward from the latest version instead of zeroing them.
+      let lineItems = input.lineItems;
+      if (!ctx.canViewMargin) {
+        const [latest] = await listQuotesByDeal(input.dealId);
+        const prior = latest?.lineItems ?? [];
+        lineItems = input.lineItems.map((li, i) => {
+          const match =
+            prior.find((p) => p.label === li.label) ?? prior[i] ?? null;
+          return { ...li, unitCost: match ? match.unitCost : li.unitCost };
+        });
+      }
+
+      const metrics = computeQuoteMetrics(lineItems);
       const discountPct = input.discountPct ?? 0;
       // Same tier thresholds as deals.discount (m3): ≤5 am, ≤15 md, else partner.
       const tier = discountPct > 0 ? discountAuthorityTier(discountPct) : null;
@@ -590,7 +603,7 @@ export const crmQuotesRouter = router({
 
       const quote = await createQuoteVersion({
         dealId: input.dealId,
-        lineItems: input.lineItems,
+        lineItems,
         quoteValue: metrics.quoteValue.toFixed(2),
         internalCost: metrics.internalCost.toFixed(2),
         marginPct: metrics.marginPct.toFixed(2),
