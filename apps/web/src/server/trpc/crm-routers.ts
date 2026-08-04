@@ -91,6 +91,7 @@ const leadLaneSchema = z.enum([
   "apollo_intent",
   "relationship_led",
   "tejari",
+  "inbound",
 ]);
 const crmTaskStatusSchema = z.enum([
   "open",

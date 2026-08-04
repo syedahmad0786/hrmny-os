@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import {
   CompanyCell,
@@ -17,6 +17,8 @@ import {
   initials,
   relationshipSummary,
 } from "@/components/crm/format";
+import { CsvActions } from "../_components/csv-actions";
+import { MergeDuplicates } from "../_components/merge-dedupe";
 
 export default function CrmCompaniesPage() {
   const utils = trpc.useUtils();
@@ -30,6 +32,12 @@ export default function CrmCompaniesPage() {
   const [market, setMarket] = useState("all");
   const [name, setName] = useState("");
   const [sector, setSector] = useState("");
+
+  // Prefill search from omni-search deep links (/crm/companies?q=…).
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) setSearch(q);
+  }, []);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -73,6 +81,8 @@ export default function CrmCompaniesPage() {
         title="Companies"
         description="One account record from first prospecting touch through active client."
         actions={
+          <>
+          <CsvActions kind="companies" />
           <CrmBtn
             variant="primary"
             disabled={create.isPending || !name.trim()}
@@ -91,6 +101,7 @@ export default function CrmCompaniesPage() {
           >
             ＋ Add company
           </CrmBtn>
+          </>
         }
       />
 
@@ -117,6 +128,8 @@ export default function CrmCompaniesPage() {
           <option value="Both">Both</option>
         </select>
       </CrmFilterBar>
+
+      <MergeDuplicates kind="companies" />
 
       {companies.isLoading ? (
         <CrmEmpty title="Loading companies…" />

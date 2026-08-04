@@ -5,6 +5,7 @@ export const LANE_LABELS: Record<string, string> = {
   apollo_intent: "Apollo intent",
   relationship_led: "Relationship led",
   tejari: "Tejari",
+  inbound: "Inbound",
 };
 
 export function initials(name: string | null | undefined): string {

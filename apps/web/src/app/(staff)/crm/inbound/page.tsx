@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import {
   CrmBtn,
@@ -10,28 +11,118 @@ import {
   CrmTableShell,
   CrmTag,
 } from "@/components/crm/ui";
+import { formatLane } from "@/components/crm/format";
 
 export default function CrmInboundPage() {
+  const router = useRouter();
   const utils = trpc.useUtils();
   const deals = trpc.crm.deals.list.useQuery();
-  const create = trpc.leads.inbound.create.useMutation({
-    onSuccess: () => {
-      void utils.crm.deals.invalidate();
-      void utils.deals.invalidate();
-    },
-  });
+  const companies = trpc.crm.companies.list.useQuery();
+  const contacts = trpc.crm.contacts.list.useQuery();
+
+  const createCompany = trpc.crm.companies.create.useMutation();
+  const createContact = trpc.crm.contacts.create.useMutation();
+  const createDeal = trpc.crm.deals.create.useMutation();
+  const createNote = trpc.crm.notes.create.useMutation();
 
   const [companyName, setCompanyName] = useState("");
+  const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [sector, setSector] = useState("Retail");
+  const [market, setMarket] = useState<"UAE" | "KSA" | "Both">("UAE");
   const [message, setMessage] = useState("");
-  const [createdId, setCreatedId] = useState<string | null>(null);
+  const [useExistingCompany, setUseExistingCompany] = useState(true);
+  const [useExistingContact, setUseExistingContact] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Dedupe courtesy: match against live CRM data before creating anything.
+  const companyMatch = useMemo(() => {
+    const key = companyName.trim().toLowerCase();
+    if (!key) return null;
+    return (
+      (companies.data ?? []).find(
+        (c) => c.name.trim().toLowerCase() === key,
+      ) ?? null
+    );
+  }, [companies.data, companyName]);
+
+  const contactMatch = useMemo(() => {
+    const key = contactEmail.trim().toLowerCase();
+    if (!key) return null;
+    return (
+      (contacts.data ?? []).find(
+        (c) => (c.email ?? "").trim().toLowerCase() === key,
+      ) ?? null
+    );
+  }, [contacts.data, contactEmail]);
 
   const inboundDeals = (deals.data ?? []).filter(
-    (d) =>
-      d.leadSourceLane === "relationship_led" ||
-      d.stage === "discover",
+    (d) => d.stage === "discover",
   );
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      // 1. Company — reuse the matched one unless staff opted out.
+      let companyId: string;
+      let dealCompanyName: string;
+      if (companyMatch && useExistingCompany) {
+        companyId = companyMatch.companyId;
+        dealCompanyName = companyMatch.name;
+      } else {
+        const co = await createCompany.mutateAsync({
+          name: companyName.trim(),
+          sector: sector.trim() || null,
+          market,
+        });
+        companyId = co.companyId;
+        dealCompanyName = co.name;
+      }
+
+      // 2. Contact — reuse on email match unless staff opted out.
+      let contactId: string;
+      if (contactMatch && useExistingContact) {
+        contactId = contactMatch.contactId;
+      } else {
+        const [firstName, ...rest] = contactName.trim().split(/\s+/);
+        const ct = await createContact.mutateAsync({
+          companyId,
+          firstName: firstName || contactEmail.trim(),
+          lastName: rest.length ? rest.join(" ") : null,
+          email: contactEmail.trim() || null,
+        });
+        contactId = ct.contactId;
+      }
+
+      // 3. Deal on the live CRM lane.
+      const deal = await createDeal.mutateAsync({
+        companyName: dealCompanyName,
+        companyId,
+        primaryContactId: contactId,
+        sector: sector.trim() || null,
+        leadSourceLane: "inbound",
+      });
+
+      // 4. Capture the enquiry + market on the deal.
+      await createNote.mutateAsync({
+        dealId: deal.dealId,
+        companyId,
+        contactId,
+        body: `Inbound enquiry · market ${market}${
+          message.trim() ? `\n\n${message.trim()}` : ""
+        }`,
+      });
+
+      await utils.crm.invalidate();
+      router.push(`/crm/deals/${deal.dealId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create lead");
+      setSubmitting(false);
+    }
+  }
 
   return (
     <main>
@@ -45,26 +136,11 @@ export default function CrmInboundPage() {
           <div className="crm-panel-head">
             <div>
               <h3>Capture lead</h3>
-              <p>Creates a discover-stage deal on the live CRM lane</p>
+              <p>Creates a real company, contact and discover-stage deal</p>
             </div>
           </div>
           <div className="crm-panel-body">
-            <form
-              className="crm-form-grid"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const deal = await create.mutateAsync({
-                  companyName,
-                  contactEmail,
-                  sector,
-                  message,
-                });
-                setCreatedId(deal.dealId);
-                setCompanyName("");
-                setContactEmail("");
-                setMessage("");
-              }}
-            >
+            <form className="crm-form-grid" onSubmit={handleSubmit}>
               <div className="crm-field">
                 <label>Company</label>
                 <input
@@ -72,6 +148,25 @@ export default function CrmInboundPage() {
                   required
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
+                />
+                {companyMatch ? (
+                  <label className="mt-1 flex items-center gap-2 text-[11px] text-[var(--muted)]">
+                    <input
+                      type="checkbox"
+                      checked={useExistingCompany}
+                      onChange={(e) => setUseExistingCompany(e.target.checked)}
+                    />
+                    Use existing company “{companyMatch.name}”
+                  </label>
+                ) : null}
+              </div>
+              <div className="crm-field">
+                <label>Contact name</label>
+                <input
+                  className="crm-input"
+                  required={!(contactMatch && useExistingContact)}
+                  value={contactName}
+                  onChange={(e) => setContactName(e.target.value)}
                 />
               </div>
               <div className="crm-field">
@@ -83,6 +178,17 @@ export default function CrmInboundPage() {
                   value={contactEmail}
                   onChange={(e) => setContactEmail(e.target.value)}
                 />
+                {contactMatch ? (
+                  <label className="mt-1 flex items-center gap-2 text-[11px] text-[var(--muted)]">
+                    <input
+                      type="checkbox"
+                      checked={useExistingContact}
+                      onChange={(e) => setUseExistingContact(e.target.checked)}
+                    />
+                    Use existing contact {contactMatch.firstName}
+                    {contactMatch.lastName ? ` ${contactMatch.lastName}` : ""}
+                  </label>
+                ) : null}
               </div>
               <div className="crm-field">
                 <label>Sector / interest</label>
@@ -94,7 +200,13 @@ export default function CrmInboundPage() {
               </div>
               <div className="crm-field">
                 <label>Market</label>
-                <select className="crm-select" defaultValue="UAE">
+                <select
+                  className="crm-select"
+                  value={market}
+                  onChange={(e) =>
+                    setMarket(e.target.value as "UAE" | "KSA" | "Both")
+                  }
+                >
                   <option>UAE</option>
                   <option>KSA</option>
                   <option>Both</option>
@@ -109,20 +221,13 @@ export default function CrmInboundPage() {
                 />
               </div>
               <div className="crm-field wide">
-                <CrmBtn
-                  variant="primary"
-                  disabled={create.isPending}
-                  type="submit"
-                >
-                  Review + create deal
+                <CrmBtn variant="primary" disabled={submitting} type="submit">
+                  {submitting ? "Creating…" : "Review + create deal"}
                 </CrmBtn>
-                {createdId ? (
-                  <p className="mt-3 text-[11px]">
-                    Created{" "}
-                    <Link className="text-[var(--ochre-dark)]" href={`/crm/deals/${createdId}`}>
-                      {createdId}
-                    </Link>
-                  </p>
+                {error ? (
+                  <div className="crm-note mt-3" role="alert">
+                    <CrmTag kind="danger">Failed</CrmTag> {error}
+                  </div>
                 ) : null}
               </div>
             </form>
@@ -134,7 +239,11 @@ export default function CrmInboundPage() {
             <h3>Recent discover deals</h3>
           </div>
           <div className="crm-panel-body">
-            {(inboundDeals ?? []).length === 0 ? (
+            {deals.isLoading ? (
+              <CrmEmpty title="Loading…" />
+            ) : deals.error ? (
+              <CrmEmpty title="Could not load deals" hint={deals.error.message} />
+            ) : inboundDeals.length === 0 ? (
               <CrmEmpty title="No inbound yet" />
             ) : (
               <div className="crm-checklist">
@@ -157,7 +266,7 @@ export default function CrmInboundPage() {
       </section>
 
       <div className="mt-4">
-        <CrmTableShell foot="Inbound form → discover deal (live)">
+        <CrmTableShell foot="Inbound form → company + contact + discover deal (live)">
           <table className="crm-table">
             <thead>
               <tr>
@@ -169,16 +278,19 @@ export default function CrmInboundPage() {
               </tr>
             </thead>
             <tbody>
-              {(deals.data ?? [])
-                .filter((d) => d.stage === "discover")
-                .map((d) => (
+              {inboundDeals.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>No discover-stage deals yet.</td>
+                </tr>
+              ) : (
+                inboundDeals.map((d) => (
                   <tr key={d.dealId}>
                     <td>
                       <strong>{d.companyName}</strong>
                     </td>
                     <td>{d.sector ?? "—"}</td>
                     <td>
-                      <CrmTag kind="info">{d.leadSourceLane.replace(/_/g, " ")}</CrmTag>
+                      <CrmTag kind="info">{formatLane(d.leadSourceLane)}</CrmTag>
                     </td>
                     <td>{d.stage}</td>
                     <td>
@@ -187,7 +299,8 @@ export default function CrmInboundPage() {
                       </Link>
                     </td>
                   </tr>
-                ))}
+                ))
+              )}
             </tbody>
           </table>
         </CrmTableShell>

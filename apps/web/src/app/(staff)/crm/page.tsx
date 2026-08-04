@@ -11,12 +11,14 @@ import {
   CrmTag,
 } from "@/components/crm/ui";
 import {
+  LANE_LABELS,
   formatAed,
   formatLane,
   formatRelative,
   initials,
   tagKindForTemp,
 } from "@/components/crm/format";
+import { DashStrip } from "./_components/dash-strip";
 
 export default function CrmPipelinePage() {
   const utils = trpc.useUtils();
@@ -36,6 +38,28 @@ export default function CrmPipelinePage() {
   const [companyName, setCompanyName] = useState("");
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
+
+  /** Move a deal; surface gate rejections (moveStage returns ok:false, it
+   * does not throw). No optimistic update, so a blocked move never moves the
+   * card — the refetch confirms server state. */
+  const handleMove = async (id: string, to: string) => {
+    if (move.isPending) return;
+    try {
+      const res = await move.mutateAsync({ id, to });
+      if (!res.ok) {
+        setMoveError(
+          res.blockedBy?.map((b) => `${b.gate}: ${b.reason}`).join(" · ") ??
+            res.reason ??
+            "Move blocked",
+        );
+      } else {
+        setMoveError(null);
+      }
+    } catch (err) {
+      setMoveError(err instanceof Error ? err.message : "Move failed");
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -91,10 +115,11 @@ export default function CrmPipelinePage() {
         />
         <select value={lane} onChange={(e) => setLane(e.target.value)}>
           <option value="all">All lanes</option>
-          <option value="relationship_led">Relationship led</option>
-          <option value="apollo_intent">Apollo intent</option>
-          <option value="industry_scanning">Industry scanning</option>
-          <option value="tejari">Tejari</option>
+          {Object.entries(LANE_LABELS).map(([key, label]) => (
+            <option key={key} value={key}>
+              {label}
+            </option>
+          ))}
         </select>
         <select value={temp} onChange={(e) => setTemp(e.target.value)}>
           <option value="all">All temperatures</option>
@@ -114,6 +139,20 @@ export default function CrmPipelinePage() {
       <p className="mb-3 text-[11px] text-[var(--muted)]">
         Live CRM · mode {health.data?.mode ?? "…"} · {filtered.length} deals shown
       </p>
+
+      <DashStrip />
+
+      {moveError ? (
+        <div
+          className="crm-note mb-4 flex items-center justify-between gap-3"
+          role="alert"
+        >
+          <span>Stage move blocked — {moveError}</span>
+          <CrmBtn variant="ghost" onClick={() => setMoveError(null)}>
+            Dismiss
+          </CrmBtn>
+        </div>
+      ) : null}
 
       {deals.isLoading ? (
         <CrmEmpty title="Loading pipeline…" />
@@ -135,9 +174,9 @@ export default function CrmPipelinePage() {
                     e.preventDefault();
                     setDragOver(null);
                     const id = dragId ?? e.dataTransfer.getData("text/deal-id");
-                    if (!id) return;
-                    void move.mutateAsync({ id, to: stage.key });
                     setDragId(null);
+                    if (!id) return;
+                    void handleMove(id, stage.key);
                   }}
                 >
                   <div className="crm-column-head">
@@ -179,6 +218,26 @@ export default function CrmPipelinePage() {
                           <span>Updated {formatRelative(d.updatedAt)}</span>
                           <span>Open →</span>
                         </div>
+                        <select
+                          aria-label={`Move ${d.companyName} to stage`}
+                          className="mt-1.5 w-full rounded-md border border-[var(--line)] bg-[var(--paper-2)] px-1.5 py-1 text-[10px] text-[var(--muted)]"
+                          value={d.stage}
+                          disabled={move.isPending}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                          onChange={(e) => {
+                            e.preventDefault();
+                            void handleMove(d.dealId, e.target.value);
+                          }}
+                        >
+                          {stageList.map((s) => (
+                            <option key={s.key} value={s.key}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
                       </Link>
                     );
                   })}

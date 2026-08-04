@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import {
   CompanyCell,
@@ -12,6 +12,8 @@ import {
   CrmTag,
 } from "@/components/crm/ui";
 import { formatRelative, initials } from "@/components/crm/format";
+import { CsvActions } from "../_components/csv-actions";
+import { MergeDuplicates } from "../_components/merge-dedupe";
 
 export default function CrmContactsPage() {
   const utils = trpc.useUtils();
@@ -28,6 +30,12 @@ export default function CrmContactsPage() {
   const [verify, setVerify] = useState("all");
   const [firstName, setFirstName] = useState("");
   const [email, setEmail] = useState("");
+
+  // Prefill search from omni-search deep links (/crm/contacts?q=…).
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) setSearch(q);
+  }, []);
 
   const companyMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -94,6 +102,8 @@ export default function CrmContactsPage() {
         title="Contacts"
         description="Verified people, linked to companies, deals and activity."
         actions={
+          <>
+          <CsvActions kind="contacts" />
           <CrmBtn
             variant="primary"
             disabled={create.isPending || !firstName.trim()}
@@ -112,6 +122,7 @@ export default function CrmContactsPage() {
           >
             ＋ Add contact
           </CrmBtn>
+          </>
         }
       />
 
@@ -145,6 +156,8 @@ export default function CrmContactsPage() {
           <option value="unverified">Unverified</option>
         </select>
       </CrmFilterBar>
+
+      <MergeDuplicates kind="contacts" />
 
       {contacts.isLoading ? (
         <CrmEmpty title="Loading contacts…" />

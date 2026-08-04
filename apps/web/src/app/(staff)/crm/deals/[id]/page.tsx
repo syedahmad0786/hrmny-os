@@ -16,6 +16,7 @@ import {
   formatLane,
   formatRelative,
 } from "@/components/crm/format";
+import { AiDealPanel } from "../../_components/ai-deal-panel";
 
 const NEXT: Record<string, string> = {
   discover: "qualify",
@@ -202,6 +203,8 @@ export default function CrmDealDetailPage() {
               </div>
             </div>
           </div>
+
+          <AiDealPanel dealId={id} />
 
           <div className="crm-panel">
             <div className="crm-panel-head">
