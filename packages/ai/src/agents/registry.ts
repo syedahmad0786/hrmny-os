@@ -23,6 +23,8 @@ export const AgentIdSchema = z.enum([
   "automation-orchestrator",
   "error-monitor",
   "ticket-assist",
+  "crm-summary",
+  "next-best-action",
 ]);
 
 export type AgentId = z.infer<typeof AgentIdSchema>;
@@ -39,6 +41,8 @@ export const ParentAgentIdSchema = z.enum([
   "automation-orchestrator",
   "error-monitor",
   "ticket-assist",
+  "crm-summary",
+  "next-best-action",
 ]);
 
 export type ParentAgentId = z.infer<typeof ParentAgentIdSchema>;
@@ -210,6 +214,24 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
       "chat.alertDraft",
       "slack.alertDraft",
     ],
+  },
+  "crm-summary": {
+    id: "crm-summary",
+    displayName: "CRM summary",
+    responsibility:
+      "Summarize a deal or account timeline from CRM data (deal, contacts, activities, notes). Read-only over CRM; produces a draft summary for humans — never sends or mutates records.",
+    producesDrafts: true,
+    requiresHitlBeforeSend: true,
+    allowedTools: ["crm.read", "memory.retrieve"],
+  },
+  "next-best-action": {
+    id: "next-best-action",
+    displayName: "Next best action",
+    responsibility:
+      "Suggest the next step for a deal given stage, BUAF flags, and activity recency. Suggestion is a draft only — any outbound action crosses the HITL queue + gate with a human.",
+    producesDrafts: true,
+    requiresHitlBeforeSend: true,
+    allowedTools: ["crm.read", "memory.retrieve"],
   },
   "ticket-assist": {
     id: "ticket-assist",

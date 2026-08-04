@@ -71,7 +71,7 @@ describe("outreach HITL gate flow", () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("GATE_BLOCKED");
     expect(composio.sends).toBe(0);
-    expect(getOutreach(item.id)!.state).toBe("draft");
+    expect((await getOutreach(item.id))!.state).toBe("draft");
   });
 
   it("ALLOWS send after approve â€” composio fires once and state becomes sent", async () => {
@@ -81,15 +81,15 @@ describe("outreach HITL gate flow", () => {
 
     const approved = await approveOutreach({ id: item.id, actor: staff, audit, emit });
     expect(approved.ok).toBe(true);
-    expect(getOutreach(item.id)!.state).toBe("approved");
-    expect(getOutreach(item.id)!.approvedBy).toBe("emp-1");
+    expect((await getOutreach(item.id))!.state).toBe("approved");
+    expect((await getOutreach(item.id))!.approvedBy).toBe("emp-1");
 
     const sent = await sendOutreach({ id: item.id, actor: staff, composio, audit, emit });
     expect(sent.ok).toBe(true);
     expect(composio.sends).toBe(1);
     expect(sent.externalId).toBeTruthy();
 
-    const final = getOutreach(item.id)!;
+    const final = (await getOutreach(item.id))!;
     expect(final.state).toBe("sent");
     expect(final.sentAt).toBeTruthy();
     expect(final.externalId).toBeTruthy();
@@ -104,7 +104,7 @@ describe("outreach HITL gate flow", () => {
     const res = await sendOutreach({ id: item.id, actor: portal, composio, audit, emit });
     expect(res.ok).toBe(false);
     expect(composio.sends).toBe(0);
-    expect(getOutreach(item.id)!.state).toBe("approved");
+    expect((await getOutreach(item.id))!.state).toBe("approved");
   });
 
   it("discards a draft — and a sent item can never be discarded", async () => {
@@ -112,13 +112,13 @@ describe("outreach HITL gate flow", () => {
     const item = await draftOutreach({ dealId: deal.dealId, body: "Bye" });
     const res = await discardOutreach({ id: item.id, actor: staff, audit, emit });
     expect(res.ok).toBe(true);
-    expect(getOutreach(item.id)?.state).toBe("discarded");
+    expect((await getOutreach(item.id))?.state).toBe("discarded");
 
     const item2 = await draftOutreach({ dealId: deal.dealId, body: "Go" });
     await approveOutreach({ id: item2.id, actor: staff, audit, emit });
     await sendOutreach({ id: item2.id, actor: staff, composio: countingComposio(), audit, emit });
     const blocked = await discardOutreach({ id: item2.id, actor: staff, audit, emit });
     expect(blocked.ok).toBe(false);
-    expect(getOutreach(item2.id)?.state).toBe("sent");
+    expect((await getOutreach(item2.id))?.state).toBe("sent");
   });
 });

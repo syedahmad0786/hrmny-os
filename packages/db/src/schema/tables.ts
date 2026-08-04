@@ -1403,6 +1403,110 @@ export const importLineage = pgTable(
 );
 
 /**
+ * M8 outreach HITL items (migration 0059). draft → approved → sent gate flow;
+ * every state change routes through the outreach gate in leadgen-router.ts.
+ */
+export const outreachItems = pgTable(
+  "outreach_items",
+  {
+    outreachItemId: uuid("outreach_item_id").defaultRandom().primaryKey(),
+    dealId: uuid("deal_id"),
+    channel: text("channel").default("gmail").notNull(),
+    state: text("state").default("draft").notNull(),
+    recipient: text("recipient").default("").notNull(),
+    subject: text("subject"),
+    body: text("body").default("").notNull(),
+    approvedBy: uuid("approved_by"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    externalId: text("external_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("outreach_items_deal_idx").on(table.dealId, table.state),
+    index("outreach_items_state_idx").on(table.state, table.createdAt),
+  ],
+);
+
+/** M8 lead_intel (migration 0060) — who-knows-whom edge list. */
+export const contactEdges = pgTable(
+  "contact_edges",
+  {
+    contactEdgeId: uuid("contact_edge_id").defaultRandom().primaryKey(),
+    fromContact: uuid("from_contact").notNull(),
+    toContact: uuid("to_contact").notNull(),
+    relation: text("relation").notNull(),
+    weight: numeric("weight", { precision: 5, scale: 4 })
+      .default("0.5")
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("contact_edges_from_idx").on(table.fromContact),
+    index("contact_edges_to_idx").on(table.toContact),
+  ],
+);
+
+/** M8 lead_intel (migration 0060) — win/loss memory notes (embedding-ready). */
+export const winLossNotes = pgTable(
+  "win_loss_notes",
+  {
+    winLossNoteId: uuid("win_loss_note_id").defaultRandom().primaryKey(),
+    dealId: uuid("deal_id"),
+    outcome: text("outcome").notNull(),
+    note: text("note").default("").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("win_loss_notes_deal_idx").on(table.dealId),
+    index("win_loss_notes_outcome_idx").on(table.outcome, table.createdAt),
+  ],
+);
+
+/** M8 lead_intel (migration 0060) — competitor-scan findings. */
+export const competitorFindings = pgTable(
+  "competitor_findings",
+  {
+    competitorFindingId: uuid("competitor_finding_id")
+      .defaultRandom()
+      .primaryKey(),
+    competitor: text("competitor").notNull(),
+    source: text("source").notNull(),
+    headline: text("headline").default("").notNull(),
+    detail: text("detail").default("").notNull(),
+    url: text("url"),
+    scopeId: text("scope_id"),
+    capturedAt: timestamp("captured_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("competitor_findings_competitor_idx").on(
+      table.competitor,
+      table.capturedAt,
+    ),
+    index("competitor_findings_scope_idx").on(table.scopeId),
+  ],
+);
+
+/**
  * Sales & Growth raw staging (slot 0065) — the JSON export intermediate kept
  * verbatim as reconciliation evidence. Upserted on (source_table, source_id).
  */
@@ -1426,5 +1530,33 @@ export const salesgrowthImportStaging = pgTable(
       table.sourceId,
     ),
     index("salesgrowth_import_staging_table_idx").on(table.sourceTable),
+  ],
+);
+
+/**
+ * CRM quote versions per deal (migration 0066). Each save appends a new
+ * version; margin fields are redacted for non-margin roles at the API layer.
+ */
+export const crmQuote = pgTable(
+  "crm_quote",
+  {
+    quoteId: uuid("quote_id").defaultRandom().primaryKey(),
+    dealId: uuid("deal_id")
+      .notNull()
+      .references(() => deal.dealId),
+    version: integer("version").notNull(),
+    lineItems: jsonb("line_items").$type<unknown[]>().default([]).notNull(),
+    quoteValue: numeric("quote_value", { precision: 12, scale: 2 }),
+    internalCost: numeric("internal_cost", { precision: 12, scale: 2 }),
+    marginPct: numeric("margin_pct", { precision: 5, scale: 2 }),
+    discountPct: numeric("discount_pct", { precision: 5, scale: 2 }),
+    discountApprovalTier: text("discount_approval_tier"),
+    status: text("status").default("draft").notNull(),
+    createdBy: uuid("created_by"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("crm_quote_deal_version_uniq").on(table.dealId, table.version),
+    index("crm_quote_deal_idx").on(table.dealId),
   ],
 );

@@ -4,10 +4,13 @@ import {
   company,
   contact,
   crmNote,
+  crmQuote,
   crmTask,
   deal,
   desc,
   eq,
+  ilike,
+  or,
   sql,
   CRM_PIPELINE_STAGES,
   CRM_PIPELINE_STAGE_LABELS,
@@ -20,8 +23,10 @@ import type {
   CompanyRow,
   ContactRow,
   CrmNoteRow,
+  CrmQuoteRow,
   CrmTaskRow,
   DealRow,
+  QuoteLineItem,
 } from "./types";
 
 function iso(d: Date | string | null | undefined): string {
@@ -916,6 +921,372 @@ export async function updateCrmTask(
       };
       mem.tasks.set(id, next);
       return next;
+    },
+  );
+}
+
+// ── Quotes ─────────────────────────────────────────────────
+
+function mapQuote(r: typeof crmQuote.$inferSelect): CrmQuoteRow {
+  return {
+    quoteId: r.quoteId,
+    dealId: r.dealId,
+    version: r.version,
+    lineItems: (r.lineItems ?? []) as QuoteLineItem[],
+    quoteValue: r.quoteValue ?? "0.00",
+    internalCost: r.internalCost ?? "0.00",
+    marginPct: r.marginPct ?? "0.00",
+    discountPct: r.discountPct,
+    discountApprovalTier:
+      r.discountApprovalTier as CrmQuoteRow["discountApprovalTier"],
+    status: r.status as CrmQuoteRow["status"],
+    createdBy: r.createdBy,
+    createdAt: iso(r.createdAt),
+    updatedAt: iso(r.updatedAt),
+  };
+}
+
+export async function listQuotesByDeal(dealId: string): Promise<CrmQuoteRow[]> {
+  return withDb(
+    async (db) => {
+      const rows = await db
+        .select()
+        .from(crmQuote)
+        .where(eq(crmQuote.dealId, dealId))
+        .orderBy(desc(crmQuote.version));
+      return rows.map(mapQuote);
+    },
+    () =>
+      [...getCrmMemory().quotes.values()]
+        .filter((q) => q.dealId === dealId)
+        .sort((a, b) => b.version - a.version),
+  );
+}
+
+export async function getQuote(quoteId: string): Promise<CrmQuoteRow | null> {
+  return withDb(
+    async (db) => {
+      const [row] = await db
+        .select()
+        .from(crmQuote)
+        .where(eq(crmQuote.quoteId, quoteId))
+        .limit(1);
+      return row ? mapQuote(row) : null;
+    },
+    () => getCrmMemory().quotes.get(quoteId) ?? null,
+  );
+}
+
+/** Append a new quote version for the deal (version = max existing + 1). */
+export async function createQuoteVersion(input: {
+  dealId: string;
+  lineItems: QuoteLineItem[];
+  quoteValue: string;
+  internalCost: string;
+  marginPct: string;
+  discountPct?: string | null;
+  discountApprovalTier?: CrmQuoteRow["discountApprovalTier"];
+  status?: CrmQuoteRow["status"];
+  createdBy?: string | null;
+}): Promise<CrmQuoteRow> {
+  // ponytail: read-then-insert version bump; unique(deal_id, version) index
+  // rejects the loser on a concurrent save — retry at the caller if it matters.
+  const existing = await listQuotesByDeal(input.dealId);
+  const version = (existing[0]?.version ?? 0) + 1;
+  return withDb(
+    async (db) => {
+      const [row] = await db
+        .insert(crmQuote)
+        .values({
+          dealId: input.dealId,
+          version,
+          lineItems: input.lineItems,
+          quoteValue: input.quoteValue,
+          internalCost: input.internalCost,
+          marginPct: input.marginPct,
+          discountPct: input.discountPct ?? null,
+          discountApprovalTier: input.discountApprovalTier ?? null,
+          status: input.status ?? "draft",
+          createdBy: input.createdBy ?? null,
+        })
+        .returning();
+      return mapQuote(row!);
+    },
+    () => {
+      const t = new Date().toISOString();
+      const row: CrmQuoteRow = {
+        quoteId: newId(),
+        dealId: input.dealId,
+        version,
+        lineItems: input.lineItems,
+        quoteValue: input.quoteValue,
+        internalCost: input.internalCost,
+        marginPct: input.marginPct,
+        discountPct: input.discountPct ?? null,
+        discountApprovalTier: input.discountApprovalTier ?? null,
+        status: input.status ?? "draft",
+        createdBy: input.createdBy ?? null,
+        createdAt: t,
+        updatedAt: t,
+      };
+      getCrmMemory().quotes.set(row.quoteId, row);
+      return row;
+    },
+  );
+}
+
+// ── Dedupe & merge ─────────────────────────────────────────
+
+/** Normalize a website URL to a bare domain (strip scheme, www, path). */
+export function normalizeDomain(website: string | null | undefined): string | null {
+  if (!website?.trim()) return null;
+  const stripped = website
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z]+:\/\//, "")
+    .replace(/^www\./, "")
+    .split(/[/?#]/)[0]!;
+  return stripped || null;
+}
+
+export type DedupeCandidates = {
+  contacts: { key: string; contactIds: string[] }[];
+  companies: { key: string; companyIds: string[] }[];
+};
+
+/** Exact-email contact groups; company groups by website domain or ci name. */
+export async function dedupeCandidates(): Promise<DedupeCandidates> {
+  // ponytail: full-scan grouping in app code (works for both backends);
+  // move to SQL GROUP BY when row counts make it slow.
+  const [contacts, companies] = await Promise.all([
+    listContacts(),
+    listCompanies(),
+  ]);
+
+  const byEmail = new Map<string, string[]>();
+  for (const c of contacts) {
+    const key = c.email?.trim().toLowerCase();
+    if (!key) continue;
+    byEmail.set(key, [...(byEmail.get(key) ?? []), c.contactId]);
+  }
+
+  const byCompanyKey = new Map<string, string[]>();
+  for (const co of companies) {
+    const key = normalizeDomain(co.website) ?? co.name.trim().toLowerCase();
+    byCompanyKey.set(key, [...(byCompanyKey.get(key) ?? []), co.companyId]);
+  }
+
+  return {
+    contacts: [...byEmail.entries()]
+      .filter(([, ids]) => ids.length > 1)
+      .map(([key, contactIds]) => ({ key, contactIds })),
+    companies: [...byCompanyKey.entries()]
+      .filter(([, ids]) => ids.length > 1)
+      .map(([key, companyIds]) => ({ key, companyIds })),
+  };
+}
+
+export type MergeResult =
+  | { ok: true; survivorId: string; duplicateId: string }
+  | { ok: false; reason: string };
+
+/** Re-point deal/activity/note/task FKs to survivor, delete duplicate. */
+export async function mergeContacts(input: {
+  survivorId: string;
+  duplicateId: string;
+}): Promise<MergeResult> {
+  const { survivorId, duplicateId } = input;
+  if (survivorId === duplicateId) {
+    return { ok: false, reason: "Survivor and duplicate are the same contact" };
+  }
+  const [survivor, duplicate] = await Promise.all([
+    getContact(survivorId),
+    getContact(duplicateId),
+  ]);
+  if (!survivor) return { ok: false, reason: "Survivor contact not found" };
+  if (!duplicate) return { ok: false, reason: "Duplicate contact not found" };
+
+  return withDb(
+    async (db) => {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(deal)
+          .set({ primaryContactId: survivorId })
+          .where(eq(deal.primaryContactId, duplicateId));
+        await tx
+          .update(activity)
+          .set({ contactId: survivorId })
+          .where(eq(activity.contactId, duplicateId));
+        await tx
+          .update(crmNote)
+          .set({ contactId: survivorId })
+          .where(eq(crmNote.contactId, duplicateId));
+        await tx
+          .update(crmTask)
+          .set({ contactId: survivorId })
+          .where(eq(crmTask.contactId, duplicateId));
+        await tx.delete(contact).where(eq(contact.contactId, duplicateId));
+      });
+      return { ok: true as const, survivorId, duplicateId };
+    },
+    () => {
+      const mem = getCrmMemory();
+      for (const d of mem.deals.values()) {
+        if (d.primaryContactId === duplicateId)
+          mem.deals.set(d.dealId, { ...d, primaryContactId: survivorId });
+      }
+      for (const a of mem.activities.values()) {
+        if (a.contactId === duplicateId)
+          mem.activities.set(a.activityId, { ...a, contactId: survivorId });
+      }
+      for (const n of mem.notes.values()) {
+        if (n.contactId === duplicateId)
+          mem.notes.set(n.crmNoteId, { ...n, contactId: survivorId });
+      }
+      for (const t of mem.tasks.values()) {
+        if (t.contactId === duplicateId)
+          mem.tasks.set(t.crmTaskId, { ...t, contactId: survivorId });
+      }
+      mem.contacts.delete(duplicateId);
+      return { ok: true as const, survivorId, duplicateId };
+    },
+  );
+}
+
+/** Re-point contact/deal/activity/note/task FKs to survivor, delete duplicate. */
+export async function mergeCompanies(input: {
+  survivorId: string;
+  duplicateId: string;
+}): Promise<MergeResult> {
+  const { survivorId, duplicateId } = input;
+  if (survivorId === duplicateId) {
+    return { ok: false, reason: "Survivor and duplicate are the same company" };
+  }
+  const [survivor, duplicate] = await Promise.all([
+    getCompany(survivorId),
+    getCompany(duplicateId),
+  ]);
+  if (!survivor) return { ok: false, reason: "Survivor company not found" };
+  if (!duplicate) return { ok: false, reason: "Duplicate company not found" };
+
+  return withDb(
+    async (db) => {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(contact)
+          .set({ companyId: survivorId })
+          .where(eq(contact.companyId, duplicateId));
+        await tx
+          .update(deal)
+          .set({ companyId: survivorId })
+          .where(eq(deal.companyId, duplicateId));
+        await tx
+          .update(activity)
+          .set({ companyId: survivorId })
+          .where(eq(activity.companyId, duplicateId));
+        await tx
+          .update(crmNote)
+          .set({ companyId: survivorId })
+          .where(eq(crmNote.companyId, duplicateId));
+        await tx
+          .update(crmTask)
+          .set({ companyId: survivorId })
+          .where(eq(crmTask.companyId, duplicateId));
+        await tx.delete(company).where(eq(company.companyId, duplicateId));
+      });
+      return { ok: true as const, survivorId, duplicateId };
+    },
+    () => {
+      const mem = getCrmMemory();
+      for (const c of mem.contacts.values()) {
+        if (c.companyId === duplicateId)
+          mem.contacts.set(c.contactId, { ...c, companyId: survivorId });
+      }
+      for (const d of mem.deals.values()) {
+        if (d.companyId === duplicateId)
+          mem.deals.set(d.dealId, { ...d, companyId: survivorId });
+      }
+      for (const a of mem.activities.values()) {
+        if (a.companyId === duplicateId)
+          mem.activities.set(a.activityId, { ...a, companyId: survivorId });
+      }
+      for (const n of mem.notes.values()) {
+        if (n.companyId === duplicateId)
+          mem.notes.set(n.crmNoteId, { ...n, companyId: survivorId });
+      }
+      for (const t of mem.tasks.values()) {
+        if (t.companyId === duplicateId)
+          mem.tasks.set(t.crmTaskId, { ...t, companyId: survivorId });
+      }
+      mem.companies.delete(duplicateId);
+      return { ok: true as const, survivorId, duplicateId };
+    },
+  );
+}
+
+// ── Omni search ────────────────────────────────────────────
+
+export type OmniSearchResult = {
+  companies: CompanyRow[];
+  contacts: ContactRow[];
+  deals: DealRow[];
+};
+
+/** Top-10-each substring search across companies/contacts/deals. */
+export async function omniSearch(q: string): Promise<OmniSearchResult> {
+  const term = q.trim();
+  if (!term) return { companies: [], contacts: [], deals: [] };
+  const pattern = `%${term}%`;
+  return withDb(
+    async (db) => {
+      const [companies, contacts, deals] = await Promise.all([
+        db
+          .select()
+          .from(company)
+          .where(ilike(company.name, pattern))
+          .limit(10),
+        db
+          .select()
+          .from(contact)
+          .where(
+            or(
+              ilike(contact.firstName, pattern),
+              ilike(contact.lastName, pattern),
+              ilike(contact.email, pattern),
+            ),
+          )
+          .limit(10),
+        db
+          .select()
+          .from(deal)
+          .where(ilike(deal.companyName, pattern))
+          .limit(10),
+      ]);
+      return {
+        companies: companies.map(mapCompany),
+        contacts: contacts.map(mapContact),
+        deals: deals.map(mapDeal),
+      };
+    },
+    () => {
+      const s = term.toLowerCase();
+      const mem = getCrmMemory();
+      return {
+        companies: [...mem.companies.values()]
+          .filter((c) => c.name.toLowerCase().includes(s))
+          .slice(0, 10),
+        contacts: [...mem.contacts.values()]
+          .filter(
+            (c) =>
+              c.firstName.toLowerCase().includes(s) ||
+              (c.lastName ?? "").toLowerCase().includes(s) ||
+              (c.email ?? "").toLowerCase().includes(s),
+          )
+          .slice(0, 10),
+        deals: [...mem.deals.values()]
+          .filter((d) => d.companyName.toLowerCase().includes(s))
+          .slice(0, 10),
+      };
     },
   );
 }

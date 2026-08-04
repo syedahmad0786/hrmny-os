@@ -13,6 +13,7 @@ import { runWorkAiTeammateJob } from "@/server/work-ai-teammates";
 import { runWorkFormReceiptJob } from "@/server/work-form-receipts";
 import { runScheduledWorkRuleJob } from "@/server/trpc/work-management-router";
 import { runDueReports } from "@/server/inngest/report-scheduler";
+import { runCrmTaskDigest } from "@/server/reminders/crm-task-digest";
 
 export const dynamic = "force-dynamic";
 
@@ -208,13 +209,20 @@ export async function GET(request: Request) {
       delayedJobs: Number(lag!.count),
     });
   }
-  const [workWebhooks, expiredAiRuns, dueReports] = await Promise.all([
-    deliverPendingWorkWebhooks(),
-    cleanupExpiredWorkAiRuns(),
-    // Scheduled reports: interval-based due-check filters to what should send
-    // this tick (mock Resend until RESEND_MODE=live). Never fatal to the job run.
-    runDueReports().catch((error) => ({ error: String(error).slice(0, 500) })),
-  ]);
+  const [workWebhooks, expiredAiRuns, dueReports, crmTaskDigest] =
+    await Promise.all([
+      deliverPendingWorkWebhooks(),
+      cleanupExpiredWorkAiRuns(),
+      // Scheduled reports: interval-based due-check filters to what should send
+      // this tick (mock Resend until RESEND_MODE=live). Never fatal to the job run.
+      runDueReports().catch((error) => ({ error: String(error).slice(0, 500) })),
+      // CRM task digest: once/day owner nudge via Google Chat. Self-gates on
+      // webhook env + hour window + today's health_signal row. Never fatal.
+      runCrmTaskDigest().catch((error) => ({
+        posted: false,
+        error: String(error).slice(0, 500),
+      })),
+    ]);
   return Response.json({
     claimed: claimed.length,
     completed,
@@ -222,5 +230,6 @@ export async function GET(request: Request) {
     workWebhooks,
     expiredAiRuns,
     dueReports,
+    crmTaskDigest,
   });
 }

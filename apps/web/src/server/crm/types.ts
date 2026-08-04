@@ -95,6 +95,48 @@ export type CrmTaskRow = {
   updatedAt: string;
 };
 
+export type QuoteLineItem = {
+  label: string;
+  unitSell: number;
+  unitCost: number;
+  qty?: number;
+  isVendor?: boolean;
+};
+
+export type CrmQuoteRow = {
+  quoteId: string;
+  dealId: string;
+  version: number;
+  lineItems: QuoteLineItem[];
+  quoteValue: string;
+  internalCost: string;
+  marginPct: string;
+  discountPct: string | null;
+  discountApprovalTier: "am" | "md" | "partner" | null;
+  status: "draft" | "sent" | "accepted" | "rejected";
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RedactedCrmQuoteRow = Omit<
+  CrmQuoteRow,
+  "internalCost" | "marginPct" | "lineItems"
+> & { lineItems: Omit<QuoteLineItem, "unitCost">[] };
+
+/** Strip margin/cost fields on a quote (incl. per-line unitCost), same policy as redactDealMargin. */
+export function redactQuoteMargin(
+  quote: CrmQuoteRow,
+  canViewMargin: boolean,
+): CrmQuoteRow | RedactedCrmQuoteRow {
+  if (canViewMargin) return quote;
+  const { internalCost: _c, marginPct: _m, ...rest } = quote;
+  return {
+    ...rest,
+    lineItems: rest.lineItems.map(({ unitCost: _u, ...line }) => line),
+  };
+}
+
 /** Strip margin/cost fields for AM / non-margin roles. */
 export function redactDealMargin<T extends DealRow>(
   deal: T,
