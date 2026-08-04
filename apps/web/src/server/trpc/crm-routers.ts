@@ -582,10 +582,11 @@ export const crmQuotesRouter = router({
       if (!ctx.canViewMargin) {
         const [latest] = await listQuotesByDeal(input.dealId);
         const prior = latest?.lineItems ?? [];
-        lineItems = input.lineItems.map((li, i) => {
-          const match =
-            prior.find((p) => p.label === li.label) ?? prior[i] ?? null;
-          return { ...li, unitCost: match ? match.unitCost : li.unitCost };
+        // Label match only — a positional fallback bleeds another line's cost
+        // into renamed/new lines. Unmatched lines keep the client's unitCost.
+        lineItems = input.lineItems.map((li) => {
+          const match = prior.find((p) => p.label === li.label);
+          return match ? { ...li, unitCost: match.unitCost } : li;
         });
       }
 
@@ -628,14 +629,25 @@ export const crmQuotesRouter = router({
           status: quote.status,
         },
       );
+      // Margin oracle only for margin-viewing roles; approvalTier/escalatedTo
+      // stay — the AM escalation UX needs them.
+      const marginOracle: {
+        marginBelowFloor?: boolean;
+        floorPct?: number;
+        targetPct?: number;
+      } = ctx.canViewMargin
+        ? {
+            marginBelowFloor: metrics.marginPct < MARGIN_FLOOR_PCT,
+            floorPct: MARGIN_FLOOR_PCT,
+            targetPct: MARGIN_TARGET_PCT,
+          }
+        : {};
       return {
         ok: true as const,
         quote: redactQuoteMargin(quote, ctx.canViewMargin),
         approvalTier: tier,
         escalatedTo,
-        marginBelowFloor: metrics.marginPct < MARGIN_FLOOR_PCT,
-        floorPct: MARGIN_FLOOR_PCT,
-        targetPct: MARGIN_TARGET_PCT,
+        ...marginOracle,
       };
     }),
 });
@@ -655,6 +667,9 @@ export const crmMergeRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      // Snapshot the duplicate before the merge deletes it — the audit
+      // 'before' payload is the only way to recover merged data.
+      const duplicate = await getContact(input.duplicateId);
       const result = await mergeContacts(input);
       if (result.ok) {
         await auditMutation(
@@ -662,7 +677,11 @@ export const crmMergeRouter = router({
           "crm.merge.contacts",
           "contact",
           input.survivorId,
-          { survivorId: input.survivorId, duplicateId: input.duplicateId },
+          {
+            survivorId: input.survivorId,
+            duplicateId: input.duplicateId,
+            duplicate: duplicate ? { ...duplicate } : null,
+          },
           { survivorId: input.survivorId, mergedDuplicateId: input.duplicateId },
         );
       }
@@ -676,6 +695,7 @@ export const crmMergeRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      const duplicate = await getCompany(input.duplicateId);
       const result = await mergeCompanies(input);
       if (result.ok) {
         await auditMutation(
@@ -683,7 +703,11 @@ export const crmMergeRouter = router({
           "crm.merge.companies",
           "company",
           input.survivorId,
-          { survivorId: input.survivorId, duplicateId: input.duplicateId },
+          {
+            survivorId: input.survivorId,
+            duplicateId: input.duplicateId,
+            duplicate: duplicate ? { ...duplicate } : null,
+          },
           { survivorId: input.survivorId, mergedDuplicateId: input.duplicateId },
         );
       }
@@ -808,7 +832,16 @@ export const crmImportRouter = router({
           summary.skipped += 1;
           continue;
         }
-        await createCompany(row);
+        // Per-row guard: one failing insert must not 500 the whole batch.
+        try {
+          await createCompany(row);
+        } catch (e) {
+          summary.errors.push({
+            row: i,
+            message: e instanceof Error ? e.message : String(e),
+          });
+          continue;
+        }
         if (domain) seen.add(`d:${domain}`);
         seen.add(nameKey);
         summary.created += 1;
@@ -847,7 +880,16 @@ export const crmImportRouter = router({
           summary.skipped += 1;
           continue;
         }
-        await createContact(row);
+        // Per-row guard: one failing insert must not 500 the whole batch.
+        try {
+          await createContact(row);
+        } catch (e) {
+          summary.errors.push({
+            row: i,
+            message: e instanceof Error ? e.message : String(e),
+          });
+          continue;
+        }
         if (emailKey) seenEmails.add(emailKey);
         summary.created += 1;
       }

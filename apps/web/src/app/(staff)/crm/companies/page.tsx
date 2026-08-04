@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import {
   CompanyCell,
@@ -20,7 +21,7 @@ import {
 import { CsvActions } from "../_components/csv-actions";
 import { MergeDuplicates } from "../_components/merge-dedupe";
 
-export default function CrmCompaniesPage() {
+function CompaniesInner() {
   const utils = trpc.useUtils();
   const companies = trpc.crm.companies.list.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
@@ -33,11 +34,12 @@ export default function CrmCompaniesPage() {
   const [name, setName] = useState("");
   const [sector, setSector] = useState("");
 
-  // Prefill search from omni-search deep links (/crm/companies?q=…).
+  // Prefill search from omni-search deep links (/crm/companies?q=…) —
+  // searchParams-driven so same-page navigations retarget the filter too.
+  const deepLinkQ = useSearchParams().get("q");
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get("q");
-    if (q) setSearch(q);
-  }, []);
+    if (deepLinkQ !== null) setSearch(deepLinkQ);
+  }, [deepLinkQ]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -192,5 +194,14 @@ export default function CrmCompaniesPage() {
         </CrmTableShell>
       )}
     </main>
+  );
+}
+
+export default function CrmCompaniesPage() {
+  // useSearchParams requires a Suspense boundary (portal/login/verify precedent).
+  return (
+    <Suspense>
+      <CompaniesInner />
+    </Suspense>
   );
 }

@@ -40,3 +40,7 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- 'inbound' lane: accepted by the API (crm-routers leadLaneSchema) but was
+-- missing from the Postgres enum — deal inserts with it failed. Align the type.
+ALTER TYPE lead_source_lane_enum ADD VALUE IF NOT EXISTS 'inbound';

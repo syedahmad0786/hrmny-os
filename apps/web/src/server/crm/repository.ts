@@ -3,6 +3,7 @@ import {
   and,
   company,
   contact,
+  contactEdges,
   crmNote,
   crmQuote,
   crmTask,
@@ -12,11 +13,13 @@ import {
   ilike,
   or,
   sql,
+  ticket,
   CRM_PIPELINE_STAGES,
   CRM_PIPELINE_STAGE_LABELS,
   type Db,
 } from "@hrmny/db";
 import { getDb } from "../db";
+import { listContactEdges } from "../leadgen/store";
 import { getCrmMemory, newId } from "./memory";
 import type {
   ActivityRow,
@@ -977,6 +980,11 @@ export async function getQuote(quoteId: string): Promise<CrmQuoteRow | null> {
   );
 }
 
+function isUniqueViolation(e: unknown): boolean {
+  const err = e as { code?: string; cause?: { code?: string } } | null;
+  return err?.code === "23505" || err?.cause?.code === "23505";
+}
+
 /** Append a new quote version for the deal (version = max existing + 1). */
 export async function createQuoteVersion(input: {
   dealId: string;
@@ -989,43 +997,53 @@ export async function createQuoteVersion(input: {
   status?: CrmQuoteRow["status"];
   createdBy?: string | null;
 }): Promise<CrmQuoteRow> {
-  // ponytail: read-then-insert version bump; unique(deal_id, version) index
-  // rejects the loser on a concurrent save — retry at the caller if it matters.
-  const existing = await listQuotesByDeal(input.dealId);
-  const version = (existing[0]?.version ?? 0) + 1;
+  const common = {
+    dealId: input.dealId,
+    lineItems: input.lineItems,
+    quoteValue: input.quoteValue,
+    internalCost: input.internalCost,
+    marginPct: input.marginPct,
+    discountPct: input.discountPct ?? null,
+    discountApprovalTier: input.discountApprovalTier ?? null,
+    status: input.status ?? ("draft" as const),
+    createdBy: input.createdBy ?? null,
+  };
   return withDb(
     async (db) => {
-      const [row] = await db
-        .insert(crmQuote)
-        .values({
-          dealId: input.dealId,
-          version,
-          lineItems: input.lineItems,
-          quoteValue: input.quoteValue,
-          internalCost: input.internalCost,
-          marginPct: input.marginPct,
-          discountPct: input.discountPct ?? null,
-          discountApprovalTier: input.discountApprovalTier ?? null,
-          status: input.status ?? "draft",
-          createdBy: input.createdBy ?? null,
-        })
-        .returning();
-      return mapQuote(row!);
+      const insertNext = async () => {
+        const [r] = await db
+          .select({ v: sql<number>`coalesce(max(version), 0)::int` })
+          .from(crmQuote)
+          .where(eq(crmQuote.dealId, input.dealId));
+        const [row] = await db
+          .insert(crmQuote)
+          .values({ ...common, version: Number(r?.v ?? 0) + 1 })
+          .returning();
+        return mapQuote(row!);
+      };
+      try {
+        return await insertNext();
+      } catch (e) {
+        // ponytail: unique(deal_id, version) lost a concurrent save — one
+        // re-read + retry is plenty at this write volume; move version
+        // allocation into SQL (insert-select) if saves ever truly contend.
+        if (!isUniqueViolation(e)) throw e;
+        return insertNext();
+      }
     },
     () => {
+      // Version computed synchronously against the map at insert time — no
+      // await between read and write, so concurrent saves can't collide.
+      const mem = getCrmMemory();
+      let max = 0;
+      for (const q of mem.quotes.values()) {
+        if (q.dealId === input.dealId && q.version > max) max = q.version;
+      }
       const t = new Date().toISOString();
       const row: CrmQuoteRow = {
         quoteId: newId(),
-        dealId: input.dealId,
-        version,
-        lineItems: input.lineItems,
-        quoteValue: input.quoteValue,
-        internalCost: input.internalCost,
-        marginPct: input.marginPct,
-        discountPct: input.discountPct ?? null,
-        discountApprovalTier: input.discountApprovalTier ?? null,
-        status: input.status ?? "draft",
-        createdBy: input.createdBy ?? null,
+        ...common,
+        version: max + 1,
         createdAt: t,
         updatedAt: t,
       };
@@ -1125,11 +1143,36 @@ export async function mergeContacts(input: {
           .update(crmTask)
           .set({ contactId: survivorId })
           .where(eq(crmTask.contactId, duplicateId));
+        // contact_edges (0060 lead_intel): drop edges that would become
+        // self-loops (duplicate ↔ survivor — CHECK from<>to would reject the
+        // repoint), then repoint both endpoints.
+        await tx
+          .delete(contactEdges)
+          .where(
+            or(
+              and(
+                eq(contactEdges.fromContact, duplicateId),
+                eq(contactEdges.toContact, survivorId),
+              ),
+              and(
+                eq(contactEdges.fromContact, survivorId),
+                eq(contactEdges.toContact, duplicateId),
+              ),
+            ),
+          );
+        await tx
+          .update(contactEdges)
+          .set({ fromContact: survivorId })
+          .where(eq(contactEdges.fromContact, duplicateId));
+        await tx
+          .update(contactEdges)
+          .set({ toContact: survivorId })
+          .where(eq(contactEdges.toContact, duplicateId));
         await tx.delete(contact).where(eq(contact.contactId, duplicateId));
       });
       return { ok: true as const, survivorId, duplicateId };
     },
-    () => {
+    async () => {
       const mem = getCrmMemory();
       for (const d of mem.deals.values()) {
         if (d.primaryContactId === duplicateId)
@@ -1146,6 +1189,14 @@ export async function mergeContacts(input: {
       for (const t of mem.tasks.values()) {
         if (t.contactId === duplicateId)
           mem.tasks.set(t.crmTaskId, { ...t, contactId: survivorId });
+      }
+      // ponytail: leadgen's memory list() returns live row references, so
+      // in-place mutation repoints edges; duplicate↔survivor edges become
+      // self-loops here (Postgres path deletes them) — dev-only backend,
+      // add a leadgen store delete export if that ever matters.
+      for (const e of await listContactEdges(duplicateId)) {
+        if (e.fromContact === duplicateId) e.fromContact = survivorId;
+        if (e.toContact === duplicateId) e.toContact = survivorId;
       }
       mem.contacts.delete(duplicateId);
       return { ok: true as const, survivorId, duplicateId };
@@ -1192,6 +1243,13 @@ export async function mergeCompanies(input: {
           .update(crmTask)
           .set({ companyId: survivorId })
           .where(eq(crmTask.companyId, duplicateId));
+        // ticket (0004) also carries company_id — repoint it too. Memory path
+        // has no ticket store (tickets-router stub is memory-only + private),
+        // so this is Postgres-only by construction.
+        await tx
+          .update(ticket)
+          .set({ companyId: survivorId })
+          .where(eq(ticket.companyId, duplicateId));
         await tx.delete(company).where(eq(company.companyId, duplicateId));
       });
       return { ok: true as const, survivorId, duplicateId };

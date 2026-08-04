@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import {
   CrmBtn,
@@ -36,6 +36,19 @@ export default function CrmInboundPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Ids created by a previous, partially-failed submit. A retry reuses them
+  // instead of re-creating the company/contact/deal. Cleared whenever an
+  // identity field changes (the stored ids would no longer match the form).
+  const created = useRef<{
+    companyId?: string;
+    companyName?: string;
+    contactId?: string;
+    dealId?: string;
+  }>({});
+  const resetCreated = () => {
+    created.current = {};
+  };
+
   // Dedupe courtesy: match against live CRM data before creating anything.
   const companyMatch = useMemo(() => {
     const key = companyName.trim().toLowerCase();
@@ -66,49 +79,63 @@ export default function CrmInboundPage() {
     setError(null);
     setSubmitting(true);
     try {
-      // 1. Company — reuse the matched one unless staff opted out.
-      let companyId: string;
-      let dealCompanyName: string;
-      if (companyMatch && useExistingCompany) {
-        companyId = companyMatch.companyId;
-        dealCompanyName = companyMatch.name;
-      } else {
-        const co = await createCompany.mutateAsync({
-          name: companyName.trim(),
-          sector: sector.trim() || null,
-          market,
-        });
-        companyId = co.companyId;
-        dealCompanyName = co.name;
+      // 1. Company — reuse a prior partial submit, then the matched one
+      // unless staff opted out.
+      let companyId = created.current.companyId;
+      let dealCompanyName = created.current.companyName;
+      if (!companyId || !dealCompanyName) {
+        if (companyMatch && useExistingCompany) {
+          companyId = companyMatch.companyId;
+          dealCompanyName = companyMatch.name;
+        } else {
+          const co = await createCompany.mutateAsync({
+            name: companyName.trim(),
+            sector: sector.trim() || null,
+            market,
+          });
+          companyId = co.companyId;
+          dealCompanyName = co.name;
+        }
+        created.current.companyId = companyId;
+        created.current.companyName = dealCompanyName;
       }
 
-      // 2. Contact — reuse on email match unless staff opted out.
-      let contactId: string;
-      if (contactMatch && useExistingContact) {
-        contactId = contactMatch.contactId;
-      } else {
-        const [firstName, ...rest] = contactName.trim().split(/\s+/);
-        const ct = await createContact.mutateAsync({
+      // 2. Contact — reuse prior partial submit, then email match unless
+      // staff opted out.
+      let contactId = created.current.contactId;
+      if (!contactId) {
+        if (contactMatch && useExistingContact) {
+          contactId = contactMatch.contactId;
+        } else {
+          const [firstName, ...rest] = contactName.trim().split(/\s+/);
+          const ct = await createContact.mutateAsync({
+            companyId,
+            firstName: firstName || contactEmail.trim(),
+            lastName: rest.length ? rest.join(" ") : null,
+            email: contactEmail.trim() || null,
+          });
+          contactId = ct.contactId;
+        }
+        created.current.contactId = contactId;
+      }
+
+      // 3. Deal on the live CRM lane (reused if only the note failed).
+      let dealId = created.current.dealId;
+      if (!dealId) {
+        const deal = await createDeal.mutateAsync({
+          companyName: dealCompanyName,
           companyId,
-          firstName: firstName || contactEmail.trim(),
-          lastName: rest.length ? rest.join(" ") : null,
-          email: contactEmail.trim() || null,
+          primaryContactId: contactId,
+          sector: sector.trim() || null,
+          leadSourceLane: "inbound",
         });
-        contactId = ct.contactId;
+        dealId = deal.dealId;
+        created.current.dealId = dealId;
       }
-
-      // 3. Deal on the live CRM lane.
-      const deal = await createDeal.mutateAsync({
-        companyName: dealCompanyName,
-        companyId,
-        primaryContactId: contactId,
-        sector: sector.trim() || null,
-        leadSourceLane: "inbound",
-      });
 
       // 4. Capture the enquiry + market on the deal.
       await createNote.mutateAsync({
-        dealId: deal.dealId,
+        dealId,
         companyId,
         contactId,
         body: `Inbound enquiry · market ${market}${
@@ -116,11 +143,14 @@ export default function CrmInboundPage() {
         }`,
       });
 
+      resetCreated();
       await utils.crm.invalidate();
-      router.push(`/crm/deals/${deal.dealId}`);
+      router.push(`/crm/deals/${dealId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create lead");
       setSubmitting(false);
+      // Partial creates are real rows now — refresh lists + dedupe matchers.
+      await utils.crm.invalidate();
     }
   }
 
@@ -147,14 +177,20 @@ export default function CrmInboundPage() {
                   className="crm-input"
                   required
                   value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
+                  onChange={(e) => {
+                    resetCreated();
+                    setCompanyName(e.target.value);
+                  }}
                 />
                 {companyMatch ? (
                   <label className="mt-1 flex items-center gap-2 text-[11px] text-[var(--muted)]">
                     <input
                       type="checkbox"
                       checked={useExistingCompany}
-                      onChange={(e) => setUseExistingCompany(e.target.checked)}
+                      onChange={(e) => {
+                        resetCreated();
+                        setUseExistingCompany(e.target.checked);
+                      }}
                     />
                     Use existing company “{companyMatch.name}”
                   </label>
@@ -166,7 +202,10 @@ export default function CrmInboundPage() {
                   className="crm-input"
                   required={!(contactMatch && useExistingContact)}
                   value={contactName}
-                  onChange={(e) => setContactName(e.target.value)}
+                  onChange={(e) => {
+                    resetCreated();
+                    setContactName(e.target.value);
+                  }}
                 />
               </div>
               <div className="crm-field">
@@ -176,14 +215,20 @@ export default function CrmInboundPage() {
                   required
                   type="email"
                   value={contactEmail}
-                  onChange={(e) => setContactEmail(e.target.value)}
+                  onChange={(e) => {
+                    resetCreated();
+                    setContactEmail(e.target.value);
+                  }}
                 />
                 {contactMatch ? (
                   <label className="mt-1 flex items-center gap-2 text-[11px] text-[var(--muted)]">
                     <input
                       type="checkbox"
                       checked={useExistingContact}
-                      onChange={(e) => setUseExistingContact(e.target.checked)}
+                      onChange={(e) => {
+                        resetCreated();
+                        setUseExistingContact(e.target.checked);
+                      }}
                     />
                     Use existing contact {contactMatch.firstName}
                     {contactMatch.lastName ? ` ${contactMatch.lastName}` : ""}

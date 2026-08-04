@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import {
   CompanyCell,
@@ -15,7 +16,7 @@ import { formatRelative, initials } from "@/components/crm/format";
 import { CsvActions } from "../_components/csv-actions";
 import { MergeDuplicates } from "../_components/merge-dedupe";
 
-export default function CrmContactsPage() {
+function ContactsInner() {
   const utils = trpc.useUtils();
   const contacts = trpc.crm.contacts.list.useQuery();
   const companies = trpc.crm.companies.list.useQuery();
@@ -31,11 +32,12 @@ export default function CrmContactsPage() {
   const [firstName, setFirstName] = useState("");
   const [email, setEmail] = useState("");
 
-  // Prefill search from omni-search deep links (/crm/contacts?q=…).
+  // Prefill search from omni-search deep links (/crm/contacts?q=…) —
+  // searchParams-driven so same-page navigations retarget the filter too.
+  const deepLinkQ = useSearchParams().get("q");
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get("q");
-    if (q) setSearch(q);
-  }, []);
+    if (deepLinkQ !== null) setSearch(deepLinkQ);
+  }, [deepLinkQ]);
 
   const companyMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -211,5 +213,14 @@ export default function CrmContactsPage() {
         </CrmTableShell>
       )}
     </main>
+  );
+}
+
+export default function CrmContactsPage() {
+  // useSearchParams requires a Suspense boundary (portal/login/verify precedent).
+  return (
+    <Suspense>
+      <ContactsInner />
+    </Suspense>
   );
 }

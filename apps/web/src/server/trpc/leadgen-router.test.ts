@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { ActorContext, AuditWriter, EmitHook } from "@hrmny/gate";
 import type { ComposioSendAdapter } from "@hrmny/integrations";
 import { createComposioStub } from "@hrmny/integrations";
+import type { RunAgent } from "../leadgen/agent-run";
 import { resetCrmMemory } from "../crm/memory";
 import { createCompany, createContact, createDeal } from "../crm/repository";
-import { getOutreach, resetLeadgenStore } from "../leadgen/store";
+import { getOutreach, listOutreach, resetLeadgenStore } from "../leadgen/store";
 import {
   approveOutreach,
   discardOutreach,
@@ -61,6 +62,27 @@ describe("outreach HITL gate flow", () => {
     expect(item.body).toBe("Hello there");
   });
 
+  it("REFUSES an empty-body draft when the agent is disabled — nothing inserted", async () => {
+    const deal = await seedDeal();
+    const refusingAgent: RunAgent = async (input) => ({
+      agent: input.agent,
+      model: "disabled",
+      output: { refused: true, message: "outreach-draft agent is disabled" },
+      inputTokens: 0,
+      outputTokens: 0,
+      costAed: 0,
+      gateOutcome: "not_applicable",
+    });
+
+    await expect(
+      draftOutreach({ dealId: deal.dealId, runAgent: refusingAgent }),
+    ).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: "outreach-draft agent is disabled",
+    });
+    expect(await listOutreach()).toHaveLength(0);
+  });
+
   it("BLOCKS send before human approve — no external send fires", async () => {
     const deal = await seedDeal();
     const item = await draftOutreach({ dealId: deal.dealId, body: "Hello" });
@@ -107,7 +129,7 @@ describe("outreach HITL gate flow", () => {
     expect((await getOutreach(item.id))!.state).toBe("approved");
   });
 
-  it("discards a draft � and a sent item can never be discarded", async () => {
+  it("discards a draft � and a sent item can never be discarded", async () => {
     const deal = await seedDeal();
     const item = await draftOutreach({ dealId: deal.dealId, body: "Bye" });
     const res = await discardOutreach({ id: item.id, actor: staff, audit, emit });

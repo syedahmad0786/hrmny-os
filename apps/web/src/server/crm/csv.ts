@@ -2,7 +2,10 @@
 
 function csvCell(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const s = String(value);
+  let s = String(value);
+  // Formula-injection guard: neutralize cells Excel/Sheets would execute
+  // (=, +, -, @, tab, CR leaders) with a leading single quote.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

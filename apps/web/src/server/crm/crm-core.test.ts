@@ -1,6 +1,11 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "../auth/session";
 import { getDemoStore } from "../demo-store";
+import {
+  insertContactEdge,
+  listContactEdges,
+  resetLeadgenStore,
+} from "../leadgen/store";
 import { createCaller } from "../trpc/root";
 import { toCsv } from "./csv";
 import { resetCrmMemory } from "./memory";
@@ -11,6 +16,7 @@ import {
   createNote,
   createCrmTask,
   createActivity,
+  createQuoteVersion,
   dedupeCandidates,
   getCompany,
   getContact,
@@ -18,10 +24,18 @@ import {
   listCrmTasks,
   listNotes,
   listActivities,
+  listQuotesByDeal,
   mergeCompanies,
   mergeContacts,
   normalizeDomain,
 } from "./repository";
+
+// Wrap createCompany in a vi.fn so a single test can inject a one-shot insert
+// failure (per-row import guard); all other calls fall through to the real impl.
+vi.mock("./repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./repository")>();
+  return { ...actual, createCompany: vi.fn(actual.createCompany) };
+});
 
 function callerFor(role: string) {
   const user = resolveDevUser(role);
@@ -40,6 +54,7 @@ function lastAuditAction(): string | undefined {
 describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
   beforeEach(() => {
     resetCrmMemory();
+    resetLeadgenStore();
   });
 
   // ── W2 audit completeness ────────────────────────────────
@@ -122,19 +137,36 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
   });
 
   it("escalates discount beyond actor authority and flags margin floor", async () => {
+    // Partner (margin role) sees the margin oracle.
+    const partner = callerFor("partner");
+    const [pDeal] = await partner.crm.deals.list();
+    const flagged = await partner.crm.quotes.save({
+      dealId: pDeal!.dealId,
+      // 10% margin — below the 25% floor
+      lineItems: [{ label: "Low margin", unitSell: 1000, unitCost: 900 }],
+    });
+    expect(flagged.ok).toBe(true);
+    if (!flagged.ok) return;
+    expect(flagged.marginBelowFloor).toBe(true);
+    expect(flagged.floorPct).toBeGreaterThan(0);
+    expect(flagged.targetPct).toBeGreaterThan(0);
+
     const caller = callerFor("am");
     const [deal] = await caller.crm.deals.list();
     const result = await caller.crm.quotes.save({
       dealId: deal!.dealId,
-      // 10% margin — below the 25% floor
       lineItems: [{ label: "Low margin", unitSell: 1000, unitCost: 900 }],
       discountPct: 10,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    // Escalation fields stay for the AM UX...
     expect(result.approvalTier).toBe("md");
     expect(result.escalatedTo).toBe("md");
-    expect(result.marginBelowFloor).toBe(true);
+    // ...but the margin oracle is omitted for non-margin roles.
+    expect("marginBelowFloor" in result).toBe(false);
+    expect("floorPct" in result).toBe(false);
+    expect("targetPct" in result).toBe(false);
     // Margin redacted for AM (no margin view)
     expect("internalCost" in result.quote).toBe(false);
     expect("marginPct" in result.quote).toBe(false);
@@ -196,6 +228,13 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
     });
     expect(result.ok).toBe(true);
     expect(lastAuditAction()).toBe("crm.merge.contacts");
+    // Audit 'before' carries a full snapshot of the deleted duplicate.
+    const audit = getDemoStore().audits[0]!;
+    const before = audit.before as {
+      duplicate?: { contactId?: string; email?: string | null };
+    };
+    expect(before.duplicate?.contactId).toBe(dup.contactId);
+    expect(before.duplicate?.email).toBe("keep@example.test");
 
     expect(await getContact(dup.contactId)).toBeNull();
     expect((await getDeal(deal.dealId))?.primaryContactId).toBe(
@@ -238,6 +277,39 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
     expect((await getDeal(deal.dealId))?.companyId).toBe(survivor.companyId);
   });
 
+  it("merge contacts repoints contact_edges endpoints (no dangling edges)", async () => {
+    const survivor = await createContact({ firstName: "Keep" });
+    const dup = await createContact({ firstName: "Drop" });
+    const other = await createContact({ firstName: "Other" });
+    await insertContactEdge({
+      fromContact: dup.contactId,
+      toContact: other.contactId,
+      relation: "knows",
+    });
+    await insertContactEdge({
+      fromContact: other.contactId,
+      toContact: dup.contactId,
+      relation: "worked_with",
+    });
+
+    const result = await mergeContacts({
+      survivorId: survivor.contactId,
+      duplicateId: dup.contactId,
+    });
+    expect(result.ok).toBe(true);
+
+    expect(await listContactEdges(dup.contactId)).toHaveLength(0);
+    const edges = await listContactEdges(survivor.contactId);
+    expect(edges).toHaveLength(2);
+    expect(
+      edges.every(
+        (e) =>
+          e.fromContact === survivor.contactId ||
+          e.toContact === survivor.contactId,
+      ),
+    ).toBe(true);
+  });
+
   it("rejects merging a record into itself or missing records", async () => {
     const co = await createCompany({ name: "Solo Co" });
     const self = await mergeCompanies({
@@ -278,6 +350,18 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
   it("escapes commas and quotes in csv cells", () => {
     const csv = toCsv(["a", "b"], [{ a: 'say "hi", ok', b: null }]);
     expect(csv).toBe('a,b\r\n"say ""hi"", ok",');
+  });
+
+  it("neutralizes formula-injection payloads in csv cells", () => {
+    const csv = toCsv(
+      ["a", "b"],
+      [{ a: '=HYPERLINK("http://evil","click")', b: "+971501234567" }],
+    );
+    expect(csv.split("\r\n")[1]).toBe(
+      "\"'=HYPERLINK(\"\"http://evil\"\",\"\"click\"\")\",'+971501234567",
+    );
+    expect(toCsv(["a"], [{ a: "@cmd" }])).toBe("a\r\n'@cmd");
+    expect(toCsv(["a"], [{ a: "safe" }])).toBe("a\r\nsafe");
   });
 
   it("exports companies/contacts/deals csv with margin redaction", async () => {
@@ -327,6 +411,20 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
     expect(contacts.errors).toHaveLength(1);
   });
 
+  it("keeps importing remaining rows when a single insert throws", async () => {
+    const caller = callerFor("partner");
+    vi.mocked(createCompany).mockRejectedValueOnce(new Error("db down"));
+    const summary = await caller.crm.import.companies({
+      rows: [{ name: "Boom Co" }, { name: "Fine Co" }],
+    });
+    expect(summary.errors).toEqual([{ row: 0, message: "db down" }]);
+    expect(summary.created).toBe(1);
+    expect(summary.skipped).toBe(0);
+    expect(await caller.crm.companies.list({ search: "Fine Co" })).toHaveLength(
+      1,
+    );
+  });
+
   it("carries unitCost forward when a non-margin role re-saves a quote", async () => {
     const partner = callerFor("partner");
     const deal = await partner.crm.deals.create({ companyName: "Cost Co" });
@@ -354,6 +452,67 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
     expect(Number((latest as { internalCost: string }).internalCost)).toBe(
       800,
     ); // 2 × 400, not 0
+  });
+
+  it("does not bleed a removed line's cost into a renamed line (label match only)", async () => {
+    const partner = callerFor("partner");
+    const deal = await partner.crm.deals.create({ companyName: "Rename Co" });
+    const v1 = await partner.crm.quotes.save({
+      dealId: deal.dealId,
+      lineItems: [
+        { label: "Design", qty: 1, unitSell: 1000, unitCost: 400 },
+        { label: "Build", qty: 1, unitSell: 2000, unitCost: 900 },
+      ],
+    });
+    expect(v1.ok).toBe(true);
+
+    const am = callerFor("am");
+    // "Design" removed; new first line must NOT inherit Design's 400 by position.
+    const v2 = await am.crm.quotes.save({
+      dealId: deal.dealId,
+      lineItems: [
+        { label: "Voiceover", qty: 1, unitSell: 500, unitCost: 0 },
+        { label: "Build", qty: 1, unitSell: 2000, unitCost: 0 },
+      ],
+    });
+    expect(v2.ok).toBe(true);
+
+    const [latest] = await partner.crm.quotes.listByDeal({
+      dealId: deal.dealId,
+    });
+    const costs = Object.fromEntries(
+      (latest!.lineItems as { label: string; unitCost: number }[]).map((l) => [
+        l.label,
+        l.unitCost,
+      ]),
+    );
+    expect(costs["Voiceover"]).toBe(0); // unmatched → keeps client value
+    expect(costs["Build"]).toBe(900); // label match → carried forward
+  });
+
+  it("allocates distinct quote versions for concurrent saves", async () => {
+    const deal = await createDeal({ companyName: "Race Co" });
+    const line = { label: "Film", unitSell: 100, unitCost: 50 };
+    await Promise.all([
+      createQuoteVersion({
+        dealId: deal.dealId,
+        lineItems: [line],
+        quoteValue: "100.00",
+        internalCost: "50.00",
+        marginPct: "50.00",
+      }),
+      createQuoteVersion({
+        dealId: deal.dealId,
+        lineItems: [line],
+        quoteValue: "100.00",
+        internalCost: "50.00",
+        marginPct: "50.00",
+      }),
+    ]);
+    const versions = (await listQuotesByDeal(deal.dealId))
+      .map((q) => q.version)
+      .sort();
+    expect(versions).toEqual([1, 2]);
   });
 
   it("normalizeDomain strips scheme/www/path", () => {

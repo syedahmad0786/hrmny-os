@@ -254,7 +254,10 @@ export default function CrmOutreachPage() {
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!draftDealId) return;
-                void draft.mutateAsync({
+                // .mutate (not mutateAsync): refusals — e.g. agent kill switch
+                // → PRECONDITION_FAILED — land in onError and render in the
+                // gate banner instead of an unhandled rejection.
+                draft.mutate({
                   dealId: draftDealId,
                   channel: "gmail",
                   subject: draftSubject.trim() || undefined,
