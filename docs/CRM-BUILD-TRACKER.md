@@ -23,7 +23,7 @@ Make the CRM surface production-ready per PLAN-PRODUCTION quality bars: every co
 | W9 ([#48](https://github.com/syedahmad0786/hrmny-os/issues/48)) | AI CRM features | `crm-summary` + `next-best-action` agents (registry, HITL drafts-only), `crmAi` router: deal summary, account summary, next-best-action, BUAF re-score, outreach draft surfacing; AI panel on deal detail | ✅ merged ([PR #53](https://github.com/syedahmad0786/hrmny-os/pull/53)) |
 | W10 ([#49](https://github.com/syedahmad0786/hrmny-os/issues/49)) | Forecast & CRM reporting | Weighted-pipeline forecast + win/loss + stage-conversion procedures on real CRM data; dashboard widgets on `/crm` | ✅ merged ([PR #53](https://github.com/syedahmad0786/hrmny-os/pull/53)) |
 | W11 ([#50](https://github.com/syedahmad0786/hrmny-os/issues/50)) | Reminders & next steps | Due/overdue `crm_task` digest via existing cron route + Google Chat webhook; owner nudges | ✅ merged ([PR #53](https://github.com/syedahmad0786/hrmny-os/pull/53)) |
-| W12 ([#51](https://github.com/syedahmad0786/hrmny-os/issues/51)) | Wiring, verification, deploy | Orchestrator: root.ts wiring, migration journal, manifest gate, full local test+build (CI dead on billing), PR merge, prod migration 0066, Vercel API deploy, smoke test | ✅ merged ([PR #53](https://github.com/syedahmad0786/hrmny-os/pull/53)) |
+| W12 ([#51](https://github.com/syedahmad0786/hrmny-os/issues/51)) | Wiring, verification, deploy | Orchestrator: root.ts wiring, migration journal, manifest gate, full local test+build (CI dead on billing), PR merge, prod migration 0066, Vercel API deploy, smoke test | ✅ LIVE 2026-08-04 — migration 0066 applied (RLS verified), deploy dpl_7fyeFLik1grfJDY1iydj7eeNV2tM READY, prod routes 200, daily cron registered |
 
 ## Rules honored
 
