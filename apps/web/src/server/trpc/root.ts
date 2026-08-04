@@ -46,6 +46,8 @@ import {
   scopesRouter,
 } from "./m3-routers";
 import { crmRouter } from "./crm-routers";
+import { crmAiRouter } from "./crm-ai-router";
+import { crmForecastRouter } from "./crm-forecast-router";
 import { ticketsRouter } from "./tickets-router";
 import { automationRouter } from "./automation-router";
 import { aiAdminRouter } from "./ai-admin-router";
@@ -770,6 +772,10 @@ export const appRouter = router({
   deals: dealsRouter,
   /** Durable CRM: companies, contacts, deals, activities, notes, tasks → Postgres or memory. */
   crm: crmRouter,
+  /** AI CRM: summaries, next-best-action, BUAF re-score, HITL outreach drafts (advisory-only). */
+  crmAi: crmAiRouter,
+  /** CRM forecast/reporting: weighted pipeline, forecast, win/loss, stage conversion (read-only). */
+  crmForecast: crmForecastRouter,
   /** Support tickets (team + portal requester) — memory stub until 0004_tickets applied. */
   tickets: ticketsRouter,
   /** n8n automation — health / list / propose / HITL trigger (automation-orchestrator). */

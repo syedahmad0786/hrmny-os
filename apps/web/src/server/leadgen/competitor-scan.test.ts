@@ -22,8 +22,8 @@ describe("runCompetitorScan", () => {
       expect(r.detail).toContain("Research basis");
     }
 
-    expect(listCompetitorFindings("deal-1")).toHaveLength(3);
-    expect(listCompetitorFindings("other-scope")).toHaveLength(0);
+    expect(await listCompetitorFindings("deal-1")).toHaveLength(3);
+    expect(await listCompetitorFindings("other-scope")).toHaveLength(0);
   });
 
   it("honours a custom source list", async () => {

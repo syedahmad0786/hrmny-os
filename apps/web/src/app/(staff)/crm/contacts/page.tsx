@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import {
   CompanyCell,
@@ -12,8 +13,10 @@ import {
   CrmTag,
 } from "@/components/crm/ui";
 import { formatRelative, initials } from "@/components/crm/format";
+import { CsvActions } from "../_components/csv-actions";
+import { MergeDuplicates } from "../_components/merge-dedupe";
 
-export default function CrmContactsPage() {
+function ContactsInner() {
   const utils = trpc.useUtils();
   const contacts = trpc.crm.contacts.list.useQuery();
   const companies = trpc.crm.companies.list.useQuery();
@@ -28,6 +31,13 @@ export default function CrmContactsPage() {
   const [verify, setVerify] = useState("all");
   const [firstName, setFirstName] = useState("");
   const [email, setEmail] = useState("");
+
+  // Prefill search from omni-search deep links (/crm/contacts?q=…) —
+  // searchParams-driven so same-page navigations retarget the filter too.
+  const deepLinkQ = useSearchParams().get("q");
+  useEffect(() => {
+    if (deepLinkQ !== null) setSearch(deepLinkQ);
+  }, [deepLinkQ]);
 
   const companyMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -94,6 +104,8 @@ export default function CrmContactsPage() {
         title="Contacts"
         description="Verified people, linked to companies, deals and activity."
         actions={
+          <>
+          <CsvActions kind="contacts" />
           <CrmBtn
             variant="primary"
             disabled={create.isPending || !firstName.trim()}
@@ -112,6 +124,7 @@ export default function CrmContactsPage() {
           >
             ＋ Add contact
           </CrmBtn>
+          </>
         }
       />
 
@@ -145,6 +158,8 @@ export default function CrmContactsPage() {
           <option value="unverified">Unverified</option>
         </select>
       </CrmFilterBar>
+
+      <MergeDuplicates kind="contacts" />
 
       {contacts.isLoading ? (
         <CrmEmpty title="Loading contacts…" />
@@ -198,5 +213,14 @@ export default function CrmContactsPage() {
         </CrmTableShell>
       )}
     </main>
+  );
+}
+
+export default function CrmContactsPage() {
+  // useSearchParams requires a Suspense boundary (portal/login/verify precedent).
+  return (
+    <Suspense>
+      <ContactsInner />
+    </Suspense>
   );
 }

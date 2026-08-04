@@ -16,11 +16,11 @@ import {
 describe("agent registry", () => {
   it("lists parent + creative subagents; all require HITL before send", () => {
     const agents = listAgents();
-    expect(agents.length).toBeGreaterThanOrEqual(13);
+    expect(agents.length).toBeGreaterThanOrEqual(15);
     for (const a of agents) {
       expect(a.requiresHitlBeforeSend).toBe(true);
     }
-    expect(listParentAgents()).toHaveLength(10);
+    expect(listParentAgents()).toHaveLength(12);
     expect(listCreativeSubagents()).toHaveLength(3);
     for (const id of CreativeSubagentIdSchema.options) {
       expect(AGENT_REGISTRY[id].parentId).toBe("creative");
@@ -32,6 +32,17 @@ describe("agent registry", () => {
     );
     expect(AGENT_REGISTRY["ticket-assist"].producesDrafts).toBe(true);
     expect(ORCHESTRATION_HITL_NOTE).toMatch(/HITL/);
+  });
+
+  it("W9 CRM AI agents draft-only with HITL and no external tools", () => {
+    for (const id of ["crm-summary", "next-best-action"] as const) {
+      const agent = AGENT_REGISTRY[id];
+      expect(agent.producesDrafts).toBe(true);
+      expect(agent.requiresHitlBeforeSend).toBe(true);
+      expect(agent.parentId).toBeUndefined();
+      // No send/spend tools — read + memory only.
+      expect(agent.allowedTools).toEqual(["crm.read", "memory.retrieve"]);
+    }
   });
 });
 

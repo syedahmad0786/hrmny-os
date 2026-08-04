@@ -4,6 +4,7 @@ import type {
   CompanyRow,
   ContactRow,
   CrmNoteRow,
+  CrmQuoteRow,
   CrmTaskRow,
   DealRow,
 } from "./types";
@@ -271,6 +272,7 @@ export type CrmMemory = {
   activities: Map<string, ActivityRow>;
   notes: Map<string, CrmNoteRow>;
   tasks: Map<string, CrmTaskRow>;
+  quotes: Map<string, CrmQuoteRow>;
 };
 
 let memory: CrmMemory | null = null;
@@ -365,6 +367,7 @@ export function getCrmMemory(): CrmMemory {
         },
       ],
     ]),
+    quotes: new Map(),
   };
   return memory;
 }

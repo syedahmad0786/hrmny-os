@@ -66,6 +66,7 @@ export const leadSourceLaneEnum = pgEnum("lead_source_lane_enum", [
   "apollo_intent",
   "relationship_led",
   "tejari",
+  "inbound",
 ]);
 
 export const buafTemperatureEnum = pgEnum("buaf_temperature_enum", [

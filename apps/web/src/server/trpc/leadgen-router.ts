@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import {
   bootstrapGateRegistry,
   transition,
@@ -118,6 +119,16 @@ export async function draftOutreach(input: {
       string,
       unknown
     >;
+    // Kill switch / policy refusals come back as typed output, not throws
+    // (same semantics as crm-ai's assertNotRefused). Never queue a refusal
+    // JSON blob as a draft — fail loud so every caller surfaces it.
+    if (out.refused === true) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message:
+          typeof out.message === "string" ? out.message : "Agent run refused",
+      });
+    }
     subject = typeof out.subject === "string" ? out.subject : subject;
     body =
       typeof out.body === "string"
@@ -142,7 +153,7 @@ export async function approveOutreach(input: {
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<TransitionResult> {
-  const item = getOutreach(input.id);
+  const item = await getOutreach(input.id);
   if (!item) throw new Error(`Outreach not found: ${input.id}`);
   return transition(
     input.actor,
@@ -151,7 +162,7 @@ export async function approveOutreach(input: {
     {
       authorize: async (a) => authorizeStaff(a),
       apply: async () => {
-        const next = patchOutreach(input.id, {
+        const next = await patchOutreach(input.id, {
           state: "approved",
           approvedBy: input.actor.employeeId,
         });
@@ -169,7 +180,7 @@ export async function discardOutreach(input: {
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<TransitionResult> {
-  const item = getOutreach(input.id);
+  const item = await getOutreach(input.id);
   if (!item) throw new Error(`Outreach not found: ${input.id}`);
   return transition(
     input.actor,
@@ -178,7 +189,7 @@ export async function discardOutreach(input: {
     {
       authorize: async (a) => authorizeStaff(a),
       apply: async () => {
-        const next = patchOutreach(input.id, { state: "discarded" });
+        const next = await patchOutreach(input.id, { state: "discarded" });
         return outreachEntity(next!);
       },
       audit: input.audit ?? defaultAudit,
@@ -194,7 +205,7 @@ export async function sendOutreach(input: {
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<TransitionResult & { externalId?: string }> {
-  const item = getOutreach(input.id);
+  const item = await getOutreach(input.id);
   if (!item) throw new Error(`Outreach not found: ${input.id}`);
   const composio = input.composio ?? createComposioStub();
   let externalId: string | undefined;
@@ -216,7 +227,7 @@ export async function sendOutreach(input: {
           body: item.body,
         });
         externalId = res.externalId;
-        const next = patchOutreach(input.id, {
+        const next = await patchOutreach(input.id, {
           state: "sent",
           sentAt: new Date().toISOString(),
           externalId: res.externalId,
