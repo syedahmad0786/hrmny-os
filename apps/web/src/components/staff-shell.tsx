@@ -121,6 +121,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   const [connectionMessage, setConnectionMessage] = useState<string | null>(
     null,
   );
+  const [accessCheckExpired, setAccessCheckExpired] = useState(false);
   const completingGoogle = useRef(false);
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
@@ -148,6 +149,10 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     enabled: Boolean(session.data?.employeeId),
     staleTime: 30_000,
   });
+  const waitingForAccess =
+    session.isLoading ||
+    session.data?.actorType === "portal" ||
+    (session.data?.authMode === "supabase" && !session.data.employeeId);
 
   useEffect(() => {
     setRole(getDevRole());
@@ -226,6 +231,16 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   }, [router, session.data?.actorType]);
 
   useEffect(() => {
+    if (!waitingForAccess) {
+      setAccessCheckExpired(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => setAccessCheckExpired(true), 8_000);
+    return () => window.clearTimeout(timer);
+  }, [waitingForAccess]);
+
+  useEffect(() => {
     if (
       !session.data?.employeeId ||
       completingGoogle.current ||
@@ -267,6 +282,12 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
 
   async function onSignOut() {
     await getSupabaseBrowserClient()?.auth.signOut();
+    await utils.invalidate();
+    router.replace("/login");
+  }
+
+  async function onRecoverSession() {
+    await getSupabaseBrowserClient()?.auth.signOut({ scope: "local" });
     await utils.invalidate();
     router.replace("/login");
   }
@@ -322,14 +343,34 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (
-    session.isLoading ||
-    session.data?.actorType === "portal" ||
-    (session.data?.authMode === "supabase" && !session.data.employeeId)
-  ) {
+  if (waitingForAccess) {
     return (
-      <main className="flex min-h-screen items-center justify-center text-sm text-muted">
-        Checking access…
+      <main className="flex min-h-screen flex-col items-center justify-center gap-3 text-sm text-muted">
+        {accessCheckExpired ? (
+          <>
+            <p className="text-ink">
+              The access check is taking longer than expected.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="rounded border border-sand bg-white px-4 py-2 text-ink"
+                onClick={() => void session.refetch()}
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                className="rounded border border-sand bg-white px-4 py-2 text-ink"
+                onClick={() => void onRecoverSession()}
+              >
+                Sign in again
+              </button>
+            </div>
+          </>
+        ) : (
+          <p>Checking access…</p>
+        )}
       </main>
     );
   }
