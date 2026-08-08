@@ -11,13 +11,14 @@ export default function StaffLoginPage() {
   const [pending, setPending] = useState(false);
   const [ssoEmail, setSsoEmail] = useState("");
 
-  // If a session already exists (or appears) while on the login page, enter
-  // the app — covers signed-in users revisiting /login after OAuth settles.
+  // Enter the app only after a fresh sign-in. Redirecting INITIAL_SESSION here
+  // can trap an expired or locked browser session in a /login → / loop before
+  // the user can recover it.
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
-      if (s && (event === "INITIAL_SESSION" || event === "SIGNED_IN")) {
+      if (s && event === "SIGNED_IN") {
         router.replace("/");
       }
     });
