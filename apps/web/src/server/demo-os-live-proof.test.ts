@@ -58,7 +58,9 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(loop.next.approvals).toContain(
         `id=${encodeURIComponent(loop.outreachId!)}`,
       );
-      expect(loop.next.portal).toBe("/portal/approvals");
+      expect(loop.portalInvite?.portalPath).toBeTruthy();
+      expect(loop.next.portal).toBe(loop.portalInvite!.portalPath);
+      expect(loop.next.onboarding).toBe(loop.portalInvite!.portalPath);
       expect(loop.outreachId).toBeTruthy();
       expect(loop.next.outreach).toContain(
         `id=${encodeURIComponent(loop.outreachId!)}`,

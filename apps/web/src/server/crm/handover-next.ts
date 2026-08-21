@@ -6,6 +6,8 @@ export function buildHandoverNextLinks(input: {
   clientId: string;
   invoiceId?: string | null;
   outreachId?: string | null;
+  /** Magic-link verify path from portal invite (preferred over bare /portal/*). */
+  portalPath?: string | null;
 }): {
   client: string;
   account: string;
@@ -16,7 +18,8 @@ export function buildHandoverNextLinks(input: {
   onboarding: string;
   outreach: string;
 } {
-  const { clientId, invoiceId, outreachId } = input;
+  const { clientId, invoiceId, outreachId, portalPath } = input;
+  const magic = portalPath?.trim() || null;
   return {
     client: `/clients/${clientId}`,
     account: `/account?clientId=${encodeURIComponent(clientId)}`,
@@ -27,8 +30,10 @@ export function buildHandoverNextLinks(input: {
     approvals: outreachId
       ? `/approvals?id=${encodeURIComponent(outreachId)}`
       : "/approvals",
-    portal: "/portal/approvals",
-    onboarding: "/portal/onboarding",
+    // Prefer the mint invite so Hunt "Portal" lands in the won client's session
+    // (bare /portal/approvals uses the wrong/dev portal actor or hits login).
+    portal: magic ?? "/portal/login",
+    onboarding: magic ?? "/portal/onboarding",
     outreach: outreachId
       ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
       : "/crm/outreach",

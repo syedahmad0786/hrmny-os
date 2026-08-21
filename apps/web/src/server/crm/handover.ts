@@ -433,6 +433,7 @@ export async function durableHandoverPack(input: {
     clientId: client.clientId,
     invoiceId,
     outreachId,
+    portalPath: portalInvite?.portalPath,
   });
   return {
     ok: true,
