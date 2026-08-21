@@ -54,6 +54,36 @@ export async function closeDurableDeal(input: {
     lostReason: input.lostReason ?? null,
   });
   if (!deal) return { ok: false, reason: "Update failed" };
+
+  try {
+    const { insertWinLossNote } = await import("../leadgen/store");
+    await insertWinLossNote({
+      dealId: input.dealId,
+      outcome: input.outcome,
+      note:
+        input.outcome === "lost"
+          ? input.lostReason?.trim() || "Lost"
+          : input.outcome === "won"
+            ? `Won ${deal.companyName} — handover ready`
+            : `Postponed / on hold: ${deal.companyName}`,
+    });
+    await persistMemoryChunk({
+      sourceType: "feedback",
+      sourceId: input.dealId,
+      content: `Deal closed (${input.outcome}): ${deal.companyName}.${
+        input.lostReason ? ` Reason: ${input.lostReason}` : ""
+      }`,
+      metadata: {
+        dealId: input.dealId,
+        companyId: deal.companyId,
+        kind: "crm.deal_closed",
+        outcome: input.outcome,
+      },
+    });
+  } catch {
+    /* win/loss + memory best-effort */
+  }
+
   return { ok: true, deal };
 }
 

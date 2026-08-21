@@ -149,6 +149,15 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(
         run.toolResults!.some((t) => t.tool === "outreach.read" && t.ok),
       ).toBe(true);
+      expect(
+        run.toolResults!.some((t) => t.tool === "onboarding.read" && t.ok),
+      ).toBe(true);
+
+      const month1 = await caller.clients.month1.get({
+        clientId: loop.clientId,
+      });
+      expect(month1.length).toBeGreaterThanOrEqual(1);
+      expect(month1.some((p) => p.status === "active")).toBe(true);
 
       const synced = await caller.invoices.syncXeroMirror();
       expect(synced.upserted).toBeGreaterThanOrEqual(0);

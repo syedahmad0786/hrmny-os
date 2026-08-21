@@ -2,6 +2,7 @@ import { listDeals, listCompanies, getDeal } from "../crm/repository";
 import { listDeliveryTasks } from "../tasks/delivery-tasks";
 import { listDeliveryCalendars } from "../tasks/delivery-calendars";
 import { listOutreach } from "../leadgen/store";
+import { getClientOnboarding } from "../clients/onboarding";
 import { searchMemory } from "./memory-db";
 import { createN8nAdapter } from "@hrmny/integrations";
 import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
@@ -180,6 +181,43 @@ export async function runAgentTools(input: {
         tool: "outreach.read",
         ok: false,
         error: err instanceof Error ? err.message : "outreach_failed",
+      });
+    }
+  }
+
+  if (
+    input.scope.clientId &&
+    (want("onboarding.read") || want("onboarding") || want("clients.onboarding"))
+  ) {
+    try {
+      const phases = await getClientOnboarding(input.scope.clientId);
+      const active = phases.find((p) => p.status === "active");
+      results.push({
+        tool: "onboarding.read",
+        ok: true,
+        data: {
+          phaseCount: phases.length,
+          activePhase: active
+            ? {
+                phaseIndex: active.phaseIndex,
+                name: active.name,
+                status: active.status,
+              }
+            : null,
+          phases: phases.map((p) => ({
+            phaseIndex: p.phaseIndex,
+            name: p.name,
+            status: p.status,
+            stepsDone: p.steps.filter((s) => s.done).length,
+            stepsTotal: p.steps.length,
+          })),
+        },
+      });
+    } catch (err) {
+      results.push({
+        tool: "onboarding.read",
+        ok: false,
+        error: err instanceof Error ? err.message : "onboarding_failed",
       });
     }
   }
