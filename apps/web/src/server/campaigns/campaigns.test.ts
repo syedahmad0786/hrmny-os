@@ -249,14 +249,14 @@ describe("campaigns durable layer (memory mode)", () => {
     });
     expect(decided.ok).toBe(true);
     const { listNotifications } = await import("../notifications/store");
-    const { DEMO_EMPLOYEE_ID } = await import("../demo-store");
-    const inbox = await listNotifications(DEMO_EMPLOYEE_ID, { limit: 20 });
+    const { DEMO_STAFF_LEAD_ID } = await import("../demo-store");
+    const inbox = await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 20 });
     expect(
       inbox.some(
         (n) =>
           n.kind === "campaign" &&
           /approved campaign/i.test(n.title) &&
-          (n.href ?? "").includes("/approvals"),
+          (n.href ?? "").includes("/approvals?id="),
       ),
     ).toBe(true);
   });

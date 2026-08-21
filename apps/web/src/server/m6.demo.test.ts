@@ -5,7 +5,7 @@ import {
   DEMO_CLIENT_B_ID,
   DEMO_CLIENT_ID,
   DEMO_CREATIVE_TASK_ID,
-  DEMO_EMPLOYEE_ID,
+  DEMO_STAFF_LEAD_ID,
   getDemoStore,
 } from "./demo-store";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
@@ -90,7 +90,7 @@ describe("M6 portal + seams", () => {
           a.actorEmployeeId === resolveDevUser("partner").employeeId,
       ),
     ).toBe(true);
-    const inbox = await listNotifications(DEMO_EMPLOYEE_ID, { limit: 20 });
+    const inbox = await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 20 });
     expect(
       inbox.some(
         (n) =>
@@ -132,7 +132,7 @@ describe("M6 portal + seams", () => {
     expect(task.clientRevisionCount).toBe(beforeCount + 1);
 
     const { listNotifications } = await import("./notifications/store");
-    const inbox = await listNotifications(DEMO_EMPLOYEE_ID, { limit: 20 });
+    const inbox = await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 20 });
     expect(
       inbox.some(
         (n) =>
@@ -155,8 +155,7 @@ describe("M6 portal + seams", () => {
     });
     expect(result.advanced).toBe(true);
     const { listNotifications } = await import("./notifications/store");
-    const { DEMO_EMPLOYEE_ID } = await import("./demo-store");
-    const inbox = await listNotifications(DEMO_EMPLOYEE_ID, { limit: 20 });
+    const inbox = await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 20 });
     expect(
       inbox.some(
         (n) =>

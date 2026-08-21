@@ -398,8 +398,8 @@ async function resolveStaffForPortalClient(
 ): Promise<string | null> {
   const db = getDb();
   if (!db) {
-    const { DEMO_EMPLOYEE_ID } = await import("./demo-store");
-    return DEMO_EMPLOYEE_ID;
+    const { DEMO_STAFF_LEAD_ID } = await import("./demo-store");
+    return DEMO_STAFF_LEAD_ID;
   }
   try {
     const owners = await db.execute<{ employeeId: string }>(sql`

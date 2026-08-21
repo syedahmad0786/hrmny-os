@@ -240,6 +240,7 @@ export async function durableHandoverPack(input: {
     title: `${client.name} — first creative cutdown`,
     taskType: "social_cutdowns",
     status: "qc",
+    ownerEmployeeId: input.actorEmployeeId ?? null,
   });
   if (task) fired.push("creative.task_seed");
 
