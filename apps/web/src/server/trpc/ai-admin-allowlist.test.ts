@@ -1,7 +1,8 @@
 process.env.DATABASE_URL = "";
+process.env.LLM_PROVIDER = "mock";
 
-import { beforeEach, describe, expect, it } from "vitest";
-import { resolveDevUser } from "../auth/session";
+import { describe, expect, it } from "vitest";
+import { resolveDevUser, sessionCanViewMargin } from "../auth/session";
 import { createCaller } from "./root";
 import { DEFAULT_FUNNEL_AGENT_TOOLS } from "../ai/agent-tools";
 
@@ -11,16 +12,11 @@ function aiAdminCaller() {
     user,
     employeeId: user.employeeId,
     roles: user.roles,
-    permissions: user.permissions,
-    canViewMargin: true,
+    canViewMargin: sessionCanViewMargin(user),
   });
 }
 
 describe("customAgents allowlist repair", () => {
-  beforeEach(() => {
-    // Memory agents accumulate across tests in-process; create unique slugs.
-  });
-
   it("create persists funnel defaults and repair fills empty allowlists", async () => {
     const caller = aiAdminCaller();
     const slug = `funnel-repair-${Date.now().toString(36)}`;

@@ -320,7 +320,7 @@ export const aiAdminRouter = router({
           }
         }
         await writeAudit({
-          actorEmployeeId: actor,
+          actorEmployeeId: actor.employeeId,
           action: "ai.custom_agent.repair_allowlists",
           entityType: "custom_agent",
           entityId: null,
@@ -339,7 +339,7 @@ export const aiAdminRouter = router({
         returning custom_agent_id as id
       `);
       await writeAudit({
-        actorEmployeeId: actor,
+        actorEmployeeId: actor.employeeId,
         action: "ai.custom_agent.repair_allowlists",
         entityType: "custom_agent",
         entityId: null,
