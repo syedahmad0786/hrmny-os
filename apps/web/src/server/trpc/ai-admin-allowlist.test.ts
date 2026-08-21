@@ -1,0 +1,57 @@
+process.env.DATABASE_URL = "";
+
+import { beforeEach, describe, expect, it } from "vitest";
+import { resolveDevUser } from "../auth/session";
+import { createCaller } from "./root";
+import { DEFAULT_FUNNEL_AGENT_TOOLS } from "../ai/agent-tools";
+
+function aiAdminCaller() {
+  const user = resolveDevUser("partner");
+  return createCaller({
+    user,
+    employeeId: user.employeeId,
+    roles: user.roles,
+    permissions: user.permissions,
+    canViewMargin: true,
+  });
+}
+
+describe("customAgents allowlist repair", () => {
+  beforeEach(() => {
+    // Memory agents accumulate across tests in-process; create unique slugs.
+  });
+
+  it("create persists funnel defaults and repair fills empty allowlists", async () => {
+    const caller = aiAdminCaller();
+    const slug = `funnel-repair-${Date.now().toString(36)}`;
+    const created = await caller.aiAdmin.customAgents.create({
+      slug,
+      displayName: "Funnel repair agent",
+    });
+    expect(created.allowedTools).toEqual([...DEFAULT_FUNNEL_AGENT_TOOLS]);
+
+    await caller.aiAdmin.customAgents.update({
+      id: created.customAgentId,
+      allowedTools: [],
+    });
+
+    const listed = await caller.aiAdmin.customAgents.list();
+    const empty = listed.find((a) => a.customAgentId === created.customAgentId);
+    expect(empty?.toolsEmpty).toBe(true);
+    expect(empty?.effectiveAllowedTools).toEqual(
+      DEFAULT_FUNNEL_AGENT_TOOLS.map((t) => t.toLowerCase()),
+    );
+
+    const repaired = await caller.aiAdmin.customAgents.repairEmptyAllowlists();
+    expect(repaired.ok).toBe(true);
+    expect(repaired.repaired).toBeGreaterThanOrEqual(1);
+
+    const after = (await caller.aiAdmin.customAgents.list()).find(
+      (a) => a.customAgentId === created.customAgentId,
+    );
+    expect(after?.toolsEmpty).toBe(false);
+    expect(after?.effectiveAllowedTools).toEqual(
+      DEFAULT_FUNNEL_AGENT_TOOLS.map((t) => t.toLowerCase()),
+    );
+  });
+});
