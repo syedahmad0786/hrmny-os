@@ -105,7 +105,7 @@ export const CONNECTION_CATALOG = [
     label: "Xero",
     authType: "oauth",
     ready: true,
-    note: "Read/mirror only — OS never writes unless XERO_WRITE_ENABLED=true.",
+    note: "Read/mirror only — connect via OAuth; OS never writes unless XERO_WRITE_ENABLED=true.",
   },
 ] as const;
 
@@ -593,8 +593,15 @@ export const connectionsRouter = router({
           const row = existing.find(
             (candidate) => candidate.toolkit === item.toolkit,
           );
-          return {
+        return {
             ...item,
+            ready:
+              item.toolkit === "xero"
+                ? Boolean(
+                    process.env.XERO_CLIENT_ID?.trim() &&
+                      process.env.XERO_CLIENT_SECRET?.trim(),
+                  )
+                : item.ready,
             allowed: allowed.get(item.toolkit) ?? false,
             connectionAccountId: row?.connectionAccountId ?? null,
             scope: row?.scope ?? "staff",
@@ -629,6 +636,13 @@ export const connectionsRouter = router({
         );
         return {
           ...item,
+          ready:
+            item.toolkit === "xero"
+              ? Boolean(
+                  process.env.XERO_CLIENT_ID?.trim() &&
+                    process.env.XERO_CLIENT_SECRET?.trim(),
+                )
+              : item.ready,
           allowed: allowed.get(item.toolkit) ?? false,
           connectionAccountId: row?.connectionAccountId ?? null,
           scope: "staff" as const,
@@ -1364,6 +1378,14 @@ export const connectionsRouter = router({
       }
       return result;
     }),
+
+  /** Native Xero OAuth (not Composio) — tokens land in Vault. */
+  startXeroOAuth: staffProcedure.mutation(async ({ ctx }) => {
+    await requireAllowedApp("xero");
+    const employeeId = requireEmployeeId(ctx.employeeId);
+    const { buildXeroAuthorizeUrl } = await import("../finance/xero-tokens");
+    return buildXeroAuthorizeUrl(employeeId);
+  }),
 
   disconnect: staffProcedure
     .input(z.object({ id: z.string().min(1) }))

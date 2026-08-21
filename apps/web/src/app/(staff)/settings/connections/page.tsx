@@ -39,6 +39,7 @@ export default function ConnectionsPage() {
         utils.connections.asanaStatus.invalidate(),
       ]),
   });
+  const startXeroOAuth = trpc.connections.startXeroOAuth.useMutation();
   const startOAuth = trpc.connections.startOAuth.useMutation();
   const disconnect = trpc.connections.disconnect.useMutation({
     onSuccess: () =>
@@ -225,11 +226,20 @@ export default function ConnectionsPage() {
                   type="button"
                   variant="ghost"
                   disabled={
-                    !item.allowed || !item.ready || startOAuth.isPending
+                    !item.allowed ||
+                    !item.ready ||
+                    startOAuth.isPending ||
+                    startXeroOAuth.isPending
                   }
                   onClick={() => {
                     if (item.toolkit === "google_workspace") {
                       void connectGoogleWorkspace();
+                      return;
+                    }
+                    if (item.toolkit === "xero") {
+                      void startXeroOAuth
+                        .mutateAsync()
+                        .then((result) => setRedirect(result.redirectUrl));
                       return;
                     }
                     void startOAuth
