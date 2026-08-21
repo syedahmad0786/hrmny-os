@@ -81,8 +81,7 @@ export default function HuntClientsPage() {
   }
   if ((ready?.connections?.googleWorkspace ?? 0) < 1) {
     blockers.push(
-      (ready?.connections as { errors?: { googleWorkspace?: number } } | undefined)
-        ?.errors?.googleWorkspace
+      (ready?.connections?.errors?.googleWorkspace ?? 0) > 0
         ? "Reconnect Google Workspace (token revoked) for live HITL Gmail"
         : "Reconnect Google Workspace for live HITL Gmail",
     );
