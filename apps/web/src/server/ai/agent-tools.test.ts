@@ -65,7 +65,7 @@ describe("runAgentTools funnel writes", () => {
     };
     expect(portalAsset?.assetId).toBeTruthy();
     expect(portalAsset?.taskId).toBeTruthy();
-    expect(portalAsset?.portalHref).toBe("/portal/approvals");
+    expect(portalAsset?.portalHref).toMatch(/\/portal\/login\/verify\?token=/);
     if (portalAsset?.mode === "memory") {
       const store = getDemoStore();
       expect(store.assets.has(portalAsset.assetId!)).toBe(true);

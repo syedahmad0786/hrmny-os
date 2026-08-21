@@ -40,8 +40,8 @@ describe("chat harness funnel_act", () => {
     expect(byTool["tasks.create"]?.ok).toBe(true);
     expect(byTool["crm.note"]?.ok).toBe(true);
     expect(byTool["creative.sendToPortal"]?.ok).toBe(true);
-    expect(byTool["creative.sendToPortal"]?.data?.portalHref).toBe(
-      "/portal/approvals",
+    expect(byTool["creative.sendToPortal"]?.data?.portalHref).toMatch(
+      /\/portal\/login\/verify\?token=/,
     );
     expect(byTool["crm.prospect"]).toBeUndefined();
   });

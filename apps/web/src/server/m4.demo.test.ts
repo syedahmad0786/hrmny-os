@@ -167,7 +167,7 @@ describe("M4 delivery demo", () => {
     });
     expect(attached.ok).toBe(true);
     expect(attached.mode).toBe("stub");
-    expect(attached.portalHref).toBe("/portal/approvals");
+    expect(attached.portalHref).toMatch(/\/portal\/login\/verify\?token=/);
     expect(attached.assetId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
