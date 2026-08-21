@@ -410,6 +410,9 @@ const DEMO_CALENDAR_ID = "a1000000-0000-4000-8000-0000000000a4";
 const DEMO_TASK_ID = "b1000000-0000-4000-8000-0000000000a4";
 const DEMO_BRIEF_ID = "d1000000-0000-4000-8000-0000000000a4";
 const DEMO_CREATIVE_TASK_ID = "b2000000-0000-4000-8000-0000000000a4";
+/** Second Demo Co creative task — pending portal approval for approve e2e (isolated from reject). */
+const DEMO_CREATIVE_APPROVE_TASK_ID = "b2000000-0000-4000-8000-0000000000a5";
+const DEMO_PORTAL_APPROVE_ID = "f1000000-0000-4000-8000-0000000000a2";
 const DEMO_CLIENT_B_TASK_ID = "b1000000-0000-4000-8000-0000000000b4";
 
 export type DemoDeliveryStatus = {
@@ -889,17 +892,58 @@ class MemoryDemoStore {
 
   seedPortalApprovals() {
     const asset = [...this.assets.values()].find(
-      (a) => a.clientId === DEMO_CLIENT_ID,
+      (a) => a.clientId === DEMO_CLIENT_ID && a.taskId === DEMO_CREATIVE_TASK_ID,
     );
-    if (!asset) return;
-    const approvalId = "f1000000-0000-4000-8000-0000000000a1";
-    this.portalApprovals.set(approvalId, {
-      approvalId,
+    if (asset) {
+      const approvalId = "f1000000-0000-4000-8000-0000000000a1";
+      this.portalApprovals.set(approvalId, {
+        approvalId,
+        clientId: DEMO_CLIENT_ID,
+        title: "Approve launch reel cut",
+        kind: "asset",
+        status: "pending",
+        entityId: asset.assetId,
+        slaHours: 48,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    // Second pending approval so approve + reject e2es don't collide.
+    const month =
+      [...this.calendars.values()].find((c) => c.clientId === DEMO_CLIENT_ID)
+        ?.month ?? new Date().toISOString().slice(0, 7);
+    const approveTask: DemoTask = {
+      taskId: DEMO_CREATIVE_APPROVE_TASK_ID,
       clientId: DEMO_CLIENT_ID,
-      title: "Approve launch reel cut",
+      calendarId: DEMO_CALENDAR_ID,
+      month,
+      taskType: "social_still",
+      title: "Product stills pack (portal approve demo)",
+      status: "client_review",
+      situationalState: null,
+      ownerEmployeeId: DEMO_EMPLOYEE_ID,
+      deadline: new Date().toISOString().slice(0, 10),
+      priority: "P2",
+      qcPassed: true,
+      qcNotes: "QC passed",
+      clientRevisionCount: 0,
+      revisionBoundaryAck: false,
+      briefId: null,
+    };
+    this.tasks.set(approveTask.taskId, approveTask);
+    const stills = this.createAsset(
+      "Product stills pack",
+      DEMO_CLIENT_ID,
+      DEMO_CREATIVE_APPROVE_TASK_ID,
+    );
+    stills.status = "client_review";
+    this.portalApprovals.set(DEMO_PORTAL_APPROVE_ID, {
+      approvalId: DEMO_PORTAL_APPROVE_ID,
+      clientId: DEMO_CLIENT_ID,
+      title: "Approve product stills pack",
       kind: "asset",
       status: "pending",
-      entityId: asset.assetId,
+      entityId: stills.assetId,
       slaHours: 48,
       createdAt: new Date().toISOString(),
     });
@@ -1236,6 +1280,8 @@ export {
   DEMO_TASK_ID,
   DEMO_BRIEF_ID,
   DEMO_CREATIVE_TASK_ID,
+  DEMO_CREATIVE_APPROVE_TASK_ID,
+  DEMO_PORTAL_APPROVE_ID,
   DEMO_CLIENT_B_TASK_ID,
   ONBOARDING_PHASE_NAMES,
   MONTH1_PHASE_NAMES,

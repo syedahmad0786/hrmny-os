@@ -285,7 +285,7 @@ test.describe("Demo funnel", () => {
       "content-type": "application/json",
     };
 
-    // Memory-mode demo store seeds a pending Demo Co approval on first use.
+    // Memory-mode demo store seeds pending Demo Co approvals (reject + approve isolated).
     const list = await request.get("/api/trpc/portal.approvals.list", {
       headers: portalHeaders,
     });
@@ -303,7 +303,8 @@ test.describe("Demo funnel", () => {
       }>) ??
       [];
     const pending = (Array.isArray(approvals) ? approvals : []).find(
-      (a) => a.status === "pending",
+      (a) =>
+        a.status === "pending" && /Approve launch reel cut/i.test(a.title),
     );
     expect(pending, listText).toBeTruthy();
 
@@ -326,12 +327,17 @@ test.describe("Demo funnel", () => {
     await expect(
       page.getByRole("heading", { name: /Notifications/i }),
     ).toBeVisible({ timeout: 60_000 });
-    await expect(page.locator("body")).toContainText(/Client revisions/i);
-    await expect(page.locator("body")).toContainText(pending!.title);
-    await expect(page.locator("body")).toContainText(/E2E: tighten the hook/i);
+    const rejectRow = page
+      .locator("li")
+      .filter({ hasText: /Client revisions/i })
+      .filter({ hasText: pending!.title });
+    await expect(rejectRow).toBeVisible();
+    await expect(rejectRow).toContainText(/E2E: tighten the hook/i);
 
     // Open must deep-link into Creative with the revised task focused.
-    const openLink = page.locator('a[href*="/creative?"][href*="taskId="]');
+    const openLink = rejectRow.locator(
+      'a[href*="/creative?"][href*="taskId="]',
+    );
     await expect(openLink).toBeVisible();
     await expect(openLink).toHaveAttribute("href", /taskId=/);
     await openLink.click();
@@ -347,6 +353,86 @@ test.describe("Demo funnel", () => {
     );
     await expect(page.getByTestId("creative-task-meta")).toContainText(
       /clientRevisions=[1-9]/,
+    );
+  });
+
+  test("portal approve lands in partner inbox and Creative deep-link", async ({
+    page,
+    request,
+  }) => {
+    const portalHeaders = {
+      "x-dev-role": "portal_a",
+      "content-type": "application/json",
+    };
+
+    const list = await request.get("/api/trpc/portal.approvals.list", {
+      headers: portalHeaders,
+    });
+    const listText = await list.text();
+    expect(list.ok(), listText).toBeTruthy();
+    const listBody = JSON.parse(listText) as {
+      result?: {
+        data?: {
+          json?: Array<{ approvalId: string; status: string; title: string }>;
+        };
+      };
+    };
+    const approvals =
+      listBody.result?.data?.json ??
+      (listBody.result?.data as unknown as Array<{
+        approvalId: string;
+        status: string;
+        title: string;
+      }>) ??
+      [];
+    const pending = (Array.isArray(approvals) ? approvals : []).find(
+      (a) =>
+        a.status === "pending" &&
+        /Approve product stills pack/i.test(a.title),
+    );
+    expect(pending, listText).toBeTruthy();
+
+    const act = await request.post("/api/trpc/portal.approvals.act", {
+      headers: portalHeaders,
+      data: {
+        json: {
+          id: pending!.approvalId,
+          action: "approve",
+          feedback: "E2E: ship it",
+        },
+      },
+    });
+    const actText = await act.text();
+    expect(act.ok(), actText).toBeTruthy();
+    expect(actText).not.toMatch(/"error"/);
+
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/notifications", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /Notifications/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    const approveRow = page
+      .locator("li")
+      .filter({ hasText: /Client approved/i })
+      .filter({ hasText: pending!.title });
+    await expect(approveRow).toBeVisible();
+    await expect(approveRow).toContainText(/E2E: ship it/i);
+
+    const openLink = approveRow.locator(
+      'a[href*="/creative?"][href*="taskId="]',
+    );
+    await expect(openLink).toBeVisible();
+    await expect(openLink).toHaveAttribute("href", /taskId=/);
+    await openLink.click();
+    await expect(
+      page.getByRole("heading", { name: /^Creative$/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/\/creative\?.*taskId=/);
+    await expect(page.getByTestId("creative-task-meta")).toContainText(
+      /status=approved/,
+    );
+    await expect(page.getByTestId("creative-approved-banner")).toContainText(
+      /Client approved/i,
     );
   });
 

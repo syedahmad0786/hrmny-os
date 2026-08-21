@@ -4,7 +4,9 @@ import {
   DEMO_BRIEF_ID,
   DEMO_CLIENT_B_ID,
   DEMO_CLIENT_ID,
+  DEMO_CREATIVE_APPROVE_TASK_ID,
   DEMO_CREATIVE_TASK_ID,
+  DEMO_PORTAL_APPROVE_ID,
   DEMO_STAFF_LEAD_ID,
   getDemoStore,
 } from "./demo-store";
@@ -70,7 +72,9 @@ describe("M6 portal + seams", () => {
     const partner = callerFor("partner");
     const preview = await partner.clientPreview.workspace();
     const approval = preview.approvals.find(
-      (item) => item.status === "pending",
+      (item) =>
+        item.status === "pending" &&
+        /Approve launch reel cut/i.test(item.title),
     );
     expect(preview.clientName).toContain("Demo Co");
     expect(approval).toBeDefined();
@@ -110,7 +114,10 @@ describe("M6 portal + seams", () => {
     const portal = callerFor("portal_a");
     const store = getDemoStore();
     const pending = [...store.portalApprovals.values()].find(
-      (a) => a.clientId === DEMO_CLIENT_ID && a.status === "pending",
+      (a) =>
+        a.clientId === DEMO_CLIENT_ID &&
+        a.status === "pending" &&
+        /Approve launch reel cut/i.test(a.title),
     );
     expect(pending).toBeDefined();
     const asset = store.assets.get(pending!.entityId);
@@ -141,6 +148,41 @@ describe("M6 portal + seams", () => {
           /Approve launch reel cut/i.test(n.title) &&
           /Tighten the hook/i.test(n.body ?? "") &&
           (n.href ?? "").includes(`taskId=${DEMO_CREATIVE_TASK_ID}`),
+      ),
+    ).toBe(true);
+  });
+
+  it("portal approve moves task to approved and notifies staff with Creative deep-link", async () => {
+    const portal = callerFor("portal_a");
+    const store = getDemoStore();
+    const pending = store.portalApprovals.get(DEMO_PORTAL_APPROVE_ID);
+    expect(pending?.status).toBe("pending");
+    expect(pending?.title).toMatch(/Approve product stills pack/i);
+    const asset = store.assets.get(pending!.entityId);
+    expect(asset?.taskId).toBe(DEMO_CREATIVE_APPROVE_TASK_ID);
+
+    const result = await portal.portal.approvals.act({
+      id: pending!.approvalId,
+      action: "approve",
+      feedback: "Looks good — ship it",
+    });
+    expect(result.status).toBe("approved");
+    expect(store.portalApprovals.get(pending!.approvalId)?.status).toBe(
+      "approved",
+    );
+    const task = store.tasks.get(DEMO_CREATIVE_APPROVE_TASK_ID)!;
+    expect(task.status).toBe("approved");
+
+    const { listNotifications } = await import("./notifications/store");
+    const inbox = await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 20 });
+    expect(
+      inbox.some(
+        (n) =>
+          n.kind === "creative" &&
+          /Client approved/i.test(n.title) &&
+          /Approve product stills pack/i.test(n.title) &&
+          /Looks good/i.test(n.body ?? "") &&
+          (n.href ?? "").includes(`taskId=${DEMO_CREATIVE_APPROVE_TASK_ID}`),
       ),
     ).toBe(true);
   });
