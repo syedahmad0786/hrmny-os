@@ -1,3 +1,5 @@
+process.env.COMPOSIO_API_KEY = "";
+
 import { beforeEach, describe, expect, it } from "vitest";
 import { createCaller } from "./trpc/root";
 import {
@@ -138,7 +140,7 @@ describe("M4 delivery demo", () => {
     }
   });
 
-  it("task board + Canva connect stub", async () => {
+  it("task board + Canva connect stub (memory mode)", async () => {
     const traffic = callerFor("traffic");
     const board = await traffic.dashboards.delivery();
     expect(board.board.some((c) => c.tasks.length > 0)).toBe(true);
@@ -149,6 +151,10 @@ describe("M4 delivery demo", () => {
     expect(conn.status).toBe("connected");
     const designs = await partner.connections.canvaListDesigns();
     expect(designs.ok).toBe(true);
-    if (designs.ok) expect(designs.designs.length).toBeGreaterThan(0);
+    if (designs.ok) {
+      expect(designs.mode).toBe("stub");
+      expect(designs.designs.length).toBeGreaterThan(0);
+      expect(designs.designs[0]?.id).toMatch(/^stub-design-/);
+    }
   });
 });

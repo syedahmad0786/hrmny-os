@@ -69,6 +69,7 @@ const readOnlyToolSlugs = new Set([
   "SLACK_SEARCH_MESSAGES",
   "MICROSOFT_TEAMS_SEARCH_MESSAGES",
   "JIRA_SEARCH_ISSUES",
+  "CANVA_LIST_USER_DESIGNS",
 ]);
 
 export type ComposioConnectedAccount = z.infer<typeof connectedAccountSchema>;

@@ -18,6 +18,10 @@ export {
   type ComposioLiveClient,
 } from "./composio/live";
 export {
+  listCanvaUserDesigns,
+  type CanvaDesignSummary,
+} from "./composio/canva";
+export {
   createAsanaDirect,
   createAsanaViaComposio,
   type AsanaAdapter,
