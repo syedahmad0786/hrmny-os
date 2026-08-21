@@ -31,27 +31,60 @@ const STEPS = [
   },
 ] as const;
 
+type ReadySmoke = {
+  tools?: Record<string, string>;
+  portalMagicLink?: string;
+  connections?: {
+    googleWorkspace?: number;
+    canva?: number;
+    linkedin?: number;
+    xero?: number;
+  };
+};
+
 export default function HuntClientsPage() {
   const [result, setResult] = useState<string | null>(null);
   const [query, setQuery] = useState("UAE retail brand");
   const [lastApolloDealId, setLastApolloDealId] = useState<string | null>(null);
-  const [toolReady, setToolReady] = useState<Record<string, string> | null>(
-    null,
-  );
+  const [ready, setReady] = useState<ReadySmoke | null>(null);
   const utils = trpc.useUtils();
 
   useEffect(() => {
     let cancelled = false;
     void fetch("/api/ready")
       .then((r) => r.json())
-      .then((body: { tools?: Record<string, string> }) => {
-        if (!cancelled && body.tools) setToolReady(body.tools);
+      .then((body: ReadySmoke) => {
+        if (!cancelled) setReady(body);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const toolReady = ready?.tools ?? null;
+  const blockers: string[] = [];
+  if (toolReady?.apollo === "mock") {
+    blockers.push("Paste Apollo API key in Connections");
+  }
+  if (toolReady?.hunter === "mock") {
+    blockers.push("Paste Hunter API key in Connections");
+  }
+  if (toolReady?.xero === "mock") {
+    blockers.push("Connect Xero OAuth in Connections");
+  }
+  if ((ready?.connections?.googleWorkspace ?? 0) < 1) {
+    blockers.push("Reconnect Google Workspace for live HITL Gmail");
+  }
+  if ((ready?.connections?.linkedin ?? 0) < 1) {
+    blockers.push("Connect LinkedIn (Composio) for campaign publish");
+  }
+  if ((ready?.connections?.canva ?? 0) < 1) {
+    blockers.push("Connect Canva (Composio) for design → portal");
+  }
+  if (toolReady?.resend === "mock") {
+    blockers.push("Set RESEND_MODE=live + RESEND_API_KEY for real portal email");
+  }
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
     onSuccess: (data) => {
       if (!data.ok) {
