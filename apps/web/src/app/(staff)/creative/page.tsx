@@ -146,6 +146,7 @@ function CreativeQcPageInner() {
         <Button
           className="mt-3"
           type="button"
+          data-testid="creative-generate"
           disabled={generate.isPending || prompt.trim().length < 3}
           onClick={() =>
             generate.mutate({
@@ -162,6 +163,7 @@ function CreativeQcPageInner() {
           </label>
           <select
             id="portal-client"
+            data-testid="creative-portal-client"
             className="rounded-lg border border-sand bg-white px-2 py-1.5 text-sm"
             value={portalClientId}
             onChange={(e) => {
@@ -179,6 +181,7 @@ function CreativeQcPageInner() {
           <Button
             type="button"
             variant="ghost"
+            data-testid="creative-send-portal"
             disabled={
               sendToPortal.isPending ||
               !portalClientId ||
@@ -347,7 +350,7 @@ function CreativeQcPageInner() {
         </div>
         {msg ? <p className="mt-3 text-ink">{msg}</p> : null}
         {portalHref ? (
-          <p className="mt-2 text-sm">
+          <p className="mt-2 text-sm" data-testid="creative-portal-review">
             <a href={portalHref} className="text-ochre underline">
               Open portal review →
             </a>

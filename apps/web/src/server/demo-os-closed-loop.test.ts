@@ -60,6 +60,11 @@ describe("demo OS closed loop", () => {
     const asset = getDemoStore().assets.get(sent.assetId);
     expect(asset?.status).toBe("client_review");
     expect(asset?.clientId).toBe(DEMO_CLIENT_ID);
+    const pending = [...getDemoStore().portalApprovals.values()].filter(
+      (a) => a.clientId === DEMO_CLIENT_ID && a.status === "pending",
+    );
+    expect(pending.some((a) => a.entityId === sent.assetId)).toBe(true);
+    expect(sent.portalHref).toMatch(/\/portal\//);
   });
 
   it("apollo import writes durable CRM deals visible to crm.deals", async () => {
