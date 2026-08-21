@@ -74,8 +74,8 @@ export default function ConnectionsPage() {
   });
   const authorizeManaged = trpc.connections.authorizeManaged.useMutation({
     onSuccess: (result) => {
-      setRedirect(result.redirectUrl);
-      void utils.connections.managedAccounts.invalidate();
+      // Navigate immediately so Composio callback_url lands back here for reconcile.
+      window.location.assign(result.redirectUrl);
     },
   });
   const disconnectManaged = trpc.connections.disconnectManaged.useMutation({

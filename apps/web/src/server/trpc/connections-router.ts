@@ -397,6 +397,14 @@ function requireSystemComposio() {
   return (systemComposio ??= createComposioLive({ apiKey }));
 }
 
+/** Where Canva/LinkedIn OAuth should return so reconcile + polling can run. */
+export function composioConnectionsCallbackUrl(): string {
+  return new URL(
+    "/settings/connections",
+    process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3000",
+  ).toString();
+}
+
 function isActiveComposioStatus(
   status: string | null | undefined,
   isDisabled?: boolean | null,
@@ -1292,7 +1300,9 @@ export const connectionsRouter = router({
         )
         .limit(1);
 
-      const request = await client.authorize(employeeId, input.toolkit);
+      const request = await client.authorize(employeeId, input.toolkit, {
+        callbackUrl: composioConnectionsCallbackUrl(),
+      });
       try {
         if (existing) {
           if (existing.externalConnectionId) {
@@ -1601,6 +1611,7 @@ export const connectionsRouter = router({
         const request = await requireSystemComposio().authorize(
           employeeId,
           input.toolkit,
+          { callbackUrl: composioConnectionsCallbackUrl() },
         );
         return { redirectUrl: request.redirectUrl };
       }

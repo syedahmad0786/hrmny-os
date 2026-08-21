@@ -3,7 +3,22 @@ import {
   findStaffConnectionRow,
   isActiveComposioRemote,
   pickActiveComposioAccount,
+  composioConnectionsCallbackUrl,
 } from "./trpc/connections-router";
+
+describe("composioConnectionsCallbackUrl", () => {
+  it("points at settings connections under APP_URL", () => {
+    const prev = process.env.NEXT_PUBLIC_APP_URL;
+    process.env.NEXT_PUBLIC_APP_URL = "https://hrmny-os.vercel.app";
+    try {
+      expect(composioConnectionsCallbackUrl()).toBe(
+        "https://hrmny-os.vercel.app/settings/connections",
+      );
+    } finally {
+      process.env.NEXT_PUBLIC_APP_URL = prev;
+    }
+  });
+});
 
 describe("findStaffConnectionRow", () => {
   it("prefers exact toolkit match over composio-prefixed row", () => {
