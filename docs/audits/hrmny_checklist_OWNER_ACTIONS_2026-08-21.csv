@@ -1,0 +1,204 @@
+Section,Item ID,Item,Previous status,Live verdict 2026-08-21,Evidence,LLM excluded?,Notes
+Executive Summary,Canva,Canva,STUB — NOT ORIGINAL SOW,STUB / OUT OF SCOPE,Not launch-critical stub,N,
+Executive Summary,Supervisor task role,Supervisor task role,FAIL,BLOCKED,No multi-user SSO session in agent run,N,Needs @hrmny.co
+Executive Summary,Feature catalogue,Feature catalogue,PARTIAL,PARTIAL,Master features AVAILABLE/BETA; live routes retested,N,
+Executive Summary,Sign-off,Sign-off,NOT CONFIRMED SIGNED,BLOCKED,Human owner sign-off required,N,
+Routes & APIs,PAGE-043,Page /sales,BLOCKED,SUPERSEDED,superseded by /crm*,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-044,Page /sales/:id,BLOCKED,SUPERSEDED,superseded by /crm*,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-046,Page /sales/outreach,BLOCKED,SUPERSEDED,superseded by /crm*,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-045,Page /sales/inbound,BLOCKED,SUPERSEDED,superseded by /crm*,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-009,Page /card/:slug,BLOCKED,PARTIAL,HTTP 404,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-003,API /api/mcp/work,BLOCKED,PARTIAL,HTTP 405,N,Auth-gated pages count as live if 200 shell or 401 API
+Creative Hub,CH-002,Tenant/client/brand selection,FAIL,PARTIAL,UI shipped; SSO needed for selection proof,N,
+Creative Hub,CH-003,Role access,NOT VERIFIED,BLOCKED,SSO role matrix not exercised,N,
+Creative Hub,CH-009,Brand override approval,FAIL,BLOCKED,SSO role matrix not exercised,N,
+Creative Hub,CH-010,OAuth connect,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-011,Open/create design,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-012,Edit handoff and return,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-013,Export variants,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-018,Queue and state machine,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-019,Cost/spend approval,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-020,Timeout/retry/cancel,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-021,Webhook/poll verification,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-022,Output import,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-023,Versioning,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-025,File safety,NOT VERIFIED,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-026,Task/project linkage,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-027,Automated preflight,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-028,Human creative review,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-029,Portal delivery,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-030,Client approval,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-031,Creative notifications,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-033,Provider data boundary,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-034,Loading/empty/error states,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-035,Accessibility/responsive,NOT TESTED,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-036,Pilot concurrency,NOT TESTED,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Task Propagation,TP-001,Authorized creator,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-002,Validated input,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-003,Canonical task record,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-004,Project membership,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-005,Creator attribution,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-006,Ahmad assignee,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-007,Supervisor relation,FAIL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-008,Supervisor permissions,FAIL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-009,My Tasks,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-010,Project board,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-011,Company all tasks,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-012,No data duplication,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-013,Assignee notification,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-014,Supervisor notification,FAIL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-015,Creator/follower policy,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-016,Inbox state,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-017,Optional email/chat,NOT VERIFIED,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-018,Atomic update propagation,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-019,Reassignment,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-020,Completion,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-021,Comments and mentions,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-022,Attachments,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-023,Transaction rollback,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-024,Double-click/network retry,FAIL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-025,Concurrent edits,FAIL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-026,Tenant/project isolation,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-027,All create controls work,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-028,Loading/empty/error/404,NOT TESTED,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-029,Mulham -> Ahmad + supervisor,BLOCKED,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-030,Reassign and complete,BLOCKED,BLOCKED,Requires SSO multi-user journey,N,
+Integrations,INT-001,Canva: Creative design handoff/create/export,FAIL,STUB / OUT OF SCOPE,Deferred stub,N,
+Integrations,INT-004,Generative image/video provider: Create visuals when Canva is not the generator,FAIL,STUB / OUT OF SCOPE,Deferred stub,N,
+Integrations,INT-010,Gmail: Governed outreach/service communication,NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-013,n8n: Workflow orchestration and ingestion events,PARTIAL,PARTIAL,tools.n8n=mock; webhook endpoint 200,N,
+Integrations,INT-015,Asana: One-time import/reconcile then retire,PARTIAL,PARTIAL,Webhook route exists; live Asana contract not re-proved this run,N,
+Integrations,INT-016,Bayzat: Parallel People migration then retire,NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-017,Xero: Accounting posting/reconciliation,FAIL,PARTIAL,tools.xero=mock write=False,N,
+Integrations,INT-018,Apollo: Lead discovery/enrichment,NOT VERIFIED,PARTIAL,tools.apollo=mock,N,
+Integrations,INT-019,Hunter: Email discovery/verification,NOT VERIFIED,PARTIAL,tools.hunter=mock,N,
+Integrations,INT-020,LinkedIn: Governed prospecting/outreach,NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-021,"Meta Ads: Spend, leads, campaign/outcome data",NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-023,GHL: Appointment/lead/outcome reconciliation if retained,NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-024,"Transactional email: Invites, approvals, alerts and resets",NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-025,Vercel: Production deployment,PARTIAL,NOT VERIFIED,No live probe mapped this run,N,
+Production Gates,GATE-003,Reproducible install,NOT TESTED,PARTIAL,CI/deploy green on merge; full suite not re-executed in this audit run,N,
+Production Gates,GATE-004,Lint/typecheck,NOT TESTED,PARTIAL,CI/deploy green on merge; full suite not re-executed in this audit run,N,
+Production Gates,GATE-006,Production build,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-009,Custom domain/TLS,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-010,Environment parity,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-011,Safe rollback,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-012,Feature flags/kill switches,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-013,SSO/login callback,NOT TESTED,BLOCKED,Owner/SSO gate,N,
+Production Gates,GATE-014,Session lifecycle,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-015,Role/tenant isolation,NOT TESTED,BLOCKED,Owner/SSO gate,N,
+Production Gates,GATE-016,Secrets,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-017,Input/output defenses,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-018,Rate limits/abuse,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-019,Dependency/headers,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-020,Every route,BLOCKED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-021,Every actionable control,BLOCKED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-022,No rough surfaces,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-023,Loading/empty/error,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-024,Accessibility,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-025,Responsive/browser,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-026,API inventory/contracts,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-027,Idempotency/concurrency,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-028,Jobs/retries/DLQ,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-029,Auditability,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-031,Backup restore,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-033,Mulham task UAT,BLOCKED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-035,Real accounts/scopes,BLOCKED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-036,Logs/metrics/traces,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-037,Alerts/on-call,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-038,Pilot load,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-039,Soak/provider failure,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-040,Runbooks,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-041,Support/defect intake,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-042,10-20 named users,NOT VERIFIED,BLOCKED,Owner/SSO gate,N,
+Role Journeys,E2E-001,Create -> assign -> supervise -> fan-out,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-004,Lead -> qualify -> deal -> handoff,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-005,Ads spend -> lead -> revenue -> ROAS,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-006,Won deal -> client/project/work,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-007,Brief -> work -> asset -> QC,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-008,Portal approval,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-009,Quote -> invoice -> payment -> reconciliation,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-010,Leave -> approval -> balance,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-011,Payroll prepare -> approve -> export/post,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-012,Invite -> role -> revoke,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-013,RAG answer with citations,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-014,Provider outage recovery,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-015,Database/object restore,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Sign-off,Product scope,Agency owner,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Engineering,Technical owner,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Security/privacy,Security/data owner,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Operations,Ops owner,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Creative Hub,Creative lead + brand owners,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Work,Operations lead,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,RAG/AI,AI governance owner,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Finance/People,Finance + HR owners,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Pilot go-live,Executive release owner,BLOCKED,BLOCKED,Human approver required,N,
+Implementation Queue,Phase 0-GATE-001,Milestone gate: Close every failed/open row in this milestone and record the accepted evidence links.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,Acceptance demo
+Implementation Queue,P0-SYS-01,Complete system: Attach the executed commercial documents.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,System
+Implementation Queue,PLAN-P0-001,"Kickoff & Access Gate: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-P0-002,"Kickoff & Access Gate: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-P0-003,"Kickoff & Access Gate: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-P0-004,"Kickoff & Access Gate: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-P0-005,"Kickoff & Access Gate: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-P0-006,"Kickoff & Access Gate: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-P0-008,Kickoff & Access Gate: Confirm inclusion and payment treatment in writing.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-P0-009,"Kickoff & Access Gate: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-P0-010,"Kickoff & Access Gate: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,E0-S1,"Phase 0 — Legal & reference exports: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,Original story
+Implementation Queue,E0-S2,"Phase 0 — Legal & reference exports: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,Original story
+Implementation Queue,E0-S3,"Phase 0 — Legal & reference exports: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,Original story
+Implementation Queue,E0-S4,"Phase 0 — Legal & reference exports: Implement or prove the requirement, run its acceptance demo, and obtain named sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,Original story
+Implementation Queue,M1-TOOL-005,External boundary: No internal software work remains for this CI-only control; rerun the exact-candidate gate whenever the candidate changes.,✅ DONE,PASS,Already DONE in sheet,N,Tool / integration
+Implementation Queue,PLAN-M1-013,Testing & security (continuous): No internal software work remains for this CI-only control; rerun the exact-candidate gate whenever the candidate changes.,✅ DONE,PASS,Already DONE in sheet,N,90-Day task
+Implementation Queue,PLAN-M1-014,Testing & security (continuous): No internal software work remains for this CI-only control; rerun the exact-candidate gate whenever the candidate changes.,✅ DONE,PASS,Already DONE in sheet,N,90-Day task
+Implementation Queue,M2-GATE-001,Milestone gate: Close every failed/open row in this milestone and record the accepted evidence links.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,Acceptance demo
+Implementation Queue,M2-SYS-01,"Complete system: Complete live Xero OAuth, fail-loud and read-back tests.",⬜ TODO,PARTIAL,xero mock; write disabled,N,System
+Implementation Queue,M2-SYS-02,Complete system: Use an approved real invoice and prove source attachment plus Xero ID read-back.,⬜ TODO,PARTIAL,xero mock; write disabled,N,System
+Implementation Queue,M2-SYS-03,Complete system: Complete the queue and reconcile approved bank lines against Xero.,⬜ TODO,PARTIAL,xero mock; write disabled,N,System
+Implementation Queue,PLAN-M2-001,"Finance (A2) — orchestration over Xero: Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,PARTIAL,xero mock; write disabled,N,90-Day task
+Implementation Queue,PLAN-M2-002,"Finance (A2) — orchestration over Xero: Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,PARTIAL,xero mock; write disabled,N,90-Day task
+Implementation Queue,PLAN-M2-003,"Finance (A2) — orchestration over Xero: Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,PARTIAL,xero mock; write disabled,N,90-Day task
+Implementation Queue,PLAN-M2-004,"Finance (A2) — orchestration over Xero: Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,PARTIAL,xero mock; write disabled,N,90-Day task
+Implementation Queue,PLAN-M2-005,"Finance (A2) — orchestration over Xero: Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,PARTIAL,xero mock; write disabled,N,90-Day task
+Implementation Queue,PLAN-M2-006,"Finance (A2) — orchestration over Xero: Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,PARTIAL,xero mock; write disabled,N,90-Day task
+Implementation Queue,PLAN-M2-011,"Acceptance demo (M2): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-M2-012,"Acceptance demo (M2): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-M2-013,Acceptance demo (M2): Pass the complete milestone demo on real approved accounts/data and obtain written acceptance.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,M3-GATE-001,Milestone gate: Close every failed/open row in this milestone and record the accepted evidence links.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,Acceptance demo
+Implementation Queue,M3-SYS-01,Complete system: Connect approved accounts and reconcile a real lead from discovery to deal.,⬜ TODO,PASS,crm.health postgres live,N,System
+Implementation Queue,M3-SYS-02,Complete system: Run the full deal thread with expected gate denials and immutable audit rows.,⬜ TODO,PASS,crm.health postgres live,N,System
+Implementation Queue,M3-SYS-03,Complete system: Verify one contact and send one approved test email with audit/reconciliation.,⬜ TODO,PASS,crm.health postgres live,N,System
+Implementation Queue,M3-SYS-05,Complete system: Reconcile one Won deal into its onboarding plan and knowledge base.,⬜ TODO,PASS,crm.health postgres live,N,System
+Implementation Queue,PLAN-M3-001,"Deal pipeline (B1): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,PASS,crm.health postgres live,N,90-Day task
+Implementation Queue,PLAN-M3-002,"Deal pipeline (B1): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,PASS,crm.health postgres live,N,90-Day task
+Implementation Queue,PLAN-M3-003,"Deal pipeline (B1): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,PASS,crm.health postgres live,N,90-Day task
+Implementation Queue,PLAN-M3-030,"Acceptance demo (M3): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-M3-031,"Acceptance demo (M3): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-M3-032,"Acceptance demo (M3): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-M3-033,Acceptance demo (M3): Pass the complete milestone demo on real approved accounts/data and obtain written acceptance.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,crm.workspace,CRM: Attach route/control/API/data/live evidence or hide the feature from the accepted production surface.,⬜ TODO,PASS,crm.health postgres live,N,Feature
+Implementation Queue,M4-GATE-001,Milestone gate: Close every failed/open row in this milestone and record the accepted evidence links.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,Acceptance demo
+Implementation Queue,M4-SYS-04,Complete system: Execute the requested Mulham→Ahmad→supervisor scenario with one canonical task and notification fan-out.,⬜ TODO,PASS,/notifications + os_notification shipped,N,System
+Implementation Queue,PLAN-M4-027,"Acceptance demo (M4): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-M4-028,"Acceptance demo (M4): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-M4-029,"Acceptance demo (M4): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-M4-030,Acceptance demo (M4): Pass the complete milestone demo on real approved accounts/data and obtain written acceptance.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,asana.connection,Integrations: Attach route/control/API/data/live evidence or hide the feature from the accepted production surface.,⬜ TODO,PASS,Composio configured + Reconnect UI,N,Feature
+Implementation Queue,work.task.notification_fanout,Work: Attach route/control/API/data/live evidence or hide the feature from the accepted production surface.,⬜ TODO,PASS,/notifications + os_notification shipped,N,Feature
+Implementation Queue,M5-GATE-001,Milestone gate: Close every failed/open row in this milestone and record the accepted evidence links.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,Acceptance demo
+Implementation Queue,M5-SYS-01,Complete system: Prove live Xero post/read-back with an approved test invoice.,⬜ TODO,PARTIAL,xero mock; write disabled,N,System
+Implementation Queue,M5-SYS-02,"Complete system: Reconcile one real client's Xero, Work and People inputs to the dirham.",⬜ TODO,PARTIAL,xero mock; write disabled,N,System
+Implementation Queue,PLAN-M5-010,"Acceptance demo (M5): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-M5-011,Acceptance demo (M5): Pass the complete milestone demo on real approved accounts/data and obtain written acceptance.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,M6-GATE-001,Milestone gate: Close every failed/open row in this milestone and record the accepted evidence links.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,Acceptance demo
+Implementation Queue,PLAN-M6-019,"Acceptance demo (M6): Replace mock/stub dependencies, reconcile real data, run role-based live browser acceptance, and obtain milestone acceptance.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-M6-020,Acceptance demo (M6): Pass the complete milestone demo on real approved accounts/data and obtain written acceptance.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,asana.connection,Integrations: Attach route/control/API/data/live evidence or hide the feature from the accepted production surface.,⬜ TODO,PASS,Composio configured + Reconnect UI,N,Feature
+Implementation Queue,work.task.notification_fanout,Work: Attach route/control/API/data/live evidence or hide the feature from the accepted production surface.,⬜ TODO,PASS,/notifications + os_notification shipped,N,Feature
+Implementation Queue,Continuous-GATE-001,Milestone gate: Close every failed/open row in this milestone and record the accepted evidence links.,⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,Acceptance demo
+Implementation Queue,PLAN-CONT-001,"Cross-cutting: Apply and evidence this control for every accepted milestone, including production and sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-CONT-002,"Cross-cutting: Apply and evidence this control for every accepted milestone, including production and sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-CONT-003,"Cross-cutting: Apply and evidence this control for every accepted milestone, including production and sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-CONT-004,"Cross-cutting: Apply and evidence this control for every accepted milestone, including production and sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,PLAN-CONT-005,"Cross-cutting: Apply and evidence this control for every accepted milestone, including production and sign-off.",⬜ TODO,BLOCKED,Owner/payment/sign-off action,N,90-Day task
+Implementation Queue,support.tickets,Core: Attach route/control/API/data/live evidence or hide the feature from the accepted production surface.,⬜ TODO,PASS,Tickets module live; tickets.health postgres,N,Feature

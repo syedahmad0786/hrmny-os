@@ -15,7 +15,9 @@
 
 Ops command home · `/crm/hunt` · `/tasks` · Hrmny `/chat` · `/tickets` · `/notifications` · creative image gen · agent CRUD · Composio reconnect.
 
-Live evidence sheet: https://docs.google.com/spreadsheets/d/107TARos-8OZ9r_PZNy6AzVZwDWWpQq93mksjHxphWoc
+Live evidence sheet: https://docs.google.com/spreadsheets/d/107TARos-8OZ9r_PZNy6AzVZwDWWpQq93mksjHxphWoc  
+Full checklist audit index: https://docs.google.com/spreadsheets/d/1x44fq-qKTTh3PIuj9d3JCsZS4oelHm8-m0WdWAHTya8  
+Repo audit CSVs: `docs/audits/` (LLM tests excluded)
 
 ## Access reality check
 
