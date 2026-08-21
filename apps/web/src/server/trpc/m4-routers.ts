@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   dorLockBlockedReason,
@@ -184,6 +185,12 @@ async function applyDurableTaskTransition(
 
 export const m4DemoRouter = router({
   reset: publicProcedure.mutation(() => {
+    if (getDb()) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "Demo M4 reset is disabled when DATABASE_URL is configured",
+      });
+    }
     getDemoStore().resetM4Demo();
     return {
       ok: true as const,
@@ -209,24 +216,26 @@ export const m4DemoRouter = router({
         return {
           clientId: latestCal.clientId,
           calendarId: latestCal.calendarId,
-          taskId: task?.taskId ?? DEMO_TASK_ID,
-          briefId: task?.briefId ?? DEMO_BRIEF_ID,
-          creativeTaskId: task?.taskId ?? DEMO_CREATIVE_TASK_ID,
+          taskId: task?.taskId ?? null,
+          briefId: task?.briefId ?? null,
+          creativeTaskId: task?.taskId ?? null,
           source: "durable_calendar" as const,
         };
       }
 
       async function withClientCalendar(clientId: string, fallback: {
-        taskId: string;
-        briefId: string;
-        creativeTaskId: string;
+        taskId: string | null;
+        briefId: string | null;
+        creativeTaskId: string | null;
       }) {
         const cals = await listDeliveryCalendars({ clientId });
         return {
           clientId,
-          calendarId: cals[0]?.calendarId ?? DEMO_CALENDAR_ID,
+          calendarId: cals[0]?.calendarId ?? null,
           ...fallback,
-          source: cals[0] ? ("durable_task" as const) : ("demo_fallback" as const),
+          source: cals[0]
+            ? ("durable_task" as const)
+            : ("durable_empty" as const),
         };
       }
 
@@ -252,10 +261,18 @@ export const m4DemoRouter = router({
       if (qcTasks[0]) {
         return withClientCalendar(qcTasks[0].clientId, {
           taskId: qcTasks[0].taskId,
-          briefId: qcTasks[0].briefId ?? DEMO_BRIEF_ID,
+          briefId: qcTasks[0].briefId ?? null,
           creativeTaskId: qcTasks[0].taskId,
         });
       }
+      return {
+        clientId: null,
+        calendarId: null,
+        taskId: null,
+        briefId: null,
+        creativeTaskId: null,
+        source: "durable_empty" as const,
+      };
     }
     const store = getDemoStore();
     if (store.calendars.size === 0) store.seedM4Demo();
