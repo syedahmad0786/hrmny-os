@@ -56,7 +56,7 @@ describe("chat harness funnel_act", () => {
     expect(clientTools.some((t) => t.name === "crm_closed_loop")).toBe(false);
   });
 
-  it("crm_closed_loop runs prospect→won→onboarding with portal links", async () => {
+  it("crm.closed_loop runs prospect→won→onboarding with portal links", async () => {
     const { resetCrmMemory } = await import("../crm/memory");
     resetCrmMemory();
     const tools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
@@ -70,8 +70,9 @@ describe("chat harness funnel_act", () => {
         ok: boolean;
         data?: {
           clientId?: string;
+          invoiceId?: string;
           portalInvite?: { portalPath?: string } | null;
-          next?: { portal?: string; client?: string };
+          next?: { portal?: string; client?: string; finance?: string };
           fired?: string[];
         };
       }>;
@@ -79,9 +80,73 @@ describe("chat harness funnel_act", () => {
     const loop = result.tools?.find((r) => r.tool === "crm.closed_loop");
     expect(loop?.ok).toBe(true);
     expect(loop?.data?.clientId).toBeTruthy();
+    expect(loop?.data?.invoiceId).toBeTruthy();
+    expect(loop?.data?.next?.finance).toMatch(/invoiceId=/);
     expect(loop?.data?.portalInvite?.portalPath ?? loop?.data?.next?.portal).toMatch(
       /\/portal\//,
     );
     expect(loop?.data?.fired?.includes("staff.notify")).toBe(true);
+  });
+
+  it("exposes finance_os_approve/issue only for org chat", async () => {
+    const orgTools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
+    const clientTools = buildChatDefaultTools({
+      employeeId: EMPLOYEE_ID,
+      clientId: CLIENT_ID,
+    });
+    expect(orgTools.some((t) => t.name === "finance_os_approve")).toBe(true);
+    expect(orgTools.some((t) => t.name === "finance_os_issue")).toBe(true);
+    expect(clientTools.some((t) => t.name === "finance_os_approve")).toBe(
+      false,
+    );
+    expect(clientTools.some((t) => t.name === "finance_os_issue")).toBe(false);
+  });
+
+  it("finance_os_approve then finance_os_issue after closed loop", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const tools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
+    const closed = tools.find((t) => t.name === "crm_closed_loop");
+    const loopResult = (await closed!.run({
+      prompt: "Run demo closed loop for company: Chat Finance Co",
+    })) as {
+      tools?: Array<{
+        tool: string;
+        ok: boolean;
+        data?: { invoiceId?: string };
+      }>;
+    };
+    const invoiceId = loopResult.tools?.find((r) => r.tool === "crm.closed_loop")
+      ?.data?.invoiceId;
+    expect(invoiceId).toBeTruthy();
+
+    const approveTool = tools.find((t) => t.name === "finance_os_approve");
+    const approveResult = (await approveTool!.run({
+      prompt: "Approve OS invoice",
+      invoiceId,
+    })) as {
+      tools?: Array<{ tool: string; ok: boolean; data?: { status?: string } }>;
+    };
+    const approved = approveResult.tools?.find(
+      (r) => r.tool === "finance.os_approve",
+    );
+    expect(approved?.ok).toBe(true);
+    expect(approved?.data?.status).toBe("approved");
+
+    const issueTool = tools.find((t) => t.name === "finance_os_issue");
+    const issueResult = (await issueTool!.run({
+      prompt: "Issue OS invoice",
+      invoiceId,
+    })) as {
+      tools?: Array<{
+        tool: string;
+        ok: boolean;
+        data?: { status?: string; xeroWrite?: boolean };
+      }>;
+    };
+    const issued = issueResult.tools?.find((r) => r.tool === "finance.os_issue");
+    expect(issued?.ok).toBe(true);
+    expect(issued?.data?.status).toBe("issued");
+    expect(issued?.data?.xeroWrite).toBe(false);
   });
 });

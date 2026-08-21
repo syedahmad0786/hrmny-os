@@ -176,6 +176,50 @@ export function buildChatDefaultTools(scope: {
               return { tools: results };
             },
           } satisfies HarnessTool,
+          {
+            name: "finance_os_approve",
+            description:
+              "Org-only: approve a proposed OS invoice. Prompt must mention approve + invoiceId UUID.",
+            run: async (args: Record<string, unknown>) => {
+              const { runAgentTools } = await import("../ai/agent-tools");
+              const id =
+                typeof args.invoiceId === "string" ? args.invoiceId : "";
+              const base = String(
+                args.prompt ?? args.query ?? "Approve OS invoice",
+              );
+              const prompt = id
+                ? `${base} invoiceId: ${id}`
+                : base;
+              const results = await runAgentTools({
+                allowedTools: ["finance.os_approve"],
+                prompt,
+                scope: { employeeId: scope.employeeId },
+              });
+              return { tools: results };
+            },
+          } satisfies HarnessTool,
+          {
+            name: "finance_os_issue",
+            description:
+              "Org-only: issue an approved OS invoice (OS-only when Xero write off). Prompt must mention issue + invoiceId UUID.",
+            run: async (args: Record<string, unknown>) => {
+              const { runAgentTools } = await import("../ai/agent-tools");
+              const id =
+                typeof args.invoiceId === "string" ? args.invoiceId : "";
+              const base = String(
+                args.prompt ?? args.query ?? "Issue OS invoice",
+              );
+              const prompt = id
+                ? `${base} invoiceId: ${id}`
+                : base;
+              const results = await runAgentTools({
+                allowedTools: ["finance.os_issue"],
+                prompt,
+                scope: { employeeId: scope.employeeId },
+              });
+              return { tools: results };
+            },
+          } satisfies HarnessTool,
         ]),
     {
       name: "now",

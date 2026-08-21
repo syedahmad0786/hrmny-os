@@ -167,6 +167,77 @@ describe("runAgentTools funnel writes", () => {
     expect(results.find((r) => r.tool === "crm.closed_loop")).toBeUndefined();
   });
 
+  it("finance.os_approve + finance.os_issue advance proposed invoice (prompt-gated)", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const loopResults = await runAgentTools({
+      allowedTools: ["crm.closed_loop"],
+      prompt: "Run demo closed loop for company: Finance Agent Co",
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const loop = loopResults.find((r) => r.tool === "crm.closed_loop");
+    expect(loop?.ok).toBe(true);
+    const invoiceId = (loop?.data as { invoiceId?: string })?.invoiceId;
+    expect(invoiceId).toBeTruthy();
+
+    const approveBlocked = await runAgentTools({
+      allowedTools: ["finance.os_approve"],
+      prompt: `Summarize invoice ${invoiceId}`,
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(
+      approveBlocked.find((r) => r.tool === "finance.os_approve"),
+    ).toBeUndefined();
+
+    const approved = await runAgentTools({
+      allowedTools: ["finance.os_approve"],
+      prompt: `Approve OS invoice invoiceId: ${invoiceId}`,
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const approve = approved.find((r) => r.tool === "finance.os_approve");
+    expect(approve?.ok).toBe(true);
+    expect((approve?.data as { status?: string })?.status).toBe("approved");
+
+    const issued = await runAgentTools({
+      allowedTools: ["finance.os_issue"],
+      prompt: `Issue OS invoice invoiceId: ${invoiceId}`,
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const issue = issued.find((r) => r.tool === "finance.os_issue");
+    expect(issue?.ok).toBe(true);
+    const data = issue?.data as {
+      status?: string;
+      xeroWrite?: boolean;
+      xeroInvoiceId?: string | null;
+    };
+    expect(data?.status).toBe("issued");
+    expect(data?.xeroWrite).toBe(false);
+    expect(data?.xeroInvoiceId ?? null).toBeNull();
+  });
+
+  it("client sandbox never runs finance.os_approve", async () => {
+    const results = await runAgentTools({
+      allowedTools: ["finance.os_approve"],
+      prompt:
+        "Approve OS invoice invoiceId: a1000000-0000-4000-8000-000000000099",
+      scope: {
+        clientId: CLIENT_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(
+      results.find((r) => r.tool === "finance.os_approve"),
+    ).toBeUndefined();
+  });
+
   it("crm.prospect imports mock Apollo companies outside client sandbox", async () => {
     const results = await runAgentTools({
       allowedTools: ["crm.prospect"],

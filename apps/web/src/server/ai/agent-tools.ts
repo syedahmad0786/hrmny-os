@@ -579,6 +579,122 @@ export async function runAgentTools(input: {
   }
 
   /**
+   * OS finance approve/issue (propose → approve → issue). Prompt-gated;
+   * never in DEFAULT_FUNNEL_AGENT_TOOLS. Org-only (no client sandbox).
+   * Issue is OS-only when Xero write is disabled.
+   */
+  const wantsFinanceApprove =
+    !input.scope.clientId &&
+    (want("finance.os_approve") ||
+      want("finance.approve") ||
+      want("invoices.approve")) &&
+    /(?:os[_\s-]?approve|approve\s+(?:the\s+)?(?:os\s+)?invoice|invoice[^\n]{0,40}approv)/i.test(
+      input.prompt,
+    );
+
+  const wantsFinanceIssue =
+    !input.scope.clientId &&
+    (want("finance.os_issue") ||
+      want("finance.issue") ||
+      want("invoices.issue")) &&
+    /(?:os[_\s-]?issue|issue\s+(?:the\s+)?(?:os\s+)?invoice|invoice[^\n]{0,40}issue|mark\s+issued)/i.test(
+      input.prompt,
+    );
+
+  if (wantsFinanceApprove || wantsFinanceIssue) {
+    const {
+      approveOsInvoice,
+      issueOsInvoice,
+      parseInvoiceIdFromPrompt,
+    } = await import("../finance/os-invoice-actions");
+    const invoiceId = parseInvoiceIdFromPrompt(input.prompt);
+    const employeeId =
+      input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
+
+    if (wantsFinanceApprove) {
+      if (!invoiceId) {
+        results.push({
+          tool: "finance.os_approve",
+          ok: false,
+          error: "invoiceId_required",
+        });
+      } else {
+        try {
+          const out = await approveOsInvoice({
+            invoiceId,
+            actor: { employeeId },
+          });
+          results.push({
+            tool: "finance.os_approve",
+            ok: out.ok,
+            error: out.ok ? undefined : out.reason,
+            data: out.invoice
+              ? {
+                  invoiceId: out.invoice.invoiceId,
+                  status: out.invoice.status,
+                  contactName: out.invoice.contactName,
+                  amount: out.invoice.amount,
+                  next: {
+                    finance: `/finance?invoiceId=${encodeURIComponent(out.invoice.invoiceId)}`,
+                  },
+                }
+              : { invoiceId },
+          });
+        } catch (err) {
+          results.push({
+            tool: "finance.os_approve",
+            ok: false,
+            error:
+              err instanceof Error ? err.message : "finance_os_approve_failed",
+          });
+        }
+      }
+    }
+
+    if (wantsFinanceIssue) {
+      if (!invoiceId) {
+        results.push({
+          tool: "finance.os_issue",
+          ok: false,
+          error: "invoiceId_required",
+        });
+      } else {
+        try {
+          const out = await issueOsInvoice({
+            invoiceId,
+            actor: { employeeId },
+          });
+          results.push({
+            tool: "finance.os_issue",
+            ok: out.ok,
+            error: out.ok ? undefined : out.reason,
+            data: out.invoice
+              ? {
+                  invoiceId: out.invoice.invoiceId,
+                  status: out.invoice.status,
+                  contactName: out.invoice.contactName,
+                  amount: out.invoice.amount,
+                  xeroWrite: out.xeroWrite ?? false,
+                  xeroInvoiceId: out.invoice.xeroInvoiceId,
+                  next: {
+                    finance: `/finance?invoiceId=${encodeURIComponent(out.invoice.invoiceId)}`,
+                  },
+                }
+              : { invoiceId },
+          });
+        } catch (err) {
+          results.push({
+            tool: "finance.os_issue",
+            ok: false,
+            error:
+              err instanceof Error ? err.message : "finance_os_issue_failed",
+          });
+        }
+      }
+    }
+  }
+
+  /**
    * Org-wide prospect → won → handover → onboarding. Prompt-gated so
    * crm.* / * allowlists alone cannot fire a full closed loop on every run.
    * Never added to DEFAULT_FUNNEL_AGENT_TOOLS.

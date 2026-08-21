@@ -262,6 +262,85 @@ export function createMockProvider(
         };
       }
 
+      // OS finance approve / issue when catalog lists the tools.
+      const catalogHasFinanceApprove =
+        /(?:^|\n)-\s*(?:finance\.os_approve|finance_os_approve|invoices\.approve)\s*:/i.test(
+          blob,
+        );
+      const catalogHasFinanceIssue =
+        /(?:^|\n)-\s*(?:finance\.os_issue|finance_os_issue|invoices\.issue)\s*:/i.test(
+          blob,
+        );
+      const sawFinanceApproveObs =
+        /Observation from (?:finance\.os_approve|finance_os_approve)/i.test(
+          blob,
+        );
+      const sawFinanceIssueObs =
+        /Observation from (?:finance\.os_issue|finance_os_issue)/i.test(blob);
+      const wantsApprove =
+        /(?:os[_\s-]?approve|approve\s+(?:the\s+)?(?:os\s+)?invoice|invoice[^\n]{0,40}approv)/i.test(
+          userText,
+        );
+      const wantsIssue =
+        /(?:os[_\s-]?issue|issue\s+(?:the\s+)?(?:os\s+)?invoice|invoice[^\n]{0,40}issue|mark\s+issued)/i.test(
+          userText,
+        );
+      if (
+        catalogHasFinanceApprove &&
+        wantsApprove &&
+        !sawFinanceApproveObs
+      ) {
+        const prompt = userText.trim().slice(0, 400) || "Approve OS invoice";
+        const toolName = /(?:^|\n)-\s*finance_os_approve\s*:/i.test(blob)
+          ? "finance_os_approve"
+          : "finance.os_approve";
+        return {
+          text: [
+            "```tool",
+            JSON.stringify({
+              name: toolName,
+              arguments: { prompt },
+            }),
+            "```",
+          ].join("\n"),
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+      if (sawFinanceApproveObs && !wantsIssue) {
+        return {
+          text: "Approved the OS invoice — ready to issue when finance confirms.",
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+      if (catalogHasFinanceIssue && wantsIssue && !sawFinanceIssueObs) {
+        const prompt = userText.trim().slice(0, 400) || "Issue OS invoice";
+        const toolName = /(?:^|\n)-\s*finance_os_issue\s*:/i.test(blob)
+          ? "finance_os_issue"
+          : "finance.os_issue";
+        return {
+          text: [
+            "```tool",
+            JSON.stringify({
+              name: toolName,
+              arguments: { prompt },
+            }),
+            "```",
+          ].join("\n"),
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+      if (sawFinanceIssueObs) {
+        return {
+          text:
+            "Issued the OS invoice (OS-only when Xero write is disabled).",
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+
       return {
         text: `[mock:${options.model ?? defaultModel}] stub response`,
         provider: "mock",
