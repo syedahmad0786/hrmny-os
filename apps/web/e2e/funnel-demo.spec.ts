@@ -546,7 +546,9 @@ test.describe("Demo funnel", () => {
       }>) ??
       [];
     const pending = (Array.isArray(items) ? items : []).find(
-      (i) => i.state === "pending_client",
+      (i) =>
+        i.state === "pending_client" &&
+        /Ramadan teaser/i.test(i.title),
     );
     expect(pending, listText).toBeTruthy();
 
@@ -603,6 +605,96 @@ test.describe("Demo funnel", () => {
     );
     await expect(page.locator("body")).toContainText(
       /E2E: lead with the offer/i,
+    );
+  });
+
+  test("portal campaign approve lands in partner inbox and Approvals deep-link", async ({
+    page,
+    request,
+  }) => {
+    const portalHeaders = {
+      "x-dev-role": "portal_a",
+      "content-type": "application/json",
+    };
+
+    // Second Demo Co seed ("Product launch reel") — isolated from reject e2e.
+    const list = await request.get("/api/trpc/portal.campaignApprovals.list", {
+      headers: portalHeaders,
+    });
+    const listText = await list.text();
+    expect(list.ok(), listText).toBeTruthy();
+    const listBody = JSON.parse(listText) as {
+      result?: {
+        data?: {
+          json?: Array<{
+            campaignItemId: string;
+            title: string;
+            state: string;
+          }>;
+        };
+      };
+    };
+    const items =
+      listBody.result?.data?.json ??
+      (listBody.result?.data as unknown as Array<{
+        campaignItemId: string;
+        title: string;
+        state: string;
+      }>) ??
+      [];
+    const pending = (Array.isArray(items) ? items : []).find(
+      (i) =>
+        i.state === "pending_client" &&
+        /Product launch reel/i.test(i.title),
+    );
+    expect(pending, listText).toBeTruthy();
+
+    const approve = await request.post(
+      "/api/trpc/portal.campaignApprovals.approve",
+      {
+        headers: portalHeaders,
+        data: {
+          json: {
+            id: pending!.campaignItemId,
+          },
+        },
+      },
+    );
+    const approveText = await approve.text();
+    expect(approve.ok(), approveText).toBeTruthy();
+    expect(approveText).not.toMatch(/"error"/);
+
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/notifications", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /Notifications/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    const approveRow = page
+      .locator("li")
+      .filter({ hasText: /Client approved campaign/i })
+      .filter({ hasText: pending!.title });
+    await expect(approveRow).toBeVisible();
+    const idEsc = pending!.campaignItemId.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&",
+    );
+    const openLink = approveRow.locator(
+      `a[href*="/approvals?id=${pending!.campaignItemId}"]`,
+    );
+    await expect(openLink).toBeVisible();
+    await expect(openLink).toHaveAttribute(
+      "href",
+      new RegExp(`/approvals\\?id=${idEsc}`),
+    );
+
+    await openLink.click();
+    await expect(
+      page.getByRole("heading", { name: /Approval inbox/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(new RegExp(`id=${idEsc}`));
+    await expect(page.locator("body")).toContainText(pending!.title);
+    await expect(page.locator("body")).toContainText(
+      /approved and ready to publish/i,
     );
   });
 
