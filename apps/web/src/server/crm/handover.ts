@@ -109,6 +109,25 @@ export type HandoverPackResult = {
   /** First OS invoice seeded from the won deal quote (sales → billing continuity). */
   invoiceId: string | null;
   onboardingPhases: number;
+  /** Content calendar seeded for Account / Creative continuity. */
+  calendarId: string | null;
+  /** Portal user + magic-link invite (mock for @example.com). */
+  portalInvite: {
+    portalUserId: string;
+    email: string;
+    portalPath?: string;
+    delivery?: { mode: "mock" | "live"; id: string };
+  } | null;
+  /** Deep links for staff after won → OS. */
+  next: {
+    client: string;
+    account: string;
+    creative: string;
+    finance: string;
+    approvals: string;
+    portal: string;
+    onboarding: string;
+  };
 };
 
 /**
@@ -277,7 +296,123 @@ export async function durableHandoverPack(input: {
   });
   fired.push("memory.handover");
 
+  let calendarId: string | null = null;
+  try {
+    const { createDeliveryCalendar, addDeliveryCalendarSlot } = await import(
+      "../tasks/delivery-calendars"
+    );
+    const month = new Date().toISOString().slice(0, 7);
+    const calendar = await createDeliveryCalendar({
+      clientId: client.clientId,
+      month,
+      focusPoints: ["Launch reel", "Product stills"],
+    });
+    calendarId = calendar?.calendarId ?? null;
+    if (calendar) {
+      fired.push("calendar.seed");
+      if (task?.taskId) {
+        await addDeliveryCalendarSlot({
+          calendarId: calendar.calendarId,
+          slotDate: `${month}-15`,
+          slotLabel: "Studio shoot",
+          taskId: task.taskId,
+          position: 1,
+        });
+        fired.push("calendar.slot");
+      }
+    }
+  } catch {
+    /* calendar optional if schema missing columns on older DBs */
+  }
+
+  let portalInvite: HandoverPackResult["portalInvite"] = null;
+  try {
+    const { getContact } = await import("./repository");
+    const contact = deal.primaryContactId
+      ? await getContact(deal.primaryContactId)
+      : null;
+    const inviteEmail =
+      contact?.email?.trim().toLowerCase() ||
+      `portal+${client.clientId.slice(0, 8)}@example.com`;
+    const displayName =
+      [contact?.firstName, contact?.lastName].filter(Boolean).join(" ") ||
+      `${client.name} Portal`;
+    const existingPortal = await db.execute<{
+      portalUserId: string;
+      email: string;
+    }>(sql`
+      select client_portal_user_id as "portalUserId", email
+      from public.client_portal_user
+      where client_id = ${client.clientId}::uuid
+        and lower(email) = ${inviteEmail}
+      limit 1
+    `);
+    let invited = existingPortal[0] ?? null;
+    if (invited) {
+      await db.execute(sql`
+        update public.client_portal_user
+        set is_active = true, display_name = ${displayName},
+            updated_at = now()
+        where client_portal_user_id = ${invited.portalUserId}::uuid
+      `);
+      fired.push("portal.user_exists");
+    } else {
+      const created = await db.execute<{
+        portalUserId: string;
+        email: string;
+      }>(sql`
+        insert into public.client_portal_user (
+          client_id, email, display_name, is_active
+        ) values (
+          ${client.clientId}::uuid,
+          ${inviteEmail},
+          ${displayName},
+          true
+        )
+        returning client_portal_user_id as "portalUserId", email
+      `);
+      invited = created[0] ?? null;
+      if (invited) fired.push("portal.user_create");
+    }
+    if (invited) {
+      const { sendPortalInviteMagicLink } = await import(
+        "../auth/portal-magic-link"
+      );
+      const placeholderInbox = inviteEmail.endsWith("@example.com");
+      const { createResendMock } = await import("@hrmny/integrations");
+      const sent = await sendPortalInviteMagicLink({
+        email: inviteEmail,
+        clientId: client.clientId,
+        displayName,
+        emailer: placeholderInbox ? createResendMock() : undefined,
+      });
+      portalInvite = {
+        ...invited,
+        portalPath: sent.portalPath,
+        delivery: { mode: sent.delivery.mode, id: sent.delivery.id },
+      };
+      fired.push(
+        sent.delivery.mode === "live"
+          ? "portal.invite_live"
+          : "portal.invite_mock",
+      );
+    }
+  } catch {
+    /* invite optional when unique constraints differ */
+  }
+
   const packId = crypto.randomUUID();
+  const next = {
+    client: `/clients/${client.clientId}`,
+    account: `/account?clientId=${encodeURIComponent(client.clientId)}`,
+    creative: `/creative?clientId=${encodeURIComponent(client.clientId)}`,
+    finance: invoiceId
+      ? `/finance?invoiceId=${encodeURIComponent(invoiceId)}`
+      : "/finance",
+    approvals: "/approvals",
+    portal: "/portal/approvals",
+    onboarding: "/portal/onboarding",
+  };
   return {
     ok: true,
     pack: {
@@ -291,5 +426,8 @@ export async function durableHandoverPack(input: {
     task,
     invoiceId,
     onboardingPhases: phases.length,
+    calendarId,
+    portalInvite,
+    next,
   };
 }

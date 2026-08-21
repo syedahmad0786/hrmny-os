@@ -1168,107 +1168,8 @@ export const crmRouter = router({
         };
       }
 
-      let calendarId: string | null = null;
-      try {
-        const { createDeliveryCalendar, addDeliveryCalendarSlot } =
-          await import("../tasks/delivery-calendars");
-        const month = new Date().toISOString().slice(0, 7);
-        const calendar = await createDeliveryCalendar({
-          clientId: pack.client.clientId,
-          month,
-          focusPoints: ["Launch reel", "Product stills"],
-        });
-        calendarId = calendar?.calendarId ?? null;
-        if (calendar && pack.task?.taskId) {
-          await addDeliveryCalendarSlot({
-            calendarId: calendar.calendarId,
-            slotDate: `${month}-15`,
-            slotLabel: "Studio shoot",
-            taskId: pack.task.taskId,
-            position: 1,
-          });
-        }
-      } catch {
-        /* calendar optional if schema missing state column on older DBs */
-      }
-
-      let portalInvite: {
-        portalUserId: string;
-        email: string;
-        portalPath?: string;
-        delivery?: { mode: "mock" | "live"; id: string };
-      } | null = null;
-      try {
-        const { getDb } = await import("../db");
-        const { sql } = await import("@hrmny/db");
-        const db = getDb();
-        if (db) {
-          const contact = contactId ? await getContact(contactId) : null;
-          const inviteEmail =
-            contact?.email?.trim().toLowerCase() ||
-            `portal+${pack.client.clientId.slice(0, 8)}@example.com`;
-          const displayName =
-            [contact?.firstName, contact?.lastName].filter(Boolean).join(" ") ||
-            `${pack.client.name} Portal`;
-          const existing = await db.execute<{
-            portalUserId: string;
-            email: string;
-          }>(sql`
-            select client_portal_user_id as "portalUserId", email
-            from public.client_portal_user
-            where client_id = ${pack.client.clientId}::uuid
-              and lower(email) = ${inviteEmail}
-            limit 1
-          `);
-          let invited = existing[0] ?? null;
-          if (invited) {
-            await db.execute(sql`
-              update public.client_portal_user
-              set is_active = true, display_name = ${displayName},
-                  updated_at = now()
-              where client_portal_user_id = ${invited.portalUserId}::uuid
-            `);
-          } else {
-            const created = await db.execute<{
-              portalUserId: string;
-              email: string;
-            }>(sql`
-              insert into public.client_portal_user (
-                client_id, email, display_name, is_active
-              ) values (
-                ${pack.client.clientId}::uuid,
-                ${inviteEmail},
-                ${displayName},
-                true
-              )
-              returning client_portal_user_id as "portalUserId", email
-            `);
-            invited = created[0] ?? null;
-          }
-          if (invited) {
-            const { sendPortalInviteMagicLink } = await import(
-              "../auth/portal-magic-link"
-            );
-            // Demo placeholder inboxes must not hit live Resend (bounces /
-            // rejects). Token + portalPath still return for the Hunt result.
-            const placeholderInbox = inviteEmail.endsWith("@example.com");
-            const { createResendMock } = await import("@hrmny/integrations");
-            const sent = await sendPortalInviteMagicLink({
-              email: inviteEmail,
-              clientId: pack.client.clientId,
-              displayName,
-              emailer: placeholderInbox ? createResendMock() : undefined,
-            });
-            portalInvite = {
-              ...invited,
-              portalPath: sent.portalPath,
-              delivery: { mode: sent.delivery.mode, id: sent.delivery.id },
-            };
-          }
-        }
-      } catch {
-        /* invite optional when unique constraints differ */
-      }
+      const calendarId = pack.calendarId;
+      const portalInvite = pack.portalInvite;
 
       await auditMutation(
         ctx,
@@ -1307,19 +1208,11 @@ export const crmRouter = router({
         apolloMode,
         next: {
           crmDeal: `/crm/deals/${dealId}`,
-          client: `/clients/${pack.client.clientId}`,
-          account: `/account?clientId=${encodeURIComponent(pack.client.clientId)}`,
-          finance: pack.invoiceId
-            ? `/finance?invoiceId=${encodeURIComponent(pack.invoiceId)}`
-            : "/finance",
-          billing: "/billing",
-          creative: `/creative?clientId=${encodeURIComponent(pack.client.clientId)}`,
-          portal: "/portal/approvals",
-          onboarding: "/portal/onboarding",
-          approvals: "/approvals",
+          ...pack.next,
           outreach: outreachId
             ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
             : "/crm/outreach",
+          billing: "/billing",
         },
       };
     }),

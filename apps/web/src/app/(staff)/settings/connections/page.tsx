@@ -147,7 +147,7 @@ export default function ConnectionsPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: `${window.location.origin}/settings/connections`,
         scopes: GOOGLE_WORKSPACE_SCOPES,
         queryParams: {
           access_type: "offline",

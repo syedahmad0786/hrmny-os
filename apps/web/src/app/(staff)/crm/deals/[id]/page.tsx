@@ -156,9 +156,33 @@ export default function CrmDealDetailPage() {
             "ok" in handover.data &&
             handover.data.ok &&
             "client" in handover.data ? (
-              <Link href={`/clients/${handover.data.client.clientId}`}>
-                <CrmBtn variant="primary">Open client onboarding →</CrmBtn>
-              </Link>
+              <div className="flex flex-wrap gap-2">
+                <Link href={`/clients/${handover.data.client.clientId}`}>
+                  <CrmBtn variant="primary">Open client onboarding →</CrmBtn>
+                </Link>
+                {"next" in handover.data && handover.data.next ? (
+                  <>
+                    <Link href={handover.data.next.account}>
+                      <CrmBtn>Account calendar →</CrmBtn>
+                    </Link>
+                    <Link href={handover.data.next.creative}>
+                      <CrmBtn>Creative →</CrmBtn>
+                    </Link>
+                    <Link href={handover.data.next.approvals}>
+                      <CrmBtn>Approvals →</CrmBtn>
+                    </Link>
+                    {handover.data.portalInvite?.portalPath ? (
+                      <Link href={handover.data.portalInvite.portalPath}>
+                        <CrmBtn>
+                          Portal invite (
+                          {handover.data.portalInvite.delivery?.mode ?? "mock"})
+                          →
+                        </CrmBtn>
+                      </Link>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
             ) : null}
           </>
         }

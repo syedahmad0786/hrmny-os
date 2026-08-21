@@ -358,7 +358,8 @@ export default function HuntClientsPage() {
                         className="underline"
                         href={demo.data.portalInvite.portalPath}
                       >
-                        Portal magic link
+                        Portal magic link (
+                        {demo.data.portalInvite.delivery?.mode ?? "mock"})
                       </Link>
                     ) : null}
                   </p>

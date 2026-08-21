@@ -280,6 +280,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         });
       })
       .catch((error: unknown) => {
+        completingGoogle.current = false;
         localStorage.removeItem("hrmny-google-workspace-connect");
         setConnectionMessage(
           error instanceof Error ? error.message : "Google connection failed",
