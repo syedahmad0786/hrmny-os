@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, auditEvent, connectionAccount, eq, sql } from "@hrmny/db";
+import { and, auditEvent, connectionAccount, eq, or, sql } from "@hrmny/db";
 import {
   createAsanaViaComposio,
   createComposioLive,
@@ -475,10 +475,14 @@ export async function getGoogleWorkspaceAccessToken(
   if (!(await isWorkConnectedAppAllowed("google_workspace"))) return null;
   const db = getDb();
   if (!db) return null;
+  // Include `error` rows that still have a vault secret so a transient refresh
+  // failure (missing env locally, brief Google outage) can self-heal once
+  // credentials work again — without forcing a full OAuth reconnect.
   const [row] = await db
     .select({
       connectionAccountId: connectionAccount.connectionAccountId,
       secretId: connectionAccount.secretId,
+      status: connectionAccount.status,
     })
     .from(connectionAccount)
     .where(
@@ -486,7 +490,10 @@ export async function getGoogleWorkspaceAccessToken(
         eq(connectionAccount.ownerEmployeeId, employeeId),
         eq(connectionAccount.toolkit, "google_workspace"),
         eq(connectionAccount.scope, "staff"),
-        eq(connectionAccount.status, "connected"),
+        or(
+          eq(connectionAccount.status, "connected"),
+          eq(connectionAccount.status, "error"),
+        ),
       ),
     )
     .limit(1);
@@ -506,6 +513,18 @@ export async function getGoogleWorkspaceAccessToken(
   }
   const stored = GoogleWorkspaceSecretSchema.parse(JSON.parse(decrypted));
   if (Date.parse(stored.expiresAt) > Date.now() + 60_000) {
+    if (row.status === "error") {
+      await db
+        .update(connectionAccount)
+        .set({
+          status: "connected",
+          lastError: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          eq(connectionAccount.connectionAccountId, row.connectionAccountId),
+        );
+    }
     return stored.accessToken;
   }
 
@@ -529,17 +548,35 @@ export async function getGoogleWorkspaceAccessToken(
     }),
   });
   if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    let reason = `Google token refresh failed (${response.status})`;
+    try {
+      const parsed = JSON.parse(detail) as {
+        error?: string;
+        error_description?: string;
+      };
+      if (parsed.error_description || parsed.error) {
+        reason = `Google token refresh failed (${response.status}): ${
+          parsed.error_description ?? parsed.error
+        }`;
+      }
+    } catch {
+      if (detail.trim()) reason = `${reason}: ${detail.slice(0, 180)}`;
+    }
+    // Record the failure for ops UI, but keep the vault secret reachable so a
+    // later refresh (after env/credentials recover) or reconnect can restore
+    // `connected` without a stuck permanent lockout.
     await db
       .update(connectionAccount)
       .set({
         status: "error",
-        lastError: `Google token refresh failed (${response.status})`,
+        lastError: reason.slice(0, 500),
         updatedAt: new Date(),
       })
       .where(
         eq(connectionAccount.connectionAccountId, row.connectionAccountId),
       );
-    throw new Error(`Google token refresh failed (${response.status})`);
+    throw new Error(reason);
   }
 
   const refreshed = GoogleTokenResponseSchema.parse(await response.json());
@@ -556,6 +593,7 @@ export async function getGoogleWorkspaceAccessToken(
     await tx
       .update(connectionAccount)
       .set({
+        status: "connected",
         expiresAt,
         lastTestedAt: new Date(),
         lastError: null,

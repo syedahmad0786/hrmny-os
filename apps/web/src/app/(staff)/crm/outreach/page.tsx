@@ -13,7 +13,7 @@ import { formatRelative } from "@/components/crm/format";
 
 /** Serialized shape of a @hrmny/gate TransitionResult refusal. */
 type GateOutcome =
-  | { ok: true }
+  | { ok: true; sendMode?: string; externalId?: string }
   | {
       ok: false;
       code?: string;
@@ -26,6 +26,7 @@ export default function CrmOutreachPage() {
   const deals = trpc.crm.deals.list.useQuery();
 
   const [gateError, setGateError] = useState<string | null>(null);
+  const [sendNote, setSendNote] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [draftDealId, setDraftDealId] = useState("");
   const [draftSubject, setDraftSubject] = useState("");
@@ -76,6 +77,13 @@ export default function CrmOutreachPage() {
   function surface(r: GateOutcome, verb: string) {
     if (r.ok) {
       setGateError(null);
+      if (verb === "Send") {
+        const parts = [
+          r.sendMode ? `mode=${r.sendMode}` : null,
+          r.externalId ? `id=${r.externalId}` : null,
+        ].filter(Boolean);
+        setSendNote(parts.length ? `Sent · ${parts.join(" · ")}` : "Sent");
+      }
       return;
     }
     const blocks = (r.blockedBy ?? [])
@@ -132,6 +140,11 @@ export default function CrmOutreachPage() {
       {gateError ? (
         <div className="crm-note" role="alert">
           <CrmTag kind="danger">Blocked</CrmTag> {gateError}
+        </div>
+      ) : null}
+      {sendNote ? (
+        <div className="crm-note" role="status">
+          <CrmTag kind="success">Send</CrmTag> {sendNote}
         </div>
       ) : null}
 
