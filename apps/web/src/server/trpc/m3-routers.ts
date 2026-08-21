@@ -33,12 +33,12 @@ import {
   staffProcedure,
 } from "./trpc";
 import { month1Router } from "./m4-routers";
-import { getEmployeeIntegrationSecret } from "./connections-router";
+import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
 
 bootstrapGateRegistry();
 
 async function apolloFor(employeeId: string) {
-  const apiKey = await getEmployeeIntegrationSecret(employeeId, "apollo");
+  const { apiKey } = await resolveIntegrationApiKey("apollo", employeeId);
   return {
     client: apiKey
       ? createApolloLive({ mode: "live", apiKey })
@@ -48,7 +48,7 @@ async function apolloFor(employeeId: string) {
 }
 
 async function hunterFor(employeeId: string) {
-  const apiKey = await getEmployeeIntegrationSecret(employeeId, "hunter");
+  const { apiKey } = await resolveIntegrationApiKey("hunter", employeeId);
   return {
     client: apiKey
       ? createHunterLive({ mode: "live", apiKey })

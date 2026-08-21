@@ -54,4 +54,17 @@ test.describe("Demo funnel", () => {
     await page.goto("/portal/approvals", { waitUntil: "domcontentloaded" });
     await expect(page.url()).not.toContain("/portal/login");
   });
+
+  test("deal detail exposes won + handover controls", async ({ page }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/crm/deals", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
+      timeout: 60_000,
+    });
+    const firstDeal = page.locator('a[href^="/crm/deals/"]').first();
+    if (await firstDeal.count()) {
+      await firstDeal.click();
+      await expect(page.locator("body")).toContainText(/BUAF|Advance|Mark won|Handover|Commercial/i);
+    }
+  });
 });

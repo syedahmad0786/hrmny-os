@@ -35,13 +35,15 @@ Tier-1 (Supabase, DB, JWT, Google OAuth, OpenRouter general, Composio, n8n, Inng
 
 | Env var | Where |
 |---------|--------|
-| `APOLLO_API_KEY` | https://app.apollo.io/#/settings/integrations/api |
-| `HUNTER_API_KEY` | https://hunter.io/api-keys |
+| `APOLLO_API_KEY` | https://app.apollo.io/#/settings/integrations/api — or paste via `/settings/connections` → Apollo |
+| `HUNTER_API_KEY` | https://hunter.io/api-keys — or paste via `/settings/connections` → Hunter |
 | `NEVERBOUNCE_API_KEY` (optional) | https://app.neverbounce.com/settings/api |
 | `XERO_CLIENT_ID` + `XERO_CLIENT_SECRET` | https://developer.xero.com/app/manage |
 | `XERO_ACCESS_TOKEN` + `XERO_TENANT_ID` (optional) | After OAuth authorize — or paste from Keeper |
 | `OPENROUTER_PRIVILEGED_API_KEY` | https://openrouter.ai/keys (salaries workspace) |
 | `CRON_SECRET` | Vercel hrmny-os env or new random |
+
+Vault paste on Connections is enough for Apollo/Hunter (no redeploy). Env keys still win when set.
 
 After Apollo/Hunter paste: leave modes unset (auto-live) or set `APOLLO_MODE=live` / `HUNTER_MODE=live`.
 
