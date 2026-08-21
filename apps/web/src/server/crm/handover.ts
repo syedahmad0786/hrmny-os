@@ -243,6 +243,23 @@ export async function durableHandoverPack(input: {
   });
   if (task) fired.push("creative.task_seed");
 
+  try {
+    const { createCampaignDraft } = await import("../campaigns/repository");
+    await createCampaignDraft({
+      title: `${client.name} — launch LinkedIn teaser`,
+      channel: "linkedin",
+      scheduledFor: new Date().toISOString().slice(0, 10),
+      clientId: client.clientId,
+      body: {
+        copy: `Excited to partner with ${client.name} on creative that converts across the UAE.`,
+        kind: "won_handover_seed",
+      },
+    });
+    fired.push("campaign.draft_seed");
+  } catch {
+    /* campaign seed best-effort — portal campaign-approvals can draft manually */
+  }
+
   let invoiceId: string | null = null;
   try {
     const { insertOsInvoice, listOsInvoicesForClientPeriod } = await import(

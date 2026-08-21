@@ -233,4 +233,32 @@ describe("campaigns durable layer (memory mode)", () => {
     );
     expect(view?.feedback).toBe("Tighten the hook");
   });
+
+  it("notifies staff inbox when the client approves a campaign", async () => {
+    const draft = await createCampaignDraft({
+      title: "Staff inbox ping",
+      channel: "linkedin",
+      scheduledFor: "2026-09-07",
+      clientId: CLIENT,
+    });
+    const decided = await decidePortalItem({
+      actor: portalActor,
+      clientId: CLIENT,
+      id: draft.campaignItemId,
+      to: "approved",
+    });
+    expect(decided.ok).toBe(true);
+    const { listNotifications } = await import("../notifications/store");
+    const { DEMO_EMPLOYEE_ID } = await import("../demo-store");
+    const inbox = await listNotifications(DEMO_EMPLOYEE_ID, { limit: 20 });
+    expect(
+      inbox.some(
+        (n) =>
+          n.kind === "campaign" &&
+          /approved campaign/i.test(n.title) &&
+          (n.href ?? "").includes("/approvals"),
+      ),
+    ).toBe(true);
+  });
+
 });
