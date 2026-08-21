@@ -13,7 +13,8 @@ function CreativeQcPageInner() {
   const reset = trpc.m4.reset.useMutation({
     onSuccess: () => void utils.invalidate(),
   });
-  const taskId = ids.data?.creativeTaskId;
+  const taskIdFromQuery = searchParams.get("taskId")?.trim() || "";
+  const taskId = taskIdFromQuery || ids.data?.creativeTaskId;
   const task = trpc.tasks.get.useQuery(
     { id: taskId! },
     { enabled: Boolean(taskId) },
