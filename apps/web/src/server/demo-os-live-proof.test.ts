@@ -134,6 +134,24 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(run.output).toBeTruthy();
       expect(run.sandbox?.clientId).toBe(loop.clientId);
       expect(run.sandbox?.taskId).toBe(deliveryTask.taskId);
+      expect(Array.isArray(run.toolResults)).toBe(true);
+      expect(run.toolResults!.some((t) => t.tool === "crm.read" && t.ok)).toBe(
+        true,
+      );
+
+      const synced = await caller.invoices.syncXeroMirror();
+      expect(synced.upserted).toBeGreaterThanOrEqual(0);
+      const billed = await caller.invoices.list();
+      expect(Array.isArray(billed)).toBe(true);
+      if (synced.upserted > 0) {
+        expect(
+          billed.some(
+            (i) =>
+              ("source" in i && i.source === "xero_mirror") ||
+              i.billingKind === "xero_mirror",
+          ),
+        ).toBe(true);
+      }
 
       const userScoped = await caller.aiAdmin.customAgents.run({
         id: agent.customAgentId,

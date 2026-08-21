@@ -101,15 +101,29 @@ export default function FinanceQueuePage() {
           {String(mirror.data?.writeEnabled ?? false)})
         </p>
         <ul className="mt-3 flex flex-col gap-2 text-sm">
-          {(mirror.data?.invoices ?? []).map((row) => (
-            <li key={row.externalId} className="border-t border-sand/60 pt-2">
-              {row.status} · {row.contactName} · {row.currency} {row.amount} ·{" "}
-              {row.externalId}
-              <span className="block text-xs text-muted">
-                mirrored {row.syncedAt}
-              </span>
-            </li>
-          ))}
+          {(mirror.data?.invoices ?? []).map((row) => {
+            const externalId = row.xeroInvoiceId ?? row.invoiceId;
+            const syncedAt =
+              row.sourceAttached &&
+              typeof row.sourceAttached === "object" &&
+              "syncedAt" in row.sourceAttached
+                ? String(
+                    (row.sourceAttached as { syncedAt?: string }).syncedAt ??
+                      "",
+                  )
+                : "";
+            return (
+              <li key={externalId} className="border-t border-sand/60 pt-2">
+                {row.status} · {row.contactName} · {row.currency} {row.amount} ·{" "}
+                {externalId}
+                {syncedAt ? (
+                  <span className="block text-xs text-muted">
+                    mirrored {syncedAt}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
           {!mirror.data?.invoices?.length && !mirror.isLoading ? (
             <li className="text-muted">No mirrored invoices yet.</li>
           ) : null}
@@ -171,7 +185,8 @@ export default function FinanceQueuePage() {
                 {inv.vatAmount}) · xero mirror id: {inv.xeroInvoiceId ?? "—"}
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {inv.status === "proposed" ? (
+                {!("readOnly" in inv && inv.readOnly) &&
+                inv.status === "proposed" ? (
                   <Button
                     type="button"
                     onClick={async () => {
@@ -182,7 +197,8 @@ export default function FinanceQueuePage() {
                     3. Approve invoice
                   </Button>
                 ) : null}
-                {inv.status === "approved" ? (
+                {!("readOnly" in inv && inv.readOnly) &&
+                inv.status === "approved" ? (
                   <Button
                     type="button"
                     onClick={async () => {
