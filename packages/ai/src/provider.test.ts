@@ -215,6 +215,27 @@ describe("withMetering", () => {
     expect(issue.text).toMatch(/"name"\s*:\s*"finance_os_issue"/);
   });
 
+  it("emits outreach.os_approve fence when catalog lists it", async () => {
+    const mock = createMockProvider();
+    const first = await mock.generate({
+      task: "generic",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Available tools:\n- outreach.os_approve: Approve outreach HITL\n- now: time",
+        },
+        {
+          role: "user",
+          content:
+            "Approve OS outreach outreachId: a1000000-0000-4000-8000-000000000077",
+        },
+      ],
+    });
+    expect(first.text).toMatch(/```tool/);
+    expect(first.text).toMatch(/"name"\s*:\s*"outreach\.os_approve"/);
+  });
+
   it("fails closed when month-to-date spend is at the cap", async () => {
     const onCost = vi.fn();
     const metered = withMetering(tokenProvider, {

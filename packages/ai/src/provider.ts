@@ -341,6 +341,50 @@ export function createMockProvider(
         };
       }
 
+      const catalogHasOutreachApprove =
+        /(?:^|\n)-\s*(?:outreach\.os_approve|outreach_os_approve|leadgen\.approve)\s*:/i.test(
+          blob,
+        );
+      const sawOutreachApproveObs =
+        /Observation from (?:outreach\.os_approve|outreach_os_approve)/i.test(
+          blob,
+        );
+      const wantsOutreachApprove =
+        /(?:os[_\s-]?approve|approve\s+(?:the\s+)?(?:os\s+)?outreach|outreach[^\n]{0,40}approv|approve\s+hitl)/i.test(
+          userText,
+        );
+      if (
+        catalogHasOutreachApprove &&
+        wantsOutreachApprove &&
+        !sawOutreachApproveObs
+      ) {
+        const prompt =
+          userText.trim().slice(0, 400) || "Approve OS outreach";
+        const toolName = /(?:^|\n)-\s*outreach_os_approve\s*:/i.test(blob)
+          ? "outreach_os_approve"
+          : "outreach.os_approve";
+        return {
+          text: [
+            "```tool",
+            JSON.stringify({
+              name: toolName,
+              arguments: { prompt },
+            }),
+            "```",
+          ].join("\n"),
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+      if (sawOutreachApproveObs) {
+        return {
+          text:
+            "Approved the outreach draft — ready for human send (HITL).",
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+
       return {
         text: `[mock:${options.model ?? defaultModel}] stub response`,
         provider: "mock",

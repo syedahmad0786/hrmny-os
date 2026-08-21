@@ -238,6 +238,63 @@ describe("runAgentTools funnel writes", () => {
     ).toBeUndefined();
   });
 
+  it("outreach.os_approve advances draft after closed loop (prompt-gated)", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const loopResults = await runAgentTools({
+      allowedTools: ["crm.closed_loop"],
+      prompt: "Run demo closed loop for company: Outreach Agent Co",
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const loop = loopResults.find((r) => r.tool === "crm.closed_loop");
+    expect(loop?.ok).toBe(true);
+    const data = loop?.data as {
+      outreachId?: string;
+      next?: { approvals?: string };
+    };
+    expect(data?.outreachId).toBeTruthy();
+    expect(data?.next?.approvals).toMatch(/id=/);
+
+    const blocked = await runAgentTools({
+      allowedTools: ["outreach.os_approve"],
+      prompt: `Summarize outreach ${data?.outreachId}`,
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(
+      blocked.find((r) => r.tool === "outreach.os_approve"),
+    ).toBeUndefined();
+
+    const approved = await runAgentTools({
+      allowedTools: ["outreach.os_approve"],
+      prompt: `Approve OS outreach outreachId: ${data?.outreachId}`,
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const row = approved.find((r) => r.tool === "outreach.os_approve");
+    expect(row?.ok).toBe(true);
+    expect((row?.data as { state?: string })?.state).toBe("approved");
+  });
+
+  it("client sandbox never runs outreach.os_approve", async () => {
+    const results = await runAgentTools({
+      allowedTools: ["outreach.os_approve"],
+      prompt:
+        "Approve OS outreach outreachId: a1000000-0000-4000-8000-000000000099",
+      scope: {
+        clientId: CLIENT_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(
+      results.find((r) => r.tool === "outreach.os_approve"),
+    ).toBeUndefined();
+  });
+
   it("crm.prospect imports mock Apollo companies outside client sandbox", async () => {
     const results = await runAgentTools({
       allowedTools: ["crm.prospect"],

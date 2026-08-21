@@ -274,16 +274,41 @@ async function memoryHandoverPack(input: {
     invoiceId = null;
   }
 
+  let outreachId: string | null = null;
+  try {
+    const { listOutreach } = await import("../leadgen/store");
+    const existingOutreach = await listOutreach({ dealId: input.dealId });
+    const reuse = existingOutreach[0];
+    if (reuse) {
+      outreachId = reuse.id;
+      fired.push("outreach.exists");
+    } else {
+      const { draftOutreach } = await import("../trpc/leadgen-router");
+      const outreach = await draftOutreach({
+        dealId: input.dealId,
+        channel: "gmail",
+        subject: `Creative Harmony × ${deal.companyName}`,
+        body: `Hi — following up on ${deal.companyName}. We'd love to share a short creative retainer concept for the UAE market. Shall we book 20 minutes?`,
+      });
+      outreachId = outreach.id;
+      fired.push("outreach.draft");
+    }
+  } catch {
+    fired.push("outreach.failed");
+    outreachId = null;
+  }
+
   await persistMemoryChunk({
     sourceType: "note",
     sourceId: demoClient.clientId,
     content: `Handover from won deal ${deal.companyName}: contract ${demoClient.contractValue} AED. Client entering onboarding (memory mode).${
       invoiceId ? ` First invoice ${invoiceId} proposed.` : ""
-    }`,
+    }${outreachId ? ` Outreach draft ${outreachId}.` : ""}`,
     metadata: {
       clientId: demoClient.clientId,
       dealId: input.dealId,
       invoiceId,
+      outreachId,
       kind: "deal.won_handover",
       mode: "memory",
     },
@@ -378,7 +403,7 @@ async function memoryHandoverPack(input: {
   const next = buildHandoverNextLinks({
     clientId: client.clientId,
     invoiceId,
-    outreachId: null,
+    outreachId,
     portalPath: portalInvite?.portalPath,
     onboardingPath: portalInvite?.onboardingPath,
   });
@@ -398,7 +423,7 @@ async function memoryHandoverPack(input: {
     onboardingPhases: phases.length,
     calendarId: null,
     portalInvite,
-    outreachId: null,
+    outreachId,
     next,
   };
 }

@@ -149,4 +149,48 @@ describe("chat harness funnel_act", () => {
     expect(issued?.data?.status).toBe("issued");
     expect(issued?.data?.xeroWrite).toBe(false);
   });
+
+  it("exposes outreach_os_approve only for org chat", async () => {
+    const orgTools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
+    const clientTools = buildChatDefaultTools({
+      employeeId: EMPLOYEE_ID,
+      clientId: CLIENT_ID,
+    });
+    expect(orgTools.some((t) => t.name === "outreach_os_approve")).toBe(true);
+    expect(clientTools.some((t) => t.name === "outreach_os_approve")).toBe(
+      false,
+    );
+  });
+
+  it("outreach_os_approve after closed loop", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const tools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
+    const closed = tools.find((t) => t.name === "crm_closed_loop");
+    const loopResult = (await closed!.run({
+      prompt: "Run demo closed loop for company: Chat Outreach Co",
+    })) as {
+      tools?: Array<{
+        tool: string;
+        ok: boolean;
+        data?: { outreachId?: string; next?: { approvals?: string } };
+      }>;
+    };
+    const loop = loopResult.tools?.find((r) => r.tool === "crm.closed_loop");
+    expect(loop?.data?.outreachId).toBeTruthy();
+    expect(loop?.data?.next?.approvals).toMatch(/id=/);
+
+    const approveTool = tools.find((t) => t.name === "outreach_os_approve");
+    const approveResult = (await approveTool!.run({
+      prompt: "Approve OS outreach",
+      outreachId: loop?.data?.outreachId,
+    })) as {
+      tools?: Array<{ tool: string; ok: boolean; data?: { state?: string } }>;
+    };
+    const approved = approveResult.tools?.find(
+      (r) => r.tool === "outreach.os_approve",
+    );
+    expect(approved?.ok).toBe(true);
+    expect(approved?.data?.state).toBe("approved");
+  });
 });
