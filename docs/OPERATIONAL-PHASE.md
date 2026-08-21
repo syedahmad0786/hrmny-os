@@ -46,7 +46,8 @@ Anon users hit SSO / “Checking access…”. Full UI needs `@hrmny.co` Google 
 `/crm/hunt` → **Run demo closed loop** or **Closed loop via Apollo** seeds prospect → won → onboarding + creative task (Postgres).  
 Apollo **Prospect with Apollo** writes durable CRM discover deals (same pipeline store).  
 `/creative` → generate → **Attach & send to portal** lands an asset in `/portal/deliveries`.  
-`/portal/onboarding` lets the client acknowledge the active phase.  
+`/portal/onboarding` lets the client acknowledge the active phase; `/portal` approvals act on `client_review` tasks.  
+`/traffic` DoR **lock** writes Postgres `locked_at` and spawns `creative_spawn`.  
 `/settings/ai` → custom agents **Run** on client/user/task memory sandbox (mock LLM if no OpenRouter credits).  
 `/approvals` → outreach HITL: after approve, Gmail send uses live Composio→Gmail when connected (else stub); LinkedIn copy-draft.
 

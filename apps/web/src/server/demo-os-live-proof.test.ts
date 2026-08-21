@@ -129,6 +129,23 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(deliveries[0]?.deliverables.some((d) => d.kind === "asset")).toBe(
         true,
       );
+
+      const creativeTask = await caller.tasks.create({
+        clientId: loop.clientId,
+        taskType: "social_cutdowns",
+        title: `Portal approve ${Date.now()}`,
+        status: "client_review",
+      });
+      const approvals = await portalCaller.portal.approvals.list();
+      expect(
+        approvals.some((a) => a.approvalId === creativeTask.taskId),
+      ).toBe(true);
+      const approved = await portalCaller.portal.approvals.act({
+        id: creativeTask.taskId,
+        action: "approve",
+      });
+      expect(approved.ok).toBe(true);
+      expect(approved.status).toBe("approved");
     },
     90_000,
   );

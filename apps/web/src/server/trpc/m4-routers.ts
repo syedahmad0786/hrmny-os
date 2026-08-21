@@ -186,6 +186,28 @@ export const m4DemoRouter = router({
   }),
   seedIds: publicProcedure.query(async () => {
     if (getDb()) {
+      const unlocked = await listDeliveryTasks({ status: "briefing" });
+      const withBrief = unlocked.find((t) => t.briefId);
+      if (withBrief?.briefId) {
+        return {
+          clientId: withBrief.clientId,
+          calendarId: DEMO_CALENDAR_ID,
+          taskId: withBrief.taskId,
+          briefId: withBrief.briefId,
+          creativeTaskId: withBrief.taskId,
+        };
+      }
+      const ready = await listDeliveryTasks({ status: "brief_ready" });
+      const readyBrief = ready.find((t) => t.briefId);
+      if (readyBrief?.briefId) {
+        return {
+          clientId: readyBrief.clientId,
+          calendarId: DEMO_CALENDAR_ID,
+          taskId: readyBrief.taskId,
+          briefId: readyBrief.briefId,
+          creativeTaskId: readyBrief.taskId,
+        };
+      }
       const qcTasks = await listDeliveryTasks({ status: "qc" });
       if (qcTasks[0]) {
         return {
@@ -761,6 +783,7 @@ export const tasksRouter = router({
         title: z.string().min(1).optional(),
         deadline: z.string().optional(),
         priority: z.string().optional(),
+        status: z.string().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -774,6 +797,7 @@ export const tasksRouter = router({
           deadline: input.deadline ?? null,
           priority: input.priority ?? null,
           ownerEmployeeId: ctx.employeeId,
+          status: input.status,
         });
         if (!durable) throw new Error("NOT_FOUND");
         return deliveryAsDemoTask(durable);
@@ -787,7 +811,7 @@ export const tasksRouter = router({
         month: input.month ?? null,
         taskType: input.taskType,
         title: input.title ?? input.taskType,
-        status: "backlog",
+        status: (input.status as DemoTask["status"]) ?? "backlog",
         situationalState: null,
         ownerEmployeeId: null,
         deadline: input.deadline ?? null,

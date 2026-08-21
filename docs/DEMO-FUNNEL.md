@@ -6,7 +6,7 @@
 **E2E:** `apps/web/e2e/funnel-demo.spec.ts` (CI uses `AUTH_MODE=dev` + `ALLOW_DEV_AUTH=true`)  
 **Tools:** `node scripts/tools-smoke.mjs`
 
-Verified against live Postgres (pgvector on): Apollo mock/live → durable discover deals → closed loop won → client → `client_onboarding` (7 phases) → immersion → client-scoped `memory_chunk` → creative QC task → portal deliveries (tasks + assets) → `agent_runs` with optional task sandbox.
+Verified against live Postgres (pgvector on): Apollo mock/live → durable discover deals → closed loop won → client → `client_onboarding` (7 phases) → immersion → client-scoped `memory_chunk` → creative QC task → portal deliveries (tasks + assets) → portal approval act → `briefs.lock` + `creative_spawn` → `agent_runs` with optional task sandbox.
 
 ## Product surfaces
 

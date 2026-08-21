@@ -413,13 +413,34 @@ export async function actOnPortalApproval(input: {
       set status = ${nextStatus}::task_status_enum, updated_at = now()
       where task_id = ${input.approvalId}::uuid
     `);
+
+    let portalActorId: string | null = null;
+    if (input.actorPortalUserId) {
+      const portalUser = await tx.execute<{ ok: number }>(sql`
+        select 1 as ok from public.client_portal_user
+        where client_portal_user_id = ${input.actorPortalUserId}::uuid
+        limit 1
+      `);
+      if (portalUser[0]) portalActorId = input.actorPortalUserId;
+    }
+
+    let employeeActorId = input.actorEmployeeId ?? null;
+    if (employeeActorId) {
+      const emp = await tx.execute<{ ok: number }>(sql`
+        select 1 as ok from public.employee
+        where employee_id = ${employeeActorId}::uuid
+        limit 1
+      `);
+      if (!emp[0]) employeeActorId = null;
+    }
+
     await tx.execute(sql`
       insert into public.audit_event (
         actor_employee_id, actor_portal_user_id, action, entity_type,
         entity_id, before, after, reason
       ) values (
-        ${input.actorEmployeeId ?? null}::uuid,
-        ${input.actorPortalUserId ?? null}::uuid,
+        ${employeeActorId}::uuid,
+        ${portalActorId}::uuid,
         'portal.approvals.act', 'task', ${input.approvalId}::uuid,
         ${JSON.stringify({ status: existing[0].status })}::jsonb,
         ${JSON.stringify({ status: nextStatus })}::jsonb,
