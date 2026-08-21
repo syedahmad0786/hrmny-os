@@ -44,11 +44,13 @@ export const DEFAULT_FUNNEL_AGENT_TOOLS = [
 
 /** Empty or invalid allowlists fall back to the funnel defaults. */
 export function resolveAgentAllowedTools(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [...DEFAULT_FUNNEL_AGENT_TOOLS];
-  const cleaned = raw
-    .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
-    .map((t) => t.trim().toLowerCase());
-  return cleaned.length > 0 ? cleaned : [...DEFAULT_FUNNEL_AGENT_TOOLS];
+  const normalize = (tools: readonly string[]) =>
+    tools.map((t) => t.trim().toLowerCase()).filter((t) => t.length > 0);
+  if (!Array.isArray(raw)) return normalize(DEFAULT_FUNNEL_AGENT_TOOLS);
+  const cleaned = normalize(
+    raw.filter((t): t is string => typeof t === "string"),
+  );
+  return cleaned.length > 0 ? cleaned : normalize(DEFAULT_FUNNEL_AGENT_TOOLS);
 }
 
 type ResolvedCrmScope = {

@@ -11,7 +11,7 @@ import {
 } from "@hrmny/ai";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { DEFAULT_FUNNEL_AGENT_TOOLS } from "../ai/agent-tools";
+import { DEFAULT_FUNNEL_AGENT_TOOLS, resolveAgentAllowedTools } from "../ai/agent-tools";
 import { getDb } from "../db";
 import { writeAudit } from "../m1-persistence";
 import { persistMemoryChunk, searchMemory } from "../ai/memory-db";
@@ -268,22 +268,90 @@ export const aiAdminRouter = router({
     list: staffProcedure.query(async ({ ctx }) => {
       requireAiAdmin(ctx);
       const db = getDb();
-      if (!db) return memCustomAgents;
-      return db.execute<CustomAgentRow>(sql`
-        select
-          custom_agent_id as "customAgentId",
-          slug, display_name as "displayName",
-          responsibility, system_prompt as "systemPrompt",
-          model, enabled,
-          produces_drafts as "producesDrafts",
-          coalesce(allowed_tools, '[]'::jsonb) as "allowedTools",
-          created_by_employee_id as "createdByEmployeeId",
-          created_at::text as "createdAt",
-          updated_at::text as "updatedAt"
-        from public.custom_agent
-        order by updated_at desc
-        limit 100
+      const rows = !db
+        ? memCustomAgents
+        : await db.execute<CustomAgentRow>(sql`
+            select
+              custom_agent_id as "customAgentId",
+              slug, display_name as "displayName",
+              responsibility, system_prompt as "systemPrompt",
+              model, enabled,
+              produces_drafts as "producesDrafts",
+              coalesce(allowed_tools, '[]'::jsonb) as "allowedTools",
+              created_by_employee_id as "createdByEmployeeId",
+              created_at::text as "createdAt",
+              updated_at::text as "updatedAt"
+            from public.custom_agent
+            order by updated_at desc
+            limit 100
+          `);
+      return rows.map((row) => {
+        const effective = resolveAgentAllowedTools(row.allowedTools);
+        const stored = Array.isArray(row.allowedTools)
+          ? row.allowedTools.filter(
+              (t): t is string => typeof t === "string" && t.trim().length > 0,
+            )
+          : [];
+        return {
+          ...row,
+          allowedTools: row.allowedTools,
+          effectiveAllowedTools: effective,
+          toolsEmpty: stored.length === 0,
+        };
+      });
+    }),
+
+    /** Persist funnel defaults onto agents that still have empty allowlists. */
+    repairEmptyAllowlists: staffProcedure.mutation(async ({ ctx }) => {
+      const actor = requireAiAdmin(ctx);
+      const toolsJson = JSON.stringify([...DEFAULT_FUNNEL_AGENT_TOOLS]);
+      const db = getDb();
+      if (!db) {
+        let repaired = 0;
+        for (const row of memCustomAgents) {
+          const stored = Array.isArray(row.allowedTools)
+            ? row.allowedTools.filter(
+                (t): t is string => typeof t === "string" && t.trim().length > 0,
+              )
+            : [];
+          if (stored.length === 0) {
+            row.allowedTools = [...DEFAULT_FUNNEL_AGENT_TOOLS];
+            repaired += 1;
+          }
+        }
+        await writeAudit({
+          actorEmployeeId: actor,
+          action: "ai.custom_agent.repair_allowlists",
+          entityType: "custom_agent",
+          entityId: null,
+          before: null,
+          after: { repaired, mode: "memory" },
+          reason: null,
+        });
+        return { ok: true as const, repaired, mode: "memory" as const };
+      }
+      const rows = await db.execute<{ id: string }>(sql`
+        update public.custom_agent
+        set
+          allowed_tools = ${toolsJson}::jsonb,
+          updated_at = now()
+        where coalesce(jsonb_array_length(allowed_tools), 0) = 0
+        returning custom_agent_id as id
       `);
+      await writeAudit({
+        actorEmployeeId: actor,
+        action: "ai.custom_agent.repair_allowlists",
+        entityType: "custom_agent",
+        entityId: null,
+        before: null,
+        after: { repaired: rows.length, mode: "durable" },
+        reason: null,
+      });
+      return {
+        ok: true as const,
+        repaired: rows.length,
+        mode: "durable" as const,
+      };
     }),
 
     create: staffProcedure

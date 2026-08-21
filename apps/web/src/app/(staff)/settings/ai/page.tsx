@@ -344,6 +344,9 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
   const remove = trpc.aiAdmin.customAgents.remove.useMutation({
     onSuccess: () => void utils.aiAdmin.customAgents.list.invalidate(),
   });
+  const repair = trpc.aiAdmin.customAgents.repairEmptyAllowlists.useMutation({
+    onSuccess: () => void utils.aiAdmin.customAgents.list.invalidate(),
+  });
   const runCustom = trpc.aiAdmin.customAgents.run.useMutation({
     onSuccess: () => void utils.aiAdmin.dashboard.invalidate(),
   });
@@ -360,8 +363,30 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
       <h2 className="font-display text-xl font-semibold">Custom agents</h2>
       <p className="mt-1 text-sm text-muted">
         Create, modify, remove, and run agents on command with client/user/task
-        memory sandboxes. Mock LLM when OpenRouter credits are empty.
+        memory sandboxes. New agents get funnel tools (tasks, briefs, campaigns,
+        portal, creative). Mock LLM when OpenRouter credits are empty.
       </p>
+      {(list.data ?? []).some((a) => a.toolsEmpty) ? (
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-ink">
+          <p>
+            Some agents still have an empty tool allowlist (runtime falls back to
+            funnel defaults). Persist defaults to the vault.
+          </p>
+          <button
+            type="button"
+            className="rounded-full border border-ink/20 bg-white px-3 py-1 text-xs font-medium disabled:opacity-40"
+            disabled={repair.isPending}
+            onClick={() => repair.mutate()}
+          >
+            {repair.isPending ? "Repairing…" : "Restore funnel tools"}
+          </button>
+          {repair.data ? (
+            <span className="text-xs text-muted">
+              Repaired {repair.data.repaired} ({repair.data.mode})
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <div className="mt-4 grid gap-2 md:grid-cols-3">
         <input
           className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
@@ -461,8 +486,21 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
               </p>
               <p className="text-xs text-muted">
                 {agent.enabled ? "enabled" : "disabled"} ·{" "}
-                {agent.model ?? "default model"}
+                {agent.model ?? "default model"} ·{" "}
+                {agent.toolsEmpty
+                  ? "tools empty (runtime funnel defaults)"
+                  : `${agent.effectiveAllowedTools?.length ?? 0} tools`}
               </p>
+              {!agent.toolsEmpty &&
+              Array.isArray(agent.effectiveAllowedTools) &&
+              agent.effectiveAllowedTools.length > 0 ? (
+                <p className="mt-1 max-w-xl font-mono text-[10px] text-muted">
+                  {agent.effectiveAllowedTools.slice(0, 8).join(", ")}
+                  {agent.effectiveAllowedTools.length > 8
+                    ? ` +${agent.effectiveAllowedTools.length - 8}`
+                    : ""}
+                </p>
+              ) : null}
             </div>
             <div className="flex gap-2">
               <button
