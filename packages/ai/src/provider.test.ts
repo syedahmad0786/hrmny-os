@@ -66,6 +66,51 @@ describe("withMetering", () => {
     expect(events[0]!.costAed).toBe(0);
   });
 
+  it("emits funnel_act tool fences for ReAct demos without OpenRouter", async () => {
+    const mock = createMockProvider();
+    const first = await mock.generate({
+      task: "generic",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Available tools:\n- funnel_act: Run sandboxed funnel writes\n- now: time",
+        },
+        {
+          role: "user",
+          content:
+            "Advance this client’s funnel drafts (brief, campaign, portal invite)",
+        },
+      ],
+    });
+    expect(first.text).toMatch(/```tool/);
+    expect(first.text).toMatch(/"name"\s*:\s*"funnel_act"/);
+
+    const second = await mock.generate({
+      task: "generic",
+      messages: [
+        {
+          role: "system",
+          content: "Available tools:\n- funnel_act: Run sandboxed funnel writes",
+        },
+        {
+          role: "user",
+          content: "Advance this client’s funnel drafts",
+        },
+        {
+          role: "user",
+          content: "Observation from funnel_act:\n{\"tools\":[]}",
+        },
+        {
+          role: "user",
+          content: "Tool result received. Continue.",
+        },
+      ],
+    });
+    expect(second.text).not.toMatch(/```tool/);
+    expect(second.text).toMatch(/portal/i);
+  });
+
   it("fails closed when month-to-date spend is at the cap", async () => {
     const onCost = vi.fn();
     const metered = withMetering(tokenProvider, {
