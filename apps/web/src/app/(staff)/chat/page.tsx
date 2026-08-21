@@ -265,7 +265,9 @@ export default function HrmnyChatPage() {
                 observe, answer. Scoped to your staff session.
               </p>
               <div className="hrmny-chat-starters">
-                {STARTERS.map((s) => (
+                {STARTERS.filter((s) =>
+                  s.includes("funnel drafts") ? Boolean(clientId) : true,
+                ).map((s) => (
                   <button
                     key={s}
                     type="button"
