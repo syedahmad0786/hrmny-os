@@ -181,6 +181,7 @@ export default function CrmQuotePage() {
                 <label>Active deal</label>
                 <select
                   className="crm-select"
+                  data-testid="quote-deal-select"
                   value={selected.dealId}
                   onChange={(e) => setDealId(e.target.value)}
                 >
@@ -207,10 +208,11 @@ export default function CrmQuotePage() {
                     </thead>
                     <tbody>
                       {lines.map((l, i) => (
-                        <tr key={i}>
+                        <tr key={i} data-testid="quote-line">
                           <td>
                             <input
                               className="crm-input"
+                              data-testid="quote-line-label"
                               placeholder="Line item"
                               value={l.label}
                               onChange={(e) => setLine(i, { label: e.target.value })}
@@ -219,6 +221,7 @@ export default function CrmQuotePage() {
                           <td>
                             <input
                               className="crm-input"
+                              data-testid="quote-line-qty"
                               type="number"
                               min={1}
                               style={{ width: 70 }}
@@ -229,6 +232,7 @@ export default function CrmQuotePage() {
                           <td>
                             <input
                               className="crm-input"
+                              data-testid="quote-line-sell"
                               type="number"
                               min={0}
                               style={{ width: 110 }}
@@ -242,6 +246,7 @@ export default function CrmQuotePage() {
                             <td>
                               <input
                                 className="crm-input"
+                                data-testid="quote-line-cost"
                                 type="number"
                                 min={0}
                                 style={{ width: 110 }}
@@ -339,6 +344,7 @@ export default function CrmQuotePage() {
               <div style={{ marginTop: 14 }}>
                 <CrmBtn
                   variant="primary"
+                  data-testid="quote-save"
                   disabled={save.isPending || parsedLines.length === 0}
                   onClick={onSave}
                 >
@@ -349,15 +355,27 @@ export default function CrmQuotePage() {
               </div>
 
               {save.error ? (
-                <div className="crm-note" style={{ marginTop: 10 }}>
+                <div
+                  className="crm-note"
+                  style={{ marginTop: 10 }}
+                  data-testid="quote-save-error"
+                >
                   Save failed · {save.error.message}
                 </div>
               ) : saveFailed ? (
-                <div className="crm-note" style={{ marginTop: 10 }}>
+                <div
+                  className="crm-note"
+                  style={{ marginTop: 10 }}
+                  data-testid="quote-save-error"
+                >
                   Save failed · {saveFailed}
                 </div>
               ) : saved ? (
-                <div className="crm-note" style={{ marginTop: 10 }}>
+                <div
+                  className="crm-note"
+                  style={{ marginTop: 10 }}
+                  data-testid="quote-save-status"
+                >
                   Saved v{saved.quote.version} ·{" "}
                   {saved.approvalTier
                     ? (TIER_LABELS[saved.approvalTier] ?? saved.approvalTier)
