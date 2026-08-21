@@ -548,6 +548,74 @@ export async function runAgentTools(input: {
     }
   }
 
+  if (
+    !input.scope.clientId &&
+    (want("crm.prospect") ||
+      want("apollo.import") ||
+      want("prospect.apollo") ||
+      want("crm.apollo"))
+  ) {
+    try {
+      const { resolveIntegrationApiKey } = await import(
+        "../integrations/resolve-keys"
+      );
+      const { createApolloLive, createEmailVerificationAdapter } =
+        await import("@hrmny/integrations");
+      const { importApolloCompaniesToCrm } = await import(
+        "../crm/apollo-import"
+      );
+      const query =
+        input.prompt.trim().slice(0, 200) || "UAE retail brands";
+      const { apiKey } = await resolveIntegrationApiKey(
+        "apollo",
+        input.scope.employeeId,
+      );
+      const hunter = await resolveIntegrationApiKey(
+        "hunter",
+        input.scope.employeeId,
+      );
+      const apolloClient = apiKey
+        ? createApolloLive({ mode: "live", apiKey })
+        : getDemoStore().apollo;
+      const mode = apiKey ? ("live" as const) : ("mock" as const);
+      const hits = await apolloClient.searchCompanies(query);
+      const imported = await importApolloCompaniesToCrm({
+        query,
+        companies: hits as Record<string, unknown>[],
+        mode,
+        ownerEmployeeId: input.scope.employeeId,
+        limit: 3,
+        verifier: createEmailVerificationAdapter(
+          hunter.apiKey
+            ? { mode: "live", apiKey: hunter.apiKey }
+            : { mode: "mock" },
+        ),
+      });
+      results.push({
+        tool: "crm.prospect",
+        ok: true,
+        data: {
+          mode: imported.mode,
+          verifyMode: imported.verifyMode,
+          query: imported.query,
+          dealCount: imported.deals.length,
+          deals: imported.deals.slice(0, 3).map((d) => ({
+            dealId: d.dealId,
+            companyName: d.companyName,
+            stage: d.stage,
+            emailVerified: d.emailVerified,
+          })),
+        },
+      });
+    } catch (err) {
+      results.push({
+        tool: "crm.prospect",
+        ok: false,
+        error: err instanceof Error ? err.message : "crm_prospect_failed",
+      });
+    }
+  }
+
   if (want("crm.note") || want("memory.note") || want("memory.write")) {
     try {
       const { persistMemoryChunk } = await import("./memory-db");
