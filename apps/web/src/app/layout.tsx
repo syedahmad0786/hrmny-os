@@ -1,6 +1,7 @@
 import "@hrmny/ui/tokens.css";
 import "./globals.css";
 import "./crm.css";
+import "./hrmny-chat.css";
 
 import type { Metadata } from "next";
 import type { ReactNode } from "react";

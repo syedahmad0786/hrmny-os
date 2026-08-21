@@ -108,5 +108,18 @@ export async function signoffOnboardingPhase(input: {
     set phases = ${JSON.stringify(phases)}::jsonb, updated_at = now()
     where client_id = ${input.clientId}::uuid
   `);
+  const { persistMemoryChunk } = await import("../ai/memory-db");
+  await persistMemoryChunk({
+    sourceType: "feedback",
+    sourceId: input.clientId,
+    content: `Onboarding phase signed off: ${phase.name} (index ${phase.phaseIndex}).${
+      advanced && next ? ` Advanced to ${next.name}.` : ""
+    }`,
+    metadata: {
+      clientId: input.clientId,
+      kind: "onboarding.phase_signoff",
+      phaseIndex: input.phaseIndex,
+    },
+  });
   return { advanced, phases };
 }

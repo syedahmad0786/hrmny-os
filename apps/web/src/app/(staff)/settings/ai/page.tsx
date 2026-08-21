@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { inferRouterOutputs } from "@trpc/server";
+import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import type { AppRouter } from "@/server/trpc/root";
 import { formatAed, formatRelative } from "@/components/crm/format";
@@ -49,6 +50,8 @@ function AdminNav() {
 export default function AiAdminPage() {
   const utils = trpc.useUtils();
   const dashboard = trpc.aiAdmin.dashboard.useQuery({ runsLimit: 20 });
+  const clients = trpc.clients.list.useQuery(undefined, { staleTime: 60_000 });
+  const [clientId, setClientId] = useState("");
   const toggle = trpc.aiAdmin.toggleAgent.useMutation({
     onSuccess: () => void utils.aiAdmin.dashboard.invalidate(),
   });
@@ -74,6 +77,24 @@ export default function AiAdminPage() {
         <AdminNav />
       </header>
 
+      <section className="rounded-xl border border-sand bg-white/75 p-4">
+        <label className="text-xs font-bold uppercase tracking-[0.12em] text-muted">
+          Memory sandbox client
+        </label>
+        <select
+          className="mt-2 w-full max-w-md rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+        >
+          <option value="">Actor-only (no client scope)</option>
+          {(clients.data ?? []).map((c) => (
+            <option key={c.clientId} value={c.clientId}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </section>
+
       {dashboard.isLoading ? (
         <div className="rounded-xl border border-sand bg-white/60 p-10 text-center text-sm text-muted">
           Loading AI control panel…
@@ -98,7 +119,10 @@ export default function AiAdminPage() {
           onRun={(agentId) =>
             run.mutate({
               agentId,
-              prompt: `Demo run for ${agentId} — summarize next actions.`,
+              prompt: clientId
+                ? `Demo run for ${agentId} on client sandbox — summarize next onboarding and creative actions.`
+                : `Demo run for ${agentId} — summarize next actions.`,
+              clientId: clientId || undefined,
             })
           }
           runningId={run.isPending ? run.variables?.agentId : undefined}
@@ -106,6 +130,8 @@ export default function AiAdminPage() {
           runError={run.error?.message}
         />
       ) : null}
+
+      <CustomAgentsPanel />
     </main>
   );
 }
@@ -298,5 +324,116 @@ function AiAdminBody({
         </div>
       </section>
     </>
+  );
+}
+
+function CustomAgentsPanel() {
+  const utils = trpc.useUtils();
+  const list = trpc.aiAdmin.customAgents.list.useQuery();
+  const create = trpc.aiAdmin.customAgents.create.useMutation({
+    onSuccess: () => {
+      void utils.aiAdmin.customAgents.list.invalidate();
+      setSlug("");
+      setName("");
+      setPrompt("");
+    },
+  });
+  const update = trpc.aiAdmin.customAgents.update.useMutation({
+    onSuccess: () => void utils.aiAdmin.customAgents.list.invalidate(),
+  });
+  const remove = trpc.aiAdmin.customAgents.remove.useMutation({
+    onSuccess: () => void utils.aiAdmin.customAgents.list.invalidate(),
+  });
+  const [slug, setSlug] = useState("");
+  const [name, setName] = useState("");
+  const [prompt, setPrompt] = useState("");
+
+  return (
+    <section className="rounded-xl border border-sand bg-white/75 p-4">
+      <h2 className="font-display text-xl font-semibold">Custom agents</h2>
+      <p className="mt-1 text-sm text-muted">
+        Create, modify, and remove CrewAI/LangSmith-style agents stored in
+        Postgres. Built-in registry agents stay above.
+      </p>
+      <div className="mt-4 grid gap-2 md:grid-cols-3">
+        <input
+          className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+          placeholder="slug (e.g. brand-voice)"
+          value={slug}
+          onChange={(e) => setSlug(e.target.value)}
+        />
+        <input
+          className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+          placeholder="Display name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <button
+          type="button"
+          className="rounded-full bg-ink px-4 py-2 text-sm text-white disabled:opacity-40"
+          disabled={!slug.trim() || !name.trim() || create.isPending}
+          onClick={() =>
+            create.mutate({
+              slug: slug.trim(),
+              displayName: name.trim(),
+              systemPrompt: prompt.trim() || undefined,
+            })
+          }
+        >
+          Create agent
+        </button>
+      </div>
+      <textarea
+        className="mt-2 min-h-[72px] w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+        placeholder="System prompt (optional)"
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+      />
+      {create.error ? (
+        <p className="mt-2 text-sm text-red-700">{create.error.message}</p>
+      ) : null}
+      <ul className="mt-4 divide-y divide-sand">
+        {(list.data ?? []).map((agent) => (
+          <li
+            key={agent.customAgentId}
+            className="flex flex-wrap items-center justify-between gap-3 py-3"
+          >
+            <div>
+              <p className="font-medium">
+                {agent.displayName}{" "}
+                <span className="font-mono text-xs text-muted">
+                  {agent.slug}
+                </span>
+              </p>
+              <p className="text-xs text-muted">
+                {agent.enabled ? "enabled" : "disabled"} ·{" "}
+                {agent.model ?? "default model"}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="rounded-full border border-sand bg-white px-3 py-1.5 text-xs"
+                onClick={() =>
+                  update.mutate({
+                    id: agent.customAgentId,
+                    enabled: !agent.enabled,
+                  })
+                }
+              >
+                {agent.enabled ? "Disable" : "Enable"}
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs text-red-700"
+                onClick={() => remove.mutate({ id: agent.customAgentId })}
+              >
+                Remove
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
