@@ -343,7 +343,11 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         <p className="text-ink">
           Signed in as <strong>{session.data.email}</strong>
         </p>
-        <p>This account does not have staff access to hrmny OS.</p>
+        <p>
+          This account does not have staff access to hrmny OS. Staff seats are
+          provisioned for approved @hrmny.co employees — ask a partner to add
+          your employee row, then sign in again.
+        </p>
         <button
           type="button"
           className="rounded border border-sand bg-white px-4 py-2 text-ink"
@@ -353,7 +357,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
               .then(() => router.replace("/login"))
           }
         >
-          Sign out and try another account
+          Sign out and try another @hrmny.co account
         </button>
       </main>
     );
