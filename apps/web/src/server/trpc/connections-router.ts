@@ -801,6 +801,18 @@ export const connectionsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const employeeId = requireEmployeeId(ctx.employeeId);
       await requireAllowedApp(input.toolkit);
+
+      const { probeIntegrationApiKey } = await import(
+        "../integrations/probe-api-key"
+      );
+      const probed = await probeIntegrationApiKey(input.toolkit, input.apiKey);
+      if (!probed.ok) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Key rejected by ${input.toolkit}: ${probed.reason}`,
+        });
+      }
+
       const db = requireDb();
       const [existing] = await db
         .select()
@@ -869,7 +881,11 @@ export const connectionsRouter = router({
           entityType: "connection_account",
           entityId: saved!.connectionAccountId,
           before: existing ? { status: existing.status } : null,
-          after: { toolkit: input.toolkit, status: "connected" },
+          after: {
+            toolkit: input.toolkit,
+            status: "connected",
+            probed: true,
+          },
         });
         return saved!;
       });
@@ -879,6 +895,7 @@ export const connectionsRouter = router({
         toolkit: row.toolkit,
         status: row.status,
         hasSecret: true,
+        probed: true as const,
       };
     }),
 
