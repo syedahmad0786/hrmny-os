@@ -247,13 +247,7 @@ export default function ConnectionsPage() {
                       void authorizeManaged
                         .mutateAsync({ toolkit: "canva" })
                         .then((result) => setRedirect(result.redirectUrl));
-                      return;
                     }
-                    void startOAuth
-                      .mutateAsync({
-                        toolkit: item.toolkit as "gmail" | "calendar" | "canva" | "linkedin",
-                      })
-                      .then((result) => setRedirect(result.redirectUrl));
                   }}
                 >
                   {item.ready
