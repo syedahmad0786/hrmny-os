@@ -1018,4 +1018,43 @@ test.describe("Demo funnel", () => {
     await expect(output).not.toBeEmpty();
   });
 
+  test("traffic DoR fill≤2 & lock spawns creative task", async ({ page }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "traffic" });
+    await page.goto("/traffic", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /Traffic · Definition of Ready/i }),
+    ).toBeVisible({ timeout: 60_000 });
+
+    const briefId = page.getByTestId("traffic-brief-id");
+    await expect(briefId).toBeVisible();
+    await expect
+      .poll(async () => briefId.textContent(), { timeout: 30_000 })
+      .toMatch(/d1000000/i);
+
+    const missing = page.getByTestId("traffic-dor-missing");
+    await expect(missing).toBeVisible();
+    // Seed starts with >2 missing required fields.
+    await expect
+      .poll(async () => missing.textContent(), { timeout: 30_000 })
+      .toMatch(/Missing:\s*[3-9]/);
+
+    await page.getByTestId("traffic-fill-lock").click();
+
+    const status = page.getByTestId("traffic-lock-status");
+    await expect(status).toBeVisible({ timeout: 60_000 });
+    await expect(status).toContainText(/Locked → taskStatus=brief_ready/i);
+
+    const spawn = page.getByTestId("traffic-spawn-result");
+    await expect(spawn).toBeVisible();
+    await expect(spawn).toContainText(/Spawned creative task/i);
+
+    const link = page.getByTestId("traffic-creative-task-link");
+    await expect(link).toHaveAttribute("href", /\/creative\?taskId=/);
+    await link.click();
+    await expect(page).toHaveURL(/\/creative\?taskId=/);
+    await expect(
+      page.getByRole("heading", { name: /^Creative$/i }),
+    ).toBeVisible({ timeout: 60_000 });
+  });
+
 });
