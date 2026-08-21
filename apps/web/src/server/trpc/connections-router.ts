@@ -1624,4 +1624,223 @@ export const connectionsRouter = router({
       mode: "stub" as const,
     };
   }),
+
+  /**
+   * Export a Canva design (PNG) into DAM and place it in client_review for
+   * the portal — mirrors creativeGen.sendToPortal for the Canva creative loop.
+   */
+  canvaAttachToPortal: staffProcedure
+    .input(
+      z.object({
+        designId: z.string().trim().min(1).max(120),
+        clientId: z.string().uuid(),
+        title: z.string().trim().min(1).max(180).optional(),
+        advanceTask: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireAllowedApp("canva");
+      const employeeId = requireEmployeeId(ctx.employeeId);
+      const title =
+        input.title?.trim() || `Canva · ${input.designId.slice(0, 40)}`;
+
+      let bytes: Uint8Array;
+      let contentType = "image/png";
+      let mode: "live" | "stub" = "stub";
+      let exportMeta: {
+        designId: string;
+        exportId?: string;
+        downloadUrl?: string;
+      } = { designId: input.designId };
+
+      if (process.env.COMPOSIO_API_KEY?.trim()) {
+        try {
+          const client = requireSystemComposio();
+          const accounts = await client.listUserConnectedAccounts(employeeId);
+          const account = accounts.find(
+            (candidate) =>
+              candidate.toolkit.slug.toLowerCase() === "canva" &&
+              !candidate.is_disabled &&
+              ACTIVE_COMPOSIO_STATUSES.has(candidate.status.toUpperCase()),
+          );
+          if (!account) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message:
+                "Canva not connected — use Connections → Connect Canva (Composio)",
+            });
+          }
+          const { exportCanvaDesign } = await import("@hrmny/integrations");
+          const exported = await exportCanvaDesign({
+            client,
+            connectedAccountId: account.id,
+            designId: input.designId,
+            format: "png",
+          });
+          const res = await fetch(exported.downloadUrl);
+          if (!res.ok) {
+            throw new Error(
+              `Canva download failed (${res.status}) for export ${exported.exportId}`,
+            );
+          }
+          bytes = new Uint8Array(await res.arrayBuffer());
+          contentType =
+            res.headers.get("content-type")?.split(";")[0]?.trim() ||
+            "image/png";
+          mode = "live";
+          exportMeta = {
+            designId: exported.designId,
+            exportId: exported.exportId,
+            downloadUrl: exported.downloadUrl,
+          };
+        } catch (err) {
+          if (err instanceof TRPCError) throw err;
+          throw new TRPCError({
+            code: "BAD_GATEWAY",
+            message:
+              err instanceof Error
+                ? `Canva attach failed: ${err.message}`
+                : "Canva attach failed",
+          });
+        }
+      } else {
+        // 1×1 PNG stub when Composio is not configured (unit / memory demos).
+        bytes = new Uint8Array(
+          Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+            "base64",
+          ),
+        );
+        exportMeta = { designId: input.designId, exportId: "stub-export" };
+      }
+
+      const ext =
+        contentType.includes("jpeg") || contentType.includes("jpg")
+          ? "jpg"
+          : "png";
+
+      const db = getDb();
+      if (!db) {
+        const store = getDemoStore();
+        let taskId: string | null = null;
+        if (input.advanceTask !== false) {
+          const task = [...store.tasks.values()].find(
+            (t) =>
+              t.clientId === input.clientId && t.taskType === "social_cutdowns",
+          );
+          if (task) {
+            task.status = "client_review";
+            taskId = task.taskId;
+          }
+        }
+        const asset = store.createAsset(title, input.clientId, taskId);
+        asset.status = "client_review";
+        const storagePath = `dam/${asset.assetId}/v1-canva.${ext}`;
+        const { getObjectStore } = await import("../storage/object-store");
+        await getObjectStore().put({
+          path: storagePath,
+          body: bytes,
+          contentType,
+        });
+        asset.versions.push({
+          assetVersionId: randomUUID(),
+          assetId: asset.assetId,
+          storagePath,
+          versionNumber: 1,
+          isClientRevision: false,
+          uploadedByEmployeeId: employeeId,
+          createdAt: new Date().toISOString(),
+        });
+        store.appendAudit({
+          actorEmployeeId: employeeId,
+          action: "connections.canvaAttachToPortal",
+          entityType: "asset",
+          entityId: asset.assetId,
+          before: null,
+          after: { ...exportMeta, mode, clientId: input.clientId },
+          reason: null,
+        });
+        return {
+          ok: true as const,
+          assetId: asset.assetId,
+          taskId,
+          clientId: input.clientId,
+          portalHref: "/portal/deliveries",
+          mode,
+        };
+      }
+
+      let taskId: string | null = null;
+      if (input.advanceTask !== false) {
+        const {
+          seedClientCreativeTask,
+          updateDeliveryTaskStatus,
+        } = await import("../tasks/delivery-tasks");
+        const seeded = await seedClientCreativeTask({
+          clientId: input.clientId,
+          title: `Portal Canva — ${title.slice(0, 80)}`,
+          status: "qc",
+        });
+        if (seeded) {
+          await updateDeliveryTaskStatus({
+            taskId: seeded.taskId,
+            status: "client_review",
+            qcPassed: true,
+            qcNotes: "Auto-QC for Canva design sent to portal",
+          });
+          taskId = seeded.taskId;
+        }
+      }
+
+      const assets = await db.execute<{ assetId: string }>(sql`
+        insert into public.asset (title, client_id, status, task_id)
+        values (
+          ${title},
+          ${input.clientId}::uuid,
+          'client_review',
+          ${taskId}::uuid
+        )
+        returning asset_id as "assetId"
+      `);
+      const assetId = assets[0]!.assetId;
+      const storagePath = `dam/${assetId}/v1-canva.${ext}`;
+      const { getObjectStore } = await import("../storage/object-store");
+      await getObjectStore().put({
+        path: storagePath,
+        body: bytes,
+        contentType,
+      });
+      await db.execute(sql`
+        insert into public.asset_version (
+          asset_id, storage_path, version_number, is_client_revision,
+          uploaded_by_employee_id
+        ) values (
+          ${assetId}::uuid,
+          ${storagePath},
+          1,
+          false,
+          ${employeeId}::uuid
+        )
+      `);
+
+      const { writeAudit } = await import("../m1-persistence");
+      await writeAudit({
+        actorEmployeeId: employeeId,
+        action: "connections.canvaAttachToPortal",
+        entityType: "asset",
+        entityId: assetId,
+        before: null,
+        after: { ...exportMeta, mode, clientId: input.clientId },
+        reason: null,
+      });
+
+      return {
+        ok: true as const,
+        assetId,
+        taskId,
+        clientId: input.clientId,
+        portalHref: "/portal/deliveries",
+        mode,
+      };
+    }),
 });

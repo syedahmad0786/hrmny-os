@@ -156,5 +156,20 @@ describe("M4 delivery demo", () => {
       expect(designs.designs.length).toBeGreaterThan(0);
       expect(designs.designs[0]?.id).toMatch(/^stub-design-/);
     }
+
+    const clientId =
+      (await partner.clients.list())[0]?.clientId ??
+      "aa000000-0000-4000-8000-0000000000aa";
+    const attached = await partner.connections.canvaAttachToPortal({
+      designId: designs.ok ? designs.designs[0]!.id : "stub-design-1",
+      clientId,
+      title: "Canva stub → portal",
+    });
+    expect(attached.ok).toBe(true);
+    expect(attached.mode).toBe("stub");
+    expect(attached.portalHref).toBe("/portal/deliveries");
+    expect(attached.assetId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
   });
 });

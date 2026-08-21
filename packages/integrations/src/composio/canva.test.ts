@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { listCanvaUserDesigns } from "./canva";
+import {
+  downloadUrlsFromCanvaExportJob,
+  exportCanvaDesign,
+  exportIdFromCanvaPost,
+  listCanvaUserDesigns,
+} from "./canva";
 import type { ComposioLiveClient } from "./live";
 
 describe("listCanvaUserDesigns", () => {
@@ -57,5 +62,93 @@ describe("listCanvaUserDesigns", () => {
         connectedAccountId: "conn-1",
       }),
     ).rejects.toThrow(/canva down/);
+  });
+});
+
+describe("Canva export helpers", () => {
+  it("parses export job id and download urls", () => {
+    expect(
+      exportIdFromCanvaPost({ data: { job: { id: "job_1" } } }),
+    ).toBe("job_1");
+    expect(
+      downloadUrlsFromCanvaExportJob({
+        data: {
+          job: { status: "success", urls: ["https://cdn.example/a.png"] },
+        },
+      }),
+    ).toEqual({
+      status: "success",
+      urls: ["https://cdn.example/a.png"],
+    });
+  });
+});
+
+describe("exportCanvaDesign", () => {
+  it("posts export then polls until success", async () => {
+    const executeTool = vi.fn(async (input: { toolSlug: string }) => {
+      if (input.toolSlug === "CANVA_POST_EXPORTS") {
+        return { data: { job: { id: "exp_9" } } };
+      }
+      if (input.toolSlug === "CANVA_GET_DESIGN_EXPORT_JOB_RESULT") {
+        return {
+          data: {
+            job: {
+              status: "success",
+              urls: ["https://cdn.example/design.png"],
+            },
+          },
+        };
+      }
+      throw new Error(`unexpected ${input.toolSlug}`);
+    }) as unknown as ComposioLiveClient["executeTool"];
+
+    const result = await exportCanvaDesign({
+      client: { executeTool },
+      connectedAccountId: "conn-canva-1",
+      designId: "DAGkg05ZH5w",
+      pollDelayMs: 0,
+    });
+
+    expect(result).toEqual({
+      designId: "DAGkg05ZH5w",
+      exportId: "exp_9",
+      downloadUrl: "https://cdn.example/design.png",
+      format: "png",
+    });
+    expect(executeTool).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        toolSlug: "CANVA_POST_EXPORTS",
+        arguments: expect.objectContaining({
+          design_id: "DAGkg05ZH5w",
+          format: { type: "png" },
+        }),
+      }),
+    );
+    expect(executeTool).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        toolSlug: "CANVA_GET_DESIGN_EXPORT_JOB_RESULT",
+        arguments: { exportId: "exp_9" },
+      }),
+    );
+  });
+
+  it("fails when job status is failed", async () => {
+    const executeTool = vi.fn(async (input: { toolSlug: string }) => {
+      if (input.toolSlug === "CANVA_POST_EXPORTS") {
+        return { job: { id: "exp_fail" } };
+      }
+      return { job: { status: "failed", urls: [] } };
+    }) as unknown as ComposioLiveClient["executeTool"];
+
+    await expect(
+      exportCanvaDesign({
+        client: { executeTool },
+        connectedAccountId: "conn-1",
+        designId: "des_x",
+        pollDelayMs: 0,
+      }),
+    ).rejects.toThrow(/failed/);
   });
 });
