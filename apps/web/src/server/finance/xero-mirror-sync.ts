@@ -1,7 +1,7 @@
 import { sql } from "@hrmny/db";
 import { createXeroAdapter } from "@hrmny/integrations";
 import { getDb } from "../db";
-import { loadXeroTokens } from "./xero-tokens";
+import { ensureFreshXeroTokens } from "./xero-tokens";
 
 /**
  * Pull invoices from the Xero adapter (live or mock mirror) into Postgres.
@@ -11,7 +11,7 @@ export async function syncXeroInvoiceMirror(): Promise<{
   mode: string;
   upserted: number;
 }> {
-  const vault = await loadXeroTokens();
+  const vault = await ensureFreshXeroTokens();
   const adapter = createXeroAdapter(
     vault
       ? {

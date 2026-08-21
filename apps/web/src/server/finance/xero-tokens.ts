@@ -163,10 +163,23 @@ export async function persistXeroTokens(input: {
 }
 
 export async function loadXeroTokens(): Promise<XeroTokenSecret | null> {
+  const loaded = await loadXeroConnection();
+  return loaded?.tokens ?? null;
+}
+
+async function loadXeroConnection(): Promise<{
+  employeeId: string;
+  connectionAccountId: string;
+  tokens: XeroTokenSecret;
+} | null> {
   const db = getDb();
   if (!db) return null;
   const [row] = await db
-    .select({ secretId: connectionAccount.secretId })
+    .select({
+      connectionAccountId: connectionAccount.connectionAccountId,
+      ownerEmployeeId: connectionAccount.ownerEmployeeId,
+      secretId: connectionAccount.secretId,
+    })
     .from(connectionAccount)
     .where(
       and(
@@ -176,7 +189,7 @@ export async function loadXeroTokens(): Promise<XeroTokenSecret | null> {
       ),
     )
     .limit(1);
-  if (!row?.secretId) return null;
+  if (!row?.secretId || !row.ownerEmployeeId) return null;
   const secrets = await db.execute(
     sql<{ decrypted_secret: string }>`
       select decrypted_secret from vault.decrypted_secrets
@@ -188,10 +201,90 @@ export async function loadXeroTokens(): Promise<XeroTokenSecret | null> {
   try {
     const parsed = JSON.parse(raw) as XeroTokenSecret;
     if (!parsed.accessToken || !parsed.tenantId) return null;
-    return parsed;
+    return {
+      employeeId: row.ownerEmployeeId,
+      connectionAccountId: row.connectionAccountId,
+      tokens: parsed,
+    };
   } catch {
     return null;
   }
+}
+
+export function xeroAccessTokenStillFresh(expiresAt?: string): boolean {
+  if (!expiresAt) return false;
+  const ms = Date.parse(expiresAt);
+  if (Number.isNaN(ms)) return false;
+  return ms > Date.now() + 60_000;
+}
+
+/**
+ * Return vault Xero tokens, refreshing the access token when near expiry.
+ * Mirrors Google Workspace token refresh so Billing → Sync Xero mirror keeps
+ * working after the ~30m access-token lifetime.
+ */
+export async function ensureFreshXeroTokens(): Promise<XeroTokenSecret | null> {
+  const loaded = await loadXeroConnection();
+  if (!loaded) return null;
+  const { tokens, employeeId, connectionAccountId } = loaded;
+  if (xeroAccessTokenStillFresh(tokens.expiresAt)) return tokens;
+  if (!tokens.refreshToken?.trim()) return tokens;
+  if (!xeroClientConfigured()) return tokens;
+
+  const clientId = process.env.XERO_CLIENT_ID!.trim();
+  const clientSecret = process.env.XERO_CLIENT_SECRET!.trim();
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const response = await fetch("https://identity.xero.com/connect/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: tokens.refreshToken,
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    const reason = `Xero token refresh failed (${response.status})${
+      detail.trim() ? `: ${detail.slice(0, 180)}` : ""
+    }`;
+    const db = getDb();
+    if (db) {
+      await db
+        .update(connectionAccount)
+        .set({
+          status: "error",
+          lastError: reason.slice(0, 500),
+          updatedAt: new Date(),
+        })
+        .where(
+          eq(connectionAccount.connectionAccountId, connectionAccountId),
+        );
+    }
+    throw new Error(reason);
+  }
+
+  const json = (await response.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
+  if (!json.access_token) {
+    throw new Error("Xero token refresh returned no access_token");
+  }
+
+  const next: XeroTokenSecret = {
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token ?? tokens.refreshToken,
+    tenantId: tokens.tenantId,
+    expiresAt: json.expires_in
+      ? new Date(Date.now() + json.expires_in * 1000).toISOString()
+      : undefined,
+  };
+  await persistXeroTokens({ employeeId, tokens: next });
+  return next;
 }
 
 export async function completeXeroOAuth(input: {
