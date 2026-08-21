@@ -60,6 +60,30 @@ function seedItems(): Map<string, CampaignItemRow> {
       createdAt: t,
       updatedAt: t,
     },
+    // Dedicated fixtures for campaign Approvals *UI* e2e — keep Ramadan /
+    // Product launch reel free for the existing API-based funnel specs.
+    {
+      campaignItemId: "c9000000-0000-4000-8000-0000000000a1",
+      title: "UI E2E offer carousel",
+      channel: "linkedin",
+      status: "draft",
+      scheduledFor: day(5),
+      clientId: CLIENT_A,
+      body: { brief: "UI click reject fixture — lead with the offer." },
+      createdAt: t,
+      updatedAt: t,
+    },
+    {
+      campaignItemId: "c9000000-0000-4000-8000-0000000000a2",
+      title: "UI E2E brand stills",
+      channel: "instagram",
+      status: "draft",
+      scheduledFor: day(6),
+      clientId: CLIENT_A,
+      body: { brief: "UI click approve fixture — ready to publish." },
+      createdAt: t,
+      updatedAt: t,
+    },
     {
       campaignItemId: "c9000000-0000-4000-8000-000000000003",
       title: "Case-study announcement",
