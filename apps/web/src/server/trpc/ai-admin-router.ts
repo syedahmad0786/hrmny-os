@@ -45,6 +45,65 @@ type CustomAgentRow = {
 
 const memCustomAgents: CustomAgentRow[] = [];
 
+/** Stable demo agent so Delivery "Run agent on task" works without Settings setup. */
+export const DEMO_DELIVERY_AGENT_ID = "a9000000-0000-4000-8000-0000000000d1";
+export const DEMO_DELIVERY_AGENT_SLUG = "delivery-coach";
+
+function demoDeliveryAgentRow(): CustomAgentRow {
+  const now = new Date().toISOString();
+  return {
+    customAgentId: DEMO_DELIVERY_AGENT_ID,
+    slug: DEMO_DELIVERY_AGENT_SLUG,
+    displayName: "Delivery coach",
+    responsibility:
+      "Suggest the next concrete delivery action for a selected client task.",
+    systemPrompt:
+      "You are a concise delivery coach for Creative Harmony. Propose the next concrete action for the selected task. Stay inside the client/task sandbox.",
+    model: null,
+    enabled: true,
+    producesDrafts: true,
+    allowedTools: [...DEFAULT_FUNNEL_AGENT_TOOLS],
+    createdByEmployeeId: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/** Ensure memory-mode (and empty durable) registries expose a runnable demo agent. */
+async function ensureDemoDeliveryAgent() {
+  const db = getDb();
+  if (!db) {
+    if (
+      !memCustomAgents.some((a) => a.slug === DEMO_DELIVERY_AGENT_SLUG)
+    ) {
+      memCustomAgents.unshift(demoDeliveryAgentRow());
+    }
+    return;
+  }
+  try {
+    await db.execute(sql`
+      insert into public.custom_agent (
+        custom_agent_id, slug, display_name, responsibility, system_prompt,
+        model, enabled, produces_drafts, allowed_tools, created_by_employee_id
+      ) values (
+        ${DEMO_DELIVERY_AGENT_ID}::uuid,
+        ${DEMO_DELIVERY_AGENT_SLUG},
+        ${"Delivery coach"},
+        ${"Suggest the next concrete delivery action for a selected client task."},
+        ${"You are a concise delivery coach for Creative Harmony. Propose the next concrete action for the selected task. Stay inside the client/task sandbox."},
+        null,
+        true,
+        true,
+        ${JSON.stringify([...DEFAULT_FUNNEL_AGENT_TOOLS])}::jsonb,
+        null
+      )
+      on conflict (slug) do nothing
+    `);
+  } catch {
+    /* table/constraint missing in some envs — memory path still covers CI */
+  }
+}
+
 function requireAiAdmin(ctx: TrpcContext) {
   if (!ctx.employeeId) throw new TRPCError({ code: "UNAUTHORIZED" });
   if (!ctx.roles.some((role) => AI_ADMIN_ROLES.includes(role as never))) {
@@ -268,6 +327,7 @@ export const aiAdminRouter = router({
     list: staffProcedure.query(async ({ ctx }) => {
       requireAiAdmin(ctx);
       const db = getDb();
+      await ensureDemoDeliveryAgent();
       const toolsJson = JSON.stringify([...DEFAULT_FUNNEL_AGENT_TOOLS]);
       if (!db) {
         for (const row of memCustomAgents) {
