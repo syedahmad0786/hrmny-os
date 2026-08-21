@@ -11,6 +11,7 @@ import {
 } from "@hrmny/ai";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { DEFAULT_FUNNEL_AGENT_TOOLS } from "../ai/agent-tools";
 import { getDb } from "../db";
 import { writeAudit } from "../m1-persistence";
 import { persistMemoryChunk, searchMemory } from "../ai/memory-db";
@@ -241,22 +242,7 @@ export const aiAdminRouter = router({
       });
       const { runAgentTools } = await import("../ai/agent-tools");
       const toolResults = await runAgentTools({
-        allowedTools: [
-          "memory.search",
-          "crm.read",
-          "delivery.read",
-          "outreach.read",
-          "onboarding.read",
-          "n8n.health",
-          "tasks.create",
-          "outreach.draft",
-          "crm.note",
-          "campaigns.draft",
-          "briefs.draft",
-          "crm.prospect",
-          "portal.invite",
-          "creative.sendToPortal",
-        ],
+        allowedTools: [...DEFAULT_FUNNEL_AGENT_TOOLS],
         prompt: input.prompt,
         scope: {
           clientId: input.clientId,
@@ -336,22 +322,7 @@ export const aiAdminRouter = router({
             model: input.model ?? null,
             enabled: true,
             producesDrafts: input.producesDrafts ?? true,
-            allowedTools: input.allowedTools ?? [
-              "memory.search",
-              "crm.read",
-              "delivery.read",
-              "outreach.read",
-              "onboarding.read",
-              "n8n.health",
-              "tasks.create",
-              "outreach.draft",
-              "crm.note",
-              "campaigns.draft",
-              "briefs.draft",
-              "crm.prospect",
-              "portal.invite",
-              "creative.sendToPortal",
-            ],
+            allowedTools: input.allowedTools ?? [...DEFAULT_FUNNEL_AGENT_TOOLS],
             createdByEmployeeId: actor.employeeId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -381,22 +352,7 @@ export const aiAdminRouter = router({
               ${input.model ?? null},
               ${input.producesDrafts ?? true},
               ${JSON.stringify(
-                input.allowedTools ?? [
-                  "memory.search",
-                  "crm.read",
-                  "delivery.read",
-                  "outreach.read",
-                  "onboarding.read",
-                  "n8n.health",
-                  "tasks.create",
-                  "outreach.draft",
-                  "crm.note",
-                  "campaigns.draft",
-                  "briefs.draft",
-                  "crm.prospect",
-                  "portal.invite",
-                  "creative.sendToPortal",
-                ],
+                input.allowedTools ?? [...DEFAULT_FUNNEL_AGENT_TOOLS],
               )}::jsonb,
               ${actor.employeeId}::uuid
             )
@@ -623,9 +579,11 @@ export const aiAdminRouter = router({
           limit: 6,
         });
 
-        const { runAgentTools } = await import("../ai/agent-tools");
+        const { runAgentTools, resolveAgentAllowedTools } = await import(
+          "../ai/agent-tools"
+        );
         const toolResults = await runAgentTools({
-          allowedTools: agent.allowedTools,
+          allowedTools: resolveAgentAllowedTools(agent.allowedTools),
           prompt: input.prompt,
           scope: {
             clientId: input.clientId,
