@@ -254,42 +254,53 @@ function CreativeQcPageInner() {
       <section className="rounded-lg border border-sand bg-white/70 p-4 text-sm">
         <h2 className="font-display text-lg font-semibold">Canva → portal</h2>
         <p className="mt-1 text-muted">
-          List connected Canva designs, export PNG into DAM, and open
-          client_review on the portal.
+          List Canva designs, export PNG into DAM, and open client_review on
+          the portal. Without a Canva OAuth connection the OS uses stub
+          designs (not live Canva).
         </p>
         {!canvaDesigns.data?.ok ? (
           <p className="mt-3 text-muted">
             {canvaDesigns.data?.reason ??
               (canvaDesigns.isLoading
                 ? "Loading Canva designs…"
-                : "Connect Canva under Settings → Connections")}
+                : "Connect Canva under Settings → Connections (or wait for stub list when Composio is configured)")}
           </p>
         ) : (
-          <ul className="mt-3 space-y-2">
-            {canvaDesigns.data.designs.map((design) => (
-              <li
-                key={design.id}
-                className="flex flex-wrap items-center justify-between gap-2 border-b border-sand/60 pb-2"
-              >
-                <span className="min-w-0 flex-1 truncate">{design.title}</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={!portalClientId || canvaAttach.isPending}
-                  onClick={() => {
-                    if (!portalClientId) return;
-                    canvaAttach.mutate({
-                      designId: design.id,
-                      clientId: portalClientId,
-                      title: design.title,
-                    });
-                  }}
+          <>
+            {"mode" in canvaDesigns.data && canvaDesigns.data.mode ? (
+              <p className="mt-2 text-xs text-muted" data-testid="canva-list-mode">
+                Mode: {canvaDesigns.data.mode}
+                {canvaDesigns.data.mode === "stub"
+                  ? " — connect Canva for live designs"
+                  : ""}
+              </p>
+            ) : null}
+            <ul className="mt-3 space-y-2">
+              {canvaDesigns.data.designs.map((design) => (
+                <li
+                  key={design.id}
+                  className="flex flex-wrap items-center justify-between gap-2 border-b border-sand/60 pb-2"
                 >
-                  {canvaAttach.isPending ? "Exporting…" : "Attach to portal"}
-                </Button>
-              </li>
-            ))}
-          </ul>
+                  <span className="min-w-0 flex-1 truncate">{design.title}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={!portalClientId || canvaAttach.isPending}
+                    onClick={() => {
+                      if (!portalClientId) return;
+                      canvaAttach.mutate({
+                        designId: design.id,
+                        clientId: portalClientId,
+                        title: design.title,
+                      });
+                    }}
+                  >
+                    {canvaAttach.isPending ? "Exporting…" : "Attach to portal"}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
         {canvaAttach.error ? (
           <p className="mt-2 text-red-700">{canvaAttach.error.message}</p>
