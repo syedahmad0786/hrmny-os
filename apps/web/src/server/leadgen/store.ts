@@ -79,6 +79,49 @@ export function resetLeadgenStore(): void {
   store.winLossNotes = [];
 }
 
+/**
+ * Seed Demo Co vs Other Co outreach rows (memory mode) so agent
+ * `outreach.read` sandboxes can prove client A vs B isolation.
+ * No-ops when DATABASE_URL is set (Postgres path owns durable rows).
+ */
+export function seedClientSandboxOutreach(input: {
+  dealIdA: string;
+  dealIdB: string;
+}): void {
+  if (getDb()) return;
+  const now = new Date().toISOString();
+  const aId = "o1000000-0000-4000-8000-0000000000a4";
+  const bId = "o1000000-0000-4000-8000-0000000000b4";
+  store.outreach.set(aId, {
+    id: aId,
+    dealId: input.dealIdA,
+    channel: "email",
+    state: "draft",
+    recipient: "alex@democo.example",
+    subject: "Demo Co launch reel follow-up",
+    body: "Checking in on the Demo Co launch reel cut.",
+    approvedBy: null,
+    sentAt: null,
+    externalId: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  store.outreach.set(bId, {
+    id: bId,
+    dealId: input.dealIdB,
+    channel: "email",
+    state: "draft",
+    recipient: "ops@otherco.example",
+    subject: "Other Co confidential outreach",
+    body: "Private Other Co pipeline note — must not leak to Demo Co.",
+    approvedBy: null,
+    sentAt: null,
+    externalId: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 async function withDb<T>(
   fn: (db: Db) => Promise<T>,
   fallback: () => T,

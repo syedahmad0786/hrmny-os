@@ -400,6 +400,8 @@ export type DemoMonth1Phase = {
 };
 
 const DEMO_DEAL_ID = "e0000000-0000-4000-8000-000000000001";
+/** Other Co won deal — must differ from DEMO_DEAL_ID so CRM/outreach sandboxes isolate. */
+const DEMO_CLIENT_B_DEAL_ID = "e0000000-0000-4000-8000-0000000000b4";
 const DEMO_EMPLOYEE_ID = "e1000000-0000-4000-8000-000000000001";
 /** Dev partner — staff inbox recipient for portal/campaign/onboarding notifies in memory mode. */
 const DEMO_STAFF_LEAD_ID = "c0000000-0000-4000-8000-000000000001";
@@ -499,6 +501,37 @@ function initialDeal(): DemoDeal {
     voiceCheckPassed: false,
     quoteValue: "50000.00",
     internalCost: "30000.00",
+    marginPct: "40.00",
+    discountPct: "0.00",
+    discountApprovalTier: null,
+    vendorHandlingFeePct: VENDOR_FEE_DEFAULT_PCT.toFixed(2),
+    quoteLines: [],
+    ownerEmployeeId: DEMO_EMPLOYEE_ID,
+    enrichment: null,
+    commercialMode: "project",
+  };
+}
+
+function initialClientBDeal(): DemoDeal {
+  return {
+    dealId: DEMO_CLIENT_B_DEAL_ID,
+    companyName: "Other Co FZ-LLC",
+    sector: "Services",
+    stage: "won",
+    closeOutcome: "won",
+    lostReason: null,
+    leadSourceLane: "relationship_led",
+    buafBudget: true,
+    buafUrgency: true,
+    buafAccess: true,
+    buafFit: true,
+    buafTemperature: "hot",
+    noGoFlags: [],
+    emailVerified: true,
+    contactEmail: "ops@otherco.example",
+    voiceCheckPassed: true,
+    quoteValue: "12000.00",
+    internalCost: "7200.00",
     marginPct: "40.00",
     discountPct: "0.00",
     discountApprovalTier: null,
@@ -840,11 +873,12 @@ class MemoryDemoStore {
     this.seedM4Demo();
   }
 
-  /** Isolation fixture: second client with own task/asset (portal_a must not see). */
+  /** Isolation fixture: second client with own deal/task/asset (portal_a must not see). */
   seedClientB() {
+    this.deals.set(DEMO_CLIENT_B_DEAL_ID, initialClientBDeal());
     const clientB: DemoClient = {
       clientId: DEMO_CLIENT_B_ID,
-      dealId: DEMO_DEAL_ID,
+      dealId: DEMO_CLIENT_B_DEAL_ID,
       name: "Other Co FZ-LLC",
       market: "UAE",
       engagementType: "project",
@@ -1301,6 +1335,7 @@ export function getDemoStore(): MemoryDemoStore {
 
 export {
   DEMO_DEAL_ID,
+  DEMO_CLIENT_B_DEAL_ID,
   DEMO_EMPLOYEE_ID,
   DEMO_STAFF_LEAD_ID,
   DEMO_CLIENT_ID,
