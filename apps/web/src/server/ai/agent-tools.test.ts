@@ -30,6 +30,7 @@ describe("runAgentTools funnel writes", () => {
     expect(byTool["campaigns.draft"]?.ok).toBe(true);
     expect(byTool["briefs.draft"]?.ok).toBe(true);
     expect(byTool["crm.note"]?.ok).toBe(true);
+    expect(byTool["crm.prospect"]).toBeUndefined();
 
     const campaign = byTool["campaigns.draft"]?.data as {
       status?: string;
@@ -45,5 +46,23 @@ describe("runAgentTools funnel writes", () => {
     expect(brief?.briefId).toBeTruthy();
     expect(brief?.dorComplete).toBe(true);
     expect(getDemoStore().briefs.has(brief!.briefId!)).toBe(true);
+  });
+
+  it("crm.prospect imports mock Apollo companies outside client sandbox", async () => {
+    const results = await runAgentTools({
+      allowedTools: ["crm.prospect"],
+      prompt: "UAE hospitality brands",
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const prospect = results.find((r) => r.tool === "crm.prospect");
+    expect(prospect?.ok).toBe(true);
+    const data = prospect?.data as {
+      mode?: string;
+      dealCount?: number;
+    };
+    expect(data?.mode).toBe("mock");
+    expect((data?.dealCount ?? 0) > 0).toBe(true);
   });
 });
