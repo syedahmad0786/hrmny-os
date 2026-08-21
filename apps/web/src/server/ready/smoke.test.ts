@@ -34,7 +34,9 @@ describe("buildDemoBlockers", () => {
     expect(blockers.some((b) => /Xero/i.test(b))).toBe(true);
     expect(blockers.some((b) => /Google Workspace/i.test(b))).toBe(true);
     expect(blockers.some((b) => /LinkedIn/i.test(b))).toBe(true);
+    expect(blockers.some((b) => /stub publish/i.test(b))).toBe(true);
     expect(blockers.some((b) => /Canva/i.test(b))).toBe(true);
+    expect(blockers.some((b) => /stub list/i.test(b))).toBe(true);
     expect(blockers.some((b) => /RESEND/i.test(b))).toBe(true);
   });
 

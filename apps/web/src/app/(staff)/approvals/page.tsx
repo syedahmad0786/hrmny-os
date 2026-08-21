@@ -178,7 +178,17 @@ function ApprovalsInner() {
         setFeedback((f) => ({
           ...f,
           [item.id]: res.ok
-            ? { tone: "ok", text: "Published" }
+            ? {
+                tone: "ok",
+                text:
+                  res.item.publishMode === "live"
+                    ? `Published · live${
+                        res.item.publishExternalId
+                          ? ` · ${res.item.publishExternalId}`
+                          : ""
+                      }`
+                    : `Published · stub (OS only — connect LinkedIn for live)`,
+              }
             : {
                 tone: "blocked",
                 text: res.reason,
@@ -282,10 +292,10 @@ function ApprovalsInner() {
           )}
           {(ready.connections?.linkedin ?? 0) < 1 ? (
             <p className="mt-1">
-              LinkedIn campaign publish is blocked until LinkedIn (Composio) is
-              connected.{" "}
+              LinkedIn is not connected — campaign publish still completes in
+              OS as stub (not a live social post).{" "}
               <Link href="/settings/connections" className="underline">
-                Connect LinkedIn
+                Connect LinkedIn for live
               </Link>
             </p>
           ) : (

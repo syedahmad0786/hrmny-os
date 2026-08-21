@@ -46,9 +46,18 @@ type CampaignItem = {
   status: CampaignStatus;
   scheduledFor: string;
   clientId: string;
+  /** Present after approved→published; stub = OS-only, not a live social post. */
+  publishMode?: "stub" | "copy_draft" | "live" | null;
+  publishExternalId?: string | null;
 };
 
 function toCampaignItem(row: CampaignItemRow): CampaignItem {
+  const publish = row.body?.publish as
+    | {
+        mode?: "stub" | "copy_draft" | "live";
+        externalId?: string;
+      }
+    | undefined;
   return {
     id: row.campaignItemId,
     title: row.title,
@@ -56,6 +65,8 @@ function toCampaignItem(row: CampaignItemRow): CampaignItem {
     status: row.status,
     scheduledFor: row.scheduledFor ?? "",
     clientId: row.clientId ?? "",
+    publishMode: publish?.mode ?? null,
+    publishExternalId: publish?.externalId ?? null,
   };
 }
 

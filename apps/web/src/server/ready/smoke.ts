@@ -170,16 +170,16 @@ export function buildDemoBlockers(input: {
     const err = connections.lastErrors.linkedin?.trim();
     blockers.push(
       err
-        ? `Connect LinkedIn (Composio): ${err}`
-        : "Connect LinkedIn (Composio) for campaign publish",
+        ? `Connect LinkedIn for live posts (${err}) — OS stub publish works without it`
+        : "Connect LinkedIn (Composio) for live posts — OS stub publish works without it",
     );
   }
   if (connections.canva < 1) {
     const err = connections.lastErrors.canva?.trim();
     blockers.push(
       err
-        ? `Connect Canva (Composio): ${err}`
-        : "Connect Canva (Composio) for design → portal",
+        ? `Connect Canva for live designs (${err}) — stub list/attach works without it`
+        : "Connect Canva (Composio) for live designs — stub list/attach works without it",
     );
   }
   if (tools.resend && tools.resend !== "live") {
