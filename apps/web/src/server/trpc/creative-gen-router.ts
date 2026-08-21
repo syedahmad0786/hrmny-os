@@ -228,7 +228,12 @@ export const creativeGenRouter = router({
         if (input.advanceTask !== false) {
           const task = [...store.tasks.values()].find(
             (t) =>
-              t.clientId === input.clientId && t.taskType === "social_cutdowns",
+              t.clientId === input.clientId &&
+              (t.taskType === "social_cutdowns" ||
+                t.taskType === "social_reel" ||
+                t.taskType === "social_still") &&
+              t.status !== "approved" &&
+              t.status !== "archived",
           );
           if (task) {
             task.status = "client_review";
@@ -270,18 +275,17 @@ export const creativeGenRouter = router({
           uploadedByEmployeeId: employeeId,
           createdAt: new Date().toISOString(),
         });
-        if (taskId) {
-          store.portalApprovals.set(taskId, {
-            approvalId: taskId,
-            clientId: input.clientId,
-            title,
-            kind: "asset",
-            status: "pending",
-            entityId: asset.assetId,
-            slaHours: 48,
-            createdAt: new Date().toISOString(),
-          });
-        }
+        const approvalId = crypto.randomUUID();
+        store.portalApprovals.set(approvalId, {
+          approvalId,
+          clientId: input.clientId,
+          title,
+          kind: "asset",
+          status: "pending",
+          entityId: asset.assetId,
+          slaHours: 48,
+          createdAt: new Date().toISOString(),
+        });
         return {
           ok: true as const,
           assetId: asset.assetId,

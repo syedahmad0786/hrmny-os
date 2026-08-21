@@ -698,4 +698,52 @@ test.describe("Demo funnel", () => {
     );
   });
 
+  test("creative generate attaches to portal review", async ({
+    page,
+    request,
+  }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/creative", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /^Creative$/i }),
+    ).toBeVisible({ timeout: 60_000 });
+
+    const clientSelect = page.getByTestId("creative-portal-client");
+    await expect(clientSelect).toBeVisible();
+    // Seed ids auto-select Demo Co; fall back to picking by label.
+    await expect
+      .poll(async () => clientSelect.inputValue(), { timeout: 30_000 })
+      .not.toBe("");
+    const selected = await clientSelect.inputValue();
+    if (!selected) {
+      await clientSelect.selectOption({ label: /Demo Co/i });
+    }
+
+    const generate = page.getByTestId("creative-generate");
+    await expect(generate).toBeEnabled();
+    await generate.click();
+
+    const send = page.getByTestId("creative-send-portal");
+    await expect(send).toBeEnabled({ timeout: 60_000 });
+    await send.click();
+
+    const portalReview = page.getByTestId("creative-portal-review");
+    await expect(portalReview).toBeVisible({ timeout: 60_000 });
+    await expect(portalReview.locator("a")).toHaveAttribute(
+      "href",
+      /\/portal\//,
+    );
+
+    // Memory-mode portal should now list the freshly attached pending approval.
+    const list = await request.get("/api/trpc/portal.approvals.list", {
+      headers: {
+        "x-dev-role": "portal_a",
+        "content-type": "application/json",
+      },
+    });
+    const listText = await list.text();
+    expect(list.ok(), listText).toBeTruthy();
+    expect(listText).toMatch(/Creative ·|pending/i);
+  });
+
 });
