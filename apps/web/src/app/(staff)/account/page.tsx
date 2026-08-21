@@ -370,7 +370,12 @@ function AccountRhythmPageInner() {
         <h2 className="font-display text-lg">Calendar / shoot gate</h2>
         {cal && activeCalendarId ? (
           <>
-            <p className="mt-2">
+            <p
+              className="mt-2"
+              data-testid="account-calendar-meta"
+              data-calendar-state={cal.state}
+              data-ref-state={cal.refApprovalState ?? ""}
+            >
               {cal.month} · shoot {cal.shootDate ?? "—"} · state {cal.state} ·
               ref {cal.refApprovalState ?? "—"}
             </p>
@@ -383,6 +388,7 @@ function AccountRhythmPageInner() {
               <Button
                 type="button"
                 variant="ghost"
+                data-testid="account-shoot-expect-block"
                 onClick={() => void tryLateShootChange()}
               >
                 Change shoot (expect T-48h block)
@@ -390,12 +396,14 @@ function AccountRhythmPageInner() {
               <Button
                 type="button"
                 variant="ghost"
+                data-testid="account-shoot-reeval"
                 onClick={() => void forceEscalate()}
               >
                 Re-eval shoot / T-24 escalate
               </Button>
               <Button
                 type="button"
+                data-testid="account-ref-approve"
                 onClick={() =>
                   void refApprove.mutateAsync({ id: activeCalendarId })
                 }
@@ -405,6 +413,7 @@ function AccountRhythmPageInner() {
               <Button
                 type="button"
                 variant="ghost"
+                data-testid="account-reschedule-edge"
                 onClick={() =>
                   void shoot
                     .mutateAsync({
@@ -436,7 +445,11 @@ function AccountRhythmPageInner() {
             to seed one, or use Reset M4 demo when demo resets are enabled.
           </p>
         )}
-        {msg ? <p className="mt-3 text-ink">{msg}</p> : null}
+        {msg ? (
+          <p className="mt-3 text-ink" data-testid="account-calendar-msg">
+            {msg}
+          </p>
+        ) : null}
         {(escalate.data ?? []).length > 0 ? (
           <ul className="mt-3 text-xs text-muted">
             {escalate.data!.slice(0, 5).map((e) => (
