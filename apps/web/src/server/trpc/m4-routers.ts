@@ -38,6 +38,7 @@ import {
   createDeliveryCalendar,
   getDeliveryCalendar,
   listDeliveryCalendars,
+  listRecentDeliveryCalendars,
   updateDeliveryCalendar,
 } from "../tasks/delivery-calendars";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
@@ -193,37 +194,65 @@ export const m4DemoRouter = router({
   }),
   seedIds: publicProcedure.query(async () => {
     if (getDb()) {
+      const recentCals = await listRecentDeliveryCalendars({ limit: 1 });
+      const latestCal = recentCals[0];
+      if (latestCal) {
+        const forClient = await listDeliveryTasks({
+          clientId: latestCal.clientId,
+        });
+        const task =
+          forClient.find((t) => t.briefId) ??
+          forClient[0] ??
+          null;
+        return {
+          clientId: latestCal.clientId,
+          calendarId: latestCal.calendarId,
+          taskId: task?.taskId ?? DEMO_TASK_ID,
+          briefId: task?.briefId ?? DEMO_BRIEF_ID,
+          creativeTaskId: task?.taskId ?? DEMO_CREATIVE_TASK_ID,
+          source: "durable_calendar" as const,
+        };
+      }
+
+      async function withClientCalendar(clientId: string, fallback: {
+        taskId: string;
+        briefId: string;
+        creativeTaskId: string;
+      }) {
+        const cals = await listDeliveryCalendars({ clientId });
+        return {
+          clientId,
+          calendarId: cals[0]?.calendarId ?? DEMO_CALENDAR_ID,
+          ...fallback,
+          source: cals[0] ? ("durable_task" as const) : ("demo_fallback" as const),
+        };
+      }
+
       const unlocked = await listDeliveryTasks({ status: "briefing" });
       const withBrief = unlocked.find((t) => t.briefId);
       if (withBrief?.briefId) {
-        return {
-          clientId: withBrief.clientId,
-          calendarId: DEMO_CALENDAR_ID,
+        return withClientCalendar(withBrief.clientId, {
           taskId: withBrief.taskId,
           briefId: withBrief.briefId,
           creativeTaskId: withBrief.taskId,
-        };
+        });
       }
       const ready = await listDeliveryTasks({ status: "brief_ready" });
       const readyBrief = ready.find((t) => t.briefId);
       if (readyBrief?.briefId) {
-        return {
-          clientId: readyBrief.clientId,
-          calendarId: DEMO_CALENDAR_ID,
+        return withClientCalendar(readyBrief.clientId, {
           taskId: readyBrief.taskId,
           briefId: readyBrief.briefId,
           creativeTaskId: readyBrief.taskId,
-        };
+        });
       }
       const qcTasks = await listDeliveryTasks({ status: "qc" });
       if (qcTasks[0]) {
-        return {
-          clientId: qcTasks[0].clientId,
-          calendarId: DEMO_CALENDAR_ID,
+        return withClientCalendar(qcTasks[0].clientId, {
           taskId: qcTasks[0].taskId,
           briefId: qcTasks[0].briefId ?? DEMO_BRIEF_ID,
           creativeTaskId: qcTasks[0].taskId,
-        };
+        });
       }
     }
     const store = getDemoStore();
@@ -234,6 +263,7 @@ export const m4DemoRouter = router({
       taskId: DEMO_TASK_ID,
       briefId: DEMO_BRIEF_ID,
       creativeTaskId: DEMO_CREATIVE_TASK_ID,
+      source: "demo_store" as const,
     };
   }),
 });
