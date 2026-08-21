@@ -129,6 +129,9 @@ export default function ClientOnboardingPage() {
                   ? "onboarding-phase-focus"
                   : `onboarding-phase-${phase.phaseIndex}`
               }
+              data-phase-index={phase.phaseIndex}
+              data-phase-status={phase.status}
+              data-phase-name={phase.name}
               aria-current={
                 focusPhase === phase.phaseIndex ? "true" : undefined
               }
@@ -153,6 +156,7 @@ export default function ClientOnboardingPage() {
                 <Button
                   type="button"
                   className="mt-2"
+                  data-testid="clients-onboarding-signoff"
                   onClick={() =>
                     void signoff.mutateAsync({
                       clientId: id,
