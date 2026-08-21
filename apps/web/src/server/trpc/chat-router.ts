@@ -117,6 +117,44 @@ function defaultTools(scope: {
       },
     },
     {
+      name: "funnel_act",
+      description:
+        "Run sandboxed funnel writes for the bound client (tasks, briefs, campaigns, portal invite, creative→portal). Requires client sandbox.",
+      run: async (args) => {
+        if (!scope.clientId) {
+          return { error: "client_sandbox_required" };
+        }
+        const { runAgentTools, DEFAULT_FUNNEL_AGENT_TOOLS } = await import(
+          "../ai/agent-tools"
+        );
+        const writes = DEFAULT_FUNNEL_AGENT_TOOLS.filter(
+          (t) =>
+            t === "tasks.create" ||
+            t === "outreach.draft" ||
+            t === "crm.note" ||
+            t === "campaigns.draft" ||
+            t === "briefs.draft" ||
+            t === "portal.invite" ||
+            t === "creative.sendToPortal",
+        );
+        const results = await runAgentTools({
+          allowedTools: [...writes],
+          prompt: String(
+            args.prompt ?? args.query ?? "Advance client funnel drafts",
+          ),
+          scope: {
+            clientId: scope.clientId,
+            employeeId: scope.employeeId,
+            dealId:
+              typeof args.dealId === "string" ? args.dealId : undefined,
+            taskId:
+              typeof args.taskId === "string" ? args.taskId : undefined,
+          },
+        });
+        return { tools: results };
+      },
+    },
+    {
       name: "now",
       description: "Return the current UTC timestamp",
       run: async () => ({ utc: nowIso() }),
