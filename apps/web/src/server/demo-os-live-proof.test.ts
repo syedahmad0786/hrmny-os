@@ -59,15 +59,28 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         `id=${encodeURIComponent(loop.outreachId!)}`,
       );
       expect(loop.portalInvite?.portalPath).toBeTruthy();
-      expect(loop.next.portal).toContain(loop.portalInvite!.portalPath);
+      expect(loop.portalInvite?.onboardingPath).toBeTruthy();
+      expect(loop.next.portal).toBe(loop.portalInvite!.portalPath);
+      expect(loop.next.onboarding).toBe(loop.portalInvite!.onboardingPath);
       expect(loop.next.portal).toContain(
         encodeURIComponent("/portal/approvals"),
       );
-      expect(loop.next.onboarding).toContain(loop.portalInvite!.portalPath);
       expect(loop.next.onboarding).toContain(
         encodeURIComponent("/portal/onboarding"),
       );
       expect(loop.next.portal).not.toBe(loop.next.onboarding);
+      // Distinct single-use tokens (token=…) so CTAs do not race.
+      const portalTok = new URL(
+        loop.next.portal,
+        "https://hrmny.invalid",
+      ).searchParams.get("token");
+      const onboardTok = new URL(
+        loop.next.onboarding,
+        "https://hrmny.invalid",
+      ).searchParams.get("token");
+      expect(portalTok).toBeTruthy();
+      expect(onboardTok).toBeTruthy();
+      expect(portalTok).not.toBe(onboardTok);
       expect(loop.outreachId).toBeTruthy();
       expect(loop.next.outreach).toContain(
         `id=${encodeURIComponent(loop.outreachId!)}`,

@@ -285,6 +285,12 @@ export default function HuntClientsPage() {
                   >
                     Portal
                   </Link>
+                  <Link
+                    className="text-sm underline"
+                    href={demo.data.next.onboarding}
+                  >
+                    Onboarding
+                  </Link>
                 </>
               ) : null}
               <Link className="text-sm underline" href="/crm">
@@ -373,8 +379,16 @@ export default function HuntClientsPage() {
                         className="underline"
                         href={demo.data.portalInvite.portalPath}
                       >
-                        Portal magic link (
+                        Portal approvals link (
                         {demo.data.portalInvite.delivery?.mode ?? "mock"})
+                      </Link>
+                    ) : null}
+                    {demo.data.portalInvite?.onboardingPath ? (
+                      <Link
+                        className="underline"
+                        href={demo.data.portalInvite.onboardingPath}
+                      >
+                        Onboarding magic link
                       </Link>
                     ) : null}
                   </p>
