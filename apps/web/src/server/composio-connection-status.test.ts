@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   findStaffConnectionRow,
   isActiveComposioRemote,
+  pickActiveComposioAccount,
 } from "./trpc/connections-router";
 
 describe("findStaffConnectionRow", () => {
@@ -30,5 +31,52 @@ describe("isActiveComposioRemote", () => {
     expect(isActiveComposioRemote("ACTIVE", true)).toBe(false);
     expect(isActiveComposioRemote("INITIATED")).toBe(false);
     expect(isActiveComposioRemote(null)).toBe(false);
+  });
+});
+
+describe("pickActiveComposioAccount", () => {
+  const remote = [
+    {
+      id: "stale",
+      status: "INITIATED",
+      is_disabled: false,
+      toolkit: { slug: "canva" },
+    },
+    {
+      id: "live",
+      status: "ACTIVE",
+      is_disabled: false,
+      toolkit: { slug: "canva" },
+    },
+  ];
+
+  it("skips stale INITIATED id and picks ACTIVE by toolkit", () => {
+    expect(
+      pickActiveComposioAccount({
+        externalConnectionId: "stale",
+        toolkitSlug: "canva",
+        remote,
+      })?.id,
+    ).toBe("live");
+  });
+
+  it("keeps ACTIVE id match when stored link is live", () => {
+    expect(
+      pickActiveComposioAccount({
+        externalConnectionId: "live",
+        toolkitSlug: "canva",
+        remote,
+      })?.id,
+    ).toBe("live");
+  });
+
+  it("returns undefined when no ACTIVE account exists", () => {
+    expect(
+      pickActiveComposioAccount({
+        externalConnectionId: "stale",
+        toolkitSlug: "canva",
+        remote: [remote[0]!],
+      }),
+    ).toBeUndefined();
   });
 });

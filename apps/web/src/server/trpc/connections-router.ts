@@ -425,6 +425,39 @@ export function isActiveComposioRemote(
 }
 
 /**
+ * Prefer an ACTIVE account matching the stored Composio id; otherwise any
+ * ACTIVE account for the toolkit. Never let a stale INITIATED/expired id
+ * block reconcile when another ACTIVE account exists (reconnect leftovers).
+ */
+export function pickActiveComposioAccount<
+  T extends {
+    id: string;
+    status: string;
+    is_disabled?: boolean | null;
+    toolkit: { slug: string };
+  },
+>(input: {
+  externalConnectionId: string | null | undefined;
+  toolkitSlug: string;
+  remote: readonly T[];
+}): T | undefined {
+  const slug = input.toolkitSlug.toLowerCase();
+  const byId = input.externalConnectionId
+    ? input.remote.find(
+        (candidate) => candidate.id === input.externalConnectionId,
+      )
+    : undefined;
+  if (byId && isActiveComposioStatus(byId.status, byId.is_disabled)) {
+    return byId;
+  }
+  return input.remote.find(
+    (candidate) =>
+      candidate.toolkit.slug.toLowerCase() === slug &&
+      isActiveComposioStatus(candidate.status, candidate.is_disabled),
+  );
+}
+
+/**
  * After Composio OAuth, vault rows often stay `pending` even when the remote
  * account is ACTIVE. Flip them to `connected` so /api/ready and Connections UI
  * reflect a completed connect (and keep externalConnectionId in sync).
@@ -452,16 +485,12 @@ async function reconcileComposioManagedStatus(
 
   for (const account of local) {
     const slug = account.toolkit.slice("composio:".length).toLowerCase();
-    const byId = account.externalConnectionId
-      ? remote.find((candidate) => candidate.id === account.externalConnectionId)
-      : undefined;
-    const byToolkit = remote.find(
-      (candidate) =>
-        candidate.toolkit.slug.toLowerCase() === slug &&
-        isActiveComposioStatus(candidate.status, candidate.is_disabled),
-    );
-    const current = byId ?? byToolkit;
-    if (!current || !isActiveComposioStatus(current.status, current.is_disabled)) {
+    const current = pickActiveComposioAccount({
+      externalConnectionId: account.externalConnectionId,
+      toolkitSlug: slug,
+      remote,
+    });
+    if (!current) {
       continue;
     }
     if (
@@ -1198,18 +1227,14 @@ export const connectionsRouter = router({
       );
     return local.map((account) => {
       const slug = account.toolkit.slice("composio:".length);
-      const current =
-        remote.find(
-          (candidate) => candidate.id === account.externalConnectionId,
-        ) ??
-        remote.find(
-          (candidate) =>
-            candidate.toolkit.slug.toLowerCase() === slug.toLowerCase() &&
-            isActiveComposioStatus(candidate.status, candidate.is_disabled),
-        );
+      const current = pickActiveComposioAccount({
+        externalConnectionId: account.externalConnectionId,
+        toolkitSlug: slug,
+        remote,
+      });
       return {
         connectionAccountId: account.connectionAccountId,
-        connectedAccountId: account.externalConnectionId,
+        connectedAccountId: current?.id ?? account.externalConnectionId,
         toolkit: slug,
         status: current?.status ?? account.status,
         statusReason: current?.status_reason ?? null,
