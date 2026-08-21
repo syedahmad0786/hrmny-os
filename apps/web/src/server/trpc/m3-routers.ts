@@ -1499,7 +1499,68 @@ export const leadsRouter = router({
           message: z.string().optional(),
         }),
       )
-      .mutation(({ input }) => {
+      .mutation(async ({ input }) => {
+        if (getDb()) {
+          const { createCompany, createContact, createDeal, createNote } =
+            await import("../crm/repository");
+          const company = await createCompany({
+            name: input.companyName,
+            sector: input.sector ?? null,
+            market: "UAE",
+          });
+          const localPart = input.contactEmail.split("@")[0] ?? "Inbound";
+          const contact = await createContact({
+            companyId: company.companyId,
+            firstName: localPart,
+            email: input.contactEmail,
+            isPrimary: true,
+          });
+          const deal = await createDeal({
+            companyName: company.name,
+            companyId: company.companyId,
+            primaryContactId: contact.contactId,
+            sector: input.sector ?? null,
+            leadSourceLane: "inbound",
+          });
+          if (input.message?.trim()) {
+            await createNote({
+              dealId: deal.dealId,
+              companyId: company.companyId,
+              body: input.message.trim(),
+            });
+          }
+          return {
+            dealId: deal.dealId,
+            companyName: deal.companyName,
+            sector: deal.sector,
+            stage: deal.stage,
+            closeOutcome: deal.closeOutcome,
+            lostReason: deal.lostReason,
+            leadSourceLane: deal.leadSourceLane,
+            buafBudget: deal.buafBudget,
+            buafUrgency: deal.buafUrgency,
+            buafAccess: deal.buafAccess,
+            buafFit: deal.buafFit,
+            buafTemperature: deal.buafTemperature,
+            noGoFlags: deal.noGoFlags,
+            emailVerified: deal.emailVerified,
+            contactEmail: input.contactEmail,
+            voiceCheckPassed: deal.voiceCheckPassed,
+            quoteValue: deal.quoteValue,
+            internalCost: deal.internalCost,
+            marginPct: deal.marginPct,
+            discountPct: deal.discountPct,
+            discountApprovalTier: deal.discountApprovalTier,
+            vendorHandlingFeePct: deal.vendorHandlingFeePct,
+            quoteLines: [],
+            ownerEmployeeId: deal.ownerEmployeeId,
+            enrichment: input.message ? { inboundMessage: input.message } : null,
+            commercialMode: "project" as const,
+            companyId: company.companyId,
+            contactId: contact.contactId,
+            durable: true as const,
+          };
+        }
         const store = getDemoStore();
         const deal: DemoDeal = {
           dealId: randomUUID(),

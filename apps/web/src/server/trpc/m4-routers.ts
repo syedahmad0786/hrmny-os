@@ -20,7 +20,7 @@ import {
   type DemoTask,
 } from "../demo-store";
 import { getDb } from "../db";
-import { driveSeam } from "../seams";
+import { driveSeam, driveSeamAsync } from "../seams";
 import {
   createDeliveryTask,
   getDeliveryBrief,
@@ -649,7 +649,7 @@ export const briefsRouter = router({
           });
           if (!locked) throw new Error("NOT_FOUND");
           const sourceTask = await getDeliveryTask(locked.brief.taskId);
-          const seam = driveSeam(
+          const seam = await driveSeamAsync(
             "brief.lock",
             `brief.lock:${locked.brief.briefId}`,
             {
@@ -945,9 +945,9 @@ export const tasksRouter = router({
           notes: input.notes,
         });
         if (!task) throw new Error("NOT_FOUND");
-        let seam = null as ReturnType<typeof driveSeam> | null;
+        let seam = null as Awaited<ReturnType<typeof driveSeamAsync>> | null;
         if (task.qcPassed) {
-          seam = driveSeam(
+          seam = await driveSeamAsync(
             "creative.approved",
             `creative.approved:${task.taskId}`,
             {

@@ -265,6 +265,35 @@ export async function readPortalWorkspace(clientId: string): Promise<PortalWorks
       entityId: row.task_id,
       createdAt: row.updated_at,
     }));
+
+  let lastSeam: string | null = null;
+  let deliveryStatusLabel = deliveryStatus(tasks);
+  try {
+    const seams = await db.execute<{
+      name: string;
+      created_at: Date | string;
+      result: Record<string, unknown> | null;
+    }>(sql`
+      select name, created_at, result
+      from public.seam_outbox
+      where payload->>'clientId' = ${clientId}
+         or result->>'clientId' = ${clientId}
+      order by created_at desc
+      limit 1
+    `);
+    const seam = seams[0];
+    if (seam) {
+      lastSeam = seam.name;
+      if (seam.name === "creative.approved") {
+        deliveryStatusLabel = "in_delivery";
+      } else if (seam.name === "brief.lock") {
+        deliveryStatusLabel = "brief_locked";
+      }
+    }
+  } catch {
+    /* seam_outbox optional on older DBs */
+  }
+
   const result: PortalWorkspace = {
     clientId,
     clientName: client.name,
@@ -286,8 +315,8 @@ export async function readPortalWorkspace(clientId: string): Promise<PortalWorks
     approvals,
     delivery: {
       clientId,
-      deliveryStatus: deliveryStatus(tasks),
-      lastSeam: null,
+      deliveryStatus: deliveryStatusLabel,
+      lastSeam,
       updatedAt: taskRows[0]?.updated_at ?? null,
       deliverables: [
         ...tasks.map(({ taskId, title, status }) => ({

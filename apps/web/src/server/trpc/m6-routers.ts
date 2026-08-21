@@ -27,7 +27,7 @@ import {
   getClientOnboarding,
   signoffOnboardingPhase,
 } from "../clients/onboarding";
-import { driveSeam, listSeams, type SeamName } from "../seams";
+import { driveSeamAsync, listSeams, resolveDirectAssetUrl, type SeamName } from "../seams";
 import { getDemoGuestShare } from "../work-governance";
 import { getDemoWork } from "./work-management-router";
 import {
@@ -527,6 +527,10 @@ export const portalRouter = router({
           return { ok: false as const, reason: "No versions uploaded" };
         }
         const ttl = Number(process.env.DAM_SIGNED_URL_TTL_SECONDS ?? 300);
+        const direct = resolveDirectAssetUrl(storagePath, ttl);
+        if (direct) {
+          return { ok: true as const, ...direct };
+        }
         const signed = await getDemoStore().objectStore.signedUrl(storagePath, ttl);
         return { ok: true as const, ...signed };
       }),
@@ -701,7 +705,7 @@ export const seamsRouter = router({
     .input(
       z.object({ limit: z.number().min(1).max(100).optional() }).optional(),
     )
-    .query(({ input }) => listSeams(input?.limit ?? 25)),
+    .query(async ({ input }) => listSeams(input?.limit ?? 25)),
 
   drive: staffProcedure
     .input(
@@ -716,8 +720,8 @@ export const seamsRouter = router({
         payload: z.record(z.unknown()).default({}),
       }),
     )
-    .mutation(({ input, ctx }) =>
-      driveSeam(input.name as SeamName, input.idempotencyKey, {
+    .mutation(async ({ input, ctx }) =>
+      driveSeamAsync(input.name as SeamName, input.idempotencyKey, {
         ...input.payload,
         actorEmployeeId: ctx.employeeId,
       }),

@@ -91,6 +91,7 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         expect(locked.taskStatus).toBe("brief_ready");
         expect(locked.brief.lockedAt).toBeTruthy();
         expect(locked.spawnedTaskId).toBeTruthy();
+        expect(locked.seam?.event?.result?.durable).toBe(true);
       }
       const lockedAgain = await caller.briefs.lock({ id: brief.briefId });
       expect(lockedAgain.ok).toBe(true);
@@ -162,6 +163,20 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       });
       expect(approved.ok).toBe(true);
       expect(approved.status).toBe("approved");
+
+      const inbound = await caller.leads.inbound.create({
+        companyName: `Inbound Proof ${Date.now()}`,
+        contactEmail: `inbound-${Date.now()}@example.com`,
+        sector: "Retail",
+        message: "Website form — need creative retainer",
+      });
+      expect(inbound.leadSourceLane).toBe("inbound");
+      expect(
+        "durable" in inbound ? inbound.durable : true,
+      ).toBeTruthy();
+      const inboundDeal = await getDeal(inbound.dealId);
+      expect(inboundDeal?.dealId).toBe(inbound.dealId);
+      expect(inboundDeal?.leadSourceLane).toBe("inbound");
     },
     90_000,
   );
