@@ -246,26 +246,24 @@ export const campaignsRouter = router({
       };
     }),
 
-  /** Campaign report v1 — posts + engagement pulled back post-publish (mock). */
+  /** Campaign report — only durable publish metadata; no fake engagement. */
   report: staffProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => {
       const row = await getCampaign(input.id);
       const stored = row?.body.publish as SocialPublishResult | undefined;
-      const lastPublish: SocialPublishResult = stored ?? {
-        published: false,
-        mode: "stub",
-        externalId: `stub-post-${input.id}`,
-        channel: row?.channel ?? "linkedin",
-        url: "https://example.invalid/post/stub",
-      };
+      const lastPublish: SocialPublishResult | null = stored ?? null;
+      const live =
+        lastPublish?.published === true && lastPublish.mode === "live";
       return {
         campaignId: input.id,
-        posts: row?.status === "published" ? 1 : 0,
-        impressions: 1240,
-        engagements: 87,
+        posts: live ? 1 : 0,
+        impressions: null as number | null,
+        engagements: null as number | null,
         lastPublish,
-        note: "Mock engagement — live figures arrive via Composio at M9",
+        note: live
+          ? "Live publish recorded — engagement metrics not ingested yet"
+          : "No live publish on this item — connect LinkedIn and publish via HITL",
       };
     }),
 });

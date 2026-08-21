@@ -19,7 +19,11 @@ export {
 } from "./composio/live";
 export {
   listCanvaUserDesigns,
+  exportCanvaDesign,
+  exportIdFromCanvaPost,
+  downloadUrlsFromCanvaExportJob,
   type CanvaDesignSummary,
+  type CanvaExportResult,
 } from "./composio/canva";
 export {
   createLinkedInSocialPublishAdapter,

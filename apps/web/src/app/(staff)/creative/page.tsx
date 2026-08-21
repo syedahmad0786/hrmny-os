@@ -38,6 +38,19 @@ export default function CreativeQcPage() {
     },
   });
   const clients = trpc.clients.list.useQuery(undefined, { staleTime: 60_000 });
+  const canvaDesigns = trpc.connections.canvaListDesigns.useQuery(undefined, {
+    staleTime: 30_000,
+    retry: false,
+  });
+  const canvaAttach = trpc.connections.canvaAttachToPortal.useMutation({
+    onSuccess: (data) => {
+      setMsg(
+        data.ok
+          ? `Canva → portal asset ${data.assetId.slice(0, 8)}… (${data.mode}) → ${data.portalHref}`
+          : "Canva attach failed",
+      );
+    },
+  });
   const [msg, setMsg] = useState<string | null>(null);
   const [prompt, setPrompt] = useState(
     "Ochre and sand brand moodboard — soft studio light, editorial product still life",
@@ -206,6 +219,54 @@ export default function CreativeQcPage() {
               ) : null,
             )}
           </div>
+        ) : null}
+      </section>
+
+      <section className="rounded-lg border border-sand bg-white/70 p-4 text-sm">
+        <h2 className="font-display text-lg font-semibold">Canva → portal</h2>
+        <p className="mt-1 text-muted">
+          List connected Canva designs, export PNG into DAM, and open
+          client_review on the portal.
+        </p>
+        {!canvaDesigns.data?.ok ? (
+          <p className="mt-3 text-muted">
+            {canvaDesigns.data?.reason ??
+              (canvaDesigns.isLoading
+                ? "Loading Canva designs…"
+                : "Connect Canva under Settings → Connections")}
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {canvaDesigns.data.designs.map((design) => (
+              <li
+                key={design.id}
+                className="flex flex-wrap items-center justify-between gap-2 border-b border-sand/60 pb-2"
+              >
+                <span className="min-w-0 flex-1 truncate">{design.title}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={!portalClientId || canvaAttach.isPending}
+                  onClick={() => {
+                    if (!portalClientId) return;
+                    canvaAttach.mutate({
+                      designId: design.id,
+                      clientId: portalClientId,
+                      title: design.title,
+                    });
+                  }}
+                >
+                  {canvaAttach.isPending ? "Exporting…" : "Attach to portal"}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {canvaAttach.error ? (
+          <p className="mt-2 text-red-700">{canvaAttach.error.message}</p>
+        ) : null}
+        {canvaDesigns.error ? (
+          <p className="mt-2 text-red-700">{canvaDesigns.error.message}</p>
         ) : null}
       </section>
 
