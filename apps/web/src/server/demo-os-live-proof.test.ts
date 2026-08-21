@@ -63,6 +63,11 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(loop.next.outreach).toContain(
         `id=${encodeURIComponent(loop.outreachId!)}`,
       );
+      if (loop.invoiceId) {
+        expect(loop.next.finance).toContain(
+          `invoiceId=${encodeURIComponent(loop.invoiceId)}`,
+        );
+      }
       expect(loop.fired.some((f) => f.startsWith("outreach."))).toBe(true);
       const outreachList = await caller.leadgen.outreach.list();
       expect(

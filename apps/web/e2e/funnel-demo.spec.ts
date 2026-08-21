@@ -110,6 +110,18 @@ test.describe("Demo funnel", () => {
       ).toBeVisible({ timeout: 30_000 });
       await expect(page.getByRole("link", { name: /Account calendar/i })).toBeVisible();
       await expect(page.getByRole("link", { name: /^Creative/i })).toBeVisible();
+      await expect(page.getByRole("link", { name: /^Finance/i })).toBeVisible();
     }
+  });
+
+  test("finance honors ?invoiceId= deep link", async ({ page }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/finance?invoiceId=demo-inv", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(page.locator("body")).toContainText(/finance|invoice|xero/i);
   });
 });

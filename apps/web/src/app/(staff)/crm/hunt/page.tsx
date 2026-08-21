@@ -271,6 +271,14 @@ export default function HuntClientsPage() {
                       Outreach
                     </Link>
                   ) : null}
+                  {"finance" in demo.data.next && demo.data.next.finance ? (
+                    <Link
+                      className="text-sm underline"
+                      href={demo.data.next.finance}
+                    >
+                      Finance
+                    </Link>
+                  ) : null}
                   <Link
                     className="text-sm underline"
                     href={demo.data.next.portal}
@@ -353,6 +361,11 @@ export default function HuntClientsPage() {
                         href={demo.data.next.outreach}
                       >
                         Outreach draft
+                      </Link>
+                    ) : null}
+                    {"finance" in demo.data.next && demo.data.next.finance ? (
+                      <Link className="underline" href={demo.data.next.finance}>
+                        First invoice
                       </Link>
                     ) : null}
                     {demo.data.portalInvite?.portalPath ? (
