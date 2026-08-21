@@ -82,6 +82,7 @@ export default function AiAdminPage() {
           Memory sandbox client
         </label>
         <select
+          data-testid="ai-sandbox-client"
           className="mt-2 w-full max-w-md rounded-lg border border-sand bg-white px-3 py-2 text-sm"
           value={clientId}
           onChange={(e) => setClientId(e.target.value)}
@@ -389,12 +390,14 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
       ) : null}
       <div className="mt-4 grid gap-2 md:grid-cols-3">
         <input
+          data-testid="ai-agent-slug"
           className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
           placeholder="slug (e.g. brand-voice)"
           value={slug}
           onChange={(e) => setSlug(e.target.value)}
         />
         <input
+          data-testid="ai-agent-name"
           className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
           placeholder="Display name"
           value={name}
@@ -402,6 +405,7 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
         />
         <button
           type="button"
+          data-testid="ai-agent-create"
           className="rounded-full bg-ink px-4 py-2 text-sm text-white disabled:opacity-40"
           disabled={!slug.trim() || !name.trim() || create.isPending}
           onClick={() =>
@@ -416,6 +420,7 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
         </button>
       </div>
       <textarea
+        data-testid="ai-agent-system-prompt"
         className="mt-2 min-h-[72px] w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm"
         placeholder="System prompt (optional)"
         value={prompt}
@@ -423,12 +428,14 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
       />
       <div className="mt-2 grid gap-2 md:grid-cols-2">
         <textarea
+          data-testid="ai-agent-run-prompt"
           className="min-h-[56px] w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm"
           placeholder="Run prompt for on-command invoke"
           value={runPrompt}
           onChange={(e) => setRunPrompt(e.target.value)}
         />
         <input
+          data-testid="ai-agent-task-id"
           className="rounded-lg border border-sand bg-white px-3 py-2 text-sm font-mono"
           placeholder="Optional task UUID sandbox"
           value={taskId}
@@ -439,7 +446,7 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
         <p className="mt-2 text-sm text-red-700">{create.error.message}</p>
       ) : null}
       {runCustom.data ? (
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 space-y-2" data-testid="ai-agent-run-output">
           <pre className="max-h-40 overflow-auto rounded-lg bg-ink/5 p-3 text-xs">
             {typeof runCustom.data.output === "string"
               ? runCustom.data.output
@@ -448,7 +455,10 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
           {"toolResults" in runCustom.data &&
           Array.isArray(runCustom.data.toolResults) &&
           runCustom.data.toolResults.length > 0 ? (
-            <ul className="rounded-lg border border-sand bg-white/70 p-3 text-xs">
+            <ul
+              data-testid="ai-agent-tool-results"
+              className="rounded-lg border border-sand bg-white/70 p-3 text-xs"
+            >
               <li className="mb-1 font-semibold uppercase tracking-[0.12em] text-muted">
                 Tool results
               </li>
@@ -475,6 +485,7 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
         {(list.data ?? []).map((agent) => (
           <li
             key={agent.customAgentId}
+            data-testid={`ai-agent-row-${agent.slug}`}
             className="flex flex-wrap items-center justify-between gap-3 py-3"
           >
             <div>
@@ -505,6 +516,7 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
             <div className="flex gap-2">
               <button
                 type="button"
+                data-testid={`ai-agent-run-${agent.slug}`}
                 className="rounded-full border border-sand bg-white px-3 py-1.5 text-xs disabled:opacity-40"
                 disabled={!agent.enabled || runCustom.isPending || !runPrompt.trim()}
                 onClick={() =>

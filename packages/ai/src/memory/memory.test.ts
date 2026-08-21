@@ -99,4 +99,40 @@ describe("memory stubs", () => {
     expect(clientHits.map((h) => h.id)).toEqual(["2"]);
   });
 
+  it("isolates employee A user sandbox from employee B", () => {
+    const employeeA = "e1000000-0000-4000-8000-0000000000aa";
+    const employeeB = "e1000000-0000-4000-8000-0000000000bb";
+    const rows = [
+      {
+        id: "a1",
+        sourceType: "note" as const,
+        sourceId: null,
+        content: "partner-only briefing preference for employee A",
+        metadata: { employeeId: employeeA },
+      },
+      {
+        id: "b1",
+        sourceType: "note" as const,
+        sourceId: null,
+        content: "finance-only cashflow note for employee B",
+        metadata: { employeeId: employeeB },
+      },
+    ];
+    const aHits = keywordSearchFromRows(rows, {
+      query: "briefing cashflow preference",
+      employeeId: employeeA,
+      limit: 10,
+    });
+    expect(aHits.map((h) => h.id)).toEqual(["a1"]);
+    expect(aHits[0]?.content).toMatch(/employee A/i);
+
+    const bHits = keywordSearchFromRows(rows, {
+      query: "briefing cashflow preference",
+      employeeId: employeeB,
+      limit: 10,
+    });
+    expect(bHits.map((h) => h.id)).toEqual(["b1"]);
+    expect(bHits[0]?.content).toMatch(/employee B/i);
+  });
+
 });

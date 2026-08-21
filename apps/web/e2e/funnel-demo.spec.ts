@@ -813,4 +813,82 @@ test.describe("Demo funnel", () => {
     expect(listText).toMatch(/Creative ·|pending/i);
   });
 
+  test("staff chat threads stay isolated across partner and finance", async ({
+    request,
+  }) => {
+    const title = `E2E partner thread ${Date.now()}`;
+    const create = await request.post("/api/trpc/chat.createThread", {
+      headers: {
+        "x-dev-role": "partner",
+        "content-type": "application/json",
+      },
+      data: { json: { title } },
+    });
+    const createText = await create.text();
+    expect(create.ok(), createText).toBeTruthy();
+    const created = JSON.parse(createText) as {
+      result?: { data?: { json?: { chatThreadId?: string }; chatThreadId?: string } };
+    };
+    const threadId =
+      created.result?.data?.json?.chatThreadId ??
+      created.result?.data?.chatThreadId;
+    expect(threadId).toBeTruthy();
+
+    const partnerList = await request.get("/api/trpc/chat.listThreads", {
+      headers: { "x-dev-role": "partner" },
+    });
+    const partnerText = await partnerList.text();
+    expect(partnerList.ok(), partnerText).toBeTruthy();
+    expect(partnerText).toContain(threadId!);
+
+    const financeList = await request.get("/api/trpc/chat.listThreads", {
+      headers: { "x-dev-role": "finance" },
+    });
+    const financeText = await financeList.text();
+    expect(financeList.ok(), financeText).toBeTruthy();
+    expect(financeText).not.toContain(threadId!);
+
+    const financeMessages = await request.get(
+      `/api/trpc/chat.messages?input=${encodeURIComponent(
+        JSON.stringify({ json: { threadId } }),
+      )}`,
+      { headers: { "x-dev-role": "finance" } },
+    );
+    const messagesText = await financeMessages.text();
+    expect(financeMessages.ok()).toBeFalsy();
+    expect(messagesText).toMatch(/NOT_FOUND|not found/i);
+  });
+
+  test("settings AI create → run agent on command", async ({ page }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/settings/ai", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /AI control panel/i }),
+    ).toBeVisible({ timeout: 60_000 });
+
+    const sandbox = page.getByTestId("ai-sandbox-client");
+    await expect(sandbox).toBeVisible();
+    await expect
+      .poll(async () => sandbox.locator("option").count(), { timeout: 30_000 })
+      .toBeGreaterThan(1);
+    await sandbox.selectOption({ label: /Demo Co/i });
+
+    const slug = `e2e-coach-${Date.now()}`;
+    await page.getByTestId("ai-agent-slug").fill(slug);
+    await page.getByTestId("ai-agent-name").fill("E2E Command Coach");
+    await page.getByTestId("ai-agent-create").click();
+
+    const row = page.getByTestId(`ai-agent-row-${slug}`);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+
+    await page
+      .getByTestId("ai-agent-run-prompt")
+      .fill("Give one next onboarding action for this client sandbox.");
+    await page.getByTestId(`ai-agent-run-${slug}`).click();
+
+    const output = page.getByTestId("ai-agent-run-output");
+    await expect(output).toBeVisible({ timeout: 60_000 });
+    await expect(output).not.toBeEmpty();
+  });
+
 });
