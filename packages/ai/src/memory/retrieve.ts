@@ -38,6 +38,7 @@ export async function retrieveMemory(
     input.companyId ?? "",
     input.clientId ?? "",
     input.employeeId ?? "",
+    input.taskId ?? "",
     input.query.slice(0, 80),
     String(input.limit),
   ].join(":");
@@ -92,6 +93,11 @@ export function keywordSearchFromRows(
     }
     if (parsed.companyId) {
       if (meta.companyId == null || String(meta.companyId) !== parsed.companyId) {
+        continue;
+      }
+    }
+    if (parsed.taskId) {
+      if (meta.taskId == null || String(meta.taskId) !== parsed.taskId) {
         continue;
       }
     }

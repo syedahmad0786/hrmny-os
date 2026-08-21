@@ -76,7 +76,12 @@ export type PortalWorkspace = {
     deliveryStatus: string;
     lastSeam: string | null;
     updatedAt: Date | string | null;
-    deliverables: Array<Pick<PortalTask, "taskId" | "title" | "status">>;
+    deliverables: Array<{
+      taskId: string;
+      title: string;
+      status: string;
+      kind: "task" | "asset";
+    }>;
   };
 };
 
@@ -164,11 +169,22 @@ function memoryWorkspace(clientId: string): PortalWorkspace {
       deliveryStatus: status?.status ?? deliveryStatus(tasks),
       lastSeam: status?.lastSeam ?? null,
       updatedAt: status?.updatedAt ?? null,
-      deliverables: tasks.map(({ taskId, title, status: taskStatus }) => ({
-        taskId,
-        title,
-        status: taskStatus,
-      })),
+      deliverables: [
+        ...tasks.map(({ taskId, title, status: taskStatus }) => ({
+          taskId,
+          title,
+          status: taskStatus,
+          kind: "task" as const,
+        })),
+        ...[...store.assets.values()]
+          .filter((asset) => asset.clientId === clientId)
+          .map((asset) => ({
+            taskId: asset.assetId,
+            title: asset.title,
+            status: asset.status,
+            kind: "asset" as const,
+          })),
+      ],
     },
   };
   assertPortalSafe(result);
@@ -273,11 +289,20 @@ export async function readPortalWorkspace(clientId: string): Promise<PortalWorks
       deliveryStatus: deliveryStatus(tasks),
       lastSeam: null,
       updatedAt: taskRows[0]?.updated_at ?? null,
-      deliverables: tasks.map(({ taskId, title, status }) => ({
-        taskId,
-        title,
-        status,
-      })),
+      deliverables: [
+        ...tasks.map(({ taskId, title, status }) => ({
+          taskId,
+          title,
+          status,
+          kind: "task" as const,
+        })),
+        ...assetRows.map((row) => ({
+          taskId: row.asset_id,
+          title: row.title,
+          status: row.status,
+          kind: "asset" as const,
+        })),
+      ],
     },
   };
   assertPortalSafe(result);

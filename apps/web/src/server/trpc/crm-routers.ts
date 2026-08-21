@@ -990,41 +990,104 @@ export const crmRouter = router({
   })),
   stages: publicProcedure.query(() => pipelineStages()),
   /**
-   * One-shot demo: mock prospect → pipeline → won → client onboarding →
-   * creative QC task. Works without Apollo/Hunter keys (uses CRM memory/Postgres).
+   * One-shot demo: prospect → pipeline → won → client onboarding →
+   * creative QC task. Optional viaApollo uses durable Apollo import first.
    */
   runDemoClosedLoop: staffProcedure
     .input(
       z
         .object({
           companyName: z.string().min(2).max(120).optional(),
+          /** When true, seed via Apollo search → durable CRM, then close. */
+          viaApollo: z.boolean().optional(),
         })
         .optional(),
     )
     .mutation(async ({ ctx, input }) => {
       const stamp = Date.now();
-      const companyName =
-        input?.companyName?.trim() || `Demo Hunt ${stamp}`;
-      const company = await createCompany({
-        name: companyName,
-        market: "UAE",
-        website: `https://demo-${stamp}.example`,
-      });
-      const contact = await createContact({
-        companyId: company.companyId,
-        firstName: "Demo",
-        lastName: "Prospect",
-        email: `prospect+${stamp}@example.com`,
-        title: "Marketing Lead",
-        isPrimary: true,
-      });
-      const deal = await createDeal({
-        companyName: company.name,
-        companyId: company.companyId,
-        primaryContactId: contact.contactId,
-        leadSourceLane: "relationship_led",
-        ownerEmployeeId: ctx.employeeId,
-      });
+      let companyId: string;
+      let contactId: string;
+      let dealId: string;
+      let companyName: string;
+      let apolloMode: "mock" | "live" | null = null;
+
+      if (input?.viaApollo) {
+        const { importApolloCompaniesToCrm } = await import(
+          "../crm/apollo-import"
+        );
+        const { resolveIntegrationApiKey } = await import(
+          "../integrations/resolve-keys"
+        );
+        const { createApolloLive } = await import("@hrmny/integrations");
+        const { getDemoStore } = await import("../demo-store");
+        const query =
+          input?.companyName?.trim() || `Demo Retail UAE ${stamp}`;
+        const { apiKey } = await resolveIntegrationApiKey(
+          "apollo",
+          ctx.employeeId!,
+        );
+        const apolloClient = apiKey
+          ? createApolloLive({ mode: "live", apiKey })
+          : getDemoStore().apollo;
+        apolloMode = apiKey ? "live" : "mock";
+        const hits = await apolloClient.searchCompanies(query);
+        const imported = await importApolloCompaniesToCrm({
+          query,
+          companies: hits as Record<string, unknown>[],
+          mode: apolloMode,
+          ownerEmployeeId: ctx.employeeId,
+          limit: 1,
+        });
+        const first = imported.deals[0];
+        if (!first) {
+          return {
+            ok: false as const,
+            step: "apollo",
+            reason: "Apollo returned no companies",
+          };
+        }
+        companyId = first.companyId;
+        contactId = first.contactId ?? "";
+        dealId = first.dealId;
+        companyName = first.companyName;
+        if (!contactId) {
+          const contact = await createContact({
+            companyId,
+            firstName: "Apollo",
+            lastName: "Prospect",
+            email: `apollo+${stamp}@example.com`,
+            isPrimary: true,
+          });
+          contactId = contact.contactId;
+          await updateDeal(dealId, { primaryContactId: contactId });
+        }
+      } else {
+        companyName =
+          input?.companyName?.trim() || `Demo Hunt ${stamp}`;
+        const company = await createCompany({
+          name: companyName,
+          market: "UAE",
+          website: `https://demo-${stamp}.example`,
+        });
+        const contact = await createContact({
+          companyId: company.companyId,
+          firstName: "Demo",
+          lastName: "Prospect",
+          email: `prospect+${stamp}@example.com`,
+          title: "Marketing Lead",
+          isPrimary: true,
+        });
+        const deal = await createDeal({
+          companyName: company.name,
+          companyId: company.companyId,
+          primaryContactId: contact.contactId,
+          leadSourceLane: "relationship_led",
+          ownerEmployeeId: ctx.employeeId,
+        });
+        companyId = company.companyId;
+        contactId = contact.contactId;
+        dealId = deal.dealId;
+      }
 
       const stages = [
         "qualify",
@@ -1035,7 +1098,7 @@ export const crmRouter = router({
       ] as const;
       for (const to of stages) {
         const moved = await moveDealStage({
-          dealId: deal.dealId,
+          dealId,
           to,
           actorEmployeeId: ctx.employeeId,
         });
@@ -1048,13 +1111,13 @@ export const crmRouter = router({
         }
       }
 
-      await updateDeal(deal.dealId, {
+      await updateDeal(dealId, {
         quoteValue: "50000",
         internalCost: "28000",
       });
 
       const closed = await closeDurableDeal({
-        dealId: deal.dealId,
+        dealId,
         outcome: "won",
         actorEmployeeId: ctx.employeeId,
       });
@@ -1068,7 +1131,7 @@ export const crmRouter = router({
       }
 
       const pack = await durableHandoverPack({
-        dealId: deal.dealId,
+        dealId,
         actorEmployeeId: ctx.employeeId,
       });
       if (!pack.ok) {
@@ -1077,7 +1140,7 @@ export const crmRouter = router({
           step: "handover",
           reason: pack.reason,
           code: pack.code,
-          dealId: deal.dealId,
+          dealId,
         };
       }
 
@@ -1085,33 +1148,79 @@ export const crmRouter = router({
         ctx,
         "crm.runDemoClosedLoop",
         "deal",
-        deal.dealId,
+        dealId,
         null,
         {
-          companyId: company.companyId,
+          companyId,
           clientId: pack.client.clientId,
           taskId: pack.task?.taskId ?? null,
+          viaApollo: Boolean(input?.viaApollo),
+          apolloMode,
         },
       );
 
       return {
         ok: true as const,
-        companyId: company.companyId,
-        contactId: contact.contactId,
-        dealId: deal.dealId,
+        companyId,
+        contactId,
+        dealId,
         clientId: pack.client.clientId,
         clientName: pack.client.name,
         taskId: pack.task?.taskId ?? null,
         onboardingPhases: pack.onboardingPhases,
         fired: pack.pack.fired,
+        viaApollo: Boolean(input?.viaApollo),
+        apolloMode,
         next: {
-          crmDeal: `/crm/deals/${deal.dealId}`,
+          crmDeal: `/crm/deals/${dealId}`,
           client: `/clients/${pack.client.clientId}`,
           creative: "/creative",
           portal: "/portal/deliveries",
+          onboarding: `/clients/${pack.client.clientId}`,
         },
       };
     }),
+
+  /** Durable prospecting helpers (Postgres / CRM memory). */
+  prospect: router({
+    apolloImport: staffProcedure
+      .input(z.object({ query: z.string().min(1).max(200) }))
+      .mutation(async ({ ctx, input }) => {
+        const { importApolloCompaniesToCrm } = await import(
+          "../crm/apollo-import"
+        );
+        const { resolveIntegrationApiKey } = await import(
+          "../integrations/resolve-keys"
+        );
+        const { createApolloLive } = await import("@hrmny/integrations");
+        const { getDemoStore } = await import("../demo-store");
+        const { apiKey } = await resolveIntegrationApiKey(
+          "apollo",
+          ctx.employeeId!,
+        );
+        const apolloClient = apiKey
+          ? createApolloLive({ mode: "live", apiKey })
+          : getDemoStore().apollo;
+        const mode = apiKey ? ("live" as const) : ("mock" as const);
+        const hits = await apolloClient.searchCompanies(input.query);
+        const result = await importApolloCompaniesToCrm({
+          query: input.query,
+          companies: hits as Record<string, unknown>[],
+          mode,
+          ownerEmployeeId: ctx.employeeId,
+        });
+        await auditMutation(
+          ctx,
+          "crm.prospect.apolloImport",
+          "deal",
+          result.deals[0]?.dealId ?? null,
+          null,
+          { query: input.query, mode, count: result.deals.length },
+        );
+        return result;
+      }),
+  }),
+
   companies: crmCompaniesRouter,
   contacts: crmContactsRouter,
   deals: crmDealsRouter,

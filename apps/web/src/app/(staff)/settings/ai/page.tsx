@@ -353,12 +353,13 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
   const [runPrompt, setRunPrompt] = useState(
     "Summarize next onboarding and creative actions for this client sandbox.",
   );
+  const [taskId, setTaskId] = useState("");
 
   return (
     <section className="rounded-xl border border-sand bg-white/75 p-4">
       <h2 className="font-display text-xl font-semibold">Custom agents</h2>
       <p className="mt-1 text-sm text-muted">
-        Create, modify, remove, and run agents on command with client/user
+        Create, modify, remove, and run agents on command with client/user/task
         memory sandboxes. Mock LLM when OpenRouter credits are empty.
       </p>
       <div className="mt-4 grid gap-2 md:grid-cols-3">
@@ -395,12 +396,20 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
       />
-      <textarea
-        className="mt-2 min-h-[56px] w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm"
-        placeholder="Run prompt for on-command invoke"
-        value={runPrompt}
-        onChange={(e) => setRunPrompt(e.target.value)}
-      />
+      <div className="mt-2 grid gap-2 md:grid-cols-2">
+        <textarea
+          className="min-h-[56px] w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+          placeholder="Run prompt for on-command invoke"
+          value={runPrompt}
+          onChange={(e) => setRunPrompt(e.target.value)}
+        />
+        <input
+          className="rounded-lg border border-sand bg-white px-3 py-2 text-sm font-mono"
+          placeholder="Optional task UUID sandbox"
+          value={taskId}
+          onChange={(e) => setTaskId(e.target.value)}
+        />
+      </div>
       {create.error ? (
         <p className="mt-2 text-sm text-red-700">{create.error.message}</p>
       ) : null}
@@ -442,6 +451,7 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
                     id: agent.customAgentId,
                     prompt: runPrompt.trim(),
                     clientId: clientId || undefined,
+                    taskId: taskId.trim() || undefined,
                   })
                 }
               >

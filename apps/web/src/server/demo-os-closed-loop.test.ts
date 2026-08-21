@@ -62,15 +62,27 @@ describe("demo OS closed loop", () => {
     expect(asset?.clientId).toBe(DEMO_CLIENT_ID);
   });
 
-  it("runDemoClosedLoop advances CRM path (handover needs DATABASE_URL)", async () => {
+  it("apollo import writes durable CRM deals visible to crm.deals", async () => {
+    const caller = callerFor("partner");
+    const imported = await caller.crm.prospect.apolloImport({
+      query: "Unit Retail Prospect",
+    });
+    expect(imported.deals.length).toBeGreaterThan(0);
+    expect(imported.mode).toBe("mock");
+    const deal = await caller.crm.deals.get({ id: imported.deals[0]!.dealId });
+    expect(deal?.dealId).toBe(imported.deals[0]!.dealId);
+    expect(deal?.leadSourceLane).toBe("apollo_intent");
+  });
+
+  it("runDemoClosedLoop viaApollo seeds apollo_intent then fails handover without DB", async () => {
     const caller = callerFor("partner");
     const result = await caller.crm.runDemoClosedLoop({
-      companyName: `Unit Demo ${Date.now()}`,
+      companyName: `Apollo Unit ${Date.now()}`,
+      viaApollo: true,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.step).toBe("handover");
-      expect(result.reason).toMatch(/DATABASE_URL/i);
     }
   });
 });

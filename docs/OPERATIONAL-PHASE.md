@@ -43,9 +43,11 @@ Anon users hit SSO / “Checking access…”. Full UI needs `@hrmny.co` Google 
 
 ## Demo closed loop (staff)
 
-`/crm/hunt` → **Run demo closed loop** seeds prospect → won → onboarding + creative task (Postgres).  
+`/crm/hunt` → **Run demo closed loop** or **Closed loop via Apollo** seeds prospect → won → onboarding + creative task (Postgres).  
+Apollo **Prospect with Apollo** writes durable CRM discover deals (same pipeline store).  
 `/creative` → generate → **Attach & send to portal** lands an asset in `/portal/deliveries`.  
-`/settings/ai` → custom agents **Run** on client/user memory sandbox (mock LLM if no OpenRouter credits).
+`/portal/onboarding` lets the client acknowledge the active phase.  
+`/settings/ai` → custom agents **Run** on client/user/task memory sandbox (mock LLM if no OpenRouter credits).
 
 ## Still mock until keys
 

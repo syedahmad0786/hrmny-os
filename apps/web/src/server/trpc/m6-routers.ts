@@ -22,6 +22,11 @@ import {
   portalClientName,
   readPortalWorkspace,
 } from "../portal-data";
+import {
+  ensureClientOnboarding,
+  getClientOnboarding,
+  signoffOnboardingPhase,
+} from "../clients/onboarding";
 import { driveSeam, listSeams, type SeamName } from "../seams";
 import { getDemoGuestShare } from "../work-governance";
 import { getDemoWork } from "./work-management-router";
@@ -531,6 +536,114 @@ export const portalRouter = router({
     list: portalProcedure.query(async ({ ctx }) => [
       (await readPortalWorkspace(requireClientId(ctx))).delivery,
     ]),
+  }),
+
+  /** Client-visible onboarding phases (no finance). Acknowledge advances the active phase. */
+  onboarding: router({
+    get: portalProcedure.query(async ({ ctx }) => {
+      const clientId = requireClientId(ctx);
+      if (getDb()) {
+        const phases = await getClientOnboarding(clientId);
+        if (phases.length) {
+          return {
+            clientId,
+            phases: phases.map((p) => ({
+              phaseIndex: p.phaseIndex,
+              name: p.name,
+              status: p.status,
+              signedOffAt: p.signedOffAt,
+              steps: p.steps.map((s) => ({
+                title: s.title,
+                done: s.done,
+              })),
+            })),
+          };
+        }
+        const seeded = await ensureClientOnboarding(clientId);
+        return {
+          clientId,
+          phases: seeded.map((p) => ({
+            phaseIndex: p.phaseIndex,
+            name: p.name,
+            status: p.status,
+            signedOffAt: p.signedOffAt,
+            steps: p.steps.map((s) => ({
+              title: s.title,
+              done: s.done,
+            })),
+          })),
+        };
+      }
+      const store = getDemoStore();
+      const phases = store.onboarding.get(clientId) ?? [];
+      return {
+        clientId,
+        phases: phases.map((p) => ({
+          phaseIndex: p.phaseIndex,
+          name: p.name,
+          status: p.status,
+          signedOffAt: p.signedOffAt,
+          steps: p.steps.map((s) => ({
+            title: s.title,
+            done: s.done,
+          })),
+        })),
+      };
+    }),
+    acknowledge: portalProcedure
+      .input(z.object({ phaseIndex: z.number().int().min(0).max(6) }))
+      .mutation(async ({ ctx, input }) => {
+        const clientId = requireClientId(ctx);
+        const durable = await signoffOnboardingPhase({
+          clientId,
+          phaseIndex: input.phaseIndex,
+        });
+        if (durable) {
+          return {
+            advanced: durable.advanced,
+            phases: durable.phases.map((p) => ({
+              phaseIndex: p.phaseIndex,
+              name: p.name,
+              status: p.status,
+              signedOffAt: p.signedOffAt,
+            })),
+          };
+        }
+        const store = getDemoStore();
+        const phases = store.onboarding.get(clientId);
+        if (!phases?.length) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "No onboarding" });
+        }
+        const phase = phases.find((p) => p.phaseIndex === input.phaseIndex);
+        if (!phase) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Phase missing" });
+        }
+        if (phase.status !== "active") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Only the active phase can be acknowledged",
+          });
+        }
+        phase.status = "signed_off";
+        phase.signedOffAt = new Date().toISOString();
+        phase.steps = phase.steps.map((s) => ({ ...s, done: true }));
+        const next = phases.find((p) => p.phaseIndex === input.phaseIndex + 1);
+        let advanced = false;
+        if (next) {
+          next.status = "active";
+          advanced = true;
+        }
+        store.onboarding.set(clientId, [...phases]);
+        return {
+          advanced,
+          phases: phases.map((p) => ({
+            phaseIndex: p.phaseIndex,
+            name: p.name,
+            status: p.status,
+            signedOffAt: p.signedOffAt,
+          })),
+        };
+      }),
   }),
 
   approvals: router({

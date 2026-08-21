@@ -163,6 +163,11 @@ async function vectorSearch(
           : sql``
       }
       ${
+        input.taskId
+          ? sql`and metadata->>'taskId' = ${input.taskId}`
+          : sql``
+      }
+      ${
         input.sourceTypes?.length
           ? sql`and source_type = any(${input.sourceTypes}::text[])`
           : sql``

@@ -465,6 +465,7 @@ export const aiAdminRouter = router({
           prompt: z.string().min(1).max(8000),
           clientId: z.string().uuid().optional(),
           dealId: z.string().uuid().optional(),
+          taskId: z.string().uuid().optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
@@ -503,6 +504,7 @@ export const aiAdminRouter = router({
           clientId: input.clientId,
           employeeId: actor.employeeId,
           dealId: input.dealId,
+          taskId: input.taskId,
         });
         if (Object.keys(scope).length) {
           await persistMemoryChunk({
@@ -520,6 +522,7 @@ export const aiAdminRouter = router({
           clientId: input.clientId,
           employeeId: input.clientId ? undefined : actor.employeeId,
           dealId: input.dealId,
+          taskId: input.taskId,
           limit: 6,
         });
 
@@ -529,7 +532,7 @@ export const aiAdminRouter = router({
           agent.responsibility?.trim()
             ? `Responsibility: ${agent.responsibility.trim()}`
             : "",
-          "Stay inside the assigned client/user memory sandbox. Do not invent client facts.",
+          "Stay inside the assigned client/user/task memory sandbox. Do not invent client facts.",
         ]
           .filter(Boolean)
           .join("\n");

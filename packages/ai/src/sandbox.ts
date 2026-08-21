@@ -128,6 +128,7 @@ export type MemorySandboxScope = {
   employeeId?: string;
   dealId?: string;
   companyId?: string;
+  taskId?: string;
 };
 
 export function memorySandboxMetadata(
@@ -138,5 +139,6 @@ export function memorySandboxMetadata(
   if (scope.employeeId) meta.employeeId = scope.employeeId;
   if (scope.dealId) meta.dealId = scope.dealId;
   if (scope.companyId) meta.companyId = scope.companyId;
+  if (scope.taskId) meta.taskId = scope.taskId;
   return meta;
 }

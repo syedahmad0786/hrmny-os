@@ -1535,47 +1535,22 @@ export const leadsRouter = router({
   }),
 
   apollo: router({
+    /** Durable CRM import — company + contact + discover deal (not demo-store). */
     import: protectedProcedure
       .input(z.object({ query: z.string().min(1) }))
       .mutation(async ({ input, ctx }) => {
-        const store = getDemoStore();
+        const { importApolloCompaniesToCrm } = await import(
+          "../crm/apollo-import"
+        );
         const apollo = await apolloFor(ctx.employeeId!);
         const companies = await apollo.client.searchCompanies(input.query);
-        const created: DemoDeal[] = [];
-        for (const c of companies.slice(0, 5)) {
-          const name = String(c.name ?? input.query);
-          const deal: DemoDeal = {
-            dealId: randomUUID(),
-            companyName: name,
-            sector: String(c.industry ?? "Unknown"),
-            stage: "discover",
-            closeOutcome: null,
-            lostReason: null,
-            leadSourceLane: "apollo_intent",
-            buafBudget: false,
-            buafUrgency: false,
-            buafAccess: false,
-            buafFit: false,
-            buafTemperature: null,
-            noGoFlags: [],
-            emailVerified: false,
-            contactEmail: null,
-            voiceCheckPassed: false,
-            quoteValue: "0.00",
-            internalCost: "0.00",
-            marginPct: "0.00",
-            discountPct: "0.00",
-            discountApprovalTier: null,
-            vendorHandlingFeePct: "20.00",
-            quoteLines: [],
-            ownerEmployeeId: ctx.employeeId,
-            enrichment: { apollo: c },
-            commercialMode: "project",
-          };
-          store.deals.set(deal.dealId, deal);
-          created.push(deal);
-        }
-        return created;
+        const result = await importApolloCompaniesToCrm({
+          query: input.query,
+          companies: companies as Record<string, unknown>[],
+          mode: apollo.live ? "live" : "mock",
+          ownerEmployeeId: ctx.employeeId,
+        });
+        return result.deals;
       }),
   }),
 

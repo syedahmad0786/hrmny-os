@@ -34,6 +34,7 @@ const STEPS = [
 export default function HuntClientsPage() {
   const [result, setResult] = useState<string | null>(null);
   const [query, setQuery] = useState("UAE retail brand");
+  const [lastApolloDealId, setLastApolloDealId] = useState<string | null>(null);
   const utils = trpc.useUtils();
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
     onSuccess: (data) => {
@@ -41,18 +42,24 @@ export default function HuntClientsPage() {
         setResult(`Blocked at ${data.step}: ${data.reason}`);
         return;
       }
+      const via = data.viaApollo
+        ? ` via Apollo (${data.apolloMode ?? "mock"})`
+        : "";
       setResult(
-        `Closed loop ready — client ${data.clientName}. Open creative, then portal deliveries.`,
+        `Closed loop ready${via} — client ${data.clientName}. Open creative, then portal deliveries.`,
       );
+      void utils.crm.deals.list.invalidate();
     },
     onError: (err) => setResult(err.message),
   });
-  const apolloImport = trpc.leads.apollo.import.useMutation({
-    onSuccess: (deals) => {
-      const n = Array.isArray(deals) ? deals.length : 0;
+  const apolloImport = trpc.crm.prospect.apolloImport.useMutation({
+    onSuccess: (payload) => {
+      const n = payload.deals.length;
+      const first = payload.deals[0];
+      setLastApolloDealId(first?.dealId ?? null);
       setResult(
         n > 0
-          ? `Apollo imported ${n} discover deal(s) — open pipeline to qualify.`
+          ? `Apollo (${payload.mode}) imported ${n} durable discover deal(s) — open pipeline to qualify.`
           : "Apollo returned no companies for that query.",
       );
       void utils.crm.deals.list.invalidate();
@@ -101,6 +108,14 @@ export default function HuntClientsPage() {
               >
                 {apolloImport.isPending ? "Searching…" : "Prospect with Apollo"}
               </button>
+              {lastApolloDealId ? (
+                <Link
+                  className="text-sm underline"
+                  href={`/crm/deals/${lastApolloDealId}`}
+                >
+                  Open deal
+                </Link>
+              ) : null}
             </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -116,6 +131,22 @@ export default function HuntClientsPage() {
                 {demo.isPending
                   ? "Running demo loop…"
                   : "Run demo closed loop"}
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-sand bg-white px-4 py-2 text-sm disabled:opacity-40"
+                disabled={demo.isPending}
+                onClick={() => {
+                  setResult(null);
+                  demo.mutate({
+                    viaApollo: true,
+                    companyName: query.trim() || undefined,
+                  });
+                }}
+              >
+                {demo.isPending
+                  ? "Running…"
+                  : "Closed loop via Apollo"}
               </button>
               {demo.data && demo.data.ok ? (
                 <>
@@ -155,9 +186,9 @@ export default function HuntClientsPage() {
               </p>
             ) : null}
             <p className="mt-2 text-xs text-muted">
-              Apollo/Hunter auto-mock without keys; paste keys in Connections
-              for live enrichment. Closed loop seeds prospect → won →
-              onboarding + creative task.
+              Apollo imports write durable CRM deals (same store as pipeline).
+              Keys in Connections go live; without keys Apollo stays mock.
+              Closed loop seeds prospect → won → onboarding + creative task.
             </p>
           </div>
 
