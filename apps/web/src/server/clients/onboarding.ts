@@ -94,6 +94,12 @@ export async function signoffOnboardingPhase(input: {
   if (!phases.length) return null;
   const phase = phases.find((p) => p.phaseIndex === input.phaseIndex);
   if (!phase) return null;
+  if (phase.status !== "active" && phase.status !== "signed_off") {
+    return null;
+  }
+  if (phase.status === "signed_off") {
+    return { advanced: false, phases };
+  }
   phase.status = "signed_off";
   phase.signedOffAt = new Date().toISOString();
   phase.steps = phase.steps.map((s) => ({ ...s, done: true }));

@@ -48,6 +48,7 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(loop.viaApollo).toBe(true);
       expect(loop.onboardingPhases).toBeGreaterThanOrEqual(1);
       expect(loop.calendarId).toBeTruthy();
+      expect(loop.portalInvite?.email).toBeTruthy();
       const seededCals = await caller.calendars.listByClient({
         clientId: loop.clientId,
       });
@@ -60,6 +61,13 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(seeds.calendarId).toBe(loop.calendarId);
       expect(seeds.source).toBe("durable_calendar");
 
+      if (loop.taskId && user.employeeId) {
+        const assigned = await caller.tasks.assign({
+          id: loop.taskId,
+          ownerEmployeeId: user.employeeId,
+        });
+        expect(assigned.ok).toBe(true);
+      }
       const gen = await caller.creativeGen.generate({
         prompt: "Ochre editorial still life for demo portal delivery",
         clientId: loop.clientId,
@@ -217,6 +225,6 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         listedCals.some((c) => c.calendarId === calendar.calendarId),
       ).toBe(true);
     },
-    90_000,
+    180_000,
   );
 });

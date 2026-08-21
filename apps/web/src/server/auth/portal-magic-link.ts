@@ -68,6 +68,78 @@ export async function getPortalAllowlist(): Promise<Map<string, string>> {
   return map;
 }
 
+/** Upsert one email → clientId into portal.allowed_contacts (magic-link gate). */
+export async function upsertPortalAllowlistContact(input: {
+  email: string;
+  clientId: string;
+}): Promise<void> {
+  const email = normalizeEmail(input.email);
+  const db = getDb();
+  if (!db) {
+    const store = getDemoStore();
+    const existing = store.conventions.get(ALLOWLIST_RULE_KEY);
+    const contacts =
+      existing?.payload &&
+      typeof existing.payload === "object" &&
+      (existing.payload as { contacts?: Record<string, string> }).contacts
+        ? {
+            ...(existing.payload as { contacts: Record<string, string> })
+              .contacts,
+          }
+        : {};
+    contacts[email] = input.clientId;
+    store.conventions.set(ALLOWLIST_RULE_KEY, {
+      ruleKey: ALLOWLIST_RULE_KEY,
+      version: existing?.version ?? 1,
+      payload: { contacts },
+      updatedAt: new Date().toISOString(),
+      updatedByEmployeeId: null,
+    });
+    return;
+  }
+
+  const [row] = await db
+    .select({
+      conventionId: convention.conventionId,
+      payload: convention.payload,
+      version: convention.version,
+    })
+    .from(convention)
+    .where(
+      and(
+        eq(convention.ruleKey, ALLOWLIST_RULE_KEY),
+        eq(convention.isActive, true),
+      ),
+    )
+    .limit(1);
+
+  const contacts: Record<string, string> = {};
+  if (row?.payload && typeof row.payload === "object") {
+    const raw = (row.payload as { contacts?: unknown }).contacts;
+    if (raw && typeof raw === "object") {
+      for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+        if (typeof v === "string" && v) contacts[normalizeEmail(k)] = v;
+      }
+    }
+  }
+  contacts[email] = input.clientId;
+  const payload = { contacts };
+
+  if (row) {
+    await db
+      .update(convention)
+      .set({ payload, updatedAt: new Date() })
+      .where(eq(convention.conventionId, row.conventionId));
+  } else {
+    await db.insert(convention).values({
+      ruleKey: ALLOWLIST_RULE_KEY,
+      version: "1",
+      payload,
+      isActive: true,
+    });
+  }
+}
+
 /** Global flag gate. Flag off short-circuits every new code path. */
 export async function portalMagicLinkEnabled(): Promise<boolean> {
   return featureEnabled(PORTAL_MAGIC_LINK_FEATURE, {});

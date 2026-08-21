@@ -272,6 +272,38 @@ export async function updateDeliveryTaskStatus(input: {
   return getDeliveryTask(input.taskId);
 }
 
+export async function updateDeliveryTaskOwner(input: {
+  taskId: string;
+  ownerEmployeeId: string;
+}): Promise<DeliveryTask | null> {
+  const db = getDb();
+  if (!db) return null;
+  const current = await getDeliveryTask(input.taskId);
+  if (!current) return null;
+  await db.execute(sql`
+    update public.task
+    set owner_employee_id = ${input.ownerEmployeeId}::uuid, updated_at = now()
+    where task_id = ${input.taskId}::uuid
+  `);
+  return getDeliveryTask(input.taskId);
+}
+
+export async function updateDeliveryTaskSituational(input: {
+  taskId: string;
+  situationalState: string | null;
+}): Promise<DeliveryTask | null> {
+  const db = getDb();
+  if (!db) return null;
+  const current = await getDeliveryTask(input.taskId);
+  if (!current) return null;
+  await db.execute(sql`
+    update public.task
+    set situational_state = ${input.situationalState}, updated_at = now()
+    where task_id = ${input.taskId}::uuid
+  `);
+  return getDeliveryTask(input.taskId);
+}
+
 export type DeliveryBrief = {
   briefId: string;
   taskId: string;
