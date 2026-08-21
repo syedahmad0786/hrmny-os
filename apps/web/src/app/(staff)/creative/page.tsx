@@ -340,15 +340,24 @@ function CreativeQcPageInner() {
           <Button
             type="button"
             variant="ghost"
+            data-testid="creative-advance-expect-block"
             onClick={() => void tryClientFacing()}
           >
             Advance to client_review (expect block)
           </Button>
-          <Button type="button" onClick={() => void passThenAdvance()}>
+          <Button
+            type="button"
+            data-testid="creative-pass-qc"
+            onClick={() => void passThenAdvance()}
+          >
             Pass QC → client_review
           </Button>
         </div>
-        {msg ? <p className="mt-3 text-ink">{msg}</p> : null}
+        {msg ? (
+          <p className="mt-3 text-ink" data-testid="creative-qc-msg">
+            {msg}
+          </p>
+        ) : null}
         {portalHref ? (
           <p className="mt-2 text-sm" data-testid="creative-portal-review">
             <a href={portalHref} className="text-ochre underline">
