@@ -253,6 +253,22 @@ export default function HuntClientsPage() {
                   >
                     Creative
                   </Link>
+                  {"approvals" in demo.data.next && demo.data.next.approvals ? (
+                    <Link
+                      className="text-sm underline"
+                      href={demo.data.next.approvals}
+                    >
+                      Approvals
+                    </Link>
+                  ) : null}
+                  {"outreach" in demo.data.next && demo.data.next.outreach ? (
+                    <Link
+                      className="text-sm underline"
+                      href={demo.data.next.outreach}
+                    >
+                      Outreach
+                    </Link>
+                  ) : null}
                   <Link
                     className="text-sm underline"
                     href={demo.data.next.portal}
@@ -320,6 +336,23 @@ export default function HuntClientsPage() {
                     <Link className="underline" href={demo.data.next.creative}>
                       Creative
                     </Link>
+                    {"approvals" in demo.data.next &&
+                    demo.data.next.approvals ? (
+                      <Link
+                        className="underline"
+                        href={demo.data.next.approvals}
+                      >
+                        Approvals (HITL)
+                      </Link>
+                    ) : null}
+                    {"outreach" in demo.data.next && demo.data.next.outreach ? (
+                      <Link
+                        className="underline"
+                        href={demo.data.next.outreach}
+                      >
+                        Outreach draft
+                      </Link>
+                    ) : null}
                     {demo.data.portalInvite?.portalPath ? (
                       <Link
                         className="underline"

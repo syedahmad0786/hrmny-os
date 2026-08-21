@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Button } from "@hrmny/ui";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatRelative } from "@/components/crm/format";
 import { DraftPreview } from "./draft-preview";
@@ -27,11 +27,32 @@ export default function ApprovalsPage() {
 
   const approveOutreach = trpc.leadgen.outreach.approve.useMutation();
   const sendOutreach = trpc.leadgen.outreach.send.useMutation();
+  const discardOutreach = trpc.leadgen.outreach.discard.useMutation();
   const moveCampaign = trpc.campaigns.transition.useMutation();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Record<string, Feedback>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [ready, setReady] = useState<{
+    connections?: {
+      googleWorkspace?: number;
+      linkedin?: number;
+      errors?: { googleWorkspace?: number };
+    };
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/ready")
+      .then((r) => r.json())
+      .then((body) => {
+        if (!cancelled) setReady(body);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const queue = useMemo<ApprovalItem[]>(() => {
     const outreachItems: ApprovalItem[] = (outreach.data ?? []).map((o) => ({
@@ -158,12 +179,23 @@ export default function ApprovalsPage() {
     }
   }
 
-  // Only campaigns have a real reject path (gate: →archived). Outreach exposes
-  // no discard/reject procedure, so those items carry no Reject control.
+  // Campaigns reject → archived; outreach reject → discarded (leadgen.discard).
   async function reject(item: ApprovalItem) {
-    if (item.kind !== "campaign_publish") return;
+    if (item.kind === "portal_item") return;
     setBusyId(item.id);
     try {
+      if (item.kind === "outreach_send") {
+        const res = await discardOutreach.mutateAsync({ id: item.id });
+        setFeedback((f) => ({
+          ...f,
+          [item.id]: res.ok
+            ? { tone: "ok", text: "Discarded" }
+            : { tone: "blocked", text: `Discard blocked (${res.code})` },
+        }));
+        await utils.leadgen.outreach.list.invalidate();
+        advanceFrom(item.id);
+        return;
+      }
       const res = await moveCampaign.mutateAsync({ id: item.id, to: "archived" });
       setFeedback((f) => ({
         ...f,
@@ -201,6 +233,37 @@ export default function ApprovalsPage() {
           </p>
         </div>
       </header>
+
+      {ready ? (
+        <div
+          className="rounded-xl border border-sand bg-white/80 px-4 py-3 text-sm text-muted"
+          role="status"
+        >
+          {(ready.connections?.googleWorkspace ?? 0) < 1 ? (
+            <p>
+              {(ready.connections?.errors?.googleWorkspace ?? 0) > 0
+                ? "Gmail HITL send is stubbed until Google Workspace is reconnected (token revoked)."
+                : "Gmail HITL send stays copy-draft / stub until Google Workspace is connected."}{" "}
+              <Link href="/settings/connections" className="underline">
+                Connections
+              </Link>
+            </p>
+          ) : (
+            <p>Google Workspace connected — outreach Approve &amp; send can go live.</p>
+          )}
+          {(ready.connections?.linkedin ?? 0) < 1 ? (
+            <p className="mt-1">
+              LinkedIn campaign publish stays copy-draft until LinkedIn (Composio) is
+              connected.{" "}
+              <Link href="/settings/connections" className="underline">
+                Connect LinkedIn
+              </Link>
+            </p>
+          ) : (
+            <p className="mt-1">LinkedIn connected — campaign publish can go live.</p>
+          )}
+        </div>
+      ) : null}
 
       <section className="grid gap-3 sm:grid-cols-3">
         {[
@@ -383,14 +446,17 @@ export default function ApprovalsPage() {
                         ? "Approve & send"
                         : "Approve & publish"}
                     </Button>
-                    {selected.kind === "campaign_publish" ? (
+                    {selected.kind === "campaign_publish" ||
+                    selected.kind === "outreach_send" ? (
                       <Button
                         type="button"
                         variant="ghost"
                         disabled={busyId === selected.id}
                         onClick={() => void reject(selected)}
                       >
-                        Reject
+                        {selected.kind === "outreach_send"
+                          ? "Discard"
+                          : "Reject"}
                       </Button>
                     ) : null}
                   </>
