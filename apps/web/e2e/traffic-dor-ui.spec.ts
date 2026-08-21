@@ -3,11 +3,27 @@ import { expect, test } from "@playwright/test";
 /**
  * Traffic DoR fill≤2 → lock → spawn creative task (mock-safe).
  * Dedicated file so creative-spawn stays first-class outside funnel-demo.
+ *
+ * Runs alphabetically AFTER funnel-demo (which may already lock the seed
+ * brief). Reset M4 first so the brief is unlocked again — safe here because
+ * portal/Month-1/calendar e2es that share M4 seed finish earlier in the suite.
  */
 test.describe("Traffic DoR → creative spawn UI", () => {
   test("Fill≤2 & lock spawns creative task and opens Creative", async ({
     page,
+    request,
   }) => {
+    const reset = await request.post("/api/trpc/m4.reset", {
+      headers: {
+        "x-dev-role": "traffic",
+        "content-type": "application/json",
+      },
+      data: { json: null },
+    });
+    const resetText = await reset.text();
+    expect(reset.ok(), resetText).toBeTruthy();
+    expect(resetText).not.toMatch(/"error"/);
+
     page.setExtraHTTPHeaders({ "x-dev-role": "traffic" });
     await page.goto("/traffic", { waitUntil: "domcontentloaded" });
     await expect(
@@ -25,6 +41,7 @@ test.describe("Traffic DoR → creative spawn UI", () => {
     await expect
       .poll(async () => missing.textContent(), { timeout: 30_000 })
       .toMatch(/Missing:\s*[3-9]/);
+    await expect(missing).not.toContainText(/locked/i);
 
     await page.getByTestId("traffic-fill-lock").click();
 
