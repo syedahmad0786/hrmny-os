@@ -4,7 +4,7 @@ import { getDb } from "../db";
 import { persistMemoryChunk } from "../ai/memory-db";
 import { seedClientCreativeTask } from "../tasks/delivery-tasks";
 import { buildHandoverNextLinks } from "./handover-next";
-import { getDeal, updateDeal, moveDealStage } from "./repository";
+import { getDeal, getContact, updateDeal, moveDealStage } from "./repository";
 import type { DealRow } from "./types";
 
 export type CloseOutcome = "won" | "lost" | "postponed_on_hold";
@@ -138,15 +138,231 @@ export type HandoverPackResult = {
 };
 
 /**
- * close/won → client + 7-phase onboarding + first creative task (qc) + memory note.
+ * Memory-mode won → OS: demo-store client + onboarding + creative QC task +
+ * portal magic links + staff notify. Keeps Hunt closed-loop green without Postgres.
  */
+async function memoryHandoverPack(input: {
+  dealId: string;
+  actorEmployeeId?: string | null;
+}): Promise<HandoverPackResult | { ok: false; reason: string; code?: string }> {
+  const deal = await getDeal(input.dealId);
+  if (!deal) return { ok: false, reason: "Deal not found" };
+  if (deal.closeOutcome !== "won") {
+    return {
+      ok: false,
+      reason: "Deal must be close/won before Handover Pack",
+      code: "GATE_BLOCKED",
+    };
+  }
+
+  if (deal.stage === "close") {
+    const moved = await moveDealStage({
+      dealId: input.dealId,
+      to: "handover_pack",
+      actorEmployeeId: input.actorEmployeeId,
+    });
+    if (!moved.ok) return { ok: false, reason: moved.reason };
+  } else if (deal.stage !== "handover_pack") {
+    return {
+      ok: false,
+      reason: `Unexpected stage ${deal.stage}`,
+      code: "GATE_BLOCKED",
+    };
+  }
+
+  const fired: string[] = [];
+  const { getDemoStore, DEMO_STAFF_LEAD_ID } = await import("../demo-store");
+  const store = getDemoStore();
+  const existing = [...store.clients.values()].find(
+    (c) => c.dealId === input.dealId,
+  );
+
+  let contactEmail: string | null = null;
+  if (deal.primaryContactId) {
+    const contact = await getContact(deal.primaryContactId);
+    contactEmail = contact?.email?.trim().toLowerCase() ?? null;
+  }
+
+  const demoClient =
+    existing ??
+    store.createClientFromWonDeal({
+      dealId: deal.dealId,
+      companyName: deal.companyName,
+      sector: deal.sector,
+      stage: "handover_pack",
+      closeOutcome: "won",
+      lostReason: null,
+      leadSourceLane: deal.leadSourceLane ?? "relationship_led",
+      buafBudget: Boolean(deal.buafBudget),
+      buafUrgency: Boolean(deal.buafUrgency),
+      buafAccess: Boolean(deal.buafAccess),
+      buafFit: Boolean(deal.buafFit),
+      buafTemperature: deal.buafTemperature,
+      noGoFlags: [],
+      emailVerified: deal.emailVerified,
+      contactEmail,
+      voiceCheckPassed: false,
+      quoteValue: deal.quoteValue ?? "0",
+      internalCost: deal.internalCost ?? "0",
+      marginPct: deal.marginPct ?? "0",
+      discountPct: deal.discountPct ?? "0",
+      discountApprovalTier: null,
+      vendorHandlingFeePct: deal.vendorHandlingFeePct ?? "0",
+      quoteLines: [],
+      ownerEmployeeId: deal.ownerEmployeeId,
+      enrichment: null,
+      commercialMode: "project",
+    });
+  fired.push(existing ? "client.exists" : "client.create");
+  fired.push("onboarding.seed");
+
+  const phases = store.onboarding.get(demoClient.clientId) ?? [];
+  const creative = store.seedWonCreativeTask({
+    clientId: demoClient.clientId,
+    title: `${demoClient.name} — first creative cutdown`,
+    ownerEmployeeId: input.actorEmployeeId ?? null,
+  });
+  fired.push("creative.task_seed");
+
+  await persistMemoryChunk({
+    sourceType: "note",
+    sourceId: demoClient.clientId,
+    content: `Handover from won deal ${deal.companyName}: contract ${demoClient.contractValue} AED. Client entering onboarding (memory mode).`,
+    metadata: {
+      clientId: demoClient.clientId,
+      dealId: input.dealId,
+      kind: "deal.won_handover",
+      mode: "memory",
+    },
+  }).catch(() => undefined);
+  fired.push("memory.handover");
+
+  let portalInvite: HandoverPackResult["portalInvite"] = null;
+  try {
+    const inviteEmail =
+      contactEmail || `portal+${demoClient.clientId.slice(0, 8)}@example.com`;
+    const displayName = `${demoClient.name} Portal`;
+    const { sendPortalInviteMagicLink } = await import(
+      "../auth/portal-magic-link"
+    );
+    const { createResendMock } = await import("@hrmny/integrations");
+    const emailer = createResendMock();
+    const sentPortal = await sendPortalInviteMagicLink({
+      email: inviteEmail,
+      clientId: demoClient.clientId,
+      displayName,
+      next: "/portal/approvals",
+      emailer,
+    });
+    const sentOnboarding = await sendPortalInviteMagicLink({
+      email: inviteEmail,
+      clientId: demoClient.clientId,
+      displayName,
+      next: "/portal/onboarding",
+      emailer,
+    });
+    portalInvite = {
+      portalUserId: crypto.randomUUID(),
+      email: inviteEmail,
+      portalPath: sentPortal.portalPath,
+      onboardingPath: sentOnboarding.portalPath,
+      delivery: {
+        mode: sentPortal.delivery.mode,
+        id: sentPortal.delivery.id,
+      },
+    };
+    fired.push("portal.invite_mock");
+    fired.push("portal.invite_onboarding");
+  } catch {
+    /* invite optional */
+  }
+
+  try {
+    const { notifyEmployee } = await import("../notifications/store");
+    await notifyEmployee({
+      employeeId: input.actorEmployeeId ?? DEMO_STAFF_LEAD_ID,
+      title: `Handover ready: ${demoClient.name}`,
+      body: `Won deal closed — client onboarding seeded (${phases.length} phases).`,
+      kind: "onboarding",
+      href: `/clients/${demoClient.clientId}`,
+      entityType: "client",
+      entityId: demoClient.clientId,
+    });
+    fired.push("staff.notify");
+  } catch {
+    /* notify optional */
+  }
+
+  const client = {
+    clientId: demoClient.clientId,
+    dealId: demoClient.dealId,
+    name: demoClient.name,
+    market: demoClient.market,
+    engagementType: demoClient.engagementType,
+    contractValue: demoClient.contractValue,
+    lifecycleStatus: demoClient.lifecycleStatus,
+  };
+
+  const task = {
+    taskId: creative.taskId,
+    clientId: creative.clientId,
+    calendarId: creative.calendarId,
+    month: creative.month,
+    taskType: creative.taskType,
+    title: creative.title,
+    status: creative.status,
+    situationalState: creative.situationalState,
+    ownerEmployeeId: creative.ownerEmployeeId,
+    deadline: creative.deadline,
+    priority: creative.priority,
+    qcPassed: creative.qcPassed,
+    qcNotes: creative.qcNotes,
+    clientRevisionCount: creative.clientRevisionCount,
+    revisionBoundaryAck: creative.revisionBoundaryAck,
+    briefId: creative.briefId,
+  };
+
+  const next = buildHandoverNextLinks({
+    clientId: client.clientId,
+    invoiceId: null,
+    outreachId: null,
+    portalPath: portalInvite?.portalPath,
+    onboardingPath: portalInvite?.onboardingPath,
+  });
+
+  return {
+    ok: true,
+    pack: {
+      packId: crypto.randomUUID(),
+      dealId: input.dealId,
+      clientId: client.clientId,
+      fired,
+      createdAt: new Date().toISOString(),
+    },
+    client,
+    task,
+    invoiceId: null,
+    onboardingPhases: phases.length,
+    calendarId: null,
+    portalInvite,
+    outreachId: null,
+    next,
+  };
+}
+
+/**
+ * close/won → client + 7-phase onboarding + first creative task (qc) + memory note.
+ * Uses Postgres when available; otherwise seeds the in-memory demo store so Hunt
+ * closed-loop works in CI / local without DATABASE_URL.
+ */
+
 export async function durableHandoverPack(input: {
   dealId: string;
   actorEmployeeId?: string | null;
 }): Promise<HandoverPackResult | { ok: false; reason: string; code?: string }> {
   const db = getDb();
   if (!db) {
-    return { ok: false, reason: "DATABASE_URL required for durable handover" };
+    return memoryHandoverPack(input);
   }
 
   const deal = await getDeal(input.dealId);
