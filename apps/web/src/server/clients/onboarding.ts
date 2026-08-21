@@ -134,7 +134,7 @@ export async function notifyStaffOfOnboardingSignoff(input: {
     title: `Onboarding signed off: ${input.phaseName}`,
     body: `Phase ${input.phaseIndex + 1} ("${input.phaseName}") was acknowledged.${nextBit}`,
     kind: "onboarding",
-    href: `/clients/${input.clientId}`,
+    href: `/clients/${input.clientId}?phase=${input.phaseIndex}`,
     entityType: "client",
     entityId: input.clientId,
   }).catch(() => undefined);

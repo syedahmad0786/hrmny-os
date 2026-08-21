@@ -252,4 +252,62 @@ test.describe("Demo funnel", () => {
     await expect(page.getByRole("link", { name: /^Open$/i }).first()).toBeVisible();
   });
 
+  test("portal onboarding acknowledge lands in partner /notifications", async ({
+    page,
+    request,
+  }) => {
+    const portalHeaders = {
+      "x-dev-role": "portal_a",
+      "content-type": "application/json",
+    };
+
+    const board = await request.get("/api/trpc/portal.onboarding.get", {
+      headers: portalHeaders,
+    });
+    const boardText = await board.text();
+    expect(board.ok(), boardText).toBeTruthy();
+    const boardBody = JSON.parse(boardText) as {
+      result?: {
+        data?: {
+          json?: {
+            phases?: Array<{ phaseIndex: number; name: string; status: string }>;
+          };
+        };
+      };
+    };
+    const phases =
+      boardBody.result?.data?.json?.phases ??
+      (
+        boardBody.result?.data as unknown as {
+          phases?: Array<{ phaseIndex: number; name: string; status: string }>;
+        }
+      )?.phases ??
+      [];
+    const active = (Array.isArray(phases) ? phases : []).find(
+      (p) => p.status === "active",
+    );
+    expect(active, boardText).toBeTruthy();
+
+    const ack = await request.post("/api/trpc/portal.onboarding.acknowledge", {
+      headers: portalHeaders,
+      data: {
+        json: { phaseIndex: active!.phaseIndex },
+      },
+    });
+    const ackText = await ack.text();
+    expect(ack.ok(), ackText).toBeTruthy();
+    expect(ackText).not.toMatch(/"error"/);
+
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/notifications", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /Notifications/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator("body")).toContainText(/Onboarding signed off/i);
+    await expect(page.locator("body")).toContainText(active!.name);
+    const open = page.getByRole("link", { name: /^Open$/i }).first();
+    await expect(open).toBeVisible();
+    await expect(open).toHaveAttribute("href", /\?phase=\d+/);
+  });
+
 });

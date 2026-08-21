@@ -161,7 +161,8 @@ describe("M6 portal + seams", () => {
         (n) =>
           n.kind === "onboarding" &&
           /signed off/i.test(n.title) &&
-          (n.href ?? "").includes("/clients/"),
+          /Kickoff/i.test(n.title) &&
+          (n.href ?? "").includes(`/clients/${DEMO_CLIENT_ID}?phase=`),
       ),
     ).toBe(true);
   });
