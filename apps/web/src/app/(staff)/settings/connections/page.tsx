@@ -76,6 +76,61 @@ export default function ConnectionsPage() {
   });
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [redirect, setRedirect] = useState<string | null>(null);
+  const [demoBlockers, setDemoBlockers] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/ready")
+      .then((r) => r.json())
+      .then(
+        (body: {
+          tools?: Record<string, string>;
+          connections?: {
+            googleWorkspace?: number;
+            canva?: number;
+            linkedin?: number;
+            xero?: number;
+          };
+        }) => {
+          if (cancelled) return;
+          const tools = body.tools ?? {};
+          const connections = body.connections ?? {};
+          const next: string[] = [];
+          if (tools.apollo === "mock") {
+            next.push("Paste an Apollo API key below (or in Vercel env).");
+          }
+          if (tools.hunter === "mock") {
+            next.push("Paste a Hunter API key below (or in Vercel env).");
+          }
+          if (tools.xero === "mock" || (connections.xero ?? 0) < 1) {
+            next.push("Connect Xero via OAuth for live billing mirror.");
+          }
+          if ((connections.googleWorkspace ?? 0) < 1) {
+            next.push(
+              "Connect Google Workspace (@hrmny.co) for live HITL Gmail send.",
+            );
+          }
+          if ((connections.linkedin ?? 0) < 1) {
+            next.push(
+              "Connect LinkedIn with Composio for live campaign publish.",
+            );
+          }
+          if ((connections.canva ?? 0) < 1) {
+            next.push("Connect Canva with Composio for design → portal.");
+          }
+          if (tools.resend === "mock") {
+            next.push(
+              "Set RESEND_MODE=live + RESEND_API_KEY for real portal invite email.",
+            );
+          }
+          setDemoBlockers(next);
+        },
+      )
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [list.dataUpdatedAt]);
 
   async function connectGoogleWorkspace() {
     const supabase = getSupabaseBrowserClient();
@@ -115,6 +170,30 @@ export default function ConnectionsPage() {
       </div>
 
       <ConnectionHealth />
+
+      {demoBlockers.length > 0 ? (
+        <section className="rounded-lg border border-ochre/40 bg-cream/50 p-4 text-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
+            Live demo blockers
+          </p>
+          <p className="mt-1 text-muted">
+            Close these gaps so prospecting → sales → creative → portal can run
+            live on production.
+          </p>
+          <ul className="mt-3 list-disc space-y-1 pl-5 text-ink">
+            {demoBlockers.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-muted">
+            Also see{" "}
+            <Link href="/crm/hunt" className="underline">
+              Hunt readiness
+            </Link>
+            .
+          </p>
+        </section>
+      ) : null}
 
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
