@@ -9,20 +9,36 @@ async function connectionSmoke(): Promise<{
   canva: number;
   linkedin: number;
   xero: number;
+  errors: {
+    googleWorkspace: number;
+    canva: number;
+    linkedin: number;
+    xero: number;
+  };
 }> {
   const empty = {
     googleWorkspace: 0,
     canva: 0,
     linkedin: 0,
     xero: 0,
+    errors: {
+      googleWorkspace: 0,
+      canva: 0,
+      linkedin: 0,
+      xero: 0,
+    },
   };
   const db = getDb();
   if (!db) return empty;
   try {
-    const rows = await db.execute<{ toolkit: string; n: number }>(sql`
-      select toolkit, count(*)::int as n
+    const rows = await db.execute<{
+      toolkit: string;
+      status: string;
+      n: number;
+    }>(sql`
+      select toolkit, status, count(*)::int as n
       from public.connection_account
-      where status = 'connected'
+      where status in ('connected', 'error')
         and toolkit in (
           'google_workspace',
           'canva',
@@ -31,24 +47,36 @@ async function connectionSmoke(): Promise<{
           'composio:canva',
           'composio:linkedin'
         )
-      group by toolkit
+      group by toolkit, status
     `);
-    const counts = { ...empty };
+    const counts = {
+      googleWorkspace: 0,
+      canva: 0,
+      linkedin: 0,
+      xero: 0,
+      errors: {
+        googleWorkspace: 0,
+        canva: 0,
+        linkedin: 0,
+        xero: 0,
+      },
+    };
     for (const row of rows) {
       const n = Number(row.n) || 0;
-      if (row.toolkit === "google_workspace") counts.googleWorkspace += n;
-      else if (row.toolkit === "xero") counts.xero += n;
-      else if (
-        row.toolkit === "canva" ||
-        row.toolkit === "composio:canva"
-      ) {
-        counts.canva += n;
-      } else if (
-        row.toolkit === "linkedin" ||
-        row.toolkit === "composio:linkedin"
-      ) {
-        counts.linkedin += n;
-      }
+      const bucket =
+        row.toolkit === "google_workspace"
+          ? "googleWorkspace"
+          : row.toolkit === "xero"
+            ? "xero"
+            : row.toolkit === "canva" || row.toolkit === "composio:canva"
+              ? "canva"
+              : row.toolkit === "linkedin" ||
+                  row.toolkit === "composio:linkedin"
+                ? "linkedin"
+                : null;
+      if (!bucket) continue;
+      if (row.status === "connected") counts[bucket] += n;
+      else if (row.status === "error") counts.errors[bucket] += n;
     }
     return counts;
   } catch {
