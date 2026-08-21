@@ -124,6 +124,14 @@ export default function ClientOnboardingPage() {
             <li
               key={phase.phaseId}
               id={`onboarding-phase-${phase.phaseIndex}`}
+              data-testid={
+                focusPhase === phase.phaseIndex
+                  ? "onboarding-phase-focus"
+                  : `onboarding-phase-${phase.phaseIndex}`
+              }
+              aria-current={
+                focusPhase === phase.phaseIndex ? "true" : undefined
+              }
               className={`border-t border-sand/60 pt-3 text-sm ${
                 focusPhase === phase.phaseIndex
                   ? "rounded-md bg-cream/80 ring-1 ring-ochre/40"
