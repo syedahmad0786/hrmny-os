@@ -300,10 +300,26 @@ function CreativeQcPageInner() {
         <p>
           Task: <strong>{task.data?.title ?? "…"}</strong>
         </p>
-        <p className="text-muted">
+        <p className="text-muted" data-testid="creative-task-meta">
           status={task.data?.status ?? "—"} · qcPassed=
           {String(task.data?.qcPassed ?? false)}
+          {typeof task.data?.clientRevisionCount === "number"
+            ? ` · clientRevisions=${task.data.clientRevisionCount}`
+            : ""}
         </p>
+        {task.data?.status === "revisions" ? (
+          <p
+            className="mt-2 rounded-md border border-ochre/40 bg-cream/90 px-3 py-2 text-ink"
+            data-testid="creative-revisions-banner"
+            role="status"
+          >
+            Client requested revisions
+            {task.data.clientRevisionCount
+              ? ` · round ${task.data.clientRevisionCount}`
+              : ""}
+            {taskIdFromQuery ? " · opened from staff inbox" : ""}
+          </p>
+        ) : null}
         <p className="mt-1 text-xs text-muted">
           Tip: switch Dev role to Creative Director before QC pass.
         </p>
