@@ -41,13 +41,29 @@ export type XeroInvoiceDraft = {
 
 export type XeroAdapterMode = "mock" | "live";
 
+export type XeroMirroredInvoice = {
+  externalId: string;
+  contactName: string;
+  amount: string;
+  currency: string;
+  status: string;
+  reference?: string;
+  syncedAt: string;
+  payload: Record<string, unknown>;
+};
+
 export interface XeroAdapter {
   readonly mode: XeroAdapterMode;
   getAuthorizeUrl(state: string): Promise<string>;
   exchangeCode(code: string): Promise<{ tenantId: string }>;
-  /** OS never disburses — post invoice / JE only. */
+  /**
+   * Client lock (14 Aug 2026): OS reads/mirrors Xero only.
+   * Writes throw unless XERO_WRITE_ENABLED=true (explicit override).
+   */
   createInvoice(draft: XeroInvoiceDraft): Promise<{ xeroInvoiceId: string }>;
   createJournal(entry: Record<string, unknown>): Promise<{ xeroJournalId: string }>;
+  /** Pull invoices from Xero into OS mirror snapshots. */
+  listInvoices(): Promise<XeroMirroredInvoice[]>;
   /** Explicitly rejected — Xero adapter never moves money. */
   disburse?(amount: string): Promise<never>;
 }

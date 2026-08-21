@@ -18,8 +18,13 @@ export type LeadSourceConfig = {
 };
 
 function resolveMode(config: LeadSourceConfig): "mock" | "live" {
-  if (config.mode) return config.mode;
-  return process.env.APOLLO_MODE?.toLowerCase() === "live" ? "live" : "mock";
+  if (config.mode === "mock") return "mock";
+  if (config.mode === "live") return "live";
+  const env = process.env.APOLLO_MODE?.toLowerCase();
+  if (env === "live") return "live";
+  if (env === "mock") return "mock";
+  if ((config.apiKey ?? process.env.APOLLO_API_KEY)?.trim()) return "live";
+  return "mock";
 }
 
 /** Stable id from a string so re-running the same search dedupes cleanly. */

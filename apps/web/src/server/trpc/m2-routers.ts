@@ -8,6 +8,7 @@ import {
   type ActorContext,
   type EntitySnapshot,
 } from "@hrmny/gate";
+import { isXeroWriteEnabled } from "@hrmny/integrations";
 import { DEMO_EMPLOYEE_ID, getDemoStore, vatOnAmount } from "../demo-store";
 import { protectedProcedure, router } from "./trpc";
 
@@ -403,6 +404,23 @@ export const invoicesRouter = router({
       );
       if (!result.ok) return { result, invoice: inv };
 
+      // Client lock: Xero is source of truth — OS does not write unless override.
+      if (!isXeroWriteEnabled()) {
+        inv.status = "issued";
+        inv.xeroInvoiceId = null;
+        store.appendAudit({
+          actorEmployeeId: ctx.employeeId!,
+          action: "invoices.issue.os_only",
+          entityType: "invoice",
+          entityId: inv.invoiceId,
+          before: { status: "approved" },
+          after: { status: "issued", xeroInvoiceId: null, xeroWrite: false },
+          reason:
+            "Marked issued in OS only — Xero is read/mirror source of truth",
+        });
+        return { result, invoice: inv, xeroWrite: false as const };
+      }
+
       const posted = await store.xero.createInvoice({
         invoiceId: inv.invoiceId,
         contactName: inv.contactName,
@@ -423,8 +441,20 @@ export const invoicesRouter = router({
         after: { status: "issued", xeroInvoiceId: posted.xeroInvoiceId },
         reason: "Posted to Xero with source attached (never disburse)",
       });
-      return { result, invoice: inv };
+      return { result, invoice: inv, xeroWrite: true as const };
     }),
+
+  /** Mirror invoices from Xero (read-only). */
+  mirrorFromXero: protectedProcedure.query(async () => {
+    const store = getDemoStore();
+    const rows = await store.xero.listInvoices();
+    return {
+      writeEnabled: isXeroWriteEnabled(),
+      mode: store.xero.mode,
+      mirroredAt: new Date().toISOString(),
+      invoices: rows,
+    };
+  }),
 
   transition: protectedProcedure
     .input(
@@ -840,6 +870,28 @@ export const payrollRouter = router({
           () => undefined,
         );
         if (!result.ok) return { result, run };
+
+        if (!isXeroWriteEnabled()) {
+          run.status = "posted";
+          run.xeroJournalId = null;
+          store.appendAudit({
+            actorEmployeeId: ctx.employeeId!,
+            action: "payroll.runs.post.os_only",
+            entityType: "payroll_run",
+            entityId: run.payrollRunId,
+            before: { status: "director_approved" },
+            after: {
+              status: "posted",
+              xeroJournalId: null,
+              disbursed: false,
+              xeroWrite: false,
+            },
+            reason:
+              "Payroll finalized in OS only — Xero JE write disabled (mirror-only)",
+          });
+          return { result, run, xeroWrite: false as const };
+        }
+
         const je = await store.xero.createJournal({
           payrollRunId: run.payrollRunId,
           period: run.period,
@@ -862,7 +914,7 @@ export const payrollRouter = router({
           },
           reason: "Xero JE only — never disburse",
         });
-        return { result, run };
+        return { result, run, xeroWrite: true as const };
       }),
   }),
 });

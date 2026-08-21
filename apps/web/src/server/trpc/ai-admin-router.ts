@@ -3,6 +3,7 @@ import {
   AgentIdSchema,
   isAgentEnabled,
   listParentAgents,
+  memorySandboxMetadata,
   setAgentEnabled,
   type AgentGateOutcome,
 } from "@hrmny/ai";
@@ -10,6 +11,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getDb } from "../db";
 import { writeAudit } from "../m1-persistence";
+import { persistMemoryChunk, searchMemory } from "../ai/memory-db";
+import { boundRunAgent } from "../ai/run-agent-bound";
 import { router, staffProcedure, type TrpcContext } from "./trpc";
 
 /**
@@ -138,5 +141,51 @@ export const aiAdminRouter = router({
         reason: null,
       });
       return { agentId: input.agentId, enabled: isAgentEnabled(input.agentId) };
+    }),
+
+  /**
+   * Run any registered agent on command. Optionally scopes memory to a
+   * client + actor (per-user / per-client sandbox).
+   */
+  runAgent: staffProcedure
+    .input(
+      z.object({
+        agentId: AgentIdSchema,
+        prompt: z.string().min(1).max(8000),
+        clientId: z.string().uuid().optional(),
+        dealId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireAiAdmin(ctx);
+      const scope = memorySandboxMetadata({
+        clientId: input.clientId,
+        employeeId: ctx.employeeId ?? undefined,
+        dealId: input.dealId,
+      });
+      if (Object.keys(scope).length) {
+        await persistMemoryChunk({
+          sourceType: "note",
+          content: input.prompt,
+          metadata: { ...scope, kind: "run_prompt" },
+        });
+      }
+      const memory = await searchMemory({
+        query: input.prompt,
+        clientId: input.clientId,
+        employeeId: ctx.employeeId ?? undefined,
+        dealId: input.dealId,
+        limit: 6,
+      });
+      const result = await boundRunAgent({
+        agent: input.agentId,
+        input: input.prompt,
+        roles: ctx.roles,
+        context: {
+          sandbox: scope,
+          memory,
+        },
+      });
+      return result;
     }),
 });

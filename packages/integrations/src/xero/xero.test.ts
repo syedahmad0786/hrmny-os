@@ -1,11 +1,48 @@
 import { describe, expect, it } from "vitest";
 import { IntegrationMisconfiguredError } from "../types";
-import { createXeroAdapter, createXeroMock } from "./index";
+import {
+  createXeroAdapter,
+  createXeroMock,
+  isXeroWriteEnabled,
+} from "./index";
 
 describe("Xero adapter", () => {
-  it("mock posts invoice and rejects disbursement", async () => {
+  it("defaults to write-disabled (client lock)", () => {
+    const prev = process.env.XERO_WRITE_ENABLED;
+    delete process.env.XERO_WRITE_ENABLED;
+    expect(isXeroWriteEnabled()).toBe(false);
+    if (prev !== undefined) process.env.XERO_WRITE_ENABLED = prev;
+  });
+
+  it("mock mirrors invoices and blocks writes by default", async () => {
+    const prev = process.env.XERO_WRITE_ENABLED;
+    delete process.env.XERO_WRITE_ENABLED;
     const xero = createXeroMock();
     expect(xero.mode).toBe("mock");
+    const mirrored = await xero.listInvoices();
+    expect(mirrored.length).toBeGreaterThan(0);
+    expect(mirrored[0]?.externalId).toMatch(/^xero-mirror-/);
+    await expect(
+      xero.createInvoice({
+        invoiceId: "a0000000-0000-4000-8000-000000000099",
+        contactName: "Vendor LLC",
+        amount: "1000.00",
+        vatAmount: "50.00",
+        currency: "AED",
+        sourceAttached: { emailRef: "msg-1" },
+      }),
+    ).rejects.toBeInstanceOf(IntegrationMisconfiguredError);
+    await expect(xero.disburse!("1.00")).rejects.toBeInstanceOf(
+      IntegrationMisconfiguredError,
+    );
+    if (prev !== undefined) process.env.XERO_WRITE_ENABLED = prev;
+    else delete process.env.XERO_WRITE_ENABLED;
+  });
+
+  it("mock posts invoice only when XERO_WRITE_ENABLED=true", async () => {
+    const prev = process.env.XERO_WRITE_ENABLED;
+    process.env.XERO_WRITE_ENABLED = "true";
+    const xero = createXeroMock();
     const posted = await xero.createInvoice({
       invoiceId: "a0000000-0000-4000-8000-000000000099",
       contactName: "Vendor LLC",
@@ -15,9 +52,8 @@ describe("Xero adapter", () => {
       sourceAttached: { emailRef: "msg-1" },
     });
     expect(posted.xeroInvoiceId).toMatch(/^mock-xero-inv-/);
-    await expect(xero.disburse!("1.00")).rejects.toBeInstanceOf(
-      IntegrationMisconfiguredError,
-    );
+    if (prev !== undefined) process.env.XERO_WRITE_ENABLED = prev;
+    else delete process.env.XERO_WRITE_ENABLED;
   });
 
   it("live mode without keys fails loud", () => {

@@ -95,7 +95,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     group: "People",
     source: "bayzat",
     availability: "available",
-    defaultEnabled: true,
+    defaultEnabled: false,
     route: "/talent",
   }),
   feature({
@@ -116,7 +116,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     group: "People",
     source: "bayzat",
     availability: "available",
-    defaultEnabled: true,
+    defaultEnabled: false,
     route: "/work-schedule",
   }),
   feature({
@@ -126,7 +126,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     group: "People",
     source: "bayzat",
     availability: "available",
-    defaultEnabled: true,
+    defaultEnabled: false,
     route: "/workplace",
   }),
   feature({
@@ -136,7 +136,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     group: "People",
     source: "bayzat",
     availability: "available",
-    defaultEnabled: true,
+    defaultEnabled: false,
     route: "/benefits",
   }),
   feature({
@@ -146,7 +146,7 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     group: "People",
     source: "native",
     availability: "available",
-    defaultEnabled: true,
+    defaultEnabled: false,
     route: "/my-card",
   }),
   feature({

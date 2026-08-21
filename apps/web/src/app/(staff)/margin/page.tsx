@@ -2,6 +2,7 @@
 
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
+import { showDemoResets } from "@/lib/feature-flags";
 
 export default function MarginDashboardPage() {
   const session = trpc.auth.session.useQuery();
@@ -27,13 +28,15 @@ export default function MarginDashboardPage() {
         {String(session.data?.canViewMargin ?? false)}
       </p>
 
-      <Button
-        type="button"
-        variant="ghost"
-        onClick={() => void reset.mutateAsync()}
-      >
-        Reset M5 demo (seed retainer + costs)
-      </Button>
+      {showDemoResets() ? (
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => void reset.mutateAsync()}
+        >
+          Reset M5 demo (seed retainer + costs)
+        </Button>
+      ) : null}
 
       {margin.isError ? (
         <section className="rounded-lg border border-sand bg-white/70 p-4">

@@ -20,6 +20,12 @@ import {
 } from "../demo-store";
 import { getDb } from "../db";
 import {
+  ensureClientOnboarding,
+  getClientOnboarding,
+  signoffOnboardingPhase,
+} from "../clients/onboarding";
+import { getImmersion, upsertImmersion } from "../clients/immersion";
+import {
   protectedProcedure,
   publicProcedure,
   requireMarginView,
@@ -931,7 +937,7 @@ export const clientsRouter = router({
       }
       const db = getDb();
       if (db) {
-        return db.transaction(async (tx) => {
+        const client = await db.transaction(async (tx) => {
           let dealId = input.dealId;
           if (dealId) {
             const deals = await tx.execute<{ dealId: string }>(sql`
@@ -987,18 +993,20 @@ export const clientsRouter = router({
               contract_value::text as "contractValue", currency,
               lifecycle_status as "lifecycleStatus"
           `);
-          const client = clients[0]!;
+          const created = clients[0]!;
           await tx.execute(sql`
             insert into public.audit_event (
               actor_employee_id, action, entity_type, entity_id, before, after
             ) values (
               ${ctx.employeeId}::uuid, 'clients.create', 'client',
-              ${client.clientId}::uuid, null,
-              ${JSON.stringify({ name: client.name, dealId: client.dealId })}::jsonb
+              ${created.clientId}::uuid, null,
+              ${JSON.stringify({ name: created.name, dealId: created.dealId })}::jsonb
             )
           `);
-          return client;
+          return created;
         });
+        await ensureClientOnboarding(client.clientId);
+        return client;
       }
       const store = getDemoStore();
       const deal = input.dealId
@@ -1157,7 +1165,11 @@ export const clientsRouter = router({
           complete: z.boolean().default(false),
         }),
       )
-      .mutation(({ input, ctx }) => {
+      .mutation(async ({ input, ctx }) => {
+        const durable = await upsertImmersion(input);
+        if (durable) {
+          return durable;
+        }
         const store = getDemoStore();
         if (!store.clients.has(input.clientId)) throw new Error("NOT_FOUND");
         const existing = [...store.immersions.values()].find(
@@ -1201,19 +1213,26 @@ export const clientsRouter = router({
 
     get: protectedProcedure
       .input(z.object({ clientId: z.string().uuid() }))
-      .query(({ input }) =>
-        [...getDemoStore().immersions.values()].filter(
+      .query(async ({ input }) => {
+        const durable = await getImmersion(input.clientId);
+        if (durable.length || getDb()) return durable;
+        return [...getDemoStore().immersions.values()].filter(
           (i) => i.clientId === input.clientId,
-        ),
-      ),
+        );
+      }),
   }),
 
   onboarding: router({
     get: protectedProcedure
       .input(z.object({ clientId: z.string().uuid() }))
-      .query(
-        ({ input }) => getDemoStore().onboarding.get(input.clientId) ?? [],
-      ),
+      .query(async ({ input }) => {
+        if (getDb()) {
+          const phases = await getClientOnboarding(input.clientId);
+          if (phases.length) return phases;
+          return ensureClientOnboarding(input.clientId);
+        }
+        return getDemoStore().onboarding.get(input.clientId) ?? [];
+      }),
 
     signoff: protectedProcedure
       .input(
@@ -1223,7 +1242,11 @@ export const clientsRouter = router({
           signoffType: z.string().default("phase"),
         }),
       )
-      .mutation(({ input, ctx }) => {
+      .mutation(async ({ input, ctx }) => {
+        const durable = await signoffOnboardingPhase(input);
+        if (durable) {
+          return durable;
+        }
         const store = getDemoStore();
         const phases = store.onboarding.get(input.clientId);
         if (!phases) throw new Error("NOT_FOUND");

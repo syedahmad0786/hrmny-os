@@ -76,37 +76,77 @@ export default function PeoplePage() {
         <div>
           <h1 className="font-display text-3xl font-semibold">People</h1>
           <p className="mt-1 text-sm text-muted">
-            Employee records, company assets, onboarding tasks, documents, and
-            letters.
+            Master headcount (hire/fire here first). HR logs leave and
+            attendance for payroll; team members see remaining leave days only.
           </p>
           <p className="mt-2 text-sm">
             <Link className="underline" href="/time">
               Leave & attendance
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/work-schedule">
-              Schedule & time
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/talent">
-              Talent & performance
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/workforce-payroll">
-              Pay & expenses
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/benefits">
-              Benefits
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/workplace">
-              Workplace
-            </Link>{" "}
-            ·{" "}
-            <Link className="underline" href="/my-card">
-              Digital card
             </Link>
+            {(session.data?.enabledFeatureKeys ?? []).includes(
+              "people.payroll",
+            ) ? (
+              <>
+                {" · "}
+                <Link className="underline" href="/workforce-payroll">
+                  Pay & expenses
+                </Link>
+                {" · "}
+                <Link className="underline" href="/payroll">
+                  Payroll prep
+                </Link>
+              </>
+            ) : null}
+            {(session.data?.enabledFeatureKeys ?? []).includes(
+              "people.shifts_timesheets",
+            ) ? (
+              <>
+                {" · "}
+                <Link className="underline" href="/work-schedule">
+                  Schedule & time
+                </Link>
+              </>
+            ) : null}
+            {(session.data?.enabledFeatureKeys ?? []).includes(
+              "people.talent",
+            ) ? (
+              <>
+                {" · "}
+                <Link className="underline" href="/talent">
+                  Talent & performance
+                </Link>
+              </>
+            ) : null}
+            {(session.data?.enabledFeatureKeys ?? []).includes(
+              "people.benefits",
+            ) ? (
+              <>
+                {" · "}
+                <Link className="underline" href="/benefits">
+                  Benefits
+                </Link>
+              </>
+            ) : null}
+            {(session.data?.enabledFeatureKeys ?? []).includes(
+              "people.workplace",
+            ) ? (
+              <>
+                {" · "}
+                <Link className="underline" href="/workplace">
+                  Workplace
+                </Link>
+              </>
+            ) : null}
+            {(session.data?.enabledFeatureKeys ?? []).includes(
+              "people.digital_cards",
+            ) ? (
+              <>
+                {" · "}
+                <Link className="underline" href="/my-card">
+                  Digital card
+                </Link>
+              </>
+            ) : null}
           </p>
         </div>
         {canAddEmployee ? (

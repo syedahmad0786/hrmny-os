@@ -179,6 +179,8 @@ export const DEV_USERS: Record<string, SessionUser> = {
 
 export function getAuthMode(): AuthMode {
   const mode = process.env.AUTH_MODE?.toLowerCase();
+  // Explicit CI/demo override. Never set ALLOW_DEV_AUTH on real production hosts.
+  if (mode === "dev" && process.env.ALLOW_DEV_AUTH === "true") return "dev";
   // Never expose dev persona impersonation from a production deployment.
   if (process.env.NODE_ENV === "production") return "supabase";
   if (mode === "supabase") return "supabase";

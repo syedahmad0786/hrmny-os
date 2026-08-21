@@ -20,7 +20,7 @@ describe("M2 finance propose-approve-post + HR", () => {
     getDemoStore().resetM2Demo();
   });
 
-  it("propose → approve → post to mock Xero with source attached", async () => {
+  it("propose → approve → mark issued in OS (Xero write disabled)", async () => {
     const finance = callerFor("finance");
     const proposal = await finance.invoices.intake({
       emailRef: "msg-test-1",
@@ -47,7 +47,12 @@ describe("M2 finance propose-approve-post + HR", () => {
     });
     expect(issued.result.ok).toBe(true);
     expect(issued.invoice.status).toBe("issued");
-    expect(issued.invoice.xeroInvoiceId).toMatch(/^mock-xero-inv-/);
+    expect(issued.invoice.xeroInvoiceId).toBeNull();
+    expect(issued.xeroWrite).toBe(false);
+
+    const mirror = await finance.invoices.mirrorFromXero();
+    expect(mirror.writeEnabled).toBe(false);
+    expect(mirror.invoices.length).toBeGreaterThan(0);
   });
 
   it("holds unknown TRN on issue", async () => {
@@ -127,7 +132,8 @@ bz-9,Sam Lee,sam@hrmny.local,Ops
 
     const posted = await partner.payroll.runs.post({ id: draft.payrollRunId });
     expect(posted.result.ok).toBe(true);
-    expect(posted.run.xeroJournalId).toMatch(/^mock-xero-je-/);
+    expect(posted.run.xeroJournalId).toBeNull();
+    expect(posted.xeroWrite).toBe(false);
   });
 
   it("blocks ordinary staff from HR administration and payroll data", async () => {

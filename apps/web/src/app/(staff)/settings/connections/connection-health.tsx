@@ -1,75 +1,9 @@
 "use client";
 
-import { Button } from "@hrmny/ui";
-import { useState } from "react";
+import { trpc } from "@/lib/trpc";
 import { formatRelative } from "@/components/crm/format";
 
-// mock data — replace with `connections.health` when the connections v2 router
-// lands (M7). Real status/lastCheck come from a per-provider health probe; the
-// existing api_key/oauth/managed flows below wire the connect/change actions.
-
 type HealthStatus = "connected" | "disconnected" | "error";
-
-type ProviderHealth = {
-  key: string;
-  name: string;
-  category: string;
-  authType: "api_key" | "oauth" | "managed";
-  status: HealthStatus;
-  lastCheck: string | null;
-  detail: string;
-};
-
-const now = Date.now();
-const minsAgo = (m: number) => new Date(now - m * 60_000).toISOString();
-
-const MOCK_PROVIDERS: readonly ProviderHealth[] = [
-  {
-    key: "composio",
-    name: "Composio",
-    category: "Agent tool bridge · Gmail send",
-    authType: "managed",
-    status: "connected",
-    lastCheck: minsAgo(4),
-    detail: "Workspace healthy · Gmail connected.",
-  },
-  {
-    key: "apollo",
-    name: "Apollo",
-    category: "ICP sourcing",
-    authType: "api_key",
-    status: "connected",
-    lastCheck: minsAgo(7),
-    detail: "Live mode · quota 62% of daily cap.",
-  },
-  {
-    key: "hunter",
-    name: "Hunter",
-    category: "Email find + verify",
-    authType: "api_key",
-    status: "error",
-    lastCheck: minsAgo(6),
-    detail: "401 from provider — re-provision key + NeverBounce credits.",
-  },
-  {
-    key: "xero",
-    name: "Xero",
-    category: "Finance / accounting",
-    authType: "oauth",
-    status: "disconnected",
-    lastCheck: null,
-    detail: "OAuth app registered; not yet authorised.",
-  },
-  {
-    key: "n8n",
-    name: "n8n",
-    category: "Automation glue",
-    authType: "api_key",
-    status: "connected",
-    lastCheck: minsAgo(12),
-    detail: "hrmny.app.n8n.cloud reachable · 3 active workflows.",
-  },
-];
 
 const STATUS: Record<
   HealthStatus,
@@ -92,14 +26,34 @@ const STATUS: Record<
   },
 };
 
+function normalizeStatus(raw: string): HealthStatus {
+  if (raw === "connected" || raw === "active") return "connected";
+  if (raw === "error") return "error";
+  return "disconnected";
+}
+
+/** Live catalog from `connections.list` (no mock cards). */
 export function ConnectionHealth() {
-  // mock optimistic disconnect — real actions dispatch to the connections
-  // router; here they only flip local card state.
-  const [overrides, setOverrides] = useState<Record<string, HealthStatus>>({});
-  const providers = MOCK_PROVIDERS.map((p) => ({
-    ...p,
-    status: overrides[p.key] ?? p.status,
-  }));
+  const list = trpc.connections.list.useQuery();
+  const providers = (list.data ?? []).map((item) => {
+    const status = item.lastError
+      ? ("error" as const)
+      : normalizeStatus(item.status);
+    return {
+      key: item.toolkit,
+      name: item.label,
+      category: item.authType,
+      status,
+      lastCheck: item.lastTestedAt,
+      detail: item.lastError
+        ? item.lastError
+        : status === "connected"
+          ? item.hasSecret
+            ? "Connected · credential on file"
+            : item.note
+          : item.note,
+    };
+  });
   const connected = providers.filter((p) => p.status === "connected").length;
   const errored = providers.filter((p) => p.status === "error").length;
 
@@ -114,12 +68,13 @@ export function ConnectionHealth() {
             Every external account, one place
           </h2>
           <p className="mt-1 text-sm text-muted">
-            Connect, disconnect, or change any integration from here. Each card
-            shows its last health check.
+            Status from your saved connections — connect or change below.
           </p>
         </div>
         <p className="text-sm text-muted">
-          {connected}/{providers.length} connected
+          {list.isLoading
+            ? "Loading…"
+            : `${connected}/${providers.length || "—"} connected`}
           {errored ? ` · ${errored} need attention` : ""}
         </p>
       </div>
@@ -144,48 +99,12 @@ export function ConnectionHealth() {
                   {status.label}
                 </span>
               </div>
-
               <p className="mt-2 flex-1 text-xs text-muted">{provider.detail}</p>
-
               <p className="mt-3 text-[11px] text-muted">
                 {provider.lastCheck
                   ? `Checked ${formatRelative(provider.lastCheck)}`
                   : "Never checked"}
               </p>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                {provider.status === "connected" ? (
-                  <>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() =>
-                        setOverrides((c) => ({
-                          ...c,
-                          [provider.key]: "disconnected",
-                        }))
-                      }
-                    >
-                      Disconnect
-                    </Button>
-                    <Button type="button" variant="ghost">
-                      Change
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    type="button"
-                    onClick={() =>
-                      setOverrides((c) => ({
-                        ...c,
-                        [provider.key]: "connected",
-                      }))
-                    }
-                  >
-                    {provider.status === "error" ? "Reconnect" : "Connect"}
-                  </Button>
-                )}
-              </div>
             </article>
           );
         })}

@@ -20,8 +20,13 @@ export type EmailVerificationConfig = {
 };
 
 function resolveMode(config: EmailVerificationConfig): "mock" | "live" {
-  if (config.mode) return config.mode;
-  return process.env.HUNTER_MODE?.toLowerCase() === "live" ? "live" : "mock";
+  if (config.mode === "mock") return "mock";
+  if (config.mode === "live") return "live";
+  const env = process.env.HUNTER_MODE?.toLowerCase();
+  if (env === "live") return "live";
+  if (env === "mock") return "mock";
+  if ((config.apiKey ?? process.env.HUNTER_API_KEY)?.trim()) return "live";
+  return "mock";
 }
 
 const unverified = (

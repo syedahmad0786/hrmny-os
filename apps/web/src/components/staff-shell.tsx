@@ -51,9 +51,16 @@ const PRIMARY_NAV = [
     index: "05",
     features: ["finance.workspace"],
     match: (p: string) =>
-      ["/finance", "/billing", "/margin"].some(
+      ["/finance", "/billing", "/margin", "/payroll"].some(
         (h) => p === h || p.startsWith(`${h}/`),
       ),
+  },
+  {
+    href: "/dashboards",
+    label: "Dashboards",
+    index: "05b",
+    features: ["analytics.dashboards", "finance.workspace", "core.home"],
+    match: (p: string) => p === "/dashboards" || p.startsWith("/dashboards/"),
   },
   {
     href: "/people",
@@ -78,7 +85,6 @@ const PRIMARY_NAV = [
         "/workplace",
         "/workforce-payroll",
         "/hr",
-        "/payroll",
         "/roles",
       ].some((h) => p === h || p.startsWith(`${h}/`)),
   },

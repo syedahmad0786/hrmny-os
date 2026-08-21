@@ -5,6 +5,7 @@ import { Button, Card } from "@hrmny/ui";
 import { useState } from "react";
 import { CrmSubnav } from "@/components/crm/subnav";
 import { trpc } from "@/lib/trpc";
+import { deliveryRhythmFor } from "@/lib/delivery-rhythm";
 
 type ClientRow = {
   clientId: string;
@@ -150,7 +151,8 @@ export default function ClientsPage() {
                   {client.name}
                 </h2>
                 <p className="mt-1 text-sm text-muted">
-                  {client.market} · {client.engagementType} ·{" "}
+                  {client.market} ·{" "}
+                  {deliveryRhythmFor(client.engagementType).label} ·{" "}
                   {client.lifecycleStatus}
                 </p>
                 <p className="mt-2 text-xs text-muted">

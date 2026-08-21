@@ -2,6 +2,7 @@
 
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
+import { showDemoResets } from "@/lib/feature-flags";
 import { useState } from "react";
 
 export default function RetainerBillingPage() {
@@ -34,26 +35,29 @@ export default function RetainerBillingPage() {
   const retainerClient = (clients.data ?? []).find(
     (c) => c.engagementType === "retainer",
   );
+  const demoResets = showDemoResets();
 
   return (
     <main className="flex flex-col gap-6">
       <h1 className="font-display text-3xl font-semibold">Retainer billing</h1>
       <p className="text-muted">
-        M5: monthly retainer draft (VAT 5%) → approve → post to Xero mock → paid
-        webhook read-back.
+        Monthly retainer draft (VAT 5%) → approve → mark issued in OS. Xero is
+        mirrored read-only — OS never posts invoices to Xero.
       </p>
 
       <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={async () => {
-            const r = await reset.mutateAsync();
-            setLast(r);
-          }}
-        >
-          Reset M5 demo
-        </Button>
+        {demoResets ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={async () => {
+              const r = await reset.mutateAsync();
+              setLast(r);
+            }}
+          >
+            Reset M5 demo
+          </Button>
+        ) : null}
         <Button
           type="button"
           onClick={async () => {
@@ -115,7 +119,7 @@ export default function RetainerBillingPage() {
                       setLast(r);
                     }}
                   >
-                    3. Post to Xero
+                    3. Mark issued (OS only)
                   </Button>
                 ) : null}
                 {inv.status === "issued" && inv.xeroInvoiceId ? (

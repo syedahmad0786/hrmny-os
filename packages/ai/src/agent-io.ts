@@ -15,6 +15,17 @@ export type AgentRunInput = {
   input: string | Record<string, unknown>;
   /** Retrieved memory / deal / client context injected before the draft. */
   context?: Record<string, unknown>;
+  /** Actor roles for sandbox routing (primary privileged-data control). */
+  roles?: string[];
+  /** Explicit privileged domains this run needs (salaries, margin, etc.). */
+  privilegedDomains?: Array<
+    | "salary"
+    | "payroll_amount"
+    | "client_payment_terms"
+    | "margin_pct"
+    | "bank_account"
+    | "personal_financial"
+  >;
 };
 
 /** Where a run ended relative to the gate it feeds (HITL is never skipped). */

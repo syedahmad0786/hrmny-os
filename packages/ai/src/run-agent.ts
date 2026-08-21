@@ -18,13 +18,17 @@ import {
   type ScheduledAllowedAction,
 } from "./policy";
 import {
-  createProvider,
   estimateCostAed,
   withMetering,
   type LLMGenerateOptions,
   type LLMProvider,
   type MeteringOptions,
 } from "./provider";
+import {
+  decideLlmSandbox,
+  providerForSandbox,
+  type PrivilegedDataDomain,
+} from "./sandbox";
 
 /**
  * Canonical agent-runner seam (M7). One entry point every live agent run flows
@@ -34,6 +38,9 @@ import {
  * Mock-first: with no keys, createProvider() returns the mock, cost is 0, and
  * the cap never trips. The cap breaker still throws MonthlyCapExceededError
  * when a live spend source is wired past the cap (fail closed by design).
+ *
+ * Privileged finance/HR agents route through the separate OpenRouter workspace
+ * when roles allow; sandbox deny returns a blocked gate outcome.
  */
 export type RunAgent = (input: AgentRunInput) => Promise<AgentRunOutput>;
 
@@ -66,6 +73,12 @@ function gateOutcomeFor(agent: AgentId): AgentGateOutcome {
   return AGENT_REGISTRY[agent].producesDrafts ? "pending" : "not_applicable";
 }
 
+function privilegedDomainsFor(agent: AgentId): PrivilegedDataDomain[] {
+  if (agent === "finance-assist") return ["client_payment_terms", "margin_pct"];
+  if (agent === "hr") return ["salary", "payroll_amount"];
+  return [];
+}
+
 export async function runAgent(
   input: AgentRunInput,
   deps: RunAgentDeps = {},
@@ -79,6 +92,35 @@ export async function runAgent(
       agent,
       model,
       output: agentDisabledRefusal(agent),
+      inputTokens: 0,
+      outputTokens: 0,
+      costAed: 0,
+      gateOutcome: "blocked",
+    };
+  }
+
+  const domains = [
+    ...privilegedDomainsFor(agent),
+    ...(input.privilegedDomains ?? []),
+  ];
+  // Enforce sandbox only when caller supplies roles (production HITL path).
+  // Legacy/mock callers without roles keep the general provider.
+  const sandbox = input.roles?.length
+    ? decideLlmSandbox({
+        roles: input.roles,
+        domains,
+        requestPrivileged: domains.length > 0,
+      })
+    : ({ allowed: true, workspace: "general" } as const);
+  if (!sandbox.allowed) {
+    return {
+      agent,
+      model,
+      output: {
+        refused: true,
+        reason: sandbox.reason,
+        workspace: sandbox.workspace,
+      },
       inputTokens: 0,
       outputTokens: 0,
       costAed: 0,
@@ -113,7 +155,8 @@ export async function runAgent(
   }
 
   const provider = withMetering(
-    deps.provider ?? createProvider({ defaultModel: input.model }),
+    deps.provider ??
+      providerForSandbox(sandbox, { defaultModel: input.model }),
     {
       agent,
       onCost: deps.onCost,

@@ -102,6 +102,7 @@ describe("M1 security insurance", () => {
   it("never enables dev persona impersonation in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("AUTH_MODE", "dev");
+    vi.stubEnv("ALLOW_DEV_AUTH", "");
     expect(getAuthMode()).toBe("supabase");
 
     const req = new Request("https://hrmny.example/api/trpc", {
@@ -127,6 +128,13 @@ describe("M1 security insurance", () => {
     });
     expect(magic.sent).toBe(false);
     expect(magic.stubToken).toBeUndefined();
+  });
+
+  it("allows explicit CI demo auth when ALLOW_DEV_AUTH=true", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AUTH_MODE", "dev");
+    vi.stubEnv("ALLOW_DEV_AUTH", "true");
+    expect(getAuthMode()).toBe("dev");
   });
 
   it("reports the configured monthly LLM cap", async () => {

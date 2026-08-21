@@ -3,6 +3,7 @@
 import { Button } from "@hrmny/ui";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc";
+import { showDemoResets } from "@/lib/feature-flags";
 import { useState } from "react";
 
 export default function FinanceQueuePage() {
@@ -11,6 +12,7 @@ export default function FinanceQueuePage() {
   const canViewMargin = session.data?.canViewMargin ?? false;
   const proposals = trpc.invoices.proposals.useQuery();
   const invoices = trpc.invoices.list.useQuery();
+  const mirror = trpc.invoices.mirrorFromXero.useQuery();
   const intake = trpc.invoices.intake.useMutation({
     onSuccess: () => void utils.invoices.invalidate(),
   });
@@ -30,6 +32,7 @@ export default function FinanceQueuePage() {
   const [bodyHint, setBodyHint] = useState(
     "ACME Supplies LLC invoice AED 2100.00 — TRN on file",
   );
+  const demoResets = showDemoResets();
 
   async function runIntake() {
     const row = await intake.mutateAsync({
@@ -43,8 +46,8 @@ export default function FinanceQueuePage() {
     <main className="flex flex-col gap-6">
       <h1 className="font-display text-3xl font-semibold">Finance queue</h1>
       <p className="text-muted">
-        Module B: email intake → AI propose (HITL) → approve → post to Xero
-        mock. Unknown TRN is held, never guessed.
+        Intake → AI propose (HITL) → approve → mark issued in OS. Xero remains
+        source of truth — OS reads/mirrors only and never writes.
       </p>
       <p className="text-sm">
         <Link className="underline" href="/billing">
@@ -58,6 +61,14 @@ export default function FinanceQueuePage() {
             </Link>
           </>
         ) : null}
+        {" · "}
+        <Link className="underline" href="/dashboards">
+          Dashboards
+        </Link>
+        {" · "}
+        <Link className="underline" href="/payroll">
+          Payroll prep
+        </Link>
       </p>
 
       <label className="flex flex-col gap-1 text-sm">
@@ -73,14 +84,37 @@ export default function FinanceQueuePage() {
         <Button type="button" onClick={() => void runIntake()} disabled={intake.isPending}>
           1. Intake (AI propose)
         </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => void reset.mutateAsync()}
-        >
-          Reset M2 finance
-        </Button>
+        {demoResets ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => void reset.mutateAsync()}
+          >
+            Reset M2 finance
+          </Button>
+        ) : null}
       </div>
+
+      <section className="rounded-lg border border-sand bg-white/70 p-4">
+        <p className="text-sm text-muted">
+          Synced from Xero ({mirror.data?.mode ?? "…"} · writeEnabled=
+          {String(mirror.data?.writeEnabled ?? false)})
+        </p>
+        <ul className="mt-3 flex flex-col gap-2 text-sm">
+          {(mirror.data?.invoices ?? []).map((row) => (
+            <li key={row.externalId} className="border-t border-sand/60 pt-2">
+              {row.status} · {row.contactName} · {row.currency} {row.amount} ·{" "}
+              {row.externalId}
+              <span className="block text-xs text-muted">
+                mirrored {row.syncedAt}
+              </span>
+            </li>
+          ))}
+          {!mirror.data?.invoices?.length && !mirror.isLoading ? (
+            <li className="text-muted">No mirrored invoices yet.</li>
+          ) : null}
+        </ul>
+      </section>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">
         <p className="text-sm text-muted">Proposals</p>
@@ -128,13 +162,13 @@ export default function FinanceQueuePage() {
       </section>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">
-        <p className="text-sm text-muted">Invoices</p>
+        <p className="text-sm text-muted">OS invoices (not written to Xero)</p>
         <ul className="mt-3 flex flex-col gap-3">
           {(invoices.data ?? []).map((inv) => (
             <li key={inv.invoiceId} className="border-t border-sand/60 pt-3 text-sm">
               <p>
                 {inv.status} · {inv.contactName} · AED {inv.amount} (+VAT{" "}
-                {inv.vatAmount}) · xero: {inv.xeroInvoiceId ?? "—"}
+                {inv.vatAmount}) · xero mirror id: {inv.xeroInvoiceId ?? "—"}
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {inv.status === "proposed" ? (
@@ -156,7 +190,7 @@ export default function FinanceQueuePage() {
                       setLast(r);
                     }}
                   >
-                    4. Post to Xero
+                    4. Mark issued (OS only)
                   </Button>
                 ) : null}
               </div>

@@ -52,6 +52,7 @@ export {
   createXeroMock,
   createXeroLive,
   createXeroAdapter,
+  isXeroWriteEnabled,
   type XeroAdapterConfig,
 } from "./xero";
 export {

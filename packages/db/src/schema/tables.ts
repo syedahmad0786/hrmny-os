@@ -439,6 +439,17 @@ export const immersion = pgTable("immersion", {
   ...timestamps,
 });
 
+/** Durable month-1 onboarding checklist (phases jsonb). */
+export const clientOnboarding = pgTable("client_onboarding", {
+  clientId: uuid("client_id")
+    .primaryKey()
+    .references(() => client.clientId, { onDelete: "cascade" }),
+  phases: jsonb("phases").$type<unknown[]>().default([]).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 /** 5. scope */
 export const scope = pgTable("scope", {
   scopeId: uuid("scope_id").defaultRandom().primaryKey(),
