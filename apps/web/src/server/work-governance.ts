@@ -54,6 +54,7 @@ const CURATED_WORK_APPS = new Set([
   "hunter",
   "jira",
   "microsoft_teams",
+  "n8n",
   "one_drive",
   "outlook",
   "power_bi",

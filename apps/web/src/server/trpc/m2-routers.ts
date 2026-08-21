@@ -10,6 +10,7 @@ import {
 } from "@hrmny/gate";
 import { isXeroWriteEnabled } from "@hrmny/integrations";
 import { DEMO_EMPLOYEE_ID, getDemoStore, vatOnAmount } from "../demo-store";
+import { getDb } from "../db";
 import { protectedProcedure, router } from "./trpc";
 
 bootstrapGateRegistry();
@@ -89,7 +90,14 @@ async function runTransition(
 }
 
 export const invoicesRouter = router({
-  list: protectedProcedure.query(() => [...getDemoStore().invoices.values()]),
+  list: protectedProcedure.query(async () => {
+    if (getDb()) {
+      const { listBillingInvoices } = await import("../finance/list-invoices");
+      const durable = await listBillingInvoices();
+      if (durable.length) return durable;
+    }
+    return [...getDemoStore().invoices.values()];
+  }),
 
   proposals: protectedProcedure.query(() => [
     ...getDemoStore().proposals.values(),
@@ -450,6 +458,19 @@ export const invoicesRouter = router({
       "../finance/xero-mirror-sync"
     );
     const synced = await syncXeroInvoiceMirror();
+    if (getDb()) {
+      const { listXeroMirrorInvoices } = await import(
+        "../finance/list-invoices"
+      );
+      const invoices = await listXeroMirrorInvoices();
+      return {
+        writeEnabled: isXeroWriteEnabled(),
+        mode: synced.mode,
+        upserted: synced.upserted,
+        mirroredAt: new Date().toISOString(),
+        invoices,
+      };
+    }
     const store = getDemoStore();
     const rows = await store.xero.listInvoices();
     return {
@@ -457,7 +478,32 @@ export const invoicesRouter = router({
       mode: synced.mode,
       upserted: synced.upserted,
       mirroredAt: new Date().toISOString(),
-      invoices: rows,
+      invoices: rows.map((row) => ({
+        invoiceId: row.externalId,
+        status: String(row.status ?? "mirrored").toLowerCase(),
+        contactName: row.contactName ?? "Xero contact",
+        amount: String(row.amount ?? "0"),
+        vatAmount: null,
+        currency: row.currency ?? "AED",
+        invoiceType: "ACCREC",
+        billingKind: "xero_mirror",
+        clientId: null,
+        period: null,
+        trn: null,
+        trnStatus: null,
+        ruleCited: null,
+        sourceAttached: {
+          xeroExternalId: row.externalId,
+          syncedAt: new Date().toISOString(),
+          reference: row.reference ?? null,
+        },
+        xeroInvoiceId: row.externalId,
+        proposedByEmployeeId: null,
+        approvedByEmployeeId: null,
+        createdAt: new Date().toISOString(),
+        readOnly: true as const,
+        source: "xero_mirror" as const,
+      })),
     };
   }),
 

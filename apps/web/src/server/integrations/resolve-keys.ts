@@ -1,12 +1,13 @@
 import { and, connectionAccount, eq, sql } from "@hrmny/db";
 import { getDb } from "../db";
 
-export type ApiKeyToolkit = "apollo" | "hunter" | "bayzat";
+export type ApiKeyToolkit = "apollo" | "hunter" | "bayzat" | "n8n";
 
 const ENV_KEY: Record<ApiKeyToolkit, string> = {
   apollo: "APOLLO_API_KEY",
   hunter: "HUNTER_API_KEY",
   bayzat: "BAYZAT_API_KEY",
+  n8n: "N8N_API_KEY",
 };
 
 /** Env first, then any connected staff vault secret for the toolkit. */

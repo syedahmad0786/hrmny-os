@@ -203,7 +203,11 @@ export default function ConnectionsPage() {
                     }
                     onClick={() => {
                       saveKey.mutate({
-                        toolkit: item.toolkit as "apollo" | "hunter" | "bayzat",
+                        toolkit: item.toolkit as
+                          | "apollo"
+                          | "hunter"
+                          | "bayzat"
+                          | "n8n",
                         apiKey: keys[item.toolkit]!,
                       });
                       setKeys((current) => ({

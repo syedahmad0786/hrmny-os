@@ -114,7 +114,8 @@ export default function RetainerBillingPage() {
                 xero: {inv.xeroInvoiceId ?? "—"}
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {inv.status === "draft" || inv.status === "proposed" ? (
+                {!("readOnly" in inv && inv.readOnly) &&
+                (inv.status === "draft" || inv.status === "proposed") ? (
                   <Button
                     type="button"
                     onClick={async () => {
@@ -125,7 +126,8 @@ export default function RetainerBillingPage() {
                     2. Approve
                   </Button>
                 ) : null}
-                {inv.status === "approved" ? (
+                {!("readOnly" in inv && inv.readOnly) &&
+                inv.status === "approved" ? (
                   <Button
                     type="button"
                     onClick={async () => {

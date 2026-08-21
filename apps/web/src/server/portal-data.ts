@@ -476,6 +476,35 @@ export async function actOnPortalApproval(input: {
         ${input.feedback ?? null}
       )
     `);
+
+    const assetStatus =
+      input.action === "approve" ? "approved" : "internal_review";
+    await tx.execute(sql`
+      update public.asset
+      set status = ${assetStatus}, updated_at = now()
+      where client_id = ${input.clientId}::uuid
+        and task_id = ${input.approvalId}::uuid
+        and status = 'client_review'
+    `);
+
     return { ok: true as const, status: nextStatus };
+  }).then(async (result) => {
+    if (input.action === "approve") {
+      try {
+        const { driveSeamAsync } = await import("./seams");
+        await driveSeamAsync(
+          "creative.approved",
+          `creative.approved:${input.approvalId}`,
+          {
+            clientId: input.clientId,
+            taskId: input.approvalId,
+            actorEmployeeId: input.actorEmployeeId ?? null,
+          },
+        );
+      } catch {
+        /* seam best-effort after commit */
+      }
+    }
+    return result;
   });
 }

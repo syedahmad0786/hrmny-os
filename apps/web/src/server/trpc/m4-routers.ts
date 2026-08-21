@@ -29,6 +29,8 @@ import {
   lockDeliveryBrief,
   setDeliveryTaskQc,
   updateDeliveryBriefBody,
+  updateDeliveryTaskOwner,
+  updateDeliveryTaskSituational,
   updateDeliveryTaskStatus,
   upsertDeliveryBriefForTask,
   type DeliveryTask,
@@ -38,6 +40,7 @@ import {
   createDeliveryCalendar,
   getDeliveryCalendar,
   listDeliveryCalendars,
+  listRecentDeliveryCalendars,
   updateDeliveryCalendar,
 } from "../tasks/delivery-calendars";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
@@ -193,37 +196,65 @@ export const m4DemoRouter = router({
   }),
   seedIds: publicProcedure.query(async () => {
     if (getDb()) {
+      const recentCals = await listRecentDeliveryCalendars({ limit: 1 });
+      const latestCal = recentCals[0];
+      if (latestCal) {
+        const forClient = await listDeliveryTasks({
+          clientId: latestCal.clientId,
+        });
+        const task =
+          forClient.find((t) => t.briefId) ??
+          forClient[0] ??
+          null;
+        return {
+          clientId: latestCal.clientId,
+          calendarId: latestCal.calendarId,
+          taskId: task?.taskId ?? DEMO_TASK_ID,
+          briefId: task?.briefId ?? DEMO_BRIEF_ID,
+          creativeTaskId: task?.taskId ?? DEMO_CREATIVE_TASK_ID,
+          source: "durable_calendar" as const,
+        };
+      }
+
+      async function withClientCalendar(clientId: string, fallback: {
+        taskId: string;
+        briefId: string;
+        creativeTaskId: string;
+      }) {
+        const cals = await listDeliveryCalendars({ clientId });
+        return {
+          clientId,
+          calendarId: cals[0]?.calendarId ?? DEMO_CALENDAR_ID,
+          ...fallback,
+          source: cals[0] ? ("durable_task" as const) : ("demo_fallback" as const),
+        };
+      }
+
       const unlocked = await listDeliveryTasks({ status: "briefing" });
       const withBrief = unlocked.find((t) => t.briefId);
       if (withBrief?.briefId) {
-        return {
-          clientId: withBrief.clientId,
-          calendarId: DEMO_CALENDAR_ID,
+        return withClientCalendar(withBrief.clientId, {
           taskId: withBrief.taskId,
           briefId: withBrief.briefId,
           creativeTaskId: withBrief.taskId,
-        };
+        });
       }
       const ready = await listDeliveryTasks({ status: "brief_ready" });
       const readyBrief = ready.find((t) => t.briefId);
       if (readyBrief?.briefId) {
-        return {
-          clientId: readyBrief.clientId,
-          calendarId: DEMO_CALENDAR_ID,
+        return withClientCalendar(readyBrief.clientId, {
           taskId: readyBrief.taskId,
           briefId: readyBrief.briefId,
           creativeTaskId: readyBrief.taskId,
-        };
+        });
       }
       const qcTasks = await listDeliveryTasks({ status: "qc" });
       if (qcTasks[0]) {
-        return {
-          clientId: qcTasks[0].clientId,
-          calendarId: DEMO_CALENDAR_ID,
+        return withClientCalendar(qcTasks[0].clientId, {
           taskId: qcTasks[0].taskId,
           briefId: qcTasks[0].briefId ?? DEMO_BRIEF_ID,
           creativeTaskId: qcTasks[0].taskId,
-        };
+        });
       }
     }
     const store = getDemoStore();
@@ -234,6 +265,7 @@ export const m4DemoRouter = router({
       taskId: DEMO_TASK_ID,
       briefId: DEMO_BRIEF_ID,
       creativeTaskId: DEMO_CREATIVE_TASK_ID,
+      source: "demo_store" as const,
     };
   }),
 });
@@ -247,15 +279,13 @@ export const calendarsRouter = router({
           clientId: input.clientId,
           month: input.month,
         });
-        if (rows.length) {
-          return rows.map((c) => ({
-            ...c,
-            shootLock: evaluateShootLock({
-              shootDate: c.shootDate,
-              refApprovalState: c.refApprovalState,
-            }),
-          }));
-        }
+        return rows.map((c) => ({
+          ...c,
+          shootLock: evaluateShootLock({
+            shootDate: c.shootDate,
+            refApprovalState: c.refApprovalState,
+          }),
+        }));
       }
       let rows = [...getDemoStore().calendars.values()].filter(
         (c) => c.clientId === input.clientId,
@@ -275,15 +305,14 @@ export const calendarsRouter = router({
     .query(async ({ input }) => {
       if (getDb()) {
         const durable = await getDeliveryCalendar(input.id);
-        if (durable) {
-          return {
-            ...durable,
-            shootLock: evaluateShootLock({
-              shootDate: durable.shootDate,
-              refApprovalState: durable.refApprovalState,
-            }),
-          };
-        }
+        if (!durable) return null;
+        return {
+          ...durable,
+          shootLock: evaluateShootLock({
+            shootDate: durable.shootDate,
+            refApprovalState: durable.refApprovalState,
+          }),
+        };
       }
       const c = getDemoStore().calendars.get(input.id);
       if (!c) return null;
@@ -311,7 +340,8 @@ export const calendarsRouter = router({
           month: input.month,
           focusPoints: input.focusPoints,
         });
-        if (durable) return durable;
+        if (!durable) throw new Error("DURABLE_CALENDAR_CREATE_FAILED");
+        return durable;
       }
       const store = getDemoStore();
       if (!store.clients.has(input.clientId)) throw new Error("NOT_FOUND");
@@ -358,7 +388,8 @@ export const calendarsRouter = router({
           taskId: input.taskId ?? null,
           position: input.position,
         });
-        if (slot) return slot;
+        if (!slot) throw new Error("NOT_FOUND");
+        return slot;
       }
       const cal = getDemoStore().calendars.get(input.calendarId);
       if (!cal) throw new Error("NOT_FOUND");
@@ -986,7 +1017,28 @@ export const tasksRouter = router({
         ownerEmployeeId: z.string().uuid(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      const durable = await getDeliveryTask(input.id);
+      if (durable) {
+        if (durable.briefId) {
+          const brief = await getDeliveryBrief(durable.briefId);
+          if (brief && brief.missingRequiredCount > 2) {
+            return {
+              ok: false as const,
+              code: "GATE_BLOCKED" as const,
+              reason: "DoR incomplete — cannot assign until ≤2 missing",
+              task: durable,
+            };
+          }
+        }
+        const task = await updateDeliveryTaskOwner({
+          taskId: input.id,
+          ownerEmployeeId: input.ownerEmployeeId,
+        });
+        if (!task) throw new Error("NOT_FOUND");
+        return { ok: true as const, task };
+      }
+      if (getDb()) throw new Error("NOT_FOUND");
       const store = getDemoStore();
       const task = store.tasks.get(input.id);
       if (!task) throw new Error("NOT_FOUND");
@@ -1053,7 +1105,17 @@ export const tasksRouter = router({
         situationalState: z.string().nullable(),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
+      const durable = await getDeliveryTask(input.id);
+      if (durable) {
+        const task = await updateDeliveryTaskSituational({
+          taskId: input.id,
+          situationalState: input.situationalState,
+        });
+        if (!task) throw new Error("NOT_FOUND");
+        return task;
+      }
+      if (getDb()) throw new Error("NOT_FOUND");
       const task = getDemoStore().tasks.get(input.id);
       if (!task) throw new Error("NOT_FOUND");
       task.situationalState = input.situationalState;

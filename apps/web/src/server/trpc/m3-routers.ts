@@ -1145,6 +1145,15 @@ export const clientsRouter = router({
             )
           `);
           return user;
+        }).then(async (user) => {
+          const { upsertPortalAllowlistContact } = await import(
+            "../auth/portal-magic-link"
+          );
+          await upsertPortalAllowlistContact({
+            email,
+            clientId: input.clientId,
+          });
+          return user;
         });
       }),
   }),

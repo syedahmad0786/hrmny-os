@@ -1178,6 +1178,72 @@ export const crmRouter = router({
         /* calendar optional if schema missing state column on older DBs */
       }
 
+      let portalInvite: {
+        portalUserId: string;
+        email: string;
+      } | null = null;
+      try {
+        const { getDb } = await import("../db");
+        const { sql } = await import("@hrmny/db");
+        const db = getDb();
+        if (db) {
+          const contact = contactId ? await getContact(contactId) : null;
+          const inviteEmail =
+            contact?.email?.trim().toLowerCase() ||
+            `portal+${pack.client.clientId.slice(0, 8)}@example.com`;
+          const displayName =
+            [contact?.firstName, contact?.lastName].filter(Boolean).join(" ") ||
+            `${pack.client.name} Portal`;
+          const existing = await db.execute<{
+            portalUserId: string;
+            email: string;
+          }>(sql`
+            select client_portal_user_id as "portalUserId", email
+            from public.client_portal_user
+            where client_id = ${pack.client.clientId}::uuid
+              and lower(email) = ${inviteEmail}
+            limit 1
+          `);
+          let invited = existing[0] ?? null;
+          if (invited) {
+            await db.execute(sql`
+              update public.client_portal_user
+              set is_active = true, display_name = ${displayName},
+                  updated_at = now()
+              where client_portal_user_id = ${invited.portalUserId}::uuid
+            `);
+          } else {
+            const created = await db.execute<{
+              portalUserId: string;
+              email: string;
+            }>(sql`
+              insert into public.client_portal_user (
+                client_id, email, display_name, is_active
+              ) values (
+                ${pack.client.clientId}::uuid,
+                ${inviteEmail},
+                ${displayName},
+                true
+              )
+              returning client_portal_user_id as "portalUserId", email
+            `);
+            invited = created[0] ?? null;
+          }
+          if (invited) {
+            const { upsertPortalAllowlistContact } = await import(
+              "../auth/portal-magic-link"
+            );
+            await upsertPortalAllowlistContact({
+              email: inviteEmail,
+              clientId: pack.client.clientId,
+            });
+            portalInvite = invited;
+          }
+        }
+      } catch {
+        /* invite optional when unique constraints differ */
+      }
+
       await auditMutation(
         ctx,
         "crm.runDemoClosedLoop",
@@ -1189,6 +1255,7 @@ export const crmRouter = router({
           clientId: pack.client.clientId,
           taskId: pack.task?.taskId ?? null,
           calendarId,
+          portalInvite,
           viaApollo: Boolean(input?.viaApollo),
           apolloMode,
         },
@@ -1203,6 +1270,7 @@ export const crmRouter = router({
         clientName: pack.client.name,
         taskId: pack.task?.taskId ?? null,
         calendarId,
+        portalInvite,
         onboardingPhases: pack.onboardingPhases,
         fired: pack.pack.fired,
         viaApollo: Boolean(input?.viaApollo),
@@ -1213,7 +1281,7 @@ export const crmRouter = router({
           account: "/account",
           creative: "/creative",
           portal: "/portal/deliveries",
-          onboarding: `/clients/${pack.client.clientId}`,
+          onboarding: "/portal/onboarding",
         },
       };
     }),

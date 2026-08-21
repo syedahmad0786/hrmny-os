@@ -8,6 +8,7 @@ import {
   N8N_EVENT_MAP,
   type N8nCrmEvent,
 } from "@hrmny/integrations";
+import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
 import { protectedProcedure, router } from "./trpc";
 
 const crmEventSchema = z.enum([
@@ -19,14 +20,17 @@ const crmEventSchema = z.enum([
   "creative.brief.dispatch",
 ]);
 
-function n8nClient() {
-  return createN8nAdapter();
+async function n8nClient(employeeId?: string | null) {
+  const resolved = await resolveIntegrationApiKey("n8n", employeeId);
+  return createN8nAdapter(
+    resolved.apiKey ? { apiKey: resolved.apiKey } : {},
+  );
 }
 
 export const automationRouter = router({
   /** Connectivity + config (never returns API key). */
-  health: protectedProcedure.query(async () => {
-    const n8n = n8nClient();
+  health: protectedProcedure.query(async ({ ctx }) => {
+    const n8n = await n8nClient(ctx.employeeId);
     const health = await n8n.health();
     return {
       ...health,
@@ -39,8 +43,8 @@ export const automationRouter = router({
    * One-shot demo proof: health + workflow list.
    * live=true only when adapter mode is live and health.ok.
    */
-  smoke: protectedProcedure.query(async () => {
-    const n8n = n8nClient();
+  smoke: protectedProcedure.query(async ({ ctx }) => {
+    const n8n = await n8nClient(ctx.employeeId);
     const health = await n8n.health();
     const workflows = await n8n.listWorkflows();
     return {
@@ -59,8 +63,8 @@ export const automationRouter = router({
     };
   }),
 
-  listWorkflows: protectedProcedure.query(async () => {
-    const n8n = n8nClient();
+  listWorkflows: protectedProcedure.query(async ({ ctx }) => {
+    const n8n = await n8nClient(ctx.employeeId);
     const workflows = await n8n.listWorkflows();
     return {
       mode: n8n.readonlyMode,
@@ -86,7 +90,7 @@ export const automationRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const n8n = n8nClient();
+      const n8n = await n8nClient(ctx.employeeId);
       const proposal = await n8n.proposeWorkflow({
         event: input.event as N8nCrmEvent,
         payload: input.payload,
@@ -113,7 +117,7 @@ export const automationRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const n8n = n8nClient();
+      const n8n = await n8nClient(ctx.employeeId);
       let path = input.webhookPath;
       if (!path && input.event) {
         const proposal = await n8n.proposeWorkflow({
@@ -144,8 +148,8 @@ export const automationRouter = router({
 
   getExecutionStatus: protectedProcedure
     .input(z.object({ executionId: z.string().min(1) }))
-    .query(async ({ input }) => {
-      const n8n = n8nClient();
+    .query(async ({ input, ctx }) => {
+      const n8n = await n8nClient(ctx.employeeId);
       return n8n.getExecutionStatus(input.executionId);
     }),
 });

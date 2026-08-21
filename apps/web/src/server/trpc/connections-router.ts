@@ -18,7 +18,7 @@ import { isWorkConnectedAppAllowed } from "../work-governance";
 import { featureEnabled } from "../features";
 
 const composio = createComposioStub();
-const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat"]);
+const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat", "n8n"]);
 const oauthToolkit = z.enum(["gmail", "calendar", "canva", "linkedin"]);
 
 export const GoogleProfileSchema = z.object({
@@ -57,6 +57,13 @@ export const CONNECTION_CATALOG = [
     authType: "api_key",
     ready: true,
     note: "Paste or replace the key without a deployment.",
+  },
+  {
+    toolkit: "n8n",
+    label: "n8n",
+    authType: "api_key",
+    ready: true,
+    note: "hrmny Cloud API key — paste to leave mock without redeploy.",
   },
   {
     toolkit: "bayzat",
@@ -346,7 +353,7 @@ async function auditComposioConnection(input: {
 
 export async function getEmployeeIntegrationSecret(
   employeeId: string,
-  toolkit: "apollo" | "hunter" | "bayzat",
+  toolkit: "apollo" | "hunter" | "bayzat" | "n8n",
 ): Promise<string | null> {
   if (!(await isWorkConnectedAppAllowed(toolkit))) return null;
   const db = getDb();

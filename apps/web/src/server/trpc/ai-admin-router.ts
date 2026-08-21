@@ -271,7 +271,12 @@ export const aiAdminRouter = router({
             model: input.model ?? null,
             enabled: true,
             producesDrafts: input.producesDrafts ?? true,
-            allowedTools: input.allowedTools ?? [],
+            allowedTools: input.allowedTools ?? [
+              "memory.search",
+              "crm.read",
+              "delivery.read",
+              "n8n.health",
+            ],
             createdByEmployeeId: actor.employeeId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -300,7 +305,14 @@ export const aiAdminRouter = router({
               ${input.systemPrompt ?? ""},
               ${input.model ?? null},
               ${input.producesDrafts ?? true},
-              ${JSON.stringify(input.allowedTools ?? [])}::jsonb,
+              ${JSON.stringify(
+                input.allowedTools ?? [
+                  "memory.search",
+                  "crm.read",
+                  "delivery.read",
+                  "n8n.health",
+                ],
+              )}::jsonb,
               ${actor.employeeId}::uuid
             )
             returning
@@ -526,6 +538,18 @@ export const aiAdminRouter = router({
           limit: 6,
         });
 
+        const { runAgentTools } = await import("../ai/agent-tools");
+        const toolResults = await runAgentTools({
+          allowedTools: agent.allowedTools,
+          prompt: input.prompt,
+          scope: {
+            clientId: input.clientId,
+            employeeId: actor.employeeId,
+            dealId: input.dealId,
+            taskId: input.taskId,
+          },
+        });
+
         const system = [
           agent.systemPrompt?.trim() ||
             `You are ${agent.displayName} (${agent.slug}).`,
@@ -533,6 +557,9 @@ export const aiAdminRouter = router({
             ? `Responsibility: ${agent.responsibility.trim()}`
             : "",
           "Stay inside the assigned client/user/task memory sandbox. Do not invent client facts.",
+          toolResults.length
+            ? "Use toolResults as ground truth for CRM/delivery/n8n facts in this turn."
+            : "",
         ]
           .filter(Boolean)
           .join("\n");
@@ -552,6 +579,7 @@ export const aiAdminRouter = router({
                 content: `${input.prompt}\n\ncontext: ${JSON.stringify({
                   sandbox: scope,
                   memory,
+                  toolResults,
                   agentSlug: agent.slug,
                 })}`,
               },
@@ -570,6 +598,7 @@ export const aiAdminRouter = router({
                 content: `${input.prompt}\n\ncontext: ${JSON.stringify({
                   sandbox: scope,
                   memory,
+                  toolResults,
                   agentSlug: agent.slug,
                   fallback:
                     err instanceof Error ? err.message.slice(0, 120) : "llm_error",
@@ -603,6 +632,7 @@ export const aiAdminRouter = router({
             context: {
               sandbox: scope,
               memory,
+              toolResults,
               customAgentId: agent.customAgentId,
               customAgentSlug: agent.slug,
             },
@@ -620,6 +650,7 @@ export const aiAdminRouter = router({
             slug: agent.slug,
             clientId: input.clientId ?? null,
             model: output.model,
+            tools: toolResults.map((t) => t.tool),
           },
           reason: null,
         });
@@ -631,6 +662,7 @@ export const aiAdminRouter = router({
           displayName: agent.displayName,
           sandbox: scope,
           provider: generated.provider,
+          toolResults,
         };
       }),
   }),

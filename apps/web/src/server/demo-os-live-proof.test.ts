@@ -48,6 +48,7 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(loop.viaApollo).toBe(true);
       expect(loop.onboardingPhases).toBeGreaterThanOrEqual(1);
       expect(loop.calendarId).toBeTruthy();
+      expect(loop.portalInvite?.email).toBeTruthy();
       const seededCals = await caller.calendars.listByClient({
         clientId: loop.clientId,
       });
@@ -55,6 +56,18 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         seededCals.some((c) => c.calendarId === loop.calendarId),
       ).toBe(true);
 
+      const seeds = await caller.m4.seedIds();
+      expect(seeds.clientId).toBe(loop.clientId);
+      expect(seeds.calendarId).toBe(loop.calendarId);
+      expect(seeds.source).toBe("durable_calendar");
+
+      if (loop.taskId && user.employeeId) {
+        const assigned = await caller.tasks.assign({
+          id: loop.taskId,
+          ownerEmployeeId: user.employeeId,
+        });
+        expect(assigned.ok).toBe(true);
+      }
       const gen = await caller.creativeGen.generate({
         prompt: "Ochre editorial still life for demo portal delivery",
         clientId: loop.clientId,
@@ -121,6 +134,24 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(run.output).toBeTruthy();
       expect(run.sandbox?.clientId).toBe(loop.clientId);
       expect(run.sandbox?.taskId).toBe(deliveryTask.taskId);
+      expect(Array.isArray(run.toolResults)).toBe(true);
+      expect(run.toolResults!.some((t) => t.tool === "crm.read" && t.ok)).toBe(
+        true,
+      );
+
+      const synced = await caller.invoices.syncXeroMirror();
+      expect(synced.upserted).toBeGreaterThanOrEqual(0);
+      const billed = await caller.invoices.list();
+      expect(Array.isArray(billed)).toBe(true);
+      if (synced.upserted > 0) {
+        expect(
+          billed.some(
+            (i) =>
+              ("source" in i && i.source === "xero_mirror") ||
+              i.billingKind === "xero_mirror",
+          ),
+        ).toBe(true);
+      }
 
       const userScoped = await caller.aiAdmin.customAgents.run({
         id: agent.customAgentId,
@@ -212,6 +243,6 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         listedCals.some((c) => c.calendarId === calendar.calendarId),
       ).toBe(true);
     },
-    90_000,
+    180_000,
   );
 });
