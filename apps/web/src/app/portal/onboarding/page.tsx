@@ -10,7 +10,7 @@ export default function PortalOnboardingPage() {
   });
 
   return (
-    <main className="flex flex-col gap-6">
+    <main className="flex flex-col gap-6" data-testid="portal-onboarding">
       <div>
         <h1 className="font-display text-3xl font-semibold text-ink">
           Onboarding
@@ -25,17 +25,25 @@ export default function PortalOnboardingPage() {
         <p className="text-sm text-muted">{data.error.message}</p>
       ) : null}
 
-      <ol className="space-y-4">
+      <ol className="space-y-4" data-testid="portal-onboarding-list">
         {(data.data?.phases ?? []).map((phase) => (
           <li
             key={phase.phaseIndex}
             className="border-b border-sand pb-4 last:border-0"
+            data-testid={`portal-onboarding-phase-${phase.phaseIndex}`}
+            data-phase-status={phase.status}
+            data-phase-name={phase.name}
           >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="font-display text-lg text-ink">
                 {phase.phaseIndex + 1}. {phase.name}
               </h2>
-              <span className="text-sm text-ochre">{phase.status}</span>
+              <span
+                className="text-sm text-ochre"
+                data-testid="portal-onboarding-phase-status"
+              >
+                {phase.status}
+              </span>
             </div>
             <ul className="mt-2 space-y-1 text-sm text-muted">
               {phase.steps.map((step, i) => (
@@ -47,6 +55,7 @@ export default function PortalOnboardingPage() {
             {phase.status === "active" ? (
               <button
                 type="button"
+                data-testid="portal-onboarding-ack"
                 className="mt-3 rounded-full bg-ink px-4 py-2 text-sm text-white disabled:opacity-40"
                 disabled={ack.isPending}
                 onClick={() => ack.mutate({ phaseIndex: phase.phaseIndex })}
