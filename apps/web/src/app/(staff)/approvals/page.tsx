@@ -242,10 +242,10 @@ export default function ApprovalsPage() {
           {(ready.connections?.googleWorkspace ?? 0) < 1 ? (
             <p>
               {(ready.connections?.errors?.googleWorkspace ?? 0) > 0
-                ? "Gmail HITL send is stubbed until Google Workspace is reconnected (token revoked)."
-                : "Gmail HITL send stays copy-draft / stub until Google Workspace is connected."}{" "}
+                ? "Gmail HITL Approve & send is blocked until Google Workspace is reconnected (token revoked)."
+                : "Gmail HITL Approve & send is blocked until Google Workspace is connected."}{" "}
               <Link href="/settings/connections" className="underline">
-                Connections
+                Reconnect in Connections
               </Link>
             </p>
           ) : (
@@ -253,7 +253,7 @@ export default function ApprovalsPage() {
           )}
           {(ready.connections?.linkedin ?? 0) < 1 ? (
             <p className="mt-1">
-              LinkedIn campaign publish stays copy-draft until LinkedIn (Composio) is
+              LinkedIn campaign publish is blocked until LinkedIn (Composio) is
               connected.{" "}
               <Link href="/settings/connections" className="underline">
                 Connect LinkedIn

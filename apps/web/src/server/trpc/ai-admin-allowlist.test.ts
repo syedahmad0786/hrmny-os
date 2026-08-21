@@ -31,12 +31,20 @@ describe("customAgents allowlist repair", () => {
       allowedTools: [],
     });
 
+    // list auto-persists funnel defaults onto empty allowlists
     const listed = await caller.aiAdmin.customAgents.list();
-    const empty = listed.find((a) => a.customAgentId === created.customAgentId);
-    expect(empty?.toolsEmpty).toBe(true);
-    expect(empty?.effectiveAllowedTools).toEqual(
+    const afterList = listed.find(
+      (a) => a.customAgentId === created.customAgentId,
+    );
+    expect(afterList?.toolsEmpty).toBe(false);
+    expect(afterList?.effectiveAllowedTools).toEqual(
       DEFAULT_FUNNEL_AGENT_TOOLS.map((t) => t.toLowerCase()),
     );
+
+    await caller.aiAdmin.customAgents.update({
+      id: created.customAgentId,
+      allowedTools: [],
+    });
 
     const repaired = await caller.aiAdmin.customAgents.repairEmptyAllowlists();
     expect(repaired.ok).toBe(true);

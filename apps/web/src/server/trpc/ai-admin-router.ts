@@ -268,6 +268,27 @@ export const aiAdminRouter = router({
     list: staffProcedure.query(async ({ ctx }) => {
       requireAiAdmin(ctx);
       const db = getDb();
+      const toolsJson = JSON.stringify([...DEFAULT_FUNNEL_AGENT_TOOLS]);
+      if (!db) {
+        for (const row of memCustomAgents) {
+          const stored = Array.isArray(row.allowedTools)
+            ? row.allowedTools.filter(
+                (t): t is string => typeof t === "string" && t.trim().length > 0,
+              )
+            : [];
+          if (stored.length === 0) {
+            row.allowedTools = [...DEFAULT_FUNNEL_AGENT_TOOLS];
+          }
+        }
+      } else {
+        await db.execute(sql`
+          update public.custom_agent
+          set
+            allowed_tools = ${toolsJson}::jsonb,
+            updated_at = now()
+          where coalesce(jsonb_array_length(allowed_tools), 0) = 0
+        `);
+      }
       const rows = !db
         ? memCustomAgents
         : await db.execute<CustomAgentRow>(sql`
