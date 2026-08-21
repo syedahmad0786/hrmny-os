@@ -51,9 +51,14 @@ export default function StaffLoginPage() {
       setError("Supabase is not configured for this deployment.");
       return;
     }
-    const domain = ssoEmail.trim().toLowerCase().split("@")[1];
+    const email = ssoEmail.trim().toLowerCase();
+    const domain = email.split("@")[1];
     if (!domain) {
       setError("Enter your company email address.");
+      return;
+    }
+    if (domain !== "hrmny.co") {
+      setError("Staff SSO is limited to @hrmny.co Google Workspace accounts.");
       return;
     }
     setPending(true);
@@ -74,11 +79,12 @@ export default function StaffLoginPage() {
         <p className="text-sm uppercase tracking-wide text-muted">hrmny OS</p>
         <h1 className="font-display text-3xl font-semibold">Staff sign in</h1>
         <p className="mt-2 text-muted">
-          Use your approved Creative Harmony Google Workspace account.
+          Use your approved Creative Harmony Google Workspace account
+          (@hrmny.co).
         </p>
       </div>
       <Button type="button" onClick={() => void signIn()} disabled={pending}>
-        {pending ? "Opening Google…" : "Continue with Google"}
+        {pending ? "Opening Google…" : "Continue with Google (@hrmny.co)"}
       </Button>
       <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-muted">
         <span className="h-px flex-1 bg-sand" /> or{" "}
@@ -92,13 +98,13 @@ export default function StaffLoginPage() {
         }}
       >
         <label className="text-sm">
-          <span className="mb-1 block font-medium">Company SSO email</span>
+          <span className="mb-1 block font-medium">@hrmny.co SSO email</span>
           <input
             className="w-full rounded-lg border border-sand bg-white px-3 py-2"
             type="email"
             value={ssoEmail}
             onChange={(event) => setSsoEmail(event.target.value)}
-            placeholder="you@company.com"
+            placeholder="you@hrmny.co"
             autoComplete="email"
           />
         </label>

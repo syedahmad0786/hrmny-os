@@ -4,7 +4,7 @@ import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ConnectionHealth } from "./connection-health";
 
 const GOOGLE_WORKSPACE_SCOPES = [
@@ -84,6 +84,18 @@ export default function ConnectionsPage() {
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [redirect, setRedirect] = useState<string | null>(null);
   const [demoBlockers, setDemoBlockers] = useState<string[]>([]);
+  const autoProbedGw = useRef(false);
+
+  useEffect(() => {
+    if (autoProbedGw.current || !list.data) return;
+    const gw = list.data.find((row) => row.toolkit === "google_workspace");
+    if (!gw) return;
+    if (gw.status !== "error" && !gw.lastError) return;
+    autoProbedGw.current = true;
+    void probeGoogle.mutateAsync().catch(() => undefined);
+    // One-shot heal attempt when Connections first sees a GW error row.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+  }, [list.data]);
 
   useEffect(() => {
     let cancelled = false;
