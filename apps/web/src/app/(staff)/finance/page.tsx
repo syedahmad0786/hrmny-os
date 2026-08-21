@@ -229,8 +229,12 @@ function FinanceQueueInner() {
                 }`}
               >
                 <p>
-                  {inv.status} · {inv.contactName} · AED {inv.amount} (+VAT{" "}
-                  {inv.vatAmount}) · xero mirror id: {inv.xeroInvoiceId ?? "—"}
+                  {inv.status} · {inv.contactName} · {inv.invoiceType} · AED{" "}
+                  {inv.amount} (+VAT {inv.vatAmount}) · xero mirror id:{" "}
+                  {inv.xeroInvoiceId ?? "—"}
+                  {inv.source === "os" ? (
+                    <span className="ml-2 text-xs text-muted">OS</span>
+                  ) : null}
                   {focused ? (
                     <span className="ml-2 text-xs font-medium text-ochre">
                       From handover
