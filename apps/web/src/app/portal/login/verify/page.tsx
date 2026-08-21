@@ -4,6 +4,7 @@ import { Button } from "@hrmny/ui";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
+import { sanitizePortalNextPath } from "@/lib/portal-next";
 import { setPortalGrant, trpc } from "@/lib/trpc";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -13,6 +14,7 @@ function VerifyInner() {
   const params = useSearchParams();
   const router = useRouter();
   const token = params.get("token");
+  const nextPath = sanitizePortalNextPath(params.get("next")) ?? "/portal";
   const [state, setState] = useState<State>("verifying");
   const [message, setMessage] = useState<string | null>(null);
   const verify = trpc.portal.auth.verify.useMutation();
@@ -36,7 +38,7 @@ function VerifyInner() {
             setPortalGrant(result.sessionGrant);
           }
           setState("success");
-          setTimeout(() => router.push("/portal"), 800);
+          setTimeout(() => router.push(nextPath), 800);
         } else {
           setState("invalid");
           setMessage(result.reason);
@@ -49,7 +51,7 @@ function VerifyInner() {
       const session = (await supabase?.auth.getSession())?.data.session ?? null;
       if (session) {
         setState("success");
-        setTimeout(() => router.push("/portal"), 800);
+        setTimeout(() => router.push(nextPath), 800);
       } else {
         setState("invalid");
         setMessage("This sign-in link is invalid or has expired.");
@@ -78,7 +80,7 @@ function VerifyInner() {
       {state === "success" ? (
         <div className="flex flex-col gap-3">
           <p className="text-muted">Signed in. Taking you to the portal…</p>
-          <Link href="/portal" className="text-sm underline">
+          <Link href={nextPath} className="text-sm underline">
             Continue now
           </Link>
         </div>

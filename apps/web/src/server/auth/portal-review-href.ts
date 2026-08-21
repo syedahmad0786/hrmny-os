@@ -7,8 +7,13 @@ import { sendPortalInviteMagicLink } from "./portal-magic-link";
  * Prefer an existing portal user email for the client; otherwise mint a
  * placeholder @example.com invite (Resend mock) so demo closed-loop works.
  * Falls back to /portal/login only when invite cannot be issued.
+ *
+ * Default `next` lands on /portal/approvals after verify (not portal home).
  */
-export async function portalReviewHref(clientId: string): Promise<string> {
+export async function portalReviewHref(
+  clientId: string,
+  options?: { next?: string | null },
+): Promise<string> {
   const id = clientId.trim();
   if (!id) return "/portal/login";
 
@@ -45,6 +50,7 @@ export async function portalReviewHref(clientId: string): Promise<string> {
       clientId: id,
       email,
       displayName,
+      next: options?.next ?? "/portal/approvals",
       emailer: placeholder ? createResendMock() : undefined,
     });
     return sent.portalPath;

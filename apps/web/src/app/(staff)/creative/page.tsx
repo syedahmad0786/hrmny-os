@@ -32,9 +32,10 @@ function CreativeQcPageInner() {
     onSuccess: (data) => {
       void utils.creativeGen.list.invalidate();
       void utils.tasks.invalidate();
+      setPortalHref(data.ok ? data.portalHref : null);
       setMsg(
         data.ok
-          ? `Sent to portal asset ${data.assetId.slice(0, 8)}… → ${data.portalHref}`
+          ? `Sent to portal asset ${data.assetId.slice(0, 8)}…`
           : "Send failed",
       );
     },
@@ -46,14 +47,16 @@ function CreativeQcPageInner() {
   });
   const canvaAttach = trpc.connections.canvaAttachToPortal.useMutation({
     onSuccess: (data) => {
+      setPortalHref(data.ok ? data.portalHref : null);
       setMsg(
         data.ok
-          ? `Canva → portal asset ${data.assetId.slice(0, 8)}… (${data.mode}) → ${data.portalHref}`
+          ? `Canva → portal asset ${data.assetId.slice(0, 8)}… (${data.mode})`
           : "Canva attach failed",
       );
     },
   });
   const [msg, setMsg] = useState<string | null>(null);
+  const [portalHref, setPortalHref] = useState<string | null>(null);
   const [prompt, setPrompt] = useState(
     "Ochre and sand brand moodboard — soft studio light, editorial product still life",
   );
@@ -316,6 +319,13 @@ function CreativeQcPageInner() {
           </Button>
         </div>
         {msg ? <p className="mt-3 text-ink">{msg}</p> : null}
+        {portalHref ? (
+          <p className="mt-2 text-sm">
+            <a href={portalHref} className="text-ochre underline">
+              Open portal review →
+            </a>
+          </p>
+        ) : null}
       </section>
     </main>
   );

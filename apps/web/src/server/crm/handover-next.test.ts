@@ -27,14 +27,19 @@ describe("buildHandoverNextLinks", () => {
     expect(next.finance).toBe("/finance?invoiceId=inv-1");
   });
 
-  it("uses portal magic-link path for portal + onboarding when invite exists", () => {
+  it("appends distinct next destinations to magic-link portal + onboarding", () => {
     const magic =
       "/portal/login/verify?token=ml_deadbeefcafebabe0123456789abcdef";
     const next = buildHandoverNextLinks({
       clientId: "c1000000-0000-4000-8000-000000000001",
       portalPath: magic,
     });
-    expect(next.portal).toBe(magic);
-    expect(next.onboarding).toBe(magic);
+    expect(next.portal).toBe(
+      `${magic}&next=${encodeURIComponent("/portal/approvals")}`,
+    );
+    expect(next.onboarding).toBe(
+      `${magic}&next=${encodeURIComponent("/portal/onboarding")}`,
+    );
+    expect(next.portal).not.toBe(next.onboarding);
   });
 });
