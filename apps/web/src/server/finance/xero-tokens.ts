@@ -1,5 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { and, connectionAccount, eq, sql } from "@hrmny/db";
+import { and, connectionAccount, eq, or, sql } from "@hrmny/db";
 import { createXeroAdapter } from "@hrmny/integrations";
 import { getDb } from "../db";
 
@@ -170,22 +170,29 @@ export async function loadXeroTokens(): Promise<XeroTokenSecret | null> {
 async function loadXeroConnection(): Promise<{
   employeeId: string;
   connectionAccountId: string;
+  status: string;
   tokens: XeroTokenSecret;
 } | null> {
   const db = getDb();
   if (!db) return null;
+  // Include `error` rows (GW pattern): a transient refresh blip must not lock
+  // Billing → Sync Xero into permanent mock until a full OAuth reconnect.
   const [row] = await db
     .select({
       connectionAccountId: connectionAccount.connectionAccountId,
       ownerEmployeeId: connectionAccount.ownerEmployeeId,
       secretId: connectionAccount.secretId,
+      status: connectionAccount.status,
     })
     .from(connectionAccount)
     .where(
       and(
         eq(connectionAccount.toolkit, "xero"),
         eq(connectionAccount.scope, "staff"),
-        eq(connectionAccount.status, "connected"),
+        or(
+          eq(connectionAccount.status, "connected"),
+          eq(connectionAccount.status, "error"),
+        ),
       ),
     )
     .limit(1);
@@ -204,6 +211,7 @@ async function loadXeroConnection(): Promise<{
     return {
       employeeId: row.ownerEmployeeId,
       connectionAccountId: row.connectionAccountId,
+      status: row.status,
       tokens: parsed,
     };
   } catch {
@@ -226,8 +234,25 @@ export function xeroAccessTokenStillFresh(expiresAt?: string): boolean {
 export async function ensureFreshXeroTokens(): Promise<XeroTokenSecret | null> {
   const loaded = await loadXeroConnection();
   if (!loaded) return null;
-  const { tokens, employeeId, connectionAccountId } = loaded;
-  if (xeroAccessTokenStillFresh(tokens.expiresAt)) return tokens;
+  const { tokens, employeeId, connectionAccountId, status } = loaded;
+  if (xeroAccessTokenStillFresh(tokens.expiresAt)) {
+    if (status === "error") {
+      const db = getDb();
+      if (db) {
+        await db
+          .update(connectionAccount)
+          .set({
+            status: "connected",
+            lastError: null,
+            updatedAt: new Date(),
+          })
+          .where(
+            eq(connectionAccount.connectionAccountId, connectionAccountId),
+          );
+      }
+    }
+    return tokens;
+  }
   if (!tokens.refreshToken?.trim()) return tokens;
   if (!xeroClientConfigured()) return tokens;
 
