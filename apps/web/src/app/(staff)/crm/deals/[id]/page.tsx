@@ -177,6 +177,12 @@ export default function CrmDealDetailPage() {
                         <CrmBtn>Outreach draft →</CrmBtn>
                       </Link>
                     ) : null}
+                    {"finance" in handover.data.next &&
+                    handover.data.next.finance ? (
+                      <Link href={handover.data.next.finance}>
+                        <CrmBtn>First invoice →</CrmBtn>
+                      </Link>
+                    ) : null}
                     {handover.data.portalInvite?.portalPath ? (
                       <Link href={handover.data.portalInvite.portalPath}>
                         <CrmBtn>

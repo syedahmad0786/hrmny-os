@@ -2,12 +2,15 @@
 
 import { Button } from "@hrmny/ui";
 import Link from "next/link";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
-import { useState } from "react";
 
-export default function FinanceQueuePage() {
+function FinanceQueueInner() {
   const utils = trpc.useUtils();
+  const searchParams = useSearchParams();
+  const focusInvoiceId = searchParams.get("invoiceId");
   const session = trpc.auth.session.useQuery();
   const canViewMargin = session.data?.canViewMargin ?? false;
   const proposals = trpc.invoices.proposals.useQuery();
@@ -33,6 +36,22 @@ export default function FinanceQueuePage() {
     "ACME Supplies LLC invoice AED 2100.00 — TRN on file",
   );
   const demoResets = showDemoResets();
+
+  const orderedInvoices = useMemo(() => {
+    const list = invoices.data ?? [];
+    if (!focusInvoiceId) return list;
+    return [...list].sort((a, b) => {
+      if (a.invoiceId === focusInvoiceId) return -1;
+      if (b.invoiceId === focusInvoiceId) return 1;
+      return 0;
+    });
+  }, [invoices.data, focusInvoiceId]);
+
+  useEffect(() => {
+    if (!focusInvoiceId) return;
+    const el = document.getElementById(`os-invoice-${focusInvoiceId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusInvoiceId, orderedInvoices]);
 
   async function runIntake() {
     const row = await intake.mutateAsync({
@@ -178,40 +197,59 @@ export default function FinanceQueuePage() {
       <section className="rounded-lg border border-sand bg-white/70 p-4">
         <p className="text-sm text-muted">OS invoices (not written to Xero)</p>
         <ul className="mt-3 flex flex-col gap-3">
-          {(invoices.data ?? []).map((inv) => (
-            <li key={inv.invoiceId} className="border-t border-sand/60 pt-3 text-sm">
-              <p>
-                {inv.status} · {inv.contactName} · AED {inv.amount} (+VAT{" "}
-                {inv.vatAmount}) · xero mirror id: {inv.xeroInvoiceId ?? "—"}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {!("readOnly" in inv && inv.readOnly) &&
-                inv.status === "proposed" ? (
-                  <Button
-                    type="button"
-                    onClick={async () => {
-                      const r = await approve.mutateAsync({ id: inv.invoiceId });
-                      setLast(r);
-                    }}
-                  >
-                    3. Approve invoice
-                  </Button>
-                ) : null}
-                {!("readOnly" in inv && inv.readOnly) &&
-                inv.status === "approved" ? (
-                  <Button
-                    type="button"
-                    onClick={async () => {
-                      const r = await issue.mutateAsync({ id: inv.invoiceId });
-                      setLast(r);
-                    }}
-                  >
-                    4. Mark issued (OS only)
-                  </Button>
-                ) : null}
-              </div>
-            </li>
-          ))}
+          {orderedInvoices.map((inv) => {
+            const focused = focusInvoiceId === inv.invoiceId;
+            return (
+              <li
+                key={inv.invoiceId}
+                id={`os-invoice-${inv.invoiceId}`}
+                data-selected={focused ? "true" : undefined}
+                className={`border-t border-sand/60 pt-3 text-sm ${
+                  focused
+                    ? "rounded-lg border border-ochre bg-white px-3 pb-3 ring-2 ring-ochre/40"
+                    : ""
+                }`}
+              >
+                <p>
+                  {inv.status} · {inv.contactName} · AED {inv.amount} (+VAT{" "}
+                  {inv.vatAmount}) · xero mirror id: {inv.xeroInvoiceId ?? "—"}
+                  {focused ? (
+                    <span className="ml-2 text-xs font-medium text-ochre">
+                      From handover
+                    </span>
+                  ) : null}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {!("readOnly" in inv && inv.readOnly) &&
+                  inv.status === "proposed" ? (
+                    <Button
+                      type="button"
+                      onClick={async () => {
+                        const r = await approve.mutateAsync({
+                          id: inv.invoiceId,
+                        });
+                        setLast(r);
+                      }}
+                    >
+                      3. Approve invoice
+                    </Button>
+                  ) : null}
+                  {!("readOnly" in inv && inv.readOnly) &&
+                  inv.status === "approved" ? (
+                    <Button
+                      type="button"
+                      onClick={async () => {
+                        const r = await issue.mutateAsync({ id: inv.invoiceId });
+                        setLast(r);
+                      }}
+                    >
+                      4. Mark issued (OS only)
+                    </Button>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </section>
 
@@ -221,5 +259,13 @@ export default function FinanceQueuePage() {
         </pre>
       ) : null}
     </main>
+  );
+}
+
+export default function FinanceQueuePage() {
+  return (
+    <Suspense>
+      <FinanceQueueInner />
+    </Suspense>
   );
 }

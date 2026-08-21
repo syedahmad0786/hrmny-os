@@ -68,6 +68,12 @@ export default function ClientOnboardingPage() {
             Outreach →
           </Link>
           <Link
+            href="/finance"
+            className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
+          >
+            Finance →
+          </Link>
+          <Link
             href="/portal/approvals"
             className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
           >
