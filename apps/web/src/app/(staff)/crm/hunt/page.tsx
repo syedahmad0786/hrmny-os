@@ -33,6 +33,8 @@ const STEPS = [
 
 export default function HuntClientsPage() {
   const [result, setResult] = useState<string | null>(null);
+  const [query, setQuery] = useState("UAE retail brand");
+  const utils = trpc.useUtils();
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
     onSuccess: (data) => {
       if (!data.ok) {
@@ -42,6 +44,18 @@ export default function HuntClientsPage() {
       setResult(
         `Closed loop ready — client ${data.clientName}. Open creative, then portal deliveries.`,
       );
+    },
+    onError: (err) => setResult(err.message),
+  });
+  const apolloImport = trpc.leads.apollo.import.useMutation({
+    onSuccess: (deals) => {
+      const n = Array.isArray(deals) ? deals.length : 0;
+      setResult(
+        n > 0
+          ? `Apollo imported ${n} discover deal(s) — open pipeline to qualify.`
+          : "Apollo returned no companies for that query.",
+      );
+      void utils.crm.deals.list.invalidate();
     },
     onError: (err) => setResult(err.message),
   });
@@ -67,7 +81,29 @@ export default function HuntClientsPage() {
               Follow the sequence. Each step opens the exact workspace — no
               scavenger hunt through the nav.
             </p>
-            <div className="mt-6 flex flex-wrap items-center gap-3">
+
+            <div className="mt-6 flex flex-wrap items-center gap-2">
+              <input
+                className="min-w-[220px] flex-1 rounded-full border border-sand bg-white px-4 py-2 text-sm"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Apollo search (mock without key)"
+                aria-label="Prospecting query"
+              />
+              <button
+                type="button"
+                className="rounded-full border border-sand bg-white px-4 py-2 text-sm disabled:opacity-40"
+                disabled={apolloImport.isPending || query.trim().length < 2}
+                onClick={() => {
+                  setResult(null);
+                  apolloImport.mutate({ query: query.trim() });
+                }}
+              >
+                {apolloImport.isPending ? "Searching…" : "Prospect with Apollo"}
+              </button>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 className="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-white disabled:opacity-40"
@@ -109,6 +145,9 @@ export default function HuntClientsPage() {
                   </Link>
                 </>
               ) : null}
+              <Link className="text-sm underline" href="/crm">
+                Pipeline
+              </Link>
             </div>
             {result ? (
               <p className="mt-3 text-sm text-muted" role="status">
@@ -116,8 +155,9 @@ export default function HuntClientsPage() {
               </p>
             ) : null}
             <p className="mt-2 text-xs text-muted">
-              Seeds prospect → won deal → onboarding + creative task without
-              Apollo/Hunter keys. Paste keys in Connections for live enrichment.
+              Apollo/Hunter auto-mock without keys; paste keys in Connections
+              for live enrichment. Closed loop seeds prospect → won →
+              onboarding + creative task.
             </p>
           </div>
 
@@ -147,6 +187,12 @@ export default function HuntClientsPage() {
             </Link>
             <Link href="/crm/activities">
               Activities <span aria-hidden>↗</span>
+            </Link>
+            <Link href="/settings/connections">
+              Connections <span aria-hidden>↗</span>
+            </Link>
+            <Link href="/settings/ai">
+              Agents <span aria-hidden>↗</span>
             </Link>
           </nav>
         </footer>

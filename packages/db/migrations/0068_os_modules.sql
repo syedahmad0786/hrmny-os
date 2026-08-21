@@ -82,12 +82,27 @@ CREATE TABLE IF NOT EXISTS public.creative_generation (
 CREATE INDEX IF NOT EXISTS creative_generation_employee_idx
   ON public.creative_generation (employee_id, created_at DESC);
 
--- RLS lockdown for new tables (service role / app role only)
-DO $$ BEGIN
-  ALTER TABLE public.os_notification ENABLE ROW LEVEL SECURITY;
-  ALTER TABLE public.custom_agent ENABLE ROW LEVEL SECURITY;
-  ALTER TABLE public.chat_thread ENABLE ROW LEVEL SECURITY;
-  ALTER TABLE public.chat_message ENABLE ROW LEVEL SECURITY;
-  ALTER TABLE public.creative_generation ENABLE ROW LEVEL SECURITY;
-EXCEPTION WHEN undefined_table THEN NULL;
+-- Lock away from the browser Data API (anon/authenticated); server role only.
+DO $$
+DECLARE
+  app_table text;
+BEGIN
+  FOREACH app_table IN ARRAY ARRAY[
+    'os_notification',
+    'custom_agent',
+    'chat_thread',
+    'chat_message',
+    'creative_generation'
+  ]::text[] LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', app_table);
+    EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE public.%I FROM PUBLIC', app_table);
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+      EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE public.%I FROM anon', app_table);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+      EXECUTE format(
+        'REVOKE ALL PRIVILEGES ON TABLE public.%I FROM authenticated', app_table
+      );
+    END IF;
+  END LOOP;
 END $$;
