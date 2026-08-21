@@ -1217,7 +1217,11 @@ const globalStore = globalThis as typeof globalThis & {
 
 export function getDemoStore(): MemoryDemoStore {
   if (!globalStore.__hrmnyDemoStore) {
-    globalStore.__hrmnyDemoStore = new MemoryDemoStore();
+    const store = new MemoryDemoStore();
+    // Seed M4–M6 demo clients/tasks/assets + a pending portal approval so
+    // memory-mode prod (CI e2e without DATABASE_URL) has a closed-loop surface.
+    store.resetM6Demo();
+    globalStore.__hrmnyDemoStore = store;
   }
   return globalStore.__hrmnyDemoStore;
 }

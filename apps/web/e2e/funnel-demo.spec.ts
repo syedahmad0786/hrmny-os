@@ -196,4 +196,60 @@ test.describe("Demo funnel", () => {
     await expect(portalCta).toBeDisabled();
   });
 
+  test("portal reject lands in partner /notifications inbox", async ({
+    page,
+    request,
+  }) => {
+    const portalHeaders = {
+      "x-dev-role": "portal_a",
+      "content-type": "application/json",
+    };
+
+    // Memory-mode demo store seeds a pending Demo Co approval on first use.
+    const list = await request.get("/api/trpc/portal.approvals.list", {
+      headers: portalHeaders,
+    });
+    const listText = await list.text();
+    expect(list.ok(), listText).toBeTruthy();
+    const listBody = JSON.parse(listText) as {
+      result?: { data?: { json?: Array<{ approvalId: string; status: string; title: string }> } };
+    };
+    const approvals =
+      listBody.result?.data?.json ??
+      (listBody.result?.data as unknown as Array<{
+        approvalId: string;
+        status: string;
+        title: string;
+      }>) ??
+      [];
+    const pending = (Array.isArray(approvals) ? approvals : []).find(
+      (a) => a.status === "pending",
+    );
+    expect(pending, listText).toBeTruthy();
+
+    const act = await request.post("/api/trpc/portal.approvals.act", {
+      headers: portalHeaders,
+      data: {
+        json: {
+          id: pending!.approvalId,
+          action: "reject",
+          feedback: "E2E: tighten the hook",
+        },
+      },
+    });
+    const actText = await act.text();
+    expect(act.ok(), actText).toBeTruthy();
+    expect(actText).not.toMatch(/"error"/);
+
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/notifications", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /Notifications/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator("body")).toContainText(/Client revisions/i);
+    await expect(page.locator("body")).toContainText(pending!.title);
+    await expect(page.locator("body")).toContainText(/E2E: tighten the hook/i);
+    await expect(page.getByRole("link", { name: /^Open$/i }).first()).toBeVisible();
+  });
+
 });
