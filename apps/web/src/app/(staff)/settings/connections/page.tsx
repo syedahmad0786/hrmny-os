@@ -133,7 +133,7 @@ export default function ConnectionsPage() {
           if ((connections.googleWorkspace ?? 0) < 1) {
             next.push(
               (connections.errors?.googleWorkspace ?? 0) > 0
-                ? "Reconnect Google Workspace (@hrmny.co) — token revoked; click Reconnect below."
+                ? "Reconnect Google Workspace (@hrmny.co) — token revoked; click Reconnect below (tokens are captured immediately after OAuth)."
                 : "Connect Google Workspace (@hrmny.co) for live HITL Gmail send.",
             );
           }
@@ -165,6 +165,11 @@ export default function ConnectionsPage() {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
     localStorage.setItem("hrmny-google-workspace-connect", "pending");
+    try {
+      sessionStorage.removeItem("hrmny-gw-oauth-tokens");
+    } catch {
+      /* ignore */
+    }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -298,7 +303,9 @@ export default function ConnectionsPage() {
                     disabled={!item.allowed}
                     autoComplete="off"
                     placeholder={
-                      item.hasSecret ? "Paste replacement key" : "Paste API key"
+                      item.hasSecret
+                        ? "Paste replacement key (live-probed)"
+                        : "Paste API key (live-probed on save)"
                     }
                     value={keys[item.toolkit] ?? ""}
                     onChange={(event) =>

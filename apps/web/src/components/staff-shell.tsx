@@ -150,12 +150,14 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   const saveGoogleWorkspace = trpc.connections.saveGoogleWorkspace.useMutation({
     onSuccess: async (result) => {
       localStorage.removeItem("hrmny-google-workspace-connect");
+      sessionStorage.removeItem("hrmny-gw-oauth-tokens");
       setConnectionMessage(`Google Workspace connected: ${result.account}`);
       await utils.connections.list.invalidate();
       router.replace("/settings/connections");
     },
     onError: (error) => {
       localStorage.removeItem("hrmny-google-workspace-connect");
+      sessionStorage.removeItem("hrmny-gw-oauth-tokens");
       setConnectionMessage(error.message);
       router.replace("/settings/connections");
     },
@@ -207,10 +209,12 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   // Refetch the session whenever Supabase auth settles — the OAuth landing
   // exchanges tokens asynchronously, so the first session query can race it
   // and cache "anonymous" (the root cause of the stuck "Checking access…").
+  // Also stash Google Workspace provider tokens immediately — they often vanish
+  // from getSession() by the time employeeId resolves after OAuth redirect.
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return;
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (
         event === "INITIAL_SESSION" ||
         event === "SIGNED_IN" ||
@@ -218,6 +222,24 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         event === "SIGNED_OUT"
       ) {
         void utils.auth.session.invalidate();
+      }
+      if (
+        (event === "SIGNED_IN" || event === "INITIAL_SESSION") &&
+        localStorage.getItem("hrmny-google-workspace-connect") === "pending" &&
+        session?.provider_token &&
+        session?.provider_refresh_token
+      ) {
+        try {
+          sessionStorage.setItem(
+            "hrmny-gw-oauth-tokens",
+            JSON.stringify({
+              accessToken: session.provider_token,
+              refreshToken: session.provider_refresh_token,
+            }),
+          );
+        } catch {
+          /* sessionStorage may be unavailable */
+        }
       }
     });
     return () => sub.subscription.unsubscribe();
@@ -264,6 +286,44 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
       return;
     }
     completingGoogle.current = true;
+
+    function readStashedTokens(): {
+      accessToken: string;
+      refreshToken: string;
+    } | null {
+      try {
+        const raw = sessionStorage.getItem("hrmny-gw-oauth-tokens");
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as {
+          accessToken?: unknown;
+          refreshToken?: unknown;
+        };
+        if (
+          typeof parsed.accessToken === "string" &&
+          parsed.accessToken &&
+          typeof parsed.refreshToken === "string" &&
+          parsed.refreshToken
+        ) {
+          return {
+            accessToken: parsed.accessToken,
+            refreshToken: parsed.refreshToken,
+          };
+        }
+      } catch {
+        /* ignore */
+      }
+      return null;
+    }
+
+    const stashed = readStashedTokens();
+    if (stashed) {
+      saveGoogleWorkspace.mutate({
+        accessToken: stashed.accessToken,
+        refreshToken: stashed.refreshToken,
+      });
+      return;
+    }
+
     void getSupabaseBrowserClient()
       ?.auth.getSession()
       .then(({ data, error }) => {
@@ -271,7 +331,8 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         const refreshToken = data.session?.provider_refresh_token;
         if (error || !providerToken || !refreshToken) {
           throw new Error(
-            error?.message ?? "Google did not return an offline refresh token",
+            error?.message ??
+              "Google tokens expired before save — click Reconnect again (tokens must be captured right after OAuth).",
           );
         }
         saveGoogleWorkspace.mutate({
@@ -282,6 +343,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
       .catch((error: unknown) => {
         completingGoogle.current = false;
         localStorage.removeItem("hrmny-google-workspace-connect");
+        sessionStorage.removeItem("hrmny-gw-oauth-tokens");
         setConnectionMessage(
           error instanceof Error ? error.message : "Google connection failed",
         );
