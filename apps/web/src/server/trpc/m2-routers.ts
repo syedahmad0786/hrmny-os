@@ -163,7 +163,7 @@ export const invoicesRouter = router({
           .optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
       const proposal = store.proposals.get(input.proposalId);
       if (!proposal) throw new Error("NOT_FOUND");
@@ -195,8 +195,8 @@ export const invoicesRouter = router({
         currency: merged.currency,
         invoiceType: merged.invoiceType,
         billingKind: "intake" as const,
-        clientId: null,
-        period: null,
+        clientId: null as string | null,
+        period: null as string | null,
         trn: merged.trn,
         trnStatus: merged.trnStatus,
         ruleCited: merged.ruleCited,
@@ -204,25 +204,41 @@ export const invoicesRouter = router({
           emailRef: proposal.emailRef,
           evidence: merged.evidence,
         },
-        xeroInvoiceId: null,
+        xeroInvoiceId: null as string | null,
         proposedByEmployeeId: ctx.employeeId,
-        approvedByEmployeeId: null,
+        approvedByEmployeeId: null as string | null,
         createdAt: new Date().toISOString(),
       };
+      if (getDb()) {
+        const { insertOsInvoice } = await import("../finance/os-invoices");
+        const { writeAudit } = await import("../m1-persistence");
+        await insertOsInvoice(invoice);
+        await writeAudit({
+          actorEmployeeId: ctx.employeeId!,
+          action: "invoices.intakeDecide",
+          entityType: "invoice",
+          entityId: invoiceId,
+          before: { proposal: input.proposalId },
+          after: { ...invoice },
+          reason: merged.ruleCited,
+        });
+      } else {
+        store.appendAudit({
+          actorEmployeeId: ctx.employeeId!,
+          action: "invoices.intakeDecide",
+          entityType: "invoice",
+          entityId: invoiceId,
+          before: { proposal: input.proposalId },
+          after: { ...invoice },
+          reason: merged.ruleCited,
+        });
+      }
+      // Always mirror in process store so gate fields (trnStatus, etc.) survive.
       store.invoices.set(invoiceId, invoice);
       proposal.status =
         input.decision === "edit_approve" ? "edited" : "approved";
       proposal.invoiceId = invoiceId;
       proposal.payload = { ...merged };
-      store.appendAudit({
-        actorEmployeeId: ctx.employeeId!,
-        action: "invoices.intakeDecide",
-        entityType: "invoice",
-        entityId: invoiceId,
-        before: { proposal: input.proposalId },
-        after: { ...invoice },
-        reason: merged.ruleCited,
-      });
       return { proposal, invoice };
     }),
 
@@ -237,31 +253,49 @@ export const invoicesRouter = router({
         contactName: z.string().optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const client = store.clients.get(input.clientId);
-      if (!client) throw new Error("NOT_FOUND");
-      const amountNum = Number(
-        input.amount ?? client.fee ?? client.contractValue,
-      );
+      let clientName = "";
+      let amountNum = 0;
+      let currency = "AED";
+      if (getDb()) {
+        const { getDurableClientForInvoice } = await import(
+          "../finance/os-invoices"
+        );
+        const client = await getDurableClientForInvoice(input.clientId);
+        if (!client) throw new Error("NOT_FOUND");
+        clientName = client.name;
+        amountNum = Number(
+          input.amount ?? client.fee ?? client.contractValue ?? 0,
+        );
+        currency = client.currency || "AED";
+      } else {
+        const client = store.clients.get(input.clientId);
+        if (!client) throw new Error("NOT_FOUND");
+        clientName = client.name;
+        amountNum = Number(
+          input.amount ?? client.fee ?? client.contractValue,
+        );
+        currency = client.currency || "AED";
+      }
       const invoiceId = randomUUID();
       const invoice = {
         invoiceId,
         status: "draft",
-        contactName: input.contactName ?? client.name,
+        contactName: input.contactName ?? clientName,
         amount: amountNum.toFixed(2),
         vatAmount: vatOnAmount(amountNum),
-        currency: client.currency || "AED",
+        currency,
         invoiceType: input.type,
         billingKind: input.type,
-        clientId: client.clientId,
+        clientId: input.clientId,
         period: input.period,
         trn: "100000000000003",
         trnStatus: "known" as const,
         ruleCited: "UAE VAT 5% on retainer/progress draft",
         sourceAttached: {
           kind: "retainer_billing",
-          clientId: client.clientId,
+          clientId: input.clientId,
           period: input.period,
         },
         xeroInvoiceId: null as string | null,
@@ -269,28 +303,91 @@ export const invoicesRouter = router({
         approvedByEmployeeId: null as string | null,
         createdAt: new Date().toISOString(),
       };
+      if (getDb()) {
+        const { insertOsInvoice } = await import("../finance/os-invoices");
+        const { writeAudit } = await import("../m1-persistence");
+        await insertOsInvoice(invoice);
+        await writeAudit({
+          actorEmployeeId: ctx.employeeId!,
+          action: "invoices.draft",
+          entityType: "invoice",
+          entityId: invoiceId,
+          before: null,
+          after: { ...invoice },
+          reason: `M5 ${input.type} draft for ${input.period}`,
+        });
+      } else {
+        store.appendAudit({
+          actorEmployeeId: ctx.employeeId!,
+          action: "invoices.draft",
+          entityType: "invoice",
+          entityId: invoiceId,
+          before: null,
+          after: { ...invoice },
+          reason: `M5 ${input.type} draft for ${input.period}`,
+        });
+      }
       store.invoices.set(invoiceId, invoice);
-      store.appendAudit({
-        actorEmployeeId: ctx.employeeId!,
-        action: "invoices.draft",
-        entityType: "invoice",
-        entityId: invoiceId,
-        before: null,
-        after: { ...invoice },
-        reason: `M5 ${input.type} draft for ${input.period}`,
-      });
       return invoice;
     }),
 
   /** Month-start retainer auto-draft for all active retainer clients. */
   draftRetainersForMonth: protectedProcedure
     .input(z.object({ period: z.string().regex(/^\d{4}-\d{2}$/) }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
       const created = [];
-      for (const client of store.clients.values()) {
-        if (client.engagementType !== "retainer") continue;
-        if (client.lifecycleStatus === "churned") continue;
+      const clients = getDb()
+        ? await (
+            await import("../finance/os-invoices")
+          ).listDurableRetainerClients()
+        : [...store.clients.values()].filter(
+            (c) =>
+              c.engagementType === "retainer" &&
+              c.lifecycleStatus !== "churned",
+          );
+
+      for (const client of clients) {
+        if (getDb()) {
+          const { listOsInvoicesForClientPeriod, insertOsInvoice } =
+            await import("../finance/os-invoices");
+          const exists = await listOsInvoicesForClientPeriod({
+            clientId: client.clientId,
+            period: input.period,
+            billingKind: "retainer",
+          });
+          if (exists.length) continue;
+          const amountNum = Number(client.fee || client.contractValue || 0);
+          const invoiceId = randomUUID();
+          const invoice = {
+            invoiceId,
+            status: "draft",
+            contactName: client.name,
+            amount: amountNum.toFixed(2),
+            vatAmount: vatOnAmount(amountNum),
+            currency: client.currency || "AED",
+            invoiceType: "retainer",
+            billingKind: "retainer" as const,
+            clientId: client.clientId,
+            period: input.period,
+            trn: "100000000000003",
+            trnStatus: "known" as const,
+            ruleCited: "UAE VAT 5% monthly retainer auto-draft",
+            sourceAttached: {
+              kind: "retainer_month_start",
+              clientId: client.clientId,
+              period: input.period,
+            },
+            xeroInvoiceId: null as string | null,
+            proposedByEmployeeId: ctx.employeeId,
+            approvedByEmployeeId: null as string | null,
+            createdAt: new Date().toISOString(),
+          };
+          await insertOsInvoice(invoice);
+          store.invoices.set(invoiceId, invoice);
+          created.push(invoice);
+          continue;
+        }
         const exists = [...store.invoices.values()].some(
           (inv) =>
             inv.clientId === client.clientId &&
@@ -299,7 +396,11 @@ export const invoicesRouter = router({
             inv.status !== "void",
         );
         if (exists) continue;
-        const amountNum = Number(client.fee || client.contractValue);
+        const amountNum = Number(
+          ("fee" in client ? client.fee : null) ||
+            client.contractValue ||
+            0,
+        );
         const invoiceId = randomUUID();
         const invoice = {
           invoiceId,
@@ -328,15 +429,28 @@ export const invoicesRouter = router({
         store.invoices.set(invoiceId, invoice);
         created.push(invoice);
       }
-      store.appendAudit({
-        actorEmployeeId: ctx.employeeId!,
-        action: "invoices.draftRetainersForMonth",
-        entityType: "invoice",
-        entityId: input.period,
-        before: null,
-        after: { count: created.length, period: input.period },
-        reason: "billing/retainer-month-start",
-      });
+      if (getDb()) {
+        const { writeAudit } = await import("../m1-persistence");
+        await writeAudit({
+          actorEmployeeId: ctx.employeeId!,
+          action: "invoices.draftRetainersForMonth",
+          entityType: "invoice",
+          entityId: input.period,
+          before: null,
+          after: { count: created.length, period: input.period },
+          reason: "billing/retainer-month-start",
+        });
+      } else {
+        store.appendAudit({
+          actorEmployeeId: ctx.employeeId!,
+          action: "invoices.draftRetainersForMonth",
+          entityType: "invoice",
+          entityId: input.period,
+          before: null,
+          after: { count: created.length, period: input.period },
+          reason: "billing/retainer-month-start",
+        });
+      }
       return { period: input.period, created };
     }),
 
@@ -348,8 +462,34 @@ export const invoicesRouter = router({
         event: z.enum(["invoice.paid"]).optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
+      if (getDb()) {
+        const { findOsInvoiceByXeroId, updateOsInvoice } = await import(
+          "../finance/os-invoices"
+        );
+        const { writeAudit } = await import("../m1-persistence");
+        const inv = await findOsInvoiceByXeroId(input.xeroInvoiceId);
+        if (!inv) throw new Error("NOT_FOUND");
+        if (inv.status !== "issued" && inv.status !== "paid") {
+          throw new Error("INVALID_STATE");
+        }
+        const before = inv.status;
+        const updated = await updateOsInvoice({
+          invoiceId: inv.invoiceId,
+          status: "paid",
+        });
+        await writeAudit({
+          actorEmployeeId: ctx.employeeId!,
+          action: "invoices.markPaidFromWebhook",
+          entityType: "invoice",
+          entityId: inv.invoiceId,
+          before: { status: before },
+          after: { status: "paid", xeroInvoiceId: inv.xeroInvoiceId },
+          reason: input.event ?? "invoice.paid",
+        });
+        return updated ?? { ...inv, status: "paid" };
+      }
       const inv = [...store.invoices.values()].find(
         (i) => i.xeroInvoiceId === input.xeroInvoiceId,
       );
@@ -375,7 +515,40 @@ export const invoicesRouter = router({
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const inv = store.invoices.get(input.id);
+      let inv = store.invoices.get(input.id) as
+        | (typeof store.invoices extends Map<string, infer V> ? V : never)
+        | undefined;
+      if (!inv && getDb()) {
+        const { getOsInvoice } = await import("../finance/os-invoices");
+        const row = await getOsInvoice(input.id);
+        if (row) {
+          inv = {
+            invoiceId: row.invoiceId,
+            status: row.status,
+            contactName: row.contactName,
+            amount: row.amount,
+            vatAmount: row.vatAmount ?? "0",
+            currency: row.currency,
+            invoiceType: row.invoiceType,
+            billingKind: (row.billingKind as
+              | "intake"
+              | "retainer"
+              | "progress"
+              | "first") ?? "retainer",
+            clientId: row.clientId,
+            period: row.period,
+            trn: row.trn,
+            trnStatus: (row.trnStatus as "known" | "unknown_held") ?? "known",
+            ruleCited: row.ruleCited,
+            sourceAttached: row.sourceAttached,
+            xeroInvoiceId: row.xeroInvoiceId,
+            proposedByEmployeeId: row.proposedByEmployeeId,
+            approvedByEmployeeId: row.approvedByEmployeeId,
+            createdAt: row.createdAt,
+          };
+          store.invoices.set(input.id, inv);
+        }
+      }
       if (!inv) throw new Error("NOT_FOUND");
       const result = await runTransition(
         "invoice",
@@ -385,10 +558,18 @@ export const invoicesRouter = router({
         { to: "approved", from: inv.status },
         ctx,
         (to) => {
-          inv.status = to;
-          inv.approvedByEmployeeId = ctx.employeeId;
+          inv!.status = to;
+          inv!.approvedByEmployeeId = ctx.employeeId;
         },
       );
+      if (getDb() && result.ok) {
+        const { updateOsInvoice } = await import("../finance/os-invoices");
+        await updateOsInvoice({
+          invoiceId: inv.invoiceId,
+          status: "approved",
+          approvedByEmployeeId: ctx.employeeId,
+        });
+      }
       return { result, invoice: inv };
     }),
 
@@ -396,7 +577,38 @@ export const invoicesRouter = router({
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const inv = store.invoices.get(input.id);
+      let inv = store.invoices.get(input.id);
+      if (!inv && getDb()) {
+        const { getOsInvoice } = await import("../finance/os-invoices");
+        const row = await getOsInvoice(input.id);
+        if (row) {
+          inv = {
+            invoiceId: row.invoiceId,
+            status: row.status,
+            contactName: row.contactName,
+            amount: row.amount,
+            vatAmount: row.vatAmount ?? "0",
+            currency: row.currency,
+            invoiceType: row.invoiceType,
+            billingKind: (row.billingKind as
+              | "intake"
+              | "retainer"
+              | "progress"
+              | "first") ?? "retainer",
+            clientId: row.clientId,
+            period: row.period,
+            trn: row.trn,
+            trnStatus: (row.trnStatus as "known" | "unknown_held") ?? "known",
+            ruleCited: row.ruleCited,
+            sourceAttached: row.sourceAttached,
+            xeroInvoiceId: row.xeroInvoiceId,
+            proposedByEmployeeId: row.proposedByEmployeeId,
+            approvedByEmployeeId: row.approvedByEmployeeId,
+            createdAt: row.createdAt,
+          };
+          store.invoices.set(input.id, inv);
+        }
+      }
       if (!inv) throw new Error("NOT_FOUND");
 
       const result = await runTransition(
@@ -416,16 +628,36 @@ export const invoicesRouter = router({
       if (!isXeroWriteEnabled()) {
         inv.status = "issued";
         inv.xeroInvoiceId = null;
-        store.appendAudit({
-          actorEmployeeId: ctx.employeeId!,
-          action: "invoices.issue.os_only",
-          entityType: "invoice",
-          entityId: inv.invoiceId,
-          before: { status: "approved" },
-          after: { status: "issued", xeroInvoiceId: null, xeroWrite: false },
-          reason:
-            "Marked issued in OS only — Xero is read/mirror source of truth",
-        });
+        if (getDb()) {
+          const { updateOsInvoice } = await import("../finance/os-invoices");
+          const { writeAudit } = await import("../m1-persistence");
+          await updateOsInvoice({
+            invoiceId: inv.invoiceId,
+            status: "issued",
+            clearXeroInvoiceId: true,
+          });
+          await writeAudit({
+            actorEmployeeId: ctx.employeeId!,
+            action: "invoices.issue.os_only",
+            entityType: "invoice",
+            entityId: inv.invoiceId,
+            before: { status: "approved" },
+            after: { status: "issued", xeroInvoiceId: null, xeroWrite: false },
+            reason:
+              "Marked issued in OS only — Xero is read/mirror source of truth",
+          });
+        } else {
+          store.appendAudit({
+            actorEmployeeId: ctx.employeeId!,
+            action: "invoices.issue.os_only",
+            entityType: "invoice",
+            entityId: inv.invoiceId,
+            before: { status: "approved" },
+            after: { status: "issued", xeroInvoiceId: null, xeroWrite: false },
+            reason:
+              "Marked issued in OS only — Xero is read/mirror source of truth",
+          });
+        }
         return { result, invoice: inv, xeroWrite: false as const };
       }
 
@@ -440,15 +672,34 @@ export const invoicesRouter = router({
       });
       inv.status = "issued";
       inv.xeroInvoiceId = posted.xeroInvoiceId;
-      store.appendAudit({
-        actorEmployeeId: ctx.employeeId!,
-        action: "invoices.issue.xero_post",
-        entityType: "invoice",
-        entityId: inv.invoiceId,
-        before: { status: "approved" },
-        after: { status: "issued", xeroInvoiceId: posted.xeroInvoiceId },
-        reason: "Posted to Xero with source attached (never disburse)",
-      });
+      if (getDb()) {
+        const { updateOsInvoice } = await import("../finance/os-invoices");
+        const { writeAudit } = await import("../m1-persistence");
+        await updateOsInvoice({
+          invoiceId: inv.invoiceId,
+          status: "issued",
+          xeroInvoiceId: posted.xeroInvoiceId,
+        });
+        await writeAudit({
+          actorEmployeeId: ctx.employeeId!,
+          action: "invoices.issue.xero_post",
+          entityType: "invoice",
+          entityId: inv.invoiceId,
+          before: { status: "approved" },
+          after: { status: "issued", xeroInvoiceId: posted.xeroInvoiceId },
+          reason: "Posted to Xero with source attached (never disburse)",
+        });
+      } else {
+        store.appendAudit({
+          actorEmployeeId: ctx.employeeId!,
+          action: "invoices.issue.xero_post",
+          entityType: "invoice",
+          entityId: inv.invoiceId,
+          before: { status: "approved" },
+          after: { status: "issued", xeroInvoiceId: posted.xeroInvoiceId },
+          reason: "Posted to Xero with source attached (never disburse)",
+        });
+      }
       return { result, invoice: inv, xeroWrite: true as const };
     }),
 

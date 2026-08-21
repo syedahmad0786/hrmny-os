@@ -83,6 +83,24 @@ function monthlyCapAed(): number | null {
   return Number.isFinite(cap) && cap > 0 ? cap : null;
 }
 
+/** Load durable agent kill-switches from feature_override into process memory. */
+async function hydrateAgentKillSwitches() {
+  const db = getDb();
+  if (!db) return;
+  const rows = await db.execute<{ featureKey: string; enabled: boolean }>(sql`
+    select feature_key as "featureKey", enabled
+    from public.feature_override
+    where scope_type = 'global'
+      and scope_key = 'global'
+      and feature_key like 'agent.%'
+  `);
+  for (const row of rows) {
+    const id = row.featureKey.slice("agent.".length);
+    const parsed = AgentIdSchema.safeParse(id);
+    if (parsed.success) setAgentEnabled(parsed.data, row.enabled);
+  }
+}
+
 export const aiAdminRouter = router({
   /** Everything the AI control panel renders in one call. */
   dashboard: staffProcedure
@@ -92,6 +110,7 @@ export const aiAdminRouter = router({
     .query(async ({ ctx, input }) => {
       requireAiAdmin(ctx);
       const db = getDb();
+      await hydrateAgentKillSwitches();
 
       const rollup = new Map<string, RollupRow>();
       let runs: RunRow[] = [];
@@ -150,6 +169,25 @@ export const aiAdminRouter = router({
     .mutation(async ({ ctx, input }) => {
       const actor = requireAiAdmin(ctx);
       setAgentEnabled(input.agentId, input.enabled);
+      const db = getDb();
+      if (db) {
+        await db.execute(sql`
+          insert into public.feature_override (
+            feature_key, scope_type, scope_key, enabled, updated_by_employee_id
+          ) values (
+            ${`agent.${input.agentId}`},
+            'global',
+            'global',
+            ${input.enabled},
+            ${actor.employeeId}::uuid
+          )
+          on conflict (feature_key, scope_type, scope_key)
+          do update set
+            enabled = excluded.enabled,
+            updated_by_employee_id = excluded.updated_by_employee_id,
+            updated_at = now()
+        `);
+      }
       await writeAudit({
         actorEmployeeId: actor.employeeId,
         action: input.enabled ? "ai.agent.enabled" : "ai.agent.disabled",
@@ -177,6 +215,7 @@ export const aiAdminRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       requireAiAdmin(ctx);
+      await hydrateAgentKillSwitches();
       const scope = memorySandboxMetadata({
         clientId: input.clientId,
         employeeId: ctx.employeeId ?? undefined,

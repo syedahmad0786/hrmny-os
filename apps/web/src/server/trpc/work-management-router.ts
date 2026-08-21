@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { sql } from "@hrmny/db";
 import { z } from "zod";
 import { getDb } from "../db";
-import { getDemoStore } from "../demo-store";
+import { getObjectStore } from "../storage/object-store";
 import {
   featureEnabled,
   listFeatureOverrides,
@@ -4854,7 +4854,7 @@ async function submitWorkForm(
   const storedPaths: string[] = [];
   try {
     for (const { attachment, body } of attachments) {
-      await getDemoStore().objectStore.put({
+      await getObjectStore().put({
         path: attachment.storagePath!,
         body,
         contentType: attachment.contentType!,
@@ -4986,7 +4986,7 @@ async function submitWorkForm(
     }
   } catch (error) {
     await Promise.all(
-      storedPaths.map((path) => getDemoStore().objectStore.remove?.(path)),
+      storedPaths.map((path) => getObjectStore().remove?.(path)),
     );
     throw error;
   }
@@ -8357,7 +8357,7 @@ export const workManagementRouter = router({
         const attachmentId = randomUUID();
         const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
         const storagePath = `work/${input.itemId}/${attachmentId}-${safeName}`;
-        await getDemoStore().objectStore.put({
+        await getObjectStore().put({
           path: storagePath,
           body: new Uint8Array(body),
           contentType: input.contentType,
@@ -8387,7 +8387,7 @@ export const workManagementRouter = router({
               )
             `);
         } catch (error) {
-          await getDemoStore().objectStore.remove?.(storagePath);
+          await getObjectStore().remove?.(storagePath);
           throw error;
         }
         await audit(
@@ -8409,7 +8409,7 @@ export const workManagementRouter = router({
         if (attachment.externalUrl)
           return { url: attachment.externalUrl, expiresAt: null };
         if (!attachment.storagePath) throw new TRPCError({ code: "NOT_FOUND" });
-        return getDemoStore().objectStore.signedUrl(
+        return getObjectStore().signedUrl(
           attachment.storagePath,
           300,
         );
@@ -8429,7 +8429,7 @@ export const workManagementRouter = router({
             sql`delete from public.work_attachment where work_attachment_id = ${input.attachmentId}::uuid`,
           );
         if (attachment.storagePath)
-          await getDemoStore().objectStore.remove?.(attachment.storagePath);
+          await getObjectStore().remove?.(attachment.storagePath);
         await audit(
           ctx,
           "work.attachment.remove",
