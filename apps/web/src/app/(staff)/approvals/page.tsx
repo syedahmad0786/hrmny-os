@@ -111,7 +111,7 @@ function ApprovalsInner() {
         meta: v.channel,
         proposedAt: v.scheduledFor || "",
         draft: v.title,
-        portalState: v.state,
+        portalState: v.state as "pending_client" | "rejected",
       }));
 
     const merged = [...outreachItems, ...campaignItems, ...portalItems].sort(
