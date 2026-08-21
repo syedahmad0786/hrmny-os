@@ -176,6 +176,45 @@ describe("withMetering", () => {
     expect(first.text).toMatch(/"name"\s*:\s*"crm_closed_loop"/);
   });
 
+  it("emits finance.os_approve / finance_os_issue fences when catalog lists them", async () => {
+    const mock = createMockProvider();
+    const approve = await mock.generate({
+      task: "generic",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Available tools:\n- finance.os_approve: Approve OS invoice\n- now: time",
+        },
+        {
+          role: "user",
+          content:
+            "Approve OS invoice invoiceId: a1000000-0000-4000-8000-000000000099",
+        },
+      ],
+    });
+    expect(approve.text).toMatch(/```tool/);
+    expect(approve.text).toMatch(/"name"\s*:\s*"finance\.os_approve"/);
+
+    const issue = await mock.generate({
+      task: "generic",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Available tools:\n- finance_os_issue: Issue OS invoice\n- now: time",
+        },
+        {
+          role: "user",
+          content:
+            "Issue OS invoice invoiceId: a1000000-0000-4000-8000-000000000099",
+        },
+      ],
+    });
+    expect(issue.text).toMatch(/```tool/);
+    expect(issue.text).toMatch(/"name"\s*:\s*"finance_os_issue"/);
+  });
+
   it("fails closed when month-to-date spend is at the cap", async () => {
     const onCost = vi.fn();
     const metered = withMetering(tokenProvider, {

@@ -224,13 +224,66 @@ async function memoryHandoverPack(input: {
   });
   fired.push("creative.task_seed");
 
+  let invoiceId: string | null = null;
+  try {
+    const { vatOnAmount } = await import("../demo-store");
+    const period = new Date().toISOString().slice(0, 7);
+    const existing = [...store.invoices.values()].find(
+      (inv) =>
+        inv.clientId === demoClient.clientId &&
+        inv.billingKind === "first" &&
+        inv.period === period,
+    );
+    if (existing) {
+      invoiceId = existing.invoiceId;
+      fired.push("invoice.exists");
+    } else {
+      const amountNum = Number(
+        demoClient.contractValue || deal.quoteValue || 0,
+      );
+      const amount = Number.isFinite(amountNum) ? amountNum : 0;
+      invoiceId = crypto.randomUUID();
+      store.invoices.set(invoiceId, {
+        invoiceId,
+        status: "proposed",
+        contactName: demoClient.name,
+        amount: amount.toFixed(2),
+        vatAmount: vatOnAmount(amount),
+        currency: "AED",
+        invoiceType: "first",
+        billingKind: "first",
+        clientId: demoClient.clientId,
+        period,
+        trn: "100000000000003",
+        trnStatus: "known",
+        ruleCited: "Won deal → first invoice (UAE VAT 5%)",
+        sourceAttached: {
+          kind: "won_handover",
+          dealId: input.dealId,
+          companyName: deal.companyName,
+          mode: "memory",
+        },
+        xeroInvoiceId: null,
+        proposedByEmployeeId: input.actorEmployeeId ?? null,
+        approvedByEmployeeId: null,
+        createdAt: new Date().toISOString(),
+      });
+      fired.push("invoice.first_seed");
+    }
+  } catch {
+    invoiceId = null;
+  }
+
   await persistMemoryChunk({
     sourceType: "note",
     sourceId: demoClient.clientId,
-    content: `Handover from won deal ${deal.companyName}: contract ${demoClient.contractValue} AED. Client entering onboarding (memory mode).`,
+    content: `Handover from won deal ${deal.companyName}: contract ${demoClient.contractValue} AED. Client entering onboarding (memory mode).${
+      invoiceId ? ` First invoice ${invoiceId} proposed.` : ""
+    }`,
     metadata: {
       clientId: demoClient.clientId,
       dealId: input.dealId,
+      invoiceId,
       kind: "deal.won_handover",
       mode: "memory",
     },
@@ -324,7 +377,7 @@ async function memoryHandoverPack(input: {
 
   const next = buildHandoverNextLinks({
     clientId: client.clientId,
-    invoiceId: null,
+    invoiceId,
     outreachId: null,
     portalPath: portalInvite?.portalPath,
     onboardingPath: portalInvite?.onboardingPath,
@@ -341,7 +394,7 @@ async function memoryHandoverPack(input: {
     },
     client,
     task,
-    invoiceId: null,
+    invoiceId,
     onboardingPhases: phases.length,
     calendarId: null,
     portalInvite,
