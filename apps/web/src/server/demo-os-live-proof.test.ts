@@ -152,6 +152,24 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(
         run.toolResults!.some((t) => t.tool === "onboarding.read" && t.ok),
       ).toBe(true);
+      expect(
+        run.toolResults!.some((t) => t.tool === "tasks.create" && t.ok),
+      ).toBe(true);
+      expect(
+        run.toolResults!.some((t) => t.tool === "outreach.draft" && t.ok),
+      ).toBe(true);
+      expect(
+        run.toolResults!.some((t) => t.tool === "crm.note" && t.ok),
+      ).toBe(true);
+      const createdTask = run.toolResults!.find(
+        (t) => t.tool === "tasks.create" && t.ok,
+      );
+      expect(
+        createdTask &&
+          typeof createdTask.data === "object" &&
+          createdTask.data !== null &&
+          "taskId" in createdTask.data,
+      ).toBe(true);
 
       const month1 = await caller.clients.month1.get({
         clientId: loop.clientId,

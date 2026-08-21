@@ -329,5 +329,115 @@ export async function runAgentTools(input: {
     }
   }
 
+  // ── Sandboxed writes (never send email / never escalate outside scope) ──
+
+  if (
+    input.scope.clientId &&
+    (want("tasks.create") || want("delivery.create") || want("tasks.write"))
+  ) {
+    try {
+      const { createDeliveryTask } = await import("../tasks/delivery-tasks");
+      const title =
+        input.prompt.trim().slice(0, 120) || "Agent-created delivery task";
+      const task = await createDeliveryTask({
+        clientId: input.scope.clientId,
+        taskType: "social_cutdowns",
+        title: `[agent] ${title}`,
+        status: "backlog",
+        ownerEmployeeId: input.scope.employeeId ?? null,
+      });
+      results.push({
+        tool: "tasks.create",
+        ok: Boolean(task?.taskId),
+        data: task
+          ? {
+              taskId: task.taskId,
+              clientId: task.clientId,
+              status: task.status,
+              taskType: task.taskType,
+              title: task.title,
+            }
+          : undefined,
+        error: task ? undefined : "task_create_failed",
+      });
+    } catch (err) {
+      results.push({
+        tool: "tasks.create",
+        ok: false,
+        error: err instanceof Error ? err.message : "tasks_create_failed",
+      });
+    }
+  }
+
+  if (
+    scopedDealId &&
+    (want("outreach.draft") || want("outreach.write") || want("leadgen.draft"))
+  ) {
+    try {
+      const { draftOutreach } = await import("../trpc/leadgen-router");
+      const subject = `Agent draft · ${input.prompt.trim().slice(0, 80) || "follow-up"}`;
+      const body =
+        input.prompt.trim().slice(0, 2000) ||
+        "Drafted by agent — human must approve before send.";
+      const item = await draftOutreach({
+        dealId: scopedDealId,
+        channel: "gmail",
+        subject,
+        body,
+      });
+      results.push({
+        tool: "outreach.draft",
+        ok: true,
+        data: {
+          id: item.id,
+          dealId: item.dealId,
+          state: item.state,
+          subject: item.subject,
+        },
+      });
+    } catch (err) {
+      results.push({
+        tool: "outreach.draft",
+        ok: false,
+        error: err instanceof Error ? err.message : "outreach_draft_failed",
+      });
+    }
+  }
+
+  if (want("crm.note") || want("memory.note") || want("memory.write")) {
+    try {
+      const { persistMemoryChunk } = await import("./memory-db");
+      const sourceId =
+        input.scope.taskId ??
+        scopedDealId ??
+        input.scope.clientId ??
+        input.scope.employeeId ??
+        undefined;
+      const saved = await persistMemoryChunk({
+        sourceType: "note",
+        sourceId: sourceId ?? null,
+        content: input.prompt.trim().slice(0, 4000) || "Agent note",
+        metadata: {
+          kind: "agent.crm_note",
+          clientId: input.scope.clientId ?? null,
+          dealId: scopedDealId ?? null,
+          taskId: input.scope.taskId ?? null,
+          employeeId: input.scope.employeeId ?? null,
+        },
+      });
+      results.push({
+        tool: "crm.note",
+        ok: true,
+        data: { id: saved.id, sandbox: input.scope },
+      });
+    } catch (err) {
+      results.push({
+        tool: "crm.note",
+        ok: false,
+        error: err instanceof Error ? err.message : "crm_note_failed",
+      });
+    }
+  }
+
   return results;
 }
