@@ -496,8 +496,8 @@ async function resolveStaffForCampaignClient(
   const { getDb } = await import("../db");
   const db = getDb();
   if (!db) {
-    const { DEMO_EMPLOYEE_ID } = await import("../demo-store");
-    return DEMO_EMPLOYEE_ID;
+    const { DEMO_STAFF_LEAD_ID } = await import("../demo-store");
+    return DEMO_STAFF_LEAD_ID;
   }
   try {
     const { sql } = await import("@hrmny/db");
@@ -554,7 +554,7 @@ export async function notifyStaffOfCampaignDecision(input: {
     title,
     body,
     kind: "campaign",
-    href: `/approvals?clientId=${encodeURIComponent(input.clientId)}`,
+    href: `/approvals?id=${encodeURIComponent(input.campaignItemId)}`,
     entityType: "campaign_item",
     entityId: input.campaignItemId,
   }).catch(() => undefined);

@@ -401,6 +401,8 @@ export type DemoMonth1Phase = {
 
 const DEMO_DEAL_ID = "e0000000-0000-4000-8000-000000000001";
 const DEMO_EMPLOYEE_ID = "e1000000-0000-4000-8000-000000000001";
+/** Dev partner — staff inbox recipient for portal/campaign/onboarding notifies in memory mode. */
+const DEMO_STAFF_LEAD_ID = "c0000000-0000-4000-8000-000000000001";
 const DEMO_CLIENT_ID = "c1000000-0000-4000-8000-0000000000a4";
 /** Second client for portal isolation demos (must not leak into portal_a). */
 const DEMO_CLIENT_B_ID = "c1000000-0000-4000-8000-0000000000b4";
@@ -1223,6 +1225,7 @@ export function getDemoStore(): MemoryDemoStore {
 export {
   DEMO_DEAL_ID,
   DEMO_EMPLOYEE_ID,
+  DEMO_STAFF_LEAD_ID,
   DEMO_CLIENT_ID,
   DEMO_CLIENT_B_ID,
   DEMO_CALENDAR_ID,

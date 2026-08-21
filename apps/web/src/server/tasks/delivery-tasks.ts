@@ -211,6 +211,7 @@ export async function seedClientCreativeTask(input: {
   title: string;
   taskType?: string;
   status?: string;
+  ownerEmployeeId?: string | null;
 }): Promise<DeliveryTask | null> {
   const db = getDb();
   if (!db) return null;
@@ -234,6 +235,7 @@ export async function seedClientCreativeTask(input: {
     title: input.title,
     status,
     priority: "high",
+    ownerEmployeeId: input.ownerEmployeeId ?? null,
   });
 }
 
