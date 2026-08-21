@@ -478,7 +478,101 @@ export async function decidePortalItem(opts: {
       body: feedback,
     });
   }
+  if (item.clientId) {
+    await notifyStaffOfCampaignDecision({
+      clientId: item.clientId,
+      campaignItemId: item.campaignItemId,
+      title: item.title,
+      action: opts.to === "approved" ? "approve" : "reject",
+      feedback,
+    });
+  }
   return { ok: true, item, state: portalStateOf(item), auditId: result.auditId };
+}
+
+async function resolveStaffForCampaignClient(
+  clientId: string,
+): Promise<string | null> {
+  const { getDb } = await import("../db");
+  const db = getDb();
+  if (!db) {
+    const { DEMO_EMPLOYEE_ID } = await import("../demo-store");
+    return DEMO_EMPLOYEE_ID;
+  }
+  try {
+    const { sql } = await import("@hrmny/db");
+    const leads = await db.execute<{ employeeId: string }>(sql`
+      select employee_id as "employeeId"
+      from public.account_team_member
+      where client_id = ${clientId}::uuid
+        and is_account_lead = true
+      order by created_at asc
+      limit 1
+    `);
+    if (leads[0]?.employeeId) return leads[0].employeeId;
+    const anyStaff = await db.execute<{ employeeId: string }>(sql`
+      select employee_id as "employeeId"
+      from public.employee
+      where is_active = true
+      order by created_at asc
+      limit 1
+    `);
+    return anyStaff[0]?.employeeId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Staff OS inbox + memory after client campaign approve/reject. */
+export async function notifyStaffOfCampaignDecision(input: {
+  clientId: string;
+  campaignItemId: string;
+  title: string;
+  action: "approve" | "reject";
+  feedback?: string;
+}): Promise<void> {
+  const employeeId = await resolveStaffForCampaignClient(input.clientId);
+  if (!employeeId) return;
+
+  const label = input.title.trim() || "campaign";
+  const verb =
+    input.action === "approve" ? "approved" : "requested changes on";
+  const title =
+    input.action === "approve"
+      ? `Client approved campaign: ${label}`
+      : `Client campaign revisions: ${label}`;
+  const body = [
+    `Client ${verb} "${label}".`,
+    input.feedback?.trim() ? `Feedback: ${input.feedback.trim()}` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const { notifyEmployee } = await import("../notifications/store");
+  await notifyEmployee({
+    employeeId,
+    title,
+    body,
+    kind: "campaign",
+    href: `/approvals?clientId=${encodeURIComponent(input.clientId)}`,
+    entityType: "campaign_item",
+    entityId: input.campaignItemId,
+  }).catch(() => undefined);
+
+  const { persistMemoryChunk } = await import("../ai/memory-db");
+  await persistMemoryChunk({
+    sourceType: "feedback",
+    sourceId: input.campaignItemId,
+    content: `Portal campaign ${input.action}: client ${verb} "${label}".${
+      input.feedback?.trim() ? ` Feedback: ${input.feedback.trim()}` : ""
+    }`,
+    metadata: {
+      clientId: input.clientId,
+      employeeId,
+      campaignItemId: input.campaignItemId,
+      kind: `portal.campaign.${input.action}`,
+    },
+  }).catch(() => undefined);
 }
 
 export type CampaignHealth = {
