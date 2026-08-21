@@ -464,13 +464,33 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
               </li>
               {runCustom.data.toolResults.map(
                 (
-                  row: { tool?: string; ok?: boolean; error?: string },
+                  row: {
+                    tool?: string;
+                    ok?: boolean;
+                    error?: string;
+                    data?: unknown;
+                  },
                   idx: number,
                 ) => (
-                  <li key={`${row.tool ?? "tool"}-${idx}`}>
+                  <li
+                    key={`${row.tool ?? "tool"}-${idx}`}
+                    data-testid={`ai-agent-tool-${row.tool ?? "unknown"}`}
+                  >
                     <span className="font-mono">{row.tool ?? "?"}</span>
                     {" · "}
-                    {row.ok ? "ok" : `failed${row.error ? `: ${row.error}` : ""}`}
+                    {row.ok
+                      ? "ok"
+                      : `failed${row.error ? `: ${row.error}` : ""}`}
+                    {row.data != null ? (
+                      <pre
+                        data-testid="ai-agent-tool-result-data"
+                        className="mt-1 max-h-28 overflow-auto rounded bg-ink/5 p-2 font-mono text-[11px] text-ink/80"
+                      >
+                        {typeof row.data === "string"
+                          ? row.data
+                          : JSON.stringify(row.data)}
+                      </pre>
+                    ) : null}
                   </li>
                 ),
               )}
