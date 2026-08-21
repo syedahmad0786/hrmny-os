@@ -47,6 +47,13 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(loop.clientId).toBeTruthy();
       expect(loop.viaApollo).toBe(true);
       expect(loop.onboardingPhases).toBeGreaterThanOrEqual(1);
+      expect(loop.calendarId).toBeTruthy();
+      const seededCals = await caller.calendars.listByClient({
+        clientId: loop.clientId,
+      });
+      expect(
+        seededCals.some((c) => c.calendarId === loop.calendarId),
+      ).toBe(true);
 
       const gen = await caller.creativeGen.generate({
         prompt: "Ochre editorial still life for demo portal delivery",

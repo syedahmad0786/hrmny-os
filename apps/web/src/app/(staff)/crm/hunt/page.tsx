@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 
 const STEPS = [
@@ -35,7 +35,23 @@ export default function HuntClientsPage() {
   const [result, setResult] = useState<string | null>(null);
   const [query, setQuery] = useState("UAE retail brand");
   const [lastApolloDealId, setLastApolloDealId] = useState<string | null>(null);
+  const [toolReady, setToolReady] = useState<Record<string, string> | null>(
+    null,
+  );
   const utils = trpc.useUtils();
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/ready")
+      .then((r) => r.json())
+      .then((body: { tools?: Record<string, string> }) => {
+        if (!cancelled && body.tools) setToolReady(body.tools);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
     onSuccess: (data) => {
       if (!data.ok) {
@@ -46,7 +62,9 @@ export default function HuntClientsPage() {
         ? ` via Apollo (${data.apolloMode ?? "mock"})`
         : "";
       setResult(
-        `Closed loop ready${via} — client ${data.clientName}. Open creative, then portal deliveries.`,
+        `Closed loop ready${via} — client ${data.clientName}${
+          data.calendarId ? " · content calendar seeded" : ""
+        }. Open Account, Creative, then portal.`,
       );
       void utils.crm.deals.list.invalidate();
     },
@@ -168,6 +186,14 @@ export default function HuntClientsPage() {
                   >
                     Client
                   </Link>
+                  {demo.data.next.account ? (
+                    <Link
+                      className="text-sm underline"
+                      href={demo.data.next.account}
+                    >
+                      Account
+                    </Link>
+                  ) : null}
                   <Link
                     className="text-sm underline"
                     href={demo.data.next.creative}
@@ -186,6 +212,17 @@ export default function HuntClientsPage() {
                 Pipeline
               </Link>
             </div>
+            {toolReady ? (
+              <p className="mt-2 text-xs text-muted">
+                Tools: apollo {toolReady.apollo} · hunter {toolReady.hunter} ·
+                n8n {toolReady.n8n} · xero {toolReady.xero} · composio{" "}
+                {toolReady.composio}
+                {" · "}
+                <Link href="/settings/connections" className="underline">
+                  Connections
+                </Link>
+              </p>
+            ) : null}
             {result ? (
               <p className="mt-3 text-sm text-muted" role="status">
                 {result}

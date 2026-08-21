@@ -1154,6 +1154,30 @@ export const crmRouter = router({
         };
       }
 
+      let calendarId: string | null = null;
+      try {
+        const { createDeliveryCalendar, addDeliveryCalendarSlot } =
+          await import("../tasks/delivery-calendars");
+        const month = new Date().toISOString().slice(0, 7);
+        const calendar = await createDeliveryCalendar({
+          clientId: pack.client.clientId,
+          month,
+          focusPoints: ["Launch reel", "Product stills"],
+        });
+        calendarId = calendar?.calendarId ?? null;
+        if (calendar && pack.task?.taskId) {
+          await addDeliveryCalendarSlot({
+            calendarId: calendar.calendarId,
+            slotDate: `${month}-15`,
+            slotLabel: "Studio shoot",
+            taskId: pack.task.taskId,
+            position: 1,
+          });
+        }
+      } catch {
+        /* calendar optional if schema missing state column on older DBs */
+      }
+
       await auditMutation(
         ctx,
         "crm.runDemoClosedLoop",
@@ -1164,6 +1188,7 @@ export const crmRouter = router({
           companyId,
           clientId: pack.client.clientId,
           taskId: pack.task?.taskId ?? null,
+          calendarId,
           viaApollo: Boolean(input?.viaApollo),
           apolloMode,
         },
@@ -1177,6 +1202,7 @@ export const crmRouter = router({
         clientId: pack.client.clientId,
         clientName: pack.client.name,
         taskId: pack.task?.taskId ?? null,
+        calendarId,
         onboardingPhases: pack.onboardingPhases,
         fired: pack.pack.fired,
         viaApollo: Boolean(input?.viaApollo),
@@ -1184,6 +1210,7 @@ export const crmRouter = router({
         next: {
           crmDeal: `/crm/deals/${dealId}`,
           client: `/clients/${pack.client.clientId}`,
+          account: "/account",
           creative: "/creative",
           portal: "/portal/deliveries",
           onboarding: `/clients/${pack.client.clientId}`,
