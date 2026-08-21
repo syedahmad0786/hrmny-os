@@ -484,6 +484,13 @@
       "when": 1787298000000,
       "tag": "0069_seam_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1787306400000,
+      "tag": "0070_portal_magic_token",
+      "breakpoints": true
     }
   ]
 }

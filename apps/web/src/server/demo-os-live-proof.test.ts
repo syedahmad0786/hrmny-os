@@ -242,6 +242,28 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(
         listedCals.some((c) => c.calendarId === calendar.calendarId),
       ).toBe(true);
+
+      if (loop.portalInvite?.email) {
+        const demoToken = await caller.clients.portalUsers.issueDemoToken({
+          clientId: loop.clientId,
+          email: loop.portalInvite.email,
+        });
+        expect(demoToken.token.startsWith("ml_")).toBe(true);
+        const anonVerify = createCaller({
+          user: null,
+          employeeId: null,
+          roles: [],
+          canViewMargin: false,
+          clientId: null,
+        });
+        const verified = await anonVerify.portal.auth.verify({
+          token: demoToken.token,
+        });
+        expect(verified.ok).toBe(true);
+        if (verified.ok) {
+          expect(verified.clientId).toBe(loop.clientId);
+        }
+      }
     },
     180_000,
   );

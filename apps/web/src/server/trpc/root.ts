@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import { bootstrapGateRegistry } from "@hrmny/gate";
 import { getDemoStore } from "../demo-store";
 import { getDb } from "../db";
+import { getObjectStore } from "../storage/object-store";
 import { DEV_USERS, getAuthMode } from "../auth/session";
 import {
   emitHealthSignal,
@@ -462,7 +463,7 @@ export const assetsRouter = router({
         if (raw.byteLength > 10_000_000) {
           throw new Error("Asset versions are limited to 10 MB");
         }
-        await getDemoStore().objectStore.put({
+        await getObjectStore().put({
           path: storagePath,
           body: new Uint8Array(raw),
           contentType: input.contentType,
@@ -494,7 +495,7 @@ export const assetsRouter = router({
             return created!;
           });
         } catch (error) {
-          await getDemoStore().objectStore.remove?.(storagePath);
+          await getObjectStore().remove?.(storagePath);
           throw error;
         }
         await emitHealthSignal("dam_upload", "info", {
@@ -563,7 +564,7 @@ export const assetsRouter = router({
           .limit(1);
         if (!version) return null;
         const ttl = Number(process.env.DAM_SIGNED_URL_TTL_SECONDS ?? 300);
-        const signed = await getDemoStore().objectStore.signedUrl(
+        const signed = await getObjectStore().signedUrl(
           version.storagePath,
           ttl,
         );
@@ -585,7 +586,7 @@ export const assetsRouter = router({
       );
       if (!version) return null;
       const ttl = Number(process.env.DAM_SIGNED_URL_TTL_SECONDS ?? 300);
-      const signed = await getDemoStore().objectStore.signedUrl(
+      const signed = await getObjectStore().signedUrl(
         version.storagePath,
         ttl,
       );

@@ -1156,6 +1156,44 @@ export const clientsRouter = router({
           return user;
         });
       }),
+
+    /** Staff demo: issue a single-use portal magic token for an invited contact. */
+    issueDemoToken: staffProcedure
+      .input(
+        z.object({
+          clientId: z.string().uuid(),
+          email: z.string().trim().email().max(320),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (
+          !ctx.roles.some((role) => role === "partner" || role === "director")
+        ) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Partner or director access required",
+          });
+        }
+        const email = input.email.toLowerCase();
+        const {
+          upsertPortalAllowlistContact,
+          issuePortalMagicToken,
+        } = await import("../auth/portal-magic-link");
+        await upsertPortalAllowlistContact({
+          email,
+          clientId: input.clientId,
+        });
+        const token = await issuePortalMagicToken({
+          clientId: input.clientId,
+          email,
+        });
+        return {
+          token,
+          portalPath: `/portal/onboarding?token=${encodeURIComponent(token)}`,
+          email,
+          clientId: input.clientId,
+        };
+      }),
   }),
 
   immersion: router({
