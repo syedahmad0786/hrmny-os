@@ -37,21 +37,37 @@ async function resolveComposioSend(
   employeeId: string | null | undefined,
   roles: readonly string[],
 ): Promise<ComposioSendAdapter> {
-  if (!employeeId || !process.env.COMPOSIO_API_KEY?.trim()) {
+  if (!employeeId) {
     return createComposioStub();
+  }
+  if (process.env.COMPOSIO_API_KEY?.trim()) {
+    try {
+      const verified = await getVerifiedWorkAppConnection(employeeId, "gmail", {
+        roles,
+      });
+      if (verified) {
+        return createComposioLiveSend({
+          client: verified.client,
+          connectedAccountId: verified.account.id,
+        });
+      }
+    } catch {
+      /* fall through to Google Workspace */
+    }
   }
   try {
-    const verified = await getVerifiedWorkAppConnection(employeeId, "gmail", {
-      roles,
-    });
-    if (!verified) return createComposioStub();
-    return createComposioLiveSend({
-      client: verified.client,
-      connectedAccountId: verified.account.id,
-    });
+    const { createGoogleWorkspaceGmailSend } = await import(
+      "../leadgen/google-workspace-send"
+    );
+    const { getGoogleWorkspaceAccessToken } = await import(
+      "./connections-router"
+    );
+    const token = await getGoogleWorkspaceAccessToken(employeeId);
+    if (token) return createGoogleWorkspaceGmailSend(employeeId);
   } catch {
-    return createComposioStub();
+    /* stub */
   }
+  return createComposioStub();
 }
 /**
  * M8 outreach HITL + lead-gen surface (importable module — orchestrator wires

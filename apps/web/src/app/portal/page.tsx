@@ -1,6 +1,7 @@
 "use client";
 
 import { trpc } from "@/lib/trpc";
+import { PortalAssetPreview } from "./portal-asset-preview";
 
 export default function PortalHomePage() {
   const session = trpc.portal.auth.session.useQuery(undefined, { retry: false });
@@ -65,10 +66,15 @@ export default function PortalHomePage() {
         </div>
         <div>
           <h2 className="font-display text-lg text-ink">Assets</h2>
-          <ul className="mt-2 space-y-2 text-sm text-muted">
+          <ul className="mt-2 space-y-4 text-sm text-muted">
             {(assets.data ?? []).map((a) => (
               <li key={a.assetId}>
-                {a.title} · {a.status} · v{a.versionCount}
+                <div>
+                  {a.title} · {a.status} · v{a.versionCount}
+                </div>
+                {a.versionCount > 0 ? (
+                  <PortalAssetPreview assetId={a.assetId} title={a.title} />
+                ) : null}
               </li>
             ))}
             {!assets.data?.length && <li>No assets for this client</li>}
