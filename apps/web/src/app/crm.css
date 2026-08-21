@@ -1466,6 +1466,11 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
   background: var(--paper-2);
 }
 
+.crm-approval-mini.is-focused {
+  border-color: var(--ochre, #e47300);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ochre, #e47300) 35%, transparent);
+}
+
 .crm-approval-mini h4 {
   margin: 10px 0 5px;
   font:

@@ -3,6 +3,7 @@ import { ensureClientOnboarding } from "../clients/onboarding";
 import { getDb } from "../db";
 import { persistMemoryChunk } from "../ai/memory-db";
 import { seedClientCreativeTask } from "../tasks/delivery-tasks";
+import { buildHandoverNextLinks } from "./handover-next";
 import { getDeal, updateDeal, moveDealStage } from "./repository";
 import type { DealRow } from "./types";
 
@@ -428,20 +429,11 @@ export async function durableHandoverPack(input: {
   }
 
   const packId = crypto.randomUUID();
-  const next = {
-    client: `/clients/${client.clientId}`,
-    account: `/account?clientId=${encodeURIComponent(client.clientId)}`,
-    creative: `/creative?clientId=${encodeURIComponent(client.clientId)}`,
-    finance: invoiceId
-      ? `/finance?invoiceId=${encodeURIComponent(invoiceId)}`
-      : "/finance",
-    approvals: "/approvals",
-    portal: "/portal/approvals",
-    onboarding: "/portal/onboarding",
-    outreach: outreachId
-      ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
-      : "/crm/outreach",
-  };
+  const next = buildHandoverNextLinks({
+    clientId: client.clientId,
+    invoiceId,
+    outreachId,
+  });
   return {
     ok: true,
     pack: {

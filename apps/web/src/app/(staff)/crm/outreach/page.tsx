@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import {
   CrmBtn,
@@ -21,7 +22,17 @@ type GateOutcome =
     };
 
 export default function CrmOutreachPage() {
+  return (
+    <Suspense>
+      <OutreachInner />
+    </Suspense>
+  );
+}
+
+function OutreachInner() {
   const utils = trpc.useUtils();
+  const searchParams = useSearchParams();
+  const focusId = searchParams.get("id");
   const items = trpc.leadgen.outreach.list.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
 
@@ -65,14 +76,28 @@ export default function CrmOutreachPage() {
 
   const byState = useMemo(() => {
     const all = items.data ?? [];
+    const sortFocus = <T extends { id: string }>(list: T[]) => {
+      if (!focusId) return list;
+      return [...list].sort((a, b) => {
+        if (a.id === focusId) return -1;
+        if (b.id === focusId) return 1;
+        return 0;
+      });
+    };
     return {
-      drafts: all.filter((i) => i.state === "draft"),
-      approved: all.filter((i) => i.state === "approved"),
+      drafts: sortFocus(all.filter((i) => i.state === "draft")),
+      approved: sortFocus(all.filter((i) => i.state === "approved")),
       history: all.filter(
         (i) => i.state === "sent" || i.state === "discarded",
       ),
     };
-  }, [items.data]);
+  }, [items.data, focusId]);
+
+  useEffect(() => {
+    if (!focusId) return;
+    const el = document.getElementById(`outreach-${focusId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusId, byState.drafts, byState.approved]);
 
   function surface(r: GateOutcome, verb: string) {
     if (r.ok) {
@@ -121,7 +146,12 @@ export default function CrmOutreachPage() {
     item: NonNullable<typeof items.data>[number],
     actions: React.ReactNode,
   ) => (
-    <article key={item.id} className="crm-approval-mini">
+    <article
+      key={item.id}
+      id={`outreach-${item.id}`}
+      data-selected={focusId === item.id ? "true" : undefined}
+      className={`crm-approval-mini${focusId === item.id ? " is-focused" : ""}`}
+    >
       <div className="flex items-center justify-between gap-2">
         <CrmTag kind={item.channel === "gmail" ? "ochre" : "info"}>
           {item.channel} · {item.state}
