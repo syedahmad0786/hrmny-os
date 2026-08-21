@@ -668,6 +668,7 @@ export async function runAgentTools(input: {
         clientId: input.scope.clientId,
         email,
         displayName: "Agent portal invite",
+        next: "/portal/approvals",
         emailer: placeholderInbox ? createResendMock() : undefined,
       });
       results.push({

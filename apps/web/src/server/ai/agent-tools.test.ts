@@ -55,6 +55,9 @@ describe("runAgentTools funnel writes", () => {
       deliveryMode?: string;
     };
     expect(invite?.portalPath).toMatch(/\/portal\/login\/verify/);
+    expect(invite?.portalPath).toContain(
+      encodeURIComponent("/portal/approvals"),
+    );
     expect(invite?.deliveryMode).toBe("mock");
 
     const portalAsset = byTool["creative.sendToPortal"]?.data as {

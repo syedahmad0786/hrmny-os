@@ -17,6 +17,8 @@ export default function DeliveryBoardPage() {
   const clients = trpc.clients.list.useQuery();
   const agents = trpc.aiAdmin.customAgents.list.useQuery();
   const runAgent = trpc.aiAdmin.customAgents.run.useMutation();
+  const reviewHref = trpc.clients.portalUsers.reviewHref.useMutation();
+  const [portalMsg, setPortalMsg] = useState<string | null>(null);
   const demoResets = showDemoResets();
   const rhythms = (clients.data ?? []).slice(0, 8).map((c) => ({
     name: c.name,
@@ -102,9 +104,27 @@ export default function DeliveryBoardPage() {
           Creative QC
         </Link>
         {" · "}
-        <Link href="/portal" className="text-ochre underline">
-          Client portal
-        </Link>
+        <button
+          type="button"
+          className="text-ochre underline disabled:opacity-40"
+          disabled={!selected?.clientId || reviewHref.isPending}
+          onClick={() => {
+            if (!selected?.clientId) return;
+            setPortalMsg(null);
+            void reviewHref
+              .mutateAsync({ clientId: selected.clientId })
+              .then((data) => {
+                window.location.assign(data.portalPath);
+              })
+              .catch((err: unknown) => {
+                setPortalMsg(
+                  err instanceof Error ? err.message : "Portal invite failed",
+                );
+              });
+          }}
+        >
+          {reviewHref.isPending ? "Minting portal…" : "Client portal"}
+        </button>
         {" · "}
         <Link href="/account" className="text-ochre underline">
           Account rhythm
@@ -114,6 +134,9 @@ export default function DeliveryBoardPage() {
           Assets
         </Link>
       </p>
+      {portalMsg ? (
+        <p className="text-sm text-red-700">{portalMsg}</p>
+      ) : null}
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">
         <h2 className="font-display text-lg">Run agent on task</h2>
