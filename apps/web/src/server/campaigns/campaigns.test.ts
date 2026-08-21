@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActorContext } from "@hrmny/gate";
-import type { SocialPublishAdapter } from "@hrmny/integrations";
+import type {
+  SocialChannel,
+  SocialPublishAdapter,
+  SocialPublishInput,
+  SocialPublishResult,
+} from "@hrmny/integrations";
 import { resetCampaignMemory } from "./memory";
 import {
   createCampaignDraft,
@@ -38,9 +43,9 @@ function spyPublisher(): {
   calls: () => number;
 } {
   const publish = vi.fn(
-    async (input: { channel: string; content: string }) => ({
+    async (input: SocialPublishInput): Promise<SocialPublishResult> => ({
       published: true,
-      mode: "live" as const,
+      mode: "live",
       externalId: `live-${input.channel}-1`,
       channel: input.channel,
       url: `https://example.test/${input.channel}/1`,
@@ -49,7 +54,12 @@ function spyPublisher(): {
   return {
     adapter: {
       mode: "live",
-      listChannels: async () => ["linkedin", "instagram", "facebook", "x"],
+      listChannels: async (): Promise<SocialChannel[]> => [
+        "linkedin",
+        "instagram",
+        "facebook",
+        "x",
+      ],
       publishAfterApproval: publish,
     },
     calls: () => publish.mock.calls.length,
