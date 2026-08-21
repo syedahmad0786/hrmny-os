@@ -310,4 +310,99 @@ test.describe("Demo funnel", () => {
     await expect(open).toHaveAttribute("href", /\?phase=\d+/);
   });
 
+  test("portal campaign reject lands in partner inbox and Approvals deep-link", async ({
+    page,
+    request,
+  }) => {
+    const portalHeaders = {
+      "x-dev-role": "portal_a",
+      "content-type": "application/json",
+    };
+
+    // Memory campaign seed: two Demo Co drafts awaiting client sign-off.
+    const list = await request.get("/api/trpc/portal.campaignApprovals.list", {
+      headers: portalHeaders,
+    });
+    const listText = await list.text();
+    expect(list.ok(), listText).toBeTruthy();
+    const listBody = JSON.parse(listText) as {
+      result?: {
+        data?: {
+          json?: Array<{
+            campaignItemId: string;
+            title: string;
+            state: string;
+          }>;
+        };
+      };
+    };
+    const items =
+      listBody.result?.data?.json ??
+      (listBody.result?.data as unknown as Array<{
+        campaignItemId: string;
+        title: string;
+        state: string;
+      }>) ??
+      [];
+    const pending = (Array.isArray(items) ? items : []).find(
+      (i) => i.state === "pending_client",
+    );
+    expect(pending, listText).toBeTruthy();
+
+    const reject = await request.post(
+      "/api/trpc/portal.campaignApprovals.reject",
+      {
+        headers: portalHeaders,
+        data: {
+          json: {
+            id: pending!.campaignItemId,
+            feedback: "E2E: lead with the offer",
+          },
+        },
+      },
+    );
+    const rejectText = await reject.text();
+    expect(reject.ok(), rejectText).toBeTruthy();
+    expect(rejectText).not.toMatch(/"error"/);
+
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/notifications", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /Notifications/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator("body")).toContainText(
+      /Client campaign revisions/i,
+    );
+    await expect(page.locator("body")).toContainText(pending!.title);
+    await expect(page.locator("body")).toContainText(
+      /E2E: lead with the offer/i,
+    );
+    const idEsc = pending!.campaignItemId.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&",
+    );
+    // Match by href so earlier funnel notifies don't steal the click.
+    const openLink = page.locator(
+      `a[href*="/approvals?id=${pending!.campaignItemId}"]`,
+    );
+    await expect(openLink).toBeVisible();
+    await expect(openLink).toHaveAttribute(
+      "href",
+      new RegExp(`/approvals\\?id=${idEsc}`),
+    );
+
+    await openLink.click();
+    await expect(
+      page.getByRole("heading", { name: /Approval inbox/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(new RegExp(`id=${idEsc}`));
+    await expect(page.locator("body")).toContainText(pending!.title);
+    await expect(page.locator("body")).toContainText(
+      /Client requested changes/i,
+    );
+    await expect(page.locator("body")).toContainText(
+      /E2E: lead with the offer/i,
+    );
+  });
+
 });
