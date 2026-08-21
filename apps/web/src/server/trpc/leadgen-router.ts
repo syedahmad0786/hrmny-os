@@ -10,6 +10,7 @@ import {
   type TransitionResult,
 } from "@hrmny/gate";
 import {
+  createComposioLiveSend,
   createComposioStub,
   createEmailVerificationAdapter,
   createLeadSourceAdapter,
@@ -30,7 +31,28 @@ import { applyReplyIntent } from "../leadgen/reply-intent";
 import { runCompetitorScan, listCompetitorFindings } from "../leadgen/competitor-scan";
 import { runDailyLeadGen } from "../leadgen/pipeline";
 import { router, staffProcedure } from "./trpc";
+import { getVerifiedWorkAppConnection } from "./connections-router";
 
+async function resolveComposioSend(
+  employeeId: string | null | undefined,
+  roles: readonly string[],
+): Promise<ComposioSendAdapter> {
+  if (!employeeId || !process.env.COMPOSIO_API_KEY?.trim()) {
+    return createComposioStub();
+  }
+  try {
+    const verified = await getVerifiedWorkAppConnection(employeeId, "gmail", {
+      roles,
+    });
+    if (!verified) return createComposioStub();
+    return createComposioLiveSend({
+      client: verified.client,
+      connectedAccountId: verified.account.id,
+    });
+  } catch {
+    return createComposioStub();
+  }
+}
 /**
  * M8 outreach HITL + lead-gen surface (importable module — orchestrator wires
  * it into appRouter). AI proposes; the gate disposes: `send` is a `outreach`
@@ -204,11 +226,18 @@ export async function sendOutreach(input: {
   composio?: ComposioSendAdapter;
   audit?: AuditWriter;
   emit?: EmitHook;
-}): Promise<TransitionResult & { externalId?: string }> {
+}): Promise<
+  TransitionResult & { externalId?: string; sendMode?: string }
+> {
   const item = await getOutreach(input.id);
   if (!item) throw new Error(`Outreach not found: ${input.id}`);
-  const composio = input.composio ?? createComposioStub();
+  const composio =
+    input.composio ??
+    (await resolveComposioSend(input.actor.employeeId, input.actor.roles));
   let externalId: string | undefined;
+  let sendMode: string | undefined;
+  const toolkit =
+    item.channel === "linkedin" ? ("linkedin" as const) : ("gmail" as const);
 
   const result = await transition(
     input.actor,
@@ -221,12 +250,13 @@ export async function sendOutreach(input: {
       // without an actual send.
       apply: async () => {
         const res = await composio.sendAfterApproval({
-          toolkit: "gmail",
+          toolkit,
           to: item.recipient,
           subject: item.subject ?? undefined,
           body: item.body,
         });
         externalId = res.externalId;
+        sendMode = res.mode;
         const next = await patchOutreach(input.id, {
           state: "sent",
           sentAt: new Date().toISOString(),
@@ -239,7 +269,7 @@ export async function sendOutreach(input: {
     },
   );
 
-  return { ...result, externalId };
+  return { ...result, externalId, sendMode };
 }
 
 // ── tRPC surface ───────────────────────────────────────────
@@ -280,7 +310,10 @@ const outreachRouter = router({
   send: staffProcedure
     .input(z.object({ id: z.string() }))
     .mutation(({ input, ctx }) =>
-      sendOutreach({ id: input.id, actor: actorFromCtx(ctx) }),
+      sendOutreach({
+        id: input.id,
+        actor: actorFromCtx(ctx),
+      }),
     ),
 
   discard: staffProcedure

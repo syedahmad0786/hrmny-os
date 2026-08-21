@@ -47,7 +47,8 @@ Anon users hit SSO / “Checking access…”. Full UI needs `@hrmny.co` Google 
 Apollo **Prospect with Apollo** writes durable CRM discover deals (same pipeline store).  
 `/creative` → generate → **Attach & send to portal** lands an asset in `/portal/deliveries`.  
 `/portal/onboarding` lets the client acknowledge the active phase.  
-`/settings/ai` → custom agents **Run** on client/user/task memory sandbox (mock LLM if no OpenRouter credits).
+`/settings/ai` → custom agents **Run** on client/user/task memory sandbox (mock LLM if no OpenRouter credits).  
+`/approvals` → outreach HITL: after approve, Gmail send uses live Composio→Gmail when connected (else stub); LinkedIn copy-draft.
 
 ## Still mock until keys
 

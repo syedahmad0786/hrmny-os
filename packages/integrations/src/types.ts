@@ -12,7 +12,7 @@ export interface ComposioAdapter {
   startOAuth(toolkit: string, redirectUri: string): Promise<OAuthStartResult>;
   disconnect(connectionId: string): Promise<void>;
   status(toolkit: string, ownerId: string): Promise<ConnectionStatus>;
-  /** Optional HITL send — implemented by createComposioStub. */
+  /** Optional HITL send — stub or live Gmail after approval. */
   sendAfterApproval?(input: {
     toolkit: "gmail" | "linkedin";
     to: string;
@@ -21,7 +21,7 @@ export interface ComposioAdapter {
     connectionId?: string;
   }): Promise<{
     sent: boolean;
-    mode: "stub" | "copy_draft";
+    mode: "stub" | "copy_draft" | "live";
     externalId: string;
     channel: "gmail" | "linkedin";
   }>;

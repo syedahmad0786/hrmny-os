@@ -31,6 +31,6 @@ Verified against live Postgres (pgvector on): Apollo mock/live → durable disco
 ## Tools
 
 - Apollo / Hunter: auto-live when API key present (`APOLLO_MODE=mock` / `HUNTER_MODE=mock` forces stub)
-- Composio: OAuth/connect live when `COMPOSIO_API_KEY` set; HITL send stays stub/copy-draft (read-only tool guard)
+- Composio: OAuth/connect live when `COMPOSIO_API_KEY` set; HITL Gmail send uses live Composio→Gmail proxy when the staff user has an ACTIVE Gmail connection (else stub); LinkedIn stays copy-draft
 - Xero: mirror-only (`XERO_WRITE_ENABLED=false`)
 - OpenRouter: configured for chat/agents/images; mock fallback without credits

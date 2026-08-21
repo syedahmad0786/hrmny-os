@@ -3,8 +3,8 @@ import {
   createContact,
   createDeal,
   createNote,
-  type DealRow,
 } from "./repository";
+import type { DealRow } from "./types";
 
 export type ApolloCompanyHit = Record<string, unknown>;
 

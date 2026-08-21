@@ -3,6 +3,7 @@ export * from "./contracts";
 export * as salesgrowth from "./salesgrowth";
 export {
   createComposioStub,
+  createComposioLiveSend,
   type ComposioSendAdapter,
   type ComposioSendInput,
   type ComposioSendResult,
