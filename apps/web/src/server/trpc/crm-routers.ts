@@ -9,6 +9,7 @@ import {
   type ActorContext,
 } from "@hrmny/gate";
 import { toCsv } from "../crm/csv";
+import { runDemoClosedLoopCore } from "../crm/closed-loop";
 import {
   closeDurableDeal,
   durableHandoverPack,
@@ -1004,201 +1005,35 @@ export const crmRouter = router({
         .optional(),
     )
     .mutation(async ({ ctx, input }) => {
-      const stamp = Date.now();
-      let companyId: string;
-      let contactId: string;
-      let dealId: string;
-      let companyName: string;
-      let apolloMode: "mock" | "live" | null = null;
-
-      if (input?.viaApollo) {
-        const { importApolloCompaniesToCrm } = await import(
-          "../crm/apollo-import"
-        );
-        const { resolveIntegrationApiKey } = await import(
-          "../integrations/resolve-keys"
-        );
-        const { createApolloLive, createEmailVerificationAdapter } =
-          await import("@hrmny/integrations");
-        const { getDemoStore } = await import("../demo-store");
-        const query =
-          input?.companyName?.trim() || `Demo Retail UAE ${stamp}`;
-        const { apiKey } = await resolveIntegrationApiKey(
-          "apollo",
-          ctx.employeeId!,
-        );
-        const hunter = await resolveIntegrationApiKey(
-          "hunter",
-          ctx.employeeId!,
-        );
-        const apolloClient = apiKey
-          ? createApolloLive({ mode: "live", apiKey })
-          : getDemoStore().apollo;
-        apolloMode = apiKey ? "live" : "mock";
-        const hits = await apolloClient.searchCompanies(query);
-        const imported = await importApolloCompaniesToCrm({
-          query,
-          companies: hits as Record<string, unknown>[],
-          mode: apolloMode,
-          ownerEmployeeId: ctx.employeeId,
-          limit: 1,
-          verifier: createEmailVerificationAdapter(
-            hunter.apiKey
-              ? { mode: "live", apiKey: hunter.apiKey }
-              : { mode: "mock" },
-          ),
-        });
-        const first = imported.deals[0];
-        if (!first) {
-          return {
-            ok: false as const,
-            step: "apollo",
-            reason: "Apollo returned no companies",
-          };
-        }
-        companyId = first.companyId;
-        contactId = first.contactId ?? "";
-        dealId = first.dealId;
-        companyName = first.companyName;
-        if (!contactId) {
-          const contact = await createContact({
-            companyId,
-            firstName: "Apollo",
-            lastName: "Prospect",
-            email: `apollo+${stamp}@example.com`,
-            isPrimary: true,
-          });
-          contactId = contact.contactId;
-          await updateDeal(dealId, { primaryContactId: contactId });
-        }
-      } else {
-        companyName =
-          input?.companyName?.trim() || `Demo Hunt ${stamp}`;
-        const company = await createCompany({
-          name: companyName,
-          market: "UAE",
-          website: `https://demo-${stamp}.example`,
-        });
-        const contact = await createContact({
-          companyId: company.companyId,
-          firstName: "Demo",
-          lastName: "Prospect",
-          email: `prospect+${stamp}@example.com`,
-          title: "Marketing Lead",
-          isPrimary: true,
-        });
-        const deal = await createDeal({
-          companyName: company.name,
-          companyId: company.companyId,
-          primaryContactId: contact.contactId,
-          leadSourceLane: "relationship_led",
-          ownerEmployeeId: ctx.employeeId,
-        });
-        companyId = company.companyId;
-        contactId = contact.contactId;
-        dealId = deal.dealId;
-      }
-
-      const stages = [
-        "qualify",
-        "engage",
-        "scope",
-        "propose",
-        "price_cost",
-      ] as const;
-      for (const to of stages) {
-        const moved = await moveDealStage({
-          dealId,
-          to,
-          actorEmployeeId: ctx.employeeId,
-        });
-        if (!moved.ok) {
-          return {
-            ok: false as const,
-            step: `stage:${to}`,
-            reason: moved.reason,
-          };
-        }
-      }
-
-      await updateDeal(dealId, {
-        quoteValue: "50000",
-        internalCost: "28000",
-      });
-
-      const closed = await closeDurableDeal({
-        dealId,
-        outcome: "won",
+      const result = await runDemoClosedLoopCore({
+        companyName: input?.companyName,
+        viaApollo: input?.viaApollo,
         actorEmployeeId: ctx.employeeId,
       });
-      if (!closed.ok) {
-        return {
-          ok: false as const,
-          step: "close",
-          reason: closed.reason,
-          code: closed.code,
-        };
+      if (!result.ok) {
+        return result;
       }
-
-      const pack = await durableHandoverPack({
-        dealId,
-        actorEmployeeId: ctx.employeeId,
-      });
-      if (!pack.ok) {
-        return {
-          ok: false as const,
-          step: "handover",
-          reason: pack.reason,
-          code: pack.code,
-          dealId,
-        };
-      }
-
-      const calendarId = pack.calendarId;
-      const portalInvite = pack.portalInvite;
-      const outreachId = pack.outreachId;
 
       await auditMutation(
         ctx,
         "crm.runDemoClosedLoop",
         "deal",
-        dealId,
+        result.dealId,
         null,
         {
-          companyId,
-          clientId: pack.client.clientId,
-          taskId: pack.task?.taskId ?? null,
-          calendarId,
-          portalInvite,
-          outreachId,
-          invoiceId: pack.invoiceId,
-          viaApollo: Boolean(input?.viaApollo),
-          apolloMode,
+          companyId: result.companyId,
+          clientId: result.clientId,
+          taskId: result.taskId,
+          calendarId: result.calendarId,
+          portalInvite: result.portalInvite,
+          outreachId: result.outreachId,
+          invoiceId: result.invoiceId,
+          viaApollo: result.viaApollo,
+          apolloMode: result.apolloMode,
         },
       );
 
-      return {
-        ok: true as const,
-        companyId,
-        contactId,
-        dealId,
-        clientId: pack.client.clientId,
-        clientName: pack.client.name,
-        taskId: pack.task?.taskId ?? null,
-        calendarId,
-        portalInvite,
-        outreachId,
-        invoiceId: pack.invoiceId,
-        onboardingPhases: pack.onboardingPhases,
-        fired: pack.pack.fired,
-        viaApollo: Boolean(input?.viaApollo),
-        apolloMode,
-        next: {
-          crmDeal: `/crm/deals/${dealId}`,
-          ...pack.next,
-          billing: "/billing",
-        },
-      };
+      return result;
     }),
 
   /** Durable prospecting helpers (Postgres / CRM memory). */

@@ -578,7 +578,74 @@ export async function runAgentTools(input: {
     }
   }
 
+  /**
+   * Org-wide prospect → won → handover → onboarding. Prompt-gated so
+   * crm.* / * allowlists alone cannot fire a full closed loop on every run.
+   * Never added to DEFAULT_FUNNEL_AGENT_TOOLS.
+   */
+  const wantsClosedLoop =
+    !input.scope.clientId &&
+    (want("crm.closed_loop") ||
+      want("crm.runDemoClosedLoop") ||
+      want("funnel.closed_loop")) &&
+    /closed\s*loop|runDemoClosedLoop|won\s*handover|prospect\s*(?:→|->|to)\s*won/i.test(
+      input.prompt,
+    );
+
+  if (wantsClosedLoop) {
+    try {
+      const { runDemoClosedLoopCore } = await import("../crm/closed-loop");
+      const viaApollo =
+        /via\s*apollo|closed\s*loop[^\n]{0,40}apollo|apollo[^\n]{0,40}closed\s*loop/i.test(
+          input.prompt,
+        );
+      const companyMatch = input.prompt.match(
+        /(?:company|for)\s*[:=]\s*["']?([A-Za-z0-9 .&'-]{2,80}?)["']?(?:\s|$|,|\.|via)/i,
+      );
+      const loop = await runDemoClosedLoopCore({
+        companyName: companyMatch?.[1]?.trim(),
+        viaApollo,
+        actorEmployeeId: input.scope.employeeId,
+      });
+      if (!loop.ok) {
+        results.push({
+          tool: "crm.closed_loop",
+          ok: false,
+          error: `${loop.step}: ${loop.reason}`,
+          data: loop,
+        });
+      } else {
+        results.push({
+          tool: "crm.closed_loop",
+          ok: true,
+          data: {
+            clientId: loop.clientId,
+            clientName: loop.clientName,
+            dealId: loop.dealId,
+            companyId: loop.companyId,
+            taskId: loop.taskId,
+            calendarId: loop.calendarId,
+            outreachId: loop.outreachId,
+            invoiceId: loop.invoiceId,
+            onboardingPhases: loop.onboardingPhases,
+            viaApollo: loop.viaApollo,
+            apolloMode: loop.apolloMode,
+            next: loop.next,
+            fired: loop.fired,
+          },
+        });
+      }
+    } catch (err) {
+      results.push({
+        tool: "crm.closed_loop",
+        ok: false,
+        error: err instanceof Error ? err.message : "crm_closed_loop_failed",
+      });
+    }
+  }
+
   if (
+    !wantsClosedLoop &&
     !input.scope.clientId &&
     (want("crm.prospect") ||
       want("apollo.import") ||

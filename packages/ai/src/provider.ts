@@ -220,6 +220,45 @@ export function createMockProvider(
         };
       }
 
+      // Staff closed-loop demo without OpenRouter when catalog lists the tool.
+      const catalogHasClosedLoop =
+        /(?:^|\n)-\s*(?:crm\.closed_loop|crm\.runDemoClosedLoop|funnel\.closed_loop)\s*:/i.test(
+          blob,
+        );
+      const sawClosedLoopObservation =
+        /Observation from (?:crm\.closed_loop|crm\.runDemoClosedLoop|funnel\.closed_loop)/i.test(
+          blob,
+        );
+      const wantsClosedLoop =
+        /closed\s*loop|won\s*handover|prospect\s*(?:→|->|to)\s*won/i.test(
+          userText,
+        );
+      if (catalogHasClosedLoop && wantsClosedLoop && !sawClosedLoopObservation) {
+        const prompt =
+          userText.trim().slice(0, 400) || "Run demo closed loop";
+        return {
+          text: [
+            "```tool",
+            JSON.stringify({
+              name: "crm.closed_loop",
+              arguments: { prompt },
+            }),
+            "```",
+          ].join("\n"),
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+      if (sawClosedLoopObservation) {
+        return {
+          text:
+            "Completed the CRM closed loop: prospected, marked won, " +
+            "emitted handover, and started client onboarding.",
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+
       return {
         text: `[mock:${options.model ?? defaultModel}] stub response`,
         provider: "mock",
