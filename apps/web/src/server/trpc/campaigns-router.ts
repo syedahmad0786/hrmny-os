@@ -1,7 +1,15 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { CAMPAIGN_TRANSITIONS, type ActorContext } from "@hrmny/gate";
-import type { SocialChannel, SocialPublishResult } from "@hrmny/integrations";
+import type {
+  SocialChannel,
+  SocialPublishAdapter,
+  SocialPublishResult,
+} from "@hrmny/integrations";
+import {
+  createComposioLive,
+  createLinkedInSocialPublishAdapter,
+} from "@hrmny/integrations";
 import {
   campaignBackendMode,
   campaignHealth,
@@ -25,8 +33,8 @@ import { router, staffProcedure } from "./trpc";
  * stub; internals are now DB-backed (campaign_items) with an in-memory
  * fallback via ../campaigns/repository. Every status change routes through the
  * gate engine; publish stays HITL (approved→published only) and fires a
- * SocialPublishAdapter stub from inside the gate. Wiring into appRouter stays
- * orchestrator-only (root.ts).
+ * SocialPublishAdapter (live LinkedIn via Composio when connected, else stub)
+ * from inside the gate. Wiring into appRouter stays orchestrator-only (root.ts).
  */
 
 type CampaignStatus = keyof typeof CAMPAIGN_TRANSITIONS;
@@ -49,6 +57,33 @@ function toCampaignItem(row: CampaignItemRow): CampaignItem {
     scheduledFor: row.scheduledFor ?? "",
     clientId: row.clientId ?? "",
   };
+}
+
+const ACTIVE_COMPOSIO_STATUSES = new Set(["ACTIVE", "CONNECTED", "SUCCESS"]);
+
+/** Resolve a live LinkedIn SocialPublishAdapter when Composio has an ACTIVE account. */
+async function resolveLinkedInPublisher(
+  employeeId: string | null | undefined,
+): Promise<SocialPublishAdapter | undefined> {
+  const apiKey = process.env.COMPOSIO_API_KEY?.trim();
+  if (!apiKey || !employeeId?.trim()) return undefined;
+  try {
+    const client = createComposioLive({ apiKey });
+    const accounts = await client.listUserConnectedAccounts(employeeId);
+    const account = accounts.find(
+      (candidate) =>
+        candidate.toolkit.slug.toLowerCase() === "linkedin" &&
+        !candidate.is_disabled &&
+        ACTIVE_COMPOSIO_STATUSES.has(candidate.status.toUpperCase()),
+    );
+    if (!account) return undefined;
+    return createLinkedInSocialPublishAdapter({
+      client,
+      connectedAccountId: account.id,
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 function actorFromCtx(ctx: {
@@ -107,8 +142,8 @@ export const campaignsRouter = router({
   /**
    * Gate-routed status change (approve / publish / archive). Publish
    * (approved→published) is HITL: the gate blocks any publish that skips a
-   * prior approve, and the external post is a SocialPublishAdapter stub fired
-   * inside the apply step.
+   * prior approve. LinkedIn uses a live Composio publisher when connected;
+   * otherwise the stub refuses durable publish (stays approved).
    */
   transition: staffProcedure
     .input(
@@ -119,11 +154,19 @@ export const campaignsRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      let publisher: SocialPublishAdapter | undefined;
+      if (input.to === "published") {
+        const existing = await getCampaign(input.id);
+        if (existing?.channel === "linkedin") {
+          publisher = await resolveLinkedInPublisher(ctx.employeeId);
+        }
+      }
       const result = await transitionCampaign({
         actor: actorFromCtx(ctx),
         id: input.id,
         to: input.to,
         overrideReason: input.overrideReason,
+        publisher,
       });
       if (!result.ok) {
         return {

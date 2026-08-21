@@ -22,6 +22,12 @@ export {
   type CanvaDesignSummary,
 } from "./composio/canva";
 export {
+  createLinkedInSocialPublishAdapter,
+  authorUrnFromLinkedInProfile,
+  externalIdFromLinkedInPost,
+  unwrapComposioToolData,
+} from "./composio/linkedin-publish";
+export {
   createAsanaDirect,
   createAsanaViaComposio,
   type AsanaAdapter,

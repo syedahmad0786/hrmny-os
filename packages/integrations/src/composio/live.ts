@@ -63,13 +63,16 @@ const toolResponseSchema = z
   })
   .passthrough();
 
-const readOnlyToolSlugs = new Set([
+/** Approved Composio tool slugs. Writes are HITL-gated by callers (campaign publish). */
+const approvedToolSlugs = new Set([
   "ONE_DRIVE_SEARCH_DRIVE_ITEMS",
   "OUTLOOK_SEARCH_MESSAGES",
   "SLACK_SEARCH_MESSAGES",
   "MICROSOFT_TEAMS_SEARCH_MESSAGES",
   "JIRA_SEARCH_ISSUES",
   "CANVA_LIST_USER_DESIGNS",
+  "LINKEDIN_GET_MY_INFO",
+  "LINKEDIN_CREATE_LINKED_IN_POST",
 ]);
 
 export type ComposioConnectedAccount = z.infer<typeof connectedAccountSchema>;
@@ -326,9 +329,9 @@ export function createComposioLive(input: {
       text?: string;
       version?: string;
     }) {
-      if (!readOnlyToolSlugs.has(toolInput.toolSlug))
+      if (!approvedToolSlugs.has(toolInput.toolSlug))
         throw new ComposioApiError(
-          "Only approved read-only Composio tools may be executed",
+          "Only approved Composio tools may be executed",
           403,
         );
       const result = toolResponseSchema.parse(

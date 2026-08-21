@@ -96,9 +96,9 @@ export const CONNECTION_CATALOG = [
   {
     toolkit: "linkedin",
     label: "LinkedIn",
-    authType: "manual",
-    ready: false,
-    note: "Copy-draft only in V1 to protect the account.",
+    authType: "oauth",
+    ready: true,
+    note: "Connect via Composio-managed OAuth; campaign publish is HITL when connected.",
   },
   {
     toolkit: "xero",

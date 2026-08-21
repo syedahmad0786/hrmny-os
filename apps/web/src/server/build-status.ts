@@ -149,8 +149,9 @@ export async function getBuildStatus() {
     {
       id: "linkedin",
       label: "LinkedIn",
-      status: "mock",
-      detail: "No OAuth — copy-draft only (ban risk)",
+      status: "missing",
+      detail:
+        "Connect via Composio OAuth; campaign publish is HITL when connected",
     },
     {
       id: "xero",

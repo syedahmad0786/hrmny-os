@@ -243,15 +243,15 @@ export default function ConnectionsPage() {
                         .then((result) => setRedirect(result.redirectUrl));
                       return;
                     }
-                    if (item.toolkit === "canva") {
+                    if (item.toolkit === "canva" || item.toolkit === "linkedin") {
                       void authorizeManaged
-                        .mutateAsync({ toolkit: "canva" })
+                        .mutateAsync({ toolkit: item.toolkit })
                         .then((result) => setRedirect(result.redirectUrl));
                     }
                   }}
                 >
                   {item.ready
-                    ? item.toolkit === "canva"
+                    ? item.toolkit === "canva" || item.toolkit === "linkedin"
                       ? "Connect with Composio"
                       : "Connect with OAuth"
                     : "Provider setup needed"}

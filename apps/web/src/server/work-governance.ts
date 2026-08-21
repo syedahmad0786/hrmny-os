@@ -53,6 +53,7 @@ const CURATED_WORK_APPS = new Set([
   "google_workspace",
   "hunter",
   "jira",
+  "linkedin",
   "microsoft_teams",
   "n8n",
   "one_drive",
@@ -61,6 +62,7 @@ const CURATED_WORK_APPS = new Set([
   "salesforce",
   "servicenow",
   "slack",
+  "xero",
   "zoom",
 ]);
 
