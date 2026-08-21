@@ -25,6 +25,23 @@ import { router, staffProcedure, type TrpcContext } from "./trpc";
 
 const AI_ADMIN_ROLES = ["partner", "director", "finance"] as const;
 
+type CustomAgentRow = {
+  customAgentId: string;
+  slug: string;
+  displayName: string;
+  responsibility: string;
+  systemPrompt: string;
+  model: string | null;
+  enabled: boolean;
+  producesDrafts: boolean;
+  allowedTools: unknown;
+  createdByEmployeeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const memCustomAgents: CustomAgentRow[] = [];
+
 function requireAiAdmin(ctx: TrpcContext) {
   if (!ctx.employeeId) throw new TRPCError({ code: "UNAUTHORIZED" });
   if (!ctx.roles.some((role) => AI_ADMIN_ROLES.includes(role as never))) {
@@ -192,4 +209,247 @@ export const aiAdminRouter = router({
       });
       return result;
     }),
+
+  /** Custom agents (CrewAI/LangSmith-style registry) — Postgres or memory. */
+  customAgents: router({
+    list: staffProcedure.query(async ({ ctx }) => {
+      requireAiAdmin(ctx);
+      const db = getDb();
+      if (!db) return memCustomAgents;
+      return db.execute<CustomAgentRow>(sql`
+        select
+          custom_agent_id as "customAgentId",
+          slug, display_name as "displayName",
+          responsibility, system_prompt as "systemPrompt",
+          model, enabled,
+          produces_drafts as "producesDrafts",
+          coalesce(allowed_tools, '[]'::jsonb) as "allowedTools",
+          created_by_employee_id as "createdByEmployeeId",
+          created_at::text as "createdAt",
+          updated_at::text as "updatedAt"
+        from public.custom_agent
+        order by updated_at desc
+        limit 100
+      `);
+    }),
+
+    create: staffProcedure
+      .input(
+        z.object({
+          slug: z
+            .string()
+            .trim()
+            .min(2)
+            .max(80)
+            .regex(/^[a-z0-9][a-z0-9_-]*$/),
+          displayName: z.string().min(1).max(120),
+          responsibility: z.string().max(500).optional(),
+          systemPrompt: z.string().max(8000).optional(),
+          model: z.string().max(120).optional(),
+          producesDrafts: z.boolean().optional(),
+          allowedTools: z.array(z.string()).max(40).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const actor = requireAiAdmin(ctx);
+        const db = getDb();
+        if (!db) {
+          if (memCustomAgents.some((a) => a.slug === input.slug)) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "Slug already exists",
+            });
+          }
+          const row: CustomAgentRow = {
+            customAgentId: crypto.randomUUID(),
+            slug: input.slug,
+            displayName: input.displayName,
+            responsibility: input.responsibility ?? "",
+            systemPrompt: input.systemPrompt ?? "",
+            model: input.model ?? null,
+            enabled: true,
+            producesDrafts: input.producesDrafts ?? true,
+            allowedTools: input.allowedTools ?? [],
+            createdByEmployeeId: actor.employeeId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          memCustomAgents.unshift(row);
+          await writeAudit({
+            actorEmployeeId: actor.employeeId,
+            action: "ai.custom_agent.created",
+            entityType: "custom_agent",
+            entityId: row.customAgentId,
+            before: null,
+            after: { slug: row.slug },
+            reason: null,
+          });
+          return row;
+        }
+        try {
+          const rows = await db.execute<CustomAgentRow>(sql`
+            insert into public.custom_agent (
+              slug, display_name, responsibility, system_prompt, model,
+              produces_drafts, allowed_tools, created_by_employee_id
+            ) values (
+              ${input.slug},
+              ${input.displayName},
+              ${input.responsibility ?? ""},
+              ${input.systemPrompt ?? ""},
+              ${input.model ?? null},
+              ${input.producesDrafts ?? true},
+              ${JSON.stringify(input.allowedTools ?? [])}::jsonb,
+              ${actor.employeeId}::uuid
+            )
+            returning
+              custom_agent_id as "customAgentId",
+              slug, display_name as "displayName",
+              responsibility, system_prompt as "systemPrompt",
+              model, enabled,
+              produces_drafts as "producesDrafts",
+              coalesce(allowed_tools, '[]'::jsonb) as "allowedTools",
+              created_by_employee_id as "createdByEmployeeId",
+              created_at::text as "createdAt",
+              updated_at::text as "updatedAt"
+          `);
+          const row = rows[0]!;
+          await writeAudit({
+            actorEmployeeId: actor.employeeId,
+            action: "ai.custom_agent.created",
+            entityType: "custom_agent",
+            entityId: row.customAgentId,
+            before: null,
+            after: { slug: row.slug },
+            reason: null,
+          });
+          return row;
+        } catch (e) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: e instanceof Error ? e.message : "Could not create agent",
+          });
+        }
+      }),
+
+    update: staffProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          displayName: z.string().min(1).max(120).optional(),
+          responsibility: z.string().max(500).optional(),
+          systemPrompt: z.string().max(8000).optional(),
+          model: z.string().max(120).nullable().optional(),
+          enabled: z.boolean().optional(),
+          producesDrafts: z.boolean().optional(),
+          allowedTools: z.array(z.string()).max(40).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const actor = requireAiAdmin(ctx);
+        const db = getDb();
+        if (!db) {
+          const row = memCustomAgents.find((a) => a.customAgentId === input.id);
+          if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+          if (input.displayName !== undefined) row.displayName = input.displayName;
+          if (input.responsibility !== undefined)
+            row.responsibility = input.responsibility;
+          if (input.systemPrompt !== undefined)
+            row.systemPrompt = input.systemPrompt;
+          if (input.model !== undefined) row.model = input.model;
+          if (input.enabled !== undefined) row.enabled = input.enabled;
+          if (input.producesDrafts !== undefined)
+            row.producesDrafts = input.producesDrafts;
+          if (input.allowedTools !== undefined)
+            row.allowedTools = input.allowedTools;
+          row.updatedAt = new Date().toISOString();
+          await writeAudit({
+            actorEmployeeId: actor.employeeId,
+            action: "ai.custom_agent.updated",
+            entityType: "custom_agent",
+            entityId: row.customAgentId,
+            before: null,
+            after: { slug: row.slug, enabled: row.enabled },
+            reason: null,
+          });
+          return row;
+        }
+        const rows = await db.execute<CustomAgentRow>(sql`
+          update public.custom_agent set
+            display_name = coalesce(${input.displayName ?? null}, display_name),
+            responsibility = coalesce(${input.responsibility ?? null}, responsibility),
+            system_prompt = coalesce(${input.systemPrompt ?? null}, system_prompt),
+            model = case
+              when ${input.model === undefined}::boolean then model
+              else ${input.model ?? null}
+            end,
+            enabled = coalesce(${input.enabled ?? null}::boolean, enabled),
+            produces_drafts = coalesce(${input.producesDrafts ?? null}::boolean, produces_drafts),
+            allowed_tools = coalesce(${input.allowedTools ? JSON.stringify(input.allowedTools) : null}::jsonb, allowed_tools),
+            updated_at = now()
+          where custom_agent_id = ${input.id}::uuid
+          returning
+            custom_agent_id as "customAgentId",
+            slug, display_name as "displayName",
+            responsibility, system_prompt as "systemPrompt",
+            model, enabled,
+            produces_drafts as "producesDrafts",
+            coalesce(allowed_tools, '[]'::jsonb) as "allowedTools",
+            created_by_employee_id as "createdByEmployeeId",
+            created_at::text as "createdAt",
+            updated_at::text as "updatedAt"
+        `);
+        const row = rows[0];
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        await writeAudit({
+          actorEmployeeId: actor.employeeId,
+          action: "ai.custom_agent.updated",
+          entityType: "custom_agent",
+          entityId: row.customAgentId,
+          before: null,
+          after: { slug: row.slug, enabled: row.enabled },
+          reason: null,
+        });
+        return row;
+      }),
+
+    remove: staffProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        const actor = requireAiAdmin(ctx);
+        const db = getDb();
+        if (!db) {
+          const idx = memCustomAgents.findIndex(
+            (a) => a.customAgentId === input.id,
+          );
+          if (idx < 0) throw new TRPCError({ code: "NOT_FOUND" });
+          const [removed] = memCustomAgents.splice(idx, 1);
+          await writeAudit({
+            actorEmployeeId: actor.employeeId,
+            action: "ai.custom_agent.removed",
+            entityType: "custom_agent",
+            entityId: input.id,
+            before: { slug: removed?.slug },
+            after: null,
+            reason: null,
+          });
+          return { ok: true };
+        }
+        const rows = await db.execute<{ id: string; slug: string }>(sql`
+          delete from public.custom_agent
+          where custom_agent_id = ${input.id}::uuid
+          returning custom_agent_id as id, slug
+        `);
+        if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
+        await writeAudit({
+          actorEmployeeId: actor.employeeId,
+          action: "ai.custom_agent.removed",
+          entityType: "custom_agent",
+          entityId: input.id,
+          before: { slug: rows[0].slug },
+          after: null,
+          reason: null,
+        });
+        return { ok: true };
+      }),
+  }),
 });

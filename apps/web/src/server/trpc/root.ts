@@ -49,6 +49,9 @@ import { crmRouter } from "./crm-routers";
 import { crmAiRouter } from "./crm-ai-router";
 import { crmForecastRouter } from "./crm-forecast-router";
 import { ticketsRouter } from "./tickets-router";
+import { notificationsRouter } from "./notifications-router";
+import { chatRouter } from "./chat-router";
+import { creativeGenRouter } from "./creative-gen-router";
 import { automationRouter } from "./automation-router";
 import { aiAdminRouter } from "./ai-admin-router";
 import { campaignsRouter } from "./campaigns-router";
@@ -776,8 +779,14 @@ export const appRouter = router({
   crmAi: crmAiRouter,
   /** CRM forecast/reporting: weighted pipeline, forecast, win/loss, stage conversion (read-only). */
   crmForecast: crmForecastRouter,
-  /** Support tickets (team + portal requester) — memory stub until 0004_tickets applied. */
+  /** Support tickets (team + portal requester) — Postgres or memory. */
   tickets: ticketsRouter,
+  /** OS notifications (durable inbox separate from work.personal.inbox). */
+  notifications: notificationsRouter,
+  /** Staff chat — OpenRouter + ReAct harness (DeepSeek/QM-style). */
+  chat: chatRouter,
+  /** Creative image generation via OpenRouter / mock SVG. */
+  creativeGen: creativeGenRouter,
   /** n8n automation — health / list / propose / HITL trigger (automation-orchestrator). */
   automation: automationRouter,
   scopes: scopesRouter,

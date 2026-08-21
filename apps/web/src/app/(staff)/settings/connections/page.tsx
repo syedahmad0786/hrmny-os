@@ -303,23 +303,8 @@ export default function ConnectionsPage() {
                     {account?.status.toLowerCase() ?? "available"}
                   </span>
                 </div>
-                {account ? (
+                <div className="mt-4 flex flex-wrap gap-2">
                   <Button
-                    className="mt-4"
-                    type="button"
-                    variant="ghost"
-                    disabled={disconnectManaged.isPending}
-                    onClick={() =>
-                      disconnectManaged.mutate({
-                        id: account.connectionAccountId,
-                      })
-                    }
-                  >
-                    Disconnect
-                  </Button>
-                ) : (
-                  <Button
-                    className="mt-4"
                     type="button"
                     variant="ghost"
                     disabled={!toolkit.allowed || authorizeManaged.isPending}
@@ -327,14 +312,32 @@ export default function ConnectionsPage() {
                       authorizeManaged.mutate({ toolkit: toolkit.slug })
                     }
                   >
-                    Connect
+                    {account ? "Reconnect" : "Connect"}
                   </Button>
-                )}
+                  {account ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={disconnectManaged.isPending}
+                      onClick={() =>
+                        disconnectManaged.mutate({
+                          id: account.connectionAccountId,
+                        })
+                      }
+                    >
+                      Disconnect
+                    </Button>
+                  ) : null}
+                </div>
                 {!toolkit.allowed ? (
                   <p className="mt-2 text-xs font-semibold text-amber-800">
                     Blocked by the organization connected-app policy
                   </p>
-                ) : null}
+                ) : (
+                  <p className="mt-2 text-xs text-muted">
+                    Each teammate connects their own Composio account.
+                  </p>
+                )}
               </div>
             );
           })}

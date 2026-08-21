@@ -22,7 +22,14 @@ export default function CreativeQcPage() {
   const transition = trpc.tasks.transition.useMutation({
     onSuccess: () => void utils.tasks.invalidate(),
   });
+  const gens = trpc.creativeGen.list.useQuery({ limit: 8 });
+  const generate = trpc.creativeGen.generate.useMutation({
+    onSuccess: () => void utils.creativeGen.list.invalidate(),
+  });
   const [msg, setMsg] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState(
+    "Ochre and sand brand moodboard — soft studio light, editorial product still life",
+  );
 
   async function tryClientFacing() {
     if (!taskId) return;
@@ -60,9 +67,9 @@ export default function CreativeQcPage() {
     <main className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl font-semibold">Creative QC</h1>
+          <h1 className="font-display text-3xl font-semibold">Creative</h1>
           <p className="text-muted">
-            State 5 (`qc`) — client-facing blocked until internal approve
+            QC gate plus OpenRouter image generation for creative tasks
           </p>
         </div>
         {showDemoResets() ? (
@@ -77,6 +84,64 @@ export default function CreativeQcPage() {
       </div>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4 text-sm">
+        <h2 className="font-display text-lg font-semibold">Image generation</h2>
+        <p className="mt-1 text-muted">
+          Third-party LLM via OpenRouter (Gemini image / compatible). Mock SVG
+          when keys or credits are unavailable.
+        </p>
+        <textarea
+          className="mt-3 min-h-[80px] w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+        <Button
+          className="mt-3"
+          type="button"
+          disabled={generate.isPending || prompt.trim().length < 3}
+          onClick={() =>
+            generate.mutate({
+              prompt: prompt.trim(),
+            })
+          }
+        >
+          {generate.isPending ? "Generating…" : "Generate image"}
+        </Button>
+        {generate.error ? (
+          <p className="mt-2 text-red-700">{generate.error.message}</p>
+        ) : null}
+        {generate.data?.imageUrl ? (
+          <div className="mt-4">
+            <p className="text-xs text-muted">
+              {generate.data.provider} · {generate.data.model}
+            </p>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={generate.data.imageUrl}
+              alt="Generated creative"
+              className="mt-2 max-h-80 rounded-lg border border-sand object-contain"
+            />
+          </div>
+        ) : null}
+        {(gens.data?.length ?? 0) > 0 ? (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {(gens.data ?? []).map((g) =>
+              g.imageUrl ? (
+                <div key={g.creativeGenerationId} className="text-xs">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={g.imageUrl}
+                    alt={g.prompt}
+                    className="aspect-square w-full rounded-md border border-sand object-cover"
+                  />
+                  <p className="mt-1 line-clamp-2 text-muted">{g.prompt}</p>
+                </div>
+              ) : null,
+            )}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="rounded-lg border border-sand bg-white/70 p-4 text-sm">
         <p>
           Task: <strong>{task.data?.title ?? "…"}</strong>
         </p>
@@ -88,7 +153,11 @@ export default function CreativeQcPage() {
           Tip: switch Dev role to Creative Director before QC pass.
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button type="button" variant="ghost" onClick={() => void tryClientFacing()}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => void tryClientFacing()}
+          >
             Advance to client_review (expect block)
           </Button>
           <Button type="button" onClick={() => void passThenAdvance()}>
