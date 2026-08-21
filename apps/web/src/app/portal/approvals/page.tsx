@@ -12,10 +12,10 @@ export default function PortalApprovalsPage() {
   });
 
   return (
-    <main className="flex flex-col gap-6">
+    <main className="flex flex-col gap-6" data-testid="portal-approvals">
       <h1 className="font-display text-3xl font-semibold text-ink">Approvals</h1>
       <p className="text-muted">Pending client approvals for your account only.</p>
-      <ul className="space-y-4">
+      <ul className="space-y-4" data-testid="portal-approvals-list">
         {(list.data ?? []).map((item) => (
           <ApprovalRow
             key={item.approvalId}
@@ -34,7 +34,9 @@ export default function PortalApprovalsPage() {
           />
         ))}
         {!list.data?.length && (
-          <li className="text-sm text-muted">No approvals queued</li>
+          <li className="text-sm text-muted" data-testid="portal-approvals-empty">
+            No approvals queued
+          </li>
         )}
       </ul>
     </main>
@@ -62,22 +64,35 @@ function ApprovalRow({
   const [reason, setReason] = useState("");
 
   return (
-    <li className="flex flex-col gap-3 border-b border-[#D9D0C4] pb-4">
+    <li
+      className="flex flex-col gap-3 border-b border-[#D9D0C4] pb-4"
+      data-testid={`portal-approval-${item.approvalId}`}
+      data-approval-status={item.status}
+      data-approval-title={item.title}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="font-medium text-ink">{item.title}</p>
+          <p className="font-medium text-ink" data-testid="portal-approval-title">
+            {item.title}
+          </p>
           <p className="text-sm text-muted">
             {item.kind} · SLA {item.slaHours}h · {item.status}
           </p>
         </div>
         {item.status === "pending" && !rejecting && (
           <div className="flex gap-2">
-            <Button type="button" onClick={onApprove} disabled={pending}>
+            <Button
+              type="button"
+              data-testid="portal-approval-approve"
+              onClick={onApprove}
+              disabled={pending}
+            >
               Approve
             </Button>
             <Button
               type="button"
               variant="ghost"
+              data-testid="portal-approval-reject"
               onClick={() => setRejecting(true)}
               disabled={pending}
             >
@@ -90,6 +105,7 @@ function ApprovalRow({
       {item.status === "pending" && rejecting && (
         <form
           className="flex flex-col gap-2"
+          data-testid="portal-approval-reject-form"
           onSubmit={(event) => {
             event.preventDefault();
             if (!reason.trim()) return;
@@ -100,18 +116,24 @@ function ApprovalRow({
         >
           <textarea
             className="min-h-24 rounded border border-[#D9D0C4] bg-white px-3 py-2 text-ink"
+            data-testid="portal-approval-reject-reason"
             placeholder="What needs to change? (required)"
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             required
           />
           <div className="flex gap-2">
-            <Button type="submit" disabled={!reason.trim() || pending}>
+            <Button
+              type="submit"
+              data-testid="portal-approval-reject-send"
+              disabled={!reason.trim() || pending}
+            >
               Send request
             </Button>
             <Button
               type="button"
               variant="ghost"
+              data-testid="portal-approval-reject-cancel"
               onClick={() => {
                 setRejecting(false);
                 setReason("");
