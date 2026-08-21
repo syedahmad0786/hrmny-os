@@ -177,6 +177,33 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       const inboundDeal = await getDeal(inbound.dealId);
       expect(inboundDeal?.dealId).toBe(inbound.dealId);
       expect(inboundDeal?.leadSourceLane).toBe("inbound");
+
+      const month = new Date().toISOString().slice(0, 7);
+      const calendar = await caller.calendars.create({
+        clientId: loop.clientId,
+        month,
+        focusPoints: ["Launch reel", "Product stills"],
+      });
+      expect(calendar.calendarId).toBeTruthy();
+      const slot = await caller.calendars.addSlot({
+        calendarId: calendar.calendarId,
+        slotDate: `${month}-15`,
+        slotLabel: "Studio shoot",
+        taskId: deliveryTask.taskId,
+        position: 1,
+      });
+      expect(slot.calendarId).toBe(calendar.calendarId);
+      const approvedCal = await caller.calendars.refApprove({
+        id: calendar.calendarId,
+      });
+      expect(approvedCal.refApprovalState).toBe("approved");
+      const listedCals = await caller.calendars.listByClient({
+        clientId: loop.clientId,
+        month,
+      });
+      expect(
+        listedCals.some((c) => c.calendarId === calendar.calendarId),
+      ).toBe(true);
     },
     90_000,
   );

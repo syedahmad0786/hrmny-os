@@ -15,7 +15,7 @@ Verified against live Postgres (pgvector on): Apollo mock/live → durable disco
 | Prospecting | `/crm/hunt`, `/crm/inbound`, `/crm/outreach` | `crm.prospect.apolloImport` + leadgen; demo loop without Apollo/Hunter keys |
 | Sales / pipeline | `/crm/deals/[id]` | Same CRM store as Apollo imports; stage moves → **Mark won** → **Handover pack** |
 | Onboarding | `/clients/[id]`, `/portal/onboarding` | Seeded by handover; portal can acknowledge active phase |
-| Creative / delivery | `/creative`, `/delivery`, `/traffic` | Durable `tasks.create`/`list`; **briefs.lock** + **seam_outbox**; generate → portal (http/data URLs resolve without memory DAM); **Run agent on task** |
+| Creative / delivery | `/creative`, `/delivery`, `/traffic`, `/account` | Durable tasks/briefs/lock + **calendars** create/slots/refApprove; seam_outbox; generate → portal; **Run agent on task** |
 | Inbound prospecting | `/crm/inbound` | `leads.inbound.create` → durable company/contact/discover deal |
 | Client portal | `/portal`, `/portal/deliveries`, `/portal/onboarding` | Same Postgres tasks/assets + onboarding phases; approvals act on `client_review` |
 | Agents on command | `/settings/ai` | Built-in `runAgent` + **customAgents.run** with client/user/task sandbox |

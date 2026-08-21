@@ -33,6 +33,13 @@ import {
   upsertDeliveryBriefForTask,
   type DeliveryTask,
 } from "../tasks/delivery-tasks";
+import {
+  addDeliveryCalendarSlot,
+  createDeliveryCalendar,
+  getDeliveryCalendar,
+  listDeliveryCalendars,
+  updateDeliveryCalendar,
+} from "../tasks/delivery-calendars";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
 
 function actorFrom(ctx: {
@@ -234,7 +241,22 @@ export const m4DemoRouter = router({
 export const calendarsRouter = router({
   listByClient: protectedProcedure
     .input(z.object({ clientId: z.string(), month: z.string().optional() }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
+      if (getDb()) {
+        const rows = await listDeliveryCalendars({
+          clientId: input.clientId,
+          month: input.month,
+        });
+        if (rows.length) {
+          return rows.map((c) => ({
+            ...c,
+            shootLock: evaluateShootLock({
+              shootDate: c.shootDate,
+              refApprovalState: c.refApprovalState,
+            }),
+          }));
+        }
+      }
       let rows = [...getDemoStore().calendars.values()].filter(
         (c) => c.clientId === input.clientId,
       );
@@ -250,7 +272,19 @@ export const calendarsRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
+      if (getDb()) {
+        const durable = await getDeliveryCalendar(input.id);
+        if (durable) {
+          return {
+            ...durable,
+            shootLock: evaluateShootLock({
+              shootDate: durable.shootDate,
+              refApprovalState: durable.refApprovalState,
+            }),
+          };
+        }
+      }
       const c = getDemoStore().calendars.get(input.id);
       if (!c) return null;
       return {
@@ -270,7 +304,15 @@ export const calendarsRouter = router({
         focusPoints: z.array(z.unknown()).default([]),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const durable = await createDeliveryCalendar({
+          clientId: input.clientId,
+          month: input.month,
+          focusPoints: input.focusPoints,
+        });
+        if (durable) return durable;
+      }
       const store = getDemoStore();
       if (!store.clients.has(input.clientId)) throw new Error("NOT_FOUND");
       const calendar: DemoCalendar = {
@@ -307,7 +349,17 @@ export const calendarsRouter = router({
         position: z.number().default(0),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
+      if (getDb()) {
+        const slot = await addDeliveryCalendarSlot({
+          calendarId: input.calendarId,
+          slotDate: input.slotDate,
+          slotLabel: input.slotLabel ?? null,
+          taskId: input.taskId ?? null,
+          position: input.position,
+        });
+        if (slot) return slot;
+      }
       const cal = getDemoStore().calendars.get(input.calendarId);
       if (!cal) throw new Error("NOT_FOUND");
       const slot = {
@@ -324,7 +376,15 @@ export const calendarsRouter = router({
 
   refApprove: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const durable = await updateDeliveryCalendar({
+          calendarId: input.id,
+          refApprovalState: "approved",
+          state: "ref_approved",
+        });
+        if (durable) return durable;
+      }
       const store = getDemoStore();
       const cal = store.calendars.get(input.id);
       if (!cal) throw new Error("NOT_FOUND");
@@ -350,7 +410,74 @@ export const calendarsRouter = router({
         rescheduleEdge: z.boolean().optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const existing = await getDeliveryCalendar(input.id);
+        if (existing) {
+          const changing =
+            existing.shootDate !== null &&
+            existing.shootDate !== input.shootDate;
+          const currentLock = evaluateShootLock({
+            shootDate: existing.shootDate,
+            refApprovalState: existing.refApprovalState,
+          });
+          if (changing && currentLock.locked && !input.rescheduleEdge) {
+            return {
+              ok: false as const,
+              code: "GATE_BLOCKED" as const,
+              blockedBy: [
+                {
+                  gate: "calendar.t48_shoot_lock",
+                  reason:
+                    currentLock.reason ??
+                    "T-48h shoot lock — late calendar/shoot changes blocked",
+                },
+              ],
+              calendar: existing,
+              shootLock: currentLock,
+            };
+          }
+          let nextState = existing.state;
+          if (changing && input.rescheduleEdge) nextState = "reschedule";
+          const updated = await updateDeliveryCalendar({
+            calendarId: input.id,
+            shootDate: input.shootDate,
+            state: nextState,
+          });
+          const cal = updated ?? existing;
+          const lock = evaluateShootLock({
+            shootDate: cal.shootDate,
+            refApprovalState: cal.refApprovalState,
+          });
+          if (lock.locked && cal.state !== "reschedule") {
+            await updateDeliveryCalendar({
+              calendarId: cal.calendarId,
+              state: "shoot_locked",
+            });
+            cal.state = "shoot_locked";
+          }
+          if (lock.escalateT24) {
+            getDemoStore().deliveryEscalations.unshift({
+              id: randomUUID(),
+              kind: "t24_shoot",
+              calendarId: cal.calendarId,
+              message:
+                lock.reason ??
+                "T-24h escalate — unapproved calendar → cancel/reschedule edge",
+              createdAt: new Date().toISOString(),
+            });
+          }
+          return {
+            ok: true as const,
+            calendar: (await getDeliveryCalendar(cal.calendarId)) ?? cal,
+            shootLock: lock,
+            escalations: getDemoStore().deliveryEscalations.filter(
+              (e) => e.calendarId === cal.calendarId,
+            ),
+          };
+        }
+      }
+
       const store = getDemoStore();
       const cal = store.calendars.get(input.id);
       if (!cal) throw new Error("NOT_FOUND");
@@ -438,7 +565,15 @@ export const calendarsRouter = router({
 
   finalApprove: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const durable = await updateDeliveryCalendar({
+          calendarId: input.id,
+          finalApprovalState: "approved",
+          state: "final_approved",
+        });
+        if (durable) return durable;
+      }
       const cal = getDemoStore().calendars.get(input.id);
       if (!cal) throw new Error("NOT_FOUND");
       cal.finalApprovalState = "approved";
@@ -457,7 +592,16 @@ export const calendarsRouter = router({
 
   evaluateLock: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
+      if (getDb()) {
+        const durable = await getDeliveryCalendar(input.id);
+        if (durable) {
+          return evaluateShootLock({
+            shootDate: durable.shootDate,
+            refApprovalState: durable.refApprovalState,
+          });
+        }
+      }
       const cal = getDemoStore().calendars.get(input.id);
       if (!cal) return null;
       return evaluateShootLock({
