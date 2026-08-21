@@ -110,6 +110,7 @@ export default function CrmDealDetailPage() {
             {nextStage && nextStage !== "handover_pack" ? (
               <CrmBtn
                 variant="primary"
+                data-testid="deal-advance"
                 disabled={move.isPending}
                 onClick={async () => {
                   const r = await move.mutateAsync({ id, to: nextStage });
@@ -123,6 +124,7 @@ export default function CrmDealDetailPage() {
             d.closeOutcome !== "won" ? (
               <CrmBtn
                 variant="primary"
+                data-testid="deal-mark-won"
                 disabled={closeDeal.isPending}
                 onClick={async () => {
                   const r = await closeDeal.mutateAsync({
@@ -138,6 +140,7 @@ export default function CrmDealDetailPage() {
             {d.closeOutcome === "won" && d.stage === "close" ? (
               <CrmBtn
                 variant="primary"
+                data-testid="deal-handover"
                 disabled={handover.isPending}
                 onClick={async () => {
                   const r = await handover.mutateAsync({ id });
@@ -156,8 +159,14 @@ export default function CrmDealDetailPage() {
             "ok" in handover.data &&
             handover.data.ok &&
             "client" in handover.data ? (
-              <div className="flex flex-wrap gap-2">
-                <Link href={`/clients/${handover.data.client.clientId}`}>
+              <div
+                className="flex flex-wrap gap-2"
+                data-testid="deal-handover-next"
+              >
+                <Link
+                  href={`/clients/${handover.data.client.clientId}`}
+                  data-testid="deal-handover-client"
+                >
                   <CrmBtn variant="primary">Open client onboarding →</CrmBtn>
                 </Link>
                 {"next" in handover.data && handover.data.next ? (
@@ -165,7 +174,10 @@ export default function CrmDealDetailPage() {
                     <Link href={handover.data.next.account}>
                       <CrmBtn>Account calendar →</CrmBtn>
                     </Link>
-                    <Link href={handover.data.next.creative}>
+                    <Link
+                      href={handover.data.next.creative}
+                      data-testid="deal-handover-creative"
+                    >
                       <CrmBtn>Creative →</CrmBtn>
                     </Link>
                     <Link href={handover.data.next.approvals}>
@@ -179,12 +191,18 @@ export default function CrmDealDetailPage() {
                     ) : null}
                     {"finance" in handover.data.next &&
                     handover.data.next.finance ? (
-                      <Link href={handover.data.next.finance}>
+                      <Link
+                        href={handover.data.next.finance}
+                        data-testid="deal-handover-finance"
+                      >
                         <CrmBtn>First invoice →</CrmBtn>
                       </Link>
                     ) : null}
                     {handover.data.portalInvite?.portalPath ? (
-                      <Link href={handover.data.portalInvite.portalPath}>
+                      <Link
+                        href={handover.data.portalInvite.portalPath}
+                        data-testid="deal-handover-portal"
+                      >
                         <CrmBtn>
                           Portal approvals (
                           {handover.data.portalInvite.delivery?.mode ?? "mock"})
@@ -193,7 +211,10 @@ export default function CrmDealDetailPage() {
                       </Link>
                     ) : null}
                     {handover.data.portalInvite?.onboardingPath ? (
-                      <Link href={handover.data.portalInvite.onboardingPath}>
+                      <Link
+                        href={handover.data.portalInvite.onboardingPath}
+                        data-testid="deal-handover-onboarding-invite"
+                      >
                         <CrmBtn>Onboarding invite →</CrmBtn>
                       </Link>
                     ) : null}
