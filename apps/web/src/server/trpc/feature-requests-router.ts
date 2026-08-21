@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { auditEvent, desc, eq, featureRequest } from "@hrmny/db";
 import { z } from "zod";
 import { getDb } from "../db";
-import { getDemoStore } from "../demo-store";
+import { getObjectStore } from "../storage/object-store";
 import {
   canTransitionFeatureRequest,
   draftFeatureRequestPrd,
@@ -91,7 +91,7 @@ export const featureRequestsRouter = router({
         }
         const fileName = input.voice.fileName.replace(/[^a-zA-Z0-9._-]/g, "-");
         voiceStoragePath = `feature-requests/${id}/${fileName}`;
-        await getDemoStore().objectStore.put({
+        await getObjectStore().put({
           path: voiceStoragePath,
           body: new Uint8Array(body),
           contentType: input.voice.contentType,
@@ -122,7 +122,7 @@ export const featureRequestsRouter = router({
         });
       } catch (error) {
         if (voiceStoragePath) {
-          await getDemoStore().objectStore.remove?.(voiceStoragePath);
+          await getObjectStore().remove?.(voiceStoragePath);
         }
         throw error;
       }
@@ -236,6 +236,6 @@ export const featureRequestsRouter = router({
         .where(eq(featureRequest.featureRequestId, input.id))
         .limit(1);
       if (!row?.voiceStoragePath) return null;
-      return getDemoStore().objectStore.signedUrl(row.voiceStoragePath, 300);
+      return getObjectStore().signedUrl(row.voiceStoragePath, 300);
     }),
 });

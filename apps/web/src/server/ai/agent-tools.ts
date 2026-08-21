@@ -1,8 +1,11 @@
+import { sql } from "@hrmny/db";
 import { listDeals, listCompanies, getDeal } from "../crm/repository";
 import { listDeliveryTasks } from "../tasks/delivery-tasks";
 import { listDeliveryCalendars } from "../tasks/delivery-calendars";
 import { listOutreach } from "../leadgen/store";
 import { getClientOnboarding } from "../clients/onboarding";
+import { getDb } from "../db";
+import { getDemoStore } from "../demo-store";
 import { searchMemory } from "./memory-db";
 import { createN8nAdapter } from "@hrmny/integrations";
 import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
@@ -20,6 +23,43 @@ export type AgentToolResult = {
   data?: unknown;
   error?: string;
 };
+
+type ResolvedCrmScope = {
+  dealId?: string;
+  companyId?: string;
+};
+
+/**
+ * Map a client sandbox to its won deal + company so CRM tools never leak
+ * org-wide deals/companies when only clientId is set (delivery board).
+ */
+async function resolveClientCrmScope(
+  clientId: string,
+): Promise<ResolvedCrmScope> {
+  const db = getDb();
+  if (db) {
+    const rows = await db.execute<{ dealId: string | null }>(sql`
+      select deal_id as "dealId"
+      from public.client
+      where client_id = ${clientId}::uuid
+      limit 1
+    `);
+    const dealId = rows[0]?.dealId ?? undefined;
+    if (!dealId) return {};
+    const deal = await getDeal(dealId);
+    return {
+      dealId,
+      companyId: deal?.companyId ?? undefined,
+    };
+  }
+  const client = getDemoStore().clients.get(clientId);
+  if (!client?.dealId) return {};
+  const deal = await getDeal(client.dealId);
+  return {
+    dealId: client.dealId,
+    companyId: deal?.companyId ?? undefined,
+  };
+}
 
 function normalizeTools(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -68,28 +108,46 @@ export async function runAgentTools(input: {
     }
   }
 
+  const clientCrm = input.scope.clientId
+    ? await resolveClientCrmScope(input.scope.clientId)
+    : {};
+  const scopedDealId = input.scope.dealId ?? clientCrm.dealId;
+  const scopedCompanyId = clientCrm.companyId;
+
   if (want("crm.read") || want("crm.deals") || want("crm")) {
     try {
-      const deals = await listDeals();
-      const scoped = input.scope.dealId
-        ? deals.filter((d) => d.dealId === input.scope.dealId)
-        : deals.slice(0, 12);
-      const deal = input.scope.dealId
-        ? await getDeal(input.scope.dealId)
-        : null;
-      results.push({
-        tool: "crm.read",
-        ok: true,
-        data: {
-          dealCount: scoped.length,
-          deals: (deal ? [deal] : scoped).slice(0, 8).map((d) => ({
-            dealId: d.dealId,
-            companyName: d.companyName,
-            stage: d.stage,
-            closeOutcome: d.closeOutcome,
-          })),
-        },
-      });
+      // Client sandbox without a linked deal: return empty, never org-wide.
+      if (input.scope.clientId && !scopedDealId && !scopedCompanyId) {
+        results.push({
+          tool: "crm.read",
+          ok: true,
+          data: { dealCount: 0, deals: [], sandbox: "client_unlinked" },
+        });
+      } else {
+        const deals = await listDeals(
+          scopedCompanyId ? { companyId: scopedCompanyId } : undefined,
+        );
+        let scoped = deals;
+        if (scopedDealId) {
+          scoped = deals.filter((d) => d.dealId === scopedDealId);
+        } else if (!scopedCompanyId) {
+          scoped = deals.slice(0, 12);
+        }
+        const deal = scopedDealId ? await getDeal(scopedDealId) : null;
+        results.push({
+          tool: "crm.read",
+          ok: true,
+          data: {
+            dealCount: scoped.length,
+            deals: (deal ? [deal] : scoped).slice(0, 8).map((d) => ({
+              dealId: d.dealId,
+              companyName: d.companyName,
+              stage: d.stage,
+              closeOutcome: d.closeOutcome,
+            })),
+          },
+        });
+      }
     } catch (err) {
       results.push({
         tool: "crm.read",
@@ -101,16 +159,27 @@ export async function runAgentTools(input: {
 
   if (want("crm.companies") || want("crm.read")) {
     try {
-      const companies = await listCompanies();
-      results.push({
-        tool: "crm.companies",
-        ok: true,
-        data: companies.slice(0, 8).map((c) => ({
-          companyId: c.companyId,
-          name: c.name,
-          website: c.website,
-        })),
-      });
+      if (input.scope.clientId && !scopedCompanyId) {
+        results.push({
+          tool: "crm.companies",
+          ok: true,
+          data: [],
+        });
+      } else {
+        const companies = await listCompanies();
+        const filtered = scopedCompanyId
+          ? companies.filter((c) => c.companyId === scopedCompanyId)
+          : companies.slice(0, 8);
+        results.push({
+          tool: "crm.companies",
+          ok: true,
+          data: filtered.map((c) => ({
+            companyId: c.companyId,
+            name: c.name,
+            website: c.website,
+          })),
+        });
+      }
     } catch (err) {
       results.push({
         tool: "crm.companies",
@@ -158,8 +227,17 @@ export async function runAgentTools(input: {
 
   if (want("outreach.read") || want("outreach") || want("leadgen.outreach")) {
     try {
+      const outreachDealId = scopedDealId;
+      // Client sandbox without deal: empty outreach (no org-wide leak).
+      if (input.scope.clientId && !outreachDealId) {
+        results.push({
+          tool: "outreach.read",
+          ok: true,
+          data: { count: 0, items: [], sandbox: "client_unlinked" },
+        });
+      } else {
       const rows = await listOutreach(
-        input.scope.dealId ? { dealId: input.scope.dealId } : undefined,
+        outreachDealId ? { dealId: outreachDealId } : undefined,
       );
       results.push({
         tool: "outreach.read",
@@ -176,6 +254,7 @@ export async function runAgentTools(input: {
           })),
         },
       });
+      }
     } catch (err) {
       results.push({
         tool: "outreach.read",
