@@ -1309,11 +1309,17 @@ export const crmRouter = router({
           crmDeal: `/crm/deals/${dealId}`,
           client: `/clients/${pack.client.clientId}`,
           account: `/account?clientId=${encodeURIComponent(pack.client.clientId)}`,
-          finance: "/finance",
+          finance: pack.invoiceId
+            ? `/finance?invoiceId=${encodeURIComponent(pack.invoiceId)}`
+            : "/finance",
           billing: "/billing",
           creative: `/creative?clientId=${encodeURIComponent(pack.client.clientId)}`,
-          portal: "/portal/deliveries",
+          portal: "/portal/approvals",
           onboarding: "/portal/onboarding",
+          approvals: "/approvals",
+          outreach: outreachId
+            ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
+            : "/crm/outreach",
         },
       };
     }),
