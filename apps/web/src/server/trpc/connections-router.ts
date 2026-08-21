@@ -93,6 +93,13 @@ export const CONNECTION_CATALOG = [
     ready: false,
     note: "Copy-draft only in V1 to protect the account.",
   },
+  {
+    toolkit: "xero",
+    label: "Xero",
+    authType: "oauth",
+    ready: true,
+    note: "Read/mirror only — OS never writes unless XERO_WRITE_ENABLED=true.",
+  },
 ] as const;
 
 const workAppToolkits = [

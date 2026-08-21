@@ -39,6 +39,7 @@ Tier-1 (Supabase, DB, JWT, Google OAuth, OpenRouter general, Composio, n8n, Inng
 | `HUNTER_API_KEY` | https://hunter.io/api-keys |
 | `NEVERBOUNCE_API_KEY` (optional) | https://app.neverbounce.com/settings/api |
 | `XERO_CLIENT_ID` + `XERO_CLIENT_SECRET` | https://developer.xero.com/app/manage |
+| `XERO_ACCESS_TOKEN` + `XERO_TENANT_ID` (optional) | After OAuth authorize — or paste from Keeper |
 | `OPENROUTER_PRIVILEGED_API_KEY` | https://openrouter.ai/keys (salaries workspace) |
 | `CRON_SECRET` | Vercel hrmny-os env or new random |
 
