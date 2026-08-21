@@ -34,6 +34,7 @@ const STEPS = [
 type ReadySmoke = {
   tools?: Record<string, string>;
   portalMagicLink?: string;
+  blockers?: string[];
   connections?: {
     googleWorkspace?: number;
     canva?: number;
@@ -44,6 +45,12 @@ type ReadySmoke = {
       canva?: number;
       linkedin?: number;
       xero?: number;
+    };
+    lastErrors?: {
+      googleWorkspace?: string | null;
+      canva?: string | null;
+      linkedin?: string | null;
+      xero?: string | null;
     };
   };
 };
@@ -69,36 +76,45 @@ export default function HuntClientsPage() {
   }, []);
 
   const toolReady = ready?.tools ?? null;
-  const blockers: string[] = [];
-  if (toolReady?.apollo === "mock") {
-    blockers.push("Paste Apollo API key in Connections");
-  }
-  if (toolReady?.hunter === "mock") {
-    blockers.push("Paste Hunter API key in Connections");
-  }
-  if (toolReady?.xero === "mock" || (ready?.connections?.xero ?? 0) < 1) {
-    blockers.push("Connect Xero OAuth in Connections");
-  }
-  if ((ready?.connections?.googleWorkspace ?? 0) < 1) {
-    blockers.push(
-      (ready?.connections?.errors?.googleWorkspace ?? 0) > 0
-        ? "Reconnect Google Workspace (token revoked) for live HITL Gmail"
-        : "Reconnect Google Workspace for live HITL Gmail",
-    );
-  }
-  if ((ready?.connections?.linkedin ?? 0) < 1) {
-    blockers.push("Connect LinkedIn (Composio) for campaign publish");
-  }
-  if ((ready?.connections?.canva ?? 0) < 1) {
-    blockers.push("Connect Canva (Composio) for design → portal");
-  }
-  if (toolReady?.resend && toolReady.resend !== "live") {
-    blockers.push(
-      toolReady.resend === "configured"
-        ? "Resend key present — set RESEND_MODE=live (+ RESEND_FROM) for real portal email"
-        : "Set RESEND_MODE=live + RESEND_API_KEY + RESEND_FROM for real portal email",
-    );
-  }
+  const blockers: string[] =
+    ready?.blockers != null
+      ? ready.blockers
+      : (() => {
+          const next: string[] = [];
+          if (toolReady?.apollo === "mock") {
+            next.push("Paste Apollo API key in Connections");
+          }
+          if (toolReady?.hunter === "mock") {
+            next.push("Paste Hunter API key in Connections");
+          }
+          if (toolReady?.xero === "mock" || (ready?.connections?.xero ?? 0) < 1) {
+            next.push("Connect Xero OAuth in Connections");
+          }
+          if ((ready?.connections?.googleWorkspace ?? 0) < 1) {
+            const err = ready?.connections?.lastErrors?.googleWorkspace?.trim();
+            next.push(
+              err
+                ? `Reconnect Google Workspace: ${err}`
+                : (ready?.connections?.errors?.googleWorkspace ?? 0) > 0
+                  ? "Reconnect Google Workspace (token revoked) for live HITL Gmail"
+                  : "Reconnect Google Workspace for live HITL Gmail",
+            );
+          }
+          if ((ready?.connections?.linkedin ?? 0) < 1) {
+            next.push("Connect LinkedIn (Composio) for campaign publish");
+          }
+          if ((ready?.connections?.canva ?? 0) < 1) {
+            next.push("Connect Canva (Composio) for design → portal");
+          }
+          if (toolReady?.resend && toolReady.resend !== "live") {
+            next.push(
+              toolReady.resend === "configured"
+                ? "Resend key present — set RESEND_MODE=live (+ RESEND_FROM) for real portal email"
+                : "Set RESEND_MODE=live + RESEND_API_KEY + RESEND_FROM for real portal email",
+            );
+          }
+          return next;
+        })();
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
     onSuccess: (data) => {
       if (!data.ok) {
