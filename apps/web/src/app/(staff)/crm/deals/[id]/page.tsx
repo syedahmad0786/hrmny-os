@@ -186,10 +186,15 @@ export default function CrmDealDetailPage() {
                     {handover.data.portalInvite?.portalPath ? (
                       <Link href={handover.data.portalInvite.portalPath}>
                         <CrmBtn>
-                          Portal invite (
+                          Portal approvals (
                           {handover.data.portalInvite.delivery?.mode ?? "mock"})
                           →
                         </CrmBtn>
+                      </Link>
+                    ) : null}
+                    {handover.data.portalInvite?.onboardingPath ? (
+                      <Link href={handover.data.portalInvite.onboardingPath}>
+                        <CrmBtn>Onboarding invite →</CrmBtn>
                       </Link>
                     ) : null}
                   </>

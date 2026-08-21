@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildHandoverNextLinks } from "./handover-next";
 
 describe("buildHandoverNextLinks", () => {
-  it("scopes account/creative/client and falls back to portal login without invite", () => {
+  it("scopes account/creative/client and falls back without invites", () => {
     const next = buildHandoverNextLinks({
       clientId: "c1000000-0000-4000-8000-000000000001",
     });
@@ -27,19 +27,20 @@ describe("buildHandoverNextLinks", () => {
     expect(next.finance).toBe("/finance?invoiceId=inv-1");
   });
 
-  it("appends distinct next destinations to magic-link portal + onboarding", () => {
-    const magic =
-      "/portal/login/verify?token=ml_deadbeefcafebabe0123456789abcdef";
+  it("uses distinct magic-link paths for portal vs onboarding", () => {
+    const portal =
+      "/portal/login/verify?token=ml_portal_deadbeefcafebabe01234567&next=%2Fportal%2Fapprovals";
+    const onboarding =
+      "/portal/login/verify?token=ml_onboard_deadbeefcafebabe0123456&next=%2Fportal%2Fonboarding";
     const next = buildHandoverNextLinks({
       clientId: "c1000000-0000-4000-8000-000000000001",
-      portalPath: magic,
+      portalPath: portal,
+      onboardingPath: onboarding,
     });
-    expect(next.portal).toBe(
-      `${magic}&next=${encodeURIComponent("/portal/approvals")}`,
-    );
-    expect(next.onboarding).toBe(
-      `${magic}&next=${encodeURIComponent("/portal/onboarding")}`,
-    );
+    expect(next.portal).toBe(portal);
+    expect(next.onboarding).toBe(onboarding);
     expect(next.portal).not.toBe(next.onboarding);
+    expect(next.portal).not.toContain("ml_onboard_");
+    expect(next.onboarding).not.toContain("ml_portal_");
   });
 });

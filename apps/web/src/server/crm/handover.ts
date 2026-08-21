@@ -116,7 +116,10 @@ export type HandoverPackResult = {
   portalInvite: {
     portalUserId: string;
     email: string;
+    /** Approvals destination (own single-use token). */
     portalPath?: string;
+    /** Onboarding destination (own single-use token). */
+    onboardingPath?: string;
     delivery?: { mode: "mock" | "live"; id: string };
   } | null;
   /** HITL outreach draft for the won deal (reuses existing if any). */
@@ -384,22 +387,38 @@ export async function durableHandoverPack(input: {
       );
       const placeholderInbox = inviteEmail.endsWith("@example.com");
       const { createResendMock } = await import("@hrmny/integrations");
-      const sent = await sendPortalInviteMagicLink({
+      // Two single-use tokens so Portal and Onboarding CTAs do not race.
+      // Live email only for the approvals invite; onboarding stays mock-delivered.
+      const emailer = placeholderInbox ? createResendMock() : undefined;
+      const sentPortal = await sendPortalInviteMagicLink({
         email: inviteEmail,
         clientId: client.clientId,
         displayName,
-        emailer: placeholderInbox ? createResendMock() : undefined,
+        next: "/portal/approvals",
+        emailer,
+      });
+      const sentOnboarding = await sendPortalInviteMagicLink({
+        email: inviteEmail,
+        clientId: client.clientId,
+        displayName,
+        next: "/portal/onboarding",
+        emailer: createResendMock(),
       });
       portalInvite = {
         ...invited,
-        portalPath: sent.portalPath,
-        delivery: { mode: sent.delivery.mode, id: sent.delivery.id },
+        portalPath: sentPortal.portalPath,
+        onboardingPath: sentOnboarding.portalPath,
+        delivery: {
+          mode: sentPortal.delivery.mode,
+          id: sentPortal.delivery.id,
+        },
       };
       fired.push(
-        sent.delivery.mode === "live"
+        sentPortal.delivery.mode === "live"
           ? "portal.invite_live"
           : "portal.invite_mock",
       );
+      fired.push("portal.invite_onboarding");
     }
   } catch {
     /* invite optional when unique constraints differ */
@@ -434,6 +453,7 @@ export async function durableHandoverPack(input: {
     invoiceId,
     outreachId,
     portalPath: portalInvite?.portalPath,
+    onboardingPath: portalInvite?.onboardingPath,
   });
   return {
     ok: true,
