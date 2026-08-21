@@ -1865,12 +1865,24 @@ export const connectionsRouter = router({
           after: { ...exportMeta, mode, clientId: input.clientId },
           reason: null,
         });
+        if (taskId) {
+          store.portalApprovals.set(taskId, {
+            approvalId: taskId,
+            clientId: input.clientId,
+            title,
+            kind: "asset",
+            status: "pending",
+            entityId: asset.assetId,
+            slaHours: 48,
+            createdAt: new Date().toISOString(),
+          });
+        }
         return {
           ok: true as const,
           assetId: asset.assetId,
           taskId,
           clientId: input.clientId,
-          portalHref: "/portal/deliveries",
+          portalHref: "/portal/approvals",
           mode,
         };
       }
@@ -1944,7 +1956,7 @@ export const connectionsRouter = router({
         assetId,
         taskId,
         clientId: input.clientId,
-        portalHref: "/portal/deliveries",
+        portalHref: "/portal/approvals",
         mode,
       };
     }),

@@ -703,11 +703,40 @@ export async function runAgentTools(input: {
       const db = getDb();
       if (!db) {
         const store = getDemoStore();
-        const asset = store.createAsset(
-          title,
-          input.scope.clientId,
-          input.scope.taskId ?? null,
+        let taskId = input.scope.taskId ?? null;
+        const existing = [...store.tasks.values()].find(
+          (t) =>
+            t.clientId === input.scope.clientId &&
+            t.taskType === "social_cutdowns",
         );
+        if (existing) {
+          existing.status = "client_review";
+          existing.qcPassed = true;
+          existing.qcNotes =
+            existing.qcNotes ?? "Auto-QC for agent creative sent to portal";
+          taskId = existing.taskId;
+        } else {
+          taskId = crypto.randomUUID();
+          store.tasks.set(taskId, {
+            taskId,
+            clientId: input.scope.clientId,
+            calendarId: null,
+            month: null,
+            taskType: "social_cutdowns",
+            title: `Portal creative — ${title.slice(0, 80)}`,
+            status: "client_review",
+            situationalState: null,
+            ownerEmployeeId: input.scope.employeeId ?? null,
+            deadline: null,
+            priority: "high",
+            qcPassed: true,
+            qcNotes: "Auto-QC for agent creative sent to portal",
+            clientRevisionCount: 0,
+            revisionBoundaryAck: false,
+            briefId: null,
+          });
+        }
+        const asset = store.createAsset(title, input.scope.clientId, taskId);
         asset.status = "client_review";
         const storagePath = `dam/${asset.assetId}/v1-agent.txt`;
         asset.versions.push({
@@ -719,24 +748,55 @@ export async function runAgentTools(input: {
           uploadedByEmployeeId: input.scope.employeeId ?? null,
           createdAt: new Date().toISOString(),
         });
+        const approvalId = taskId ?? asset.assetId;
+        store.portalApprovals.set(approvalId, {
+          approvalId,
+          clientId: input.scope.clientId,
+          title,
+          kind: "asset",
+          status: "pending",
+          entityId: asset.assetId,
+          slaHours: 48,
+          createdAt: new Date().toISOString(),
+        });
         results.push({
           tool: "creative.sendToPortal",
           ok: true,
           data: {
             assetId: asset.assetId,
+            taskId,
             clientId: input.scope.clientId,
-            portalHref: "/portal/deliveries",
+            portalHref: "/portal/approvals",
             mode: "memory",
           },
         });
       } else {
+        const {
+          seedClientCreativeTask,
+          updateDeliveryTaskStatus,
+        } = await import("../tasks/delivery-tasks");
+        let taskId = input.scope.taskId ?? null;
+        const seeded = await seedClientCreativeTask({
+          clientId: input.scope.clientId,
+          title: `Portal creative — ${title.slice(0, 80)}`,
+          status: "qc",
+        });
+        if (seeded) {
+          await updateDeliveryTaskStatus({
+            taskId: seeded.taskId,
+            status: "client_review",
+            qcPassed: true,
+            qcNotes: "Auto-QC for agent creative sent to portal",
+          });
+          taskId = seeded.taskId;
+        }
         const assets = await db.execute<{ assetId: string }>(sql`
           insert into public.asset (title, client_id, status, task_id)
           values (
             ${title},
             ${input.scope.clientId}::uuid,
             'client_review',
-            ${input.scope.taskId ?? null}::uuid
+            ${taskId}::uuid
           )
           returning asset_id as "assetId"
         `);
@@ -768,8 +828,9 @@ export async function runAgentTools(input: {
           ok: true,
           data: {
             assetId,
+            taskId,
             clientId: input.scope.clientId,
-            portalHref: "/portal/deliveries",
+            portalHref: "/portal/approvals",
             mode: "durable",
           },
         });
