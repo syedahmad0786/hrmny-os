@@ -337,11 +337,15 @@ function AccountRhythmPageInner() {
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">
         <h2 className="font-display text-lg">Month-1 phases</h2>
-        <ul className="mt-3 flex flex-col gap-2 text-sm">
+        <ul className="mt-3 flex flex-col gap-2 text-sm" data-testid="account-month1-list">
           {(month1.data ?? []).map((p) => (
             <li
               key={p.phaseIndex}
               className="flex items-center justify-between"
+              data-testid="account-month1-phase"
+              data-phase-index={p.phaseIndex}
+              data-phase-status={p.status}
+              data-phase-name={p.name}
             >
               <span>
                 P{p.phaseIndex}: {p.name}{" "}
@@ -351,6 +355,7 @@ function AccountRhythmPageInner() {
                 <Button
                   type="button"
                   variant="ghost"
+                  data-testid="account-month1-advance"
                   onClick={() =>
                     void advance.mutateAsync({
                       clientId: clientId!,
