@@ -3,10 +3,12 @@
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
-export default function CreativeQcPage() {
+function CreativeQcPageInner() {
   const utils = trpc.useUtils();
+  const searchParams = useSearchParams();
   const ids = trpc.m4.seedIds.useQuery();
   const reset = trpc.m4.reset.useMutation({
     onSuccess: () => void utils.invalidate(),
@@ -56,6 +58,23 @@ export default function CreativeQcPage() {
     "Ochre and sand brand moodboard — soft studio light, editorial product still life",
   );
   const [portalClientId, setPortalClientId] = useState("");
+  const [portalClientTouched, setPortalClientTouched] = useState(false);
+
+  useEffect(() => {
+    if (portalClientTouched || portalClientId) return;
+    const fromQuery = searchParams.get("clientId")?.trim() ?? "";
+    if (fromQuery) {
+      setPortalClientId(fromQuery);
+      return;
+    }
+    const fromSeed = ids.data?.clientId?.trim() ?? "";
+    if (fromSeed) setPortalClientId(fromSeed);
+  }, [
+    ids.data?.clientId,
+    portalClientId,
+    portalClientTouched,
+    searchParams,
+  ]);
 
   async function tryClientFacing() {
     if (!taskId) return;
@@ -141,7 +160,10 @@ export default function CreativeQcPage() {
             id="portal-client"
             className="rounded-lg border border-sand bg-white px-2 py-1.5 text-sm"
             value={portalClientId}
-            onChange={(e) => setPortalClientId(e.target.value)}
+            onChange={(e) => {
+              setPortalClientTouched(true);
+              setPortalClientId(e.target.value);
+            }}
           >
             <option value="">Select client…</option>
             {(clients.data ?? []).map((c) => (
@@ -296,5 +318,20 @@ export default function CreativeQcPage() {
         {msg ? <p className="mt-3 text-ink">{msg}</p> : null}
       </section>
     </main>
+  );
+}
+
+export default function CreativeQcPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex flex-col gap-6">
+          <h1 className="font-display text-3xl font-semibold">Creative</h1>
+          <p className="text-muted">Loading…</p>
+        </main>
+      }
+    >
+      <CreativeQcPageInner />
+    </Suspense>
   );
 }

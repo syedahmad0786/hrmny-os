@@ -1306,7 +1306,7 @@ export const crmRouter = router({
           account: "/account",
           finance: "/finance",
           billing: "/billing",
-          creative: "/creative",
+          creative: `/creative?clientId=${encodeURIComponent(pack.client.clientId)}`,
           portal: "/portal/deliveries",
           onboarding: "/portal/onboarding",
         },
