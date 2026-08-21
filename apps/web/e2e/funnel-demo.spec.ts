@@ -249,7 +249,25 @@ test.describe("Demo funnel", () => {
     await expect(page.locator("body")).toContainText(/Client revisions/i);
     await expect(page.locator("body")).toContainText(pending!.title);
     await expect(page.locator("body")).toContainText(/E2E: tighten the hook/i);
-    await expect(page.getByRole("link", { name: /^Open$/i }).first()).toBeVisible();
+
+    // Open must deep-link into Creative with the revised task focused.
+    const openLink = page.locator('a[href*="/creative?"][href*="taskId="]');
+    await expect(openLink).toBeVisible();
+    await expect(openLink).toHaveAttribute("href", /taskId=/);
+    await openLink.click();
+    await expect(
+      page.getByRole("heading", { name: /^Creative$/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/\/creative\?.*taskId=/);
+    await expect(page.getByTestId("creative-task-meta")).toContainText(
+      /status=revisions/,
+    );
+    await expect(page.getByTestId("creative-revisions-banner")).toContainText(
+      /Client requested revisions/i,
+    );
+    await expect(page.getByTestId("creative-task-meta")).toContainText(
+      /clientRevisions=[1-9]/,
+    );
   });
 
   test("portal onboarding acknowledge lands in partner /notifications", async ({
