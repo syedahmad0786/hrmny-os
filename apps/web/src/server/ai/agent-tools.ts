@@ -88,13 +88,6 @@ async function resolveClientCrmScope(
   };
 }
 
-function normalizeTools(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
-    .map((t) => t.trim().toLowerCase());
-}
-
 /**
  * Execute allowlisted agent tools inside the client/user/deal/task sandbox.
  * Unknown tools are skipped (ok:false) — never escalate privileges.
