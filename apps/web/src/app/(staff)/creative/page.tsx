@@ -320,6 +320,16 @@ function CreativeQcPageInner() {
             {taskIdFromQuery ? " · opened from staff inbox" : ""}
           </p>
         ) : null}
+        {task.data?.status === "approved" ? (
+          <p
+            className="mt-2 rounded-md border border-emerald-600/30 bg-emerald-50/90 px-3 py-2 text-ink"
+            data-testid="creative-approved-banner"
+            role="status"
+          >
+            Client approved
+            {taskIdFromQuery ? " · opened from staff inbox" : ""}
+          </p>
+        ) : null}
         <p className="mt-1 text-xs text-muted">
           Tip: switch Dev role to Creative Director before QC pass.
         </p>
