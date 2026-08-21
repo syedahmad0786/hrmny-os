@@ -99,12 +99,18 @@ describe("runAgentTools funnel writes", () => {
       viaApollo?: boolean;
       onboardingPhases?: number;
       next?: Record<string, string>;
+      portalInvite?: { portalPath?: string; onboardingPath?: string } | null;
+      fired?: string[];
     };
     expect(data?.clientId).toBeTruthy();
     expect(data?.dealId).toBeTruthy();
     expect(data?.viaApollo).toBe(false);
     expect((data?.onboardingPhases ?? 0) > 0).toBe(true);
     expect(data?.next?.crmDeal).toMatch(/^\/crm\/deals\//);
+    expect(data?.portalInvite?.portalPath ?? "").toMatch(
+      /\/portal\/login\/verify/,
+    );
+    expect(data?.fired?.some((f) => f === "staff.notify")).toBe(true);
   });
 
   it("crm.closed_loop viaApollo uses mock Apollo when keys absent", async () => {

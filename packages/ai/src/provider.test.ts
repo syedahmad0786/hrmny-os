@@ -156,6 +156,26 @@ describe("withMetering", () => {
     expect(second.text).toMatch(/handover|onboarding/i);
   });
 
+  it("emits crm_closed_loop fence when chat catalog lists underscore name", async () => {
+    const mock = createMockProvider();
+    const first = await mock.generate({
+      task: "generic",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Available tools:\n- crm_closed_loop: Org prospect → won → handover\n- now: time",
+        },
+        {
+          role: "user",
+          content: "Run demo closed loop",
+        },
+      ],
+    });
+    expect(first.text).toMatch(/```tool/);
+    expect(first.text).toMatch(/"name"\s*:\s*"crm_closed_loop"/);
+  });
+
   it("fails closed when month-to-date spend is at the cap", async () => {
     const onCost = vi.fn();
     const metered = withMetering(tokenProvider, {
