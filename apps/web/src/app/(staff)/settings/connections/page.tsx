@@ -4,7 +4,7 @@ import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ConnectionHealth } from "./connection-health";
 
 const GOOGLE_WORKSPACE_SCOPES = [
