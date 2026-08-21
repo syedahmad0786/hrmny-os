@@ -1,6 +1,7 @@
 "use client";
 
 import { trpc } from "@/lib/trpc";
+import Link from "next/link";
 import { PortalAssetPreview } from "./portal-asset-preview";
 
 export default function PortalHomePage() {
@@ -35,8 +36,10 @@ export default function PortalHomePage() {
 
       {session.error && (
         <p className="rounded border border-[#D9D0C4] bg-white/60 px-4 py-3 text-sm text-muted">
-          Switch Dev persona to <strong>portal_a</strong> (Demo Co) or{" "}
-          <strong>portal_b</strong> (Other Co) in the header.
+          Sign in with your portal magic link to open this workspace.{" "}
+          <Link href="/portal/login" className="font-medium text-ink underline">
+            Go to portal login →
+          </Link>
         </p>
       )}
 

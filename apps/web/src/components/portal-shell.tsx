@@ -92,7 +92,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
               hrmny portal
             </p>
             <p className="text-sm text-muted">
-              {session.data?.displayName ?? "Select portal persona"} ·{" "}
+              {session.data?.displayName ?? "Portal client"} ·{" "}
               {session.data?.clientName ?? "—"}
               <span className="ml-2 text-xs text-[#9A9188]">
                 (no finance · scoped to client)
