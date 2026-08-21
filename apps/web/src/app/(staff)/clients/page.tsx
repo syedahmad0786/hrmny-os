@@ -41,6 +41,7 @@ export default function ClientsPage() {
       await utils.clients.list.invalidate();
     },
   });
+  const [demoPortalLink, setDemoPortalLink] = useState<string | null>(null);
   const invitePortalUser = trpc.clients.portalUsers.invite.useMutation({
     onSuccess: async () => {
       setPortalName("");
@@ -49,6 +50,11 @@ export default function ClientsPage() {
         utils.clients.list.invalidate(),
         utils.clients.portalUsers.list.invalidate(),
       ]);
+    },
+  });
+  const issueDemoToken = trpc.clients.portalUsers.issueDemoToken.useMutation({
+    onSuccess: (data) => {
+      setDemoPortalLink(data.portalPath);
     },
   });
   const rows = (clients.data ?? []) as ClientRow[];
@@ -250,18 +256,48 @@ export default function ClientsPage() {
               {invitePortalUser.error.message}
             </p>
           ) : null}
+          {issueDemoToken.error ? (
+            <p className="mt-3 text-sm text-red-700">
+              {issueDemoToken.error.message}
+            </p>
+          ) : null}
+          {demoPortalLink ? (
+            <p className="mt-3 rounded-lg border border-sand bg-cream/40 p-3 text-sm">
+              Demo portal link (single-use):{" "}
+              <a className="font-medium text-ochre underline" href={demoPortalLink}>
+                {demoPortalLink}
+              </a>
+            </p>
+          ) : null}
           <div className="mt-4 space-y-2 text-sm">
             {(portalUsers.data ?? []).map((user) => (
               <div
                 key={user.portalUserId}
-                className="flex justify-between border-t border-sand/70 pt-2"
+                className="flex flex-wrap items-center justify-between gap-2 border-t border-sand/70 pt-2"
               >
                 <span>
                   {user.displayName} · {user.email}
                 </span>
-                <span className="text-muted">
-                  {user.isActive ? "Active" : "Inactive"}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-muted">
+                    {user.isActive ? "Active" : "Inactive"}
+                  </span>
+                  {user.isActive && user.email ? (
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-ochre underline"
+                      disabled={issueDemoToken.isPending}
+                      onClick={() =>
+                        issueDemoToken.mutate({
+                          clientId: accessClientId,
+                          email: user.email,
+                        })
+                      }
+                    >
+                      Open portal link
+                    </button>
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>

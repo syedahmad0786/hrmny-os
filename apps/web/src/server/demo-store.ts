@@ -595,6 +595,11 @@ class MemoryDemoStore {
     string,
     { token: string; clientId: string; email?: string; expiresAt: number }
   >();
+  /** Multi-use portal grants after magic verify (AUTH_MODE=supabase demos). */
+  portalSessionGrants = new Map<
+    string,
+    { token: string; clientId: string; email: string; expiresAt: number }
+  >();
 
   invoices = new Map<string, DemoInvoice>();
   proposals = new Map<string, DemoInvoiceProposal>();

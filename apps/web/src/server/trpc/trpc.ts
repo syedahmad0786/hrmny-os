@@ -9,6 +9,7 @@ import {
   sessionHas,
   type SessionUser,
 } from "../auth/session";
+import { resolvePortalSessionGrant } from "../auth/portal-magic-link";
 import { emitHealthSignal } from "../m1-persistence";
 import { featureForTrpcPath } from "@/features/catalog";
 import { featureEnabled } from "../features";
@@ -32,6 +33,20 @@ export async function createContext(
 ): Promise<TrpcContext> {
   const headers = opts?.req.headers;
   const mode = getAuthMode();
+
+  const portalGrant = headers?.get("x-portal-grant")?.trim();
+  if (portalGrant) {
+    const granted = await resolvePortalSessionGrant(portalGrant);
+    if (granted) {
+      return {
+        user: granted,
+        employeeId: granted.employeeId,
+        roles: granted.roles,
+        canViewMargin: false,
+        clientId: granted.clientId,
+      };
+    }
+  }
 
   if (mode === "dev") {
     const role =

@@ -13,6 +13,7 @@ export const PORTAL_MAGIC_LINK_FEATURE = "portal.magic_link";
 /** Convention rule holding the email→clientId invite allowlist (no new table). */
 const ALLOWLIST_RULE_KEY = "portal.allowed_contacts";
 const TOKEN_TTL_MS = 15 * 60 * 1000;
+const SESSION_GRANT_TTL_MS = 8 * 60 * 60 * 1000;
 
 /** Canonical portal grant — shared with resolveSupabaseUser's portal branch. */
 export const PORTAL_PERMISSIONS = [
@@ -25,6 +26,32 @@ export const PORTAL_PERMISSIONS = [
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/** Stable uuid-shaped id from an email — no client_portal_user row required. */
+function deterministicPortalUserId(email: string): string {
+  const h = createHash("sha256").update(`portal:${email}`).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+
+function portalSessionUser(input: {
+  email: string;
+  clientId: string;
+}): SessionUser {
+  const email = normalizeEmail(input.email);
+  return {
+    employeeId: deterministicPortalUserId(email || input.clientId),
+    email: email || `portal@${input.clientId.slice(0, 8)}.local`,
+    displayName: email || "Portal contact",
+    roles: ["portal_client"],
+    permissions: [...PORTAL_PERMISSIONS],
+    actorType: "portal",
+    clientId: input.clientId,
+  };
 }
 
 /**
@@ -147,10 +174,6 @@ export async function portalMagicLinkEnabled(): Promise<boolean> {
 
 export type RequestResult = { status: "sent"; stubToken?: string };
 
-function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
-
 async function ensurePortalMagicTokenTable(): Promise<boolean> {
   const db = getDb();
   if (!db) return false;
@@ -261,8 +284,111 @@ export async function requestPortalMagicLink(
 }
 
 export type VerifyResult =
-  | { ok: true; clientId: string; email: string; via: "magic_link" }
+  | {
+      ok: true;
+      clientId: string;
+      email: string;
+      via: "magic_link";
+      sessionGrant: string;
+    }
   | { ok: false; reason: string };
+
+async function ensurePortalSessionGrantTable(): Promise<boolean> {
+  const db = getDb();
+  if (!db) return false;
+  try {
+    await db.execute(sql`
+      create table if not exists public.portal_session_grant (
+        portal_session_grant_id uuid primary key default gen_random_uuid() not null,
+        token_hash text not null unique,
+        client_id uuid not null references public.client(client_id),
+        email text not null,
+        expires_at timestamptz not null,
+        created_at timestamptz not null default now()
+      )
+    `);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Multi-use portal session after magic-link verify (header: x-portal-grant). */
+export async function issuePortalSessionGrant(input: {
+  clientId: string;
+  email: string;
+}): Promise<string> {
+  const email = normalizeEmail(input.email);
+  const token = `ps_${randomUUID().replace(/-/g, "")}`;
+  const expiresAt = Date.now() + SESSION_GRANT_TTL_MS;
+  const db = getDb();
+  if (db && (await ensurePortalSessionGrantTable())) {
+    try {
+      await db.execute(sql`
+        insert into public.portal_session_grant (
+          token_hash, client_id, email, expires_at
+        ) values (
+          ${hashToken(token)},
+          ${input.clientId}::uuid,
+          ${email},
+          ${new Date(expiresAt).toISOString()}::timestamptz
+        )
+      `);
+      return token;
+    } catch {
+      // fall through to memory
+    }
+  }
+  getDemoStore().portalSessionGrants.set(token, {
+    token,
+    clientId: input.clientId,
+    email,
+    expiresAt,
+  });
+  return token;
+}
+
+export async function resolvePortalSessionGrant(
+  token: string,
+): Promise<SessionUser | null> {
+  if (!token.startsWith("ps_")) return null;
+  const db = getDb();
+  if (db && (await ensurePortalSessionGrantTable())) {
+    const rows = await db.execute<{
+      client_id: string;
+      email: string;
+      expires_at: Date | string;
+    }>(sql`
+      select client_id, email, expires_at
+      from public.portal_session_grant
+      where token_hash = ${hashToken(token)}
+      limit 1
+    `);
+    const row = rows[0];
+    if (row && new Date(row.expires_at).getTime() >= Date.now()) {
+      return portalSessionUser({
+        clientId: row.client_id,
+        email: row.email,
+      });
+    }
+  }
+  const mem = getDemoStore().portalSessionGrants.get(token);
+  if (!mem || mem.expiresAt < Date.now()) {
+    getDemoStore().portalSessionGrants.delete(token);
+    return null;
+  }
+  return portalSessionUser({ clientId: mem.clientId, email: mem.email });
+}
+
+async function withSessionGrant(
+  result: { ok: true; clientId: string; email: string; via: "magic_link" },
+): Promise<VerifyResult> {
+  const sessionGrant = await issuePortalSessionGrant({
+    clientId: result.clientId,
+    email: result.email,
+  });
+  return { ...result, sessionGrant };
+}
 
 /** Single-use token verification (Postgres, then memory fallback). */
 export async function verifyPortalMagicToken(
@@ -303,7 +429,10 @@ export async function verifyPortalMagicToken(
         via: "magic_link" as const,
       };
     });
-    if (durable) return durable;
+    if (durable) {
+      if (!durable.ok) return durable;
+      return withSessionGrant(durable);
+    }
   }
 
   const store = getDemoStore();
@@ -313,12 +442,12 @@ export async function verifyPortalMagicToken(
     return { ok: false, reason: "Invalid or expired magic link" };
   }
   store.portalMagicTokens.delete(token);
-  return {
+  return withSessionGrant({
     ok: true,
     clientId: mem.clientId,
     email: mem.email ?? "",
     via: "magic_link",
-  };
+  });
 }
 
 /**
@@ -332,19 +461,5 @@ export async function resolvePortalSessionForEmail(
   const normalized = normalizeEmail(email);
   const clientId = (await getPortalAllowlist()).get(normalized);
   if (!clientId) return null;
-  return {
-    employeeId: deterministicPortalUserId(normalized),
-    email: normalized,
-    displayName: normalized,
-    roles: ["portal_client"],
-    permissions: [...PORTAL_PERMISSIONS],
-    actorType: "portal",
-    clientId,
-  };
-}
-
-/** Stable uuid-shaped id from an email — no client_portal_user row required. */
-function deterministicPortalUserId(email: string): string {
-  const h = createHash("sha256").update(`portal:${email}`).digest("hex");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+  return portalSessionUser({ email: normalized, clientId });
 }

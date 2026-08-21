@@ -1189,7 +1189,7 @@ export const clientsRouter = router({
         });
         return {
           token,
-          portalPath: `/portal/onboarding?token=${encodeURIComponent(token)}`,
+          portalPath: `/portal/login/verify?token=${encodeURIComponent(token)}`,
           email,
           clientId: input.clientId,
         };

@@ -262,6 +262,11 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         expect(verified.ok).toBe(true);
         if (verified.ok) {
           expect(verified.clientId).toBe(loop.clientId);
+          expect(
+            "sessionGrant" in verified &&
+              typeof verified.sessionGrant === "string" &&
+              verified.sessionGrant.startsWith("ps_"),
+          ).toBe(true);
         }
       }
     },

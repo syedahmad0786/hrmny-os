@@ -82,6 +82,7 @@ describe("portal magic-link", () => {
     expect(token.startsWith("ml_")).toBe(true);
     const first = await verifyPortalMagicToken(token);
     expect(first).toMatchObject({ ok: true, clientId: DEMO_CLIENT_B_ID });
+    if (first.ok) expect(first.sessionGrant.startsWith("ps_")).toBe(true);
     expect((await verifyPortalMagicToken(token)).ok).toBe(false);
   });
 

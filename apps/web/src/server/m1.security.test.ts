@@ -97,7 +97,12 @@ describe("M1 security insurance", () => {
     });
     const ok = await anon.portal.auth.verify({ token });
     expect(ok.ok).toBe(true);
-    if (ok.ok) expect(ok.clientId).toBe(DEMO_CLIENT_ID);
+    if (ok.ok) {
+      expect(ok.clientId).toBe(DEMO_CLIENT_ID);
+      expect("sessionGrant" in ok && ok.sessionGrant.startsWith("ps_")).toBe(
+        true,
+      );
+    }
     const reuse = await anon.portal.auth.verify({ token });
     expect(reuse.ok).toBe(false);
   });
