@@ -27,6 +27,7 @@ export type BillingInvoiceRow = {
 type OsRow = {
   invoice_id: string;
   client_id: string | null;
+  client_name: string | null;
   invoice_type: string;
   status: string;
   amount: string;
@@ -55,17 +56,19 @@ export async function listOsInvoices(): Promise<BillingInvoiceRow[]> {
   if (!db) return [];
   const rows = await db.execute<OsRow>(sql`
     select
-      invoice_id, client_id, invoice_type, status,
-      amount::text as amount, vat_amount::text as vat_amount,
-      currency, xero_invoice_id, period, created_at
-    from public.invoice
-    order by created_at desc
+      i.invoice_id, i.client_id, c.name as client_name,
+      i.invoice_type, i.status,
+      i.amount::text as amount, i.vat_amount::text as vat_amount,
+      i.currency, i.xero_invoice_id, i.period, i.created_at
+    from public.invoice i
+    left join public.client c on c.client_id = i.client_id
+    order by i.created_at desc
     limit 200
   `);
   return rows.map((r) => ({
     invoiceId: r.invoice_id,
     status: r.status,
-    contactName: "Client",
+    contactName: r.client_name?.trim() || "Client",
     amount: r.amount,
     vatAmount: r.vat_amount,
     currency: r.currency ?? "AED",
@@ -76,7 +79,10 @@ export async function listOsInvoices(): Promise<BillingInvoiceRow[]> {
     trn: null,
     trnStatus: null,
     ruleCited: null,
-    sourceAttached: null,
+    sourceAttached: {
+      source: "os",
+      invoiceType: r.invoice_type,
+    },
     xeroInvoiceId: r.xero_invoice_id,
     proposedByEmployeeId: null,
     approvedByEmployeeId: null,

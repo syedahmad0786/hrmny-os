@@ -26,6 +26,7 @@ export type OsInvoiceWrite = {
 type Row = {
   invoice_id: string;
   client_id: string | null;
+  client_name: string | null;
   invoice_type: string;
   status: string;
   amount: string;
@@ -43,7 +44,8 @@ function mapRow(
   return {
     invoiceId: r.invoice_id,
     status: r.status,
-    contactName: extras?.contactName ?? "Client",
+    contactName:
+      extras?.contactName ?? r.client_name?.trim() ?? "Client",
     amount: r.amount,
     vatAmount: r.vat_amount,
     currency: r.currency ?? "AED",
@@ -54,7 +56,10 @@ function mapRow(
     trn: extras?.trn ?? null,
     trnStatus: extras?.trnStatus ?? null,
     ruleCited: extras?.ruleCited ?? null,
-    sourceAttached: extras?.sourceAttached ?? null,
+    sourceAttached: extras?.sourceAttached ?? {
+      source: "os",
+      invoiceType: r.invoice_type,
+    },
     xeroInvoiceId: r.xero_invoice_id,
     proposedByEmployeeId: extras?.proposedByEmployeeId ?? null,
     approvedByEmployeeId: extras?.approvedByEmployeeId ?? null,
@@ -71,11 +76,13 @@ export async function getOsInvoice(
   if (!db) return null;
   const rows = await db.execute<Row>(sql`
     select
-      invoice_id, client_id, invoice_type, status,
-      amount::text as amount, vat_amount::text as vat_amount,
-      currency, xero_invoice_id, period, created_at
-    from public.invoice
-    where invoice_id = ${invoiceId}::uuid
+      i.invoice_id, i.client_id, c.name as client_name,
+      i.invoice_type, i.status,
+      i.amount::text as amount, i.vat_amount::text as vat_amount,
+      i.currency, i.xero_invoice_id, i.period, i.created_at
+    from public.invoice i
+    left join public.client c on c.client_id = i.client_id
+    where i.invoice_id = ${invoiceId}::uuid
     limit 1
   `);
   return rows[0] ? mapRow(rows[0]) : null;
@@ -103,7 +110,8 @@ export async function insertOsInvoice(
       ${input.period ?? null}
     )
     returning
-      invoice_id, client_id, invoice_type, status,
+      invoice_id, client_id, null::text as client_name,
+      invoice_type, status,
       amount::text as amount, vat_amount::text as vat_amount,
       currency, xero_invoice_id, period, created_at
   `);
@@ -160,11 +168,13 @@ export async function findOsInvoiceByXeroId(
   if (!db) return null;
   const rows = await db.execute<Row>(sql`
     select
-      invoice_id, client_id, invoice_type, status,
-      amount::text as amount, vat_amount::text as vat_amount,
-      currency, xero_invoice_id, period, created_at
-    from public.invoice
-    where xero_invoice_id = ${xeroInvoiceId}
+      i.invoice_id, i.client_id, c.name as client_name,
+      i.invoice_type, i.status,
+      i.amount::text as amount, i.vat_amount::text as vat_amount,
+      i.currency, i.xero_invoice_id, i.period, i.created_at
+    from public.invoice i
+    left join public.client c on c.client_id = i.client_id
+    where i.xero_invoice_id = ${xeroInvoiceId}
     limit 1
   `);
   return rows[0] ? mapRow(rows[0]) : null;
@@ -179,14 +189,16 @@ export async function listOsInvoicesForClientPeriod(input: {
   if (!db) return [];
   const rows = await db.execute<Row>(sql`
     select
-      invoice_id, client_id, invoice_type, status,
-      amount::text as amount, vat_amount::text as vat_amount,
-      currency, xero_invoice_id, period, created_at
-    from public.invoice
-    where client_id = ${input.clientId}::uuid
-      and period = ${input.period}
-      and invoice_type = ${input.billingKind}
-      and status <> 'void'
+      i.invoice_id, i.client_id, c.name as client_name,
+      i.invoice_type, i.status,
+      i.amount::text as amount, i.vat_amount::text as vat_amount,
+      i.currency, i.xero_invoice_id, i.period, i.created_at
+    from public.invoice i
+    left join public.client c on c.client_id = i.client_id
+    where i.client_id = ${input.clientId}::uuid
+      and i.period = ${input.period}
+      and i.invoice_type = ${input.billingKind}
+      and i.status <> 'void'
   `);
   return rows.map((r) => mapRow(r, { billingKind: input.billingKind }));
 }
