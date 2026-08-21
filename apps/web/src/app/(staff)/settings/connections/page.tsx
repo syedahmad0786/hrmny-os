@@ -145,9 +145,11 @@ export default function ConnectionsPage() {
           if ((connections.canva ?? 0) < 1) {
             next.push("Connect Canva with Composio for design → portal.");
           }
-          if (tools.resend === "mock") {
+          if (tools.resend && tools.resend !== "live") {
             next.push(
-              "Set RESEND_MODE=live + RESEND_API_KEY + RESEND_FROM for real portal invite email.",
+              tools.resend === "configured"
+                ? "Resend API key is set — flip RESEND_MODE=live and set RESEND_FROM for real portal invite email."
+                : "Set RESEND_MODE=live + RESEND_API_KEY + RESEND_FROM for real portal invite email.",
             );
           }
           setDemoBlockers(next);
