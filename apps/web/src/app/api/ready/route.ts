@@ -22,7 +22,7 @@ async function connectionSmoke(): Promise<{
     const rows = await db.execute<{ toolkit: string; n: number }>(sql`
       select toolkit, count(*)::int as n
       from public.connection_account
-      where status in ('connected', 'ACTIVE', 'active')
+      where status = 'connected'
         and toolkit in (
           'google_workspace',
           'canva',
