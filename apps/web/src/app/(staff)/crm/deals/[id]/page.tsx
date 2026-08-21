@@ -43,6 +43,16 @@ export default function CrmDealDetailPage() {
   const move = trpc.crm.deals.moveStage.useMutation({
     onSuccess: () => void utils.crm.invalidate(),
   });
+  const closeDeal = trpc.crm.deals.close.useMutation({
+    onSuccess: () => void utils.crm.invalidate(),
+  });
+  const handover = trpc.crm.deals.handoverPack.useMutation({
+    onSuccess: () => {
+      void utils.crm.invalidate();
+      void utils.clients.invalidate();
+      void utils.tasks.invalidate();
+    },
+  });
   const logActivity = trpc.crm.activities.create.useMutation({
     onSuccess: () => void utils.crm.activities.invalidate(),
   });
@@ -97,7 +107,7 @@ export default function CrmDealDetailPage() {
             <Link href="/crm">
               <CrmBtn>← Pipeline</CrmBtn>
             </Link>
-            {nextStage ? (
+            {nextStage && nextStage !== "handover_pack" ? (
               <CrmBtn
                 variant="primary"
                 disabled={move.isPending}
@@ -108,6 +118,47 @@ export default function CrmDealDetailPage() {
               >
                 Advance → {nextStage.replace(/_/g, " ")}
               </CrmBtn>
+            ) : null}
+            {(d.stage === "price_cost" || d.stage === "close") &&
+            d.closeOutcome !== "won" ? (
+              <CrmBtn
+                variant="primary"
+                disabled={closeDeal.isPending}
+                onClick={async () => {
+                  const r = await closeDeal.mutateAsync({
+                    id,
+                    outcome: "won",
+                  });
+                  setLast(r);
+                }}
+              >
+                Mark won
+              </CrmBtn>
+            ) : null}
+            {d.closeOutcome === "won" && d.stage === "close" ? (
+              <CrmBtn
+                variant="primary"
+                disabled={handover.isPending}
+                onClick={async () => {
+                  const r = await handover.mutateAsync({ id });
+                  setLast(r);
+                }}
+              >
+                Handover pack → client
+              </CrmBtn>
+            ) : null}
+            {d.stage === "handover_pack" ? (
+              <Link href="/clients">
+                <CrmBtn variant="primary">Open clients →</CrmBtn>
+              </Link>
+            ) : null}
+            {handover.data &&
+            "ok" in handover.data &&
+            handover.data.ok &&
+            "client" in handover.data ? (
+              <Link href={`/clients/${handover.data.client.clientId}`}>
+                <CrmBtn variant="primary">Open client onboarding →</CrmBtn>
+              </Link>
             ) : null}
           </>
         }

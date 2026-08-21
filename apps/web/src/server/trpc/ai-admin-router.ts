@@ -170,10 +170,14 @@ export const aiAdminRouter = router({
           metadata: { ...scope, kind: "run_prompt" },
         });
       }
+      // Client sandbox: filter by clientId only so immersion/handover chunks
+      // (without employeeId) are visible. User sandbox when no client selected.
       const memory = await searchMemory({
         query: input.prompt,
         clientId: input.clientId,
-        employeeId: ctx.employeeId ?? undefined,
+        employeeId: input.clientId
+          ? undefined
+          : (ctx.employeeId ?? undefined),
         dealId: input.dealId,
         limit: 6,
       });

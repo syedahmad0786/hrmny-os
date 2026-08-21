@@ -19,7 +19,15 @@ import {
   type DemoCalendar,
   type DemoTask,
 } from "../demo-store";
+import { getDb } from "../db";
 import { driveSeam } from "../seams";
+import {
+  getDeliveryTask,
+  listDeliveryTasks,
+  setDeliveryTaskQc,
+  updateDeliveryTaskStatus,
+  type DeliveryTask,
+} from "../tasks/delivery-tasks";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
 
 function actorFrom(ctx: {
@@ -94,6 +102,71 @@ async function applyTaskTransition(
   });
 }
 
+function deliveryAsDemoTask(task: DeliveryTask): DemoTask {
+  return {
+    taskId: task.taskId,
+    clientId: task.clientId,
+    calendarId: task.calendarId,
+    month: task.month,
+    taskType: task.taskType,
+    title: task.title,
+    status: task.status as DemoTask["status"],
+    situationalState: task.situationalState,
+    ownerEmployeeId: task.ownerEmployeeId,
+    deadline: task.deadline,
+    priority: task.priority,
+    qcPassed: task.qcPassed,
+    qcNotes: task.qcNotes,
+    clientRevisionCount: task.clientRevisionCount,
+    revisionBoundaryAck: task.revisionBoundaryAck,
+    briefId: task.briefId,
+  };
+}
+
+async function applyDurableTaskTransition(
+  ctx: {
+    employeeId: string | null;
+    roles: string[];
+    user: { permissions?: string[] } | null;
+  },
+  task: DeliveryTask,
+  to: string,
+  payload?: Record<string, unknown>,
+  overrideReason?: string | null,
+) {
+  const demo = deliveryAsDemoTask(task);
+  return transition(actorFrom(ctx), taskSnapshot(demo), {
+    to,
+    from: task.status,
+    payload,
+    overrideReason,
+  }, {
+    authorize: async () => true,
+    apply: async ({ request }) => {
+      const qcPassed =
+        request.payload?.qcPassed === true ? true : task.qcPassed;
+      const updated = await updateDeliveryTaskStatus({
+        taskId: task.taskId,
+        status: request.to,
+        qcPassed,
+      });
+      return taskSnapshot(deliveryAsDemoTask(updated ?? { ...task, status: request.to, qcPassed }));
+    },
+    audit: async (event) => {
+      const row = getDemoStore().appendAudit({
+        actorEmployeeId: event.actorEmployeeId,
+        action: event.action,
+        entityType: event.entityType,
+        entityId: event.entityId ?? task.taskId,
+        before: event.before,
+        after: event.after,
+        reason: event.reason ?? null,
+      });
+      return { auditId: row.auditEventId };
+    },
+  });
+}
+
 export const m4DemoRouter = router({
   reset: publicProcedure.mutation(() => {
     getDemoStore().resetM4Demo();
@@ -106,7 +179,19 @@ export const m4DemoRouter = router({
       creativeTaskId: DEMO_CREATIVE_TASK_ID,
     };
   }),
-  seedIds: publicProcedure.query(() => {
+  seedIds: publicProcedure.query(async () => {
+    if (getDb()) {
+      const qcTasks = await listDeliveryTasks({ status: "qc" });
+      if (qcTasks[0]) {
+        return {
+          clientId: qcTasks[0].clientId,
+          calendarId: DEMO_CALENDAR_ID,
+          taskId: qcTasks[0].taskId,
+          briefId: qcTasks[0].briefId ?? DEMO_BRIEF_ID,
+          creativeTaskId: qcTasks[0].taskId,
+        };
+      }
+    }
     const store = getDemoStore();
     if (store.calendars.size === 0) store.seedM4Demo();
     return {
@@ -505,7 +590,13 @@ export const tasksRouter = router({
         })
         .optional(),
     )
-    .query(({ input }) => {
+    .query(async ({ input }) => {
+      if (getDb()) {
+        const rows = await listDeliveryTasks(input);
+        if (rows.length || input?.clientId || input?.status) {
+          return rows.map(deliveryAsDemoTask);
+        }
+      }
       let rows = [...getDemoStore().tasks.values()];
       if (input?.clientId) {
         rows = rows.filter((t) => t.clientId === input.clientId);
@@ -518,7 +609,11 @@ export const tasksRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => getDemoStore().tasks.get(input.id) ?? null),
+    .query(async ({ input }) => {
+      const durable = await getDeliveryTask(input.id);
+      if (durable) return deliveryAsDemoTask(durable);
+      return getDemoStore().tasks.get(input.id) ?? null;
+    }),
 
   create: protectedProcedure
     .input(
@@ -612,6 +707,16 @@ export const tasksRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      const durable = await getDeliveryTask(input.id);
+      if (durable) {
+        return applyDurableTaskTransition(
+          ctx,
+          durable,
+          input.to,
+          input.payload,
+          input.overrideReason,
+        );
+      }
       const task = getDemoStore().tasks.get(input.id);
       if (!task) throw new Error("NOT_FOUND");
       return applyTaskTransition(
@@ -645,10 +750,7 @@ export const tasksRouter = router({
         notes: z.string().optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
-      const store = getDemoStore();
-      const task = store.tasks.get(input.id);
-      if (!task) throw new Error("NOT_FOUND");
+    .mutation(async ({ input, ctx }) => {
       const isCd =
         ctx.roles.includes("creative_director") ||
         ctx.roles.includes("partner") ||
@@ -660,6 +762,47 @@ export const tasksRouter = router({
           reason: "Only Creative Director / partner may QC",
         };
       }
+
+      const durable = await getDeliveryTask(input.id);
+      if (durable) {
+        const task = await setDeliveryTaskQc({
+          taskId: input.id,
+          decision: input.decision,
+          notes: input.notes,
+        });
+        if (!task) throw new Error("NOT_FOUND");
+        let seam = null as ReturnType<typeof driveSeam> | null;
+        if (task.qcPassed) {
+          seam = driveSeam(
+            "creative.approved",
+            `creative.approved:${task.taskId}`,
+            {
+              taskId: task.taskId,
+              assetId: null,
+              clientId: task.clientId,
+              actorEmployeeId: ctx.employeeId,
+            },
+          );
+        }
+        getDemoStore().appendAudit({
+          actorEmployeeId: ctx.employeeId!,
+          action: "tasks.qc",
+          entityType: "task",
+          entityId: task.taskId,
+          before: null,
+          after: {
+            decision: input.decision,
+            qcPassed: task.qcPassed,
+            seamEventId: seam?.event.eventId ?? null,
+          },
+          reason: input.notes ?? null,
+        });
+        return { ok: true as const, task: deliveryAsDemoTask(task), seam };
+      }
+
+      const store = getDemoStore();
+      const task = store.tasks.get(input.id);
+      if (!task) throw new Error("NOT_FOUND");
       task.qcPassed = input.decision === "pass" || input.decision === "waive";
       task.qcNotes = input.notes ?? null;
       if (input.decision === "waive") {
@@ -699,8 +842,10 @@ export const tasksRouter = router({
 });
 
 export const deliveryDashboardsRouter = router({
-  capacity: protectedProcedure.query(() => {
-    const tasks = [...getDemoStore().tasks.values()];
+  capacity: protectedProcedure.query(async () => {
+    const tasks = getDb()
+      ? (await listDeliveryTasks()).map(deliveryAsDemoTask)
+      : [...getDemoStore().tasks.values()];
     const weeks = [0, 1, 2].map((offset) => {
       const start = new Date();
       start.setDate(start.getDate() + offset * 7);
@@ -716,8 +861,10 @@ export const deliveryDashboardsRouter = router({
     return { weeks };
   }),
 
-  delivery: protectedProcedure.query(() => {
-    const tasks = [...getDemoStore().tasks.values()];
+  delivery: protectedProcedure.query(async () => {
+    const tasks = getDb()
+      ? (await listDeliveryTasks()).map(deliveryAsDemoTask)
+      : [...getDemoStore().tasks.values()];
     const columns = [
       "backlog",
       "briefing",

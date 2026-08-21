@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { inferRouterOutputs } from "@trpc/server";
+import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import type { AppRouter } from "@/server/trpc/root";
 import { formatAed, formatRelative } from "@/components/crm/format";
@@ -49,6 +50,8 @@ function AdminNav() {
 export default function AiAdminPage() {
   const utils = trpc.useUtils();
   const dashboard = trpc.aiAdmin.dashboard.useQuery({ runsLimit: 20 });
+  const clients = trpc.clients.list.useQuery(undefined, { staleTime: 60_000 });
+  const [clientId, setClientId] = useState("");
   const toggle = trpc.aiAdmin.toggleAgent.useMutation({
     onSuccess: () => void utils.aiAdmin.dashboard.invalidate(),
   });
@@ -74,6 +77,24 @@ export default function AiAdminPage() {
         <AdminNav />
       </header>
 
+      <section className="rounded-xl border border-sand bg-white/75 p-4">
+        <label className="text-xs font-bold uppercase tracking-[0.12em] text-muted">
+          Memory sandbox client
+        </label>
+        <select
+          className="mt-2 w-full max-w-md rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+        >
+          <option value="">Actor-only (no client scope)</option>
+          {(clients.data ?? []).map((c) => (
+            <option key={c.clientId} value={c.clientId}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </section>
+
       {dashboard.isLoading ? (
         <div className="rounded-xl border border-sand bg-white/60 p-10 text-center text-sm text-muted">
           Loading AI control panel…
@@ -98,7 +119,10 @@ export default function AiAdminPage() {
           onRun={(agentId) =>
             run.mutate({
               agentId,
-              prompt: `Demo run for ${agentId} — summarize next actions.`,
+              prompt: clientId
+                ? `Demo run for ${agentId} on client sandbox — summarize next onboarding and creative actions.`
+                : `Demo run for ${agentId} — summarize next actions.`,
+              clientId: clientId || undefined,
             })
           }
           runningId={run.isPending ? run.variables?.agentId : undefined}
