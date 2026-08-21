@@ -144,50 +144,45 @@ async function vectorSearch(
       (1 - (embedding <=> ${vectorLiteral}::vector))::float8 as score
     from public.memory_chunk
     where embedding is not null
+      ${
+        input.clientId
+          ? sql`and metadata->>'clientId' = ${input.clientId}`
+          : sql``
+      }
+      ${
+        input.dealId ? sql`and metadata->>'dealId' = ${input.dealId}` : sql``
+      }
+      ${
+        input.companyId
+          ? sql`and metadata->>'companyId' = ${input.companyId}`
+          : sql``
+      }
+      ${
+        input.employeeId
+          ? sql`and metadata->>'employeeId' = ${input.employeeId}`
+          : sql``
+      }
+      ${
+        input.taskId
+          ? sql`and metadata->>'taskId' = ${input.taskId}`
+          : sql``
+      }
+      ${
+        input.sourceTypes?.length
+          ? sql`and source_type = any(${input.sourceTypes}::text[])`
+          : sql``
+      }
     order by embedding <=> ${vectorLiteral}::vector
     limit ${limit}
   `);
-  return rows
-    .filter((r) => {
-      const meta = r.metadata ?? {};
-      if (
-        input.clientId &&
-        String(meta.clientId ?? "") !== input.clientId
-      ) {
-        return false;
-      }
-      if (input.dealId && String(meta.dealId ?? "") !== input.dealId) {
-        return false;
-      }
-      if (
-        input.companyId &&
-        String(meta.companyId ?? "") !== input.companyId
-      ) {
-        return false;
-      }
-      if (
-        input.employeeId &&
-        String(meta.employeeId ?? "") !== input.employeeId
-      ) {
-        return false;
-      }
-      if (
-        input.sourceTypes &&
-        !input.sourceTypes.includes(r.source_type)
-      ) {
-        return false;
-      }
-      return true;
-    })
-    .slice(0, input.limit ?? 8)
-    .map((r) => ({
-      id: r.id,
-      sourceType: r.source_type,
-      sourceId: r.source_id,
-      content: r.content,
-      score: r.score,
-      metadata: r.metadata ?? {},
-    }));
+  return rows.map((r) => ({
+    id: r.id,
+    sourceType: r.source_type,
+    sourceId: r.source_id,
+    content: r.content,
+    score: r.score,
+    metadata: r.metadata ?? {},
+  }));
 }
 
 /**

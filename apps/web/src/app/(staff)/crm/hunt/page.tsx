@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { trpc } from "@/lib/trpc";
 
 const STEPS = [
   {
@@ -30,6 +32,65 @@ const STEPS = [
 ] as const;
 
 export default function HuntClientsPage() {
+  const [result, setResult] = useState<string | null>(null);
+  const [query, setQuery] = useState("UAE retail brand");
+  const [lastApolloDealId, setLastApolloDealId] = useState<string | null>(null);
+  const [toolReady, setToolReady] = useState<Record<string, string> | null>(
+    null,
+  );
+  const utils = trpc.useUtils();
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/ready")
+      .then((r) => r.json())
+      .then((body: { tools?: Record<string, string> }) => {
+        if (!cancelled && body.tools) setToolReady(body.tools);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const demo = trpc.crm.runDemoClosedLoop.useMutation({
+    onSuccess: (data) => {
+      if (!data.ok) {
+        setResult(`Blocked at ${data.step}: ${data.reason}`);
+        return;
+      }
+      const via = data.viaApollo
+        ? ` via Apollo (${data.apolloMode ?? "mock"})`
+        : "";
+      setResult(
+        `Closed loop ready${via} — client ${data.clientName}${
+          data.calendarId ? " · content calendar seeded" : ""
+        }. Open Account, Creative, then portal.`,
+      );
+      void utils.crm.deals.list.invalidate();
+    },
+    onError: (err) => setResult(err.message),
+  });
+  const apolloImport = trpc.crm.prospect.apolloImport.useMutation({
+    onSuccess: (payload) => {
+      const n = payload.deals.length;
+      const first = payload.deals[0];
+      setLastApolloDealId(first?.dealId ?? null);
+      setResult(
+        n > 0
+          ? `Apollo (${payload.mode}${
+              payload.verifyMode !== "skipped"
+                ? ` · hunter ${payload.verifyMode}`
+                : ""
+            }) imported ${n} durable discover deal(s)${
+              payload.deals[0]?.emailVerified ? " with verified email" : ""
+            } — open pipeline to qualify.`
+          : "Apollo returned no companies for that query.",
+      );
+      void utils.crm.deals.list.invalidate();
+    },
+    onError: (err) => setResult(err.message),
+  });
+
   return (
     <main className="ops-home">
       <section className="ops-command" aria-labelledby="hunt-title">
@@ -50,6 +111,127 @@ export default function HuntClientsPage() {
             <p className="ops-support">
               Follow the sequence. Each step opens the exact workspace — no
               scavenger hunt through the nav.
+            </p>
+
+            <div className="mt-6 flex flex-wrap items-center gap-2">
+              <input
+                className="min-w-[220px] flex-1 rounded-full border border-sand bg-white px-4 py-2 text-sm"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Apollo search (mock without key)"
+                aria-label="Prospecting query"
+              />
+              <button
+                type="button"
+                className="rounded-full border border-sand bg-white px-4 py-2 text-sm disabled:opacity-40"
+                disabled={apolloImport.isPending || query.trim().length < 2}
+                onClick={() => {
+                  setResult(null);
+                  apolloImport.mutate({ query: query.trim() });
+                }}
+              >
+                {apolloImport.isPending ? "Searching…" : "Prospect with Apollo"}
+              </button>
+              {lastApolloDealId ? (
+                <Link
+                  className="text-sm underline"
+                  href={`/crm/deals/${lastApolloDealId}`}
+                >
+                  Open deal
+                </Link>
+              ) : null}
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                className="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-white disabled:opacity-40"
+                disabled={demo.isPending}
+                onClick={() => {
+                  setResult(null);
+                  demo.mutate({});
+                }}
+              >
+                {demo.isPending
+                  ? "Running demo loop…"
+                  : "Run demo closed loop"}
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-sand bg-white px-4 py-2 text-sm disabled:opacity-40"
+                disabled={demo.isPending}
+                onClick={() => {
+                  setResult(null);
+                  demo.mutate({
+                    viaApollo: true,
+                    companyName: query.trim() || undefined,
+                  });
+                }}
+              >
+                {demo.isPending
+                  ? "Running…"
+                  : "Closed loop via Apollo"}
+              </button>
+              {demo.data && demo.data.ok ? (
+                <>
+                  <Link
+                    className="text-sm underline"
+                    href={demo.data.next.crmDeal}
+                  >
+                    Deal
+                  </Link>
+                  <Link
+                    className="text-sm underline"
+                    href={demo.data.next.client}
+                  >
+                    Client
+                  </Link>
+                  {demo.data.next.account ? (
+                    <Link
+                      className="text-sm underline"
+                      href={demo.data.next.account}
+                    >
+                      Account
+                    </Link>
+                  ) : null}
+                  <Link
+                    className="text-sm underline"
+                    href={demo.data.next.creative}
+                  >
+                    Creative
+                  </Link>
+                  <Link
+                    className="text-sm underline"
+                    href={demo.data.next.portal}
+                  >
+                    Portal
+                  </Link>
+                </>
+              ) : null}
+              <Link className="text-sm underline" href="/crm">
+                Pipeline
+              </Link>
+            </div>
+            {toolReady ? (
+              <p className="mt-2 text-xs text-muted">
+                Tools: apollo {toolReady.apollo} · hunter {toolReady.hunter} ·
+                n8n {toolReady.n8n} · xero {toolReady.xero} · composio{" "}
+                {toolReady.composio}
+                {" · "}
+                <Link href="/settings/connections" className="underline">
+                  Connections
+                </Link>
+              </p>
+            ) : null}
+            {result ? (
+              <p className="mt-3 text-sm text-muted" role="status">
+                {result}
+              </p>
+            ) : null}
+            <p className="mt-2 text-xs text-muted">
+              Apollo imports write durable CRM deals (same store as pipeline).
+              Keys in Connections go live; without keys Apollo stays mock.
+              Closed loop seeds prospect → won → onboarding + creative task.
             </p>
           </div>
 
@@ -81,7 +263,10 @@ export default function HuntClientsPage() {
               Activities <span aria-hidden>↗</span>
             </Link>
             <Link href="/settings/connections">
-              Connect Apollo / Hunter <span aria-hidden>↗</span>
+              Connections <span aria-hidden>↗</span>
+            </Link>
+            <Link href="/settings/ai">
+              Agents <span aria-hidden>↗</span>
             </Link>
           </nav>
         </footer>

@@ -20,14 +20,26 @@ import {
   type DemoTask,
 } from "../demo-store";
 import { getDb } from "../db";
-import { driveSeam } from "../seams";
+import { driveSeam, driveSeamAsync } from "../seams";
 import {
+  createDeliveryTask,
+  getDeliveryBrief,
   getDeliveryTask,
   listDeliveryTasks,
+  lockDeliveryBrief,
   setDeliveryTaskQc,
+  updateDeliveryBriefBody,
   updateDeliveryTaskStatus,
+  upsertDeliveryBriefForTask,
   type DeliveryTask,
 } from "../tasks/delivery-tasks";
+import {
+  addDeliveryCalendarSlot,
+  createDeliveryCalendar,
+  getDeliveryCalendar,
+  listDeliveryCalendars,
+  updateDeliveryCalendar,
+} from "../tasks/delivery-calendars";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
 
 function actorFrom(ctx: {
@@ -181,6 +193,28 @@ export const m4DemoRouter = router({
   }),
   seedIds: publicProcedure.query(async () => {
     if (getDb()) {
+      const unlocked = await listDeliveryTasks({ status: "briefing" });
+      const withBrief = unlocked.find((t) => t.briefId);
+      if (withBrief?.briefId) {
+        return {
+          clientId: withBrief.clientId,
+          calendarId: DEMO_CALENDAR_ID,
+          taskId: withBrief.taskId,
+          briefId: withBrief.briefId,
+          creativeTaskId: withBrief.taskId,
+        };
+      }
+      const ready = await listDeliveryTasks({ status: "brief_ready" });
+      const readyBrief = ready.find((t) => t.briefId);
+      if (readyBrief?.briefId) {
+        return {
+          clientId: readyBrief.clientId,
+          calendarId: DEMO_CALENDAR_ID,
+          taskId: readyBrief.taskId,
+          briefId: readyBrief.briefId,
+          creativeTaskId: readyBrief.taskId,
+        };
+      }
       const qcTasks = await listDeliveryTasks({ status: "qc" });
       if (qcTasks[0]) {
         return {
@@ -207,7 +241,22 @@ export const m4DemoRouter = router({
 export const calendarsRouter = router({
   listByClient: protectedProcedure
     .input(z.object({ clientId: z.string(), month: z.string().optional() }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
+      if (getDb()) {
+        const rows = await listDeliveryCalendars({
+          clientId: input.clientId,
+          month: input.month,
+        });
+        if (rows.length) {
+          return rows.map((c) => ({
+            ...c,
+            shootLock: evaluateShootLock({
+              shootDate: c.shootDate,
+              refApprovalState: c.refApprovalState,
+            }),
+          }));
+        }
+      }
       let rows = [...getDemoStore().calendars.values()].filter(
         (c) => c.clientId === input.clientId,
       );
@@ -223,7 +272,19 @@ export const calendarsRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
+      if (getDb()) {
+        const durable = await getDeliveryCalendar(input.id);
+        if (durable) {
+          return {
+            ...durable,
+            shootLock: evaluateShootLock({
+              shootDate: durable.shootDate,
+              refApprovalState: durable.refApprovalState,
+            }),
+          };
+        }
+      }
       const c = getDemoStore().calendars.get(input.id);
       if (!c) return null;
       return {
@@ -243,7 +304,15 @@ export const calendarsRouter = router({
         focusPoints: z.array(z.unknown()).default([]),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const durable = await createDeliveryCalendar({
+          clientId: input.clientId,
+          month: input.month,
+          focusPoints: input.focusPoints,
+        });
+        if (durable) return durable;
+      }
       const store = getDemoStore();
       if (!store.clients.has(input.clientId)) throw new Error("NOT_FOUND");
       const calendar: DemoCalendar = {
@@ -280,7 +349,17 @@ export const calendarsRouter = router({
         position: z.number().default(0),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
+      if (getDb()) {
+        const slot = await addDeliveryCalendarSlot({
+          calendarId: input.calendarId,
+          slotDate: input.slotDate,
+          slotLabel: input.slotLabel ?? null,
+          taskId: input.taskId ?? null,
+          position: input.position,
+        });
+        if (slot) return slot;
+      }
       const cal = getDemoStore().calendars.get(input.calendarId);
       if (!cal) throw new Error("NOT_FOUND");
       const slot = {
@@ -297,7 +376,15 @@ export const calendarsRouter = router({
 
   refApprove: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const durable = await updateDeliveryCalendar({
+          calendarId: input.id,
+          refApprovalState: "approved",
+          state: "ref_approved",
+        });
+        if (durable) return durable;
+      }
       const store = getDemoStore();
       const cal = store.calendars.get(input.id);
       if (!cal) throw new Error("NOT_FOUND");
@@ -323,7 +410,74 @@ export const calendarsRouter = router({
         rescheduleEdge: z.boolean().optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const existing = await getDeliveryCalendar(input.id);
+        if (existing) {
+          const changing =
+            existing.shootDate !== null &&
+            existing.shootDate !== input.shootDate;
+          const currentLock = evaluateShootLock({
+            shootDate: existing.shootDate,
+            refApprovalState: existing.refApprovalState,
+          });
+          if (changing && currentLock.locked && !input.rescheduleEdge) {
+            return {
+              ok: false as const,
+              code: "GATE_BLOCKED" as const,
+              blockedBy: [
+                {
+                  gate: "calendar.t48_shoot_lock",
+                  reason:
+                    currentLock.reason ??
+                    "T-48h shoot lock — late calendar/shoot changes blocked",
+                },
+              ],
+              calendar: existing,
+              shootLock: currentLock,
+            };
+          }
+          let nextState = existing.state;
+          if (changing && input.rescheduleEdge) nextState = "reschedule";
+          const updated = await updateDeliveryCalendar({
+            calendarId: input.id,
+            shootDate: input.shootDate,
+            state: nextState,
+          });
+          const cal = updated ?? existing;
+          const lock = evaluateShootLock({
+            shootDate: cal.shootDate,
+            refApprovalState: cal.refApprovalState,
+          });
+          if (lock.locked && cal.state !== "reschedule") {
+            await updateDeliveryCalendar({
+              calendarId: cal.calendarId,
+              state: "shoot_locked",
+            });
+            cal.state = "shoot_locked";
+          }
+          if (lock.escalateT24) {
+            getDemoStore().deliveryEscalations.unshift({
+              id: randomUUID(),
+              kind: "t24_shoot",
+              calendarId: cal.calendarId,
+              message:
+                lock.reason ??
+                "T-24h escalate — unapproved calendar → cancel/reschedule edge",
+              createdAt: new Date().toISOString(),
+            });
+          }
+          return {
+            ok: true as const,
+            calendar: (await getDeliveryCalendar(cal.calendarId)) ?? cal,
+            shootLock: lock,
+            escalations: getDemoStore().deliveryEscalations.filter(
+              (e) => e.calendarId === cal.calendarId,
+            ),
+          };
+        }
+      }
+
       const store = getDemoStore();
       const cal = store.calendars.get(input.id);
       if (!cal) throw new Error("NOT_FOUND");
@@ -411,7 +565,15 @@ export const calendarsRouter = router({
 
   finalApprove: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const durable = await updateDeliveryCalendar({
+          calendarId: input.id,
+          finalApprovalState: "approved",
+          state: "final_approved",
+        });
+        if (durable) return durable;
+      }
       const cal = getDemoStore().calendars.get(input.id);
       if (!cal) throw new Error("NOT_FOUND");
       cal.finalApprovalState = "approved";
@@ -430,7 +592,16 @@ export const calendarsRouter = router({
 
   evaluateLock: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
+      if (getDb()) {
+        const durable = await getDeliveryCalendar(input.id);
+        if (durable) {
+          return evaluateShootLock({
+            shootDate: durable.shootDate,
+            refApprovalState: durable.refApprovalState,
+          });
+        }
+      }
       const cal = getDemoStore().calendars.get(input.id);
       if (!cal) return null;
       return evaluateShootLock({
@@ -447,7 +618,22 @@ export const calendarsRouter = router({
 export const briefsRouter = router({
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => getDemoStore().briefs.get(input.id) ?? null),
+    .query(async ({ input }) => {
+      const durable = await getDeliveryBrief(input.id);
+      if (durable) {
+        const dor = validateDor(durable.body);
+        return {
+          briefId: durable.briefId,
+          taskId: durable.taskId,
+          body: durable.body,
+          dorComplete: durable.dorComplete,
+          missingRequiredCount: durable.missingRequiredCount,
+          missing: [...dor.missing],
+          lockedAt: durable.lockedAt,
+        } satisfies DemoBrief;
+      }
+      return getDemoStore().briefs.get(input.id) ?? null;
+    }),
 
   createForTask: protectedProcedure
     .input(
@@ -456,11 +642,32 @@ export const briefsRouter = router({
         body: z.record(z.unknown()).default({}),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      const dor = validateDor(input.body);
+      if (getDb()) {
+        const durableTask = await getDeliveryTask(input.taskId);
+        if (durableTask) {
+          const brief = await upsertDeliveryBriefForTask({
+            taskId: input.taskId,
+            body: input.body,
+            dorComplete: dor.dorComplete,
+            missingRequiredCount: dor.missingRequiredCount,
+          });
+          if (!brief) throw new Error("NOT_FOUND");
+          return {
+            briefId: brief.briefId,
+            taskId: brief.taskId,
+            body: brief.body,
+            dorComplete: brief.dorComplete,
+            missingRequiredCount: brief.missingRequiredCount,
+            missing: [...dor.missing],
+            lockedAt: brief.lockedAt,
+          } satisfies DemoBrief;
+        }
+      }
       const store = getDemoStore();
       const task = store.tasks.get(input.taskId);
       if (!task) throw new Error("NOT_FOUND");
-      const dor = validateDor(input.body);
       const brief: DemoBrief = {
         briefId: randomUUID(),
         taskId: input.taskId,
@@ -492,11 +699,33 @@ export const briefsRouter = router({
         body: z.record(z.unknown()),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
+      const dor = validateDor(input.body);
+      if (getDb()) {
+        const durable = await getDeliveryBrief(input.id);
+        if (durable) {
+          if (durable.lockedAt) throw new Error("BRIEF_LOCKED");
+          const updated = await updateDeliveryBriefBody({
+            briefId: input.id,
+            body: input.body,
+            dorComplete: dor.dorComplete,
+            missingRequiredCount: dor.missingRequiredCount,
+          });
+          if (!updated) throw new Error("NOT_FOUND");
+          return {
+            briefId: updated.briefId,
+            taskId: updated.taskId,
+            body: updated.body,
+            dorComplete: updated.dorComplete,
+            missingRequiredCount: updated.missingRequiredCount,
+            missing: [...dor.missing],
+            lockedAt: updated.lockedAt,
+          } satisfies DemoBrief;
+        }
+      }
       const brief = getDemoStore().briefs.get(input.id);
       if (!brief) throw new Error("NOT_FOUND");
       if (brief.lockedAt) throw new Error("BRIEF_LOCKED");
-      const dor = validateDor(input.body);
       brief.body = input.body;
       brief.dorComplete = dor.dorComplete;
       brief.missingRequiredCount = dor.missingRequiredCount;
@@ -506,7 +735,25 @@ export const briefsRouter = router({
 
   validateDor: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
+      if (getDb()) {
+        const durable = await getDeliveryBrief(input.id);
+        if (durable) {
+          const dor = validateDor(durable.body);
+          await updateDeliveryBriefBody({
+            briefId: input.id,
+            body: durable.body,
+            dorComplete: dor.dorComplete,
+            missingRequiredCount: dor.missingRequiredCount,
+          });
+          return {
+            missingRequiredCount: dor.missingRequiredCount,
+            dorComplete: dor.dorComplete,
+            missing: dor.missing,
+            canLock: dor.canLock,
+          };
+        }
+      }
       const brief = getDemoStore().briefs.get(input.id);
       if (!brief) throw new Error("NOT_FOUND");
       const dor = validateDor(brief.body);
@@ -523,7 +770,60 @@ export const briefsRouter = router({
 
   lock: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const durable = await getDeliveryBrief(input.id);
+        if (durable) {
+          const dor = validateDor(durable.body);
+          const blocked = dorLockBlockedReason(dor);
+          if (blocked) {
+            return {
+              ok: false as const,
+              code: "GATE_BLOCKED" as const,
+              status: 423 as const,
+              reason: blocked,
+              missingRequiredCount: dor.missingRequiredCount,
+              missing: dor.missing,
+            };
+          }
+          const locked = await lockDeliveryBrief({
+            briefId: input.id,
+            dorComplete: dor.dorComplete,
+            missingRequiredCount: dor.missingRequiredCount,
+          });
+          if (!locked) throw new Error("NOT_FOUND");
+          const sourceTask = await getDeliveryTask(locked.brief.taskId);
+          const seam = await driveSeamAsync(
+            "brief.lock",
+            `brief.lock:${locked.brief.briefId}`,
+            {
+              briefId: locked.brief.briefId,
+              taskId: locked.brief.taskId,
+              clientId: sourceTask?.clientId ?? null,
+              actorEmployeeId: ctx.employeeId,
+              durableSpawnTaskId: locked.spawnedTaskId,
+              durableReuse: locked.reuse,
+            },
+          );
+          const brief: DemoBrief = {
+            briefId: locked.brief.briefId,
+            taskId: locked.brief.taskId,
+            body: locked.brief.body,
+            dorComplete: locked.brief.dorComplete,
+            missingRequiredCount: locked.brief.missingRequiredCount,
+            missing: [...dor.missing],
+            lockedAt: locked.brief.lockedAt,
+          };
+          return {
+            ok: true as const,
+            taskStatus: "brief_ready" as const,
+            brief,
+            seam,
+            spawnedTaskId: locked.spawnedTaskId,
+          };
+        }
+      }
+
       const store = getDemoStore();
       const brief = store.briefs.get(input.id);
       if (!brief) throw new Error("NOT_FOUND");
@@ -576,6 +876,10 @@ export const briefsRouter = router({
         taskStatus: "brief_ready" as const,
         brief,
         seam,
+        spawnedTaskId:
+          typeof seam.event.result?.taskId === "string"
+            ? seam.event.result.taskId
+            : null,
       };
     }),
 });
@@ -593,9 +897,7 @@ export const tasksRouter = router({
     .query(async ({ input }) => {
       if (getDb()) {
         const rows = await listDeliveryTasks(input);
-        if (rows.length || input?.clientId || input?.status) {
-          return rows.map(deliveryAsDemoTask);
-        }
+        return rows.map(deliveryAsDemoTask);
       }
       let rows = [...getDemoStore().tasks.values()];
       if (input?.clientId) {
@@ -625,9 +927,25 @@ export const tasksRouter = router({
         title: z.string().min(1).optional(),
         deadline: z.string().optional(),
         priority: z.string().optional(),
+        status: z.string().optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const durable = await createDeliveryTask({
+          clientId: input.clientId,
+          calendarId: input.calendarId ?? null,
+          month: input.month ?? null,
+          taskType: input.taskType,
+          title: input.title,
+          deadline: input.deadline ?? null,
+          priority: input.priority ?? null,
+          ownerEmployeeId: ctx.employeeId,
+          status: input.status,
+        });
+        if (!durable) throw new Error("NOT_FOUND");
+        return deliveryAsDemoTask(durable);
+      }
       const store = getDemoStore();
       if (!store.clients.has(input.clientId)) throw new Error("NOT_FOUND");
       const task: DemoTask = {
@@ -637,7 +955,7 @@ export const tasksRouter = router({
         month: input.month ?? null,
         taskType: input.taskType,
         title: input.title ?? input.taskType,
-        status: "backlog",
+        status: (input.status as DemoTask["status"]) ?? "backlog",
         situationalState: null,
         ownerEmployeeId: null,
         deadline: input.deadline ?? null,
@@ -771,9 +1089,9 @@ export const tasksRouter = router({
           notes: input.notes,
         });
         if (!task) throw new Error("NOT_FOUND");
-        let seam = null as ReturnType<typeof driveSeam> | null;
+        let seam = null as Awaited<ReturnType<typeof driveSeamAsync>> | null;
         if (task.qcPassed) {
-          seam = driveSeam(
+          seam = await driveSeamAsync(
             "creative.approved",
             `creative.approved:${task.taskId}`,
             {

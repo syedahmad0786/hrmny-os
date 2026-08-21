@@ -18,6 +18,9 @@ test.describe("Demo funnel", () => {
     });
     await expect(page.locator("body")).toContainText(/CRM|deal|pipeline/i);
 
+    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("body")).toContainText(/hunt|apollo|closed loop/i);
+
     await page.goto("/crm/deals", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
 
@@ -31,17 +34,23 @@ test.describe("Demo funnel", () => {
     await expect(page.locator("body")).toContainText(/client/i);
 
     await page.goto("/creative", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: /Creative QC/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Creative$/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Pass QC/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Generate image/i })).toBeVisible();
 
     await page.goto("/delivery", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible();
+    await expect(page.locator("body")).toContainText(/Run agent on task/i);
 
     await page.goto("/settings/ai", { waitUntil: "domcontentloaded" });
     await expect(page.locator("body")).toContainText(/AI|agent/i);
 
     await page.goto("/settings/connections", { waitUntil: "domcontentloaded" });
     await expect(page.locator("body")).toContainText(/connection|composio|apollo/i);
+
+    await page.goto("/settings/automations", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: /Automations/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Run n8n smoke/i })).toBeVisible();
   });
 
   test("portal path: client workspace loads for portal_a", async ({ page }) => {
@@ -53,6 +62,9 @@ test.describe("Demo funnel", () => {
 
     await page.goto("/portal/approvals", { waitUntil: "domcontentloaded" });
     await expect(page.url()).not.toContain("/portal/login");
+
+    await page.goto("/portal/onboarding", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: /Onboarding/i })).toBeVisible();
   });
 
   test("deal detail exposes won + handover controls", async ({ page }) => {

@@ -1,3 +1,6 @@
+process.env.DATABASE_URL = "";
+process.env.COMPOSIO_API_KEY = "";
+
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ActorContext, AuditWriter, EmitHook } from "@hrmny/gate";
 import type { ComposioSendAdapter } from "@hrmny/integrations";

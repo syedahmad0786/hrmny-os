@@ -252,12 +252,47 @@ export const chatRouter = router({
       }
 
       const provider = createProvider({});
+      let customSystem = "";
+      if (thread.agentSlug) {
+        const dbAgent = getDb();
+        if (dbAgent) {
+          const rows = await dbAgent.execute<{
+            systemPrompt: string;
+            displayName: string;
+            responsibility: string;
+          }>(sql`
+            select
+              system_prompt as "systemPrompt",
+              display_name as "displayName",
+              responsibility
+            from public.custom_agent
+            where slug = ${thread.agentSlug}
+              and enabled = true
+            limit 1
+          `);
+          const custom = rows[0];
+          if (custom) {
+            customSystem = [
+              custom.systemPrompt?.trim() ||
+                `You are ${custom.displayName} (${thread.agentSlug}).`,
+              custom.responsibility?.trim()
+                ? `Responsibility: ${custom.responsibility.trim()}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join("\n");
+          }
+        }
+      }
       const system = [
-        "You are Hrmny — the multiplayer agent harness for Creative Harmony staff.",
+        customSystem ||
+          "You are Hrmny — the multiplayer agent harness for Creative Harmony staff.",
         "Inspired by QM (YC Software): plan → act → observe, then answer.",
         "Be concise. Prefer tools for factual lookups. Never invent client data.",
         `Effort level: ${effort}.`,
-        thread.agentSlug ? `Preferred agent persona: ${thread.agentSlug}.` : "",
+        !customSystem && thread.agentSlug
+          ? `Preferred agent persona: ${thread.agentSlug}.`
+          : "",
         thread.clientId ? `Client sandbox id: ${thread.clientId}.` : "",
       ]
         .filter(Boolean)

@@ -16,7 +16,8 @@ export default function PortalDeliveriesPage() {
           </p>
           <ul className="space-y-2 text-sm text-muted">
             {d.deliverables.map((item) => (
-              <li key={item.taskId}>
+              <li key={`${item.kind}-${item.taskId}`}>
+                {item.kind === "asset" ? "Asset · " : ""}
                 {item.title} · {item.status}
               </li>
             ))}

@@ -79,6 +79,12 @@ try {
       "utf8",
     ),
   );
+  await sql.unsafe(
+    readFileSync(
+      join(root, "packages/db/migrations/0069_seam_outbox.sql"),
+      "utf8",
+    ),
+  );
 
   const vector = await sql`select exists(select 1 from pg_extension where extname='vector') as ok`;
   const employees = await sql`select employee_id from employee limit 1`;

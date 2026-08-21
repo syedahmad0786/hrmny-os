@@ -105,7 +105,11 @@ export default function ConnectionsPage() {
         <p className="mt-2 text-muted">
           Business credentials stay encrypted in Supabase Vault. Personal tools
           use Composio-hosted authorization and are never exposed to the
-          browser.
+          browser.{" "}
+          <Link href="/settings/automations" className="underline">
+            Automations / n8n smoke
+          </Link>
+          .
         </p>
       </div>
 

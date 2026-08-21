@@ -56,6 +56,15 @@ export default function TasksHubPage() {
             </h1>
             <p className="ops-support">
               Personal, sales, delivery, and approvals — each with one door.
+              Run agents on command from AI settings with a client sandbox.
+            </p>
+            <p className="mt-4">
+              <Link
+                className="rounded-full border border-sand bg-white px-4 py-2 text-sm"
+                href="/settings/ai"
+              >
+                Run agents on command →
+              </Link>
             </p>
           </div>
 

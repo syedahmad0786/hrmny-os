@@ -55,6 +55,16 @@ Anon users hit SSO / “Checking access…”. Full UI needs `@hrmny.co` Google 
 | Live test 2026-08-21 | https://docs.google.com/spreadsheets/d/107TARos-8OZ9r_PZNy6AzVZwDWWpQq93mksjHxphWoc |
 | Checklist update note | https://docs.google.com/document/d/15IKlcFGMK30nKH8b8CXYfTvl07yWz5uObhrfenporfw |
 
+## Demo closed loop (staff)
+
+`/crm/hunt` → **Run demo closed loop** or **Closed loop via Apollo** seeds prospect → won → onboarding + creative task (Postgres).  
+Apollo **Prospect with Apollo** writes durable CRM discover deals (same pipeline store).  
+`/creative` → generate → **Attach & send to portal** lands an asset in `/portal/deliveries`.  
+`/portal/onboarding` lets the client acknowledge the active phase; `/portal` approvals act on `client_review` tasks.  
+`/traffic` DoR **lock** writes Postgres `locked_at` and spawns `creative_spawn`.  
+`/settings/ai` → custom agents **Run** on client/user/task memory sandbox (mock LLM if no OpenRouter credits).  
+`/approvals` → outreach HITL: after approve, Gmail send uses live Composio→Gmail when connected (else stub); LinkedIn copy-draft.
+
 ## Still mock until keys
 
 Apollo · Hunter · Xero · n8n — paste via Connections / Vercel env. Xero writes stay off.

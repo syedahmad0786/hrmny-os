@@ -1,8 +1,14 @@
 import { generateImage } from "@hrmny/ai";
 import { sql } from "@hrmny/db";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getDb } from "../db";
+import { getDemoStore } from "../demo-store";
 import { notifyEmployee } from "../notifications/store";
+import {
+  seedClientCreativeTask,
+  updateDeliveryTaskStatus,
+} from "../tasks/delivery-tasks";
 import { staffProcedure, router } from "./trpc";
 
 type GenRow = {
@@ -20,6 +26,38 @@ type GenRow = {
 };
 
 const memGens: GenRow[] = [];
+
+async function loadGeneration(
+  id: string,
+  employeeId: string,
+): Promise<GenRow | null> {
+  const db = getDb();
+  if (!db) {
+    return (
+      memGens.find(
+        (g) =>
+          g.creativeGenerationId === id && g.employeeId === employeeId,
+      ) ?? null
+    );
+  }
+  const rows = await db.execute<GenRow>(sql`
+    select
+      creative_generation_id as "creativeGenerationId",
+      employee_id as "employeeId",
+      client_id as "clientId",
+      task_id as "taskId",
+      prompt, model, status,
+      image_url as "imageUrl",
+      image_b64 as "imageB64",
+      error,
+      created_at::text as "createdAt"
+    from public.creative_generation
+    where creative_generation_id = ${id}::uuid
+      and employee_id = ${employeeId}::uuid
+    limit 1
+  `);
+  return rows[0] ?? null;
+}
 
 export const creativeGenRouter = router({
   list: staffProcedure
@@ -128,5 +166,145 @@ export const creativeGenRouter = router({
       }).catch(() => undefined);
 
       return { ...row, provider: result.provider };
+    }),
+
+  /**
+   * Attach a ready generation to a client portal deliverable:
+   * asset (+ version) in client_review, optional creative task advanced.
+   */
+  sendToPortal: staffProcedure
+    .input(
+      z.object({
+        creativeGenerationId: z.string().uuid(),
+        clientId: z.string().uuid(),
+        title: z.string().min(1).max(180).optional(),
+        advanceTask: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const employeeId = ctx.employeeId!;
+      const gen = await loadGeneration(input.creativeGenerationId, employeeId);
+      if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
+      if (gen.status !== "ready" || (!gen.imageUrl && !gen.imageB64)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Generation is not ready to send",
+        });
+      }
+
+      const title =
+        input.title?.trim() ||
+        `Creative · ${gen.prompt.slice(0, 60)}`;
+      const storagePath =
+        gen.imageUrl ??
+        (gen.imageB64
+          ? `data:image/svg+xml;base64,${gen.imageB64}`
+          : `creative://${gen.creativeGenerationId}`);
+
+      const db = getDb();
+      if (!db) {
+        const store = getDemoStore();
+        const asset = store.createAsset(title, input.clientId);
+        asset.status = "client_review";
+        asset.versions.push({
+          assetVersionId: crypto.randomUUID(),
+          assetId: asset.assetId,
+          storagePath,
+          versionNumber: 1,
+          isClientRevision: false,
+          uploadedByEmployeeId: employeeId,
+          createdAt: new Date().toISOString(),
+        });
+        let taskId = gen.taskId;
+        if (input.advanceTask !== false) {
+          const task = [...store.tasks.values()].find(
+            (t) =>
+              t.clientId === input.clientId && t.taskType === "social_cutdowns",
+          );
+          if (task) {
+            task.status = "client_review";
+            taskId = task.taskId;
+          }
+        }
+        return {
+          ok: true as const,
+          assetId: asset.assetId,
+          taskId,
+          clientId: input.clientId,
+          portalHref: "/portal/deliveries",
+        };
+      }
+
+      const assets = await db.execute<{ assetId: string }>(sql`
+        insert into public.asset (title, client_id, status)
+        values (${title}, ${input.clientId}::uuid, 'client_review')
+        returning asset_id as "assetId"
+      `);
+      const assetId = assets[0]!.assetId;
+      await db.execute(sql`
+        insert into public.asset_version (
+          asset_id, storage_path, version_number, is_client_revision,
+          uploaded_by_employee_id
+        ) values (
+          ${assetId}::uuid,
+          ${storagePath},
+          1,
+          false,
+          ${employeeId}::uuid
+        )
+      `);
+
+      await db.execute(sql`
+        update public.creative_generation
+        set
+          client_id = ${input.clientId}::uuid,
+          metadata = coalesce(metadata, '{}'::jsonb) || ${JSON.stringify({
+            portalAssetId: assetId,
+            sentToPortalAt: new Date().toISOString(),
+          })}::jsonb,
+          updated_at = now()
+        where creative_generation_id = ${gen.creativeGenerationId}::uuid
+      `);
+
+      let taskId = gen.taskId;
+      if (input.advanceTask !== false) {
+        const seeded = await seedClientCreativeTask({
+          clientId: input.clientId,
+          title: `Portal creative — ${title.slice(0, 80)}`,
+          status: "qc",
+        });
+        if (seeded) {
+          await updateDeliveryTaskStatus({
+            taskId: seeded.taskId,
+            status: "client_review",
+            qcPassed: true,
+            qcNotes: "Auto-QC for generated creative sent to portal",
+          });
+          taskId = seeded.taskId;
+          await db.execute(sql`
+            update public.creative_generation
+            set task_id = ${seeded.taskId}::uuid
+            where creative_generation_id = ${gen.creativeGenerationId}::uuid
+          `);
+        }
+      }
+
+      await notifyEmployee({
+        employeeId,
+        title: "Creative sent to portal",
+        body: title.slice(0, 120),
+        kind: "creative",
+        href: "/portal/deliveries",
+        entityType: "asset",
+        entityId: assetId,
+      }).catch(() => undefined);
+
+      return {
+        ok: true as const,
+        assetId,
+        taskId,
+        clientId: input.clientId,
+        portalHref: "/portal/deliveries",
+      };
     }),
 });

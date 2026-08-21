@@ -10,6 +10,7 @@ import { featureForPathname } from "@/features/catalog";
 const NAV = [
   { href: "/portal", label: "Home", feature: "portal.client" },
   { href: "/portal/work", label: "Shared work", feature: "work.guests" },
+  { href: "/portal/onboarding", label: "Onboarding", feature: "portal.client" },
   { href: "/portal/deliveries", label: "Deliveries", feature: "portal.client" },
   { href: "/portal/approvals", label: "Approvals", feature: "portal.client" },
   {

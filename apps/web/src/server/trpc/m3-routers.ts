@@ -1499,7 +1499,68 @@ export const leadsRouter = router({
           message: z.string().optional(),
         }),
       )
-      .mutation(({ input }) => {
+      .mutation(async ({ input }) => {
+        if (getDb()) {
+          const { createCompany, createContact, createDeal, createNote } =
+            await import("../crm/repository");
+          const company = await createCompany({
+            name: input.companyName,
+            sector: input.sector ?? null,
+            market: "UAE",
+          });
+          const localPart = input.contactEmail.split("@")[0] ?? "Inbound";
+          const contact = await createContact({
+            companyId: company.companyId,
+            firstName: localPart,
+            email: input.contactEmail,
+            isPrimary: true,
+          });
+          const deal = await createDeal({
+            companyName: company.name,
+            companyId: company.companyId,
+            primaryContactId: contact.contactId,
+            sector: input.sector ?? null,
+            leadSourceLane: "inbound",
+          });
+          if (input.message?.trim()) {
+            await createNote({
+              dealId: deal.dealId,
+              companyId: company.companyId,
+              body: input.message.trim(),
+            });
+          }
+          return {
+            dealId: deal.dealId,
+            companyName: deal.companyName,
+            sector: deal.sector,
+            stage: deal.stage,
+            closeOutcome: deal.closeOutcome,
+            lostReason: deal.lostReason,
+            leadSourceLane: deal.leadSourceLane,
+            buafBudget: deal.buafBudget,
+            buafUrgency: deal.buafUrgency,
+            buafAccess: deal.buafAccess,
+            buafFit: deal.buafFit,
+            buafTemperature: deal.buafTemperature,
+            noGoFlags: [],
+            emailVerified: deal.emailVerified,
+            contactEmail: input.contactEmail,
+            voiceCheckPassed: false,
+            quoteValue: deal.quoteValue,
+            internalCost: deal.internalCost,
+            marginPct: deal.marginPct,
+            discountPct: deal.discountPct,
+            discountApprovalTier: deal.discountApprovalTier,
+            vendorHandlingFeePct: deal.vendorHandlingFeePct,
+            quoteLines: [],
+            ownerEmployeeId: deal.ownerEmployeeId,
+            enrichment: input.message ? { inboundMessage: input.message } : null,
+            commercialMode: "project" as const,
+            companyId: company.companyId,
+            contactId: contact.contactId,
+            durable: true as const,
+          };
+        }
         const store = getDemoStore();
         const deal: DemoDeal = {
           dealId: randomUUID(),
@@ -1535,47 +1596,37 @@ export const leadsRouter = router({
   }),
 
   apollo: router({
+    /** Durable CRM import — company + contact + discover deal (not demo-store). */
     import: protectedProcedure
       .input(z.object({ query: z.string().min(1) }))
       .mutation(async ({ input, ctx }) => {
-        const store = getDemoStore();
+        const { importApolloCompaniesToCrm } = await import(
+          "../crm/apollo-import"
+        );
+        const { createEmailVerificationAdapter } = await import(
+          "@hrmny/integrations"
+        );
+        const { resolveIntegrationApiKey } = await import(
+          "../integrations/resolve-keys"
+        );
         const apollo = await apolloFor(ctx.employeeId!);
+        const hunter = await resolveIntegrationApiKey(
+          "hunter",
+          ctx.employeeId!,
+        );
         const companies = await apollo.client.searchCompanies(input.query);
-        const created: DemoDeal[] = [];
-        for (const c of companies.slice(0, 5)) {
-          const name = String(c.name ?? input.query);
-          const deal: DemoDeal = {
-            dealId: randomUUID(),
-            companyName: name,
-            sector: String(c.industry ?? "Unknown"),
-            stage: "discover",
-            closeOutcome: null,
-            lostReason: null,
-            leadSourceLane: "apollo_intent",
-            buafBudget: false,
-            buafUrgency: false,
-            buafAccess: false,
-            buafFit: false,
-            buafTemperature: null,
-            noGoFlags: [],
-            emailVerified: false,
-            contactEmail: null,
-            voiceCheckPassed: false,
-            quoteValue: "0.00",
-            internalCost: "0.00",
-            marginPct: "0.00",
-            discountPct: "0.00",
-            discountApprovalTier: null,
-            vendorHandlingFeePct: "20.00",
-            quoteLines: [],
-            ownerEmployeeId: ctx.employeeId,
-            enrichment: { apollo: c },
-            commercialMode: "project",
-          };
-          store.deals.set(deal.dealId, deal);
-          created.push(deal);
-        }
-        return created;
+        const result = await importApolloCompaniesToCrm({
+          query: input.query,
+          companies: companies as Record<string, unknown>[],
+          mode: apollo.live ? "live" : "mock",
+          ownerEmployeeId: ctx.employeeId,
+          verifier: createEmailVerificationAdapter(
+            hunter.apiKey
+              ? { mode: "live", apiKey: hunter.apiKey }
+              : { mode: "mock" },
+          ),
+        });
+        return result.deals;
       }),
   }),
 

@@ -131,7 +131,7 @@ export default function AiAdminPage() {
         />
       ) : null}
 
-      <CustomAgentsPanel />
+      <CustomAgentsPanel clientId={clientId} />
     </main>
   );
 }
@@ -327,7 +327,7 @@ function AiAdminBody({
   );
 }
 
-function CustomAgentsPanel() {
+function CustomAgentsPanel({ clientId }: { clientId: string }) {
   const utils = trpc.useUtils();
   const list = trpc.aiAdmin.customAgents.list.useQuery();
   const create = trpc.aiAdmin.customAgents.create.useMutation({
@@ -344,16 +344,23 @@ function CustomAgentsPanel() {
   const remove = trpc.aiAdmin.customAgents.remove.useMutation({
     onSuccess: () => void utils.aiAdmin.customAgents.list.invalidate(),
   });
+  const runCustom = trpc.aiAdmin.customAgents.run.useMutation({
+    onSuccess: () => void utils.aiAdmin.dashboard.invalidate(),
+  });
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [runPrompt, setRunPrompt] = useState(
+    "Summarize next onboarding and creative actions for this client sandbox.",
+  );
+  const [taskId, setTaskId] = useState("");
 
   return (
     <section className="rounded-xl border border-sand bg-white/75 p-4">
       <h2 className="font-display text-xl font-semibold">Custom agents</h2>
       <p className="mt-1 text-sm text-muted">
-        Create, modify, and remove CrewAI/LangSmith-style agents stored in
-        Postgres. Built-in registry agents stay above.
+        Create, modify, remove, and run agents on command with client/user/task
+        memory sandboxes. Mock LLM when OpenRouter credits are empty.
       </p>
       <div className="mt-4 grid gap-2 md:grid-cols-3">
         <input
@@ -389,8 +396,32 @@ function CustomAgentsPanel() {
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
       />
+      <div className="mt-2 grid gap-2 md:grid-cols-2">
+        <textarea
+          className="min-h-[56px] w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+          placeholder="Run prompt for on-command invoke"
+          value={runPrompt}
+          onChange={(e) => setRunPrompt(e.target.value)}
+        />
+        <input
+          className="rounded-lg border border-sand bg-white px-3 py-2 text-sm font-mono"
+          placeholder="Optional task UUID sandbox"
+          value={taskId}
+          onChange={(e) => setTaskId(e.target.value)}
+        />
+      </div>
       {create.error ? (
         <p className="mt-2 text-sm text-red-700">{create.error.message}</p>
+      ) : null}
+      {runCustom.data ? (
+        <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-ink/5 p-3 text-xs">
+          {typeof runCustom.data.output === "string"
+            ? runCustom.data.output
+            : JSON.stringify(runCustom.data.output, null, 2)}
+        </pre>
+      ) : null}
+      {runCustom.error ? (
+        <p className="mt-2 text-sm text-red-700">{runCustom.error.message}</p>
       ) : null}
       <ul className="mt-4 divide-y divide-sand">
         {(list.data ?? []).map((agent) => (
@@ -411,6 +442,21 @@ function CustomAgentsPanel() {
               </p>
             </div>
             <div className="flex gap-2">
+              <button
+                type="button"
+                className="rounded-full border border-sand bg-white px-3 py-1.5 text-xs disabled:opacity-40"
+                disabled={!agent.enabled || runCustom.isPending || !runPrompt.trim()}
+                onClick={() =>
+                  runCustom.mutate({
+                    id: agent.customAgentId,
+                    prompt: runPrompt.trim(),
+                    clientId: clientId || undefined,
+                    taskId: taskId.trim() || undefined,
+                  })
+                }
+              >
+                Run
+              </button>
               <button
                 type="button"
                 className="rounded-full border border-sand bg-white px-3 py-1.5 text-xs"

@@ -37,7 +37,10 @@ export async function GET() {
       composio: has("COMPOSIO_API_KEY") ? "configured" : "missing",
       apollo,
       hunter,
-      n8n: has("N8N_API_KEY") ? "configured" : "mock",
+      n8n:
+        has("N8N_API_KEY") && process.env.N8N_MODE?.toLowerCase() !== "mock"
+          ? "configured"
+          : "mock",
       openrouter: has("OPENROUTER_API_KEY") ? "configured" : "mock",
       googleOAuth: has("GOOGLE_OAUTH_CLIENT_ID") ? "configured" : "missing",
       xero,

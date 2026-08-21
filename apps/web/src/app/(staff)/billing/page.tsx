@@ -30,6 +30,9 @@ export default function RetainerBillingPage() {
   const markPaid = trpc.invoices.markPaidFromWebhook.useMutation({
     onSuccess: () => void utils.invoices.invalidate(),
   });
+  const syncXero = trpc.invoices.syncXeroMirror.useMutation({
+    onSuccess: (r) => setLast(r),
+  });
   const [last, setLast] = useState<unknown>(null);
   const period = new Date().toISOString().slice(0, 7);
   const retainerClient = (clients.data ?? []).find(
@@ -84,6 +87,17 @@ export default function RetainerBillingPage() {
             Draft progress invoice
           </Button>
         ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={async () => {
+            const r = await syncXero.mutateAsync();
+            setLast(r);
+          }}
+          disabled={syncXero.isPending}
+        >
+          {syncXero.isPending ? "Syncing…" : "Sync Xero mirror (read-only)"}
+        </Button>
       </div>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">
