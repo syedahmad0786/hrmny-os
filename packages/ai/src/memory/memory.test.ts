@@ -61,4 +61,42 @@ describe("memory stubs", () => {
     expect(hits).toHaveLength(1);
     expect(hits[0]?.content).toMatch(/Client A/);
   });
+
+  it("isolates user sandbox from client-tagged notes", () => {
+    const employeeId = "e1000000-0000-4000-8000-000000000001";
+    const clientId = "c1000000-0000-4000-8000-000000000001";
+    const rows = [
+      {
+        id: "1",
+        sourceType: "note" as const,
+        sourceId: null,
+        content: "user-only preference about briefing tone",
+        metadata: { employeeId },
+      },
+      {
+        id: "2",
+        sourceType: "note" as const,
+        sourceId: null,
+        content: "client campaign brief for dual-tagged run",
+        metadata: { employeeId, clientId },
+      },
+    ];
+    const userHits = keywordSearchFromRows(rows, {
+      query: "brief",
+      employeeId,
+      limit: 10,
+    });
+    expect(userHits.map((h) => h.id)).toEqual(["1"]);
+    expect(userHits[0]?.content).toMatch(/user-only/i);
+
+    const clientHits = keywordSearchFromRows(rows, {
+      query: "brief",
+      employeeId,
+      clientId,
+      limit: 10,
+    });
+    // Client sandbox requires matching clientId — user-only notes stay out.
+    expect(clientHits.map((h) => h.id)).toEqual(["2"]);
+  });
+
 });

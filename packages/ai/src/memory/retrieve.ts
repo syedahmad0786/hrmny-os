@@ -85,6 +85,15 @@ export function keywordSearchFromRows(
       ) {
         continue;
       }
+      // User sandbox: exclude dual-tagged client notes so client runs do not
+      // leak into partner/user-scoped retrieve.
+      if (
+        !parsed.clientId &&
+        meta.clientId != null &&
+        String(meta.clientId).length > 0
+      ) {
+        continue;
+      }
     }
     if (parsed.dealId) {
       if (meta.dealId == null || String(meta.dealId) !== parsed.dealId) {

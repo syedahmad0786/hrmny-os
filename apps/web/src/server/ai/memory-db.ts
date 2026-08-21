@@ -159,7 +159,10 @@ async function vectorSearch(
       }
       ${
         input.employeeId
-          ? sql`and metadata->>'employeeId' = ${input.employeeId}`
+          ? input.clientId
+            ? sql`and metadata->>'employeeId' = ${input.employeeId}`
+            : sql`and metadata->>'employeeId' = ${input.employeeId}
+              and (metadata->>'clientId' is null or metadata->>'clientId' = '')`
           : sql``
       }
       ${
