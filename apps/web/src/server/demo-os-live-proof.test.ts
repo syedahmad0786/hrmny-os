@@ -76,11 +76,27 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
           title: "Demo brief",
           objective: "Launch",
           audience: "UAE retail",
+          deliverables: "3 reels",
+          deadline: "2026-12-31",
+          brandAssets: { logo: true },
         },
       });
       expect(brief.taskId).toBe(deliveryTask.taskId);
       const briefGet = await caller.briefs.get({ id: brief.briefId });
       expect(briefGet?.briefId).toBe(brief.briefId);
+
+      const locked = await caller.briefs.lock({ id: brief.briefId });
+      expect(locked.ok).toBe(true);
+      if (locked.ok) {
+        expect(locked.taskStatus).toBe("brief_ready");
+        expect(locked.brief.lockedAt).toBeTruthy();
+        expect(locked.spawnedTaskId).toBeTruthy();
+      }
+      const lockedAgain = await caller.briefs.lock({ id: brief.briefId });
+      expect(lockedAgain.ok).toBe(true);
+      if (locked.ok && lockedAgain.ok) {
+        expect(lockedAgain.spawnedTaskId).toBe(locked.spawnedTaskId);
+      }
 
       const agent = await caller.aiAdmin.customAgents.create({
         slug: `proof-agent-${Date.now()}`,

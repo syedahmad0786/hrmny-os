@@ -406,6 +406,110 @@ export async function updateDeliveryBriefBody(input: {
   return getDeliveryBrief(input.briefId);
 }
 
+/**
+ * Lock a durable brief (sets locked_at), advances task to brief_ready,
+ * and spawns a sibling creative_spawn task when missing.
+ */
+export async function lockDeliveryBrief(input: {
+  briefId: string;
+  dorComplete: boolean;
+  missingRequiredCount: number;
+}): Promise<{
+  brief: DeliveryBrief;
+  taskStatus: string;
+  spawnedTaskId: string | null;
+  reuse: boolean;
+} | null> {
+  const db = getDb();
+  if (!db) return null;
+  const existing = await getDeliveryBrief(input.briefId);
+  if (!existing) return null;
+
+  const sourceTask = await getDeliveryTask(existing.taskId);
+  if (!sourceTask) return null;
+
+  if (!existing.lockedAt) {
+    await db.execute(sql`
+      update public.brief
+      set
+        dor_complete = ${input.dorComplete},
+        missing_required_count = ${input.missingRequiredCount},
+        locked_at = coalesce(locked_at, now()),
+        updated_at = now()
+      where brief_id = ${input.briefId}::uuid
+    `);
+  }
+
+  await db.execute(sql`
+    update public.task
+    set status = 'brief_ready'::task_status_enum, updated_at = now()
+    where task_id = ${existing.taskId}::uuid
+  `);
+
+  const spawnTitle = `Creative from brief ${input.briefId.slice(0, 8)}`;
+  const existingSpawn = await db.execute<{ taskId: string }>(sql`
+    select t.task_id as "taskId"
+    from public.task t
+    join public.brief b on b.task_id = t.task_id
+    where t.client_id = ${sourceTask.clientId}::uuid
+      and t.task_type = 'creative_spawn'
+      and (
+        b.body->>'sourceBriefId' = ${input.briefId}
+        or b.body->>'briefId' = ${input.briefId}
+      )
+    limit 1
+  `);
+
+  let spawnedTaskId: string | null = existingSpawn[0]?.taskId ?? null;
+  let reuse = Boolean(spawnedTaskId);
+
+  if (spawnedTaskId) {
+    await db.execute(sql`
+      update public.task
+      set status = 'brief_ready'::task_status_enum, updated_at = now()
+      where task_id = ${spawnedTaskId}::uuid
+    `);
+  } else {
+    const spawned = await createDeliveryTask({
+      clientId: sourceTask.clientId,
+      taskType: "creative_spawn",
+      title: spawnTitle,
+      status: "brief_ready",
+      calendarId: sourceTask.calendarId,
+      month: sourceTask.month,
+      deadline: sourceTask.deadline,
+      priority: sourceTask.priority ?? "high",
+      ownerEmployeeId: sourceTask.ownerEmployeeId,
+    });
+    spawnedTaskId = spawned?.taskId ?? null;
+    if (spawned?.briefId) {
+      const body = {
+        title: spawnTitle,
+        sourceBriefId: input.briefId,
+        sourceTaskId: existing.taskId,
+        qcPassed: false,
+        clientRevisionCount: 0,
+        revisionBoundaryAck: false,
+      };
+      await db.execute(sql`
+        update public.brief
+        set body = ${JSON.stringify(body)}::jsonb, updated_at = now()
+        where brief_id = ${spawned.briefId}::uuid
+      `);
+    }
+    reuse = false;
+  }
+
+  const brief = await getDeliveryBrief(input.briefId);
+  if (!brief) return null;
+  return {
+    brief,
+    taskStatus: "brief_ready",
+    spawnedTaskId,
+    reuse,
+  };
+}
+
 export async function setDeliveryTaskQc(input: {
   taskId: string;
   decision: "pass" | "fail" | "waive";

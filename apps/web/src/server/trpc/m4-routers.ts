@@ -26,6 +26,7 @@ import {
   getDeliveryBrief,
   getDeliveryTask,
   listDeliveryTasks,
+  lockDeliveryBrief,
   setDeliveryTaskQc,
   updateDeliveryBriefBody,
   updateDeliveryTaskStatus,
@@ -603,7 +604,60 @@ export const briefsRouter = router({
 
   lock: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const durable = await getDeliveryBrief(input.id);
+        if (durable) {
+          const dor = validateDor(durable.body);
+          const blocked = dorLockBlockedReason(dor);
+          if (blocked) {
+            return {
+              ok: false as const,
+              code: "GATE_BLOCKED" as const,
+              status: 423 as const,
+              reason: blocked,
+              missingRequiredCount: dor.missingRequiredCount,
+              missing: dor.missing,
+            };
+          }
+          const locked = await lockDeliveryBrief({
+            briefId: input.id,
+            dorComplete: dor.dorComplete,
+            missingRequiredCount: dor.missingRequiredCount,
+          });
+          if (!locked) throw new Error("NOT_FOUND");
+          const sourceTask = await getDeliveryTask(locked.brief.taskId);
+          const seam = driveSeam(
+            "brief.lock",
+            `brief.lock:${locked.brief.briefId}`,
+            {
+              briefId: locked.brief.briefId,
+              taskId: locked.brief.taskId,
+              clientId: sourceTask?.clientId ?? null,
+              actorEmployeeId: ctx.employeeId,
+              durableSpawnTaskId: locked.spawnedTaskId,
+              durableReuse: locked.reuse,
+            },
+          );
+          const brief: DemoBrief = {
+            briefId: locked.brief.briefId,
+            taskId: locked.brief.taskId,
+            body: locked.brief.body,
+            dorComplete: locked.brief.dorComplete,
+            missingRequiredCount: locked.brief.missingRequiredCount,
+            missing: [...dor.missing],
+            lockedAt: locked.brief.lockedAt,
+          };
+          return {
+            ok: true as const,
+            taskStatus: "brief_ready" as const,
+            brief,
+            seam,
+            spawnedTaskId: locked.spawnedTaskId,
+          };
+        }
+      }
+
       const store = getDemoStore();
       const brief = store.briefs.get(input.id);
       if (!brief) throw new Error("NOT_FOUND");
@@ -656,6 +710,10 @@ export const briefsRouter = router({
         taskStatus: "brief_ready" as const,
         brief,
         seam,
+        spawnedTaskId:
+          typeof seam.event.result?.taskId === "string"
+            ? seam.event.result.taskId
+            : null,
       };
     }),
 });

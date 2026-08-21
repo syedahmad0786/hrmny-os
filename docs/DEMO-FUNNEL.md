@@ -15,7 +15,7 @@ Verified against live Postgres (pgvector on): Apollo mock/live → durable disco
 | Prospecting | `/crm/hunt`, `/crm/inbound`, `/crm/outreach` | `crm.prospect.apolloImport` + leadgen; demo loop without Apollo/Hunter keys |
 | Sales / pipeline | `/crm/deals/[id]` | Same CRM store as Apollo imports; stage moves → **Mark won** → **Handover pack** |
 | Onboarding | `/clients/[id]`, `/portal/onboarding` | Seeded by handover; portal can acknowledge active phase |
-| Creative / delivery | `/creative`, `/delivery` | Durable `tasks.create`/`list` on Postgres; generate → portal; **Run agent on task** on delivery board |
+| Creative / delivery | `/creative`, `/delivery`, `/traffic` | Durable `tasks.create`/`list`; **briefs.lock** sets Postgres `locked_at` + spawns `creative_spawn`; generate → portal; **Run agent on task** |
 | Client portal | `/portal`, `/portal/deliveries`, `/portal/onboarding` | Same Postgres tasks/assets + onboarding phases |
 | Agents on command | `/settings/ai` | Built-in `runAgent` + **customAgents.run** with client/user/task sandbox |
 | Chat harness | `/chat` | Loads `custom_agent.system_prompt` when thread has `agentSlug` |
