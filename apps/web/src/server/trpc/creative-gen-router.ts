@@ -287,7 +287,9 @@ export const creativeGenRouter = router({
           assetId: asset.assetId,
           taskId,
           clientId: input.clientId,
-          portalHref: "/portal/approvals",
+          portalHref: await (
+            await import("../auth/portal-review-href")
+          ).portalReviewHref(input.clientId),
         };
       }
 
@@ -372,12 +374,16 @@ export const creativeGenRouter = router({
         where creative_generation_id = ${gen.creativeGenerationId}::uuid
       `);
 
+      const portalHref = await (
+        await import("../auth/portal-review-href")
+      ).portalReviewHref(input.clientId);
+
       await notifyEmployee({
         employeeId,
         title: "Creative sent to portal",
         body: title.slice(0, 120),
         kind: "creative",
-        href: "/portal/approvals",
+        href: portalHref,
         entityType: "asset",
         entityId: assetId,
       }).catch(() => undefined);
@@ -387,7 +393,7 @@ export const creativeGenRouter = router({
         assetId,
         taskId,
         clientId: input.clientId,
-        portalHref: "/portal/approvals",
+        portalHref,
       };
     }),
 });

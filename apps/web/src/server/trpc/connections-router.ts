@@ -2001,7 +2001,9 @@ export const connectionsRouter = router({
           assetId: asset.assetId,
           taskId,
           clientId: input.clientId,
-          portalHref: "/portal/approvals",
+          portalHref: await (
+            await import("../auth/portal-review-href")
+          ).portalReviewHref(input.clientId),
           mode,
         };
       }
@@ -2075,7 +2077,9 @@ export const connectionsRouter = router({
         assetId,
         taskId,
         clientId: input.clientId,
-        portalHref: "/portal/approvals",
+        portalHref: await (
+          await import("../auth/portal-review-href")
+        ).portalReviewHref(input.clientId),
         mode,
       };
     }),

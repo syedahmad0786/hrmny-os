@@ -768,7 +768,9 @@ export async function runAgentTools(input: {
             assetId: asset.assetId,
             taskId,
             clientId: input.scope.clientId,
-            portalHref: "/portal/approvals",
+            portalHref: await (
+              await import("../auth/portal-review-href")
+            ).portalReviewHref(input.scope.clientId),
             mode: "memory",
           },
         });
@@ -832,7 +834,9 @@ export async function runAgentTools(input: {
             assetId,
             taskId,
             clientId: input.scope.clientId,
-            portalHref: "/portal/approvals",
+            portalHref: await (
+              await import("../auth/portal-review-href")
+            ).portalReviewHref(input.scope.clientId),
             mode: "durable",
           },
         });
