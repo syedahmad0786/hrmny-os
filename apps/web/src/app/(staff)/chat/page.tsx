@@ -1,10 +1,46 @@
 "use client";
 
-import { Button } from "@hrmny/ui";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
 
-export default function ChatPage() {
+type Effort = "low" | "medium" | "high" | "xhigh";
+type HarnessMode = "react" | "direct";
+
+const STARTERS = [
+  "Summarize open pipeline deals that need a next action",
+  "What delivery tasks are blocked on QC?",
+  "Draft a warm outreach opener for a Dubai hospitality lead",
+  "List my unread notifications and tickets",
+] as const;
+
+function StepFold({
+  steps,
+}: {
+  steps: Array<Record<string, unknown>> | undefined;
+}) {
+  if (!steps?.length) return null;
+  const tools = steps.filter((s) => typeof s.toolName === "string");
+  if (!tools.length) return null;
+  return (
+    <details className="hrmny-chat-workfold">
+      <summary>
+        Worked · {tools.length} tool{tools.length === 1 ? "" : "s"}
+      </summary>
+      <ol>
+        {tools.map((s, i) => (
+          <li key={i}>
+            <strong>{String(s.toolName)}</strong>
+            {s.observation ? (
+              <span>{String(s.observation).slice(0, 240)}</span>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+export default function HrmnyChatPage() {
   const utils = trpc.useUtils();
   const threads = trpc.chat.listThreads.useQuery();
   const create = trpc.chat.createThread.useMutation({
@@ -14,6 +50,12 @@ export default function ChatPage() {
     },
   });
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [effort, setEffort] = useState<Effort>("medium");
+  const [harness, setHarness] = useState<HarnessMode>("react");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const scroller = useRef<HTMLDivElement>(null);
+
   const messages = trpc.chat.messages.useQuery(
     { threadId: threadId! },
     { enabled: Boolean(threadId) },
@@ -25,7 +67,6 @@ export default function ChatPage() {
       setDraft("");
     },
   });
-  const [draft, setDraft] = useState("");
 
   useEffect(() => {
     if (!threadId && threads.data?.[0]) {
@@ -33,112 +74,238 @@ export default function ChatPage() {
     }
   }, [threadId, threads.data]);
 
+  useEffect(() => {
+    scroller.current?.scrollTo({
+      top: scroller.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages.data, send.isPending]);
+
+  const activeTitle = useMemo(
+    () =>
+      threads.data?.find((t) => t.chatThreadId === threadId)?.title ??
+      "New conversation",
+    [threads.data, threadId],
+  );
+
+  function submit(text: string) {
+    const content = text.trim();
+    if (!content) return;
+    if (!threadId) {
+      create.mutate(
+        { title: content.slice(0, 60) },
+        {
+          onSuccess: (row) => {
+            setThreadId(row.chatThreadId);
+            send.mutate({
+              threadId: row.chatThreadId,
+              content,
+              effort,
+              harness,
+            });
+          },
+        },
+      );
+      return;
+    }
+    send.mutate({ threadId, content, effort, harness });
+  }
+
   return (
-    <main className="flex min-h-[70vh] flex-col gap-4">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-ochre">
-            AI · Harness
-          </p>
-          <h1 className="mt-1 font-display text-3xl font-semibold">Chat</h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted">
-            OpenRouter-backed ReAct loop (plan → tool → observe). Falls back to
-            mock when credits or keys are unavailable.
-          </p>
-        </div>
-        <Button
-          type="button"
-          onClick={() => create.mutate({ title: "New chat" })}
-          disabled={create.isPending}
-        >
-          New thread
-        </Button>
-      </header>
-
-      <div className="grid flex-1 gap-4 lg:grid-cols-[240px_1fr]">
-        <aside className="rounded-xl border border-sand bg-white/75 p-2">
-          {(threads.data ?? []).length === 0 ? (
-            <p className="p-3 text-sm text-muted">No threads yet.</p>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {(threads.data ?? []).map((t) => (
-                <li key={t.chatThreadId}>
-                  <button
-                    type="button"
-                    className={`w-full rounded-lg px-3 py-2 text-left text-sm ${
-                      threadId === t.chatThreadId
-                        ? "bg-ink text-white"
-                        : "hover:bg-cream"
-                    }`}
-                    onClick={() => setThreadId(t.chatThreadId)}
-                  >
-                    <span className="line-clamp-1 font-medium">{t.title}</span>
-                    <span
-                      className={`mt-0.5 block text-[10px] uppercase tracking-wide ${
-                        threadId === t.chatThreadId
-                          ? "text-white/70"
-                          : "text-muted"
-                      }`}
-                    >
-                      {t.harness}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </aside>
-
-        <section className="flex flex-col rounded-xl border border-sand bg-white/75">
-          <div className="flex-1 space-y-3 overflow-y-auto p-4">
-            {!threadId ? (
-              <p className="text-sm text-muted">Start a thread to chat.</p>
-            ) : messages.isLoading ? (
-              <p className="text-sm text-muted">Loading messages…</p>
-            ) : (messages.data?.length ?? 0) === 0 ? (
-              <p className="text-sm text-muted">
-                Ask about a client, deal, or delivery task. The harness can call
-                memory search tools.
-              </p>
-            ) : (
-              (messages.data ?? []).map((m) => (
-                <div
-                  key={m.chatMessageId}
-                  className={`max-w-[90%] rounded-lg px-3 py-2 text-sm ${
-                    m.role === "user"
-                      ? "ml-auto bg-ink text-white"
-                      : "bg-cream text-ink"
-                  }`}
-                >
-                  <p className="whitespace-pre-wrap">{m.content}</p>
-                </div>
-              ))
-            )}
-            {send.error ? (
-              <p className="text-sm text-red-700">{send.error.message}</p>
-            ) : null}
-          </div>
-          <form
-            className="flex gap-2 border-t border-sand p-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!threadId || !draft.trim()) return;
-              send.mutate({ threadId, content: draft.trim() });
-            }}
+    <div className={`hrmny-chat${sidebarOpen ? "" : " is-rail"}`}>
+      <aside className="hrmny-chat-sidebar" aria-label="Conversations">
+        <div className="hrmny-chat-brand">
+          <button
+            type="button"
+            className="hrmny-chat-rail-toggle"
+            aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            onClick={() => setSidebarOpen((v) => !v)}
           >
-            <input
-              className="flex-1 rounded-lg border border-sand bg-white px-3 py-2 text-sm"
-              placeholder="Message the harness…"
+            ☰
+          </button>
+          <div className="hrmny-chat-brand-lockup">
+            <span className="hrmny-chat-mark">h</span>
+            <div>
+              <strong>Hrmny</strong>
+              <small>Agent harness</small>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="hrmny-chat-new"
+          disabled={create.isPending}
+          onClick={() => create.mutate({ title: "New chat" })}
+        >
+          <span>+</span>
+          <span>New chat</span>
+        </button>
+
+        <p className="hrmny-chat-section">Personal</p>
+        <ul className="hrmny-chat-sessions">
+          {(threads.data ?? []).map((t) => (
+            <li key={t.chatThreadId}>
+              <button
+                type="button"
+                className={
+                  threadId === t.chatThreadId
+                    ? "hrmny-chat-session is-active"
+                    : "hrmny-chat-session"
+                }
+                onClick={() => setThreadId(t.chatThreadId)}
+              >
+                <span className="hrmny-chat-session-title">{t.title}</span>
+                <span className="hrmny-chat-session-meta">{t.harness}</span>
+              </button>
+            </li>
+          ))}
+          {(threads.data?.length ?? 0) === 0 ? (
+            <li className="hrmny-chat-empty-side">No sessions yet</li>
+          ) : null}
+        </ul>
+
+        <p className="hrmny-chat-attrib">
+          Shell patterned after{" "}
+          <a
+            href="https://github.com/yc-software/qm"
+            target="_blank"
+            rel="noreferrer"
+          >
+            QM
+          </a>
+          , rebranded for Hrmny.
+        </p>
+      </aside>
+
+      <section className="hrmny-chat-main">
+        <header className="hrmny-chat-header">
+          <div>
+            <p className="hrmny-chat-kicker">Conversation</p>
+            <h1>{activeTitle}</h1>
+          </div>
+          <div className="hrmny-chat-pills">
+            <span>{harness === "react" ? "ReAct" : "Direct"}</span>
+            <span>Effort · {effort}</span>
+          </div>
+        </header>
+
+        <div className="hrmny-chat-transcript" ref={scroller}>
+          {!threadId || (messages.data?.length ?? 0) === 0 ? (
+            <div className="hrmny-chat-welcome">
+              <h2>What should Hrmny work on?</h2>
+              <p>
+                Personal workspace with a QM-style harness — plan, call tools,
+                observe, answer. Scoped to your staff session.
+              </p>
+              <div className="hrmny-chat-starters">
+                {STARTERS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => submit(s)}
+                    disabled={send.isPending || create.isPending}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="hrmny-chat-messages">
+              {(messages.data ?? []).map((m) => {
+                const meta = (m.metadata ?? {}) as {
+                  steps?: Array<Record<string, unknown>>;
+                  provider?: string;
+                };
+                return (
+                  <article
+                    key={m.chatMessageId}
+                    className={`hrmny-chat-msg is-${m.role}`}
+                  >
+                    <div className="hrmny-chat-msg-role">
+                      {m.role === "user" ? "You" : "Hrmny"}
+                    </div>
+                    <div className="hrmny-chat-msg-body">
+                      {m.role === "assistant" ? (
+                        <StepFold steps={meta.steps} />
+                      ) : null}
+                      <p>{m.content}</p>
+                    </div>
+                  </article>
+                );
+              })}
+              {send.isPending ? (
+                <article className="hrmny-chat-msg is-assistant is-working">
+                  <div className="hrmny-chat-msg-role">Hrmny</div>
+                  <div className="hrmny-chat-msg-body">
+                    <span className="hrmny-chat-working-dot" />
+                    Working…
+                  </div>
+                </article>
+              ) : null}
+            </div>
+          )}
+          {send.error ? (
+            <p className="hrmny-chat-error">{send.error.message}</p>
+          ) : null}
+        </div>
+
+        <form
+          className="hrmny-chat-composer"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit(draft);
+          }}
+        >
+          <div className="hrmny-chat-composer-toolbar">
+            <label>
+              Harness
+              <select
+                value={harness}
+                onChange={(e) => setHarness(e.target.value as HarnessMode)}
+              >
+                <option value="react">ReAct (QM-style)</option>
+                <option value="direct">Direct</option>
+              </select>
+            </label>
+            <label>
+              Effort
+              <select
+                value={effort}
+                onChange={(e) => setEffort(e.target.value as Effort)}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">xHigh</option>
+              </select>
+            </label>
+          </div>
+          <div className="hrmny-chat-composer-row">
+            <textarea
+              rows={2}
+              placeholder="Message Hrmny…"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              disabled={!threadId || send.isPending}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit(draft);
+                }
+              }}
+              disabled={send.isPending}
             />
-            <Button type="submit" disabled={!threadId || send.isPending}>
-              {send.isPending ? "Thinking…" : "Send"}
-            </Button>
-          </form>
-        </section>
-      </div>
-    </main>
+            <button
+              type="submit"
+              disabled={send.isPending || !draft.trim()}
+              aria-label="Send"
+            >
+              ↑
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }

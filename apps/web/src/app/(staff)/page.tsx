@@ -12,10 +12,10 @@ type JobPath = {
 
 const JOB_PATHS = [
   {
-    href: "/crm",
+    href: "/crm/hunt",
     index: "01 / Growth",
     title: "Hunt clients",
-    description: "Qualify inbound leads and move outreach in CRM.",
+    description: "Inbound → outreach → qualify → pipeline, in order.",
   },
   {
     href: "/tasks",

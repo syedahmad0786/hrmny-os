@@ -18,7 +18,7 @@ const PRIMARY_NAV = [
     match: (p: string) => p === "/",
   },
   {
-    href: "/crm",
+    href: "/crm/hunt",
     label: "Hunt",
     index: "02",
     features: ["crm.workspace"],
@@ -414,7 +414,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
               >
                 <span className="desk-nav-index">{item.index}</span>
                 <span>{item.label}</span>
-                {item.href === "/crm" && dealCount ? (
+                {item.href === "/crm/hunt" && dealCount ? (
                   <span className="desk-nav-count">{dealCount}</span>
                 ) : (
                   <span />

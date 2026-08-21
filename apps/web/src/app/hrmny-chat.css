@@ -1,0 +1,483 @@
+/* Hrmny Chat — QM-inspired shell (MIT: yc-software/qm), rebranded for hrmny OS */
+
+.hrmny-chat {
+  --hc-sidebar: 260px;
+  --hc-rail: 52px;
+  --hc-content: 760px;
+  display: grid;
+  grid-template-columns: var(--hc-sidebar) minmax(0, 1fr);
+  min-height: calc(100vh - 2rem);
+  margin: -0.5rem -0.25rem;
+  border: 1px solid color-mix(in srgb, var(--sand, #e7e0d4) 80%, transparent);
+  border-radius: 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(1200px 400px at 80% -10%, rgba(180, 83, 9, 0.08), transparent 55%),
+    linear-gradient(180deg, #fbfaf7 0%, #f5f1ea 100%);
+  color: var(--ink, #1c1917);
+}
+
+.hrmny-chat.is-rail {
+  grid-template-columns: var(--hc-rail) minmax(0, 1fr);
+}
+
+.hrmny-chat-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-right: 1px solid color-mix(in srgb, var(--sand, #e7e0d4) 90%, #000 4%);
+  background: color-mix(in srgb, #f0ebe3 70%, #fff);
+  overflow: hidden;
+}
+
+.hrmny-chat.is-rail .hrmny-chat-brand-lockup,
+.hrmny-chat.is-rail .hrmny-chat-new span:last-child,
+.hrmny-chat.is-rail .hrmny-chat-section,
+.hrmny-chat.is-rail .hrmny-chat-sessions,
+.hrmny-chat.is-rail .hrmny-chat-attrib {
+  display: none;
+}
+
+.hrmny-chat-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.hrmny-chat-rail-toggle {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--sand, #e7e0d4);
+  background: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.hrmny-chat-brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.hrmny-chat-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--ink, #1c1917);
+  color: #fafaf9;
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 0.95rem;
+}
+
+.hrmny-chat-brand-lockup strong {
+  display: block;
+  font-size: 0.92rem;
+  letter-spacing: -0.02em;
+}
+
+.hrmny-chat-brand-lockup small {
+  display: block;
+  color: var(--muted, #78716c);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.hrmny-chat-new {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  border: 1px solid var(--sand, #e7e0d4);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hrmny-chat-new span:first-child {
+  display: grid;
+  place-items: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 999px;
+  background: var(--ochre, #b45309);
+  color: #fff;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.hrmny-chat-section {
+  margin: 0.35rem 0.2rem 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted, #78716c);
+}
+
+.hrmny-chat-sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.hrmny-chat-session {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 0.55rem 0.65rem;
+  cursor: pointer;
+}
+
+.hrmny-chat-session:hover {
+  background: color-mix(in srgb, #fff 70%, transparent);
+}
+
+.hrmny-chat-session.is-active {
+  background: var(--ink, #1c1917);
+  color: #fafaf9;
+}
+
+.hrmny-chat-session-title {
+  display: block;
+  font-size: 0.84rem;
+  font-weight: 560;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hrmny-chat-session-meta {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  opacity: 0.65;
+}
+
+.hrmny-chat-empty-side {
+  padding: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--muted, #78716c);
+}
+
+.hrmny-chat-attrib {
+  margin: 0;
+  padding: 0.4rem 0.2rem 0;
+  font-size: 0.65rem;
+  color: var(--muted, #78716c);
+  line-height: 1.4;
+}
+
+.hrmny-chat-attrib a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.hrmny-chat-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: transparent;
+}
+
+.hrmny-chat-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--sand, #e7e0d4) 80%, transparent);
+}
+
+.hrmny-chat-kicker {
+  margin: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ochre, #b45309);
+}
+
+.hrmny-chat-header h1 {
+  margin: 0.15rem 0 0;
+  font-family: var(--font-display, Georgia, "Times New Roman", serif);
+  font-size: clamp(1.15rem, 1.6vw, 1.45rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.hrmny-chat-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.hrmny-chat-pills span {
+  border-radius: 999px;
+  border: 1px solid var(--sand, #e7e0d4);
+  background: #fff;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #78716c);
+}
+
+.hrmny-chat-transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem;
+}
+
+.hrmny-chat-welcome {
+  max-width: var(--hc-content);
+  margin: 2.5rem auto 0;
+  text-align: left;
+}
+
+.hrmny-chat-welcome h2 {
+  margin: 0;
+  font-family: var(--font-display, Georgia, serif);
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  letter-spacing: -0.03em;
+}
+
+.hrmny-chat-welcome > p {
+  margin: 0.75rem 0 1.25rem;
+  max-width: 38rem;
+  color: var(--muted, #78716c);
+  font-size: 0.95rem;
+}
+
+.hrmny-chat-starters {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.hrmny-chat-starters button {
+  text-align: left;
+  border: 1px solid var(--sand, #e7e0d4);
+  border-radius: 12px;
+  background: color-mix(in srgb, #fff 80%, transparent);
+  padding: 0.8rem 0.95rem;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.hrmny-chat-starters button:hover {
+  border-color: var(--ochre, #b45309);
+  transform: translateY(-1px);
+}
+
+.hrmny-chat-messages {
+  max-width: var(--hc-content);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.hrmny-chat-msg-role {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted, #78716c);
+  margin-bottom: 0.35rem;
+}
+
+.hrmny-chat-msg.is-user .hrmny-chat-msg-body {
+  margin-left: auto;
+  max-width: 85%;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--ink, #1c1917);
+  color: #fafaf9;
+  padding: 0.75rem 0.9rem;
+}
+
+.hrmny-chat-msg.is-assistant .hrmny-chat-msg-body {
+  max-width: 92%;
+}
+
+.hrmny-chat-msg-body p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+
+.hrmny-chat-workfold {
+  margin-bottom: 0.55rem;
+  border-radius: 10px;
+  border: 1px solid var(--sand, #e7e0d4);
+  background: color-mix(in srgb, #fff 75%, transparent);
+  padding: 0.45rem 0.65rem;
+  font-size: 0.78rem;
+}
+
+.hrmny-chat-workfold summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ochre, #b45309);
+}
+
+.hrmny-chat-workfold ol {
+  margin: 0.45rem 0 0.15rem;
+  padding-left: 1.1rem;
+  color: var(--muted, #78716c);
+}
+
+.hrmny-chat-workfold li {
+  margin-bottom: 0.35rem;
+}
+
+.hrmny-chat-workfold li strong {
+  display: block;
+  color: var(--ink, #1c1917);
+}
+
+.hrmny-chat-working-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-right: 0.45rem;
+  border-radius: 999px;
+  background: var(--ochre, #b45309);
+  animation: hrmny-pulse 1s ease-in-out infinite;
+}
+
+@keyframes hrmny-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.hrmny-chat-error {
+  max-width: var(--hc-content);
+  margin: 0.75rem auto 0;
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
+.hrmny-chat-composer {
+  border-top: 1px solid color-mix(in srgb, var(--sand, #e7e0d4) 80%, transparent);
+  padding: 0.75rem 1.1rem 1rem;
+  background: color-mix(in srgb, #fff 55%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.hrmny-chat-composer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+}
+
+.hrmny-chat-composer-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted, #78716c);
+}
+
+.hrmny-chat-composer-toolbar select {
+  border: 1px solid var(--sand, #e7e0d4);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.25rem 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink, #1c1917);
+}
+
+.hrmny-chat-composer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  max-width: var(--hc-content);
+  margin: 0 auto;
+}
+
+.hrmny-chat-composer-row textarea {
+  resize: none;
+  border: 1px solid var(--sand, #e7e0d4);
+  border-radius: 14px;
+  background: #fff;
+  padding: 0.75rem 0.9rem;
+  font: inherit;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.hrmny-chat-composer-row button {
+  width: 44px;
+  height: 44px;
+  align-self: end;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink, #1c1917);
+  color: #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.hrmny-chat-composer-row button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .hrmny-chat,
+  .hrmny-chat.is-rail {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .hrmny-chat-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--sand, #e7e0d4);
+    max-height: 220px;
+  }
+
+  .hrmny-chat.is-rail .hrmny-chat-brand-lockup,
+  .hrmny-chat.is-rail .hrmny-chat-new span:last-child,
+  .hrmny-chat.is-rail .hrmny-chat-section,
+  .hrmny-chat.is-rail .hrmny-chat-sessions {
+    display: initial;
+  }
+
+  .hrmny-chat.is-rail .hrmny-chat-sessions {
+    display: flex;
+  }
+}
