@@ -270,12 +270,24 @@ export const creativeGenRouter = router({
           uploadedByEmployeeId: employeeId,
           createdAt: new Date().toISOString(),
         });
+        if (taskId) {
+          store.portalApprovals.set(taskId, {
+            approvalId: taskId,
+            clientId: input.clientId,
+            title,
+            kind: "asset",
+            status: "pending",
+            entityId: asset.assetId,
+            slaHours: 48,
+            createdAt: new Date().toISOString(),
+          });
+        }
         return {
           ok: true as const,
           assetId: asset.assetId,
           taskId,
           clientId: input.clientId,
-          portalHref: "/portal/deliveries",
+          portalHref: "/portal/approvals",
         };
       }
 
@@ -365,7 +377,7 @@ export const creativeGenRouter = router({
         title: "Creative sent to portal",
         body: title.slice(0, 120),
         kind: "creative",
-        href: "/portal/deliveries",
+        href: "/portal/approvals",
         entityType: "asset",
         entityId: assetId,
       }).catch(() => undefined);
@@ -375,7 +387,7 @@ export const creativeGenRouter = router({
         assetId,
         taskId,
         clientId: input.clientId,
-        portalHref: "/portal/deliveries",
+        portalHref: "/portal/approvals",
       };
     }),
 });

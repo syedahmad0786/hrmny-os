@@ -59,13 +59,22 @@ describe("runAgentTools funnel writes", () => {
 
     const portalAsset = byTool["creative.sendToPortal"]?.data as {
       assetId?: string;
+      taskId?: string;
       portalHref?: string;
       mode?: string;
     };
     expect(portalAsset?.assetId).toBeTruthy();
-    expect(portalAsset?.portalHref).toBe("/portal/deliveries");
+    expect(portalAsset?.taskId).toBeTruthy();
+    expect(portalAsset?.portalHref).toBe("/portal/approvals");
     if (portalAsset?.mode === "memory") {
-      expect(getDemoStore().assets.has(portalAsset.assetId!)).toBe(true);
+      const store = getDemoStore();
+      expect(store.assets.has(portalAsset.assetId!)).toBe(true);
+      expect(store.portalApprovals.has(portalAsset.taskId!)).toBe(true);
+      const task = store.tasks.get(portalAsset.taskId!);
+      expect(task?.status).toBe("client_review");
+      expect(store.assets.get(portalAsset.assetId!)?.taskId).toBe(
+        portalAsset.taskId,
+      );
     }
   });
 
