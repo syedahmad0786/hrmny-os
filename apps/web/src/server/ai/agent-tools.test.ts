@@ -81,6 +81,86 @@ describe("runAgentTools funnel writes", () => {
     }
   });
 
+  it("crm.closed_loop runs prospect→won→onboarding when prompt-gated (org only)", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const results = await runAgentTools({
+      allowedTools: ["crm.closed_loop"],
+      prompt: "Run demo closed loop for company: Agent Loop Co",
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const loop = results.find((r) => r.tool === "crm.closed_loop");
+    expect(loop?.ok).toBe(true);
+    const data = loop?.data as {
+      clientId?: string;
+      dealId?: string;
+      viaApollo?: boolean;
+      onboardingPhases?: number;
+      next?: Record<string, string>;
+    };
+    expect(data?.clientId).toBeTruthy();
+    expect(data?.dealId).toBeTruthy();
+    expect(data?.viaApollo).toBe(false);
+    expect((data?.onboardingPhases ?? 0) > 0).toBe(true);
+    expect(data?.next?.crmDeal).toMatch(/^\/crm\/deals\//);
+  });
+
+  it("crm.closed_loop viaApollo uses mock Apollo when keys absent", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const results = await runAgentTools({
+      allowedTools: ["crm.runDemoClosedLoop"],
+      prompt: "Run closed loop via Apollo",
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const loop = results.find((r) => r.tool === "crm.closed_loop");
+    expect(loop?.ok).toBe(true);
+    const data = loop?.data as {
+      viaApollo?: boolean;
+      apolloMode?: string;
+    };
+    expect(data?.viaApollo).toBe(true);
+    expect(data?.apolloMode).toBe("mock");
+  });
+
+  it("crm.closed_loop does not fire without prompt gate even if allowlisted", async () => {
+    const results = await runAgentTools({
+      allowedTools: ["crm.closed_loop", "crm.read"],
+      prompt: "Summarize open deals",
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(results.find((r) => r.tool === "crm.closed_loop")).toBeUndefined();
+  });
+
+  it("client sandbox never runs crm.closed_loop", async () => {
+    const results = await runAgentTools({
+      allowedTools: ["crm.closed_loop", "crm.read"],
+      prompt: "Run demo closed loop",
+      scope: {
+        clientId: CLIENT_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(results.find((r) => r.tool === "crm.closed_loop")).toBeUndefined();
+  });
+
+  it("default funnel allowlist does not include closed_loop", async () => {
+    const results = await runAgentTools({
+      allowedTools: [],
+      prompt: "Run demo closed loop",
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(results.find((r) => r.tool === "crm.closed_loop")).toBeUndefined();
+  });
+
   it("crm.prospect imports mock Apollo companies outside client sandbox", async () => {
     const results = await runAgentTools({
       allowedTools: ["crm.prospect"],
