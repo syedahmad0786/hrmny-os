@@ -56,10 +56,11 @@ export default function DashboardsHubPage() {
       </section>
 
       <p className="text-sm text-muted">
-        Client portal:{" "}
-        <Link className="text-ochre underline" href="/portal">
-          /portal
-        </Link>
+        Client portal: pick a client on{" "}
+        <Link className="text-ochre underline" href="/clients">
+          /clients
+        </Link>{" "}
+        then use Portal approvals
         {" · "}
         Cutover notes: see <code className="text-ink">CUTOVER.md</code>
       </p>
