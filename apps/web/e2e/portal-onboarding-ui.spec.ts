@@ -25,8 +25,6 @@ test.describe("Portal onboarding UI", () => {
     );
     expect(Number.isFinite(phaseIndex)).toBe(true);
 
-    // Pin by phase index — after ack the next phase becomes active, so
-    // `[data-phase-status=active]` would point at a different row.
     const target = page.getByTestId(`portal-onboarding-phase-${phaseIndex}`);
     await target.getByTestId("portal-onboarding-ack").click();
     await expect(target).toHaveAttribute("data-phase-status", "signed_off", {
@@ -39,16 +37,13 @@ test.describe("Portal onboarding UI", () => {
       page.getByRole("heading", { name: /Notifications/i }),
     ).toBeVisible({ timeout: 60_000 });
 
-    const onboardRow = page
-      .locator("li")
-      .filter({ hasText: /Onboarding signed off/i })
-      .filter({ hasText: phaseName });
-    await expect(onboardRow).toBeVisible({ timeout: 30_000 });
-
-    const open = onboardRow.getByRole("link", { name: /^Open$/i });
-    await expect(open).toBeVisible();
-    await expect(open).toHaveAttribute("href", /\?phase=\d+/);
-    await open.click();
+    // Match Open by phase= — prior signoffs say "Advanced to {next}" which
+    // makes name filters match multiple notification rows.
+    const open = page.locator(
+      `a[href*="/clients/"][href*="phase=${phaseIndex}"]`,
+    );
+    await expect(open.first()).toBeVisible({ timeout: 30_000 });
+    await open.first().click();
     await expect(page).toHaveURL(
       new RegExp(`/clients/.+\\?phase=${phaseIndex}`),
     );
