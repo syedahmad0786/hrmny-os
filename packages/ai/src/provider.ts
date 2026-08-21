@@ -185,6 +185,41 @@ export function createMockProvider(
         };
       }
 
+      // ReAct demos without OpenRouter: emit funnel_act when the harness
+      // catalog exposes it and the user asks to advance client funnel drafts.
+      const blob = options.messages.map((m) => m.content).join("\n");
+      const catalogHasFunnel = /(?:^|\n)-\s*funnel_act\s*:/i.test(blob);
+      const sawFunnelObservation = /Observation from funnel_act/i.test(blob);
+      const wantsFunnel = /funnel drafts|advance(?:\s+\w+){0,4}\s+funnel|portal invite|brief.*campaign|campaign.*brief/i.test(
+        userText,
+      );
+      if (catalogHasFunnel && wantsFunnel && !sawFunnelObservation) {
+        const prompt =
+          userText.trim().slice(0, 400) ||
+          "Advance this client’s funnel drafts (brief, campaign, portal invite)";
+        return {
+          text: [
+            "```tool",
+            JSON.stringify({
+              name: "funnel_act",
+              arguments: { prompt },
+            }),
+            "```",
+          ].join("\n"),
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+      if (sawFunnelObservation) {
+        return {
+          text:
+            "Advanced the client funnel: drafted tasks/briefs/campaigns, " +
+            "queued a portal invite, and sent creative into portal review.",
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+
       return {
         text: `[mock:${options.model ?? defaultModel}] stub response`,
         provider: "mock",

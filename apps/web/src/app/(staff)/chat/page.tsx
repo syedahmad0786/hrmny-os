@@ -23,16 +23,21 @@ function StepFold({
   const tools = steps.filter((s) => typeof s.toolName === "string");
   if (!tools.length) return null;
   return (
-    <details className="hrmny-chat-workfold">
+    <details className="hrmny-chat-workfold" data-testid="chat-work-steps" open>
       <summary>
         Worked · {tools.length} tool{tools.length === 1 ? "" : "s"}
       </summary>
       <ol>
         {tools.map((s, i) => (
-          <li key={i}>
+          <li
+            key={i}
+            data-testid={`chat-tool-${String(s.toolName)}`}
+          >
             <strong>{String(s.toolName)}</strong>
             {s.observation ? (
-              <span>{String(s.observation).slice(0, 240)}</span>
+              <span data-testid="chat-tool-observation">
+                {String(s.observation).slice(0, 2400)}
+              </span>
             ) : null}
           </li>
         ))}
@@ -76,10 +81,13 @@ export default function HrmnyChatPage() {
   });
 
   useEffect(() => {
-    if (!threadId && threads.data?.[0]) {
-      setThreadId(threads.data[0].chatThreadId);
-    }
-  }, [threadId, threads.data]);
+    if (threadId) return;
+    const preferred = (threads.data ?? []).find(
+      (t) => (t.clientId ?? "") === clientId,
+    );
+    // Only auto-open a session that matches the selected sandbox.
+    if (preferred) setThreadId(preferred.chatThreadId);
+  }, [threadId, threads.data, clientId]);
 
   const activeThread = threads.data?.find((t) => t.chatThreadId === threadId);
 
@@ -158,6 +166,7 @@ export default function HrmnyChatPage() {
         <button
           type="button"
           className="hrmny-chat-new"
+          data-testid="chat-new"
           disabled={create.isPending}
           onClick={() =>
             create.mutate({
@@ -176,6 +185,7 @@ export default function HrmnyChatPage() {
             Agent
             <select
               className="mt-1 w-full rounded border border-sand bg-white px-2 py-1.5 text-xs text-ink"
+              data-testid="chat-agent-slug"
               value={agentSlug}
               onChange={(e) => setAgentSlug(e.target.value)}
             >
@@ -191,8 +201,16 @@ export default function HrmnyChatPage() {
             Client sandbox
             <select
               className="mt-1 w-full rounded border border-sand bg-white px-2 py-1.5 text-xs text-ink"
+              data-testid="chat-sandbox-client"
               value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setClientId(next);
+                // Sandbox change must not reuse an org/other-client thread.
+                if ((activeThread?.clientId ?? "") !== next) {
+                  setThreadId(null);
+                }
+              }}
             >
               <option value="">Staff / org scope</option>
               {(clients.data ?? []).map((c) => (
@@ -271,6 +289,11 @@ export default function HrmnyChatPage() {
                   <button
                     key={s}
                     type="button"
+                    data-testid={
+                      s.includes("funnel drafts")
+                        ? "chat-starter-funnel"
+                        : "chat-starter"
+                    }
                     onClick={() => submit(s)}
                     disabled={send.isPending || create.isPending}
                   >
@@ -290,6 +313,11 @@ export default function HrmnyChatPage() {
                   <article
                     key={m.chatMessageId}
                     className={`hrmny-chat-msg is-${m.role}`}
+                    data-testid={
+                      m.role === "assistant"
+                        ? "chat-assistant-message"
+                        : "chat-user-message"
+                    }
                   >
                     <div className="hrmny-chat-msg-role">
                       {m.role === "user" ? "You" : "Hrmny"}
@@ -354,6 +382,7 @@ export default function HrmnyChatPage() {
             <textarea
               rows={2}
               placeholder="Message Hrmny…"
+              data-testid="chat-composer"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -366,6 +395,7 @@ export default function HrmnyChatPage() {
             />
             <button
               type="submit"
+              data-testid="chat-send"
               disabled={send.isPending || !draft.trim()}
               aria-label="Send"
             >
