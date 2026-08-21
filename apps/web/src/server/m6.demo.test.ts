@@ -96,12 +96,53 @@ describe("M6 portal + seams", () => {
         (n) =>
           n.kind === "creative" &&
           /approved/i.test(n.title) &&
-          n.entityId === approval!.approvalId,
+          (n.entityId === approval!.approvalId ||
+            n.entityId === DEMO_CREATIVE_TASK_ID) &&
+          (n.href ?? "").includes("taskId="),
       ),
     ).toBe(true);
     await expect(callerFor("am").clientPreview.workspace()).rejects.toThrow(
       /Partner or director/,
     );
+  });
+
+  it("portal reject moves task to revisions, bumps count, and notifies staff", async () => {
+    const portal = callerFor("portal_a");
+    const store = getDemoStore();
+    const pending = [...store.portalApprovals.values()].find(
+      (a) => a.clientId === DEMO_CLIENT_ID && a.status === "pending",
+    );
+    expect(pending).toBeDefined();
+    const asset = store.assets.get(pending!.entityId);
+    expect(asset?.taskId).toBe(DEMO_CREATIVE_TASK_ID);
+    const beforeCount =
+      store.tasks.get(DEMO_CREATIVE_TASK_ID)?.clientRevisionCount ?? 0;
+
+    const result = await portal.portal.approvals.act({
+      id: pending!.approvalId,
+      action: "reject",
+      feedback: "Tighten the hook and crop",
+    });
+    expect(result.status).toBe("revisions");
+    expect(store.portalApprovals.get(pending!.approvalId)?.status).toBe(
+      "rejected",
+    );
+    const task = store.tasks.get(DEMO_CREATIVE_TASK_ID)!;
+    expect(task.status).toBe("revisions");
+    expect(task.clientRevisionCount).toBe(beforeCount + 1);
+
+    const { listNotifications } = await import("./notifications/store");
+    const inbox = await listNotifications(DEMO_EMPLOYEE_ID, { limit: 20 });
+    expect(
+      inbox.some(
+        (n) =>
+          n.kind === "creative" &&
+          /revisions/i.test(n.title) &&
+          /Approve launch reel cut/i.test(n.title) &&
+          /Tighten the hook/i.test(n.body ?? "") &&
+          (n.href ?? "").includes(`taskId=${DEMO_CREATIVE_TASK_ID}`),
+      ),
+    ).toBe(true);
   });
 
   it("portal onboarding acknowledge notifies staff inbox", async () => {

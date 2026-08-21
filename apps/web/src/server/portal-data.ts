@@ -471,7 +471,7 @@ async function notifyStaffOfPortalDecision(input: {
     title,
     body,
     kind: "creative",
-    href: `/creative?clientId=${encodeURIComponent(input.clientId)}`,
+    href: `/creative?clientId=${encodeURIComponent(input.clientId)}&taskId=${encodeURIComponent(input.approvalId)}`,
     entityType: "task",
     entityId: input.approvalId,
   }).catch(() => undefined);
@@ -508,7 +508,24 @@ export async function actOnPortalApproval(input: {
     const before = item.status;
     item.status = input.action === "approve" ? "approved" : "rejected";
     const asset = store.assets.get(item.entityId);
-    if (asset) asset.status = input.action === "approve" ? "approved" : "internal_review";
+    if (asset) {
+      asset.status =
+        input.action === "approve" ? "approved" : "internal_review";
+    }
+    // Portal approval stays rejected; linked creative task moves to revisions.
+    let taskIdForNotify = input.approvalId;
+    if (asset?.taskId) {
+      taskIdForNotify = asset.taskId;
+      const task = store.tasks.get(asset.taskId);
+      if (task && task.clientId === input.clientId) {
+        if (input.action === "reject") {
+          task.status = "revisions";
+          task.clientRevisionCount = (task.clientRevisionCount ?? 0) + 1;
+        } else if (input.action === "approve") {
+          task.status = "approved";
+        }
+      }
+    }
     store.appendAudit({
       actorEmployeeId:
         input.actorEmployeeId ?? input.actorPortalUserId ??
@@ -522,12 +539,15 @@ export async function actOnPortalApproval(input: {
     });
     await notifyStaffOfPortalDecision({
       clientId: input.clientId,
-      approvalId: input.approvalId,
+      approvalId: taskIdForNotify,
       action: input.action,
       feedback: input.feedback,
       title: item.title,
     });
-    return { ok: true as const, status: item.status };
+    return {
+      ok: true as const,
+      status: input.action === "approve" ? "approved" : "revisions",
+    };
   }
 
   const nextStatus = input.action === "approve" ? "approved" : "revisions";
@@ -550,6 +570,21 @@ export async function actOnPortalApproval(input: {
       set status = ${nextStatus}::task_status_enum, updated_at = now()
       where task_id = ${input.approvalId}::uuid
     `);
+
+    if (input.action === "reject") {
+      await tx.execute(sql`
+        update public.brief b
+        set body = jsonb_set(
+          coalesce(b.body, '{}'::jsonb),
+          '{clientRevisionCount}',
+          to_jsonb(
+            coalesce((b.body->>'clientRevisionCount')::int, 0) + 1
+          )
+        ),
+        updated_at = now()
+        where b.task_id = ${input.approvalId}::uuid
+      `);
+    }
 
     let portalActorId: string | null = null;
     if (input.actorPortalUserId) {
@@ -613,11 +648,25 @@ export async function actOnPortalApproval(input: {
         /* seam best-effort after commit */
       }
     }
+    let title: string | undefined;
+    try {
+      const rows = await db.execute<{ title: string | null }>(sql`
+        select coalesce(b.body->>'title', t.task_type) as title
+        from public.task t
+        left join public.brief b on b.task_id = t.task_id
+        where t.task_id = ${input.approvalId}::uuid
+        limit 1
+      `);
+      title = rows[0]?.title ?? undefined;
+    } catch {
+      title = undefined;
+    }
     await notifyStaffOfPortalDecision({
       clientId: input.clientId,
       approvalId: input.approvalId,
       action: input.action,
       feedback: input.feedback,
+      title,
     });
     return result;
   });
