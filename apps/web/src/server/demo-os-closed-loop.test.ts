@@ -82,15 +82,36 @@ describe("demo OS closed loop", () => {
     expect(deal?.emailVerified).toBe(true);
   });
 
-  it("runDemoClosedLoop viaApollo seeds apollo_intent then fails handover without DB", async () => {
+  it("runDemoClosedLoop viaApollo completes handover in memory mode", async () => {
     const caller = callerFor("partner");
     const result = await caller.crm.runDemoClosedLoop({
       companyName: `Apollo Unit ${Date.now()}`,
       viaApollo: true,
     });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.step).toBe("handover");
-    }
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.clientId).toBeTruthy();
+    expect(result.onboardingPhases).toBeGreaterThanOrEqual(1);
+    expect(result.taskId).toBeTruthy();
+    expect(result.next.client).toMatch(/^\/clients\//);
+    expect(result.fired).toEqual(
+      expect.arrayContaining(["client.create", "onboarding.seed", "creative.task_seed"]),
+    );
+    const store = getDemoStore();
+    expect(store.clients.has(result.clientId)).toBe(true);
+    expect(store.onboarding.get(result.clientId)?.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("runDemoClosedLoop without Apollo completes prospect → won → onboarding", async () => {
+    const caller = callerFor("partner");
+    const result = await caller.crm.runDemoClosedLoop({
+      companyName: `Memory Prospect ${Date.now()}`,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.viaApollo).toBe(false);
+    expect(result.clientName).toMatch(/Memory Prospect/);
+    expect(result.next.client).toContain(result.clientId);
+    expect(result.portalInvite?.portalPath ?? "").toMatch(/\/portal\//);
   });
 });

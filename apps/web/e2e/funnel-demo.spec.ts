@@ -21,6 +21,21 @@ test.describe("Demo funnel", () => {
     await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
     await expect(page.locator("body")).toContainText(/hunt|apollo|closed loop/i);
 
+    // Memory-mode prospect → won → onboarding (no DATABASE_URL in CI).
+    const runLoop = page.getByRole("button", { name: /Run demo closed loop/i });
+    await expect(runLoop).toBeVisible();
+    await runLoop.click();
+    const status = page.getByTestId("hunt-closed-loop-status");
+    await expect(status).toBeVisible({ timeout: 60_000 });
+    await expect(status).toContainText(/Closed loop ready/i);
+    const clientLink = status.getByRole("link", { name: /Client onboarding/i });
+    await expect(clientLink).toBeVisible();
+    await clientLink.click();
+    await expect(page).toHaveURL(/\/clients\//);
+    await expect(
+      page.getByRole("navigation", { name: /Continue OS after handover/i }),
+    ).toBeVisible({ timeout: 30_000 });
+
     await page.goto("/crm/deals", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
 

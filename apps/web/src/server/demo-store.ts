@@ -1253,6 +1253,35 @@ class MemoryDemoStore {
     this.onboarding.set(client.clientId, seedOnboarding());
     return client;
   }
+
+  /** First creative QC task after a memory-mode won→handover (no Postgres). */
+  seedWonCreativeTask(input: {
+    clientId: string;
+    title: string;
+    ownerEmployeeId?: string | null;
+  }): DemoTask {
+    const month = new Date().toISOString().slice(0, 7);
+    const task: DemoTask = {
+      taskId: randomUUID(),
+      clientId: input.clientId,
+      calendarId: null,
+      month,
+      taskType: "social_cutdowns",
+      title: input.title,
+      status: "qc",
+      situationalState: null,
+      ownerEmployeeId: input.ownerEmployeeId ?? DEMO_EMPLOYEE_ID,
+      deadline: new Date().toISOString().slice(0, 10),
+      priority: "P1",
+      qcPassed: false,
+      qcNotes: null,
+      clientRevisionCount: 0,
+      revisionBoundaryAck: false,
+      briefId: null,
+    };
+    this.tasks.set(task.taskId, task);
+    return task;
+  }
 }
 
 const globalStore = globalThis as typeof globalThis & {
