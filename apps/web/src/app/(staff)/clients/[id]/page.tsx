@@ -39,6 +39,41 @@ export default function ClientOnboardingPage() {
             ? String(client.data.renewalDate)
             : "—"}
         </p>
+        <nav
+          className="mt-3 flex flex-wrap gap-2 text-sm"
+          aria-label="Continue OS after handover"
+        >
+          <Link
+            href={`/account?clientId=${encodeURIComponent(id)}`}
+            className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
+          >
+            Account calendar →
+          </Link>
+          <Link
+            href={`/creative?clientId=${encodeURIComponent(id)}`}
+            className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
+          >
+            Creative →
+          </Link>
+          <Link
+            href="/approvals"
+            className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
+          >
+            Approvals →
+          </Link>
+          <Link
+            href="/crm/outreach"
+            className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
+          >
+            Outreach →
+          </Link>
+          <Link
+            href="/portal/approvals"
+            className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
+          >
+            Portal approvals →
+          </Link>
+        </nav>
       </div>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">

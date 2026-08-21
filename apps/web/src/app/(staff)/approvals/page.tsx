@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { Button } from "@hrmny/ui";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { formatRelative } from "@/components/crm/format";
 import { DraftPreview } from "./draft-preview";
@@ -17,7 +18,17 @@ const KIND_TONE: Record<ApprovalKind, string> = {
 };
 
 export default function ApprovalsPage() {
+  return (
+    <Suspense>
+      <ApprovalsInner />
+    </Suspense>
+  );
+}
+
+function ApprovalsInner() {
   const utils = trpc.useUtils();
+  const searchParams = useSearchParams();
+  const focusId = searchParams.get("id");
   // Outreach drafts awaiting a human send (leadgen router, gate: draft→approved→sent).
   const outreach = trpc.leadgen.outreach.list.useQuery({ state: "draft" });
   // Campaign items approved and awaiting publish (campaigns router, gate: approved→published).
@@ -30,7 +41,7 @@ export default function ApprovalsPage() {
   const discardOutreach = trpc.leadgen.outreach.discard.useMutation();
   const moveCampaign = trpc.campaigns.transition.useMutation();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(focusId);
   const [feedback, setFeedback] = useState<Record<string, Feedback>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [ready, setReady] = useState<{
@@ -53,6 +64,10 @@ export default function ApprovalsPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (focusId) setSelectedId(focusId);
+  }, [focusId]);
 
   const queue = useMemo<ApprovalItem[]>(() => {
     const outreachItems: ApprovalItem[] = (outreach.data ?? []).map((o) => ({
@@ -95,16 +110,26 @@ export default function ApprovalsPage() {
         draft: v.title,
       }));
 
-    return [...outreachItems, ...campaignItems, ...portalItems].sort((a, b) =>
-      b.proposedAt.localeCompare(a.proposedAt),
+    const merged = [...outreachItems, ...campaignItems, ...portalItems].sort(
+      (a, b) => b.proposedAt.localeCompare(a.proposedAt),
     );
-  }, [outreach.data, campaigns.data, portal.data]);
+    if (!focusId) return merged;
+    return [...merged].sort((a, b) => {
+      if (a.id === focusId) return -1;
+      if (b.id === focusId) return 1;
+      return 0;
+    });
+  }, [outreach.data, campaigns.data, portal.data, focusId]);
 
   const isLoading =
     outreach.isLoading || campaigns.isLoading || portal.isLoading;
   const error = outreach.error ?? campaigns.error ?? portal.error;
 
-  const selected = queue.find((i) => i.id === selectedId) ?? queue[0] ?? null;
+  const selected =
+    queue.find((i) => i.id === selectedId) ??
+    (focusId ? queue.find((i) => i.id === focusId) : undefined) ??
+    queue[0] ??
+    null;
   const outreachCount = queue.filter((i) => i.kind === "outreach_send").length;
   const actedCount = Object.keys(feedback).length;
 

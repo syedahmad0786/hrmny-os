@@ -79,4 +79,37 @@ test.describe("Demo funnel", () => {
       await expect(page.locator("body")).toContainText(/BUAF|Advance|Mark won|Handover|Commercial/i);
     }
   });
+
+  test("outreach and approvals honor ?id= deep links", async ({ page }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/crm/outreach?id=demo-focus", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(page.locator("body")).toContainText(/outreach|draft|queue/i);
+
+    await page.goto("/approvals?id=demo-focus", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.locator("body")).toContainText(/approval|inbox|HITL/i);
+  });
+
+  test("client onboarding shows continue OS links", async ({ page }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/clients", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
+      timeout: 60_000,
+    });
+    const firstClient = page.locator('a[href^="/clients/"]').first();
+    if (await firstClient.count()) {
+      await firstClient.click();
+      await expect(
+        page.getByRole("navigation", { name: "Continue OS after handover" }),
+      ).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("link", { name: /Account calendar/i })).toBeVisible();
+      await expect(page.getByRole("link", { name: /^Creative/i })).toBeVisible();
+    }
+  });
 });
