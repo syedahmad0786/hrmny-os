@@ -26,6 +26,8 @@ export type ApprovalItem = {
   proposedAt: string;
   /** The content the agent wants to send/publish. */
   draft: string;
+  /** Present for portal_item rows (pending vs client-rejected). */
+  portalState?: "pending_client" | "rejected";
   /**
    * For edits, the prior copy the draft was derived from — rendered as a line
    * diff against `draft`. Omitted for net-new items (draft-only preview).
