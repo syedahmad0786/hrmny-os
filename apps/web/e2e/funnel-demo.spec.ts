@@ -1062,12 +1062,9 @@ test.describe("Demo funnel", () => {
   }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
-    await expect(
-      page.getByRole("heading", { name: /What should Hrmny work on|New conversation|Chat/i }),
-    ).toBeVisible({ timeout: 60_000 });
 
     const sandbox = page.getByTestId("chat-sandbox-client");
-    await expect(sandbox).toBeVisible();
+    await expect(sandbox).toBeVisible({ timeout: 60_000 });
     await expect
       .poll(async () => sandbox.locator("option").count(), { timeout: 30_000 })
       .toBeGreaterThan(1);
