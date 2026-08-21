@@ -3,12 +3,18 @@
 import Link from "next/link";
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
-import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export default function ClientOnboardingPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const id = params.id;
+  const focusPhaseRaw = searchParams.get("phase");
+  const focusPhase =
+    focusPhaseRaw != null && focusPhaseRaw !== ""
+      ? Number(focusPhaseRaw)
+      : null;
   const utils = trpc.useUtils();
   const client = trpc.clients.get.useQuery({ id });
   const onboarding = trpc.clients.onboarding.get.useQuery({ clientId: id });
@@ -25,6 +31,14 @@ export default function ClientOnboardingPage() {
   const [audience, setAudience] = useState("");
   const [objective, setObjective] = useState("");
   const [portalMsg, setPortalMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (focusPhase == null || Number.isNaN(focusPhase)) return;
+    if (!onboarding.data?.length) return;
+    document
+      .getElementById(`onboarding-phase-${focusPhase}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusPhase, onboarding.data]);
 
   return (
     <main className="flex flex-col gap-6">
@@ -109,7 +123,12 @@ export default function ClientOnboardingPage() {
           {(onboarding.data ?? []).map((phase) => (
             <li
               key={phase.phaseId}
-              className="border-t border-sand/60 pt-3 text-sm"
+              id={`onboarding-phase-${phase.phaseIndex}`}
+              className={`border-t border-sand/60 pt-3 text-sm ${
+                focusPhase === phase.phaseIndex
+                  ? "rounded-md bg-cream/80 ring-1 ring-ochre/40"
+                  : ""
+              }`}
             >
               <p className="font-medium">
                 P{phase.phaseIndex}: {phase.name}{" "}
