@@ -1,7 +1,8 @@
 # Demo funnel — prospecting → sales → onboarding
 
 **Script:** `node scripts/demo-funnel.mjs`  
-**E2E:** `apps/web/e2e/funnel-demo.spec.ts` (CI uses `AUTH_MODE=dev` + `ALLOW_DEV_AUTH=true`)
+**E2E:** `apps/web/e2e/funnel-demo.spec.ts` (CI uses `AUTH_MODE=dev` + `ALLOW_DEV_AUTH=true`)  
+**Tools:** `node scripts/tools-smoke.mjs`
 
 Verified against live Postgres (pgvector on): creates won deal → client → `client_onboarding` (7 phases) → immersion → client-scoped `memory_chunk` → `agent_runs` row. Confirms other-client memory does not appear in the client sandbox.
 
