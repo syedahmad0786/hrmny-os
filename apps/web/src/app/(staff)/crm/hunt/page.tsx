@@ -31,27 +31,60 @@ const STEPS = [
   },
 ] as const;
 
+type ReadySmoke = {
+  tools?: Record<string, string>;
+  portalMagicLink?: string;
+  connections?: {
+    googleWorkspace?: number;
+    canva?: number;
+    linkedin?: number;
+    xero?: number;
+  };
+};
+
 export default function HuntClientsPage() {
   const [result, setResult] = useState<string | null>(null);
   const [query, setQuery] = useState("UAE retail brand");
   const [lastApolloDealId, setLastApolloDealId] = useState<string | null>(null);
-  const [toolReady, setToolReady] = useState<Record<string, string> | null>(
-    null,
-  );
+  const [ready, setReady] = useState<ReadySmoke | null>(null);
   const utils = trpc.useUtils();
 
   useEffect(() => {
     let cancelled = false;
     void fetch("/api/ready")
       .then((r) => r.json())
-      .then((body: { tools?: Record<string, string> }) => {
-        if (!cancelled && body.tools) setToolReady(body.tools);
+      .then((body: ReadySmoke) => {
+        if (!cancelled) setReady(body);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const toolReady = ready?.tools ?? null;
+  const blockers: string[] = [];
+  if (toolReady?.apollo === "mock") {
+    blockers.push("Paste Apollo API key in Connections");
+  }
+  if (toolReady?.hunter === "mock") {
+    blockers.push("Paste Hunter API key in Connections");
+  }
+  if (toolReady?.xero === "mock") {
+    blockers.push("Connect Xero OAuth in Connections");
+  }
+  if ((ready?.connections?.googleWorkspace ?? 0) < 1) {
+    blockers.push("Reconnect Google Workspace for live HITL Gmail");
+  }
+  if ((ready?.connections?.linkedin ?? 0) < 1) {
+    blockers.push("Connect LinkedIn (Composio) for campaign publish");
+  }
+  if ((ready?.connections?.canva ?? 0) < 1) {
+    blockers.push("Connect Canva (Composio) for design → portal");
+  }
+  if (toolReady?.resend === "mock") {
+    blockers.push("Set RESEND_MODE=live + RESEND_API_KEY for real portal email");
+  }
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
     onSuccess: (data) => {
       if (!data.ok) {
@@ -221,15 +254,37 @@ export default function HuntClientsPage() {
               </Link>
             </div>
             {toolReady ? (
-              <p className="mt-2 text-xs text-muted">
-                Tools: apollo {toolReady.apollo} · hunter {toolReady.hunter} ·
-                n8n {toolReady.n8n} · xero {toolReady.xero} · composio{" "}
-                {toolReady.composio}
-                {" · "}
-                <Link href="/settings/connections" className="underline">
-                  Connections
-                </Link>
-              </p>
+              <div className="mt-3 space-y-2 text-xs text-muted">
+                <p>
+                  Tools: apollo {toolReady.apollo} · hunter {toolReady.hunter} ·
+                  n8n {toolReady.n8n} · xero {toolReady.xero} · composio{" "}
+                  {toolReady.composio} · resend {toolReady.resend ?? "—"} ·
+                  portal magic-link {ready?.portalMagicLink ?? "—"}
+                  {" · "}
+                  <Link href="/settings/connections" className="underline">
+                    Connections
+                  </Link>
+                </p>
+                {ready?.connections ? (
+                  <p>
+                    Connected accounts: GW {ready.connections.googleWorkspace ?? 0}{" "}
+                    · Canva {ready.connections.canva ?? 0} · LinkedIn{" "}
+                    {ready.connections.linkedin ?? 0} · Xero{" "}
+                    {ready.connections.xero ?? 0}
+                  </p>
+                ) : null}
+                {blockers.length > 0 ? (
+                  <ul className="list-disc space-y-1 pl-4 text-ink/80">
+                    {blockers.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-ink/80">
+                    Live tool keys and OAuth connections look ready for demo.
+                  </p>
+                )}
+              </div>
             ) : null}
             {result ? (
               <div
