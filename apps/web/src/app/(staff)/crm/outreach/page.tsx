@@ -149,6 +149,9 @@ function OutreachInner() {
     <article
       key={item.id}
       id={`outreach-${item.id}`}
+      data-testid={`outreach-item-${item.id}`}
+      data-outreach-state={item.state}
+      data-outreach-subject={item.subject ?? ""}
       data-selected={focusId === item.id ? "true" : undefined}
       className={`crm-approval-mini${focusId === item.id ? " is-focused" : ""}`}
     >
@@ -160,7 +163,7 @@ function OutreachInner() {
           {companyByDeal.get(item.dealId) ?? "Deal"} → {item.recipient || "—"}
         </span>
       </div>
-      <h4>{item.subject ?? "(no subject)"}</h4>
+      <h4 data-testid="outreach-item-subject">{item.subject ?? "(no subject)"}</h4>
       <p style={{ whiteSpace: "pre-wrap" }}>{item.body}</p>
       <div className="crm-approval-actions">{actions}</div>
     </article>
@@ -213,6 +216,7 @@ function OutreachInner() {
                   <>
                     <CrmBtn
                       variant="primary"
+                      data-testid="outreach-approve"
                       disabled={busyId !== null}
                       onClick={() =>
                         void run(item.id, "Approve", () =>
@@ -300,6 +304,7 @@ function OutreachInner() {
           <div className="crm-panel-body">
             <form
               className="crm-form-grid"
+              data-testid="outreach-draft-form"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!draftDealId) return;
@@ -318,6 +323,7 @@ function OutreachInner() {
                 <label>Deal</label>
                 <select
                   className="crm-select"
+                  data-testid="outreach-draft-deal"
                   required
                   value={draftDealId}
                   onChange={(e) => setDraftDealId(e.target.value)}
@@ -336,6 +342,7 @@ function OutreachInner() {
                 <label>Subject (optional)</label>
                 <input
                   className="crm-input"
+                  data-testid="outreach-draft-subject"
                   value={draftSubject}
                   onChange={(e) => setDraftSubject(e.target.value)}
                 />
@@ -344,6 +351,7 @@ function OutreachInner() {
                 <label>Body (optional — AI drafts when empty)</label>
                 <textarea
                   className="crm-textarea"
+                  data-testid="outreach-draft-body"
                   value={draftBody}
                   onChange={(e) => setDraftBody(e.target.value)}
                 />
@@ -352,6 +360,7 @@ function OutreachInner() {
                 <CrmBtn
                   variant="primary"
                   type="submit"
+                  data-testid="outreach-draft-create"
                   disabled={!draftDealId || draft.isPending}
                 >
                   {draft.isPending ? "Drafting…" : "Create draft"}
