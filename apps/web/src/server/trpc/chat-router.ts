@@ -155,6 +155,28 @@ export function buildChatDefaultTools(scope: {
         return { tools: results };
       },
     },
+    ...(scope.clientId
+      ? []
+      : [
+          {
+            name: "crm_closed_loop",
+            description:
+              "Org-only: prospect → won → handover → onboarding. Prompt must mention closed loop (or won handover). Returns portal magic links.",
+            run: async (args: Record<string, unknown>) => {
+              const { runAgentTools } = await import("../ai/agent-tools");
+              const results = await runAgentTools({
+                allowedTools: ["crm.closed_loop"],
+                prompt: String(
+                  args.prompt ?? args.query ?? "Run demo closed loop",
+                ),
+                scope: {
+                  employeeId: scope.employeeId,
+                },
+              });
+              return { tools: results };
+            },
+          } satisfies HarnessTool,
+        ]),
     {
       name: "now",
       description: "Return the current UTC timestamp",

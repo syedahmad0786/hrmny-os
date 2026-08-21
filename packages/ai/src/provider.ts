@@ -222,11 +222,11 @@ export function createMockProvider(
 
       // Staff closed-loop demo without OpenRouter when catalog lists the tool.
       const catalogHasClosedLoop =
-        /(?:^|\n)-\s*(?:crm\.closed_loop|crm\.runDemoClosedLoop|funnel\.closed_loop)\s*:/i.test(
+        /(?:^|\n)-\s*(?:crm\.closed_loop|crm\.runDemoClosedLoop|funnel\.closed_loop|crm_closed_loop)\s*:/i.test(
           blob,
         );
       const sawClosedLoopObservation =
-        /Observation from (?:crm\.closed_loop|crm\.runDemoClosedLoop|funnel\.closed_loop)/i.test(
+        /Observation from (?:crm\.closed_loop|crm\.runDemoClosedLoop|funnel\.closed_loop|crm_closed_loop)/i.test(
           blob,
         );
       const wantsClosedLoop =
@@ -236,11 +236,14 @@ export function createMockProvider(
       if (catalogHasClosedLoop && wantsClosedLoop && !sawClosedLoopObservation) {
         const prompt =
           userText.trim().slice(0, 400) || "Run demo closed loop";
+        const toolName = /(?:^|\n)-\s*crm_closed_loop\s*:/i.test(blob)
+          ? "crm_closed_loop"
+          : "crm.closed_loop";
         return {
           text: [
             "```tool",
             JSON.stringify({
-              name: "crm.closed_loop",
+              name: toolName,
               arguments: { prompt },
             }),
             "```",

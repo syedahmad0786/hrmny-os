@@ -274,7 +274,7 @@ async function memoryHandoverPack(input: {
     fired.push("portal.invite_mock");
     fired.push("portal.invite_onboarding");
   } catch {
-    /* invite optional */
+    fired.push("portal.invite_failed");
   }
 
   try {
@@ -290,7 +290,7 @@ async function memoryHandoverPack(input: {
     });
     fired.push("staff.notify");
   } catch {
-    /* notify optional */
+    fired.push("staff.notify_failed");
   }
 
   const client = {
@@ -655,7 +655,7 @@ export async function durableHandoverPack(input: {
       fired.push("portal.invite_onboarding");
     }
   } catch {
-    /* invite optional when unique constraints differ */
+    fired.push("portal.invite_failed");
   }
 
   let outreachId: string | null = null;
@@ -678,7 +678,24 @@ export async function durableHandoverPack(input: {
       fired.push("outreach.draft");
     }
   } catch {
-    /* outreach optional when agent/kill-switch refuses */
+    fired.push("outreach.failed");
+  }
+
+  try {
+    const { notifyEmployee } = await import("../notifications/store");
+    const { DEMO_STAFF_LEAD_ID } = await import("../demo-store");
+    await notifyEmployee({
+      employeeId: input.actorEmployeeId ?? DEMO_STAFF_LEAD_ID,
+      title: `Handover ready: ${client.name}`,
+      body: `Won deal closed — client onboarding seeded (${phases.length} phases).`,
+      kind: "onboarding",
+      href: `/clients/${client.clientId}`,
+      entityType: "client",
+      entityId: client.clientId,
+    });
+    fired.push("staff.notify");
+  } catch {
+    fired.push("staff.notify_failed");
   }
 
   const packId = crypto.randomUUID();

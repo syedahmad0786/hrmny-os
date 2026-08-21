@@ -45,4 +45,43 @@ describe("chat harness funnel_act", () => {
     );
     expect(byTool["crm.prospect"]).toBeUndefined();
   });
+
+  it("exposes crm_closed_loop only for org chat (no client sandbox)", async () => {
+    const orgTools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
+    const clientTools = buildChatDefaultTools({
+      employeeId: EMPLOYEE_ID,
+      clientId: CLIENT_ID,
+    });
+    expect(orgTools.some((t) => t.name === "crm_closed_loop")).toBe(true);
+    expect(clientTools.some((t) => t.name === "crm_closed_loop")).toBe(false);
+  });
+
+  it("crm_closed_loop runs prospect→won→onboarding with portal links", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const tools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
+    const closed = tools.find((t) => t.name === "crm_closed_loop");
+    expect(closed).toBeTruthy();
+    const result = (await closed!.run({
+      prompt: "Run demo closed loop for company: Chat Loop Co",
+    })) as {
+      tools?: Array<{
+        tool: string;
+        ok: boolean;
+        data?: {
+          clientId?: string;
+          portalInvite?: { portalPath?: string } | null;
+          next?: { portal?: string; client?: string };
+          fired?: string[];
+        };
+      }>;
+    };
+    const loop = result.tools?.find((r) => r.tool === "crm.closed_loop");
+    expect(loop?.ok).toBe(true);
+    expect(loop?.data?.clientId).toBeTruthy();
+    expect(loop?.data?.portalInvite?.portalPath ?? loop?.data?.next?.portal).toMatch(
+      /\/portal\//,
+    );
+    expect(loop?.data?.fired?.includes("staff.notify")).toBe(true);
+  });
 });

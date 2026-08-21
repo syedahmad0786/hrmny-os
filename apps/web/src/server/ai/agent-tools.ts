@@ -630,6 +630,7 @@ export async function runAgentTools(input: {
             onboardingPhases: loop.onboardingPhases,
             viaApollo: loop.viaApollo,
             apolloMode: loop.apolloMode,
+            portalInvite: loop.portalInvite,
             next: loop.next,
             fired: loop.fired,
           },
