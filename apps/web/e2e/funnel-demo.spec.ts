@@ -698,6 +698,58 @@ test.describe("Demo funnel", () => {
     );
   });
 
+  test("portal_a and portal_b sandboxes stay isolated", async ({ request }) => {
+    const parseList = async (path: string, role: string) => {
+      const res = await request.get(path, {
+        headers: {
+          "x-dev-role": role,
+          "content-type": "application/json",
+        },
+      });
+      const text = await res.text();
+      expect(res.ok(), `${role} ${path}: ${text}`).toBeTruthy();
+      const body = JSON.parse(text) as {
+        result?: { data?: { json?: unknown } };
+      };
+      return {
+        text,
+        data:
+          body.result?.data?.json ??
+          (body.result?.data as unknown) ??
+          null,
+      };
+    };
+
+    const aTasks = await parseList("/api/trpc/portal.tasks.list", "portal_a");
+    const aAssets = await parseList("/api/trpc/portal.assets.list", "portal_a");
+    const aApprovals = await parseList(
+      "/api/trpc/portal.approvals.list",
+      "portal_a",
+    );
+    const bTasks = await parseList("/api/trpc/portal.tasks.list", "portal_b");
+    const bAssets = await parseList("/api/trpc/portal.assets.list", "portal_b");
+    const bApprovals = await parseList(
+      "/api/trpc/portal.approvals.list",
+      "portal_b",
+    );
+
+    const blob = (value: unknown) => JSON.stringify(value ?? {});
+
+    expect(blob(aTasks.data)).toMatch(/Launch reel|Demo Co|Approve launch/i);
+    expect(blob(aTasks.data)).not.toMatch(/Other Co/i);
+    expect(blob(aAssets.data)).not.toMatch(/Other Co/i);
+    expect(blob(aApprovals.data)).toMatch(/Approve launch reel cut|Approve product stills/i);
+    expect(blob(aApprovals.data)).not.toMatch(/Other Co/i);
+
+    expect(blob(bTasks.data)).toMatch(/Other Co/i);
+    expect(blob(bTasks.data)).not.toMatch(/Launch reel|Demo Co/i);
+    expect(blob(bAssets.data)).toMatch(/Other Co/i);
+    expect(blob(bAssets.data)).not.toMatch(/Launch reel|Demo Co/i);
+    expect(blob(bApprovals.data)).not.toMatch(
+      /Approve launch reel cut|Approve product stills|Demo Co/i,
+    );
+  });
+
   test("creative generate attaches to portal review", async ({
     page,
     request,
