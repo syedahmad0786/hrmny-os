@@ -80,6 +80,13 @@ const PRIMARY_NAV = [
       ),
   },
   {
+    href: "/dashboards",
+    label: "Dashboards",
+    index: "05b",
+    features: ["analytics.dashboards", "finance.workspace", "core.home"],
+    match: (p: string) => p === "/dashboards" || p.startsWith("/dashboards/"),
+  },
+  {
     href: "/people",
     label: "People",
     index: "08",
