@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActorContext } from "@hrmny/gate";
-import type { SocialPublishAdapter } from "@hrmny/integrations";
+import type {
+  SocialChannel,
+  SocialPublishAdapter,
+  SocialPublishInput,
+  SocialPublishResult,
+} from "@hrmny/integrations";
 import { resetCampaignMemory } from "./memory";
 import {
   createCampaignDraft,
-  createSocialPublishStub,
   decidePortalItem,
   getCampaign,
   listApprovalViews,
@@ -38,10 +42,26 @@ function spyPublisher(): {
   adapter: SocialPublishAdapter;
   calls: () => number;
 } {
-  const base = createSocialPublishStub();
-  const publish = vi.fn(base.publishAfterApproval);
+  const publish = vi.fn(
+    async (input: SocialPublishInput): Promise<SocialPublishResult> => ({
+      published: true,
+      mode: "live",
+      externalId: `live-${input.channel}-1`,
+      channel: input.channel,
+      url: `https://example.test/${input.channel}/1`,
+    }),
+  );
   return {
-    adapter: { ...base, publishAfterApproval: publish },
+    adapter: {
+      mode: "live",
+      listChannels: async (): Promise<SocialChannel[]> => [
+        "linkedin",
+        "instagram",
+        "facebook",
+        "x",
+      ],
+      publishAfterApproval: publish,
+    },
     calls: () => publish.mock.calls.length,
   };
 }
@@ -145,10 +165,12 @@ describe("campaigns durable layer (memory mode)", () => {
     expect(decided.item.status).toBe("approved");
 
     // Client approval unlocked the approved→published gate.
+    const publisher = spyPublisher();
     const published = await transitionCampaign({
       actor: staffActor,
       id: draft.campaignItemId,
       to: "published",
+      publisher: publisher.adapter,
     });
     expect(published.ok).toBe(true);
   });

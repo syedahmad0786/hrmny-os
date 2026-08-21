@@ -22,15 +22,31 @@ const portal: ActorContext = { employeeId: "cli-1", roles: ["portal_client"], pe
 const audit: AuditWriter = async () => ({ auditId: "audit-test" });
 const emit: EmitHook = async () => {};
 
-/** Composio stub that counts sends so we can prove send is gated. */
-function countingComposio(): ComposioSendAdapter & { sends: number } {
+/** Live-mode adapter that counts sends (unit tests must not durable-send on stub). */
+function countingLiveComposio(): ComposioSendAdapter & { sends: number } {
   const base = createComposioStub();
+  let seq = 0;
   const wrapper = {
     ...base,
     sends: 0,
-    async sendAfterApproval(input: Parameters<ComposioSendAdapter["sendAfterApproval"]>[0]) {
+    async sendAfterApproval(
+      input: Parameters<ComposioSendAdapter["sendAfterApproval"]>[0],
+    ) {
       wrapper.sends += 1;
-      return base.sendAfterApproval(input);
+      if (input.toolkit === "linkedin") {
+        return {
+          sent: false,
+          mode: "copy_draft" as const,
+          externalId: `test-li-${++seq}`,
+          channel: "linkedin" as const,
+        };
+      }
+      return {
+        sent: true,
+        mode: "live" as const,
+        externalId: `test-gmail-${++seq}`,
+        channel: "gmail" as const,
+      };
     },
   };
   return wrapper;
@@ -89,7 +105,7 @@ describe("outreach HITL gate flow", () => {
   it("BLOCKS send before human approve — no external send fires", async () => {
     const deal = await seedDeal();
     const item = await draftOutreach({ dealId: deal.dealId, body: "Hello" });
-    const composio = countingComposio();
+    const composio = countingLiveComposio();
 
     const res = await sendOutreach({ id: item.id, actor: staff, composio, audit, emit });
 
@@ -99,10 +115,10 @@ describe("outreach HITL gate flow", () => {
     expect((await getOutreach(item.id))!.state).toBe("draft");
   });
 
-  it("ALLOWS send after approve — composio fires once and state becomes sent", async () => {
+  it("ALLOWS send after approve — live composio fires once and state becomes sent", async () => {
     const deal = await seedDeal();
     const item = await draftOutreach({ dealId: deal.dealId, body: "Hello" });
-    const composio = countingComposio();
+    const composio = countingLiveComposio();
 
     const approved = await approveOutreach({ id: item.id, actor: staff, audit, emit });
     expect(approved.ok).toBe(true);
@@ -111,6 +127,7 @@ describe("outreach HITL gate flow", () => {
 
     const sent = await sendOutreach({ id: item.id, actor: staff, composio, audit, emit });
     expect(sent.ok).toBe(true);
+    expect(sent.sendMode).toBe("live");
     expect(composio.sends).toBe(1);
     expect(sent.externalId).toBeTruthy();
 
@@ -120,10 +137,39 @@ describe("outreach HITL gate flow", () => {
     expect(final.externalId).toBeTruthy();
   });
 
+  it("REFUSES stub send — outreach stays approved", async () => {
+    const deal = await seedDeal();
+    const item = await draftOutreach({ dealId: deal.dealId, body: "Hello" });
+    await approveOutreach({ id: item.id, actor: staff, audit, emit });
+    const stub = createComposioStub();
+
+    await expect(
+      sendOutreach({ id: item.id, actor: staff, composio: stub, audit, emit }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    expect((await getOutreach(item.id))!.state).toBe("approved");
+  });
+
+  it("LinkedIn copy-draft stays approved (not sent)", async () => {
+    const deal = await seedDeal();
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      channel: "linkedin",
+      body: "LinkedIn note",
+    });
+    await approveOutreach({ id: item.id, actor: staff, audit, emit });
+    const composio = countingLiveComposio();
+
+    const res = await sendOutreach({ id: item.id, actor: staff, composio, audit, emit });
+    expect(res.ok).toBe(true);
+    expect(res.copyDraft).toBe(true);
+    expect(res.sendMode).toBe("copy_draft");
+    expect((await getOutreach(item.id))!.state).toBe("approved");
+  });
+
   it("BLOCKS a non-staff actor from sending even after approve", async () => {
     const deal = await seedDeal();
     const item = await draftOutreach({ dealId: deal.dealId, body: "Hello" });
-    const composio = countingComposio();
+    const composio = countingLiveComposio();
     await approveOutreach({ id: item.id, actor: staff, audit, emit });
 
     const res = await sendOutreach({ id: item.id, actor: portal, composio, audit, emit });
@@ -132,7 +178,7 @@ describe("outreach HITL gate flow", () => {
     expect((await getOutreach(item.id))!.state).toBe("approved");
   });
 
-  it("discards a draft � and a sent item can never be discarded", async () => {
+  it("discards a draft — and a sent item can never be discarded", async () => {
     const deal = await seedDeal();
     const item = await draftOutreach({ dealId: deal.dealId, body: "Bye" });
     const res = await discardOutreach({ id: item.id, actor: staff, audit, emit });
@@ -141,7 +187,13 @@ describe("outreach HITL gate flow", () => {
 
     const item2 = await draftOutreach({ dealId: deal.dealId, body: "Go" });
     await approveOutreach({ id: item2.id, actor: staff, audit, emit });
-    await sendOutreach({ id: item2.id, actor: staff, composio: countingComposio(), audit, emit });
+    await sendOutreach({
+      id: item2.id,
+      actor: staff,
+      composio: countingLiveComposio(),
+      audit,
+      emit,
+    });
     const blocked = await discardOutreach({ id: item2.id, actor: staff, audit, emit });
     expect(blocked.ok).toBe(false);
     expect((await getOutreach(item2.id))?.state).toBe("sent");

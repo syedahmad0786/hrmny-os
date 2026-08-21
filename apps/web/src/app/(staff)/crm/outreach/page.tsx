@@ -13,7 +13,7 @@ import { formatRelative } from "@/components/crm/format";
 
 /** Serialized shape of a @hrmny/gate TransitionResult refusal. */
 type GateOutcome =
-  | { ok: true; sendMode?: string; externalId?: string }
+  | { ok: true; sendMode?: string; externalId?: string; copyDraft?: boolean }
   | {
       ok: false;
       code?: string;
@@ -78,11 +78,17 @@ export default function CrmOutreachPage() {
     if (r.ok) {
       setGateError(null);
       if (verb === "Send") {
-        const parts = [
-          r.sendMode ? `mode=${r.sendMode}` : null,
-          r.externalId ? `id=${r.externalId}` : null,
-        ].filter(Boolean);
-        setSendNote(parts.length ? `Sent · ${parts.join(" · ")}` : "Sent");
+        if ("copyDraft" in r && r.copyDraft) {
+          setSendNote(
+            `Copy draft ready${r.sendMode ? ` · ${r.sendMode}` : ""} — paste manually; still approved`,
+          );
+        } else {
+          const parts = [
+            r.sendMode ? `mode=${r.sendMode}` : null,
+            r.externalId ? `id=${r.externalId}` : null,
+          ].filter(Boolean);
+          setSendNote(parts.length ? `Sent · ${parts.join(" · ")}` : "Sent");
+        }
       }
       return;
     }

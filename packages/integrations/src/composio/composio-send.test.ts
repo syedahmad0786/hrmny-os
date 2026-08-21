@@ -51,7 +51,7 @@ describe("createComposioLiveSend", () => {
     expect(res.mode).toBe("copy_draft");
   });
 
-  it("falls back to stub when proxy fails", async () => {
+  it("fails loud when Gmail proxy errors (no stub fallback)", async () => {
     const adapter = createComposioLiveSend({
       client: {
         proxy: vi.fn(async () => {
@@ -61,13 +61,12 @@ describe("createComposioLiveSend", () => {
       connectedAccountId: "conn-1",
       fallback: createComposioStub(),
     });
-    const res = await adapter.sendAfterApproval({
-      toolkit: "gmail",
-      to: "lead@example.com",
-      body: "Fallback path",
-    });
-    expect(res.sent).toBe(true);
-    expect(res.mode).toBe("stub");
-    expect(res.externalId.startsWith("fallback-")).toBe(true);
+    await expect(
+      adapter.sendAfterApproval({
+        toolkit: "gmail",
+        to: "lead@example.com",
+        body: "Fallback path",
+      }),
+    ).rejects.toThrow(/composio down/);
   });
 });

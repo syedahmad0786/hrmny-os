@@ -258,12 +258,13 @@ export function createSocialPublishStub(): SocialPublishAdapter {
       return ["linkedin", "instagram", "facebook", "x"];
     },
     async publishAfterApproval(input) {
+      // Honest stub: do not claim a real social post. Callers must not
+      // durable-mark campaigns published on mode=stub.
       return {
-        published: true,
+        published: false,
         mode: "stub",
         externalId: `stub-${input.channel}-${Date.now()}`,
         channel: input.channel,
-        url: `https://example.invalid/${input.channel}/stub`,
       };
     },
   };
@@ -359,6 +360,11 @@ export async function transitionCampaign(opts: {
               (existing.body.brief as string | undefined) ?? existing.title,
             ),
           });
+          if (!published.published || published.mode === "stub") {
+            throw new Error(
+              "Social publish is not live. Connect LinkedIn (or inject a live publisher) — campaign stays approved.",
+            );
+          }
           patch.body = { ...existing.body, publish: published };
         }
         const updated = await updateCampaign(existing.campaignItemId, patch);
