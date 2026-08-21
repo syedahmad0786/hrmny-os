@@ -124,4 +124,76 @@ test.describe("Demo funnel", () => {
     });
     await expect(page.locator("body")).toContainText(/finance|invoice|xero/i);
   });
+
+  test("staff can mint distinct portal vs onboarding magic links", async ({
+    request,
+  }) => {
+    // CI e2e has no DATABASE_URL for durable handover; mint via reviewHref instead.
+    const clientId = "c1000000-0000-4000-8000-0000000000a4";
+    const headers = {
+      "x-dev-role": "partner",
+      "content-type": "application/json",
+    };
+
+    async function mint(next: string) {
+      const res = await request.post(
+        "/api/trpc/clients.portalUsers.reviewHref",
+        {
+          headers,
+          data: { json: { clientId, next } },
+        },
+      );
+      const text = await res.text();
+      expect(res.ok(), text).toBeTruthy();
+      const body = JSON.parse(text) as {
+        result?: {
+          data?:
+            | { json?: { portalPath?: string }; portalPath?: string }
+            | { portalPath?: string };
+        };
+        error?: unknown;
+      };
+      expect(body.error, text).toBeFalsy();
+      const data = body.result?.data as
+        | { json?: { portalPath?: string }; portalPath?: string }
+        | undefined;
+      const portalPath = data?.json?.portalPath ?? data?.portalPath;
+      expect(portalPath, text).toBeTruthy();
+      return portalPath!;
+    }
+
+    const portalHref = await mint("/portal/approvals");
+    const onboardingHref = await mint("/portal/onboarding");
+
+    expect(portalHref).toMatch(/\/portal\/login\/verify/);
+    expect(onboardingHref).toMatch(/\/portal\/login\/verify/);
+    expect(portalHref).toContain(encodeURIComponent("/portal/approvals"));
+    expect(onboardingHref).toContain(encodeURIComponent("/portal/onboarding"));
+    expect(portalHref).not.toBe(onboardingHref);
+
+    const portalToken = new URL(portalHref, "http://localhost").searchParams.get(
+      "token",
+    );
+    const onboardingToken = new URL(
+      onboardingHref,
+      "http://localhost",
+    ).searchParams.get("token");
+    expect(portalToken).toBeTruthy();
+    expect(onboardingToken).toBeTruthy();
+    expect(portalToken).not.toBe(onboardingToken);
+  });
+
+  test("delivery Client portal CTA requires a selected task", async ({
+    page,
+  }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/delivery", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
+      timeout: 60_000,
+    });
+    const portalCta = page.getByRole("button", { name: /Client portal/i });
+    await expect(portalCta).toBeVisible();
+    await expect(portalCta).toBeDisabled();
+  });
+
 });
