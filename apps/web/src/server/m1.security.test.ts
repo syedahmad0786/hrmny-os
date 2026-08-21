@@ -8,6 +8,8 @@ import {
 import { createContext } from "./trpc/trpc";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { issuePortalMagicToken } from "./auth/portal-magic-link";
+import { DEMO_CLIENT_ID } from "./demo-store";
 
 /**
  * M1 security / insurance checks — RLS SQL grants, margin strip, secrets hygiene.
@@ -80,22 +82,28 @@ describe("M1 security insurance", () => {
     });
   });
 
-  it("magic-link stub issues token and verify is single-use", async () => {
-    const user = resolveDevUser("partner");
-    const caller = createCaller({
-      user,
-      employeeId: user.employeeId,
-      roles: user.roles,
-      canViewMargin: sessionCanViewMargin(user),
-    });
-    const sent = await caller.portal.auth.magicLink({
+  it("magic-link token verify is single-use", async () => {
+    const token = await issuePortalMagicToken({
+      clientId: DEMO_CLIENT_ID,
       email: "client@demo.local",
     });
-    expect(sent.sent).toBe(true);
-    expect(sent.stubToken).toBeTruthy();
-    const ok = await caller.portal.auth.verify({ token: sent.stubToken! });
+    expect(token.startsWith("ml_")).toBe(true);
+    const anon = createCaller({
+      user: null,
+      employeeId: null,
+      roles: [],
+      canViewMargin: false,
+      clientId: null,
+    });
+    const ok = await anon.portal.auth.verify({ token });
     expect(ok.ok).toBe(true);
-    const reuse = await caller.portal.auth.verify({ token: sent.stubToken! });
+    if (ok.ok) {
+      expect(ok.clientId).toBe(DEMO_CLIENT_ID);
+      expect("sessionGrant" in ok && ok.sessionGrant.startsWith("ps_")).toBe(
+        true,
+      );
+    }
+    const reuse = await anon.portal.auth.verify({ token });
     expect(reuse.ok).toBe(false);
   });
 
@@ -126,7 +134,7 @@ describe("M1 security insurance", () => {
     const magic = await caller.portal.auth.magicLink({
       email: "client@example.com",
     });
-    expect(magic.sent).toBe(false);
+    // Never return a consumable stub token under production auth mode.
     expect(magic.stubToken).toBeUndefined();
   });
 

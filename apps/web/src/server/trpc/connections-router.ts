@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import { isWorkConnectedAppAllowed } from "../work-governance";
 import { featureEnabled } from "../features";
 
-const composio = createComposioStub();
+const composioStub = createComposioStub();
 const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat", "n8n"]);
 const oauthToolkit = z.enum(["gmail", "calendar", "canva", "linkedin"]);
 
@@ -1331,10 +1331,18 @@ export const connectionsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       await requireAllowedApp(input.toolkit);
+      const employeeId = requireEmployeeId(ctx.employeeId);
+      if (process.env.COMPOSIO_API_KEY?.trim()) {
+        const request = await requireSystemComposio().authorize(
+          employeeId,
+          input.toolkit,
+        );
+        return { redirectUrl: request.redirectUrl };
+      }
       const redirectUri =
         input.redirectUri ??
         `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/settings/connections/callback`;
-      const result = await composio.startOAuth(input.toolkit, redirectUri);
+      const result = await composioStub.startOAuth(input.toolkit, redirectUri);
       if (!getDb()) {
         const store = getDemoStore();
         store.connections.push({
@@ -1345,7 +1353,7 @@ export const connectionsRouter = router({
           externalConnectionId: null,
         });
         store.appendAudit({
-          actorEmployeeId: requireEmployeeId(ctx.employeeId),
+          actorEmployeeId: employeeId,
           action: "connections.startOAuth",
           entityType: "connection_account",
           entityId: "00000000-0000-4000-8000-000000000000",
@@ -1363,7 +1371,7 @@ export const connectionsRouter = router({
       const employeeId = requireEmployeeId(ctx.employeeId);
       const db = getDb();
       if (!db) {
-        await composio.disconnect(input.id);
+        await composioStub.disconnect(input.id);
         const store = getDemoStore();
         store.connections = store.connections.filter(
           (row) => row.connectionAccountId !== input.id,
@@ -1413,7 +1421,20 @@ export const connectionsRouter = router({
     .input(z.object({ toolkit: z.string() }))
     .query(async ({ input, ctx }) => {
       await requireAllowedApp(input.toolkit);
-      return composio.status(input.toolkit, requireEmployeeId(ctx.employeeId));
+      const employeeId = requireEmployeeId(ctx.employeeId);
+      if (process.env.COMPOSIO_API_KEY?.trim()) {
+        const accounts = await requireSystemComposio().listUserConnectedAccounts(
+          employeeId,
+        );
+        const connected = accounts.some(
+          (account) =>
+            account.toolkit.slug === input.toolkit &&
+            !account.is_disabled &&
+            ACTIVE_COMPOSIO_STATUSES.has(account.status.toUpperCase()),
+        );
+        return { connected, expiresAt: null };
+      }
+      return composioStub.status(input.toolkit, employeeId);
     }),
 
   /** Local/demo OAuth callback. Production callbacks must exchange real provider tokens. */

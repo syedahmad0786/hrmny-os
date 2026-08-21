@@ -4,7 +4,7 @@ import { Button } from "@hrmny/ui";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { trpc } from "@/lib/trpc";
+import { setPortalGrant, trpc } from "@/lib/trpc";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 type State = "verifying" | "success" | "invalid" | "error";
@@ -32,6 +32,9 @@ function VerifyInner() {
       if (token) {
         const result = await verify.mutateAsync({ token });
         if (result.ok) {
+          if ("sessionGrant" in result && result.sessionGrant) {
+            setPortalGrant(result.sessionGrant);
+          }
           setState("success");
           setTimeout(() => router.push("/portal"), 800);
         } else {

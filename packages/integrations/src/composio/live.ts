@@ -195,13 +195,33 @@ export function createComposioLive(input: {
     },
 
     async authorize(userId, toolkitSlug) {
-      const request = await sdk.toolkits.authorize(userId, toolkitSlug);
-      if (!request.redirectUrl) {
-        throw new Error("Composio did not return an authorization URL");
+      const query = new URLSearchParams({
+        limit: "100",
+        toolkit_slugs: toolkitSlug,
+      });
+      const page = authConfigListSchema.parse(
+        await request(`/auth_configs?${query}`),
+      );
+      const config =
+        page.items.find((row) => row.is_composio_managed) ?? page.items[0];
+      if (!config) {
+        throw new ComposioApiError(
+          `No Composio auth config for toolkit ${toolkitSlug}`,
+          404,
+        );
       }
+      const link = connectLinkSchema.parse(
+        await request("/connected_accounts/link", {
+          method: "POST",
+          body: JSON.stringify({
+            auth_config_id: config.id,
+            user_id: userId,
+          }),
+        }),
+      );
       return {
-        id: request.id,
-        redirectUrl: request.redirectUrl,
+        id: link.connected_account_id,
+        redirectUrl: link.redirect_url,
       };
     },
 

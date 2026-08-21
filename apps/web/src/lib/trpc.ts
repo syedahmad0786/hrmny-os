@@ -15,6 +15,19 @@ export function setDevRole(role: string) {
   localStorage.setItem("hrmny-dev-role", role);
 }
 
+const PORTAL_GRANT_KEY = "hrmny-portal-grant";
+
+export function getPortalGrant(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(PORTAL_GRANT_KEY);
+}
+
+export function setPortalGrant(token: string | null) {
+  if (typeof window === "undefined") return;
+  if (token) localStorage.setItem(PORTAL_GRANT_KEY, token);
+  else localStorage.removeItem(PORTAL_GRANT_KEY);
+}
+
 export function createTrpcClient() {
   return trpc.createClient({
     links: [
@@ -33,6 +46,8 @@ export function createTrpcClient() {
           const headers: Record<string, string> = {
             "x-dev-role": getDevRole(),
           };
+          const grant = getPortalGrant();
+          if (grant) headers["x-portal-grant"] = grant;
           const client = getSupabaseBrowserClient();
           if (client) {
             // getSession() can queue behind the OAuth hash-processing auth

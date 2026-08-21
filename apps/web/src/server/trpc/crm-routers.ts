@@ -1121,6 +1121,20 @@ export const crmRouter = router({
         }
       }
 
+      let outreachId: string | null = null;
+      try {
+        const { draftOutreach } = await import("./leadgen-router");
+        const outreach = await draftOutreach({
+          dealId,
+          channel: "gmail",
+          subject: `Creative Harmony × ${companyName}`,
+          body: `Hi — following up on ${companyName}. We'd love to share a short creative retainer concept for the UAE market. Shall we book 20 minutes?`,
+        });
+        outreachId = outreach.id;
+      } catch {
+        /* outreach optional when agent/kill-switch refuses */
+      }
+
       await updateDeal(dealId, {
         quoteValue: "50000",
         internalCost: "28000",
@@ -1256,6 +1270,7 @@ export const crmRouter = router({
           taskId: pack.task?.taskId ?? null,
           calendarId,
           portalInvite,
+          outreachId,
           viaApollo: Boolean(input?.viaApollo),
           apolloMode,
         },
@@ -1271,6 +1286,7 @@ export const crmRouter = router({
         taskId: pack.task?.taskId ?? null,
         calendarId,
         portalInvite,
+        outreachId,
         onboardingPhases: pack.onboardingPhases,
         fired: pack.pack.fired,
         viaApollo: Boolean(input?.viaApollo),

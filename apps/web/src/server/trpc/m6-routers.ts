@@ -11,6 +11,7 @@ import {
 } from "../auth/portal-magic-link";
 import { getSupabasePublicConfig } from "@/lib/supabase-config";
 import { getDb } from "../db";
+import { getObjectStore } from "../storage/object-store";
 import {
   featureEnabled,
   listFeatureOverrides,
@@ -211,45 +212,31 @@ export const portalRouter = router({
     verify: publicProcedure
       .input(z.object({ token: z.string().optional() }).optional())
       .mutation(async ({ input, ctx }) => {
-        // Flag on: single-use allowlist-bound token verification.
-        if (input?.token && (await portalMagicLinkEnabled())) {
-          const result = verifyPortalMagicToken(input.token);
-          return result.ok
-            ? { ...result, displayName: result.email || "Portal contact" }
-            : result;
-        }
-        const store = getDemoStore();
+        // Durable (Postgres) or memory single-use tokens — always, so staff
+        // issueDemoToken works even when portal.magic_link flag is off.
         if (input?.token) {
-          if (getAuthMode() === "supabase") {
+          const result = await verifyPortalMagicToken(input.token);
+          if (result.ok) {
+            const store = getDemoStore();
+            store.appendAudit({
+              actorEmployeeId: "00000000-0000-4000-8000-000000000000",
+              action: "portal.auth.verify",
+              entityType: "client_portal_user",
+              entityId: result.clientId,
+              before: null,
+              after: {
+                clientId: result.clientId,
+                email: result.email,
+                via: "magic_link",
+              },
+              reason: null,
+            });
             return {
-              ok: false as const,
-              reason: "Dev magic-link tokens are disabled in production",
+              ...result,
+              displayName: result.email || "Portal contact",
             };
           }
-          const row = store.portalMagicTokens.get(input.token);
-          if (!row || row.expiresAt < Date.now()) {
-            return {
-              ok: false as const,
-              reason: "Invalid or expired magic link",
-            };
-          }
-          store.portalMagicTokens.delete(input.token);
-          store.appendAudit({
-            actorEmployeeId: "00000000-0000-4000-8000-000000000000",
-            action: "portal.auth.verify",
-            entityType: "client_portal_user",
-            entityId: row.clientId,
-            before: null,
-            after: { clientId: row.clientId, via: "magic_link" },
-            reason: null,
-          });
-          return {
-            ok: true as const,
-            clientId: row.clientId,
-            displayName: "Portal Magic User",
-            email: "magic@link.local",
-            via: "magic_link" as const,
-          };
+          return result;
         }
         if (
           !ctx.user ||
@@ -531,7 +518,7 @@ export const portalRouter = router({
         if (direct) {
           return { ok: true as const, ...direct };
         }
-        const signed = await getDemoStore().objectStore.signedUrl(storagePath, ttl);
+        const signed = await getObjectStore().signedUrl(storagePath, ttl);
         return { ok: true as const, ...signed };
       }),
   }),

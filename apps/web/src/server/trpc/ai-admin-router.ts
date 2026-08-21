@@ -200,6 +200,23 @@ export const aiAdminRouter = router({
         dealId: input.dealId,
         limit: 6,
       });
+      const { runAgentTools } = await import("../ai/agent-tools");
+      const toolResults = await runAgentTools({
+        allowedTools: [
+          "memory.search",
+          "crm.read",
+          "delivery.read",
+          "outreach.read",
+          "onboarding.read",
+          "n8n.health",
+        ],
+        prompt: input.prompt,
+        scope: {
+          clientId: input.clientId,
+          employeeId: ctx.employeeId,
+          dealId: input.dealId,
+        },
+      });
       const result = await boundRunAgent({
         agent: input.agentId,
         input: input.prompt,
@@ -207,9 +224,10 @@ export const aiAdminRouter = router({
         context: {
           sandbox: scope,
           memory,
+          toolResults,
         },
       });
-      return result;
+      return { ...result, sandbox: scope, toolResults };
     }),
 
   /** Custom agents (CrewAI/LangSmith-style registry) — Postgres or memory. */
@@ -275,6 +293,8 @@ export const aiAdminRouter = router({
               "memory.search",
               "crm.read",
               "delivery.read",
+              "outreach.read",
+              "onboarding.read",
               "n8n.health",
             ],
             createdByEmployeeId: actor.employeeId,
@@ -310,6 +330,8 @@ export const aiAdminRouter = router({
                   "memory.search",
                   "crm.read",
                   "delivery.read",
+                  "outreach.read",
+                  "onboarding.read",
                   "n8n.health",
                 ],
               )}::jsonb,

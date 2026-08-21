@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   dorLockBlockedReason,
@@ -184,6 +185,12 @@ async function applyDurableTaskTransition(
 
 export const m4DemoRouter = router({
   reset: publicProcedure.mutation(() => {
+    if (getDb()) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "Demo M4 reset is disabled when DATABASE_URL is configured",
+      });
+    }
     getDemoStore().resetM4Demo();
     return {
       ok: true as const,
@@ -209,24 +216,26 @@ export const m4DemoRouter = router({
         return {
           clientId: latestCal.clientId,
           calendarId: latestCal.calendarId,
-          taskId: task?.taskId ?? DEMO_TASK_ID,
-          briefId: task?.briefId ?? DEMO_BRIEF_ID,
-          creativeTaskId: task?.taskId ?? DEMO_CREATIVE_TASK_ID,
+          taskId: task?.taskId ?? null,
+          briefId: task?.briefId ?? null,
+          creativeTaskId: task?.taskId ?? null,
           source: "durable_calendar" as const,
         };
       }
 
       async function withClientCalendar(clientId: string, fallback: {
-        taskId: string;
-        briefId: string;
-        creativeTaskId: string;
+        taskId: string | null;
+        briefId: string | null;
+        creativeTaskId: string | null;
       }) {
         const cals = await listDeliveryCalendars({ clientId });
         return {
           clientId,
-          calendarId: cals[0]?.calendarId ?? DEMO_CALENDAR_ID,
+          calendarId: cals[0]?.calendarId ?? null,
           ...fallback,
-          source: cals[0] ? ("durable_task" as const) : ("demo_fallback" as const),
+          source: cals[0]
+            ? ("durable_task" as const)
+            : ("durable_empty" as const),
         };
       }
 
@@ -252,10 +261,18 @@ export const m4DemoRouter = router({
       if (qcTasks[0]) {
         return withClientCalendar(qcTasks[0].clientId, {
           taskId: qcTasks[0].taskId,
-          briefId: qcTasks[0].briefId ?? DEMO_BRIEF_ID,
+          briefId: qcTasks[0].briefId ?? null,
           creativeTaskId: qcTasks[0].taskId,
         });
       }
+      return {
+        clientId: null,
+        calendarId: null,
+        taskId: null,
+        briefId: null,
+        creativeTaskId: null,
+        source: "durable_empty" as const,
+      };
     }
     const store = getDemoStore();
     if (store.calendars.size === 0) store.seedM4Demo();
@@ -1280,7 +1297,27 @@ export const deliveryDashboardsRouter = router({
 export const month1Router = router({
   get: protectedProcedure
     .input(z.object({ clientId: z.string().uuid() }))
-    .query(({ input }) => getDemoStore().month1.get(input.clientId) ?? []),
+    .query(async ({ input }) => {
+      if (getDb()) {
+        const { ensureClientOnboarding, getClientOnboarding } = await import(
+          "../clients/onboarding"
+        );
+        let phases = await getClientOnboarding(input.clientId);
+        if (!phases.length) {
+          phases = await ensureClientOnboarding(input.clientId);
+        }
+        return phases.map((p) => ({
+          phaseIndex: p.phaseIndex,
+          name: p.name,
+          status:
+            p.status === "signed_off"
+              ? ("done" as const)
+              : (p.status as "active" | "pending"),
+          gate: `month1.g${p.phaseIndex}`,
+        }));
+      }
+      return getDemoStore().month1.get(input.clientId) ?? [];
+    }),
 
   transition: protectedProcedure
     .input(
@@ -1289,7 +1326,49 @@ export const month1Router = router({
         toPhase: z.number().int().min(0).max(6),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const {
+          ensureClientOnboarding,
+          getClientOnboarding,
+          signoffOnboardingPhase,
+        } = await import("../clients/onboarding");
+        let phases = await getClientOnboarding(input.clientId);
+        if (!phases.length) {
+          phases = await ensureClientOnboarding(input.clientId);
+        }
+        const active = phases.find((p) => p.status === "active");
+        if (!active) throw new Error("NO_ACTIVE_PHASE");
+        if (
+          input.toPhase !== active.phaseIndex + 1 &&
+          input.toPhase !== active.phaseIndex
+        ) {
+          return {
+            ok: false as const,
+            code: "GATE_BLOCKED" as const,
+            reason: `Month-1 gate: advance only to next phase (active P${active.phaseIndex})`,
+          };
+        }
+        if (input.toPhase === active.phaseIndex + 1) {
+          const signed = await signoffOnboardingPhase({
+            clientId: input.clientId,
+            phaseIndex: active.phaseIndex,
+          });
+          phases = signed?.phases ?? phases;
+        }
+        return {
+          ok: true as const,
+          phases: phases.map((p) => ({
+            phaseIndex: p.phaseIndex,
+            name: p.name,
+            status:
+              p.status === "signed_off"
+                ? ("done" as const)
+                : (p.status as "active" | "pending"),
+            gate: `month1.g${p.phaseIndex}`,
+          })),
+        };
+      }
       const store = getDemoStore();
       const phases = store.month1.get(input.clientId);
       if (!phases) throw new Error("NOT_FOUND");

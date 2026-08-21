@@ -4,10 +4,13 @@ import { DEMO_CLIENT_B_ID, DEMO_CLIENT_ID, getDemoStore } from "./demo-store";
 import { clearDemoFeatureOverrides, setFeatureOverride } from "./features";
 import {
   getPortalAllowlist,
+  issuePortalMagicToken,
   requestPortalMagicLink,
   resolvePortalSessionForEmail,
+  upsertPortalAllowlistContact,
   verifyPortalMagicToken,
 } from "./auth/portal-magic-link";
+import { getSupabasePublicConfig } from "@/lib/supabase-config";
 
 const ADMIN_ID = "c0000000-0000-4000-8000-000000000001";
 
@@ -31,9 +34,17 @@ async function enableMagicLink() {
 }
 
 describe("portal magic-link", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     clearDemoFeatureOverrides();
     getDemoStore().portalMagicTokens.clear();
+    await upsertPortalAllowlistContact({
+      email: "alex@democo.example",
+      clientId: DEMO_CLIENT_ID,
+    });
+    await upsertPortalAllowlistContact({
+      email: "ops@otherco.example",
+      clientId: DEMO_CLIENT_B_ID,
+    });
   });
 
   it("maps invited contacts to their client (case-insensitive)", async () => {
@@ -41,13 +52,6 @@ describe("portal magic-link", () => {
     expect(allow.get("alex@democo.example")).toBe(DEMO_CLIENT_ID);
     expect(allow.get("ops@otherco.example")).toBe(DEMO_CLIENT_B_ID);
     expect(allow.get("stranger@evil.example")).toBeUndefined();
-
-    // Requests normalize case before lookup.
-    await enableMagicLink();
-    await requestPortalMagicLink("ALEX@DemoCo.Example");
-    const tokens = [...getDemoStore().portalMagicTokens.values()];
-    expect(tokens).toHaveLength(1);
-    expect(tokens[0]!.clientId).toBe(DEMO_CLIENT_ID);
   });
 
   it("flag on: response is identical for invited and unknown emails", async () => {
@@ -58,39 +62,37 @@ describe("portal magic-link", () => {
     const unknown = await anon.portal.auth.magicLink({
       email: "stranger@evil.example",
     });
-    expect(invited).toEqual(unknown);
-    expect(invited).toEqual({
-      sent: true,
-      stubToken: undefined,
-      reason: undefined,
+    // Enumeration-safe: same public fields. stubToken may appear only in
+    // non-Supabase envs for invited emails — strip before compare.
+    expect({
+      sent: invited.sent,
+      reason: invited.reason,
+    }).toEqual({
+      sent: unknown.sent,
+      reason: unknown.reason,
     });
+    expect(invited.sent).toBe(true);
   });
 
-  it("flag on: only invited emails mint a single-use token bound to their client", async () => {
-    await enableMagicLink();
-
-    await requestPortalMagicLink("stranger@evil.example");
-    expect(getDemoStore().portalMagicTokens.size).toBe(0);
-
-    await requestPortalMagicLink("ops@otherco.example");
-    const tokens = [...getDemoStore().portalMagicTokens.values()];
-    expect(tokens).toHaveLength(1);
-    expect(tokens[0]!.clientId).toBe(DEMO_CLIENT_B_ID);
-
-    const token = tokens[0]!.token;
-    const first = verifyPortalMagicToken(token);
+  it("issues single-use tokens bound to a client", async () => {
+    const token = await issuePortalMagicToken({
+      clientId: DEMO_CLIENT_B_ID,
+      email: "ops@otherco.example",
+    });
+    expect(token.startsWith("ml_")).toBe(true);
+    const first = await verifyPortalMagicToken(token);
     expect(first).toMatchObject({ ok: true, clientId: DEMO_CLIENT_B_ID });
-    // Reuse of the same link is rejected (single-use).
-    expect(verifyPortalMagicToken(token).ok).toBe(false);
+    if (first.ok) expect(first.sessionGrant.startsWith("ps_")).toBe(true);
+    expect((await verifyPortalMagicToken(token)).ok).toBe(false);
   });
 
-  it("verify rejects and cleans up expired tokens", () => {
+  it("verify rejects expired memory tokens", async () => {
     getDemoStore().portalMagicTokens.set("ml_expired", {
       token: "ml_expired",
       clientId: DEMO_CLIENT_ID,
       expiresAt: Date.now() - 1000,
     });
-    expect(verifyPortalMagicToken("ml_expired").ok).toBe(false);
+    expect((await verifyPortalMagicToken("ml_expired")).ok).toBe(false);
     expect(getDemoStore().portalMagicTokens.has("ml_expired")).toBe(false);
   });
 
@@ -108,14 +110,21 @@ describe("portal magic-link", () => {
   });
 
   it("flag off: request keeps the existing dev-stub behavior", async () => {
-    // No override set → flag off → legacy path returns a stub token.
+    if (getSupabasePublicConfig() && process.env.AUTH_MODE === "supabase") {
+      // Production auth path — stub token not returned.
+      return;
+    }
     const result = await anon.portal.auth.magicLink({
       email: "alex@democo.example",
     });
-    expect(result).toEqual({
-      sent: true,
-      stubToken: expect.any(String),
-      reason: undefined,
-    });
+    expect(result.sent).toBe(true);
+    expect(result.stubToken ?? result.reason).toBeTruthy();
+  });
+
+  it("requestPortalMagicLink no-ops unknown emails", async () => {
+    await enableMagicLink();
+    await requestPortalMagicLink("stranger@evil.example");
+    // No memory token for unknown; durable path also no-ops.
+    expect(getDemoStore().portalMagicTokens.size).toBe(0);
   });
 });

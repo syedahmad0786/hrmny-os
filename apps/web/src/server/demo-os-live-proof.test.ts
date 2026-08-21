@@ -49,6 +49,11 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(loop.onboardingPhases).toBeGreaterThanOrEqual(1);
       expect(loop.calendarId).toBeTruthy();
       expect(loop.portalInvite?.email).toBeTruthy();
+      expect(loop.outreachId).toBeTruthy();
+      const outreachList = await caller.leadgen.outreach.list();
+      expect(
+        outreachList.some((o) => o.id === loop.outreachId && o.state === "draft"),
+      ).toBe(true);
       const seededCals = await caller.calendars.listByClient({
         clientId: loop.clientId,
       });
@@ -80,6 +85,7 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       });
       expect(sent.ok).toBe(true);
       expect(sent.assetId).toBeTruthy();
+      expect(sent.taskId).toBeTruthy();
 
       const deliveryTask = await caller.tasks.create({
         clientId: loop.clientId,
@@ -129,15 +135,29 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         prompt: "List 2 next onboarding actions for this client.",
         clientId: loop.clientId,
         taskId: deliveryTask.taskId,
+        dealId: loop.dealId,
       });
       expect(run.slug).toBe(agent.slug);
       expect(run.output).toBeTruthy();
       expect(run.sandbox?.clientId).toBe(loop.clientId);
       expect(run.sandbox?.taskId).toBe(deliveryTask.taskId);
+      expect(run.sandbox?.dealId).toBe(loop.dealId);
       expect(Array.isArray(run.toolResults)).toBe(true);
       expect(run.toolResults!.some((t) => t.tool === "crm.read" && t.ok)).toBe(
         true,
       );
+      expect(
+        run.toolResults!.some((t) => t.tool === "outreach.read" && t.ok),
+      ).toBe(true);
+      expect(
+        run.toolResults!.some((t) => t.tool === "onboarding.read" && t.ok),
+      ).toBe(true);
+
+      const month1 = await caller.clients.month1.get({
+        clientId: loop.clientId,
+      });
+      expect(month1.length).toBeGreaterThanOrEqual(1);
+      expect(month1.some((p) => p.status === "active")).toBe(true);
 
       const synced = await caller.invoices.syncXeroMirror();
       expect(synced.upserted).toBeGreaterThanOrEqual(0);
@@ -185,18 +205,12 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         true,
       );
 
-      const creativeTask = await caller.tasks.create({
-        clientId: loop.clientId,
-        taskType: "social_cutdowns",
-        title: `Portal approve ${Date.now()}`,
-        status: "client_review",
-      });
       const approvals = await portalCaller.portal.approvals.list();
       expect(
-        approvals.some((a) => a.approvalId === creativeTask.taskId),
+        approvals.some((a) => a.approvalId === sent.taskId),
       ).toBe(true);
       const approved = await portalCaller.portal.approvals.act({
-        id: creativeTask.taskId,
+        id: sent.taskId!,
         action: "approve",
       });
       expect(approved.ok).toBe(true);
@@ -242,6 +256,33 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(
         listedCals.some((c) => c.calendarId === calendar.calendarId),
       ).toBe(true);
+
+      if (loop.portalInvite?.email) {
+        const demoToken = await caller.clients.portalUsers.issueDemoToken({
+          clientId: loop.clientId,
+          email: loop.portalInvite.email,
+        });
+        expect(demoToken.token.startsWith("ml_")).toBe(true);
+        const anonVerify = createCaller({
+          user: null,
+          employeeId: null,
+          roles: [],
+          canViewMargin: false,
+          clientId: null,
+        });
+        const verified = await anonVerify.portal.auth.verify({
+          token: demoToken.token,
+        });
+        expect(verified.ok).toBe(true);
+        if (verified.ok) {
+          expect(verified.clientId).toBe(loop.clientId);
+          expect(
+            "sessionGrant" in verified &&
+              typeof verified.sessionGrant === "string" &&
+              verified.sessionGrant.startsWith("ps_"),
+          ).toBe(true);
+        }
+      }
     },
     180_000,
   );
