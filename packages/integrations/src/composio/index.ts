@@ -50,8 +50,10 @@ export function createComposioStub(): ComposioSendAdapter {
           channel: "linkedin",
         };
       }
+      // Gmail stub does NOT claim a real send — callers must not durable-mark
+      // outreach as sent on mode=stub.
       return {
-        sent: true,
+        sent: false,
         mode: "stub",
         externalId: `stub-gmail-${seq}`,
         channel: "gmail",
@@ -84,7 +86,8 @@ function buildGmailRawMessage(input: {
 
 /**
  * Live HITL send: Gmail via Composio proxy → Gmail API.
- * LinkedIn stays copy-draft. Falls back to stub if live Gmail errors.
+ * LinkedIn stays copy-draft. Proxy failures fail loud — never stub-fallback
+ * a "sent" that did not actually leave Composio/Gmail.
  */
 export function createComposioLiveSend(opts: {
   client: Pick<ComposioLiveClient, "proxy">;
@@ -120,32 +123,23 @@ export function createComposioLiveSend(opts: {
         };
       }
 
-      try {
-        const raw = buildGmailRawMessage(input);
-        const result = await opts.client.proxy<{ id?: string }>({
-          connectedAccountId:
-            input.connectionId?.trim() || opts.connectedAccountId,
-          endpoint: "/gmail/v1/users/me/messages/send",
-          method: "POST",
-          body: { raw },
-        });
-        const externalId =
-          (typeof result.data?.id === "string" && result.data.id) ||
-          `live-gmail-${seq}`;
-        return {
-          sent: true,
-          mode: "live",
-          externalId,
-          channel: "gmail",
-        };
-      } catch {
-        const stubbed = await fallback.sendAfterApproval(input);
-        return {
-          ...stubbed,
-          mode: stubbed.mode === "copy_draft" ? "copy_draft" : "stub",
-          externalId: `fallback-${stubbed.externalId}`,
-        };
-      }
+      const raw = buildGmailRawMessage(input);
+      const result = await opts.client.proxy<{ id?: string }>({
+        connectedAccountId:
+          input.connectionId?.trim() || opts.connectedAccountId,
+        endpoint: "/gmail/v1/users/me/messages/send",
+        method: "POST",
+        body: { raw },
+      });
+      const externalId =
+        (typeof result.data?.id === "string" && result.data.id) ||
+        `live-gmail-${seq}`;
+      return {
+        sent: true,
+        mode: "live",
+        externalId,
+        channel: "gmail",
+      };
     },
   };
 }

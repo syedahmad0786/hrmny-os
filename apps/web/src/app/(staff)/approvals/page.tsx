@@ -109,9 +109,11 @@ export default function ApprovalsPage() {
           [item.id]: sent.ok
             ? {
                 tone: "ok",
-                text: `Sent${sent.sendMode ? ` · ${sent.sendMode}` : ""}${
-                  sent.externalId ? ` · ${sent.externalId}` : ""
-                }`,
+                text: sent.copyDraft
+                  ? `Copy draft ready${sent.sendMode ? ` · ${sent.sendMode}` : ""} — paste manually; still approved`
+                  : `Sent${sent.sendMode ? ` · ${sent.sendMode}` : ""}${
+                      sent.externalId ? ` · ${sent.externalId}` : ""
+                    }`,
               }
             : { tone: "blocked", text: `Send blocked (${sent.code})` },
         }));

@@ -264,7 +264,12 @@ export async function sendOutreach(input: {
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<
-  TransitionResult & { externalId?: string; sendMode?: string }
+  TransitionResult & {
+    externalId?: string;
+    sendMode?: string;
+    /** Present when LinkedIn (or other) copy-draft completed without flipping to sent. */
+    copyDraft?: boolean;
+  }
 > {
   const item = await getOutreach(input.id);
   if (!item) throw new Error(`Outreach not found: ${input.id}`);
@@ -276,37 +281,77 @@ export async function sendOutreach(input: {
   const toolkit =
     item.channel === "linkedin" ? ("linkedin" as const) : ("gmail" as const);
 
-  const result = await transition(
-    input.actor,
-    outreachEntity(item),
-    { to: "sent", from: item.state },
-    {
-      authorize: async (a) => authorizeStaff(a),
-      // The approve-before-send gate has already cleared here; the external
-      // side effect and the "sent" state land together so we never mark sent
-      // without an actual send.
-      apply: async () => {
-        const res = await composio.sendAfterApproval({
-          toolkit,
-          to: item.recipient,
-          subject: item.subject ?? undefined,
-          body: item.body,
-        });
-        externalId = res.externalId;
-        sendMode = res.mode;
-        const next = await patchOutreach(input.id, {
-          state: "sent",
-          sentAt: new Date().toISOString(),
-          externalId: res.externalId,
-        });
-        return outreachEntity(next!);
-      },
-      audit: input.audit ?? defaultAudit,
-      emit: input.emit ?? defaultEmit,
-    },
-  );
+  try {
+    const result = await transition(
+      input.actor,
+      outreachEntity(item),
+      { to: "sent", from: item.state },
+      {
+        authorize: async (a) => authorizeStaff(a),
+        // Live send + durable "sent" land together. Stub/copy_draft must not
+        // flip state — throw so the row stays approved.
+        apply: async () => {
+          const res = await composio.sendAfterApproval({
+            toolkit,
+            to: item.recipient,
+            subject: item.subject ?? undefined,
+            body: item.body,
+          });
+          externalId = res.externalId;
+          sendMode = res.mode;
 
-  return { ...result, externalId, sendMode };
+          if (res.mode === "copy_draft") {
+            throw Object.assign(new Error("COPY_DRAFT"), {
+              code: "COPY_DRAFT" as const,
+              externalId: res.externalId,
+              sendMode: res.mode,
+            });
+          }
+          if (!res.sent || res.mode !== "live") {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message:
+                res.mode === "stub"
+                  ? "Gmail send is not live. Connect Google Workspace or Composio Gmail under Settings → Connections. Outreach stays approved."
+                  : `Gmail send did not complete (mode=${res.mode}). Outreach stays approved.`,
+            });
+          }
+
+          const next = await patchOutreach(input.id, {
+            state: "sent",
+            sentAt: new Date().toISOString(),
+            externalId: res.externalId,
+          });
+          return outreachEntity(next!);
+        },
+        audit: input.audit ?? defaultAudit,
+        emit: input.emit ?? defaultEmit,
+      },
+    );
+
+    return { ...result, externalId, sendMode };
+  } catch (err) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code: string }).code === "COPY_DRAFT"
+    ) {
+      const draftErr = err as {
+        externalId?: string;
+        sendMode?: string;
+      };
+      return {
+        ok: true,
+        newState: item.state,
+        auditId: "copy_draft",
+        externalId: draftErr.externalId ?? externalId,
+        sendMode: draftErr.sendMode ?? sendMode ?? "copy_draft",
+        copyDraft: true,
+      };
+    }
+    throw err;
+  }
 }
 
 // ── tRPC surface ───────────────────────────────────────────
