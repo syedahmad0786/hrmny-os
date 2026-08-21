@@ -106,6 +106,8 @@ export type HandoverPackResult = {
     lifecycleStatus: string;
   };
   task: Awaited<ReturnType<typeof seedClientCreativeTask>> | null;
+  /** First OS invoice seeded from the won deal quote (sales → billing continuity). */
+  invoiceId: string | null;
   onboardingPhases: number;
 };
 
@@ -215,13 +217,61 @@ export async function durableHandoverPack(input: {
   });
   if (task) fired.push("creative.task_seed");
 
+  let invoiceId: string | null = null;
+  try {
+    const { insertOsInvoice, listOsInvoicesForClientPeriod } = await import(
+      "../finance/os-invoices"
+    );
+    const { vatOnAmount } = await import("../demo-store");
+    const period = new Date().toISOString().slice(0, 7);
+    const existingFirst = await listOsInvoicesForClientPeriod({
+      clientId: client.clientId,
+      period,
+      billingKind: "first",
+    });
+    if (existingFirst[0]) {
+      invoiceId = existingFirst[0].invoiceId;
+      fired.push("invoice.exists");
+    } else {
+      const amountNum = Number(client.contractValue || deal.quoteValue || 0);
+      const amount = Number.isFinite(amountNum) ? amountNum : 0;
+      const seeded = await insertOsInvoice({
+        clientId: client.clientId,
+        invoiceType: "first",
+        billingKind: "first",
+        status: "proposed",
+        amount: amount.toFixed(2),
+        vatAmount: vatOnAmount(amount),
+        currency: "AED",
+        period,
+        contactName: client.name,
+        trn: "100000000000003",
+        trnStatus: "known",
+        ruleCited: "Won deal → first invoice (UAE VAT 5%)",
+        sourceAttached: {
+          kind: "won_handover",
+          dealId: input.dealId,
+          companyName: deal.companyName,
+        },
+        proposedByEmployeeId: input.actorEmployeeId ?? null,
+      });
+      invoiceId = seeded?.invoiceId ?? null;
+      if (invoiceId) fired.push("invoice.first_seed");
+    }
+  } catch {
+    /* invoice seed best-effort — billing UI can draft manually */
+  }
+
   await persistMemoryChunk({
     sourceType: "note",
     sourceId: client.clientId,
-    content: `Handover from won deal ${deal.companyName}: contract ${client.contractValue} AED. Client entering onboarding.`,
+    content: `Handover from won deal ${deal.companyName}: contract ${client.contractValue} AED. Client entering onboarding.${
+      invoiceId ? ` First invoice ${invoiceId} proposed.` : ""
+    }`,
     metadata: {
       clientId: client.clientId,
       dealId: input.dealId,
+      invoiceId,
       kind: "deal.won_handover",
     },
   });
@@ -239,6 +289,7 @@ export async function durableHandoverPack(input: {
     },
     client,
     task,
+    invoiceId,
     onboardingPhases: phases.length,
   };
 }

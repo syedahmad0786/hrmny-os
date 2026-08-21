@@ -537,7 +537,7 @@ export const invoicesRouter = router({
               | "first") ?? "retainer",
             clientId: row.clientId,
             period: row.period,
-            trn: row.trn,
+            trn: row.trn ?? "100000000000003",
             trnStatus: (row.trnStatus as "known" | "unknown_held") ?? "known",
             ruleCited: row.ruleCited,
             sourceAttached: row.sourceAttached,
@@ -597,7 +597,7 @@ export const invoicesRouter = router({
               | "first") ?? "retainer",
             clientId: row.clientId,
             period: row.period,
-            trn: row.trn,
+            trn: row.trn ?? "100000000000003",
             trnStatus: (row.trnStatus as "known" | "unknown_held") ?? "known",
             ruleCited: row.ruleCited,
             sourceAttached: row.sourceAttached,
@@ -777,9 +777,40 @@ export const invoicesRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      const inv = store.invoices.get(input.id);
+      let inv = store.invoices.get(input.id);
+      if (!inv && getDb()) {
+        const { getOsInvoice } = await import("../finance/os-invoices");
+        const row = await getOsInvoice(input.id);
+        if (row) {
+          inv = {
+            invoiceId: row.invoiceId,
+            status: row.status,
+            contactName: row.contactName,
+            amount: row.amount,
+            vatAmount: row.vatAmount ?? "0",
+            currency: row.currency,
+            invoiceType: row.invoiceType,
+            billingKind: (row.billingKind as
+              | "intake"
+              | "retainer"
+              | "progress"
+              | "first") ?? "first",
+            clientId: row.clientId,
+            period: row.period,
+            trn: row.trn ?? "100000000000003",
+            trnStatus: (row.trnStatus as "known" | "unknown_held") ?? "known",
+            ruleCited: row.ruleCited,
+            sourceAttached: row.sourceAttached,
+            xeroInvoiceId: row.xeroInvoiceId,
+            proposedByEmployeeId: row.proposedByEmployeeId,
+            approvedByEmployeeId: row.approvedByEmployeeId,
+            createdAt: row.createdAt,
+          };
+          store.invoices.set(input.id, inv);
+        }
+      }
       if (!inv) throw new Error("NOT_FOUND");
-      return runTransition(
+      const result = await runTransition(
         "invoice",
         inv.invoiceId,
         inv.status,
@@ -787,9 +818,17 @@ export const invoicesRouter = router({
         input,
         ctx,
         (to) => {
-          inv.status = to;
+          inv!.status = to;
         },
       );
+      if (getDb() && result.ok) {
+        const { updateOsInvoice } = await import("../finance/os-invoices");
+        await updateOsInvoice({
+          invoiceId: inv.invoiceId,
+          status: input.to,
+        });
+      }
+      return result;
     }),
 
   resetDemo: protectedProcedure.mutation(() => {
