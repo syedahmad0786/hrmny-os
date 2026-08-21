@@ -22,6 +22,7 @@ import {
 import { getDb } from "../db";
 import { driveSeam } from "../seams";
 import {
+  createDeliveryTask,
   getDeliveryTask,
   listDeliveryTasks,
   setDeliveryTaskQc,
@@ -593,9 +594,7 @@ export const tasksRouter = router({
     .query(async ({ input }) => {
       if (getDb()) {
         const rows = await listDeliveryTasks(input);
-        if (rows.length || input?.clientId || input?.status) {
-          return rows.map(deliveryAsDemoTask);
-        }
+        return rows.map(deliveryAsDemoTask);
       }
       let rows = [...getDemoStore().tasks.values()];
       if (input?.clientId) {
@@ -627,7 +626,21 @@ export const tasksRouter = router({
         priority: z.string().optional(),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (getDb()) {
+        const durable = await createDeliveryTask({
+          clientId: input.clientId,
+          calendarId: input.calendarId ?? null,
+          month: input.month ?? null,
+          taskType: input.taskType,
+          title: input.title,
+          deadline: input.deadline ?? null,
+          priority: input.priority ?? null,
+          ownerEmployeeId: ctx.employeeId,
+        });
+        if (!durable) throw new Error("NOT_FOUND");
+        return deliveryAsDemoTask(durable);
+      }
       const store = getDemoStore();
       if (!store.clients.has(input.clientId)) throw new Error("NOT_FOUND");
       const task: DemoTask = {

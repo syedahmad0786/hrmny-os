@@ -57,6 +57,15 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(sent.ok).toBe(true);
       expect(sent.assetId).toBeTruthy();
 
+      const deliveryTask = await caller.tasks.create({
+        clientId: loop.clientId,
+        taskType: "social_cutdowns",
+        title: `Durable board ${Date.now()}`,
+      });
+      expect(deliveryTask.taskId).toBeTruthy();
+      const listed = await caller.tasks.list({ clientId: loop.clientId });
+      expect(listed.some((t) => t.taskId === deliveryTask.taskId)).toBe(true);
+
       const agent = await caller.aiAdmin.customAgents.create({
         slug: `proof-agent-${Date.now()}`,
         displayName: "Proof Agent",
@@ -66,7 +75,7 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         id: agent.customAgentId,
         prompt: "List 2 next onboarding actions for this client.",
         clientId: loop.clientId,
-        taskId: loop.taskId ?? undefined,
+        taskId: deliveryTask.taskId,
       });
       expect(run.slug).toBe(agent.slug);
       expect(run.output).toBeTruthy();

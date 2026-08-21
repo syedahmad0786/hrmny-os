@@ -141,6 +141,70 @@ export async function getDeliveryTask(
   return rows[0] ? mapRow(rows[0]) : null;
 }
 
+/** Create a delivery task + brief metadata in Postgres. */
+export async function createDeliveryTask(input: {
+  clientId: string;
+  taskType: string;
+  title?: string;
+  status?: string;
+  calendarId?: string | null;
+  month?: string | null;
+  deadline?: string | null;
+  priority?: string | null;
+  ownerEmployeeId?: string | null;
+}): Promise<DeliveryTask | null> {
+  const db = getDb();
+  if (!db) return null;
+
+  const clientRows = await db.execute<{ ok: number }>(sql`
+    select 1 as ok from public.client
+    where client_id = ${input.clientId}::uuid
+    limit 1
+  `);
+  if (!clientRows[0]) return null;
+
+  const status = input.status ?? "backlog";
+  const title = input.title?.trim() || input.taskType.replace(/_/g, " ");
+  const priority = input.priority ?? "medium";
+
+  const tasks = await db.execute<{ taskId: string }>(sql`
+    insert into public.task (
+      client_id, calendar_id, month, task_type, status,
+      owner_employee_id, deadline, priority
+    )
+    values (
+      ${input.clientId}::uuid,
+      ${input.calendarId ?? null}::uuid,
+      ${input.month ?? null},
+      ${input.taskType},
+      ${status}::task_status_enum,
+      ${input.ownerEmployeeId ?? null}::uuid,
+      ${input.deadline ?? null}::date,
+      ${priority}
+    )
+    returning task_id as "taskId"
+  `);
+  const taskId = tasks[0]!.taskId;
+  await db.execute(sql`
+    insert into public.brief (task_id, body, dor_complete, missing_required_count)
+    values (
+      ${taskId}::uuid,
+      ${JSON.stringify({
+        title,
+        qcPassed: false,
+        clientRevisionCount: 0,
+        revisionBoundaryAck: false,
+      })}::jsonb,
+      false,
+      0
+    )
+    on conflict (task_id) do update set
+      body = excluded.body,
+      updated_at = now()
+  `);
+  return getDeliveryTask(taskId);
+}
+
 /** Seed a creative task at QC (or given status) with brief title metadata. */
 export async function seedClientCreativeTask(input: {
   clientId: string;
@@ -164,35 +228,13 @@ export async function seedClientCreativeTask(input: {
     return getDeliveryTask(existing[0].taskId);
   }
 
-  const tasks = await db.execute<{ taskId: string }>(sql`
-    insert into public.task (client_id, task_type, status, priority)
-    values (
-      ${input.clientId}::uuid,
-      ${taskType},
-      ${status}::task_status_enum,
-      'high'
-    )
-    returning task_id as "taskId"
-  `);
-  const taskId = tasks[0]!.taskId;
-  await db.execute(sql`
-    insert into public.brief (task_id, body, dor_complete, missing_required_count)
-    values (
-      ${taskId}::uuid,
-      ${JSON.stringify({
-        title: input.title,
-        qcPassed: false,
-        clientRevisionCount: 0,
-        revisionBoundaryAck: false,
-      })}::jsonb,
-      true,
-      0
-    )
-    on conflict (task_id) do update set
-      body = excluded.body,
-      updated_at = now()
-  `);
-  return getDeliveryTask(taskId);
+  return createDeliveryTask({
+    clientId: input.clientId,
+    taskType,
+    title: input.title,
+    status,
+    priority: "high",
+  });
 }
 
 export async function updateDeliveryTaskStatus(input: {
