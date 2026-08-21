@@ -153,11 +153,13 @@ export default function ConnectionsPage() {
           }
           if ((connections.linkedin ?? 0) < 1) {
             next.push(
-              "Connect LinkedIn with Composio for live campaign publish.",
+              "Connect LinkedIn with Composio for live posts (OS stub publish works without it).",
             );
           }
           if ((connections.canva ?? 0) < 1) {
-            next.push("Connect Canva with Composio for design → portal.");
+            next.push(
+              "Connect Canva with Composio for live designs (stub list/attach works without it).",
+            );
           }
           if (tools.resend && tools.resend !== "live") {
             next.push(

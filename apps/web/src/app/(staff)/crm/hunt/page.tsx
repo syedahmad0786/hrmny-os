@@ -101,10 +101,14 @@ export default function HuntClientsPage() {
             );
           }
           if ((ready?.connections?.linkedin ?? 0) < 1) {
-            next.push("Connect LinkedIn (Composio) for campaign publish");
+            next.push(
+              "Connect LinkedIn (Composio) for live posts — OS stub publish works without it",
+            );
           }
           if ((ready?.connections?.canva ?? 0) < 1) {
-            next.push("Connect Canva (Composio) for design → portal");
+            next.push(
+              "Connect Canva (Composio) for live designs — stub list/attach works without it",
+            );
           }
           if (toolReady?.resend && toolReady.resend !== "live") {
             next.push(
