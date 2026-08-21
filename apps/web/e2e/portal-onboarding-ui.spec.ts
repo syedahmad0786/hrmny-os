@@ -25,8 +25,11 @@ test.describe("Portal onboarding UI", () => {
     );
     expect(Number.isFinite(phaseIndex)).toBe(true);
 
-    await active.getByTestId("portal-onboarding-ack").click();
-    await expect(active).toHaveAttribute("data-phase-status", "signed_off", {
+    // Pin by phase index — after ack the next phase becomes active, so
+    // `[data-phase-status=active]` would point at a different row.
+    const target = page.getByTestId(`portal-onboarding-phase-${phaseIndex}`);
+    await target.getByTestId("portal-onboarding-ack").click();
+    await expect(target).toHaveAttribute("data-phase-status", "signed_off", {
       timeout: 30_000,
     });
 
