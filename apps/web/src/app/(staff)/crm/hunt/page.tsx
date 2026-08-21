@@ -76,7 +76,7 @@ export default function HuntClientsPage() {
   if (toolReady?.hunter === "mock") {
     blockers.push("Paste Hunter API key in Connections");
   }
-  if (toolReady?.xero === "mock") {
+  if (toolReady?.xero === "mock" || (ready?.connections?.xero ?? 0) < 1) {
     blockers.push("Connect Xero OAuth in Connections");
   }
   if ((ready?.connections?.googleWorkspace ?? 0) < 1) {
