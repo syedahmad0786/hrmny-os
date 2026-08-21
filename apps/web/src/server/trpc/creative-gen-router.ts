@@ -204,17 +204,6 @@ export const creativeGenRouter = router({
       const db = getDb();
       if (!db) {
         const store = getDemoStore();
-        const asset = store.createAsset(title, input.clientId);
-        asset.status = "client_review";
-        asset.versions.push({
-          assetVersionId: crypto.randomUUID(),
-          assetId: asset.assetId,
-          storagePath,
-          versionNumber: 1,
-          isClientRevision: false,
-          uploadedByEmployeeId: employeeId,
-          createdAt: new Date().toISOString(),
-        });
         let taskId = gen.taskId;
         if (input.advanceTask !== false) {
           const task = [...store.tasks.values()].find(
@@ -226,6 +215,21 @@ export const creativeGenRouter = router({
             taskId = task.taskId;
           }
         }
+        const asset = store.createAsset(
+          title,
+          input.clientId,
+          taskId ?? null,
+        );
+        asset.status = "client_review";
+        asset.versions.push({
+          assetVersionId: crypto.randomUUID(),
+          assetId: asset.assetId,
+          storagePath,
+          versionNumber: 1,
+          isClientRevision: false,
+          uploadedByEmployeeId: employeeId,
+          createdAt: new Date().toISOString(),
+        });
         return {
           ok: true as const,
           assetId: asset.assetId,
@@ -235,9 +239,37 @@ export const creativeGenRouter = router({
         };
       }
 
+      let taskId = gen.taskId;
+      if (input.advanceTask !== false) {
+        const seeded = await seedClientCreativeTask({
+          clientId: input.clientId,
+          title: `Portal creative — ${title.slice(0, 80)}`,
+          status: "qc",
+        });
+        if (seeded) {
+          await updateDeliveryTaskStatus({
+            taskId: seeded.taskId,
+            status: "client_review",
+            qcPassed: true,
+            qcNotes: "Auto-QC for generated creative sent to portal",
+          });
+          taskId = seeded.taskId;
+          await db.execute(sql`
+            update public.creative_generation
+            set task_id = ${seeded.taskId}::uuid
+            where creative_generation_id = ${gen.creativeGenerationId}::uuid
+          `);
+        }
+      }
+
       const assets = await db.execute<{ assetId: string }>(sql`
-        insert into public.asset (title, client_id, status)
-        values (${title}, ${input.clientId}::uuid, 'client_review')
+        insert into public.asset (title, client_id, status, task_id)
+        values (
+          ${title},
+          ${input.clientId}::uuid,
+          'client_review',
+          ${taskId ?? null}::uuid
+        )
         returning asset_id as "assetId"
       `);
       const assetId = assets[0]!.assetId;
@@ -265,29 +297,6 @@ export const creativeGenRouter = router({
           updated_at = now()
         where creative_generation_id = ${gen.creativeGenerationId}::uuid
       `);
-
-      let taskId = gen.taskId;
-      if (input.advanceTask !== false) {
-        const seeded = await seedClientCreativeTask({
-          clientId: input.clientId,
-          title: `Portal creative — ${title.slice(0, 80)}`,
-          status: "qc",
-        });
-        if (seeded) {
-          await updateDeliveryTaskStatus({
-            taskId: seeded.taskId,
-            status: "client_review",
-            qcPassed: true,
-            qcNotes: "Auto-QC for generated creative sent to portal",
-          });
-          taskId = seeded.taskId;
-          await db.execute(sql`
-            update public.creative_generation
-            set task_id = ${seeded.taskId}::uuid
-            where creative_generation_id = ${gen.creativeGenerationId}::uuid
-          `);
-        }
-      }
 
       await notifyEmployee({
         employeeId,

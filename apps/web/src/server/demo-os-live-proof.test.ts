@@ -80,6 +80,7 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       });
       expect(sent.ok).toBe(true);
       expect(sent.assetId).toBeTruthy();
+      expect(sent.taskId).toBeTruthy();
 
       const deliveryTask = await caller.tasks.create({
         clientId: loop.clientId,
@@ -185,18 +186,12 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         true,
       );
 
-      const creativeTask = await caller.tasks.create({
-        clientId: loop.clientId,
-        taskType: "social_cutdowns",
-        title: `Portal approve ${Date.now()}`,
-        status: "client_review",
-      });
       const approvals = await portalCaller.portal.approvals.list();
       expect(
-        approvals.some((a) => a.approvalId === creativeTask.taskId),
+        approvals.some((a) => a.approvalId === sent.taskId),
       ).toBe(true);
       const approved = await portalCaller.portal.approvals.act({
-        id: creativeTask.taskId,
+        id: sent.taskId!,
         action: "approve",
       });
       expect(approved.ok).toBe(true);
