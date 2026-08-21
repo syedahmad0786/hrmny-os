@@ -67,6 +67,9 @@ export default function HuntClientsPage() {
         }. Open Account, Creative, then portal.`,
       );
       void utils.crm.deals.list.invalidate();
+      void utils.m4.seedIds.invalidate();
+      void utils.calendars.invalidate();
+      void utils.clients.invalidate();
     },
     onError: (err) => setResult(err.message),
   });
@@ -224,9 +227,27 @@ export default function HuntClientsPage() {
               </p>
             ) : null}
             {result ? (
-              <p className="mt-3 text-sm text-muted" role="status">
-                {result}
-              </p>
+              <div
+                className="mt-4 rounded-xl border border-ink/20 bg-white px-4 py-3 text-sm text-ink shadow-sm"
+                role="status"
+                aria-live="polite"
+                data-testid="hunt-closed-loop-status"
+              >
+                <p className="font-medium">{result}</p>
+                {demo.data && demo.data.ok ? (
+                  <p className="mt-2 flex flex-wrap gap-3 text-sm">
+                    <Link className="underline" href="/account">
+                      Open Account calendar →
+                    </Link>
+                    <Link className="underline" href={demo.data.next.client}>
+                      Client onboarding
+                    </Link>
+                    <Link className="underline" href={demo.data.next.creative}>
+                      Creative
+                    </Link>
+                  </p>
+                ) : null}
+              </div>
             ) : null}
             <p className="mt-2 text-xs text-muted">
               Apollo imports write durable CRM deals (same store as pipeline).

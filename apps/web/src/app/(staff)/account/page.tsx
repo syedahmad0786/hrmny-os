@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
@@ -91,15 +92,18 @@ export default function AccountRhythmPage() {
     },
   });
 
-  const cal = calendars.data?.[0];
+  const cal =
+    calendars.data?.find((c) => c.calendarId === calendarId) ??
+    calendars.data?.[0];
+  const activeCalendarId = cal?.calendarId ?? calendarId;
 
   async function tryLateShootChange() {
-    if (!calendarId) return;
+    if (!activeCalendarId) return;
     const next = new Date(Date.now() + 72 * 60 * 60 * 1000)
       .toISOString()
       .slice(0, 10);
     const result = await shoot.mutateAsync({
-      id: calendarId,
+      id: activeCalendarId,
       shootDate: next,
     });
     if (!result.ok) {
@@ -110,10 +114,10 @@ export default function AccountRhythmPage() {
   }
 
   async function forceEscalate() {
-    if (!calendarId || !cal?.shootDate) return;
+    if (!activeCalendarId || !cal?.shootDate) return;
     // Re-set same shoot date to evaluate T-24 escalate path
     const result = await shoot.mutateAsync({
-      id: calendarId,
+      id: activeCalendarId,
       shootDate: cal.shootDate,
     });
     if (result.ok) {
@@ -141,6 +145,14 @@ export default function AccountRhythmPage() {
           <p className="text-muted">
             Availability, Month-1 rhythm, and calendar controls
           </p>
+          {clientId ? (
+            <p className="mt-1 text-xs text-muted">
+              Active client {clientId.slice(0, 8)}…
+              {ids.data && "source" in ids.data && ids.data.source
+                ? ` · ${ids.data.source.replaceAll("_", " ")}`
+                : ""}
+            </p>
+          ) : null}
         </div>
         {showDemoResets() ? (
           <Button
@@ -353,7 +365,7 @@ export default function AccountRhythmPage() {
 
       <section className="rounded-lg border border-sand bg-white/70 p-4 text-sm">
         <h2 className="font-display text-lg">Calendar / shoot gate</h2>
-        {cal ? (
+        {cal && activeCalendarId ? (
           <>
             <p className="mt-2">
               {cal.month} · shoot {cal.shootDate ?? "—"} · state {cal.state} ·
@@ -381,7 +393,9 @@ export default function AccountRhythmPage() {
               </Button>
               <Button
                 type="button"
-                onClick={() => void refApprove.mutateAsync({ id: calendarId! })}
+                onClick={() =>
+                  void refApprove.mutateAsync({ id: activeCalendarId })
+                }
               >
                 Ref-approve calendar
               </Button>
@@ -391,7 +405,7 @@ export default function AccountRhythmPage() {
                 onClick={() =>
                   void shoot
                     .mutateAsync({
-                      id: calendarId!,
+                      id: activeCalendarId,
                       shootDate: new Date(Date.now() + 96 * 60 * 60 * 1000)
                         .toISOString()
                         .slice(0, 10),
@@ -411,7 +425,13 @@ export default function AccountRhythmPage() {
             </div>
           </>
         ) : (
-          <p className="mt-2 text-muted">Reset M4 demo to seed calendar.</p>
+          <p className="mt-2 text-muted">
+            No content calendar for this client yet.{" "}
+            <Link className="underline" href="/crm/hunt">
+              Run demo closed loop on Hunt
+            </Link>{" "}
+            to seed one, or use Reset M4 demo when demo resets are enabled.
+          </p>
         )}
         {msg ? <p className="mt-3 text-ink">{msg}</p> : null}
         {(escalate.data ?? []).length > 0 ? (

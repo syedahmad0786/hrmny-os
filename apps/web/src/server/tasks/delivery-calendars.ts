@@ -118,6 +118,29 @@ export async function listDeliveryCalendars(input: {
   return out;
 }
 
+/** Newest durable calendars first (closed-loop / account demo path). */
+export async function listRecentDeliveryCalendars(input?: {
+  limit?: number;
+}): Promise<DeliveryCalendar[]> {
+  const db = getDb();
+  if (!db) return [];
+  const limit = Math.min(Math.max(input?.limit ?? 10, 1), 50);
+  const rows = await db.execute<CalendarRow>(sql`
+    select
+      calendar_id, client_id, month, focus_points,
+      ref_approval_state, final_approval_state,
+      shoot_date::text as shoot_date, state
+    from public.calendar
+    order by updated_at desc, created_at desc
+    limit ${sql.raw(String(limit))}
+  `);
+  const out: DeliveryCalendar[] = [];
+  for (const row of rows) {
+    out.push(mapCalendar(row, await loadSlots(row.calendar_id)));
+  }
+  return out;
+}
+
 export async function getDeliveryCalendar(
   calendarId: string,
 ): Promise<DeliveryCalendar | null> {

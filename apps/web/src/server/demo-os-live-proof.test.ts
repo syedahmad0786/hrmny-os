@@ -55,6 +55,11 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         seededCals.some((c) => c.calendarId === loop.calendarId),
       ).toBe(true);
 
+      const seeds = await caller.m4.seedIds();
+      expect(seeds.clientId).toBe(loop.clientId);
+      expect(seeds.calendarId).toBe(loop.calendarId);
+      expect(seeds.source).toBe("durable_calendar");
+
       const gen = await caller.creativeGen.generate({
         prompt: "Ochre editorial still life for demo portal delivery",
         clientId: loop.clientId,
