@@ -46,6 +46,12 @@ export async function GET() {
         (process.env.DAM_STORAGE ?? "memory").toLowerCase() === "supabase"
         ? "supabase"
         : "memory",
+      inboundWebhook:
+        has("N8N_WEBHOOK_SECRET") ||
+        has("HRMNY_N8N_WEBHOOK_SECRET") ||
+        has("CRON_SECRET")
+          ? "configured"
+          : "missing",
     },
   };
   return NextResponse.json(body, { status: body.ok ? 200 : 503 });

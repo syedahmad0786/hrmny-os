@@ -27,6 +27,7 @@ function configuredSecret(): string | null {
   return (
     process.env.N8N_WEBHOOK_SECRET?.trim() ||
     process.env.HRMNY_N8N_WEBHOOK_SECRET?.trim() ||
+    process.env.CRON_SECRET?.trim() ||
     null
   );
 }
