@@ -17,7 +17,7 @@ const EMBED_MODEL =
 /** Deterministic 1536-d bag-of-tokens vector when OpenRouter embeddings unavailable. */
 function localEmbed(text: string): number[] {
   const dims = 1536;
-  const out = new Float64Array(dims);
+  const out = new Array<number>(dims).fill(0);
   const tokens = text.toLowerCase().split(/\W+/).filter(Boolean);
   for (const tok of tokens) {
     let h = 2166136261;
@@ -26,12 +26,15 @@ function localEmbed(text: string): number[] {
       h = Math.imul(h, 16777619);
     }
     const idx = Math.abs(h) % dims;
-    out[idx] += 1;
+    out[idx] = (out[idx] ?? 0) + 1;
   }
   let norm = 0;
-  for (let i = 0; i < dims; i++) norm += out[i] * out[i];
+  for (let i = 0; i < dims; i++) {
+    const v = out[i] ?? 0;
+    norm += v * v;
+  }
   norm = Math.sqrt(norm) || 1;
-  return Array.from(out, (v) => v / norm);
+  return out.map((v) => (v ?? 0) / norm);
 }
 
 /** Embed text via OpenRouter; falls back to local hash vectors for demo pgvector. */
