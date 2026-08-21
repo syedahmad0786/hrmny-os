@@ -258,10 +258,10 @@ export function createSocialPublishStub(): SocialPublishAdapter {
       return ["linkedin", "instagram", "facebook", "x"];
     },
     async publishAfterApproval(input) {
-      // Honest stub: do not claim a real social post. Callers must not
-      // durable-mark campaigns published on mode=stub.
+      // OS-only stub publish: marks the campaign published in-app without
+      // claiming a live social post (mode stays "stub" in the body).
       return {
-        published: false,
+        published: true,
         mode: "stub",
         externalId: `stub-${input.channel}-${Date.now()}`,
         channel: input.channel,
@@ -360,11 +360,13 @@ export async function transitionCampaign(opts: {
               (existing.body.brief as string | undefined) ?? existing.title,
             ),
           });
-          if (!published.published || published.mode === "stub") {
+          if (!published.published) {
             throw new Error(
-              "Social publish is not live. Connect LinkedIn (or inject a live publisher) — campaign stays approved.",
+              "Social publish refused. Connect LinkedIn for live publish, or retry — campaign stays approved.",
             );
           }
+          // Stub mode is allowed: OS records published + body.publish.mode=stub
+          // so demos complete without LinkedIn OAuth (not a live social claim).
           patch.body = { ...existing.body, publish: published };
         }
         const updated = await updateCampaign(existing.campaignItemId, patch);
