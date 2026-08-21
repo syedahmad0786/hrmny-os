@@ -104,6 +104,28 @@ describe("M6 portal + seams", () => {
     );
   });
 
+  it("portal onboarding acknowledge notifies staff inbox", async () => {
+    const portal = callerFor("portal_a");
+    const board = await portal.portal.onboarding.get();
+    const active = board.phases.find((p) => p.status === "active");
+    expect(active).toBeDefined();
+    const result = await portal.portal.onboarding.acknowledge({
+      phaseIndex: active!.phaseIndex,
+    });
+    expect(result.advanced).toBe(true);
+    const { listNotifications } = await import("./notifications/store");
+    const { DEMO_EMPLOYEE_ID } = await import("./demo-store");
+    const inbox = await listNotifications(DEMO_EMPLOYEE_ID, { limit: 20 });
+    expect(
+      inbox.some(
+        (n) =>
+          n.kind === "onboarding" &&
+          /signed off/i.test(n.title) &&
+          (n.href ?? "").includes("/clients/"),
+      ),
+    ).toBe(true);
+  });
+
   it("rejects nested finance fields from portal payloads", () => {
     expect(() =>
       assertPortalSafe({ delivery: { internal_cost: 100 } }),

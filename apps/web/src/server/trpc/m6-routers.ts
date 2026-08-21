@@ -27,6 +27,7 @@ import {
   ensureClientOnboarding,
   getClientOnboarding,
   signoffOnboardingPhase,
+  notifyStaffOfOnboardingSignoff,
 } from "../clients/onboarding";
 import { driveSeamAsync, listSeams, resolveDirectAssetUrl, type SeamName } from "../seams";
 import { getDemoGuestShare } from "../work-governance";
@@ -625,6 +626,13 @@ export const portalRouter = router({
           advanced = true;
         }
         store.onboarding.set(clientId, [...phases]);
+        await notifyStaffOfOnboardingSignoff({
+          clientId,
+          phaseName: phase.name,
+          phaseIndex: input.phaseIndex,
+          advanced,
+          nextPhaseName: next?.name ?? null,
+        });
         return {
           advanced,
           phases: phases.map((p) => ({
