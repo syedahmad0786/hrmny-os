@@ -47,6 +47,48 @@ export function createApolloMock(): ApolloAdapter {
   };
 }
 
+function pickString(v: unknown): string | undefined {
+  return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
+
+/**
+ * Normalize Apollo people/match payloads to the camelCase shape the CRM UI
+ * and verify waterfall expect (`emailStatus`, `source: "apollo"`).
+ */
+export function normalizeApolloPerson(
+  email: string,
+  person: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  if (!person) return null;
+  const emailStatus =
+    pickString(person.emailStatus) ??
+    pickString(person.email_status) ??
+    (person.email_verified_status === true || person.email_verified === true
+      ? "verified"
+      : undefined) ??
+    "unknown";
+  const org =
+    person.organization && typeof person.organization === "object"
+      ? (person.organization as Record<string, unknown>)
+      : null;
+  return {
+    ...person,
+    email: pickString(person.email) ?? email,
+    firstName:
+      pickString(person.firstName) ?? pickString(person.first_name) ?? null,
+    lastName:
+      pickString(person.lastName) ?? pickString(person.last_name) ?? null,
+    title: pickString(person.title) ?? null,
+    organization:
+      pickString(person.organization as unknown) ??
+      pickString(org?.name) ??
+      pickString(person.organization_name) ??
+      null,
+    emailStatus,
+    source: "apollo",
+  };
+}
+
 /** Live Apollo REST — fail-loud without API key. */
 export function createApolloLive(config: ApolloAdapterConfig = {}): ApolloAdapter {
   const apiKey = config.apiKey ?? process.env.APOLLO_API_KEY;
@@ -73,7 +115,7 @@ export function createApolloLive(config: ApolloAdapterConfig = {}): ApolloAdapte
         );
       }
       const data = (await res.json()) as { person?: Record<string, unknown> };
-      return data.person ?? null;
+      return normalizeApolloPerson(email, data.person ?? null);
     },
     async searchCompanies(query: string) {
       const res = await fetch("https://api.apollo.io/v1/mixed_companies/search", {

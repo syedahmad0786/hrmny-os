@@ -67,6 +67,7 @@ export {
   createApolloMock,
   createApolloLive,
   createApolloAdapter,
+  normalizeApolloPerson,
   type ApolloAdapterConfig,
 } from "./apollo";
 export {
