@@ -90,6 +90,12 @@ export default function ConnectionsPage() {
             canva?: number;
             linkedin?: number;
             xero?: number;
+            errors?: {
+              googleWorkspace?: number;
+              canva?: number;
+              linkedin?: number;
+              xero?: number;
+            };
           };
         }) => {
           if (cancelled) return;
@@ -107,7 +113,9 @@ export default function ConnectionsPage() {
           }
           if ((connections.googleWorkspace ?? 0) < 1) {
             next.push(
-              "Connect Google Workspace (@hrmny.co) for live HITL Gmail send.",
+              (connections.errors?.googleWorkspace ?? 0) > 0
+                ? "Reconnect Google Workspace (@hrmny.co) — token revoked; click Reconnect below."
+                : "Connect Google Workspace (@hrmny.co) for live HITL Gmail send.",
             );
           }
           if ((connections.linkedin ?? 0) < 1) {

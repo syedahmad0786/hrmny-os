@@ -39,6 +39,12 @@ type ReadySmoke = {
     canva?: number;
     linkedin?: number;
     xero?: number;
+    errors?: {
+      googleWorkspace?: number;
+      canva?: number;
+      linkedin?: number;
+      xero?: number;
+    };
   };
 };
 
@@ -74,7 +80,12 @@ export default function HuntClientsPage() {
     blockers.push("Connect Xero OAuth in Connections");
   }
   if ((ready?.connections?.googleWorkspace ?? 0) < 1) {
-    blockers.push("Reconnect Google Workspace for live HITL Gmail");
+    blockers.push(
+      (ready?.connections as { errors?: { googleWorkspace?: number } } | undefined)
+        ?.errors?.googleWorkspace
+        ? "Reconnect Google Workspace (token revoked) for live HITL Gmail"
+        : "Reconnect Google Workspace for live HITL Gmail",
+    );
   }
   if ((ready?.connections?.linkedin ?? 0) < 1) {
     blockers.push("Connect LinkedIn (Composio) for campaign publish");
