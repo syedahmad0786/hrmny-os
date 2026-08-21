@@ -107,6 +107,7 @@ export default function DeliveryBoardPage() {
         <button
           type="button"
           className="text-ochre underline disabled:opacity-40"
+          data-testid="delivery-client-portal"
           disabled={!selected?.clientId || reviewHref.isPending}
           onClick={() => {
             if (!selected?.clientId) return;
@@ -150,6 +151,7 @@ export default function DeliveryBoardPage() {
             value={taskKey}
             onChange={(e) => setTaskKey(e.target.value)}
             aria-label="Task"
+            data-testid="delivery-task-select"
           >
             <option value="">Select task…</option>
             {flatTasks.map((t) => (
