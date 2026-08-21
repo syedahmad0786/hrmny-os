@@ -64,8 +64,20 @@ async function resolveComposioSend(
     );
     const token = await getGoogleWorkspaceAccessToken(employeeId);
     if (token) return createGoogleWorkspaceGmailSend(employeeId);
-  } catch {
-    /* stub */
+  } catch (err) {
+    // A Workspace vault row that cannot refresh must not silently stub —
+    // that hides reconnect-needed failures behind a fake "sent".
+    const message = err instanceof Error ? err.message : String(err);
+    if (
+      message.includes("Google token refresh failed") ||
+      message.includes("Google OAuth client credentials") ||
+      message.includes("secret is unavailable")
+    ) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `${message}. Reconnect Google Workspace under Settings → Connections.`,
+      });
+    }
   }
   return createComposioStub();
 }

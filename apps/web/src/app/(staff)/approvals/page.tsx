@@ -107,7 +107,12 @@ export default function ApprovalsPage() {
         setFeedback((f) => ({
           ...f,
           [item.id]: sent.ok
-            ? { tone: "ok", text: `Sent${sent.externalId ? ` · ${sent.externalId}` : ""}` }
+            ? {
+                tone: "ok",
+                text: `Sent${sent.sendMode ? ` · ${sent.sendMode}` : ""}${
+                  sent.externalId ? ` · ${sent.externalId}` : ""
+                }`,
+              }
             : { tone: "blocked", text: `Send blocked (${sent.code})` },
         }));
         await utils.leadgen.outreach.list.invalidate();
