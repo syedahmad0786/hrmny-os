@@ -261,4 +261,38 @@ describe("campaigns durable layer (memory mode)", () => {
     ).toBe(true);
   });
 
+
+  it("notifies staff inbox when the client rejects a campaign with focusable href", async () => {
+    const draft = await createCampaignDraft({
+      title: "Needs a sharper hook",
+      channel: "linkedin",
+      scheduledFor: "2026-09-08",
+      clientId: CLIENT,
+    });
+    const rejected = await decidePortalItem({
+      actor: portalActor,
+      clientId: CLIENT,
+      id: draft.campaignItemId,
+      to: "rejected",
+      feedback: "Lead with the offer",
+    });
+    expect(rejected.ok).toBe(true);
+    const views = await listApprovalViews({ clientId: CLIENT });
+    const view = views.find((v) => v.campaignItemId === draft.campaignItemId);
+    expect(view?.state).toBe("rejected");
+    expect(view?.feedback).toBe("Lead with the offer");
+
+    const { listNotifications } = await import("../notifications/store");
+    const { DEMO_STAFF_LEAD_ID } = await import("../demo-store");
+    const inbox = await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 20 });
+    expect(
+      inbox.some(
+        (n) =>
+          n.kind === "campaign" &&
+          /campaign revisions/i.test(n.title) &&
+          (n.href ?? "") === `/approvals?id=${draft.campaignItemId}`,
+      ),
+    ).toBe(true);
+  });
+
 });

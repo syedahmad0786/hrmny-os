@@ -222,12 +222,15 @@ export const campaignsRouter = router({
       }),
   }),
 
-  /** Staff view of items awaiting client sign-off in the portal. */
+  /** Staff view: portal items awaiting client sign-off OR client-rejected (needs revision). */
   pendingApproval: staffProcedure
     .input(z.object({ clientId: z.string().uuid().optional() }).optional())
-    .query(({ input }) =>
-      listApprovalViews({ clientId: input?.clientId, state: "pending_client" }),
-    ),
+    .query(async ({ input }) => {
+      const views = await listApprovalViews({ clientId: input?.clientId });
+      return views.filter(
+        (v) => v.state === "pending_client" || v.state === "rejected",
+      );
+    }),
 
   /** Content-calendar view — items grouped by scheduled date. */
   calendar: staffProcedure

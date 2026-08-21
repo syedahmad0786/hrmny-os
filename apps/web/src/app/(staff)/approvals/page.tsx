@@ -97,17 +97,21 @@ function ApprovalsInner() {
       }));
 
     const portalItems: ApprovalItem[] = (portal.data ?? [])
-      .filter((v) => v.state === "pending_client")
+      .filter((v) => v.state === "pending_client" || v.state === "rejected")
       .map((v) => ({
         id: v.campaignItemId,
-        kind: "portal_item",
+        kind: "portal_item" as const,
         title: v.title,
-        summary: `${v.channel} item awaiting client sign-off in the portal.${v.feedback ? ` Client note: ${v.feedback}` : ""}`,
+        summary:
+          v.state === "rejected"
+            ? `${v.channel} — client requested changes.${v.feedback ? ` Feedback: ${v.feedback}` : ""}`
+            : `${v.channel} item awaiting client sign-off in the portal.${v.feedback ? ` Client note: ${v.feedback}` : ""}`,
         target: v.clientId ? `Portal · ${v.clientId}` : "Client portal",
         agent: "creative",
         meta: v.channel,
         proposedAt: v.scheduledFor || "",
         draft: v.title,
+        portalState: v.state as "pending_client" | "rejected",
       }));
 
     const merged = [...outreachItems, ...campaignItems, ...portalItems].sort(
@@ -458,7 +462,9 @@ function ApprovalsInner() {
               <div className="mt-auto flex flex-wrap gap-2">
                 {selected.kind === "portal_item" ? (
                   <p className="text-sm text-muted">
-                    Awaiting client sign-off in the portal — no staff action.
+                    {selected.portalState === "rejected"
+                      ? "Client requested changes — revise the campaign and resend to the portal."
+                      : "Awaiting client sign-off in the portal — no staff action."}
                   </p>
                 ) : (
                   <>
