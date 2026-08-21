@@ -76,6 +76,8 @@ export function resolveN8nConfig(partial: {
   if (!partial.mode) {
     const env = process.env.N8N_MODE?.toLowerCase();
     if (env === "live") mode = "live";
+    else if (env === "mock") mode = "mock";
+    else if (apiKey) mode = "live";
   }
   // Live without key still constructs but health/list fail-loud or mock-fallback in client.
   if (mode === "live" && !apiKey) {
