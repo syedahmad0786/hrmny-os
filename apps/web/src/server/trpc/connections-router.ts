@@ -397,6 +397,96 @@ function requireSystemComposio() {
   return (systemComposio ??= createComposioLive({ apiKey }));
 }
 
+function isActiveComposioStatus(
+  status: string | null | undefined,
+  isDisabled?: boolean | null,
+): boolean {
+  if (isDisabled) return false;
+  if (!status) return false;
+  return ACTIVE_COMPOSIO_STATUSES.has(status.toUpperCase());
+}
+
+/** Prefer exact toolkit match, then Composio-managed `composio:<toolkit>` vault row. */
+export function findStaffConnectionRow<T extends { toolkit: string }>(
+  rows: readonly T[],
+  toolkit: string,
+): T | undefined {
+  return (
+    rows.find((candidate) => candidate.toolkit === toolkit) ??
+    rows.find((candidate) => candidate.toolkit === `composio:${toolkit}`)
+  );
+}
+
+export function isActiveComposioRemote(
+  status: string | null | undefined,
+  isDisabled?: boolean | null,
+): boolean {
+  return isActiveComposioStatus(status, isDisabled);
+}
+
+/**
+ * After Composio OAuth, vault rows often stay `pending` even when the remote
+ * account is ACTIVE. Flip them to `connected` so /api/ready and Connections UI
+ * reflect a completed connect (and keep externalConnectionId in sync).
+ */
+async function reconcileComposioManagedStatus(
+  db: NonNullable<ReturnType<typeof getDb>>,
+  employeeId: string,
+  remote: readonly ComposioConnectedAccount[],
+): Promise<void> {
+  const local = await db
+    .select({
+      connectionAccountId: connectionAccount.connectionAccountId,
+      toolkit: connectionAccount.toolkit,
+      externalConnectionId: connectionAccount.externalConnectionId,
+      status: connectionAccount.status,
+    })
+    .from(connectionAccount)
+    .where(
+      and(
+        eq(connectionAccount.ownerEmployeeId, employeeId),
+        eq(connectionAccount.scope, "staff"),
+        sql`${connectionAccount.toolkit} like 'composio:%'`,
+      ),
+    );
+
+  for (const account of local) {
+    const slug = account.toolkit.slice("composio:".length).toLowerCase();
+    const byId = account.externalConnectionId
+      ? remote.find((candidate) => candidate.id === account.externalConnectionId)
+      : undefined;
+    const byToolkit = remote.find(
+      (candidate) =>
+        candidate.toolkit.slug.toLowerCase() === slug &&
+        isActiveComposioStatus(candidate.status, candidate.is_disabled),
+    );
+    const current = byId ?? byToolkit;
+    if (!current || !isActiveComposioStatus(current.status, current.is_disabled)) {
+      continue;
+    }
+    if (
+      account.status === "connected" &&
+      account.externalConnectionId === current.id
+    ) {
+      continue;
+    }
+    await db
+      .update(connectionAccount)
+      .set({
+        status: "connected",
+        externalConnectionId: current.id,
+        lastError: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        eq(
+          connectionAccount.connectionAccountId,
+          account.connectionAccountId,
+        ),
+      );
+  }
+}
+
 export type VerifiedWorkAppConnection = {
   account: ComposioConnectedAccount;
   client: ComposioLiveClient;
@@ -651,6 +741,16 @@ export const connectionsRouter = router({
           };
         });
       }
+      if (process.env.COMPOSIO_API_KEY?.trim()) {
+        try {
+          const remote =
+            await requireSystemComposio().listUserConnectedAccounts(employeeId);
+          await reconcileComposioManagedStatus(db, employeeId, remote);
+        } catch {
+          // Readiness reconcile is best-effort; catalog still returns vault rows.
+        }
+      }
+
       const rows = await db
         .select({
           connectionAccountId: connectionAccount.connectionAccountId,
@@ -669,9 +769,7 @@ export const connectionsRouter = router({
           ),
         );
       return CONNECTION_CATALOG.map((item) => {
-        const row = rows.find(
-          (candidate) => candidate.toolkit === item.toolkit,
-        );
+        const row = findStaffConnectionRow(rows, item.toolkit);
         return {
           ...item,
           ready:
@@ -1063,32 +1161,39 @@ export const connectionsRouter = router({
     const employeeId = requireEmployeeId(ctx.employeeId);
     await requireAllowedApp("composio");
     const db = requireDb();
-    const [remote, local] = await Promise.all([
-      requireSystemComposio().listUserConnectedAccounts(employeeId),
-      db
-        .select({
-          connectionAccountId: connectionAccount.connectionAccountId,
-          toolkit: connectionAccount.toolkit,
-          externalConnectionId: connectionAccount.externalConnectionId,
-          status: connectionAccount.status,
-        })
-        .from(connectionAccount)
-        .where(
-          and(
-            eq(connectionAccount.ownerEmployeeId, employeeId),
-            eq(connectionAccount.scope, "staff"),
-            sql`${connectionAccount.toolkit} like 'composio:%'`,
-          ),
+    const remote =
+      await requireSystemComposio().listUserConnectedAccounts(employeeId);
+    await reconcileComposioManagedStatus(db, employeeId, remote);
+    const local = await db
+      .select({
+        connectionAccountId: connectionAccount.connectionAccountId,
+        toolkit: connectionAccount.toolkit,
+        externalConnectionId: connectionAccount.externalConnectionId,
+        status: connectionAccount.status,
+      })
+      .from(connectionAccount)
+      .where(
+        and(
+          eq(connectionAccount.ownerEmployeeId, employeeId),
+          eq(connectionAccount.scope, "staff"),
+          sql`${connectionAccount.toolkit} like 'composio:%'`,
         ),
-    ]);
-    return local.map((account) => {
-      const current = remote.find(
-        (candidate) => candidate.id === account.externalConnectionId,
       );
+    return local.map((account) => {
+      const slug = account.toolkit.slice("composio:".length);
+      const current =
+        remote.find(
+          (candidate) => candidate.id === account.externalConnectionId,
+        ) ??
+        remote.find(
+          (candidate) =>
+            candidate.toolkit.slug.toLowerCase() === slug.toLowerCase() &&
+            isActiveComposioStatus(candidate.status, candidate.is_disabled),
+        );
       return {
         connectionAccountId: account.connectionAccountId,
         connectedAccountId: account.externalConnectionId,
-        toolkit: account.toolkit.slice("composio:".length),
+        toolkit: slug,
         status: current?.status ?? account.status,
         statusReason: current?.status_reason ?? null,
       };
