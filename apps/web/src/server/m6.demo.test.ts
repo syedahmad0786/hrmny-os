@@ -5,11 +5,13 @@ import {
   DEMO_CLIENT_B_ID,
   DEMO_CLIENT_ID,
   DEMO_CREATIVE_TASK_ID,
+  DEMO_EMPLOYEE_ID,
   getDemoStore,
 } from "./demo-store";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 import { driveSeam } from "./seams";
 import { assertPortalSafe } from "./portal-data";
+import { listNotifications } from "./notifications/store";
 
 function callerFor(role: string) {
   const user = resolveDevUser(role);
@@ -81,10 +83,22 @@ describe("M6 portal + seams", () => {
     expect(
       getDemoStore().portalApprovals.get(approval!.approvalId)?.status,
     ).toBe("approved");
-    expect(getDemoStore().audits[0]).toMatchObject({
-      actorEmployeeId: resolveDevUser("partner").employeeId,
-      action: "portal.approvals.act",
-    });
+    expect(
+      getDemoStore().audits.some(
+        (a) =>
+          a.action === "portal.approvals.act" &&
+          a.actorEmployeeId === resolveDevUser("partner").employeeId,
+      ),
+    ).toBe(true);
+    const inbox = await listNotifications(DEMO_EMPLOYEE_ID, { limit: 20 });
+    expect(
+      inbox.some(
+        (n) =>
+          n.kind === "creative" &&
+          /approved/i.test(n.title) &&
+          n.entityId === approval!.approvalId,
+      ),
+    ).toBe(true);
     await expect(callerFor("am").clientPreview.workspace()).rejects.toThrow(
       /Partner or director/,
     );

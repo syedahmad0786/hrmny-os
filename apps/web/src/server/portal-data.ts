@@ -391,6 +391,107 @@ export async function portalAssetStoragePath(
   return rows[0]?.storage_path ?? null;
 }
 
+
+async function resolveStaffForPortalClient(
+  clientId: string,
+  approvalId: string,
+): Promise<string | null> {
+  const db = getDb();
+  if (!db) {
+    const { DEMO_EMPLOYEE_ID } = await import("./demo-store");
+    return DEMO_EMPLOYEE_ID;
+  }
+  try {
+    const owners = await db.execute<{ employeeId: string }>(sql`
+      select owner_employee_id as "employeeId"
+      from public.task
+      where task_id = ${approvalId}::uuid
+        and client_id = ${clientId}::uuid
+        and owner_employee_id is not null
+      limit 1
+    `);
+    if (owners[0]?.employeeId) return owners[0].employeeId;
+
+    const leads = await db.execute<{ employeeId: string }>(sql`
+      select employee_id as "employeeId"
+      from public.account_team_member
+      where client_id = ${clientId}::uuid
+        and is_account_lead = true
+      order by created_at asc
+      limit 1
+    `);
+    if (leads[0]?.employeeId) return leads[0].employeeId;
+
+    const anyStaff = await db.execute<{ employeeId: string }>(sql`
+      select employee_id as "employeeId"
+      from public.employee
+      where is_active = true
+      order by created_at asc
+      limit 1
+    `);
+    return anyStaff[0]?.employeeId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Staff OS inbox + agent memory after client portal approve/reject. */
+async function notifyStaffOfPortalDecision(input: {
+  clientId: string;
+  approvalId: string;
+  action: "approve" | "reject";
+  feedback?: string;
+  title?: string;
+}): Promise<void> {
+  const employeeId = await resolveStaffForPortalClient(
+    input.clientId,
+    input.approvalId,
+  );
+  if (!employeeId) return;
+
+  const clientName = await portalClientName(input.clientId).catch(
+    () => "Client",
+  );
+  const label = input.title?.trim() || "deliverable";
+  const verb = input.action === "approve" ? "approved" : "requested revisions on";
+  const title =
+    input.action === "approve"
+      ? `Client approved: ${label}`
+      : `Client revisions: ${label}`;
+  const body = [
+    `${clientName} ${verb} "${label}".`,
+    input.feedback?.trim() ? `Feedback: ${input.feedback.trim()}` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const { notifyEmployee } = await import("./notifications/store");
+  await notifyEmployee({
+    employeeId,
+    title,
+    body,
+    kind: "creative",
+    href: `/creative?clientId=${encodeURIComponent(input.clientId)}`,
+    entityType: "task",
+    entityId: input.approvalId,
+  }).catch(() => undefined);
+
+  const { persistMemoryChunk } = await import("./ai/memory-db");
+  await persistMemoryChunk({
+    sourceType: "feedback",
+    sourceId: input.approvalId,
+    content: `Portal ${input.action}: ${clientName} ${verb} "${label}".${
+      input.feedback?.trim() ? ` Feedback: ${input.feedback.trim()}` : ""
+    }`,
+    metadata: {
+      clientId: input.clientId,
+      employeeId,
+      taskId: input.approvalId,
+      kind: `portal.approval.${input.action}`,
+    },
+  }).catch(() => undefined);
+}
+
 export async function actOnPortalApproval(input: {
   clientId: string;
   approvalId: string;
@@ -418,6 +519,13 @@ export async function actOnPortalApproval(input: {
       before: { status: before },
       after: { status: item.status },
       reason: input.feedback ?? null,
+    });
+    await notifyStaffOfPortalDecision({
+      clientId: input.clientId,
+      approvalId: input.approvalId,
+      action: input.action,
+      feedback: input.feedback,
+      title: item.title,
     });
     return { ok: true as const, status: item.status };
   }
@@ -505,6 +613,12 @@ export async function actOnPortalApproval(input: {
         /* seam best-effort after commit */
       }
     }
+    await notifyStaffOfPortalDecision({
+      clientId: input.clientId,
+      approvalId: input.approvalId,
+      action: input.action,
+      feedback: input.feedback,
+    });
     return result;
   });
 }
