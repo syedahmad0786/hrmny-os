@@ -191,9 +191,43 @@ test.describe("Demo funnel", () => {
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
     });
-    const portalCta = page.getByRole("button", { name: /Client portal/i });
+    const portalCta = page.getByTestId("delivery-client-portal");
     await expect(portalCta).toBeVisible();
     await expect(portalCta).toBeDisabled();
+  });
+
+  test("delivery Client portal mints magic link into portal approvals", async ({
+    page,
+  }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/delivery", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
+      timeout: 60_000,
+    });
+
+    const taskSelect = page.getByTestId("delivery-task-select");
+    await expect(taskSelect).toBeVisible();
+    await expect
+      .poll(async () => taskSelect.locator("option").count(), {
+        timeout: 60_000,
+      })
+      .toBeGreaterThan(1);
+
+    await taskSelect.selectOption({ index: 1 });
+    const portalCta = page.getByTestId("delivery-client-portal");
+    await expect(portalCta).toBeEnabled();
+    await portalCta.click();
+
+    await expect(page).toHaveURL(/\/portal\/login\/verify/, {
+      timeout: 60_000,
+    });
+    await expect(page).toHaveURL(/token=/);
+
+    // Verify consumes the token and lands on portal Approvals (default next).
+    await expect(
+      page.getByRole("heading", { name: /^Approvals$/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/\/portal\/approvals/);
   });
 
   test("portal reject lands in partner /notifications inbox", async ({
