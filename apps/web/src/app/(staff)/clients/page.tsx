@@ -42,10 +42,19 @@ export default function ClientsPage() {
     },
   });
   const [demoPortalLink, setDemoPortalLink] = useState<string | null>(null);
+  const [inviteDeliveryNote, setInviteDeliveryNote] = useState<string | null>(
+    null,
+  );
   const invitePortalUser = trpc.clients.portalUsers.invite.useMutation({
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       setPortalName("");
       setPortalEmail("");
+      setInviteDeliveryNote(
+        data.delivery
+          ? `Invite emailed (${data.delivery.mode}) — open ${data.portalPath}`
+          : null,
+      );
+      if (data.portalPath) setDemoPortalLink(data.portalPath);
       await Promise.all([
         utils.clients.list.invalidate(),
         utils.clients.portalUsers.list.invalidate(),
@@ -55,6 +64,11 @@ export default function ClientsPage() {
   const issueDemoToken = trpc.clients.portalUsers.issueDemoToken.useMutation({
     onSuccess: (data) => {
       setDemoPortalLink(data.portalPath);
+      setInviteDeliveryNote(
+        data.delivery
+          ? `Magic link emailed (${data.delivery.mode})`
+          : null,
+      );
     },
   });
   const rows = (clients.data ?? []) as ClientRow[];
@@ -255,6 +269,9 @@ export default function ClientsPage() {
             <p className="mt-3 text-sm text-red-700">
               {invitePortalUser.error.message}
             </p>
+          ) : null}
+          {inviteDeliveryNote ? (
+            <p className="mt-3 text-sm text-muted">{inviteDeliveryNote}</p>
           ) : null}
           {issueDemoToken.error ? (
             <p className="mt-3 text-sm text-red-700">

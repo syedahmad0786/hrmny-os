@@ -1075,89 +1075,102 @@ export const clientsRouter = router({
             message: "Partner or director access required",
           });
         }
+        const email = input.email.toLowerCase();
         const db = getDb();
+        let user: {
+          portalUserId: string;
+          email: string;
+          displayName: string;
+          isActive: boolean;
+        };
         if (!db) {
-          return {
+          user = {
             portalUserId: randomUUID(),
-            email: input.email.toLowerCase(),
+            email,
             displayName: input.displayName,
             isActive: true,
           };
-        }
-        const email = input.email.toLowerCase();
-        return db.transaction(async (tx) => {
-          await tx.execute(sql`
-            select pg_advisory_xact_lock(hashtextextended(${email}, 0))
-          `);
-          const conflicts = await tx.execute<{ clientId: string }>(sql`
-            select client_id as "clientId" from public.client_portal_user
-            where lower(email) = ${email} and is_active
-              and client_id <> ${input.clientId}::uuid
-            limit 1
-          `);
-          if (conflicts[0]) {
-            throw new TRPCError({
-              code: "CONFLICT",
-              message: "This email already has access to another client portal",
-            });
-          }
-          const existing = await tx.execute<{ portalUserId: string }>(sql`
-            select client_portal_user_id as "portalUserId"
-            from public.client_portal_user
-            where client_id = ${input.clientId}::uuid and lower(email) = ${email}
-            limit 1
-          `);
-          const users = existing[0]
-            ? await tx.execute<{
-                portalUserId: string;
-                email: string;
-                displayName: string;
-                isActive: boolean;
-              }>(sql`
-                update public.client_portal_user set
-                  email = ${email}, display_name = ${input.displayName},
-                  is_active = true, updated_at = now()
-                where client_portal_user_id = ${existing[0].portalUserId}::uuid
-                returning client_portal_user_id as "portalUserId", email,
-                  display_name as "displayName", is_active as "isActive"
-              `)
-            : await tx.execute<{
-                portalUserId: string;
-                email: string;
-                displayName: string;
-                isActive: boolean;
-              }>(sql`
-                insert into public.client_portal_user (
-                  client_id, email, display_name, is_active
-                ) values (
-                  ${input.clientId}::uuid, ${email}, ${input.displayName}, true
-                ) returning client_portal_user_id as "portalUserId", email,
-                  display_name as "displayName", is_active as "isActive"
-              `);
-          const user = users[0]!;
-          await tx.execute(sql`
-            insert into public.audit_event (
-              actor_employee_id, action, entity_type, entity_id, before, after
-            ) values (
-              ${ctx.employeeId}::uuid, 'clients.portal_user.invite',
-              'client_portal_user', ${user.portalUserId}::uuid, null,
-              ${JSON.stringify({ clientId: input.clientId, email })}::jsonb
-            )
-          `);
-          return user;
-        }).then(async (user) => {
-          const { upsertPortalAllowlistContact } = await import(
-            "../auth/portal-magic-link"
-          );
-          await upsertPortalAllowlistContact({
-            email,
-            clientId: input.clientId,
+        } else {
+          user = await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              select pg_advisory_xact_lock(hashtextextended(${email}, 0))
+            `);
+            const conflicts = await tx.execute<{ clientId: string }>(sql`
+              select client_id as "clientId" from public.client_portal_user
+              where lower(email) = ${email} and is_active
+                and client_id <> ${input.clientId}::uuid
+              limit 1
+            `);
+            if (conflicts[0]) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message:
+                  "This email already has access to another client portal",
+              });
+            }
+            const existing = await tx.execute<{ portalUserId: string }>(sql`
+              select client_portal_user_id as "portalUserId"
+              from public.client_portal_user
+              where client_id = ${input.clientId}::uuid and lower(email) = ${email}
+              limit 1
+            `);
+            const users = existing[0]
+              ? await tx.execute<{
+                  portalUserId: string;
+                  email: string;
+                  displayName: string;
+                  isActive: boolean;
+                }>(sql`
+                  update public.client_portal_user set
+                    email = ${email}, display_name = ${input.displayName},
+                    is_active = true, updated_at = now()
+                  where client_portal_user_id = ${existing[0].portalUserId}::uuid
+                  returning client_portal_user_id as "portalUserId", email,
+                    display_name as "displayName", is_active as "isActive"
+                `)
+              : await tx.execute<{
+                  portalUserId: string;
+                  email: string;
+                  displayName: string;
+                  isActive: boolean;
+                }>(sql`
+                  insert into public.client_portal_user (
+                    client_id, email, display_name, is_active
+                  ) values (
+                    ${input.clientId}::uuid, ${email}, ${input.displayName}, true
+                  ) returning client_portal_user_id as "portalUserId", email,
+                    display_name as "displayName", is_active as "isActive"
+                `);
+            const row = users[0]!;
+            await tx.execute(sql`
+              insert into public.audit_event (
+                actor_employee_id, action, entity_type, entity_id, before, after
+              ) values (
+                ${ctx.employeeId}::uuid, 'clients.portal_user.invite',
+                'client_portal_user', ${row.portalUserId}::uuid, null,
+                ${JSON.stringify({ clientId: input.clientId, email })}::jsonb
+              )
+            `);
+            return row;
           });
-          return user;
+        }
+
+        const { sendPortalInviteMagicLink } = await import(
+          "../auth/portal-magic-link"
+        );
+        const invite = await sendPortalInviteMagicLink({
+          clientId: input.clientId,
+          email,
+          displayName: input.displayName,
         });
+        return {
+          ...user,
+          portalPath: invite.portalPath,
+          delivery: invite.delivery,
+        };
       }),
 
-    /** Staff demo: issue a single-use portal magic token for an invited contact. */
+    /** Staff demo: issue a single-use portal magic token and email it. */
     issueDemoToken: staffProcedure
       .input(
         z.object({
@@ -1175,23 +1188,19 @@ export const clientsRouter = router({
           });
         }
         const email = input.email.toLowerCase();
-        const {
-          upsertPortalAllowlistContact,
-          issuePortalMagicToken,
-        } = await import("../auth/portal-magic-link");
-        await upsertPortalAllowlistContact({
-          email,
-          clientId: input.clientId,
-        });
-        const token = await issuePortalMagicToken({
+        const { sendPortalInviteMagicLink } = await import(
+          "../auth/portal-magic-link"
+        );
+        const invite = await sendPortalInviteMagicLink({
           clientId: input.clientId,
           email,
         });
         return {
-          token,
-          portalPath: `/portal/login/verify?token=${encodeURIComponent(token)}`,
-          email,
-          clientId: input.clientId,
+          token: invite.token,
+          portalPath: invite.portalPath,
+          email: invite.email,
+          clientId: invite.clientId,
+          delivery: invite.delivery,
         };
       }),
   }),

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { createResendMock } from "@hrmny/integrations";
 import { createCaller } from "./trpc/root";
 import { DEMO_CLIENT_B_ID, DEMO_CLIENT_ID, getDemoStore } from "./demo-store";
 import { clearDemoFeatureOverrides, setFeatureOverride } from "./features";
@@ -7,6 +8,7 @@ import {
   issuePortalMagicToken,
   requestPortalMagicLink,
   resolvePortalSessionForEmail,
+  sendPortalInviteMagicLink,
   upsertPortalAllowlistContact,
   verifyPortalMagicToken,
 } from "./auth/portal-magic-link";
@@ -126,5 +128,24 @@ describe("portal magic-link", () => {
     await requestPortalMagicLink("stranger@evil.example");
     // No memory token for unknown; durable path also no-ops.
     expect(getDemoStore().portalMagicTokens.size).toBe(0);
+  });
+
+  it("sendPortalInviteMagicLink emails a verify URL via Resend mock", async () => {
+    const emailer = createResendMock();
+    const invite = await sendPortalInviteMagicLink({
+      clientId: DEMO_CLIENT_ID,
+      email: "alex@democo.example",
+      displayName: "Alex Demo",
+      emailer,
+    });
+    expect(invite.token.startsWith("ml_")).toBe(true);
+    expect(invite.portalPath).toContain(
+      `/portal/login/verify?token=${encodeURIComponent(invite.token)}`,
+    );
+    expect(invite.delivery.mode).toBe("mock");
+    const recorded = emailer.recorded();
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.to).toEqual(["alex@democo.example"]);
+    expect(recorded[0]?.subject).toMatch(/portal/i);
   });
 });
