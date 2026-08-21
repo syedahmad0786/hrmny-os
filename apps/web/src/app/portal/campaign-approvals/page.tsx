@@ -25,7 +25,7 @@ export default function PortalCampaignApprovalsPage() {
   const items = (list.data ?? []) as PortalItem[];
 
   return (
-    <main className="flex flex-col gap-6">
+    <main className="flex flex-col gap-6" data-testid="portal-campaign-approvals">
       <h1 className="font-display text-3xl font-semibold text-ink">
         Campaign approvals
       </h1>
@@ -33,7 +33,7 @@ export default function PortalCampaignApprovalsPage() {
         Approve or request changes to campaign content for your account before
         it is published.
       </p>
-      <ul className="space-y-6">
+      <ul className="space-y-6" data-testid="portal-campaign-list">
         {items.map((item) => (
           <ApprovalRow
             key={item.campaignItemId}
@@ -42,7 +42,12 @@ export default function PortalCampaignApprovalsPage() {
           />
         ))}
         {!items.length && (
-          <li className="text-sm text-muted">No items awaiting approval</li>
+          <li
+            className="text-sm text-muted"
+            data-testid="portal-campaign-empty"
+          >
+            No items awaiting approval
+          </li>
         )}
       </ul>
     </main>
@@ -86,10 +91,20 @@ function ApprovalRow({
   const comments = thread.data ?? [];
 
   return (
-    <li className="flex flex-col gap-3 border-b border-[#D9D0C4] pb-5">
+    <li
+      className="flex flex-col gap-3 border-b border-[#D9D0C4] pb-5"
+      data-testid={`portal-campaign-${item.campaignItemId}`}
+      data-campaign-state={item.state}
+      data-campaign-title={item.title}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="font-medium text-ink">{item.title}</p>
+          <p
+            className="font-medium text-ink"
+            data-testid="portal-campaign-title"
+          >
+            {item.title}
+          </p>
           <p className="text-sm text-muted">
             {item.channel} · {item.scheduledFor ?? "unscheduled"} ·{" "}
             {item.state.replace("_", " ")}
@@ -97,12 +112,17 @@ function ApprovalRow({
         </div>
         {item.state === "pending_client" && !rejecting && (
           <div className="flex gap-2">
-            <Button type="button" onClick={onApprove}>
+            <Button
+              type="button"
+              data-testid="portal-campaign-approve"
+              onClick={onApprove}
+            >
               Approve
             </Button>
             <Button
               type="button"
               variant="ghost"
+              data-testid="portal-campaign-reject"
               onClick={() => setRejecting(true)}
             >
               Request changes
@@ -114,6 +134,7 @@ function ApprovalRow({
       {rejecting && (
         <form
           className="flex flex-col gap-2"
+          data-testid="portal-campaign-reject-form"
           onSubmit={(event) => {
             event.preventDefault();
             if (!reason.trim()) return;
@@ -122,18 +143,24 @@ function ApprovalRow({
         >
           <textarea
             className="min-h-24 rounded border border-sand bg-white px-3 py-2"
+            data-testid="portal-campaign-reject-reason"
             placeholder="What needs to change? (required)"
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             required
           />
           <div className="flex gap-2">
-            <Button type="submit" disabled={!reason.trim() || reject.isPending}>
+            <Button
+              type="submit"
+              data-testid="portal-campaign-reject-send"
+              disabled={!reason.trim() || reject.isPending}
+            >
               Send request
             </Button>
             <Button
               type="button"
               variant="ghost"
+              data-testid="portal-campaign-reject-cancel"
               onClick={() => setRejecting(false)}
             >
               Cancel
