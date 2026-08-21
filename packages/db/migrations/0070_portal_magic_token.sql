@@ -13,4 +13,20 @@ CREATE TABLE IF NOT EXISTS public.portal_magic_token (
 CREATE INDEX IF NOT EXISTS portal_magic_token_client_idx
   ON public.portal_magic_token (client_id);
 
-ALTER TABLE public.portal_magic_token ENABLE ROW LEVEL SECURITY;
+DO $$
+DECLARE
+  app_table text;
+BEGIN
+  FOREACH app_table IN ARRAY ARRAY['portal_magic_token']::text[] LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', app_table);
+    EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE public.%I FROM PUBLIC', app_table);
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+      EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE public.%I FROM anon', app_table);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+      EXECUTE format(
+        'REVOKE ALL PRIVILEGES ON TABLE public.%I FROM authenticated', app_table
+      );
+    END IF;
+  END LOOP;
+END $$;
