@@ -64,9 +64,14 @@ export default function HuntClientsPage() {
       setResult(
         `Closed loop ready${via} — client ${data.clientName}${
           data.calendarId ? " · content calendar seeded" : ""
-        }. Open Account, Creative, then portal.`,
+        }${
+          "outreachId" in data && data.outreachId
+            ? " · outreach draft queued"
+            : ""
+        }. Open Outreach, Account, Creative, then portal.`,
       );
       void utils.crm.deals.list.invalidate();
+      void utils.leadgen.outreach.invalidate();
       void utils.m4.seedIds.invalidate();
       void utils.calendars.invalidate();
       void utils.clients.invalidate();

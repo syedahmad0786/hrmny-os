@@ -49,6 +49,11 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(loop.onboardingPhases).toBeGreaterThanOrEqual(1);
       expect(loop.calendarId).toBeTruthy();
       expect(loop.portalInvite?.email).toBeTruthy();
+      expect(loop.outreachId).toBeTruthy();
+      const outreachList = await caller.leadgen.outreach.list();
+      expect(
+        outreachList.some((o) => o.id === loop.outreachId && o.state === "draft"),
+      ).toBe(true);
       const seededCals = await caller.calendars.listByClient({
         clientId: loop.clientId,
       });
@@ -139,6 +144,9 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(run.toolResults!.some((t) => t.tool === "crm.read" && t.ok)).toBe(
         true,
       );
+      expect(
+        run.toolResults!.some((t) => t.tool === "outreach.read" && t.ok),
+      ).toBe(true);
 
       const synced = await caller.invoices.syncXeroMirror();
       expect(synced.upserted).toBeGreaterThanOrEqual(0);

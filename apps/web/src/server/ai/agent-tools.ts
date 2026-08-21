@@ -1,6 +1,7 @@
 import { listDeals, listCompanies, getDeal } from "../crm/repository";
 import { listDeliveryTasks } from "../tasks/delivery-tasks";
 import { listDeliveryCalendars } from "../tasks/delivery-calendars";
+import { listOutreach } from "../leadgen/store";
 import { searchMemory } from "./memory-db";
 import { createN8nAdapter } from "@hrmny/integrations";
 import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
@@ -150,6 +151,35 @@ export async function runAgentTools(input: {
         tool: "delivery.read",
         ok: false,
         error: err instanceof Error ? err.message : "delivery_failed",
+      });
+    }
+  }
+
+  if (want("outreach.read") || want("outreach") || want("leadgen.outreach")) {
+    try {
+      const rows = await listOutreach(
+        input.scope.dealId ? { dealId: input.scope.dealId } : undefined,
+      );
+      results.push({
+        tool: "outreach.read",
+        ok: true,
+        data: {
+          count: rows.length,
+          items: rows.slice(0, 8).map((r) => ({
+            id: r.id,
+            dealId: r.dealId,
+            channel: r.channel,
+            state: r.state,
+            recipient: r.recipient,
+            subject: r.subject,
+          })),
+        },
+      });
+    } catch (err) {
+      results.push({
+        tool: "outreach.read",
+        ok: false,
+        error: err instanceof Error ? err.message : "outreach_failed",
       });
     }
   }
