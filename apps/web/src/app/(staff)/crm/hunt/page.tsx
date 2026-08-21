@@ -171,6 +171,7 @@ export default function HuntClientsPage() {
             <div className="mt-6 flex flex-wrap items-center gap-2">
               <input
                 className="min-w-[220px] flex-1 rounded-full border border-sand bg-white px-4 py-2 text-sm"
+                data-testid="hunt-apollo-query"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Apollo search (mock without key)"
@@ -178,6 +179,7 @@ export default function HuntClientsPage() {
               />
               <button
                 type="button"
+                data-testid="hunt-apollo-prospect"
                 className="rounded-full border border-sand bg-white px-4 py-2 text-sm disabled:opacity-40"
                 disabled={apolloImport.isPending || query.trim().length < 2}
                 onClick={() => {
@@ -190,6 +192,7 @@ export default function HuntClientsPage() {
               {lastApolloDealId ? (
                 <Link
                   className="text-sm underline"
+                  data-testid="hunt-apollo-open-deal"
                   href={`/crm/deals/${lastApolloDealId}`}
                 >
                   Open deal
