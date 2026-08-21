@@ -34,17 +34,22 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function defaultTools(employeeId: string): HarnessTool[] {
+function defaultTools(scope: {
+  employeeId: string;
+  clientId?: string | null;
+}): HarnessTool[] {
   return [
     {
       name: "search_memory",
-      description: "Search org memory for client/deal context snippets",
+      description:
+        "Search org memory for client/deal context snippets (respects client sandbox)",
       run: async (args) => {
         const query = String(args.query ?? "").slice(0, 500);
         if (!query) return { hits: [] };
         const hits = await searchMemory({
           query,
-          employeeId,
+          clientId: scope.clientId ?? undefined,
+          employeeId: scope.clientId ? undefined : scope.employeeId,
           limit: 5,
         });
         return {
@@ -53,6 +58,62 @@ function defaultTools(employeeId: string): HarnessTool[] {
             score: h.score,
           })),
         };
+      },
+    },
+    {
+      name: "crm_read",
+      description: "Read durable CRM deals/companies in the current sandbox",
+      run: async (args) => {
+        const { runAgentTools } = await import("../ai/agent-tools");
+        const results = await runAgentTools({
+          allowedTools: ["crm.read", "crm.companies"],
+          prompt: String(args.query ?? args.prompt ?? "crm snapshot"),
+          scope: {
+            clientId: scope.clientId ?? undefined,
+            employeeId: scope.employeeId,
+            dealId:
+              typeof args.dealId === "string" ? args.dealId : undefined,
+          },
+        });
+        return { tools: results };
+      },
+    },
+    {
+      name: "delivery_read",
+      description:
+        "Read delivery tasks and content calendars for the sandboxed client",
+      run: async (args) => {
+        if (!scope.clientId) {
+          return { error: "client_sandbox_required" };
+        }
+        const { runAgentTools } = await import("../ai/agent-tools");
+        const results = await runAgentTools({
+          allowedTools: ["delivery.read", "onboarding.read"],
+          prompt: String(args.query ?? args.prompt ?? "delivery snapshot"),
+          scope: {
+            clientId: scope.clientId,
+            employeeId: scope.employeeId,
+          },
+        });
+        return { tools: results };
+      },
+    },
+    {
+      name: "outreach_read",
+      description: "List HITL outreach drafts/sends (optionally for a dealId)",
+      run: async (args) => {
+        const { runAgentTools } = await import("../ai/agent-tools");
+        const results = await runAgentTools({
+          allowedTools: ["outreach.read"],
+          prompt: String(args.query ?? "outreach queue"),
+          scope: {
+            clientId: scope.clientId ?? undefined,
+            employeeId: scope.employeeId,
+            dealId:
+              typeof args.dealId === "string" ? args.dealId : undefined,
+          },
+        });
+        return { tools: results };
       },
     },
     {
@@ -318,7 +379,10 @@ export const chatRouter = router({
           : await runHarness({
               system,
               user: input.content,
-              tools: defaultTools(employeeId),
+              tools: defaultTools({
+                employeeId,
+                clientId: thread.clientId,
+              }),
               maxIterations,
               generate: async (messages) => {
                 const folded = messages.map((m) => {
