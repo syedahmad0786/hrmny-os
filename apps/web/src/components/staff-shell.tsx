@@ -33,7 +33,11 @@ const PRIMARY_NAV = [
     label: "Work",
     index: "03",
     features: ["work.projects"],
-    match: (p: string) => p === "/work" || p.startsWith("/work/"),
+    match: (p: string) =>
+      p === "/work" ||
+      p.startsWith("/work/") ||
+      p === "/tasks" ||
+      p.startsWith("/tasks/"),
   },
   {
     href: "/delivery",
@@ -44,6 +48,26 @@ const PRIMARY_NAV = [
       ["/delivery", "/traffic", "/creative", "/account", "/assets"].some(
         (h) => p === h || p.startsWith(`${h}/`),
       ),
+  },
+  {
+    href: "/chat",
+    label: "Chat",
+    index: "04b",
+    features: ["ai.os_chat"],
+    match: (p: string) => p === "/chat" || p.startsWith("/chat/"),
+  },
+  {
+    href: "/tickets",
+    label: "Support",
+    index: "04c",
+    features: ["support.tickets"],
+    match: (p: string) =>
+      p === "/tickets" ||
+      p.startsWith("/tickets/") ||
+      p === "/notifications" ||
+      p.startsWith("/notifications/") ||
+      p === "/approvals" ||
+      p.startsWith("/approvals/"),
   },
   {
     href: "/finance",

@@ -1068,8 +1068,14 @@ export const connectionsRouter = router({
       }
       const db = requireDb();
       const toolkitKey = `composio:${input.toolkit}`;
+      // Re-auth / reconnect: everyone can connect their own accounts.
+      // If a row already exists, refresh the managed auth request instead of CONFLICT.
       const [existing] = await db
-        .select({ id: connectionAccount.connectionAccountId })
+        .select({
+          id: connectionAccount.connectionAccountId,
+          externalConnectionId: connectionAccount.externalConnectionId,
+          status: connectionAccount.status,
+        })
         .from(connectionAccount)
         .where(
           and(
@@ -1079,16 +1085,47 @@ export const connectionsRouter = router({
           ),
         )
         .limit(1);
-      if (existing) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message:
-            "This toolkit is already connected or awaiting authorization",
-        });
-      }
 
       const request = await client.authorize(employeeId, input.toolkit);
       try {
+        if (existing) {
+          if (existing.externalConnectionId) {
+            await client
+              .disconnect(existing.externalConnectionId)
+              .catch(() => undefined);
+          }
+          const [saved] = await db.transaction(async (tx) => {
+            const updated = await tx
+              .update(connectionAccount)
+              .set({
+                externalConnectionId: request.id,
+                status: "pending",
+                authType: "composio_managed",
+                label: input.toolkit,
+                updatedAt: new Date(),
+              })
+              .where(eq(connectionAccount.connectionAccountId, existing.id))
+              .returning();
+            await tx.insert(auditEvent).values({
+              actorEmployeeId: employeeId,
+              action: "connections.composio.reauthorize",
+              entityType: "connection_account",
+              entityId: existing.id,
+              after: {
+                toolkit: input.toolkit,
+                status: "pending",
+                previousStatus: existing.status,
+              },
+            });
+            return updated;
+          });
+          return {
+            connectionAccountId: saved!.connectionAccountId,
+            redirectUrl: request.redirectUrl,
+            reconnected: true as const,
+          };
+        }
+
         const [saved] = await db.transaction(async (tx) => {
           const created = await tx
             .insert(connectionAccount)
@@ -1114,6 +1151,7 @@ export const connectionsRouter = router({
         return {
           connectionAccountId: saved!.connectionAccountId,
           redirectUrl: request.redirectUrl,
+          reconnected: false as const,
         };
       } catch (error) {
         await client.disconnect(request.id).catch(() => undefined);

@@ -11,3 +11,5 @@ export * from "./policy";
 export * from "./run-agent";
 export * from "./evals";
 export * from "./sandbox";
+export * from "./harness";
+export * from "./image";
