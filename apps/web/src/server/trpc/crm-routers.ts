@@ -989,6 +989,129 @@ export const crmRouter = router({
     mode: crmBackendMode(),
   })),
   stages: publicProcedure.query(() => pipelineStages()),
+  /**
+   * One-shot demo: mock prospect → pipeline → won → client onboarding →
+   * creative QC task. Works without Apollo/Hunter keys (uses CRM memory/Postgres).
+   */
+  runDemoClosedLoop: staffProcedure
+    .input(
+      z
+        .object({
+          companyName: z.string().min(2).max(120).optional(),
+        })
+        .optional(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const stamp = Date.now();
+      const companyName =
+        input?.companyName?.trim() || `Demo Hunt ${stamp}`;
+      const company = await createCompany({
+        name: companyName,
+        market: "UAE",
+        website: `https://demo-${stamp}.example`,
+      });
+      const contact = await createContact({
+        companyId: company.companyId,
+        firstName: "Demo",
+        lastName: "Prospect",
+        email: `prospect+${stamp}@example.com`,
+        title: "Marketing Lead",
+        isPrimary: true,
+      });
+      const deal = await createDeal({
+        companyName: company.name,
+        companyId: company.companyId,
+        primaryContactId: contact.contactId,
+        leadSourceLane: "relationship_led",
+        ownerEmployeeId: ctx.employeeId,
+      });
+
+      const stages = [
+        "qualify",
+        "engage",
+        "scope",
+        "propose",
+        "price_cost",
+      ] as const;
+      for (const to of stages) {
+        const moved = await moveDealStage({
+          dealId: deal.dealId,
+          to,
+          actorEmployeeId: ctx.employeeId,
+        });
+        if (!moved.ok) {
+          return {
+            ok: false as const,
+            step: `stage:${to}`,
+            reason: moved.reason,
+          };
+        }
+      }
+
+      await updateDeal(deal.dealId, {
+        quoteValue: "50000",
+        internalCost: "28000",
+      });
+
+      const closed = await closeDurableDeal({
+        dealId: deal.dealId,
+        outcome: "won",
+        actorEmployeeId: ctx.employeeId,
+      });
+      if (!closed.ok) {
+        return {
+          ok: false as const,
+          step: "close",
+          reason: closed.reason,
+          code: closed.code,
+        };
+      }
+
+      const pack = await durableHandoverPack({
+        dealId: deal.dealId,
+        actorEmployeeId: ctx.employeeId,
+      });
+      if (!pack.ok) {
+        return {
+          ok: false as const,
+          step: "handover",
+          reason: pack.reason,
+          code: pack.code,
+          dealId: deal.dealId,
+        };
+      }
+
+      await auditMutation(
+        ctx,
+        "crm.runDemoClosedLoop",
+        "deal",
+        deal.dealId,
+        null,
+        {
+          companyId: company.companyId,
+          clientId: pack.client.clientId,
+          taskId: pack.task?.taskId ?? null,
+        },
+      );
+
+      return {
+        ok: true as const,
+        companyId: company.companyId,
+        contactId: contact.contactId,
+        dealId: deal.dealId,
+        clientId: pack.client.clientId,
+        clientName: pack.client.name,
+        taskId: pack.task?.taskId ?? null,
+        onboardingPhases: pack.onboardingPhases,
+        fired: pack.pack.fired,
+        next: {
+          crmDeal: `/crm/deals/${deal.dealId}`,
+          client: `/clients/${pack.client.clientId}`,
+          creative: "/creative",
+          portal: "/portal/deliveries",
+        },
+      };
+    }),
   companies: crmCompaniesRouter,
   contacts: crmContactsRouter,
   deals: crmDealsRouter,

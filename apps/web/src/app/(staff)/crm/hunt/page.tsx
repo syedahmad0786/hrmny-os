@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
+import { trpc } from "@/lib/trpc";
 
 const STEPS = [
   {
@@ -30,6 +32,20 @@ const STEPS = [
 ] as const;
 
 export default function HuntClientsPage() {
+  const [result, setResult] = useState<string | null>(null);
+  const demo = trpc.crm.runDemoClosedLoop.useMutation({
+    onSuccess: (data) => {
+      if (!data.ok) {
+        setResult(`Blocked at ${data.step}: ${data.reason}`);
+        return;
+      }
+      setResult(
+        `Closed loop ready — client ${data.clientName}. Open creative, then portal deliveries.`,
+      );
+    },
+    onError: (err) => setResult(err.message),
+  });
+
   return (
     <main className="ops-home">
       <section className="ops-command" aria-labelledby="hunt-title">
@@ -50,6 +66,58 @@ export default function HuntClientsPage() {
             <p className="ops-support">
               Follow the sequence. Each step opens the exact workspace — no
               scavenger hunt through the nav.
+            </p>
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                className="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-white disabled:opacity-40"
+                disabled={demo.isPending}
+                onClick={() => {
+                  setResult(null);
+                  demo.mutate({});
+                }}
+              >
+                {demo.isPending
+                  ? "Running demo loop…"
+                  : "Run demo closed loop"}
+              </button>
+              {demo.data && demo.data.ok ? (
+                <>
+                  <Link
+                    className="text-sm underline"
+                    href={demo.data.next.crmDeal}
+                  >
+                    Deal
+                  </Link>
+                  <Link
+                    className="text-sm underline"
+                    href={demo.data.next.client}
+                  >
+                    Client
+                  </Link>
+                  <Link
+                    className="text-sm underline"
+                    href={demo.data.next.creative}
+                  >
+                    Creative
+                  </Link>
+                  <Link
+                    className="text-sm underline"
+                    href={demo.data.next.portal}
+                  >
+                    Portal
+                  </Link>
+                </>
+              ) : null}
+            </div>
+            {result ? (
+              <p className="mt-3 text-sm text-muted" role="status">
+                {result}
+              </p>
+            ) : null}
+            <p className="mt-2 text-xs text-muted">
+              Seeds prospect → won deal → onboarding + creative task without
+              Apollo/Hunter keys. Paste keys in Connections for live enrichment.
             </p>
           </div>
 
@@ -79,9 +147,6 @@ export default function HuntClientsPage() {
             </Link>
             <Link href="/crm/activities">
               Activities <span aria-hidden>↗</span>
-            </Link>
-            <Link href="/settings/connections">
-              Connect Apollo / Hunter <span aria-hidden>↗</span>
             </Link>
           </nav>
         </footer>

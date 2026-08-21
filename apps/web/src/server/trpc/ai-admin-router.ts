@@ -1,6 +1,8 @@
 import { sql } from "@hrmny/db";
 import {
   AgentIdSchema,
+  createProvider,
+  estimateCostAed,
   isAgentEnabled,
   listParentAgents,
   memorySandboxMetadata,
@@ -12,7 +14,7 @@ import { z } from "zod";
 import { getDb } from "../db";
 import { writeAudit } from "../m1-persistence";
 import { persistMemoryChunk, searchMemory } from "../ai/memory-db";
-import { boundRunAgent } from "../ai/run-agent-bound";
+import { boundRunAgent, persistAgentRun } from "../ai/run-agent-bound";
 import { router, staffProcedure, type TrpcContext } from "./trpc";
 
 /**
@@ -450,6 +452,183 @@ export const aiAdminRouter = router({
           reason: null,
         });
         return { ok: true };
+      }),
+
+    /**
+     * Run a custom agent on command with per-client / per-user memory sandbox.
+     * Uses the agent system_prompt (mock LLM when keys/credits unavailable).
+     */
+    run: staffProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          prompt: z.string().min(1).max(8000),
+          clientId: z.string().uuid().optional(),
+          dealId: z.string().uuid().optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const actor = requireAiAdmin(ctx);
+        const db = getDb();
+        let agent: CustomAgentRow | undefined;
+        if (!db) {
+          agent = memCustomAgents.find((a) => a.customAgentId === input.id);
+        } else {
+          const rows = await db.execute<CustomAgentRow>(sql`
+            select
+              custom_agent_id as "customAgentId",
+              slug, display_name as "displayName",
+              responsibility, system_prompt as "systemPrompt",
+              model, enabled,
+              produces_drafts as "producesDrafts",
+              coalesce(allowed_tools, '[]'::jsonb) as "allowedTools",
+              created_by_employee_id as "createdByEmployeeId",
+              created_at::text as "createdAt",
+              updated_at::text as "updatedAt"
+            from public.custom_agent
+            where custom_agent_id = ${input.id}::uuid
+            limit 1
+          `);
+          agent = rows[0];
+        }
+        if (!agent) throw new TRPCError({ code: "NOT_FOUND" });
+        if (!agent.enabled) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: `Custom agent "${agent.slug}" is disabled`,
+          });
+        }
+
+        const scope = memorySandboxMetadata({
+          clientId: input.clientId,
+          employeeId: actor.employeeId,
+          dealId: input.dealId,
+        });
+        if (Object.keys(scope).length) {
+          await persistMemoryChunk({
+            sourceType: "note",
+            content: input.prompt,
+            metadata: {
+              ...scope,
+              kind: "custom_agent_run_prompt",
+              agentSlug: agent.slug,
+            },
+          });
+        }
+        const memory = await searchMemory({
+          query: input.prompt,
+          clientId: input.clientId,
+          employeeId: input.clientId ? undefined : actor.employeeId,
+          dealId: input.dealId,
+          limit: 6,
+        });
+
+        const system = [
+          agent.systemPrompt?.trim() ||
+            `You are ${agent.displayName} (${agent.slug}).`,
+          agent.responsibility?.trim()
+            ? `Responsibility: ${agent.responsibility.trim()}`
+            : "",
+          "Stay inside the assigned client/user memory sandbox. Do not invent client facts.",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        const provider = createProvider({
+          defaultModel: agent.model ?? undefined,
+        });
+        let generated;
+        try {
+          generated = await provider.generate({
+            model: agent.model ?? undefined,
+            task: "generic",
+            messages: [
+              { role: "system", content: system },
+              {
+                role: "user",
+                content: `${input.prompt}\n\ncontext: ${JSON.stringify({
+                  sandbox: scope,
+                  memory,
+                  agentSlug: agent.slug,
+                })}`,
+              },
+            ],
+          });
+        } catch (err) {
+          // Demo-ready: fall back to mock when OpenRouter has no credits/keys.
+          const mock = createProvider({ provider: "mock" });
+          generated = await mock.generate({
+            model: "mock",
+            task: "generic",
+            messages: [
+              { role: "system", content: system },
+              {
+                role: "user",
+                content: `${input.prompt}\n\ncontext: ${JSON.stringify({
+                  sandbox: scope,
+                  memory,
+                  agentSlug: agent.slug,
+                  fallback:
+                    err instanceof Error ? err.message.slice(0, 120) : "llm_error",
+                })}`,
+              },
+            ],
+          });
+        }
+
+        const inputTokens = generated.inputTokens ?? 0;
+        const outputTokens = generated.outputTokens ?? 0;
+        const output = {
+          agent: `custom:${agent.slug}` as const,
+          model: generated.model,
+          output:
+            (generated.object as Record<string, unknown>) ?? generated.text,
+          inputTokens,
+          outputTokens,
+          costAed: estimateCostAed(generated.model, inputTokens, outputTokens),
+          gateOutcome: (agent.producesDrafts
+            ? "pending"
+            : "not_applicable") as AgentGateOutcome,
+        };
+
+        await persistAgentRun(
+          {
+            agent: "research" as never,
+            input: input.prompt,
+            roles: actor.roles,
+            model: agent.model ?? undefined,
+            context: {
+              sandbox: scope,
+              memory,
+              customAgentId: agent.customAgentId,
+              customAgentSlug: agent.slug,
+            },
+          },
+          { ...output, agent: `custom:${agent.slug}` as never },
+        ).catch(() => undefined);
+
+        await writeAudit({
+          actorEmployeeId: actor.employeeId,
+          action: "ai.custom_agent.run",
+          entityType: "custom_agent",
+          entityId: agent.customAgentId,
+          before: null,
+          after: {
+            slug: agent.slug,
+            clientId: input.clientId ?? null,
+            model: output.model,
+          },
+          reason: null,
+        });
+
+        return {
+          ...output,
+          customAgentId: agent.customAgentId,
+          slug: agent.slug,
+          displayName: agent.displayName,
+          sandbox: scope,
+          provider: generated.provider,
+        };
       }),
   }),
 });

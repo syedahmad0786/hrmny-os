@@ -26,10 +26,23 @@ export default function CreativeQcPage() {
   const generate = trpc.creativeGen.generate.useMutation({
     onSuccess: () => void utils.creativeGen.list.invalidate(),
   });
+  const sendToPortal = trpc.creativeGen.sendToPortal.useMutation({
+    onSuccess: (data) => {
+      void utils.creativeGen.list.invalidate();
+      void utils.tasks.invalidate();
+      setMsg(
+        data.ok
+          ? `Sent to portal asset ${data.assetId.slice(0, 8)}… → ${data.portalHref}`
+          : "Send failed",
+      );
+    },
+  });
+  const clients = trpc.clients.list.useQuery(undefined, { staleTime: 60_000 });
   const [msg, setMsg] = useState<string | null>(null);
   const [prompt, setPrompt] = useState(
     "Ochre and sand brand moodboard — soft studio light, editorial product still life",
   );
+  const [portalClientId, setPortalClientId] = useState("");
 
   async function tryClientFacing() {
     if (!taskId) return;
@@ -101,11 +114,52 @@ export default function CreativeQcPage() {
           onClick={() =>
             generate.mutate({
               prompt: prompt.trim(),
+              clientId: portalClientId || undefined,
             })
           }
         >
           {generate.isPending ? "Generating…" : "Generate image"}
         </Button>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <label className="text-xs text-muted" htmlFor="portal-client">
+            Portal client
+          </label>
+          <select
+            id="portal-client"
+            className="rounded-lg border border-sand bg-white px-2 py-1.5 text-sm"
+            value={portalClientId}
+            onChange={(e) => setPortalClientId(e.target.value)}
+          >
+            <option value="">Select client…</option>
+            {(clients.data ?? []).map((c) => (
+              <option key={c.clientId} value={c.clientId}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={
+              sendToPortal.isPending ||
+              !portalClientId ||
+              !generate.data?.creativeGenerationId ||
+              generate.data.status !== "ready"
+            }
+            onClick={() => {
+              if (!generate.data?.creativeGenerationId || !portalClientId) return;
+              sendToPortal.mutate({
+                creativeGenerationId: generate.data.creativeGenerationId,
+                clientId: portalClientId,
+              });
+            }}
+          >
+            {sendToPortal.isPending ? "Sending…" : "Attach & send to portal"}
+          </Button>
+        </div>
+        {sendToPortal.error ? (
+          <p className="mt-2 text-red-700">{sendToPortal.error.message}</p>
+        ) : null}
         {generate.error ? (
           <p className="mt-2 text-red-700">{generate.error.message}</p>
         ) : null}
@@ -134,6 +188,20 @@ export default function CreativeQcPage() {
                     className="aspect-square w-full rounded-md border border-sand object-cover"
                   />
                   <p className="mt-1 line-clamp-2 text-muted">{g.prompt}</p>
+                  <button
+                    type="button"
+                    className="mt-1 text-[11px] underline disabled:opacity-40"
+                    disabled={!portalClientId || sendToPortal.isPending}
+                    onClick={() => {
+                      if (!portalClientId) return;
+                      sendToPortal.mutate({
+                        creativeGenerationId: g.creativeGenerationId,
+                        clientId: portalClientId,
+                      });
+                    }}
+                  >
+                    Send to portal
+                  </button>
                 </div>
               ) : null,
             )}
