@@ -34,7 +34,8 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function defaultTools(scope: {
+/** Exported for unit tests — chat harness tools for a staff/client sandbox. */
+export function buildChatDefaultTools(scope: {
   employeeId: string;
   clientId?: string | null;
 }): HarnessTool[] {
@@ -160,6 +161,13 @@ function defaultTools(scope: {
       run: async () => ({ utc: nowIso() }),
     },
   ];
+}
+
+function defaultTools(scope: {
+  employeeId: string;
+  clientId?: string | null;
+}): HarnessTool[] {
+  return buildChatDefaultTools(scope);
 }
 
 export const chatRouter = router({

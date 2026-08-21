@@ -10,6 +10,7 @@ const STARTERS = [
   "Summarize open pipeline deals that need a next action",
   "What delivery tasks are blocked on QC?",
   "Draft a warm outreach opener for a Dubai hospitality lead",
+  "Advance this client’s funnel drafts (brief, campaign, portal invite)",
   "List my unread notifications and tickets",
 ] as const;
 
@@ -80,6 +81,18 @@ export default function HrmnyChatPage() {
     }
   }, [threadId, threads.data]);
 
+  const activeThread = threads.data?.find((t) => t.chatThreadId === threadId);
+
+  useEffect(() => {
+    if (!activeThread) return;
+    setClientId(activeThread.clientId ?? "");
+    setAgentSlug(activeThread.agentSlug ?? "");
+  }, [
+    activeThread?.chatThreadId,
+    activeThread?.clientId,
+    activeThread?.agentSlug,
+  ]);
+
   useEffect(() => {
     scroller.current?.scrollTo({
       top: scroller.current.scrollHeight,
@@ -93,8 +106,6 @@ export default function HrmnyChatPage() {
       "New conversation",
     [threads.data, threadId],
   );
-
-  const activeThread = threads.data?.find((t) => t.chatThreadId === threadId);
 
   function submit(text: string) {
     const content = text.trim();
