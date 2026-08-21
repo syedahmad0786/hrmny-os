@@ -871,7 +871,7 @@ test.describe("Demo funnel", () => {
     await expect
       .poll(async () => sandbox.locator("option").count(), { timeout: 30_000 })
       .toBeGreaterThan(1);
-    await sandbox.selectOption({ label: /Demo Co/i });
+    await sandbox.selectOption({ label: "Demo Co LLC" });
 
     const slug = `e2e-coach-${Date.now()}`;
     await page.getByTestId("ai-agent-slug").fill(slug);
