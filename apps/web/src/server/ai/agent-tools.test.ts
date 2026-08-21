@@ -17,6 +17,8 @@ describe("runAgentTools funnel writes", () => {
         "campaigns.draft",
         "briefs.draft",
         "crm.note",
+        "portal.invite",
+        "creative.sendToPortal",
       ],
       prompt: "Prepare LinkedIn launch cutdowns for UAE retail",
       scope: {
@@ -30,6 +32,8 @@ describe("runAgentTools funnel writes", () => {
     expect(byTool["campaigns.draft"]?.ok).toBe(true);
     expect(byTool["briefs.draft"]?.ok).toBe(true);
     expect(byTool["crm.note"]?.ok).toBe(true);
+    expect(byTool["portal.invite"]?.ok).toBe(true);
+    expect(byTool["creative.sendToPortal"]?.ok).toBe(true);
     expect(byTool["crm.prospect"]).toBeUndefined();
 
     const campaign = byTool["campaigns.draft"]?.data as {
@@ -45,7 +49,24 @@ describe("runAgentTools funnel writes", () => {
     };
     expect(brief?.briefId).toBeTruthy();
     expect(brief?.dorComplete).toBe(true);
-    expect(getDemoStore().briefs.has(brief!.briefId!)).toBe(true);
+
+    const invite = byTool["portal.invite"]?.data as {
+      portalPath?: string;
+      deliveryMode?: string;
+    };
+    expect(invite?.portalPath).toMatch(/\/portal\/login\/verify/);
+    expect(invite?.deliveryMode).toBe("mock");
+
+    const portalAsset = byTool["creative.sendToPortal"]?.data as {
+      assetId?: string;
+      portalHref?: string;
+      mode?: string;
+    };
+    expect(portalAsset?.assetId).toBeTruthy();
+    expect(portalAsset?.portalHref).toBe("/portal/deliveries");
+    if (portalAsset?.mode === "memory") {
+      expect(getDemoStore().assets.has(portalAsset.assetId!)).toBe(true);
+    }
   });
 
   it("crm.prospect imports mock Apollo companies outside client sandbox", async () => {

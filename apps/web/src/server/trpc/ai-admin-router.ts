@@ -254,6 +254,8 @@ export const aiAdminRouter = router({
           "campaigns.draft",
           "briefs.draft",
           "crm.prospect",
+          "portal.invite",
+          "creative.sendToPortal",
         ],
         prompt: input.prompt,
         scope: {
@@ -347,6 +349,8 @@ export const aiAdminRouter = router({
               "campaigns.draft",
               "briefs.draft",
               "crm.prospect",
+              "portal.invite",
+              "creative.sendToPortal",
             ],
             createdByEmployeeId: actor.employeeId,
             createdAt: new Date().toISOString(),
@@ -390,6 +394,8 @@ export const aiAdminRouter = router({
                   "campaigns.draft",
                   "briefs.draft",
                   "crm.prospect",
+                  "portal.invite",
+                  "creative.sendToPortal",
                 ],
               )}::jsonb,
               ${actor.employeeId}::uuid

@@ -167,6 +167,12 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(
         run.toolResults!.some((t) => t.tool === "briefs.draft" && t.ok),
       ).toBe(true);
+      expect(
+        run.toolResults!.some((t) => t.tool === "portal.invite" && t.ok),
+      ).toBe(true);
+      expect(
+        run.toolResults!.some((t) => t.tool === "creative.sendToPortal" && t.ok),
+      ).toBe(true);
       const createdTask = run.toolResults!.find(
         (t) => t.tool === "tasks.create" && t.ok,
       );

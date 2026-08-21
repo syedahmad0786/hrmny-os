@@ -81,10 +81,18 @@ export async function runAgentTools(input: {
   if (!allowed.length) return [];
 
   const results: AgentToolResult[] = [];
-  const want = (name: string) =>
-    allowed.includes(name) ||
-    allowed.includes(name.split(".")[0]!) ||
-    allowed.some((a) => a === "*" || a.endsWith(".*") && name.startsWith(a.slice(0, -1)));
+  const want = (name: string) => {
+    const key = name.toLowerCase();
+    return (
+      allowed.includes(key) ||
+      allowed.includes(key.split(".")[0]!) ||
+      allowed.some(
+        (a) =>
+          a === "*" ||
+          (a.endsWith(".*") && key.startsWith(a.slice(0, -1))),
+      )
+    );
+  };
 
   if (want("memory.search") || want("memory")) {
     try {
@@ -612,6 +620,146 @@ export async function runAgentTools(input: {
         tool: "crm.prospect",
         ok: false,
         error: err instanceof Error ? err.message : "crm_prospect_failed",
+      });
+    }
+  }
+
+  if (
+    input.scope.clientId &&
+    (want("portal.invite") ||
+      want("portal.magic_link") ||
+      want("onboarding.invite"))
+  ) {
+    try {
+      const { sendPortalInviteMagicLink } = await import(
+        "../auth/portal-magic-link"
+      );
+      const { createResendMock } = await import("@hrmny/integrations");
+      const emailMatch = input.prompt.match(
+        /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
+      );
+      const email =
+        emailMatch?.[0]?.toLowerCase() ??
+        `portal+${input.scope.clientId.slice(0, 8)}@example.com`;
+      const placeholderInbox = email.endsWith("@example.com");
+      const sent = await sendPortalInviteMagicLink({
+        clientId: input.scope.clientId,
+        email,
+        displayName: "Agent portal invite",
+        emailer: placeholderInbox ? createResendMock() : undefined,
+      });
+      results.push({
+        tool: "portal.invite",
+        ok: true,
+        data: {
+          email: sent.email,
+          clientId: sent.clientId,
+          portalPath: sent.portalPath,
+          deliveryMode: sent.delivery.mode,
+          deliveryId: sent.delivery.id,
+        },
+      });
+    } catch (err) {
+      results.push({
+        tool: "portal.invite",
+        ok: false,
+        error: err instanceof Error ? err.message : "portal_invite_failed",
+      });
+    }
+  }
+
+  if (
+    input.scope.clientId &&
+    (want("creative.sendToPortal") ||
+      want("creative.portal") ||
+      want("portal.deliverable"))
+  ) {
+    try {
+      const title =
+        `[agent] ${input.prompt.trim().slice(0, 100) || "Creative deliverable"}`.slice(
+          0,
+          180,
+        );
+      const db = getDb();
+      if (!db) {
+        const store = getDemoStore();
+        const asset = store.createAsset(
+          title,
+          input.scope.clientId,
+          input.scope.taskId ?? null,
+        );
+        asset.status = "client_review";
+        const storagePath = `dam/${asset.assetId}/v1-agent.txt`;
+        asset.versions.push({
+          assetVersionId: crypto.randomUUID(),
+          assetId: asset.assetId,
+          storagePath,
+          versionNumber: 1,
+          isClientRevision: false,
+          uploadedByEmployeeId: input.scope.employeeId ?? null,
+          createdAt: new Date().toISOString(),
+        });
+        results.push({
+          tool: "creative.sendToPortal",
+          ok: true,
+          data: {
+            assetId: asset.assetId,
+            clientId: input.scope.clientId,
+            portalHref: "/portal/deliveries",
+            mode: "memory",
+          },
+        });
+      } else {
+        const assets = await db.execute<{ assetId: string }>(sql`
+          insert into public.asset (title, client_id, status, task_id)
+          values (
+            ${title},
+            ${input.scope.clientId}::uuid,
+            'client_review',
+            ${input.scope.taskId ?? null}::uuid
+          )
+          returning asset_id as "assetId"
+        `);
+        const assetId = assets[0]!.assetId;
+        const storagePath = `dam/${assetId}/v1-agent.txt`;
+        const body = new TextEncoder().encode(
+          input.prompt.trim().slice(0, 4000) || title,
+        );
+        const { getObjectStore } = await import("../storage/object-store");
+        await getObjectStore().put({
+          path: storagePath,
+          body,
+          contentType: "text/plain; charset=utf-8",
+        });
+        await db.execute(sql`
+          insert into public.asset_version (
+            asset_id, storage_path, version_number, is_client_revision,
+            uploaded_by_employee_id
+          ) values (
+            ${assetId}::uuid,
+            ${storagePath},
+            1,
+            false,
+            ${input.scope.employeeId ?? null}::uuid
+          )
+        `);
+        results.push({
+          tool: "creative.sendToPortal",
+          ok: true,
+          data: {
+            assetId,
+            clientId: input.scope.clientId,
+            portalHref: "/portal/deliveries",
+            mode: "durable",
+          },
+        });
+      }
+    } catch (err) {
+      results.push({
+        tool: "creative.sendToPortal",
+        ok: false,
+        error:
+          err instanceof Error ? err.message : "creative_send_to_portal_failed",
       });
     }
   }
