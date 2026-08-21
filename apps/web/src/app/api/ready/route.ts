@@ -21,10 +21,11 @@ export async function GET() {
     }
   }
   const has = (k: string) => Boolean(process.env[k]?.trim());
-  const [apollo, hunter, xero] = await Promise.all([
+  const [apollo, hunter, xero, n8n] = await Promise.all([
     toolConfiguredStatus("apollo"),
     toolConfiguredStatus("hunter"),
     toolConfiguredStatus("xero"),
+    toolConfiguredStatus("n8n"),
   ]);
   const body = {
     ok: database === "up",
@@ -38,9 +39,7 @@ export async function GET() {
       apollo,
       hunter,
       n8n:
-        has("N8N_API_KEY") && process.env.N8N_MODE?.toLowerCase() !== "mock"
-          ? "configured"
-          : "mock",
+        process.env.N8N_MODE?.toLowerCase() === "mock" ? "mock" : n8n,
       openrouter: has("OPENROUTER_API_KEY") ? "configured" : "mock",
       googleOAuth: has("GOOGLE_OAUTH_CLIENT_ID") ? "configured" : "missing",
       xero,
