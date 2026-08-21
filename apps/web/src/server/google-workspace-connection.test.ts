@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { GoogleProfileSchema } from "./trpc/connections-router";
+import {
+  GoogleProfileSchema,
+  getGoogleWorkspaceAccessToken,
+} from "./trpc/connections-router";
 
 describe("Google Workspace connection", () => {
   it("accepts verified hrmny accounts and rejects personal accounts", () => {
@@ -15,5 +18,17 @@ describe("Google Workspace connection", () => {
         email_verified: true,
       }),
     ).toThrow();
+  });
+
+  it("returns null without DATABASE_URL (memory mode)", async () => {
+    const prev = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = "";
+    try {
+      await expect(
+        getGoogleWorkspaceAccessToken("c0000000-0000-4000-8000-000000000001"),
+      ).resolves.toBeNull();
+    } finally {
+      process.env.DATABASE_URL = prev;
+    }
   });
 });
