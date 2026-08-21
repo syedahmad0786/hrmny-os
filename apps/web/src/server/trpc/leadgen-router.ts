@@ -79,6 +79,15 @@ async function resolveComposioSend(
       });
     }
   }
+  // In supabase (prod) mode never pretend a send succeeded without a live
+  // Composio Gmail or Google Workspace token — stub would mark outreach sent.
+  if ((process.env.AUTH_MODE ?? "supabase").toLowerCase() === "supabase") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "No live Gmail connection. Connect Google Workspace or Composio Gmail under Settings → Connections.",
+    });
+  }
   return createComposioStub();
 }
 /**

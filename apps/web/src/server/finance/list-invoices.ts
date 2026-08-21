@@ -70,7 +70,7 @@ export async function listOsInvoices(): Promise<BillingInvoiceRow[]> {
     vatAmount: r.vat_amount,
     currency: r.currency ?? "AED",
     invoiceType: r.invoice_type,
-    billingKind: "os",
+    billingKind: r.invoice_type || "os",
     clientId: r.client_id,
     period: r.period,
     trn: null,

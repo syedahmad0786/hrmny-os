@@ -163,6 +163,32 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(synced.upserted).toBeGreaterThanOrEqual(0);
       const billed = await caller.invoices.list();
       expect(Array.isArray(billed)).toBe(true);
+      expect(loop.invoiceId).toBeTruthy();
+      expect(
+        billed.some(
+          (i) =>
+            i.invoiceId === loop.invoiceId &&
+            i.clientId === loop.clientId &&
+            (i.invoiceType === "first" || i.billingKind === "first"),
+        ),
+      ).toBe(true);
+      if (loop.invoiceId) {
+        const approved = await caller.invoices.approve({ id: loop.invoiceId });
+        expect(approved.result.ok).toBe(true);
+        expect(approved.invoice.status).toBe("approved");
+        const transitioned = await caller.invoices.transition({
+          id: loop.invoiceId,
+          to: "issued",
+          from: "approved",
+        });
+        expect(transitioned.ok).toBe(true);
+        const after = await caller.invoices.list();
+        expect(
+          after.some(
+            (i) => i.invoiceId === loop.invoiceId && i.status === "issued",
+          ),
+        ).toBe(true);
+      }
       if (synced.upserted > 0) {
         expect(
           billed.some(
