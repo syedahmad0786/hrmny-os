@@ -84,6 +84,62 @@ export async function getClientOnboarding(
   return rows[0]?.phases ?? [];
 }
 
+
+async function resolveStaffForClient(clientId: string): Promise<string | null> {
+  const db = getDb();
+  if (!db) {
+    const { DEMO_EMPLOYEE_ID } = await import("../demo-store");
+    return DEMO_EMPLOYEE_ID;
+  }
+  try {
+    const leads = await db.execute<{ employeeId: string }>(sql`
+      select employee_id as "employeeId"
+      from public.account_team_member
+      where client_id = ${clientId}::uuid
+        and is_account_lead = true
+      order by created_at asc
+      limit 1
+    `);
+    if (leads[0]?.employeeId) return leads[0].employeeId;
+    const anyStaff = await db.execute<{ employeeId: string }>(sql`
+      select employee_id as "employeeId"
+      from public.employee
+      where is_active = true
+      order by created_at asc
+      limit 1
+    `);
+    return anyStaff[0]?.employeeId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Staff OS inbox after client (or staff) signs off an onboarding phase. */
+export async function notifyStaffOfOnboardingSignoff(input: {
+  clientId: string;
+  phaseName: string;
+  phaseIndex: number;
+  advanced: boolean;
+  nextPhaseName?: string | null;
+}): Promise<void> {
+  const employeeId = await resolveStaffForClient(input.clientId);
+  if (!employeeId) return;
+  const nextBit =
+    input.advanced && input.nextPhaseName
+      ? ` Next up: ${input.nextPhaseName}.`
+      : "";
+  const { notifyEmployee } = await import("../notifications/store");
+  await notifyEmployee({
+    employeeId,
+    title: `Onboarding signed off: ${input.phaseName}`,
+    body: `Phase ${input.phaseIndex + 1} ("${input.phaseName}") was acknowledged.${nextBit}`,
+    kind: "onboarding",
+    href: `/clients/${input.clientId}`,
+    entityType: "client",
+    entityId: input.clientId,
+  }).catch(() => undefined);
+}
+
 export async function signoffOnboardingPhase(input: {
   clientId: string;
   phaseIndex: number;
@@ -114,6 +170,7 @@ export async function signoffOnboardingPhase(input: {
     set phases = ${JSON.stringify(phases)}::jsonb, updated_at = now()
     where client_id = ${input.clientId}::uuid
   `);
+  const employeeId = await resolveStaffForClient(input.clientId);
   const { persistMemoryChunk } = await import("../ai/memory-db");
   await persistMemoryChunk({
     sourceType: "feedback",
@@ -123,9 +180,17 @@ export async function signoffOnboardingPhase(input: {
     }`,
     metadata: {
       clientId: input.clientId,
+      employeeId: employeeId ?? undefined,
       kind: "onboarding.phase_signoff",
       phaseIndex: input.phaseIndex,
     },
+  });
+  await notifyStaffOfOnboardingSignoff({
+    clientId: input.clientId,
+    phaseName: phase.name,
+    phaseIndex: input.phaseIndex,
+    advanced,
+    nextPhaseName: next?.name ?? null,
   });
   return { advanced, phases };
 }

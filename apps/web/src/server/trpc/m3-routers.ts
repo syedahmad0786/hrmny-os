@@ -23,6 +23,7 @@ import {
   ensureClientOnboarding,
   getClientOnboarding,
   signoffOnboardingPhase,
+  notifyStaffOfOnboardingSignoff,
 } from "../clients/onboarding";
 import { getImmersion, upsertImmersion } from "../clients/immersion";
 import {
@@ -1346,6 +1347,13 @@ export const clientsRouter = router({
             signoffType: input.signoffType,
           },
           reason: null,
+        });
+        await notifyStaffOfOnboardingSignoff({
+          clientId: input.clientId,
+          phaseName: phase.name,
+          phaseIndex: input.phaseIndex,
+          advanced,
+          nextPhaseName: next?.name ?? null,
         });
         return { advanced, phases: store.onboarding.get(input.clientId) };
       }),
