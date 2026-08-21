@@ -3,6 +3,7 @@
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 const DOR_FIELDS = [
@@ -38,6 +39,7 @@ export default function TrafficDorPage() {
 
   const [body, setBody] = useState<Record<string, string>>({});
   const [lockMsg, setLockMsg] = useState<string | null>(null);
+  const [spawnedTaskId, setSpawnedTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     if (brief.data?.body) {
@@ -74,8 +76,10 @@ export default function TrafficDorPage() {
     if (!briefId) return;
     const result = await lock.mutateAsync({ id: briefId });
     if (!result.ok) {
+      setSpawnedTaskId(null);
       setLockMsg(result.reason);
     } else {
+      setSpawnedTaskId(result.spawnedTaskId ?? null);
       setLockMsg(`Locked → taskStatus=${result.taskStatus}`);
     }
   }
@@ -103,7 +107,10 @@ export default function TrafficDorPage() {
       </div>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">
-        <p className="text-sm">
+        <p className="text-sm" data-testid="traffic-brief-id">
+          Brief: <span className="font-mono text-xs">{briefId ?? "…"}</span>
+        </p>
+        <p className="mt-2 text-sm" data-testid="traffic-dor-missing">
           Missing:{" "}
           <strong>{brief.data?.missingRequiredCount ?? "—"}</strong>
           {brief.data?.missing?.length
@@ -131,12 +138,14 @@ export default function TrafficDorPage() {
           <Button
             type="button"
             variant="ghost"
+            data-testid="traffic-save-validate"
             onClick={() => void saveBody(body)}
           >
             Save & validate DoR
           </Button>
           <Button
             type="button"
+            data-testid="traffic-fill-lock"
             onClick={() =>
               void saveBody({
                 objective: "Grow retail",
@@ -151,11 +160,38 @@ export default function TrafficDorPage() {
           >
             Fill ≤2 missing & lock
           </Button>
-          <Button type="button" variant="ghost" onClick={() => void tryLock()}>
+          <Button
+            type="button"
+            variant="ghost"
+            data-testid="traffic-try-lock"
+            onClick={() => void tryLock()}
+          >
             Try lock (expect block if &gt;2)
           </Button>
         </div>
-        {lockMsg ? <p className="mt-3 text-sm text-ink">{lockMsg}</p> : null}
+        {lockMsg ? (
+          <p className="mt-3 text-sm text-ink" data-testid="traffic-lock-status">
+            {lockMsg}
+          </p>
+        ) : null}
+        {spawnedTaskId ? (
+          <div
+            className="mt-3 rounded border border-sand bg-white/80 p-3 text-sm"
+            data-testid="traffic-spawn-result"
+          >
+            <p>
+              Spawned creative task{" "}
+              <span className="font-mono text-xs">{spawnedTaskId}</span>
+            </p>
+            <Link
+              className="mt-2 inline-block text-ochre underline"
+              href={`/creative?taskId=${spawnedTaskId}`}
+              data-testid="traffic-creative-task-link"
+            >
+              Open creative task
+            </Link>
+          </div>
+        ) : null}
       </section>
     </main>
   );

@@ -61,6 +61,9 @@ describe("M4 delivery demo", () => {
     expect(locked.ok).toBe(true);
     if (locked.ok) {
       expect(locked.taskStatus).toBe("brief_ready");
+      expect(locked.spawnedTaskId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
     }
   });
 
