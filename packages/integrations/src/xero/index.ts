@@ -90,7 +90,12 @@ export function createXeroMock(): XeroAdapter {
       return `https://login.xero.com/identity/connect/authorize?state=${encodeURIComponent(state)}&mock=1`;
     },
     async exchangeCode() {
-      return { tenantId: "mock-tenant" };
+      return {
+        tenantId: "mock-tenant",
+        accessToken: "mock-access",
+        refreshToken: "mock-refresh",
+        expiresIn: 1800,
+      };
     },
     async listInvoices() {
       return mockMirroredInvoices();
@@ -213,7 +218,12 @@ export function createXeroLive(config: XeroAdapterConfig = {}): XeroAdapter {
           ? Date.now() + tokenJson.expires_in * 1000
           : undefined,
       });
-      return { tenantId };
+      return {
+        tenantId,
+        accessToken: tokenJson.access_token,
+        refreshToken: tokenJson.refresh_token,
+        expiresIn: tokenJson.expires_in,
+      };
     },
     async listInvoices() {
       const bundle = resolveToken(config);

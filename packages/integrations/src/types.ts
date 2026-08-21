@@ -55,7 +55,12 @@ export type XeroMirroredInvoice = {
 export interface XeroAdapter {
   readonly mode: XeroAdapterMode;
   getAuthorizeUrl(state: string): Promise<string>;
-  exchangeCode(code: string): Promise<{ tenantId: string }>;
+  exchangeCode(code: string): Promise<{
+    tenantId: string;
+    accessToken?: string;
+    refreshToken?: string;
+    expiresIn?: number;
+  }>;
   /**
    * Client lock (14 Aug 2026): OS reads/mirrors Xero only.
    * Writes throw unless XERO_WRITE_ENABLED=true (explicit override).
