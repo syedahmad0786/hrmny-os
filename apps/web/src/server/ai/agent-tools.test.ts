@@ -86,4 +86,19 @@ describe("runAgentTools funnel writes", () => {
     expect(data?.mode).toBe("mock");
     expect((data?.dealCount ?? 0) > 0).toBe(true);
   });
+
+  it("client sandbox does not run org-wide crm.prospect", async () => {
+    const results = await runAgentTools({
+      allowedTools: ["crm.prospect", "crm.read"],
+      prompt: "Import competitors",
+      scope: {
+        clientId: CLIENT_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(results.find((r) => r.tool === "crm.prospect")).toBeUndefined();
+    const crm = results.find((r) => r.tool === "crm.read" || r.tool === "crm.deals");
+    // Scoped read may succeed with empty/linked deal — never org prospect.
+    if (crm) expect(crm.ok).toBe(true);
+  });
 });

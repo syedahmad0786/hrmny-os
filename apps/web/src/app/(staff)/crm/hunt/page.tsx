@@ -298,7 +298,10 @@ export default function HuntClientsPage() {
                 <p className="font-medium">{result}</p>
                 {demo.data && demo.data.ok ? (
                   <p className="mt-2 flex flex-wrap gap-3 text-sm">
-                    <Link className="underline" href="/account">
+                    <Link
+                      className="underline"
+                      href={demo.data.next.account ?? "/account"}
+                    >
                       Open Account calendar →
                     </Link>
                     <Link className="underline" href={demo.data.next.client}>
@@ -307,6 +310,14 @@ export default function HuntClientsPage() {
                     <Link className="underline" href={demo.data.next.creative}>
                       Creative
                     </Link>
+                    {demo.data.portalInvite?.portalPath ? (
+                      <Link
+                        className="underline"
+                        href={demo.data.portalInvite.portalPath}
+                      >
+                        Portal magic link
+                      </Link>
+                    ) : null}
                   </p>
                 ) : null}
               </div>

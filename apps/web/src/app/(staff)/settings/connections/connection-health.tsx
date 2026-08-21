@@ -100,6 +100,14 @@ export function ConnectionHealth() {
                 </span>
               </div>
               <p className="mt-2 flex-1 text-xs text-muted">{provider.detail}</p>
+              {provider.status === "error" ? (
+                <a
+                  href="#direct-business-connections"
+                  className="mt-2 text-xs font-semibold text-ochre underline"
+                >
+                  Reconnect below →
+                </a>
+              ) : null}
               <p className="mt-3 text-[11px] text-muted">
                 {provider.lastCheck
                   ? `Checked ${formatRelative(provider.lastCheck)}`

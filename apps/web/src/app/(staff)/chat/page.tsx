@@ -43,6 +43,12 @@ function StepFold({
 export default function HrmnyChatPage() {
   const utils = trpc.useUtils();
   const threads = trpc.chat.listThreads.useQuery();
+  const agents = trpc.chat.listRunnableAgents.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  const clients = trpc.clients.list.useQuery(undefined, { staleTime: 60_000 });
+  const [agentSlug, setAgentSlug] = useState("");
+  const [clientId, setClientId] = useState("");
   const create = trpc.chat.createThread.useMutation({
     onSuccess: (row) => {
       void utils.chat.listThreads.invalidate();
@@ -88,12 +94,18 @@ export default function HrmnyChatPage() {
     [threads.data, threadId],
   );
 
+  const activeThread = threads.data?.find((t) => t.chatThreadId === threadId);
+
   function submit(text: string) {
     const content = text.trim();
     if (!content) return;
     if (!threadId) {
       create.mutate(
-        { title: content.slice(0, 60) },
+        {
+          title: content.slice(0, 60),
+          agentSlug: agentSlug || undefined,
+          clientId: clientId || undefined,
+        },
         {
           onSuccess: (row) => {
             setThreadId(row.chatThreadId);
@@ -136,11 +148,50 @@ export default function HrmnyChatPage() {
           type="button"
           className="hrmny-chat-new"
           disabled={create.isPending}
-          onClick={() => create.mutate({ title: "New chat" })}
+          onClick={() =>
+            create.mutate({
+              title: "New chat",
+              agentSlug: agentSlug || undefined,
+              clientId: clientId || undefined,
+            })
+          }
         >
           <span>+</span>
           <span>New chat</span>
         </button>
+
+        <div className="mx-3 mb-2 space-y-2">
+          <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+            Agent
+            <select
+              className="mt-1 w-full rounded border border-sand bg-white px-2 py-1.5 text-xs text-ink"
+              value={agentSlug}
+              onChange={(e) => setAgentSlug(e.target.value)}
+            >
+              <option value="">Default harness</option>
+              {(agents.data ?? []).map((a) => (
+                <option key={a.customAgentId} value={a.slug}>
+                  {a.displayName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+            Client sandbox
+            <select
+              className="mt-1 w-full rounded border border-sand bg-white px-2 py-1.5 text-xs text-ink"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+            >
+              <option value="">Staff / org scope</option>
+              {(clients.data ?? []).map((c) => (
+                <option key={c.clientId} value={c.clientId}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
 
         <p className="hrmny-chat-section">Personal</p>
         <ul className="hrmny-chat-sessions">
@@ -185,6 +236,10 @@ export default function HrmnyChatPage() {
             <h1>{activeTitle}</h1>
           </div>
           <div className="hrmny-chat-pills">
+            {activeThread?.agentSlug ? (
+              <span>Agent · {activeThread.agentSlug}</span>
+            ) : null}
+            {activeThread?.clientId ? <span>Client sandbox</span> : null}
             <span>{harness === "react" ? "ReAct" : "Direct"}</span>
             <span>Effort · {effort}</span>
           </div>
