@@ -144,6 +144,36 @@ describe("campaigns durable layer (memory mode)", () => {
     expect(published.item.body.publish).toMatchObject({ published: true });
   });
 
+  it("stub publisher marks OS published with mode=stub (no LinkedIn OAuth)", async () => {
+    const draft = await createCampaignDraft({
+      title: "Stub publish demo",
+      channel: "linkedin",
+      scheduledFor: "2026-09-10",
+      clientId: CLIENT,
+    });
+    const approved = await transitionCampaign({
+      actor: staffActor,
+      id: draft.campaignItemId,
+      to: "approved",
+    });
+    expect(approved.ok).toBe(true);
+
+    const published = await transitionCampaign({
+      actor: staffActor,
+      id: draft.campaignItemId,
+      to: "published",
+      // default createSocialPublishStub
+    });
+    expect(published.ok).toBe(true);
+    if (!published.ok) throw new Error("expected stub publish");
+    expect(published.item.status).toBe("published");
+    expect(published.item.body.publish).toMatchObject({
+      published: true,
+      mode: "stub",
+      channel: "linkedin",
+    });
+  });
+
   it("lets the client approve a pending item, unlocking staff publish", async () => {
     const draft = await createCampaignDraft({
       title: "Client sign-off flow",

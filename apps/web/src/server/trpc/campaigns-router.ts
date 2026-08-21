@@ -143,7 +143,7 @@ export const campaignsRouter = router({
    * Gate-routed status change (approve / publish / archive). Publish
    * (approved→published) is HITL: the gate blocks any publish that skips a
    * prior approve. LinkedIn uses a live Composio publisher when connected;
-   * otherwise the stub refuses durable publish (stays approved).
+   * otherwise the stub marks OS published with body.publish.mode=stub.
    */
   transition: staffProcedure
     .input(
