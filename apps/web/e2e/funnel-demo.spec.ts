@@ -200,16 +200,38 @@ test.describe("Demo funnel", () => {
     page,
     request,
   }) => {
-    // Seeded demo approval for Demo Co (memory mode — CI has no DATABASE_URL).
-    const approvalId = "f1000000-0000-4000-8000-0000000000a1";
+    const portalHeaders = {
+      "x-dev-role": "portal_a",
+      "content-type": "application/json",
+    };
+
+    // Memory-mode demo store seeds a pending Demo Co approval on first use.
+    const list = await request.get("/api/trpc/portal.approvals.list", {
+      headers: portalHeaders,
+    });
+    const listText = await list.text();
+    expect(list.ok(), listText).toBeTruthy();
+    const listBody = JSON.parse(listText) as {
+      result?: { data?: { json?: Array<{ approvalId: string; status: string; title: string }> } };
+    };
+    const approvals =
+      listBody.result?.data?.json ??
+      (listBody.result?.data as unknown as Array<{
+        approvalId: string;
+        status: string;
+        title: string;
+      }>) ??
+      [];
+    const pending = (Array.isArray(approvals) ? approvals : []).find(
+      (a) => a.status === "pending",
+    );
+    expect(pending, listText).toBeTruthy();
+
     const act = await request.post("/api/trpc/portal.approvals.act", {
-      headers: {
-        "x-dev-role": "portal_a",
-        "content-type": "application/json",
-      },
+      headers: portalHeaders,
       data: {
         json: {
-          id: approvalId,
+          id: pending!.approvalId,
           action: "reject",
           feedback: "E2E: tighten the hook",
         },
@@ -221,11 +243,11 @@ test.describe("Demo funnel", () => {
 
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/notifications", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: /Notifications/i })).toBeVisible({
-      timeout: 60_000,
-    });
+    await expect(
+      page.getByRole("heading", { name: /Notifications/i }),
+    ).toBeVisible({ timeout: 60_000 });
     await expect(page.locator("body")).toContainText(/Client revisions/i);
-    await expect(page.locator("body")).toContainText(/Approve launch reel cut/i);
+    await expect(page.locator("body")).toContainText(pending!.title);
     await expect(page.locator("body")).toContainText(/E2E: tighten the hook/i);
     await expect(page.getByRole("link", { name: /^Open$/i }).first()).toBeVisible();
   });
