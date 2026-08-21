@@ -444,16 +444,29 @@ export const invoicesRouter = router({
       return { result, invoice: inv, xeroWrite: true as const };
     }),
 
-  /** Mirror invoices from Xero (read-only). */
+  /** Mirror invoices from Xero (read-only) into Postgres + response. */
   mirrorFromXero: protectedProcedure.query(async () => {
+    const { syncXeroInvoiceMirror } = await import(
+      "../finance/xero-mirror-sync"
+    );
+    const synced = await syncXeroInvoiceMirror();
     const store = getDemoStore();
     const rows = await store.xero.listInvoices();
     return {
       writeEnabled: isXeroWriteEnabled(),
-      mode: store.xero.mode,
+      mode: synced.mode,
+      upserted: synced.upserted,
       mirroredAt: new Date().toISOString(),
       invoices: rows,
     };
+  }),
+
+  /** Explicit sync mutation for connections / cron. */
+  syncXeroMirror: protectedProcedure.mutation(async () => {
+    const { syncXeroInvoiceMirror } = await import(
+      "../finance/xero-mirror-sync"
+    );
+    return syncXeroInvoiceMirror();
   }),
 
   transition: protectedProcedure

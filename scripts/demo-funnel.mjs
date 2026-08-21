@@ -122,13 +122,34 @@ try {
     returning immersion_id
   `;
 
+  // Creative QC task shared with portal (title in brief.body)
+  const [task] = await sql`
+    insert into task (client_id, task_type, status, priority)
+    values (${client.client_id}, 'social_cutdowns', 'qc', 'high')
+    returning task_id
+  `;
+  await sql`
+    insert into brief (task_id, body, dor_complete, missing_required_count)
+    values (
+      ${task.task_id},
+      ${sql.json({
+        title: `${companyName} — first creative cutdown`,
+        qcPassed: false,
+        clientRevisionCount: 0,
+        revisionBoundaryAck: false,
+      })},
+      true,
+      0
+    )
+  `;
+
   // Per-client sandbox memory
   await sql`
     insert into memory_chunk (source_type, content, metadata)
     values (
       'note',
       ${`Client ${companyName} prefers short-form creative for prospecting.`},
-      ${sql.json({ clientId: client.client_id, employeeId, kind: "demo" })}
+      ${sql.json({ clientId: client.client_id, kind: "demo" })}
     )
   `;
   // Other client noise — must not leak
@@ -172,6 +193,7 @@ try {
         dealId: deal.deal_id,
         clientId: client.client_id,
         immersionId: immersion.immersion_id,
+        creativeTaskId: task.task_id,
         onboardingPhases: onboard[0].n,
         clientMemoryChunks: scoped.length,
         sandboxIsolated: scoped.every(

@@ -314,10 +314,19 @@ export const leadgenRouter = router({
   }),
 
   /** Manual daily-pipeline trigger (Inngest runs the same fn on schedule). */
-  runDailyPipeline: staffProcedure.mutation(() =>
-    runDailyLeadGen({
-      leadSource: createLeadSourceAdapter(),
-      verifier: createEmailVerificationAdapter(),
-    }),
-  ),
+  runDailyPipeline: staffProcedure.mutation(async ({ ctx }) => {
+    const { resolveIntegrationApiKey } = await import(
+      "../integrations/resolve-keys"
+    );
+    const apollo = await resolveIntegrationApiKey("apollo", ctx.employeeId);
+    const hunter = await resolveIntegrationApiKey("hunter", ctx.employeeId);
+    return runDailyLeadGen({
+      leadSource: createLeadSourceAdapter(
+        apollo.apiKey ? { mode: "live", apiKey: apollo.apiKey } : undefined,
+      ),
+      verifier: createEmailVerificationAdapter(
+        hunter.apiKey ? { mode: "live", apiKey: hunter.apiKey } : undefined,
+      ),
+    });
+  }),
 });

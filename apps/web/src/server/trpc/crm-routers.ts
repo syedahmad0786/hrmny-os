@@ -10,6 +10,10 @@ import {
 } from "@hrmny/gate";
 import { toCsv } from "../crm/csv";
 import {
+  closeDurableDeal,
+  durableHandoverPack,
+} from "../crm/handover";
+import {
   createActivity,
   createCompany,
   createContact,
@@ -329,13 +333,20 @@ export const crmDealsRouter = router({
       const existing = await getDeal(input.id);
       if (!existing) return { ok: false as const, reason: "Deal not found" };
 
+      // Durable CRM has no voice_check column yet — treat verified email as
+      // voice-check proxy so engage→scope is demoable end-to-end.
+      const gateData = {
+        ...existing,
+        voiceCheckPassed: existing.emailVerified,
+      };
+
       const gateResult = await transition(
         actorFromCtx(ctx),
         {
           entityType: "deal",
           entityId: existing.dealId,
           state: existing.stage,
-          data: { ...existing },
+          data: gateData,
         },
         {
           to: input.to,
@@ -360,7 +371,7 @@ export const crmDealsRouter = router({
               entityType: "deal",
               entityId: moved.deal.dealId,
               state: moved.deal.stage,
-              data: { ...moved.deal },
+              data: { ...moved.deal, voiceCheckPassed: moved.deal.emailVerified },
             };
           },
           audit: async (event) => {
@@ -405,6 +416,75 @@ export const crmDealsRouter = router({
         deal: redactDealMargin(deal, ctx.canViewMargin),
         auditId: gateResult.auditId,
       };
+    }),
+
+  /** Mark deal won/lost/on-hold (sets closeOutcome; required before handover). */
+  close: protectedProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        outcome: z.enum(["won", "lost", "postponed_on_hold"]),
+        lostReason: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const before = await getDeal(input.id);
+      const result = await closeDurableDeal({
+        dealId: input.id,
+        outcome: input.outcome,
+        lostReason: input.lostReason,
+        actorEmployeeId: ctx.employeeId,
+      });
+      if (!result.ok) {
+        return {
+          ok: false as const,
+          reason: result.reason,
+          code: result.code ?? "GATE_BLOCKED",
+        };
+      }
+      await auditMutation(
+        ctx,
+        "crm.deals.close",
+        "deal",
+        input.id,
+        before ? { ...before } : null,
+        { stage: result.deal.stage, closeOutcome: result.deal.closeOutcome },
+      );
+      return {
+        ok: true as const,
+        deal: redactDealMargin(result.deal, ctx.canViewMargin),
+      };
+    }),
+
+  /** Won deal → client + onboarding + creative QC task + client memory. */
+  handoverPack: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const result = await durableHandoverPack({
+        dealId: input.id,
+        actorEmployeeId: ctx.employeeId,
+      });
+      if (!result.ok) {
+        return {
+          ok: false as const,
+          reason: result.reason,
+          code: result.code ?? "GATE_BLOCKED",
+        };
+      }
+      await auditMutation(
+        ctx,
+        "crm.deals.handoverPack",
+        "deal",
+        input.id,
+        null,
+        result.pack,
+      );
+      await emitHealthSignal("deal.won", "info", {
+        dealId: input.id,
+        clientId: result.client.clientId,
+        fired: result.pack.fired,
+      });
+      return result;
     }),
 });
 

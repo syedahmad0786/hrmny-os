@@ -97,5 +97,26 @@ export async function upsertImmersion(input: {
       approvers,
       completed_at::text as "completedAt"
   `);
-  return rows[0] ?? null;
+  const row = rows[0] ?? null;
+  if (row && (input.complete || input.usp || input.audience)) {
+    const { persistMemoryChunk } = await import("../ai/memory-db");
+    const parts = [
+      row.usp ? `USP: ${row.usp}` : null,
+      row.audience ? `Audience: ${row.audience}` : null,
+      row.objectivePriority ? `Objective: ${row.objectivePriority}` : null,
+      row.swot ? `SWOT: ${JSON.stringify(row.swot)}` : null,
+    ].filter(Boolean);
+    if (parts.length) {
+      await persistMemoryChunk({
+        sourceType: "note",
+        sourceId: row.immersionId,
+        content: `Client immersion — ${parts.join(". ")}`,
+        metadata: {
+          clientId: row.clientId,
+          kind: input.complete ? "immersion.completed" : "immersion.upsert",
+        },
+      });
+    }
+  }
+  return row;
 }
