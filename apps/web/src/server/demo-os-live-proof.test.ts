@@ -135,11 +135,13 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
         prompt: "List 2 next onboarding actions for this client.",
         clientId: loop.clientId,
         taskId: deliveryTask.taskId,
+        dealId: loop.dealId,
       });
       expect(run.slug).toBe(agent.slug);
       expect(run.output).toBeTruthy();
       expect(run.sandbox?.clientId).toBe(loop.clientId);
       expect(run.sandbox?.taskId).toBe(deliveryTask.taskId);
+      expect(run.sandbox?.dealId).toBe(loop.dealId);
       expect(Array.isArray(run.toolResults)).toBe(true);
       expect(run.toolResults!.some((t) => t.tool === "crm.read" && t.ok)).toBe(
         true,
