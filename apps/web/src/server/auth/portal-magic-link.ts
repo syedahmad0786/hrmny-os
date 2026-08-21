@@ -222,7 +222,7 @@ export async function issuePortalMagicToken(input: {
     }
   }
   const store = getDemoStore();
-  store.portalMagicTokens.set(token, {
+  getDemoStore().portalMagicTokens.set(token, {
     token,
     clientId: input.clientId,
     email,
@@ -231,15 +231,106 @@ export async function issuePortalMagicToken(input: {
   return token;
 }
 
+export type PortalInviteDelivery = {
+  mode: "mock" | "live";
+  id: string;
+  to: string;
+  subject: string;
+};
+
+export type SendPortalInviteResult = {
+  token: string;
+  portalPath: string;
+  verifyUrl: string;
+  email: string;
+  clientId: string;
+  delivery: PortalInviteDelivery;
+};
+
+function portalAppOrigin(): string {
+  const raw =
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.VERCEL_URL?.trim() ||
+    "http://localhost:3000";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw.replace(/\/$/, "");
+  return `https://${raw.replace(/\/$/, "")}`;
+}
+
+/**
+ * Allowlist + single-use magic token + Resend (mock by default, live when
+ * RESEND_MODE=live). Shared by staff invite, demo token, and closed-loop.
+ */
+export async function sendPortalInviteMagicLink(input: {
+  clientId: string;
+  email: string;
+  displayName?: string;
+  emailer?: import("@hrmny/integrations").EmailSendAdapter;
+}): Promise<SendPortalInviteResult> {
+  const email = normalizeEmail(input.email);
+  await upsertPortalAllowlistContact({
+    email,
+    clientId: input.clientId,
+  });
+  const token = await issuePortalMagicToken({
+    clientId: input.clientId,
+    email,
+  });
+  const portalPath = `/portal/login/verify?token=${encodeURIComponent(token)}`;
+  const verifyUrl = `${portalAppOrigin()}${portalPath}`;
+  const greeting =
+    input.displayName?.trim() || email;
+  const subject = "Your hrmny client portal sign-in link";
+  const markdown = [
+    `Hi ${greeting},`,
+    "",
+    "Use this single-use link to open your client portal (expires in 15 minutes):",
+    "",
+    verifyUrl,
+    "",
+    "If you did not expect this, ignore this email.",
+  ].join("\n");
+
+  const { createResendAdapter } = await import("@hrmny/integrations");
+  const emailer = input.emailer ?? createResendAdapter();
+  const sent = await emailer.send({
+    to: [email],
+    subject,
+    markdown,
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    console.info(
+      `[portal invite] ${sent.mode} delivery ${sent.id} → ${email} ${portalPath}`,
+    );
+  }
+
+  return {
+    token,
+    portalPath,
+    verifyUrl,
+    email,
+    clientId: input.clientId,
+    delivery: {
+      mode: sent.mode,
+      id: sent.id,
+      to: email,
+      subject,
+    },
+  };
+}
+
 /**
  * Enumeration-safe magic-link request. The return value is byte-identical for
  * allowlisted and unknown emails; only an allowlisted contact triggers a side
- * effect (a Supabase OTP email, or a single-use durable/dev token). Unknown
- * emails silently no-op so a caller cannot probe who is invited.
+ * effect (a Supabase OTP email, or a single-use durable token emailed via
+ * Resend). Unknown emails silently no-op so a caller cannot probe who is invited.
  */
 export async function requestPortalMagicLink(
   email: string,
-  opts?: { redirectTo?: string },
+  opts?: {
+    redirectTo?: string;
+    emailer?: import("@hrmny/integrations").EmailSendAdapter;
+  },
 ): Promise<RequestResult> {
   const normalized = normalizeEmail(email);
   const clientId = (await getPortalAllowlist()).get(normalized);
@@ -269,16 +360,14 @@ export async function requestPortalMagicLink(
     return { status: "sent" };
   }
 
-  // No Supabase public config: durable single-use token when DB present.
+  // No Supabase public config: durable single-use token + Resend delivery.
   if (clientId) {
-    const token = await issuePortalMagicToken({
+    const invite = await sendPortalInviteMagicLink({
       clientId,
       email: normalized,
+      emailer: opts?.emailer,
     });
-    if (process.env.NODE_ENV !== "production") {
-      console.info(`[portal magic-link] dev token for ${normalized}: ${token}`);
-    }
-    return { status: "sent", stubToken: token };
+    return { status: "sent", stubToken: invite.token };
   }
   return { status: "sent" };
 }

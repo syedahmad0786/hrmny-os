@@ -1195,6 +1195,8 @@ export const crmRouter = router({
       let portalInvite: {
         portalUserId: string;
         email: string;
+        portalPath?: string;
+        delivery?: { mode: "mock" | "live"; id: string };
       } | null = null;
       try {
         const { getDb } = await import("../db");
@@ -1244,14 +1246,19 @@ export const crmRouter = router({
             invited = created[0] ?? null;
           }
           if (invited) {
-            const { upsertPortalAllowlistContact } = await import(
+            const { sendPortalInviteMagicLink } = await import(
               "../auth/portal-magic-link"
             );
-            await upsertPortalAllowlistContact({
+            const sent = await sendPortalInviteMagicLink({
               email: inviteEmail,
               clientId: pack.client.clientId,
+              displayName,
             });
-            portalInvite = invited;
+            portalInvite = {
+              ...invited,
+              portalPath: sent.portalPath,
+              delivery: { mode: sent.delivery.mode, id: sent.delivery.id },
+            };
           }
         }
       } catch {
