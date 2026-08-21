@@ -264,6 +264,8 @@ export async function sendPortalInviteMagicLink(input: {
   clientId: string;
   email: string;
   displayName?: string;
+  /** Post-verify destination under /portal/* (allowlisted). */
+  next?: string | null;
   emailer?: import("@hrmny/integrations").EmailSendAdapter;
 }): Promise<SendPortalInviteResult> {
   const email = normalizeEmail(input.email);
@@ -275,7 +277,11 @@ export async function sendPortalInviteMagicLink(input: {
     clientId: input.clientId,
     email,
   });
-  const portalPath = `/portal/login/verify?token=${encodeURIComponent(token)}`;
+  const { withPortalNext } = await import("../../lib/portal-next");
+  const portalPath = withPortalNext(
+    `/portal/login/verify?token=${encodeURIComponent(token)}`,
+    input.next,
+  );
   const verifyUrl = `${portalAppOrigin()}${portalPath}`;
   const greeting =
     input.displayName?.trim() || email;

@@ -32,7 +32,17 @@ describe("portalReviewHref", () => {
       expect.objectContaining({
         clientId: "c1000000-0000-4000-8000-000000000001",
         email: expect.stringMatching(/@example\.com$/),
+        next: "/portal/approvals",
       }),
+    );
+  });
+
+  it("forwards a custom next destination", async () => {
+    await portalReviewHref("c1000000-0000-4000-8000-000000000001", {
+      next: "/portal/onboarding",
+    });
+    expect(sendPortalInviteMagicLink).toHaveBeenCalledWith(
+      expect.objectContaining({ next: "/portal/onboarding" }),
     );
   });
 

@@ -2,6 +2,8 @@
  * Deep links for staff after won deal → OS handover.
  * Pure helper so unit tests can lock URL shapes without Postgres.
  */
+import { withPortalNext } from "../../lib/portal-next";
+
 export function buildHandoverNextLinks(input: {
   clientId: string;
   invoiceId?: string | null;
@@ -32,8 +34,13 @@ export function buildHandoverNextLinks(input: {
       : "/approvals",
     // Prefer the mint invite so Hunt "Portal" lands in the won client's session
     // (bare /portal/approvals uses the wrong/dev portal actor or hits login).
-    portal: magic ?? "/portal/login",
-    onboarding: magic ?? "/portal/onboarding",
+    // Distinct `next` so Portal → approvals and Onboarding → checklist.
+    portal: magic
+      ? withPortalNext(magic, "/portal/approvals")
+      : "/portal/login",
+    onboarding: magic
+      ? withPortalNext(magic, "/portal/onboarding")
+      : "/portal/onboarding",
     outreach: outreachId
       ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
       : "/crm/outreach",

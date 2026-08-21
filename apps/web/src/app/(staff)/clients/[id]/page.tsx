@@ -19,10 +19,12 @@ export default function ClientOnboardingPage() {
   const upsert = trpc.clients.immersion.upsert.useMutation({
     onSuccess: () => void utils.clients.invalidate(),
   });
+  const reviewHref = trpc.clients.portalUsers.reviewHref.useMutation();
 
   const [usp, setUsp] = useState("");
   const [audience, setAudience] = useState("");
   const [objective, setObjective] = useState("");
+  const [portalMsg, setPortalMsg] = useState<string | null>(null);
 
   return (
     <main className="flex flex-col gap-6">
@@ -73,13 +75,32 @@ export default function ClientOnboardingPage() {
           >
             Finance →
           </Link>
-          <Link
-            href="/portal/approvals"
-            className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
+          <button
+            type="button"
+            className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline disabled:opacity-50"
+            disabled={reviewHref.isPending}
+            onClick={() => {
+              setPortalMsg(null);
+              void reviewHref
+                .mutateAsync({ clientId: id })
+                .then((data) => {
+                  window.location.assign(data.portalPath);
+                })
+                .catch((err: unknown) => {
+                  setPortalMsg(
+                    err instanceof Error ? err.message : "Portal invite failed",
+                  );
+                });
+            }}
           >
-            Portal approvals →
-          </Link>
+            {reviewHref.isPending
+              ? "Minting portal…"
+              : "Portal approvals →"}
+          </button>
         </nav>
+        {portalMsg ? (
+          <p className="mt-2 text-sm text-red-700">{portalMsg}</p>
+        ) : null}
       </div>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">

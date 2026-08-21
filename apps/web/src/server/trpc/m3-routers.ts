@@ -1170,6 +1170,22 @@ export const clientsRouter = router({
         };
       }),
 
+    /** Mint magic-link that lands on portal approvals after verify. */
+    reviewHref: staffProcedure
+      .input(
+        z.object({
+          clientId: z.string().uuid(),
+          next: z.string().trim().max(200).optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const { portalReviewHref } = await import("../auth/portal-review-href");
+        const portalPath = await portalReviewHref(input.clientId, {
+          next: input.next ?? "/portal/approvals",
+        });
+        return { portalPath, clientId: input.clientId };
+      }),
+
     /** Staff demo: issue a single-use portal magic token and email it. */
     issueDemoToken: staffProcedure
       .input(
