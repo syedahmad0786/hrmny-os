@@ -111,6 +111,22 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       });
       expect(run.slug).toBe(agent.slug);
       expect(run.output).toBeTruthy();
+      expect(run.sandbox?.clientId).toBe(loop.clientId);
+      expect(run.sandbox?.taskId).toBe(deliveryTask.taskId);
+
+      const userScoped = await caller.aiAdmin.customAgents.run({
+        id: agent.customAgentId,
+        prompt: `User-only note ${Date.now()} for partner sandbox isolation.`,
+      });
+      expect(userScoped.sandbox?.employeeId).toBe(user.employeeId);
+      expect(userScoped.sandbox?.clientId).toBeUndefined();
+
+      const smoke = await caller.automation.smoke();
+      expect(smoke.health).toBeTruthy();
+      expect(
+        smoke.health.apiKeyConfigured === true ||
+          smoke.health.apiKeyConfigured === false,
+      ).toBe(true);
 
       const portalUser = {
         ...resolveDevUser("portal_a"),
