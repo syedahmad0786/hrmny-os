@@ -171,6 +171,12 @@ export default function CrmDealDetailPage() {
                     <Link href={handover.data.next.approvals}>
                       <CrmBtn>Approvals →</CrmBtn>
                     </Link>
+                    {"outreach" in handover.data.next &&
+                    handover.data.next.outreach ? (
+                      <Link href={handover.data.next.outreach}>
+                        <CrmBtn>Outreach draft →</CrmBtn>
+                      </Link>
+                    ) : null}
                     {handover.data.portalInvite?.portalPath ? (
                       <Link href={handover.data.portalInvite.portalPath}>
                         <CrmBtn>

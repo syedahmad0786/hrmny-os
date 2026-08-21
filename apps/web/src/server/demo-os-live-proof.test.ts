@@ -58,6 +58,10 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(loop.next.approvals).toBe("/approvals");
       expect(loop.next.portal).toBe("/portal/approvals");
       expect(loop.outreachId).toBeTruthy();
+      expect(loop.next.outreach).toContain(
+        `id=${encodeURIComponent(loop.outreachId!)}`,
+      );
+      expect(loop.fired.some((f) => f.startsWith("outreach."))).toBe(true);
       const outreachList = await caller.leadgen.outreach.list();
       expect(
         outreachList.some((o) => o.id === loop.outreachId && o.state === "draft"),

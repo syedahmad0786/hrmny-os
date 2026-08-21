@@ -1121,20 +1121,6 @@ export const crmRouter = router({
         }
       }
 
-      let outreachId: string | null = null;
-      try {
-        const { draftOutreach } = await import("./leadgen-router");
-        const outreach = await draftOutreach({
-          dealId,
-          channel: "gmail",
-          subject: `Creative Harmony × ${companyName}`,
-          body: `Hi — following up on ${companyName}. We'd love to share a short creative retainer concept for the UAE market. Shall we book 20 minutes?`,
-        });
-        outreachId = outreach.id;
-      } catch {
-        /* outreach optional when agent/kill-switch refuses */
-      }
-
       await updateDeal(dealId, {
         quoteValue: "50000",
         internalCost: "28000",
@@ -1170,6 +1156,7 @@ export const crmRouter = router({
 
       const calendarId = pack.calendarId;
       const portalInvite = pack.portalInvite;
+      const outreachId = pack.outreachId;
 
       await auditMutation(
         ctx,
@@ -1209,9 +1196,6 @@ export const crmRouter = router({
         next: {
           crmDeal: `/crm/deals/${dealId}`,
           ...pack.next,
-          outreach: outreachId
-            ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
-            : "/crm/outreach",
           billing: "/billing",
         },
       };

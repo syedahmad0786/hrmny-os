@@ -118,6 +118,8 @@ export type HandoverPackResult = {
     portalPath?: string;
     delivery?: { mode: "mock" | "live"; id: string };
   } | null;
+  /** HITL outreach draft for the won deal (reuses existing if any). */
+  outreachId: string | null;
   /** Deep links for staff after won → OS. */
   next: {
     client: string;
@@ -127,6 +129,7 @@ export type HandoverPackResult = {
     approvals: string;
     portal: string;
     onboarding: string;
+    outreach: string;
   };
 };
 
@@ -401,6 +404,29 @@ export async function durableHandoverPack(input: {
     /* invite optional when unique constraints differ */
   }
 
+  let outreachId: string | null = null;
+  try {
+    const { listOutreach } = await import("../leadgen/store");
+    const existingOutreach = await listOutreach({ dealId: input.dealId });
+    const reuse = existingOutreach[0];
+    if (reuse) {
+      outreachId = reuse.id;
+      fired.push("outreach.exists");
+    } else {
+      const { draftOutreach } = await import("../trpc/leadgen-router");
+      const outreach = await draftOutreach({
+        dealId: input.dealId,
+        channel: "gmail",
+        subject: `Creative Harmony × ${deal.companyName}`,
+        body: `Hi — following up on ${deal.companyName}. We'd love to share a short creative retainer concept for the UAE market. Shall we book 20 minutes?`,
+      });
+      outreachId = outreach.id;
+      fired.push("outreach.draft");
+    }
+  } catch {
+    /* outreach optional when agent/kill-switch refuses */
+  }
+
   const packId = crypto.randomUUID();
   const next = {
     client: `/clients/${client.clientId}`,
@@ -412,6 +438,9 @@ export async function durableHandoverPack(input: {
     approvals: "/approvals",
     portal: "/portal/approvals",
     onboarding: "/portal/onboarding",
+    outreach: outreachId
+      ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
+      : "/crm/outreach",
   };
   return {
     ok: true,
@@ -428,6 +457,7 @@ export async function durableHandoverPack(input: {
     onboardingPhases: phases.length,
     calendarId,
     portalInvite,
+    outreachId,
     next,
   };
 }
