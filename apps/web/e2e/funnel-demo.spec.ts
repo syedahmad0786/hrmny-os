@@ -124,4 +124,61 @@ test.describe("Demo funnel", () => {
     });
     await expect(page.locator("body")).toContainText(/finance|invoice|xero/i);
   });
+
+  test("closed loop mints distinct portal vs onboarding magic links", async ({
+    page,
+  }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
+      timeout: 60_000,
+    });
+
+    await page.getByRole("button", { name: /Run demo closed loop/i }).click();
+    const status = page.getByTestId("hunt-closed-loop-status");
+    await expect(status).toBeVisible({ timeout: 120_000 });
+    await expect(status).toContainText(/Closed loop ready/i);
+
+    const portalLink = page.getByRole("link", { name: /^Portal$/i }).first();
+    const onboardingLink = page
+      .getByRole("link", { name: /^Onboarding$/i })
+      .first();
+    await expect(portalLink).toBeVisible();
+    await expect(onboardingLink).toBeVisible();
+
+    const portalHref = await portalLink.getAttribute("href");
+    const onboardingHref = await onboardingLink.getAttribute("href");
+    expect(portalHref).toBeTruthy();
+    expect(onboardingHref).toBeTruthy();
+    expect(portalHref).toMatch(/\/portal\/login\/verify/);
+    expect(onboardingHref).toMatch(/\/portal\/login\/verify/);
+    expect(portalHref).toContain(encodeURIComponent("/portal/approvals"));
+    expect(onboardingHref).toContain(encodeURIComponent("/portal/onboarding"));
+    expect(portalHref).not.toBe(onboardingHref);
+
+    const portalToken = new URL(portalHref!, "http://localhost").searchParams.get(
+      "token",
+    );
+    const onboardingToken = new URL(
+      onboardingHref!,
+      "http://localhost",
+    ).searchParams.get("token");
+    expect(portalToken).toBeTruthy();
+    expect(onboardingToken).toBeTruthy();
+    expect(portalToken).not.toBe(onboardingToken);
+  });
+
+  test("delivery Client portal CTA requires a selected task", async ({
+    page,
+  }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/delivery", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
+      timeout: 60_000,
+    });
+    const portalCta = page.getByRole("button", { name: /Client portal/i });
+    await expect(portalCta).toBeVisible();
+    await expect(portalCta).toBeDisabled();
+  });
+
 });
