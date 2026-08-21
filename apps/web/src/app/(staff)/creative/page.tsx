@@ -92,7 +92,7 @@ export default function CreativeQcPage() {
             Advance to client_review (expect block)
           </Button>
           <Button type="button" onClick={() => void passThenAdvance()}>
-            QC pass → client_review
+            Pass QC → client_review
           </Button>
         </div>
         {msg ? <p className="mt-3 text-ink">{msg}</p> : null}

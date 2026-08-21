@@ -82,6 +82,10 @@ export default function DeliveryBoardPage() {
           Creative QC
         </Link>
         {" · "}
+        <Link href="/portal" className="text-ochre underline">
+          Client portal
+        </Link>
+        {" · "}
         <Link href="/account" className="text-ochre underline">
           Account rhythm
         </Link>

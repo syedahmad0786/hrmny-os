@@ -13,6 +13,9 @@ function resolveMode(config: ApolloAdapterConfig): "mock" | "live" {
   if (config.mode === "live") return "live";
   const env = process.env.APOLLO_MODE?.toLowerCase();
   if (env === "live") return "live";
+  if (env === "mock") return "mock";
+  // Auto-live when a key is present — flip APOLLO_MODE=mock to force stub.
+  if ((config.apiKey ?? process.env.APOLLO_API_KEY)?.trim()) return "live";
   return "mock";
 }
 

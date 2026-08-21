@@ -1,0 +1,57 @@
+import { test, expect } from "@playwright/test";
+
+/**
+ * Demo funnel — prospecting → sales → onboarding → creative → portal.
+ * Uses x-dev-role (requires AUTH_MODE=dev + ALLOW_DEV_AUTH in CI prod server).
+ */
+test.describe("Demo funnel", () => {
+  test.setTimeout(180_000);
+
+  test("staff path: CRM → clients → creative → delivery → AI", async ({
+    page,
+  }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+
+    await page.goto("/crm", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(page.locator("body")).toContainText(/CRM|deal|pipeline/i);
+
+    await page.goto("/crm/deals", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+
+    await page.goto("/crm/inbound", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("body")).toContainText(/inbound|lead|prospect/i);
+
+    await page.goto("/crm/outreach", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("body")).toContainText(/outreach|draft|queue/i);
+
+    await page.goto("/clients", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("body")).toContainText(/client/i);
+
+    await page.goto("/creative", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: /Creative QC/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Pass QC/i })).toBeVisible();
+
+    await page.goto("/delivery", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible();
+
+    await page.goto("/settings/ai", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("body")).toContainText(/AI|agent/i);
+
+    await page.goto("/settings/connections", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("body")).toContainText(/connection|composio|apollo/i);
+  });
+
+  test("portal path: client workspace loads for portal_a", async ({ page }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "portal_a" });
+
+    await page.goto("/portal", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("body")).toContainText(/workspace|brief|approval/i);
+    await expect(page.url()).not.toContain("/portal/login");
+
+    await page.goto("/portal/approvals", { waitUntil: "domcontentloaded" });
+    await expect(page.url()).not.toContain("/portal/login");
+  });
+});
