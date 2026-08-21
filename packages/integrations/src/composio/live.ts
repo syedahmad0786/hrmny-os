@@ -104,6 +104,7 @@ export type ComposioLiveClient = {
   authorize(
     userId: string,
     toolkitSlug: string,
+    options?: { callbackUrl?: string },
   ): Promise<{
     id: string;
     redirectUrl: string;
@@ -148,6 +149,21 @@ export type ComposioLiveClient = {
     }>;
   }): Promise<{ status: number; data: T; headers: Record<string, string> }>;
 };
+
+/** Body for POST /connected_accounts/link used by authorize(). */
+export function buildComposioAuthorizeLinkBody(input: {
+  authConfigId: string;
+  userId: string;
+  callbackUrl?: string;
+}): Record<string, string> {
+  return {
+    auth_config_id: input.authConfigId,
+    user_id: input.userId,
+    ...(input.callbackUrl?.trim()
+      ? { callback_url: input.callbackUrl.trim() }
+      : {}),
+  };
+}
 
 export function createComposioLive(input: {
   apiKey: string;
@@ -200,7 +216,7 @@ export function createComposioLive(input: {
         }));
     },
 
-    async authorize(userId, toolkitSlug) {
+    async authorize(userId, toolkitSlug, options) {
       const query = new URLSearchParams({
         limit: "100",
         toolkit_slugs: toolkitSlug,
@@ -219,10 +235,13 @@ export function createComposioLive(input: {
       const link = connectLinkSchema.parse(
         await request("/connected_accounts/link", {
           method: "POST",
-          body: JSON.stringify({
-            auth_config_id: config.id,
-            user_id: userId,
-          }),
+          body: JSON.stringify(
+            buildComposioAuthorizeLinkBody({
+              authConfigId: config.id,
+              userId,
+              callbackUrl: options?.callbackUrl,
+            }),
+          ),
         }),
       );
       return {
