@@ -254,15 +254,37 @@ export default function HuntClientsPage() {
               </Link>
             </div>
             {toolReady ? (
-              <p className="mt-2 text-xs text-muted">
-                Tools: apollo {toolReady.apollo} · hunter {toolReady.hunter} ·
-                n8n {toolReady.n8n} · xero {toolReady.xero} · composio{" "}
-                {toolReady.composio}
-                {" · "}
-                <Link href="/settings/connections" className="underline">
-                  Connections
-                </Link>
-              </p>
+              <div className="mt-3 space-y-2 text-xs text-muted">
+                <p>
+                  Tools: apollo {toolReady.apollo} · hunter {toolReady.hunter} ·
+                  n8n {toolReady.n8n} · xero {toolReady.xero} · composio{" "}
+                  {toolReady.composio} · resend {toolReady.resend ?? "—"} ·
+                  portal magic-link {ready?.portalMagicLink ?? "—"}
+                  {" · "}
+                  <Link href="/settings/connections" className="underline">
+                    Connections
+                  </Link>
+                </p>
+                {ready?.connections ? (
+                  <p>
+                    Connected accounts: GW {ready.connections.googleWorkspace ?? 0}{" "}
+                    · Canva {ready.connections.canva ?? 0} · LinkedIn{" "}
+                    {ready.connections.linkedin ?? 0} · Xero{" "}
+                    {ready.connections.xero ?? 0}
+                  </p>
+                ) : null}
+                {blockers.length > 0 ? (
+                  <ul className="list-disc space-y-1 pl-4 text-ink/80">
+                    {blockers.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-ink/80">
+                    Live tool keys and OAuth connections look ready for demo.
+                  </p>
+                )}
+              </div>
             ) : null}
             {result ? (
               <div
