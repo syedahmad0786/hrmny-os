@@ -1,6 +1,7 @@
 "use client";
 
 import { trpc } from "@/lib/trpc";
+import { PortalAssetPreview } from "../portal-asset-preview";
 
 export default function PortalDeliveriesPage() {
   const rows = trpc.portal.deliveries.list.useQuery();
@@ -14,11 +15,16 @@ export default function PortalDeliveriesPage() {
           <p className="text-sm">
             Pipeline: <span className="text-ochre">{d.deliveryStatus}</span>
           </p>
-          <ul className="space-y-2 text-sm text-muted">
+          <ul className="space-y-4 text-sm text-muted">
             {d.deliverables.map((item) => (
               <li key={`${item.kind}-${item.taskId}`}>
-                {item.kind === "asset" ? "Asset · " : ""}
-                {item.title} · {item.status}
+                <div>
+                  {item.kind === "asset" ? "Asset · " : ""}
+                  {item.title} · {item.status}
+                </div>
+                {item.kind === "asset" && item.taskId ? (
+                  <PortalAssetPreview assetId={item.taskId} title={item.title} />
+                ) : null}
               </li>
             ))}
           </ul>

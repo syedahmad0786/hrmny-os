@@ -1,0 +1,68 @@
+import type { ComposioSendAdapter } from "@hrmny/integrations";
+import { createComposioStub } from "@hrmny/integrations";
+import { getGoogleWorkspaceAccessToken } from "../trpc/connections-router";
+
+/**
+ * HITL Gmail send via staff Google Workspace OAuth (gmail.send scope).
+ * Used when Composio Gmail work-app is not connected.
+ */
+export function createGoogleWorkspaceGmailSend(
+  employeeId: string,
+): ComposioSendAdapter {
+  const stub = createComposioStub();
+  return {
+    listToolkits: stub.listToolkits.bind(stub),
+    startOAuth: stub.startOAuth.bind(stub),
+    disconnect: stub.disconnect.bind(stub),
+    status: async () => ({ connected: true, expiresAt: null }),
+    async sendAfterApproval(input) {
+      if (input.toolkit === "linkedin") {
+        return stub.sendAfterApproval(input);
+      }
+      const accessToken = await getGoogleWorkspaceAccessToken(employeeId);
+      if (!accessToken) {
+        return stub.sendAfterApproval(input);
+      }
+      const subject = (input.subject ?? "(no subject)")
+        .replace(/[\r\n]+/g, " ")
+        .trim()
+        .slice(0, 200);
+      const encodedSubject = Buffer.from(subject, "utf8").toString("base64");
+      const message = [
+        `To: ${input.to.trim()}`,
+        `Subject: =?UTF-8?B?${encodedSubject}?=`,
+        "MIME-Version: 1.0",
+        'Content-Type: text/plain; charset="UTF-8"',
+        "Content-Transfer-Encoding: 8bit",
+        "",
+        input.body,
+      ].join("\r\n");
+      const response = await fetch(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            raw: Buffer.from(message, "utf8").toString("base64url"),
+          }),
+        },
+      );
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(
+          `Google Workspace Gmail send failed (${response.status}): ${detail.slice(0, 200)}`,
+        );
+      }
+      const json = (await response.json()) as { id?: string };
+      return {
+        sent: true,
+        mode: "live",
+        externalId: json.id ?? `gw-gmail-${Date.now()}`,
+        channel: "gmail",
+      };
+    },
+  };
+}

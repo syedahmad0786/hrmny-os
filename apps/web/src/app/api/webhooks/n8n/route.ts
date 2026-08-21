@@ -7,10 +7,16 @@
  * Both compares are constant-time. Fails closed: no secret configured ⇒ reject in
  * production; unsigned bodies are never trusted.
  *
+ * Lead events are forwarded into durable CRM via leads.inbound.create.
  * Instance: https://hrmny.app.n8n.cloud (see 11-N8N-SETUP.md)
  */
 import { NextResponse } from "next/server";
+import { createCaller } from "@/server/trpc/root";
 import { verifyN8nSignature } from "./verify";
+
+function pickString(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
 
 export async function POST(request: Request) {
   const raw = await request.text();
@@ -37,19 +43,77 @@ export async function POST(request: Request) {
   }
 
   const event =
-    typeof body.event === "string"
-      ? body.event
-      : typeof body.workflowName === "string"
-        ? body.workflowName
-        : "unknown";
+    pickString(body.event) ??
+    pickString(body.workflowName) ??
+    pickString(body.type) ??
+    "unknown";
 
-  // Stub: acknowledge only — CRM/ticket side-effects land in a later slice.
+  const looksLikeLead =
+    /lead/i.test(event) ||
+    Boolean(pickString(body.email) || pickString(body.contactEmail)) ||
+    Boolean(pickString(body.company) || pickString(body.companyName));
+
+  if (looksLikeLead) {
+    const companyName =
+      pickString(body.companyName) ??
+      pickString(body.company) ??
+      pickString(body.name);
+    const contactEmail = (
+      pickString(body.contactEmail) ?? pickString(body.email) ?? ""
+    ).toLowerCase();
+    if (!companyName || !contactEmail) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "VALIDATION",
+          reason: "lead event needs company + email",
+          event,
+        },
+        { status: 400 },
+      );
+    }
+    const caller = createCaller({
+      user: null,
+      employeeId: null,
+      roles: [],
+      canViewMargin: false,
+    });
+    try {
+      const created = await caller.leads.inbound.create({
+        companyName,
+        contactEmail,
+        sector: pickString(body.sector) ?? undefined,
+        message:
+          pickString(body.message) ??
+          (pickString(body.source) ? `Source: ${pickString(body.source)}` : undefined),
+      });
+      return NextResponse.json({
+        ok: true,
+        received: true,
+        event,
+        verified: verify.reason,
+        dealId: created.dealId,
+        leadSourceLane: created.leadSourceLane,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "INTERNAL",
+          event,
+          reason: err instanceof Error ? err.message.slice(0, 200) : "create_failed",
+        },
+        { status: 500 },
+      );
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     received: true,
     event,
     verified: verify.reason,
-    next: "wire to crm/tickets handlers — see 11-N8N-SETUP.md",
+    handled: false,
   });
 }
 
@@ -58,7 +122,8 @@ export async function GET() {
     ok: true,
     endpoint: "/api/webhooks/n8n",
     methods: ["POST"],
-    signature: "X-Hrmny-N8n-Signature or X-N8n-Signature (HMAC-SHA256 or shared secret)",
+    signature:
+      "X-Hrmny-N8n-Signature or X-N8n-Signature (HMAC-SHA256 or shared secret)",
     docs: "hrmny_OS_Execution/11-N8N-SETUP.md",
   });
 }

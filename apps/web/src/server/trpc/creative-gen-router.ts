@@ -195,11 +195,31 @@ export const creativeGenRouter = router({
       const title =
         input.title?.trim() ||
         `Creative · ${gen.prompt.slice(0, 60)}`;
-      const storagePath =
-        gen.imageUrl ??
-        (gen.imageB64
-          ? `data:image/svg+xml;base64,${gen.imageB64}`
-          : `creative://${gen.creativeGenerationId}`);
+
+      let contentType = "image/png";
+      let bytes: Uint8Array | null = null;
+      if (gen.imageB64) {
+        bytes = new Uint8Array(Buffer.from(gen.imageB64, "base64"));
+        contentType = "image/svg+xml";
+      } else if (gen.imageUrl?.startsWith("data:")) {
+        const match = /^data:([^;,]+);base64,(.+)$/i.exec(gen.imageUrl);
+        if (match) {
+          contentType = match[1]!;
+          bytes = new Uint8Array(Buffer.from(match[2]!, "base64"));
+        }
+      } else if (gen.imageUrl?.startsWith("http")) {
+        try {
+          const res = await fetch(gen.imageUrl);
+          if (res.ok) {
+            bytes = new Uint8Array(await res.arrayBuffer());
+            contentType =
+              res.headers.get("content-type")?.split(";")[0]?.trim() ||
+              "image/png";
+          }
+        } catch {
+          /* keep fallback path below */
+        }
+      }
 
       const db = getDb();
       if (!db) {
@@ -221,6 +241,26 @@ export const creativeGenRouter = router({
           taskId ?? null,
         );
         asset.status = "client_review";
+        const ext =
+          contentType.includes("svg")
+            ? "svg"
+            : contentType.includes("jpeg") || contentType.includes("jpg")
+              ? "jpg"
+              : "png";
+        const storagePath = bytes
+          ? `dam/${asset.assetId}/v1-creative.${ext}`
+          : gen.imageUrl ??
+            (gen.imageB64
+              ? `data:image/svg+xml;base64,${gen.imageB64}`
+              : `creative://${gen.creativeGenerationId}`);
+        if (bytes) {
+          const { getObjectStore } = await import("../storage/object-store");
+          await getObjectStore().put({
+            path: storagePath,
+            body: bytes,
+            contentType,
+          });
+        }
         asset.versions.push({
           assetVersionId: crypto.randomUUID(),
           assetId: asset.assetId,
@@ -273,6 +313,27 @@ export const creativeGenRouter = router({
         returning asset_id as "assetId"
       `);
       const assetId = assets[0]!.assetId;
+      const ext =
+        contentType.includes("svg")
+          ? "svg"
+          : contentType.includes("jpeg") || contentType.includes("jpg")
+            ? "jpg"
+            : "png";
+      let storagePath = `dam/${assetId}/v1-creative.${ext}`;
+      if (bytes) {
+        const { getObjectStore } = await import("../storage/object-store");
+        await getObjectStore().put({
+          path: storagePath,
+          body: bytes,
+          contentType,
+        });
+      } else {
+        storagePath =
+          gen.imageUrl ??
+          (gen.imageB64
+            ? `data:image/svg+xml;base64,${gen.imageB64}`
+            : `creative://${gen.creativeGenerationId}`);
+      }
       await db.execute(sql`
         insert into public.asset_version (
           asset_id, storage_path, version_number, is_client_revision,
@@ -293,6 +354,7 @@ export const creativeGenRouter = router({
           metadata = coalesce(metadata, '{}'::jsonb) || ${JSON.stringify({
             portalAssetId: assetId,
             sentToPortalAt: new Date().toISOString(),
+            damUploaded: Boolean(bytes),
           })}::jsonb,
           updated_at = now()
         where creative_generation_id = ${gen.creativeGenerationId}::uuid
