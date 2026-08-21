@@ -272,6 +272,140 @@ export async function updateDeliveryTaskStatus(input: {
   return getDeliveryTask(input.taskId);
 }
 
+export type DeliveryBrief = {
+  briefId: string;
+  taskId: string;
+  body: Record<string, unknown>;
+  dorComplete: boolean;
+  missingRequiredCount: number;
+  lockedAt: string | null;
+};
+
+type BriefRow = {
+  brief_id: string;
+  task_id: string;
+  body: Record<string, unknown> | null;
+  dor_complete: boolean;
+  missing_required_count: number | string;
+  locked_at: Date | string | null;
+};
+
+function mapBrief(row: BriefRow): DeliveryBrief {
+  return {
+    briefId: row.brief_id,
+    taskId: row.task_id,
+    body: row.body ?? {},
+    dorComplete: Boolean(row.dor_complete),
+    missingRequiredCount: Number(row.missing_required_count ?? 0),
+    lockedAt: row.locked_at
+      ? typeof row.locked_at === "string"
+        ? row.locked_at
+        : row.locked_at.toISOString()
+      : null,
+  };
+}
+
+export async function getDeliveryBrief(
+  briefId: string,
+): Promise<DeliveryBrief | null> {
+  const db = getDb();
+  if (!db) return null;
+  const rows = await db.execute<BriefRow>(sql`
+    select
+      brief_id, task_id, body, dor_complete, missing_required_count, locked_at
+    from public.brief
+    where brief_id = ${briefId}::uuid
+    limit 1
+  `);
+  return rows[0] ? mapBrief(rows[0]) : null;
+}
+
+export async function getDeliveryBriefByTask(
+  taskId: string,
+): Promise<DeliveryBrief | null> {
+  const db = getDb();
+  if (!db) return null;
+  const rows = await db.execute<BriefRow>(sql`
+    select
+      brief_id, task_id, body, dor_complete, missing_required_count, locked_at
+    from public.brief
+    where task_id = ${taskId}::uuid
+    limit 1
+  `);
+  return rows[0] ? mapBrief(rows[0]) : null;
+}
+
+/** Upsert brief for a durable task; advances task to briefing when unlocked. */
+export async function upsertDeliveryBriefForTask(input: {
+  taskId: string;
+  body: Record<string, unknown>;
+  dorComplete: boolean;
+  missingRequiredCount: number;
+  setStatusBriefing?: boolean;
+}): Promise<DeliveryBrief | null> {
+  const db = getDb();
+  if (!db) return null;
+  const task = await getDeliveryTask(input.taskId);
+  if (!task) return null;
+
+  await db.execute(sql`
+    insert into public.brief (task_id, body, dor_complete, missing_required_count)
+    values (
+      ${input.taskId}::uuid,
+      ${JSON.stringify(input.body)}::jsonb,
+      ${input.dorComplete},
+      ${input.missingRequiredCount}
+    )
+    on conflict (task_id) do update set
+      body = excluded.body,
+      dor_complete = excluded.dor_complete,
+      missing_required_count = excluded.missing_required_count,
+      updated_at = now()
+  `);
+
+  if (input.setStatusBriefing !== false && !task.briefId) {
+    await db.execute(sql`
+      update public.task
+      set status = 'briefing'::task_status_enum, updated_at = now()
+      where task_id = ${input.taskId}::uuid
+        and status = 'backlog'::task_status_enum
+    `);
+  } else if (input.setStatusBriefing !== false) {
+    await db.execute(sql`
+      update public.task
+      set status = 'briefing'::task_status_enum, updated_at = now()
+      where task_id = ${input.taskId}::uuid
+        and status in ('backlog'::task_status_enum, 'briefing'::task_status_enum)
+    `);
+  }
+
+  return getDeliveryBriefByTask(input.taskId);
+}
+
+export async function updateDeliveryBriefBody(input: {
+  briefId: string;
+  body: Record<string, unknown>;
+  dorComplete: boolean;
+  missingRequiredCount: number;
+}): Promise<DeliveryBrief | null> {
+  const db = getDb();
+  if (!db) return null;
+  const existing = await getDeliveryBrief(input.briefId);
+  if (!existing) return null;
+  if (existing.lockedAt) return null;
+
+  await db.execute(sql`
+    update public.brief
+    set
+      body = ${JSON.stringify(input.body)}::jsonb,
+      dor_complete = ${input.dorComplete},
+      missing_required_count = ${input.missingRequiredCount},
+      updated_at = now()
+    where brief_id = ${input.briefId}::uuid
+  `);
+  return getDeliveryBrief(input.briefId);
+}
+
 export async function setDeliveryTaskQc(input: {
   taskId: string;
   decision: "pass" | "fail" | "waive";

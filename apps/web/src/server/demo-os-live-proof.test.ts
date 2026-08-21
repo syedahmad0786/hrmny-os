@@ -70,6 +70,18 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       const listed = await caller.tasks.list({ clientId: loop.clientId });
       expect(listed.some((t) => t.taskId === deliveryTask.taskId)).toBe(true);
 
+      const brief = await caller.briefs.createForTask({
+        taskId: deliveryTask.taskId,
+        body: {
+          title: "Demo brief",
+          objective: "Launch",
+          audience: "UAE retail",
+        },
+      });
+      expect(brief.taskId).toBe(deliveryTask.taskId);
+      const briefGet = await caller.briefs.get({ id: brief.briefId });
+      expect(briefGet?.briefId).toBe(brief.briefId);
+
       const agent = await caller.aiAdmin.customAgents.create({
         slug: `proof-agent-${Date.now()}`,
         displayName: "Proof Agent",

@@ -23,10 +23,13 @@ import { getDb } from "../db";
 import { driveSeam } from "../seams";
 import {
   createDeliveryTask,
+  getDeliveryBrief,
   getDeliveryTask,
   listDeliveryTasks,
   setDeliveryTaskQc,
+  updateDeliveryBriefBody,
   updateDeliveryTaskStatus,
+  upsertDeliveryBriefForTask,
   type DeliveryTask,
 } from "../tasks/delivery-tasks";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
@@ -448,7 +451,22 @@ export const calendarsRouter = router({
 export const briefsRouter = router({
   get: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(({ input }) => getDemoStore().briefs.get(input.id) ?? null),
+    .query(async ({ input }) => {
+      const durable = await getDeliveryBrief(input.id);
+      if (durable) {
+        const dor = validateDor(durable.body);
+        return {
+          briefId: durable.briefId,
+          taskId: durable.taskId,
+          body: durable.body,
+          dorComplete: durable.dorComplete,
+          missingRequiredCount: durable.missingRequiredCount,
+          missing: [...dor.missing],
+          lockedAt: durable.lockedAt,
+        } satisfies DemoBrief;
+      }
+      return getDemoStore().briefs.get(input.id) ?? null;
+    }),
 
   createForTask: protectedProcedure
     .input(
@@ -457,11 +475,32 @@ export const briefsRouter = router({
         body: z.record(z.unknown()).default({}),
       }),
     )
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
+      const dor = validateDor(input.body);
+      if (getDb()) {
+        const durableTask = await getDeliveryTask(input.taskId);
+        if (durableTask) {
+          const brief = await upsertDeliveryBriefForTask({
+            taskId: input.taskId,
+            body: input.body,
+            dorComplete: dor.dorComplete,
+            missingRequiredCount: dor.missingRequiredCount,
+          });
+          if (!brief) throw new Error("NOT_FOUND");
+          return {
+            briefId: brief.briefId,
+            taskId: brief.taskId,
+            body: brief.body,
+            dorComplete: brief.dorComplete,
+            missingRequiredCount: brief.missingRequiredCount,
+            missing: [...dor.missing],
+            lockedAt: brief.lockedAt,
+          } satisfies DemoBrief;
+        }
+      }
       const store = getDemoStore();
       const task = store.tasks.get(input.taskId);
       if (!task) throw new Error("NOT_FOUND");
-      const dor = validateDor(input.body);
       const brief: DemoBrief = {
         briefId: randomUUID(),
         taskId: input.taskId,
@@ -493,11 +532,33 @@ export const briefsRouter = router({
         body: z.record(z.unknown()),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
+      const dor = validateDor(input.body);
+      if (getDb()) {
+        const durable = await getDeliveryBrief(input.id);
+        if (durable) {
+          if (durable.lockedAt) throw new Error("BRIEF_LOCKED");
+          const updated = await updateDeliveryBriefBody({
+            briefId: input.id,
+            body: input.body,
+            dorComplete: dor.dorComplete,
+            missingRequiredCount: dor.missingRequiredCount,
+          });
+          if (!updated) throw new Error("NOT_FOUND");
+          return {
+            briefId: updated.briefId,
+            taskId: updated.taskId,
+            body: updated.body,
+            dorComplete: updated.dorComplete,
+            missingRequiredCount: updated.missingRequiredCount,
+            missing: [...dor.missing],
+            lockedAt: updated.lockedAt,
+          } satisfies DemoBrief;
+        }
+      }
       const brief = getDemoStore().briefs.get(input.id);
       if (!brief) throw new Error("NOT_FOUND");
       if (brief.lockedAt) throw new Error("BRIEF_LOCKED");
-      const dor = validateDor(input.body);
       brief.body = input.body;
       brief.dorComplete = dor.dorComplete;
       brief.missingRequiredCount = dor.missingRequiredCount;
@@ -507,7 +568,25 @@ export const briefsRouter = router({
 
   validateDor: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
+      if (getDb()) {
+        const durable = await getDeliveryBrief(input.id);
+        if (durable) {
+          const dor = validateDor(durable.body);
+          await updateDeliveryBriefBody({
+            briefId: input.id,
+            body: durable.body,
+            dorComplete: dor.dorComplete,
+            missingRequiredCount: dor.missingRequiredCount,
+          });
+          return {
+            missingRequiredCount: dor.missingRequiredCount,
+            dorComplete: dor.dorComplete,
+            missing: dor.missing,
+            canLock: dor.canLock,
+          };
+        }
+      }
       const brief = getDemoStore().briefs.get(input.id);
       if (!brief) throw new Error("NOT_FOUND");
       const dor = validateDor(brief.body);
