@@ -41,6 +41,13 @@ export default function ConnectionsPage() {
   });
   const startXeroOAuth = trpc.connections.startXeroOAuth.useMutation();
   const startOAuth = trpc.connections.startOAuth.useMutation();
+  const probeGoogle = trpc.connections.probeGoogleWorkspace.useMutation({
+    onSuccess: () =>
+      void Promise.all([
+        utils.connections.list.invalidate(),
+        utils.connections.workApps.invalidate(),
+      ]),
+  });
   const disconnect = trpc.connections.disconnect.useMutation({
     onSuccess: () =>
       void Promise.all([
@@ -313,47 +320,86 @@ export default function ConnectionsPage() {
                   </Button>
                 </div>
               ) : item.authType === "oauth" ? (
-                <Button
-                  className="mt-4"
-                  type="button"
-                  variant="ghost"
-                  disabled={
-                    !item.allowed ||
-                    !item.ready ||
-                    startOAuth.isPending ||
-                    startXeroOAuth.isPending ||
-                    authorizeManaged.isPending
-                  }
-                  onClick={() => {
-                    if (item.toolkit === "google_workspace") {
-                      void connectGoogleWorkspace();
-                      return;
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={
+                      !item.allowed ||
+                      !item.ready ||
+                      startOAuth.isPending ||
+                      startXeroOAuth.isPending ||
+                      authorizeManaged.isPending
                     }
-                    if (item.toolkit === "xero") {
-                      void startXeroOAuth
-                        .mutateAsync()
-                        .then((result) => setRedirect(result.redirectUrl));
-                      return;
-                    }
-                    if (item.toolkit === "canva" || item.toolkit === "linkedin") {
-                      void authorizeManaged
-                        .mutateAsync({ toolkit: item.toolkit })
-                        .then((result) => setRedirect(result.redirectUrl));
-                    }
-                  }}
-                >
-                  {item.ready
-                    ? item.toolkit === "canva" || item.toolkit === "linkedin"
-                      ? item.status === "connected"
-                        ? "Reconnect with Composio"
-                        : "Connect with Composio"
-                      : item.status === "error" || item.lastError
-                        ? "Reconnect (token revoked)"
-                        : item.status === "connected"
-                          ? "Reconnect with OAuth"
-                          : "Connect with OAuth"
-                    : "Provider setup needed"}
-                </Button>
+                    onClick={() => {
+                      if (item.toolkit === "google_workspace") {
+                        void connectGoogleWorkspace();
+                        return;
+                      }
+                      if (item.toolkit === "xero") {
+                        void startXeroOAuth
+                          .mutateAsync()
+                          .then((result) => setRedirect(result.redirectUrl));
+                        return;
+                      }
+                      if (
+                        item.toolkit === "canva" ||
+                        item.toolkit === "linkedin"
+                      ) {
+                        void authorizeManaged
+                          .mutateAsync({ toolkit: item.toolkit })
+                          .then((result) => setRedirect(result.redirectUrl));
+                      }
+                    }}
+                  >
+                    {item.ready
+                      ? item.toolkit === "canva" || item.toolkit === "linkedin"
+                        ? item.status === "connected"
+                          ? "Reconnect with Composio"
+                          : "Connect with Composio"
+                        : item.status === "error" || item.lastError
+                          ? "Reconnect (token revoked)"
+                          : item.status === "connected"
+                            ? "Reconnect with OAuth"
+                            : "Connect with OAuth"
+                      : "Provider setup needed"}
+                  </Button>
+                  {item.toolkit === "google_workspace" &&
+                  item.ready &&
+                  (item.status === "error" ||
+                    item.status === "connected" ||
+                    item.lastError) ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={probeGoogle.isPending}
+                      onClick={() => void probeGoogle.mutateAsync()}
+                    >
+                      {probeGoogle.isPending
+                        ? "Testing…"
+                        : "Test / heal token"}
+                    </Button>
+                  ) : null}
+                  {probeGoogle.data && item.toolkit === "google_workspace" ? (
+                    <p
+                      className={`w-full text-xs ${
+                        probeGoogle.data.ok ? "text-emerald-700" : "text-red-700"
+                      }`}
+                    >
+                      {probeGoogle.data.ok
+                        ? `OK · ${probeGoogle.data.status}${
+                            probeGoogle.data.account
+                              ? ` · ${probeGoogle.data.account}`
+                              : ""
+                          }`
+                        : `Failed · ${
+                            "reason" in probeGoogle.data
+                              ? probeGoogle.data.reason
+                              : "unknown"
+                          }`}
+                    </p>
+                  ) : null}
+                </div>
               ) : item.toolkit === "asana" && item.allowed ? (
                 <div className="mt-4 flex items-center gap-3">
                   <Link

@@ -1479,6 +1479,72 @@ export const connectionsRouter = router({
       };
     }),
 
+  /**
+   * Refresh / validate the staff Google Workspace token without sending mail.
+   * Self-heals `error` → `connected` when refresh succeeds; returns the failure
+   * reason when the refresh token is revoked (operator must Reconnect).
+   */
+  probeGoogleWorkspace: staffProcedure.mutation(async ({ ctx }) => {
+    const employeeId = requireEmployeeId(ctx.employeeId);
+    await requireAllowedApp("google_workspace");
+    try {
+      const token = await getGoogleWorkspaceAccessToken(employeeId);
+      if (!token) {
+        return {
+          ok: false as const,
+          status: "missing" as const,
+          reason: "No Google Workspace connection found — connect first",
+        };
+      }
+      const db = getDb();
+      let status: string = "connected";
+      let account: string | null = null;
+      let lastError: string | null = null;
+      if (db) {
+        const [row] = await db
+          .select({
+            status: connectionAccount.status,
+            externalConnectionId: connectionAccount.externalConnectionId,
+            lastError: connectionAccount.lastError,
+          })
+          .from(connectionAccount)
+          .where(
+            and(
+              eq(connectionAccount.ownerEmployeeId, employeeId),
+              eq(connectionAccount.toolkit, "google_workspace"),
+              eq(connectionAccount.scope, "staff"),
+            ),
+          )
+          .limit(1);
+        status = row?.status ?? "connected";
+        account = row?.externalConnectionId ?? null;
+        lastError = row?.lastError ?? null;
+        await db
+          .update(connectionAccount)
+          .set({ lastTestedAt: new Date(), updatedAt: new Date() })
+          .where(
+            and(
+              eq(connectionAccount.ownerEmployeeId, employeeId),
+              eq(connectionAccount.toolkit, "google_workspace"),
+              eq(connectionAccount.scope, "staff"),
+            ),
+          );
+      }
+      return {
+        ok: true as const,
+        status,
+        account,
+        lastError,
+      };
+    } catch (err) {
+      return {
+        ok: false as const,
+        status: "error" as const,
+        reason: err instanceof Error ? err.message : "probe_failed",
+      };
+    }
+  }),
+
   startOAuth: staffProcedure
     .input(
       z.object({
