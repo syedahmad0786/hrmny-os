@@ -14,6 +14,7 @@ import { runWorkFormReceiptJob } from "@/server/work-form-receipts";
 import { runScheduledWorkRuleJob } from "@/server/trpc/work-management-router";
 import { runDueReports } from "@/server/inngest/report-scheduler";
 import { runCrmTaskDigest } from "@/server/reminders/crm-task-digest";
+import { runLeadgenDailyCron } from "@/server/leadgen/daily-cron";
 
 export const dynamic = "force-dynamic";
 
@@ -209,7 +210,7 @@ export async function GET(request: Request) {
       delayedJobs: Number(lag!.count),
     });
   }
-  const [workWebhooks, expiredAiRuns, dueReports, crmTaskDigest] =
+  const [workWebhooks, expiredAiRuns, dueReports, crmTaskDigest, leadgenDaily] =
     await Promise.all([
       deliverPendingWorkWebhooks(),
       cleanupExpiredWorkAiRuns(),
@@ -222,6 +223,11 @@ export async function GET(request: Request) {
         posted: false,
         error: String(error).slice(0, 500),
       })),
+      // Daily lead-gen pipeline (Apollo/Hunter live when keyed). Never fatal.
+      runLeadgenDailyCron().catch((error) => ({
+        ran: false,
+        error: String(error).slice(0, 500),
+      })),
     ]);
   return Response.json({
     claimed: claimed.length,
@@ -231,5 +237,6 @@ export async function GET(request: Request) {
     expiredAiRuns,
     dueReports,
     crmTaskDigest,
+    leadgenDaily,
   });
 }
