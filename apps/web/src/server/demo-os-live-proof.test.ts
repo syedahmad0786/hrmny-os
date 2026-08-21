@@ -49,6 +49,14 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       expect(loop.onboardingPhases).toBeGreaterThanOrEqual(1);
       expect(loop.calendarId).toBeTruthy();
       expect(loop.portalInvite?.email).toBeTruthy();
+      expect(
+        loop.portalInvite?.delivery?.mode === "mock" ||
+          loop.portalInvite?.delivery?.mode === "live",
+      ).toBe(true);
+      expect(loop.next.account).toContain("clientId=");
+      expect(loop.next.creative).toContain("clientId=");
+      expect(loop.next.approvals).toBe("/approvals");
+      expect(loop.next.portal).toBe("/portal/approvals");
       expect(loop.outreachId).toBeTruthy();
       const outreachList = await caller.leadgen.outreach.list();
       expect(
