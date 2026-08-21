@@ -1,6 +1,7 @@
 import {
   closeDurableDeal,
   durableHandoverPack,
+  type HandoverPackResult,
 } from "./handover";
 import {
   createCompany,
@@ -16,29 +17,30 @@ export type ClosedLoopInput = {
   actorEmployeeId?: string | null;
 };
 
+export type ClosedLoopSuccess = {
+  ok: true;
+  companyId: string;
+  contactId: string;
+  dealId: string;
+  clientId: string;
+  clientName: string;
+  taskId: string | null;
+  calendarId: string | null;
+  portalInvite: HandoverPackResult["portalInvite"];
+  outreachId: string | null;
+  invoiceId: string | null;
+  onboardingPhases: number;
+  fired: string[];
+  viaApollo: boolean;
+  apolloMode: "mock" | "live" | null;
+  next: HandoverPackResult["next"] & {
+    crmDeal: string;
+    billing: string;
+  };
+};
+
 export type ClosedLoopResult =
-  | {
-      ok: true;
-      companyId: string;
-      contactId: string;
-      dealId: string;
-      clientId: string;
-      clientName: string;
-      taskId: string | null;
-      calendarId: string | null;
-      portalInvite: Awaited<
-        ReturnType<typeof durableHandoverPack>
-      > extends { ok: true; portalInvite: infer P }
-        ? P
-        : null;
-      outreachId: string | null;
-      invoiceId: string | null;
-      onboardingPhases: number;
-      fired: string[];
-      viaApollo: boolean;
-      apolloMode: "mock" | "live" | null;
-      next: Record<string, string>;
-    }
+  | ClosedLoopSuccess
   | {
       ok: false;
       step: string;
