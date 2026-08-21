@@ -90,8 +90,8 @@ export const CONNECTION_CATALOG = [
     toolkit: "canva",
     label: "Canva",
     authType: "oauth",
-    ready: false,
-    note: "Needs Canva OAuth app or Composio access.",
+    ready: true,
+    note: "Connect via Composio-managed OAuth; design list is live when connected.",
   },
   {
     toolkit: "linkedin",
@@ -1540,6 +1540,61 @@ export const connectionsRouter = router({
 
   canvaListDesigns: staffProcedure.query(async ({ ctx }) => {
     await requireAllowedApp("canva");
+    const employeeId = requireEmployeeId(ctx.employeeId);
+
+    if (process.env.COMPOSIO_API_KEY?.trim()) {
+      try {
+        const client = requireSystemComposio();
+        const accounts = await client.listUserConnectedAccounts(employeeId);
+        const account = accounts.find(
+          (candidate) =>
+            candidate.toolkit.slug.toLowerCase() === "canva" &&
+            !candidate.is_disabled &&
+            ACTIVE_COMPOSIO_STATUSES.has(candidate.status.toUpperCase()),
+        );
+        if (!account) {
+          return {
+            ok: false as const,
+            reason:
+              "Canva not connected — use Connections → Connect Canva (Composio)",
+            designs: [] as { id: string; title: string }[],
+          };
+        }
+        const { listCanvaUserDesigns } = await import("@hrmny/integrations");
+        const designs = await listCanvaUserDesigns({
+          client,
+          connectedAccountId: account.id,
+        });
+        const db = getDb();
+        if (db) {
+          const { writeAudit } = await import("../m1-persistence");
+          await writeAudit({
+            actorEmployeeId: employeeId,
+            action: "connections.canvaListDesigns",
+            entityType: "connection_account",
+            entityId: account.id,
+            before: null,
+            after: { count: designs.length, mode: "live" },
+            reason: null,
+          });
+        }
+        return {
+          ok: true as const,
+          designs: designs.map((d) => ({ id: d.id, title: d.title })),
+          mode: "live" as const,
+        };
+      } catch (err) {
+        throw new TRPCError({
+          code: "BAD_GATEWAY",
+          message:
+            err instanceof Error
+              ? `Canva list failed: ${err.message}`
+              : "Canva list failed",
+        });
+      }
+    }
+
+    // Memory/demo path only when Composio is not configured (unit tests).
     const store = getDemoStore();
     const canva = store.connections.find(
       (row) => row.toolkit === "canva" && row.status === "connected",
@@ -1552,12 +1607,12 @@ export const connectionsRouter = router({
       };
     }
     store.appendAudit({
-      actorEmployeeId: requireEmployeeId(ctx.employeeId),
+      actorEmployeeId: employeeId,
       action: "connections.canvaListDesigns",
       entityType: "connection_account",
       entityId: canva.connectionAccountId,
       before: null,
-      after: { smoke: true },
+      after: { smoke: true, mode: "stub" },
       reason: null,
     });
     return {
@@ -1566,6 +1621,7 @@ export const connectionsRouter = router({
         { id: "stub-design-1", title: "Brand kit cover (Canva stub)" },
         { id: "stub-design-2", title: "Social template pack (Canva stub)" },
       ],
+      mode: "stub" as const,
     };
   }),
 });

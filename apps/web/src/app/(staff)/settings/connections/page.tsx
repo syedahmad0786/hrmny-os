@@ -229,7 +229,8 @@ export default function ConnectionsPage() {
                     !item.allowed ||
                     !item.ready ||
                     startOAuth.isPending ||
-                    startXeroOAuth.isPending
+                    startXeroOAuth.isPending ||
+                    authorizeManaged.isPending
                   }
                   onClick={() => {
                     if (item.toolkit === "google_workspace") {
@@ -242,14 +243,18 @@ export default function ConnectionsPage() {
                         .then((result) => setRedirect(result.redirectUrl));
                       return;
                     }
-                    void startOAuth
-                      .mutateAsync({
-                        toolkit: item.toolkit as "canva",
-                      })
-                      .then((result) => setRedirect(result.redirectUrl));
+                    if (item.toolkit === "canva") {
+                      void authorizeManaged
+                        .mutateAsync({ toolkit: "canva" })
+                        .then((result) => setRedirect(result.redirectUrl));
+                    }
                   }}
                 >
-                  {item.ready ? "Connect with OAuth" : "Provider setup needed"}
+                  {item.ready
+                    ? item.toolkit === "canva"
+                      ? "Connect with Composio"
+                      : "Connect with OAuth"
+                    : "Provider setup needed"}
                 </Button>
               ) : item.toolkit === "asana" && item.allowed ? (
                 <div className="mt-4 flex items-center gap-3">
