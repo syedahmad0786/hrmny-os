@@ -94,19 +94,26 @@ function FinanceQueueInner() {
         <span className="text-muted">Invoice email body hint</span>
         <textarea
           className="min-h-[72px] rounded border border-sand bg-white px-3 py-2"
+          data-testid="finance-intake-hint"
           value={bodyHint}
           onChange={(e) => setBodyHint(e.target.value)}
         />
       </label>
 
       <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={() => void runIntake()} disabled={intake.isPending}>
+        <Button
+          type="button"
+          data-testid="finance-intake"
+          onClick={() => void runIntake()}
+          disabled={intake.isPending}
+        >
           1. Intake (AI propose)
         </Button>
         {demoResets ? (
           <Button
             type="button"
             variant="ghost"
+            data-testid="finance-reset"
             onClick={() => void reset.mutateAsync()}
           >
             Reset M2 finance
@@ -153,7 +160,13 @@ function FinanceQueueInner() {
         <p className="text-sm text-muted">Proposals</p>
         <ul className="mt-3 flex flex-col gap-3">
           {(proposals.data ?? []).map((p) => (
-            <li key={p.proposalId} className="border-t border-sand/60 pt-3 text-sm">
+            <li
+              key={p.proposalId}
+              className="border-t border-sand/60 pt-3 text-sm"
+              data-testid="finance-proposal"
+              data-proposal-status={p.status}
+              data-proposal-id={p.proposalId}
+            >
               <p>
                 {p.status} · {p.emailRef}
               </p>
@@ -164,6 +177,7 @@ function FinanceQueueInner() {
                 <div className="mt-2 flex gap-2">
                   <Button
                     type="button"
+                    data-testid="finance-approve-proposal"
                     onClick={async () => {
                       const r = await decide.mutateAsync({
                         proposalId: p.proposalId,
@@ -177,6 +191,7 @@ function FinanceQueueInner() {
                   <Button
                     type="button"
                     variant="ghost"
+                    data-testid="finance-reject-proposal"
                     onClick={async () => {
                       const r = await decide.mutateAsync({
                         proposalId: p.proposalId,
@@ -203,6 +218,9 @@ function FinanceQueueInner() {
               <li
                 key={inv.invoiceId}
                 id={`os-invoice-${inv.invoiceId}`}
+                data-testid="finance-invoice"
+                data-invoice-id={inv.invoiceId}
+                data-invoice-status={inv.status}
                 data-selected={focused ? "true" : undefined}
                 className={`border-t border-sand/60 pt-3 text-sm ${
                   focused
@@ -224,6 +242,7 @@ function FinanceQueueInner() {
                   inv.status === "proposed" ? (
                     <Button
                       type="button"
+                      data-testid="finance-approve-invoice"
                       onClick={async () => {
                         const r = await approve.mutateAsync({
                           id: inv.invoiceId,
@@ -238,6 +257,7 @@ function FinanceQueueInner() {
                   inv.status === "approved" ? (
                     <Button
                       type="button"
+                      data-testid="finance-issue-invoice"
                       onClick={async () => {
                         const r = await issue.mutateAsync({ id: inv.invoiceId });
                         setLast(r);
