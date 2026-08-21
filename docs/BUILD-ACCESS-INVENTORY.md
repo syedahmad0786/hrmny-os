@@ -25,11 +25,11 @@
 
 | System | URL / ID | Owner / login | Where config lives | Status | Notes |
 |--------|----------|---------------|--------------------|--------|-------|
-| Prod OS (Vercel) | `https://hrmny-os.vercel.app` · team `team_1JFUzpwQIfMIYzFhsmVaBatl` · project `hrmny-os` | developer@hrmny.co | Vercel → Settings → Environment Variables | `need` | Singapore `sin1` |
+| Prod OS (Vercel) | `https://hrmny-os.vercel.app` · team `team_1JFUzpwQIfMIYzFhsmVaBatl` · project `hrmny-os` | developer@hrmny.co | Vercel → Settings → Environment Variables | `have` (URL) | MCP lacks hrmny team — secrets still need paste |
 | Desk site | `https://hrmny-os-desk*.vercel.app` | same Vercel team | Vercel env | `deferred` | Public desk; not Phase 1 core |
 | Blueprint | `https://hrmny-operating-system-blueprint.vercel.app/` | — | reference only | `have` | Spec canvas |
 | Docs (Netlify) | `https://hrmny-os-docs.netlify.app` | — | reference | `have` | Spec HTML |
-| Supabase | ref `klrugedztqxlvyghyzxs` · dashboard `https://supabase.com/dashboard/project/klrugedztqxlvyghyzxs` | org owner / PAT | Vercel + local `.env.local` | `need` | Auth + Postgres |
+| Supabase | ref `klrugedztqxlvyghyzxs` · dashboard `https://supabase.com/dashboard/project/klrugedztqxlvyghyzxs` | org owner / PAT | Vercel + local `.env.local` | `partial` | URL + publishable filled locally; secret/DB still need |
 | n8n Cloud | `https://hrmny.app.n8n.cloud` | n8n API key | `N8N_*` | `deferred` | Automations optional this phase |
 | Google Workspace SSO | `@hrmny.co` | Google Cloud OAuth client | `GOOGLE_OAUTH_*`, Supabase Auth | `need` | Staff login |
 | OpenRouter (general) | `https://openrouter.ai` · **workspace A** | API key A | `OPENROUTER_API_KEY` | `need` | Day-to-day agents |
@@ -135,3 +135,4 @@ Production: paste the same Tier-1 keys into Vercel project `hrmny-os` (Productio
 | Date | Who | What marked have / deferred |
 |------|-----|-----------------------------|
 | 2026-08-21 | Agent | Inventory created; Tier-1 status `need`; code defaults `XERO_WRITE_ENABLED=false`; privileged OpenRouter vars added to `.env.example` |
+| 2026-08-21 | Agent | Filled local `.env.local` from prod public bundle (Supabase URL + publishable key, app URLs). See [ENV-FILL-STATUS.md](./ENV-FILL-STATUS.md) for remaining paste URLs. |
