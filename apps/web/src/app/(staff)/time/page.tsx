@@ -7,10 +7,24 @@ import { trpc } from "@/lib/trpc";
 export default function TimePage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
+  const year = new Date().getFullYear();
+  const isHr = (session.data?.roles ?? []).some((role) =>
+    ["partner", "director", "hr"].includes(role),
+  );
+  const balances = trpc.hrOperations.balances.list.useQuery(
+    { year },
+    { enabled: Boolean(session.data?.employeeId), retry: false },
+  );
   const policies = trpc.hrOperations.policies.list.useQuery();
   const requests = trpc.hrOperations.requests.list.useQuery();
-  const records = trpc.hrOperations.attendance.list.useQuery();
-  const corrections = trpc.hrOperations.attendance.corrections.list.useQuery();
+  const records = trpc.hrOperations.attendance.list.useQuery(undefined, {
+    enabled: isHr,
+    retry: false,
+  });
+  const corrections = trpc.hrOperations.attendance.corrections.list.useQuery(
+    undefined,
+    { enabled: isHr, retry: false },
+  );
   const createRequest = trpc.hrOperations.requests.create.useMutation({
     onSuccess: () => void utils.hrOperations.requests.invalidate(),
   });
@@ -50,6 +64,17 @@ export default function TimePage() {
     }
   };
 
+  const remainingFor = (row: {
+    entitledDays: string;
+    carriedOverDays: string;
+    adjustmentDays: string;
+  }) => {
+    const entitled = Number(row.entitledDays) || 0;
+    const carried = Number(row.carriedOverDays) || 0;
+    const adjustment = Number(row.adjustmentDays) || 0;
+    return (entitled + carried + adjustment).toFixed(1);
+  };
+
   return (
     <main className="flex flex-col gap-6">
       <div>
@@ -57,12 +82,39 @@ export default function TimePage() {
           Leave & attendance
         </h1>
         <p className="mt-1 text-sm text-muted">
-          Request leave, clock your workday, and submit attendance corrections.
+          {isHr
+            ? "HR logs leave approvals and attendance for payroll. Team members see remaining leave days below."
+            : "Your remaining leave days for the year. Talk to HR to change anything."}
         </p>
       </div>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">
-        <h2 className="font-semibold">Today</h2>
+        <h2 className="font-semibold">Remaining leave days ({year})</h2>
+        {balances.isError ? (
+          <p className="mt-2 text-sm text-muted">
+            Leave balances need a live database connection.
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2 text-sm">
+            {(balances.data ?? []).map((row) => (
+              <li
+                key={row.leaveBalanceId}
+                className="flex justify-between border-t border-sand/60 pt-2"
+              >
+                <span>{row.policyName}</span>
+                <span className="font-medium">{remainingFor(row)} days</span>
+              </li>
+            ))}
+            {!balances.isLoading && !(balances.data ?? []).length ? (
+              <li className="text-muted">No leave balances on file yet.</li>
+            ) : null}
+          </ul>
+        )}
+      </section>
+
+      {isHr ? (
+      <section className="rounded-lg border border-sand bg-white/70 p-4">
+        <h2 className="font-semibold">Today (HR attendance log)</h2>
         <div className="mt-3 flex gap-2">
           <Button
             type="button"
@@ -90,9 +142,12 @@ export default function TimePage() {
           ))}
         </ul>
       </section>
+      ) : null}
 
+      {isHr ? (
+        <>
       <section className="rounded-lg border border-sand bg-white/70 p-4">
-        <h2 className="font-semibold">New leave request</h2>
+        <h2 className="font-semibold">Log leave (HR)</h2>
         <form
           className="mt-3 grid gap-3 md:grid-cols-2"
           onSubmit={(event) => {
@@ -315,6 +370,8 @@ export default function TimePage() {
           ))}
         </ul>
       </section>
+        </>
+      ) : null}
 
       {message ? (
         <p role="status" className="text-sm text-muted">

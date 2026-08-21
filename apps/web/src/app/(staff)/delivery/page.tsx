@@ -2,6 +2,8 @@
 
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
+import { showDemoResets } from "@/lib/feature-flags";
+import { deliveryRhythmFor } from "@/lib/delivery-rhythm";
 import Link from "next/link";
 
 export default function DeliveryBoardPage() {
@@ -11,6 +13,12 @@ export default function DeliveryBoardPage() {
   });
   const board = trpc.dashboards.delivery.useQuery();
   const capacity = trpc.dashboards.capacity.useQuery();
+  const clients = trpc.clients.list.useQuery();
+  const demoResets = showDemoResets();
+  const rhythms = (clients.data ?? []).slice(0, 8).map((c) => ({
+    name: c.name,
+    ...deliveryRhythmFor(c.engagementType),
+  }));
 
   return (
     <main className="flex flex-col gap-6">
@@ -20,18 +28,43 @@ export default function DeliveryBoardPage() {
             Delivery board
           </h1>
           <p className="text-muted">
-            In-house task board (Asana replace) · 11-state creative machine
+            Task board · retainer = recurring checkpoints · project = milestone
+            touchpoints
           </p>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => void reset.mutateAsync()}
-          disabled={reset.isPending}
-        >
-          Reset M4 demo
-        </Button>
+        {demoResets ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => void reset.mutateAsync()}
+            disabled={reset.isPending}
+          >
+            Reset M4 demo
+          </Button>
+        ) : null}
       </div>
+
+      <section className="rounded-lg border border-sand bg-white/70 p-4">
+        <p className="text-sm font-medium">Contract → delivery rhythm</p>
+        <ul className="mt-2 space-y-1 text-sm">
+          {rhythms.map((row) => (
+            <li key={row.name}>
+              <span className="font-medium">{row.name}</span>
+              {" — "}
+              {row.label}
+            </li>
+          ))}
+          {!rhythms.length ? (
+            <li className="text-muted">
+              No clients yet — set engagement type on{" "}
+              <Link href="/clients" className="underline">
+                Clients
+              </Link>
+              .
+            </li>
+          ) : null}
+        </ul>
+      </section>
 
       <p className="text-sm text-muted">
         Bottleneck:{" "}
@@ -51,6 +84,10 @@ export default function DeliveryBoardPage() {
         {" · "}
         <Link href="/account" className="text-ochre underline">
           Account rhythm
+        </Link>
+        {" · "}
+        <Link href="/assets" className="text-ochre underline">
+          Assets
         </Link>
       </p>
 

@@ -1,7 +1,11 @@
 # hrmny OS — Credentials & Access Needed (ordered by blocking impact)
 
-**Prepared:** 2026-07-30 · **Owner:** Ahmad Bukhari
-**Rule:** never send secrets through chat/email/git. Put each value in the approved Keeper folder (or paste directly into Vercel env), and reply only "done" per line item. Companion: `PRODUCTION-OWNERSHIP-ACCESS-REGISTER.md` (ownership + how each connection is accepted), `MASTER-PLAN-V2.md` (what each key unblocks).
+**Prepared:** 2026-07-30 · **Updated:** 2026-08-21 · **Owner:** Ahmad Bukhari
+**Rule:** never send secrets through chat/email/git. Put each value in the approved Keeper folder (or paste directly into Vercel env), and reply only "done" per line item.
+
+**Start here:** fill [BUILD-ACCESS-INVENTORY.md](./BUILD-ACCESS-INVENTORY.md) first. Client lock: `XERO_WRITE_ENABLED=false`, dual OpenRouter workspaces (general + privileged).
+
+Companion: `PRODUCTION-OWNERSHIP-ACCESS-REGISTER.md` (ownership + how each connection is accepted), `MASTER-PLAN-V2.md` (what each key unblocks).
 
 ## Tier 1 — blocks everything AI (Phase 0 / M7)
 

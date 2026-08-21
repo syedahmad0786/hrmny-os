@@ -2,6 +2,7 @@
 
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
+import { showDemoResets } from "@/lib/feature-flags";
 import { useState } from "react";
 
 export default function CreativeQcPage() {
@@ -64,13 +65,15 @@ export default function CreativeQcPage() {
             State 5 (`qc`) — client-facing blocked until internal approve
           </p>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => void reset.mutateAsync()}
-        >
-          Reset M4 demo
-        </Button>
+        {showDemoResets() ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => void reset.mutateAsync()}
+          >
+            Reset M4 demo
+          </Button>
+        ) : null}
       </div>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4 text-sm">

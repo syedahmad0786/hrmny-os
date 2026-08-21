@@ -2,6 +2,7 @@
 
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
+import { showDemoResets } from "@/lib/feature-flags";
 import { useEffect, useState } from "react";
 
 const DOR_FIELDS = [
@@ -90,13 +91,15 @@ export default function TrafficDorPage() {
             Form 2 — lock blocked when &gt;2 required items missing
           </p>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => void reset.mutateAsync()}
-        >
-          Reset M4 demo
-        </Button>
+        {showDemoResets() ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => void reset.mutateAsync()}
+          >
+            Reset M4 demo
+          </Button>
+        ) : null}
       </div>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">

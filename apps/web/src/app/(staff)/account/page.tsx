@@ -2,6 +2,7 @@
 
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
+import { showDemoResets } from "@/lib/feature-flags";
 import { type FormEvent, useState } from "react";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -141,13 +142,15 @@ export default function AccountRhythmPage() {
             Availability, Month-1 rhythm, and calendar controls
           </p>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => void reset.mutateAsync()}
-        >
-          Reset M4 demo
-        </Button>
+        {showDemoResets() ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => void reset.mutateAsync()}
+          >
+            Reset M4 demo
+          </Button>
+        ) : null}
       </div>
 
       {outOfOfficeEnabled ? (

@@ -20,7 +20,7 @@ describe("M5 money loop", () => {
     getDemoStore().resetM5Demo();
   });
 
-  it("retainer draft → approve → Xero post → paid webhook", async () => {
+  it("retainer draft → approve → mark issued in OS (no Xero write)", async () => {
     const finance = callerFor("finance");
     const period = "2026-07";
     const batch = await finance.invoices.draftRetainersForMonth({ period });
@@ -36,12 +36,9 @@ describe("M5 money loop", () => {
 
     const issued = await finance.invoices.issue({ id: inv.invoiceId });
     expect(issued.result.ok).toBe(true);
-    expect(issued.invoice.xeroInvoiceId).toMatch(/^mock-xero-inv-/);
-
-    const paid = await finance.invoices.markPaidFromWebhook({
-      xeroInvoiceId: issued.invoice.xeroInvoiceId!,
-    });
-    expect(paid.status).toBe("paid");
+    expect(issued.invoice.status).toBe("issued");
+    expect(issued.invoice.xeroInvoiceId).toBeNull();
+    expect(issued.xeroWrite).toBe(false);
   });
 
   it("AM denied margin dashboard (FORBIDDEN)", async () => {
@@ -92,7 +89,8 @@ describe("M5 money loop", () => {
       id: draft.payrollRunId,
     });
     expect(posted.result.ok).toBe(true);
-    expect(posted.run.xeroJournalId).toMatch(/^mock-xero-je-/);
+    expect(posted.run.xeroJournalId).toBeNull();
+    expect(posted.xeroWrite).toBe(false);
     expect(posted.run.disbursed).toBe(false);
   });
 

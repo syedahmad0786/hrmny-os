@@ -1,7 +1,9 @@
 "use client";
 
 import { Button } from "@hrmny/ui";
+import Link from "next/link";
 import { trpc } from "@/lib/trpc";
+import { showDemoResets } from "@/lib/feature-flags";
 import { useState } from "react";
 
 export default function PayrollRunPage() {
@@ -25,26 +27,43 @@ export default function PayrollRunPage() {
   });
   const [last, setLast] = useState<unknown>(null);
   const period = new Date().toISOString().slice(0, 7);
+  const demoResets = showDemoResets();
 
   return (
     <main className="flex flex-col gap-6">
       <h1 className="font-display text-3xl font-semibold">Payroll run</h1>
       <p className="text-muted">
-        Module E: Bayzat mirror draft → HR confirm → Director/partner approve →
-        Xero JE. OS never disburses. Switch Dev role for SoD (HR ≠ approver).
+        Bayzat/OS draft → HR confirm → Director/partner approve → finalize in
+        OS. Xero journal posts are disabled (read/mirror only). OS never
+        disburses.
+      </p>
+      <p className="text-sm">
+        <Link className="underline" href="/people">
+          People headcount
+        </Link>
+        {" · "}
+        <Link className="underline" href="/workforce-payroll">
+          Pay & expenses
+        </Link>
+        {" · "}
+        <Link className="underline" href="/finance">
+          Finance mirror
+        </Link>
       </p>
       <p className="text-sm text-muted">
         Current role: {(session.data?.roles ?? []).join(", ") || "—"}
       </p>
 
       <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={async () => setLast(await reset.mutateAsync())}
-        >
-          Reset M5 demo
-        </Button>
+        {demoResets ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={async () => setLast(await reset.mutateAsync())}
+          >
+            Reset M5 demo
+          </Button>
+        ) : null}
         <Button
           type="button"
           onClick={async () => {
@@ -118,7 +137,7 @@ export default function PayrollRunPage() {
                         setLast(r);
                       }}
                     >
-                      4. Post Xero JE
+                      4. Finalize in OS (no Xero write)
                     </Button>
                     <Button
                       type="button"
