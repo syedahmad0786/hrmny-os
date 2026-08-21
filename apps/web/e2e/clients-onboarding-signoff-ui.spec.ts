@@ -29,8 +29,10 @@ test.describe("Staff clients onboarding signoff UI", () => {
     expect(phaseName.length).toBeGreaterThan(0);
     expect(Number.isFinite(phaseIndex)).toBe(true);
 
-    await active.getByTestId("clients-onboarding-signoff").click();
-    await expect(active).toHaveAttribute("data-phase-status", "signed_off", {
+    // Pin by phase index — after signoff the next phase becomes active.
+    const target = page.locator(`[data-phase-index="${phaseIndex}"]`);
+    await target.getByTestId("clients-onboarding-signoff").click();
+    await expect(target).toHaveAttribute("data-phase-status", "signed_off", {
       timeout: 30_000,
     });
 
