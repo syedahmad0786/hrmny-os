@@ -29,6 +29,10 @@ export const RetrieveMemoryInputSchema = z.object({
   query: z.string().min(1),
   dealId: z.string().uuid().optional(),
   companyId: z.string().uuid().optional(),
+  /** Client sandbox — only chunks tagged with this clientId. */
+  clientId: z.string().uuid().optional(),
+  /** User sandbox — only chunks tagged with this employeeId. */
+  employeeId: z.string().uuid().optional(),
   sourceTypes: z.array(MemorySourceTypeSchema).optional(),
   limit: z.number().int().min(1).max(50).default(8),
 });

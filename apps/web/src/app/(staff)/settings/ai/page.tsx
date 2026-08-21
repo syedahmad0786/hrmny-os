@@ -52,6 +52,9 @@ export default function AiAdminPage() {
   const toggle = trpc.aiAdmin.toggleAgent.useMutation({
     onSuccess: () => void utils.aiAdmin.dashboard.invalidate(),
   });
+  const run = trpc.aiAdmin.runAgent.useMutation({
+    onSuccess: () => void utils.aiAdmin.dashboard.invalidate(),
+  });
 
   return (
     <main className="flex flex-col gap-6">
@@ -64,9 +67,8 @@ export default function AiAdminPage() {
             AI control panel
           </h1>
           <p className="mt-2 max-w-3xl text-sm text-muted">
-            Per-agent kill switches, monthly spend against the configured cap, and
-            the most recent runs with their gate outcome. The cap is a hard circuit
-            breaker — it fails closed.
+            Kill switches, on-command runs with client/user memory sandboxes, and
+            the cost ledger. Cap fails closed.
           </p>
         </div>
         <AdminNav />
@@ -93,6 +95,15 @@ export default function AiAdminPage() {
           data={dashboard.data}
           onToggle={(agentId, enabled) => toggle.mutate({ agentId, enabled })}
           togglingId={toggle.isPending ? toggle.variables?.agentId : undefined}
+          onRun={(agentId) =>
+            run.mutate({
+              agentId,
+              prompt: `Demo run for ${agentId} — summarize next actions.`,
+            })
+          }
+          runningId={run.isPending ? run.variables?.agentId : undefined}
+          lastRun={run.data ?? null}
+          runError={run.error?.message}
         />
       ) : null}
     </main>
@@ -103,10 +114,18 @@ function AiAdminBody({
   data,
   onToggle,
   togglingId,
+  onRun,
+  runningId,
+  lastRun,
+  runError,
 }: {
   data: Dashboard;
   onToggle: (agentId: AgentKey, enabled: boolean) => void;
   togglingId: AgentKey | undefined;
+  onRun: (agentId: AgentKey) => void;
+  runningId: AgentKey | undefined;
+  lastRun: inferRouterOutputs<AppRouter>["aiAdmin"]["runAgent"] | null;
+  runError?: string;
 }) {
   const { agents, runs, monthlyCapAed } = data;
   const spendAed = agents.reduce((sum, a) => sum + a.spendAed, 0);
@@ -154,6 +173,15 @@ function AiAdminBody({
             />
           </div>
         ) : null}
+        {runError ? (
+          <p className="mt-3 text-sm text-red-700">{runError}</p>
+        ) : null}
+        {lastRun ? (
+          <p className="mt-3 text-sm text-muted">
+            Last run: <span className="font-medium text-ink">{lastRun.agent}</span>{" "}
+            · {lastRun.gateOutcome} · {formatAed(lastRun.costAed)}
+          </p>
+        ) : null}
       </section>
 
       <section>
@@ -166,6 +194,7 @@ function AiAdminBody({
           ) : (
             agents.map((agent) => {
               const busy = togglingId === agent.key;
+              const running = runningId === agent.key;
               return (
                 <div
                   key={agent.key}
@@ -180,13 +209,21 @@ function AiAdminBody({
                     </div>
                     <p className="mt-1 text-sm text-muted">{agent.purpose}</p>
                   </div>
-                  <div className="flex items-center gap-4 md:justify-end">
+                  <div className="flex items-center gap-3 md:justify-end">
                     <div className="text-right">
                       <p className="font-medium">{formatAed(agent.spendAed)}</p>
                       <p className="text-xs text-muted">
                         {agent.runs.toLocaleString("en-AE")} runs
                       </p>
                     </div>
+                    <button
+                      type="button"
+                      disabled={!agent.enabled || running}
+                      className="rounded-full border border-sand bg-white px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+                      onClick={() => onRun(agent.key)}
+                    >
+                      {running ? "Running…" : "Run"}
+                    </button>
                     <button
                       type="button"
                       role="switch"

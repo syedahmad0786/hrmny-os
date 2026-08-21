@@ -36,6 +36,8 @@ export async function retrieveMemory(
     "mem",
     input.dealId ?? "",
     input.companyId ?? "",
+    input.clientId ?? "",
+    input.employeeId ?? "",
     input.query.slice(0, 80),
     String(input.limit),
   ].join(":");
@@ -70,12 +72,28 @@ export function keywordSearchFromRows(
       continue;
     }
     const meta = row.metadata ?? {};
-    if (
-      parsed.dealId &&
-      meta.dealId != null &&
-      String(meta.dealId) !== parsed.dealId
-    ) {
-      continue;
+    if (parsed.clientId) {
+      if (meta.clientId == null || String(meta.clientId) !== parsed.clientId) {
+        continue;
+      }
+    }
+    if (parsed.employeeId) {
+      if (
+        meta.employeeId == null ||
+        String(meta.employeeId) !== parsed.employeeId
+      ) {
+        continue;
+      }
+    }
+    if (parsed.dealId) {
+      if (meta.dealId == null || String(meta.dealId) !== parsed.dealId) {
+        continue;
+      }
+    }
+    if (parsed.companyId) {
+      if (meta.companyId == null || String(meta.companyId) !== parsed.companyId) {
+        continue;
+      }
     }
     const score = simpleScore(parsed.query, row.content);
     if (score <= 0) continue;

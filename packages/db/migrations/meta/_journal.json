@@ -463,6 +463,13 @@
       "when": 1785085200000,
       "tag": "0066_crm_quote",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1785090000000,
+      "tag": "0067_client_onboarding",
+      "breakpoints": true
     }
   ]
 }

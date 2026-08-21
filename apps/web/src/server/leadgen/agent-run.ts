@@ -1,21 +1,19 @@
 import {
-  runAgent,
   type AgentRunInput,
   type AgentRunOutput,
   type RunAgent,
 } from "@hrmny/ai";
+import { boundRunAgent } from "../ai/run-agent-bound";
 
 /**
  * The M8 agent-runner seam. `RunAgent` is the frozen dependency type from
- * `@hrmny/ai`; the live binding is M7's `runAgent` (mock-first — with no keys it
- * returns the mock provider, cost 0, cap never trips). The pipeline/outreach/
- * competitor code accepts a `RunAgent` and defaults to `defaultRunAgent`; tests
- * inject `createMockRunAgent()` so scoring is deterministic and provider-free.
+ * `@hrmny/ai`; the live binding persists to `agent_runs` when DATABASE_URL is set.
+ * Tests inject `createMockRunAgent()` so scoring is deterministic and provider-free.
  */
 export type { RunAgent };
 
-/** Bind M8 to M7's canonical runner (single-arg form; deps default internally). */
-export const defaultRunAgent: RunAgent = (input) => runAgent(input);
+/** Bind M8 to the durable runner (ledger + sandbox-aware provider). */
+export const defaultRunAgent: RunAgent = boundRunAgent;
 
 /** Stable 0–100 score from a seed so re-runs and tests are deterministic. */
 function stableScore(seed: string): number {

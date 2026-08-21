@@ -118,3 +118,25 @@ export function providerForSandbox(
     ? createPrivilegedProvider(config)
     : createGeneralProvider(config);
 }
+
+/**
+ * Data-plane sandbox tags for memory / agent context.
+ * Chunks must carry matching clientId / employeeId metadata when scoped.
+ */
+export type MemorySandboxScope = {
+  clientId?: string;
+  employeeId?: string;
+  dealId?: string;
+  companyId?: string;
+};
+
+export function memorySandboxMetadata(
+  scope: MemorySandboxScope,
+): Record<string, string> {
+  const meta: Record<string, string> = {};
+  if (scope.clientId) meta.clientId = scope.clientId;
+  if (scope.employeeId) meta.employeeId = scope.employeeId;
+  if (scope.dealId) meta.dealId = scope.dealId;
+  if (scope.companyId) meta.companyId = scope.companyId;
+  return meta;
+}
