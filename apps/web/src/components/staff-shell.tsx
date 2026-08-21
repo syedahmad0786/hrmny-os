@@ -18,8 +18,8 @@ const PRIMARY_NAV = [
     match: (p: string) => p === "/",
   },
   {
-    href: "/crm",
-    label: "CRM",
+    href: "/crm/hunt",
+    label: "Hunt",
     index: "02",
     features: ["crm.workspace"],
     match: (p: string) =>
@@ -29,10 +29,10 @@ const PRIMARY_NAV = [
       p.startsWith("/clients"),
   },
   {
-    href: "/work",
-    label: "Work",
+    href: "/tasks",
+    label: "Tasks",
     index: "03",
-    features: ["work.projects"],
+    features: ["work.my_tasks"],
     match: (p: string) =>
       p === "/work" ||
       p.startsWith("/work/") ||
@@ -52,14 +52,14 @@ const PRIMARY_NAV = [
   {
     href: "/chat",
     label: "Chat",
-    index: "04b",
+    index: "05",
     features: ["ai.os_chat"],
     match: (p: string) => p === "/chat" || p.startsWith("/chat/"),
   },
   {
     href: "/tickets",
     label: "Support",
-    index: "04c",
+    index: "06",
     features: ["support.tickets"],
     match: (p: string) =>
       p === "/tickets" ||
@@ -72,7 +72,7 @@ const PRIMARY_NAV = [
   {
     href: "/finance",
     label: "Finance",
-    index: "05",
+    index: "07",
     features: ["finance.workspace"],
     match: (p: string) =>
       ["/finance", "/billing", "/margin", "/payroll"].some(
@@ -80,16 +80,9 @@ const PRIMARY_NAV = [
       ),
   },
   {
-    href: "/dashboards",
-    label: "Dashboards",
-    index: "05b",
-    features: ["analytics.dashboards", "finance.workspace", "core.home"],
-    match: (p: string) => p === "/dashboards" || p.startsWith("/dashboards/"),
-  },
-  {
     href: "/people",
-    label: "People / HR",
-    index: "06",
+    label: "People",
+    index: "08",
     features: [
       "people.core_hr",
       "people.leave_attendance",
@@ -113,20 +106,6 @@ const PRIMARY_NAV = [
       ].some((h) => p === h || p.startsWith(`${h}/`)),
   },
   {
-    href: "/requests",
-    label: "Requests",
-    index: "07",
-    features: ["requests.feature_intake"],
-    match: (p: string) => p === "/requests" || p.startsWith("/requests/"),
-  },
-  {
-    href: "/client-preview",
-    label: "Client Preview",
-    index: "08",
-    features: ["portal.client"],
-    match: (p: string) => p.startsWith("/client-preview"),
-  },
-  {
     href: "/admin/features",
     label: "Admin",
     index: "09",
@@ -139,8 +118,7 @@ const PRIMARY_NAV = [
       p.startsWith("/settings") ||
       p.startsWith("/admin") ||
       p.startsWith("/gate") ||
-      p.startsWith("/conventions") ||
-      p.startsWith("/dashboards"),
+      p.startsWith("/conventions"),
   },
 ] as const;
 
@@ -436,7 +414,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
               >
                 <span className="desk-nav-index">{item.index}</span>
                 <span>{item.label}</span>
-                {item.label === "CRM" && dealCount ? (
+                {item.href === "/crm/hunt" && dealCount ? (
                   <span className="desk-nav-count">{dealCount}</span>
                 ) : (
                   <span />

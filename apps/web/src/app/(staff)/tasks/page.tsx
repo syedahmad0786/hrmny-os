@@ -3,101 +3,95 @@
 import Link from "next/link";
 import { trpc } from "@/lib/trpc";
 
+const PATHS = [
+  {
+    href: "/work/my-tasks",
+    index: "01 / Personal",
+    title: "My work tasks",
+    body: "Assigned items across Work projects.",
+  },
+  {
+    href: "/crm/tasks",
+    index: "02 / Sales",
+    title: "CRM follow-ups",
+    body: "Deal tasks and next actions in the pipeline.",
+  },
+  {
+    href: "/delivery",
+    index: "03 / Delivery",
+    title: "Client delivery board",
+    body: "Capacity, traffic, creative QC, and briefs.",
+  },
+  {
+    href: "/approvals",
+    index: "04 / Gate",
+    title: "Approvals waiting",
+    body: "Outreach sends, campaign publish, portal sign-off.",
+  },
+] as const;
+
 export default function TasksHubPage() {
-  const work = trpc.work.personal.myTasks.useQuery(
-    {},
-    {
-      retry: false,
-    },
-  );
-  const delivery = trpc.dashboards.delivery.useQuery(undefined, {
-    retry: false,
-  });
+  const work = trpc.work.personal.myTasks.useQuery({}, { retry: false });
   const crmTasks = trpc.crm.tasks.list.useQuery(undefined, { retry: false });
 
   return (
-    <main className="flex flex-col gap-6">
-      <header>
-        <p className="text-xs font-bold uppercase tracking-[0.16em] text-ochre">
-          Work · Delivery · CRM
-        </p>
-        <h1 className="mt-1 font-display text-3xl font-semibold">
-          Task management
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-muted">
-          Hub for personal work items, delivery queue, and CRM sales tasks.
-          Approval routes live at{" "}
-          <Link className="underline" href="/approvals">
-            /approvals
-          </Link>
-          ; delivery board at{" "}
-          <Link className="underline" href="/delivery">
-            /delivery
-          </Link>
-          .
-        </p>
-      </header>
+    <main className="ops-home">
+      <section className="ops-command" aria-labelledby="tasks-title">
+        <div className="ops-command-atmosphere" aria-hidden />
+        <header className="ops-command-header">
+          <div className="ops-brand">
+            hrmny <span>tasks</span>
+          </div>
+          <p>
+            {work.isError ? "—" : `${work.data?.length ?? "…"} work`} ·{" "}
+            {crmTasks.isError ? "—" : `${crmTasks.data?.length ?? "…"} CRM`}
+          </p>
+        </header>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Link
-          href="/work/my-tasks"
-          className="rounded-xl border border-sand bg-white/75 p-4 transition hover:border-ochre"
-        >
-          <h2 className="font-display text-lg font-semibold">My work tasks</h2>
-          <p className="mt-2 text-sm text-muted">
-            {work.isError
-              ? "Open Work module"
-              : `${work.data?.length ?? "…"} assigned`}
-          </p>
-        </Link>
-        <Link
-          href="/delivery"
-          className="rounded-xl border border-sand bg-white/75 p-4 transition hover:border-ochre"
-        >
-          <h2 className="font-display text-lg font-semibold">Delivery</h2>
-          <p className="mt-2 text-sm text-muted">
-            {delivery.isError
-              ? "Open delivery board"
-              : "Capacity, traffic, creative QC"}
-          </p>
-        </Link>
-        <Link
-          href="/crm/tasks"
-          className="rounded-xl border border-sand bg-white/75 p-4 transition hover:border-ochre"
-        >
-          <h2 className="font-display text-lg font-semibold">CRM tasks</h2>
-          <p className="mt-2 text-sm text-muted">
-            {crmTasks.isError
-              ? "Open CRM tasks"
-              : `${crmTasks.data?.length ?? "…"} sales follow-ups`}
-          </p>
-        </Link>
-      </div>
+        <div className="ops-command-main">
+          <div className="ops-command-intro">
+            <p className="ops-eyebrow">Clear path</p>
+            <h1 id="tasks-title">
+              See the work. <em>Pick a lane.</em>
+            </h1>
+            <p className="ops-support">
+              Personal, sales, delivery, and approvals — each with one door.
+            </p>
+          </div>
 
-      <section className="rounded-xl border border-sand bg-white/75 p-4 text-sm">
-        <h2 className="font-display text-lg font-semibold">Routes</h2>
-        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-          <li>
-            <Link className="underline" href="/traffic">
-              Traffic / DoR
+          <nav className="ops-job-paths" aria-label="Task lanes">
+            {PATHS.map((path) => (
+              <Link key={path.href} href={path.href} className="ops-job-path">
+                <span className="ops-job-index">{path.index}</span>
+                <span className="ops-job-copy">
+                  <strong>{path.title}</strong>
+                  <small>{path.body}</small>
+                </span>
+                <span className="ops-job-arrow" aria-hidden>
+                  ↗
+                </span>
+              </Link>
+            ))}
+          </nav>
+        </div>
+
+        <footer className="ops-command-footer">
+          <nav className="ops-quick-paths" aria-label="Related">
+            <span>Also</span>
+            <Link href="/work">
+              Work board <span aria-hidden>↗</span>
             </Link>
-          </li>
-          <li>
-            <Link className="underline" href="/creative">
-              Creative + image gen
+            <Link href="/traffic">
+              Traffic / DoR <span aria-hidden>↗</span>
             </Link>
-          </li>
-          <li>
-            <Link className="underline" href="/approvals">
-              Approval queue
+            <Link href="/creative">
+              Creative <span aria-hidden>↗</span>
             </Link>
-          </li>
-          <li>
-            <Link className="underline" href="/work">
-              Work projects board
+            <Link href="/chat">
+              Ask Hrmny <span aria-hidden>↗</span>
             </Link>
-          </li>
-        </ul>
+          </nav>
+        </footer>
       </section>
     </main>
   );

@@ -177,11 +177,26 @@ export const chatRouter = router({
       z.object({
         threadId: z.string().uuid(),
         content: z.string().min(1).max(8000),
+        effort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
+        harness: z.enum(["react", "direct"]).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const employeeId = ctx.employeeId!;
       const db = getDb();
+      const effort = input.effort ?? "medium";
+      const maxIterations =
+        input.harness === "direct"
+          ? 1
+          : effort === "low"
+            ? 2
+            : effort === "high"
+              ? 5
+              : effort === "xhigh"
+                ? 6
+                : 4;
+      const temperature =
+        effort === "low" ? 0.2 : effort === "xhigh" ? 0.5 : 0.3;
 
       let thread: ThreadRow | undefined;
       if (!db) {
@@ -238,8 +253,10 @@ export const chatRouter = router({
 
       const provider = createProvider({});
       const system = [
-        "You are hrmny OS chat — a DeepSeek/QM-style ReAct assistant for agency staff.",
+        "You are Hrmny — the multiplayer agent harness for Creative Harmony staff.",
+        "Inspired by QM (YC Software): plan → act → observe, then answer.",
         "Be concise. Prefer tools for factual lookups. Never invent client data.",
+        `Effort level: ${effort}.`,
         thread.agentSlug ? `Preferred agent persona: ${thread.agentSlug}.` : "",
         thread.clientId ? `Client sandbox id: ${thread.clientId}.` : "",
       ]
@@ -247,48 +264,51 @@ export const chatRouter = router({
         .join("\n");
 
       const steps: Array<Record<string, unknown>> = [];
-      const harnessResult = await runHarness({
-        system,
-        user: input.content,
-        tools: defaultTools(employeeId),
-        maxIterations: 4,
-        generate: async (messages) => {
-          const llmMessages = messages
-            .filter((m) => m.role !== "tool")
-            .map((m) => ({
-              role: (m.role === "system" || m.role === "user" || m.role === "assistant"
-                ? m.role
-                : "user") as "system" | "user" | "assistant",
-              content:
-                m.role === "tool"
-                  ? `[tool ${m.toolName}]: ${m.content}`
-                  : m.content,
-            }));
-          // Fold tool observations into user turns for providers without tool role.
-          const folded = messages.map((m) => {
-            if (m.role === "tool") {
+      const harnessResult =
+        input.harness === "direct"
+          ? await (async () => {
+              const res = await provider.generate({
+                messages: [
+                  { role: "system", content: system },
+                  { role: "user", content: input.content },
+                ],
+                temperature,
+                task: "generic",
+              });
               return {
-                role: "user" as const,
-                content: `Observation from ${m.toolName ?? "tool"}:\n${m.content}`,
+                answer: res.text,
+                steps: [{ iteration: 0, answer: res.text }],
               };
-            }
-            return {
-              role: m.role as "system" | "user" | "assistant",
-              content: m.content,
-            };
-          });
-          void llmMessages;
-          const res = await provider.generate({
-            messages: folded,
-            temperature: 0.3,
-            task: "generic",
-          });
-          return res.text;
-        },
-        onStep: (step) => {
-          steps.push(step as unknown as Record<string, unknown>);
-        },
-      });
+            })()
+          : await runHarness({
+              system,
+              user: input.content,
+              tools: defaultTools(employeeId),
+              maxIterations,
+              generate: async (messages) => {
+                const folded = messages.map((m) => {
+                  if (m.role === "tool") {
+                    return {
+                      role: "user" as const,
+                      content: `Observation from ${m.toolName ?? "tool"}:\n${m.content}`,
+                    };
+                  }
+                  return {
+                    role: m.role as "system" | "user" | "assistant",
+                    content: m.content,
+                  };
+                });
+                const res = await provider.generate({
+                  messages: folded,
+                  temperature,
+                  task: "generic",
+                });
+                return res.text;
+              },
+              onStep: (step) => {
+                steps.push(step as unknown as Record<string, unknown>);
+              },
+            });
 
       const assistantMsg: MessageRow = {
         chatMessageId: crypto.randomUUID(),
@@ -298,8 +318,12 @@ export const chatRouter = router({
         toolName: null,
         metadata: {
           provider: provider.name,
-          harness: "react",
-          steps,
+          harness: input.harness ?? "react",
+          effort,
+          steps:
+            "steps" in harnessResult && Array.isArray(harnessResult.steps)
+              ? harnessResult.steps
+              : steps,
         },
         createdAt: nowIso(),
       };
