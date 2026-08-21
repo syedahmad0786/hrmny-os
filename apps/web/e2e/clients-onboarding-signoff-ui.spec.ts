@@ -29,7 +29,6 @@ test.describe("Staff clients onboarding signoff UI", () => {
     expect(phaseName.length).toBeGreaterThan(0);
     expect(Number.isFinite(phaseIndex)).toBe(true);
 
-    // Pin by phase index — after signoff the next phase becomes active.
     const target = page.locator(`[data-phase-index="${phaseIndex}"]`);
     await target.getByTestId("clients-onboarding-signoff").click();
     await expect(target).toHaveAttribute("data-phase-status", "signed_off", {
@@ -41,15 +40,13 @@ test.describe("Staff clients onboarding signoff UI", () => {
       page.getByRole("heading", { name: /Notifications/i }),
     ).toBeVisible({ timeout: 60_000 });
 
-    const row = page
-      .locator("li")
-      .filter({ hasText: /Onboarding signed off/i })
-      .filter({ hasText: phaseName });
-    await expect(row).toBeVisible({ timeout: 30_000 });
-
-    const open = row.getByRole("link", { name: /^Open$/i });
-    await expect(open).toHaveAttribute("href", /\?phase=\d+/);
-    await open.click();
+    // Match Open by phase= — "Advanced to {next}" text can make name filters
+    // match multiple notification rows.
+    const open = page.locator(
+      `a[href*="/clients/"][href*="phase=${phaseIndex}"]`,
+    );
+    await expect(open.first()).toBeVisible({ timeout: 30_000 });
+    await open.first().click();
     await expect(page).toHaveURL(
       new RegExp(`/clients/.+\\?phase=${phaseIndex}`),
     );

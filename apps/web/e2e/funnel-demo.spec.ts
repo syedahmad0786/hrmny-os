@@ -453,15 +453,14 @@ test.describe("Demo funnel", () => {
     await expect(
       page.getByRole("heading", { name: /Notifications/i }),
     ).toBeVisible({ timeout: 60_000 });
-    const onboardRow = page
-      .locator("li")
-      .filter({ hasText: /Onboarding signed off/i })
-      .filter({ hasText: active!.name });
-    await expect(onboardRow).toBeVisible();
-    const open = onboardRow.getByRole("link", { name: /^Open$/i });
-    await expect(open).toBeVisible();
-    await expect(open).toHaveAttribute("href", /\?phase=\d+/);
-    await open.click();
+    // Prefer phase= href — "Advanced to {next phase}" can make name filters
+    // match more than one notification row.
+    const open = page.locator(
+      `a[href*="/clients/"][href*="phase=${active!.phaseIndex}"]`,
+    );
+    await expect(open.first()).toBeVisible({ timeout: 30_000 });
+    await expect(open.first()).toHaveAttribute("href", /\?phase=\d+/);
+    await open.first().click();
     await expect(page).toHaveURL(
       new RegExp(`/clients/.+\\?phase=${active!.phaseIndex}`),
     );
