@@ -59,7 +59,13 @@ export default function HuntClientsPage() {
       setLastApolloDealId(first?.dealId ?? null);
       setResult(
         n > 0
-          ? `Apollo (${payload.mode}) imported ${n} durable discover deal(s) — open pipeline to qualify.`
+          ? `Apollo (${payload.mode}${
+              payload.verifyMode !== "skipped"
+                ? ` · hunter ${payload.verifyMode}`
+                : ""
+            }) imported ${n} durable discover deal(s)${
+              payload.deals[0]?.emailVerified ? " with verified email" : ""
+            } — open pipeline to qualify.`
           : "Apollo returned no companies for that query.",
       );
       void utils.crm.deals.list.invalidate();

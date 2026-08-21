@@ -69,9 +69,12 @@ describe("demo OS closed loop", () => {
     });
     expect(imported.deals.length).toBeGreaterThan(0);
     expect(imported.mode).toBe("mock");
+    expect(imported.verifyMode).toBe("mock");
+    expect(imported.deals[0]!.emailVerified).toBe(true);
     const deal = await caller.crm.deals.get({ id: imported.deals[0]!.dealId });
     expect(deal?.dealId).toBe(imported.deals[0]!.dealId);
     expect(deal?.leadSourceLane).toBe("apollo_intent");
+    expect(deal?.emailVerified).toBe(true);
   });
 
   it("runDemoClosedLoop viaApollo seeds apollo_intent then fails handover without DB", async () => {

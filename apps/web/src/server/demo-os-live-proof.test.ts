@@ -27,11 +27,15 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       });
       expect(imported.deals.length).toBeGreaterThan(0);
       expect(imported.mode === "mock" || imported.mode === "live").toBe(true);
+      expect(
+        imported.verifyMode === "mock" || imported.verifyMode === "live",
+      ).toBe(true);
       const apolloDeal = imported.deals[0]!;
       const durable = await getDeal(apolloDeal.dealId);
       expect(durable?.dealId).toBe(apolloDeal.dealId);
       expect(durable?.leadSourceLane).toBe("apollo_intent");
       expect(durable?.stage).toBe("discover");
+      expect(durable?.emailVerified).toBe(apolloDeal.emailVerified);
 
       const loop = await caller.crm.runDemoClosedLoop({
         companyName: `Live Proof ${Date.now()}`,

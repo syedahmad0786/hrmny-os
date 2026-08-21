@@ -35,6 +35,30 @@ export const automationRouter = router({
     };
   }),
 
+  /**
+   * One-shot demo proof: health + workflow list.
+   * live=true only when adapter mode is live and health.ok.
+   */
+  smoke: protectedProcedure.query(async () => {
+    const n8n = n8nClient();
+    const health = await n8n.health();
+    const workflows = await n8n.listWorkflows();
+    return {
+      live: health.mode === "live" && health.ok,
+      health: {
+        ...health,
+        eventMapCount: N8N_EVENT_MAP.length,
+        blockedOnApiKey: !health.apiKeyConfigured,
+      },
+      workflowCount: workflows.length,
+      workflows: workflows.slice(0, 25).map((w) => ({
+        id: w.id,
+        name: w.name,
+        active: w.active,
+      })),
+    };
+  }),
+
   listWorkflows: protectedProcedure.query(async () => {
     const n8n = n8nClient();
     const workflows = await n8n.listWorkflows();

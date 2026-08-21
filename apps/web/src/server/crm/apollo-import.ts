@@ -3,14 +3,18 @@ import {
   createContact,
   createDeal,
   createNote,
+  updateContact,
+  updateDeal,
 } from "./repository";
 import type { DealRow } from "./types";
+import type { EmailVerificationAdapter } from "@hrmny/integrations";
 
 export type ApolloCompanyHit = Record<string, unknown>;
 
 export type DurableApolloImportResult = {
   mode: "mock" | "live";
   query: string;
+  verifyMode: "mock" | "live" | "skipped";
   deals: Array<{
     dealId: string;
     companyId: string;
@@ -19,6 +23,8 @@ export type DurableApolloImportResult = {
     stage: DealRow["stage"];
     leadSourceLane: DealRow["leadSourceLane"];
     sector: string | null;
+    emailVerified: boolean;
+    verifyVerdict: string | null;
   }>;
 };
 
@@ -51,7 +57,7 @@ function normalizeCompany(hit: ApolloCompanyHit, fallbackQuery: string) {
 
 /**
  * Apollo company search → durable CRM company + contact + discover deal.
- * Works with mock or live Apollo; never writes demo-store deals.
+ * Optional Hunter (or mock) email verification on the contact.
  */
 export async function importApolloCompaniesToCrm(input: {
   query: string;
@@ -59,9 +65,11 @@ export async function importApolloCompaniesToCrm(input: {
   mode: "mock" | "live";
   ownerEmployeeId?: string | null;
   limit?: number;
+  verifier?: EmailVerificationAdapter | null;
 }): Promise<DurableApolloImportResult> {
   const limit = input.limit ?? 5;
   const deals: DurableApolloImportResult["deals"] = [];
+  let verifyMode: DurableApolloImportResult["verifyMode"] = "skipped";
 
   for (const hit of input.companies.slice(0, limit)) {
     const norm = normalizeCompany(hit, input.query);
@@ -94,6 +102,22 @@ export async function importApolloCompaniesToCrm(input: {
       isPrimary: true,
     });
 
+    let emailVerified = false;
+    let verifyVerdict: string | null = null;
+    if (contactEmail && input.verifier) {
+      verifyMode = input.verifier.mode;
+      try {
+        const verified = await input.verifier.verify(contactEmail);
+        emailVerified = verified.emailVerified;
+        verifyVerdict = verified.verdict;
+        if (emailVerified) {
+          await updateContact(contact.contactId, { emailVerified: true });
+        }
+      } catch {
+        verifyVerdict = "error";
+      }
+    }
+
     const deal = await createDeal({
       companyName: company.name,
       companyId: company.companyId,
@@ -102,6 +126,9 @@ export async function importApolloCompaniesToCrm(input: {
       leadSourceLane: "apollo_intent",
       ownerEmployeeId: input.ownerEmployeeId ?? null,
     });
+    if (emailVerified) {
+      await updateDeal(deal.dealId, { emailVerified: true });
+    }
 
     await createNote({
       dealId: deal.dealId,
@@ -113,6 +140,9 @@ export async function importApolloCompaniesToCrm(input: {
           website: norm.website,
           industry: norm.industry,
           source: hit.source ?? input.mode,
+          emailVerified,
+          verifyVerdict,
+          verifyMode,
         },
       )}`,
     });
@@ -125,12 +155,15 @@ export async function importApolloCompaniesToCrm(input: {
       stage: deal.stage,
       leadSourceLane: deal.leadSourceLane,
       sector: deal.sector,
+      emailVerified,
+      verifyVerdict,
     });
   }
 
   return {
     mode: input.mode,
     query: input.query,
+    verifyMode,
     deals,
   };
 }

@@ -117,6 +117,7 @@ export const ROUTES: RouteEntry[] = [
   // Legacy /sales tree fully removed; server hrefs repoint to /crm.
   staff("/settings/ai"),
   staff("/settings/asana-migration"),
+  staff("/settings/automations"),
   staff("/settings/connections"),
   staff("/talent"),
   staff("/tasks"),

@@ -1542,13 +1542,28 @@ export const leadsRouter = router({
         const { importApolloCompaniesToCrm } = await import(
           "../crm/apollo-import"
         );
+        const { createEmailVerificationAdapter } = await import(
+          "@hrmny/integrations"
+        );
+        const { resolveIntegrationApiKey } = await import(
+          "../integrations/resolve-keys"
+        );
         const apollo = await apolloFor(ctx.employeeId!);
+        const hunter = await resolveIntegrationApiKey(
+          "hunter",
+          ctx.employeeId!,
+        );
         const companies = await apollo.client.searchCompanies(input.query);
         const result = await importApolloCompaniesToCrm({
           query: input.query,
           companies: companies as Record<string, unknown>[],
           mode: apollo.live ? "live" : "mock",
           ownerEmployeeId: ctx.employeeId,
+          verifier: createEmailVerificationAdapter(
+            hunter.apiKey
+              ? { mode: "live", apiKey: hunter.apiKey }
+              : { mode: "mock" },
+          ),
         });
         return result.deals;
       }),

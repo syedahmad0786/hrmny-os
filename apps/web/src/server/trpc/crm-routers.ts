@@ -1018,12 +1018,17 @@ export const crmRouter = router({
         const { resolveIntegrationApiKey } = await import(
           "../integrations/resolve-keys"
         );
-        const { createApolloLive } = await import("@hrmny/integrations");
+        const { createApolloLive, createEmailVerificationAdapter } =
+          await import("@hrmny/integrations");
         const { getDemoStore } = await import("../demo-store");
         const query =
           input?.companyName?.trim() || `Demo Retail UAE ${stamp}`;
         const { apiKey } = await resolveIntegrationApiKey(
           "apollo",
+          ctx.employeeId!,
+        );
+        const hunter = await resolveIntegrationApiKey(
+          "hunter",
           ctx.employeeId!,
         );
         const apolloClient = apiKey
@@ -1037,6 +1042,11 @@ export const crmRouter = router({
           mode: apolloMode,
           ownerEmployeeId: ctx.employeeId,
           limit: 1,
+          verifier: createEmailVerificationAdapter(
+            hunter.apiKey
+              ? { mode: "live", apiKey: hunter.apiKey }
+              : { mode: "mock" },
+          ),
         });
         const first = imported.deals[0];
         if (!first) {
@@ -1192,10 +1202,15 @@ export const crmRouter = router({
         const { resolveIntegrationApiKey } = await import(
           "../integrations/resolve-keys"
         );
-        const { createApolloLive } = await import("@hrmny/integrations");
+        const { createApolloLive, createEmailVerificationAdapter } =
+          await import("@hrmny/integrations");
         const { getDemoStore } = await import("../demo-store");
         const { apiKey } = await resolveIntegrationApiKey(
           "apollo",
+          ctx.employeeId!,
+        );
+        const hunter = await resolveIntegrationApiKey(
+          "hunter",
           ctx.employeeId!,
         );
         const apolloClient = apiKey
@@ -1208,6 +1223,11 @@ export const crmRouter = router({
           companies: hits as Record<string, unknown>[],
           mode,
           ownerEmployeeId: ctx.employeeId,
+          verifier: createEmailVerificationAdapter(
+            hunter.apiKey
+              ? { mode: "live", apiKey: hunter.apiKey }
+              : { mode: "mock" },
+          ),
         });
         await auditMutation(
           ctx,
@@ -1215,7 +1235,12 @@ export const crmRouter = router({
           "deal",
           result.deals[0]?.dealId ?? null,
           null,
-          { query: input.query, mode, count: result.deals.length },
+          {
+            query: input.query,
+            mode,
+            verifyMode: result.verifyMode,
+            count: result.deals.length,
+          },
         );
         return result;
       }),

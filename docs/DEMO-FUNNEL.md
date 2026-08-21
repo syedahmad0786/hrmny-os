@@ -30,7 +30,8 @@ Verified against live Postgres (pgvector on): Apollo mock/live → durable disco
 
 ## Tools
 
-- Apollo / Hunter: auto-live when API key present (`APOLLO_MODE=mock` / `HUNTER_MODE=mock` forces stub)
+- Apollo / Hunter: auto-live when API key present (`APOLLO_MODE=mock` / `HUNTER_MODE=mock` forces stub). Apollo import verifies contact emails via Hunter (mock without key).
 - Composio: OAuth/connect live when `COMPOSIO_API_KEY` set; HITL Gmail send uses live Composio→Gmail proxy when the staff user has an ACTIVE Gmail connection (else stub); LinkedIn stays copy-draft
+- n8n: `/settings/automations` → **Run n8n smoke** (`automation.smoke`); live when `N8N_API_KEY` + `N8N_MODE=live`
 - Xero: mirror-only (`XERO_WRITE_ENABLED=false`)
 - OpenRouter: configured for chat/agents/images; mock fallback without credits
