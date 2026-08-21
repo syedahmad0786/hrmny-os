@@ -230,6 +230,52 @@ test.describe("Demo funnel", () => {
     await expect(page).toHaveURL(/\/portal\/approvals/);
   });
 
+  test("delivery Run agent uses seeded Delivery coach on a task", async ({
+    page,
+  }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/delivery", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
+      timeout: 60_000,
+    });
+
+    const taskSelect = page.getByTestId("delivery-task-select");
+    await expect
+      .poll(async () => taskSelect.locator("option").count(), {
+        timeout: 60_000,
+      })
+      .toBeGreaterThan(1);
+    await taskSelect.selectOption({ index: 1 });
+
+    const agentSelect = page.getByTestId("delivery-agent-select");
+    await expect
+      .poll(async () => agentSelect.locator("option").count(), {
+        timeout: 60_000,
+      })
+      .toBeGreaterThan(1);
+    // Prefer the seeded Delivery coach when present.
+    const coachOption = agentSelect.locator("option").filter({
+      hasText: "Delivery coach",
+    });
+    if ((await coachOption.count()) > 0) {
+      const value = await coachOption.first().getAttribute("value");
+      expect(value).toBeTruthy();
+      await agentSelect.selectOption(value!);
+    } else {
+      await agentSelect.selectOption({ index: 1 });
+    }
+
+    const prompt = page.getByTestId("delivery-agent-prompt");
+    await prompt.fill("E2E: what is the next delivery step for this task?");
+    const run = page.getByTestId("delivery-run-agent");
+    await expect(run).toBeEnabled();
+    await run.click();
+
+    const output = page.getByTestId("delivery-agent-output");
+    await expect(output).toBeVisible({ timeout: 60_000 });
+    await expect(output).not.toHaveText("");
+  });
+
   test("portal reject lands in partner /notifications inbox", async ({
     page,
     request,

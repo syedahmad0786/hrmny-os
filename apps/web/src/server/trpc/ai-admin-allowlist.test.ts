@@ -17,6 +17,15 @@ function aiAdminCaller() {
 }
 
 describe("customAgents allowlist repair", () => {
+  it("seeds Delivery coach in memory mode so Delivery run is available", async () => {
+    const caller = aiAdminCaller();
+    const listed = await caller.aiAdmin.customAgents.list();
+    const coach = listed.find((a) => a.slug === "delivery-coach");
+    expect(coach).toBeDefined();
+    expect(coach?.enabled).toBe(true);
+    expect(coach?.displayName).toMatch(/Delivery coach/i);
+  });
+
   it("create persists funnel defaults and repair fills empty allowlists", async () => {
     const caller = aiAdminCaller();
     const slug = `funnel-repair-${Date.now().toString(36)}`;

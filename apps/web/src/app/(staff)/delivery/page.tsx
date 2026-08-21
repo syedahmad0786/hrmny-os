@@ -165,6 +165,7 @@ export default function DeliveryBoardPage() {
             value={agentId}
             onChange={(e) => setAgentId(e.target.value)}
             aria-label="Agent"
+            data-testid="delivery-agent-select"
           >
             <option value="">Select agent…</option>
             {(agents.data ?? [])
@@ -178,6 +179,7 @@ export default function DeliveryBoardPage() {
           <button
             type="button"
             className="rounded-full bg-ink px-4 py-2 text-sm text-white disabled:opacity-40"
+            data-testid="delivery-run-agent"
             disabled={
               !selected || !agentId || !prompt.trim() || runAgent.isPending
             }
@@ -198,6 +200,7 @@ export default function DeliveryBoardPage() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           aria-label="Agent prompt"
+          data-testid="delivery-agent-prompt"
         />
         {!agents.data?.length ? (
           <p className="mt-2 text-xs text-muted">
@@ -209,7 +212,10 @@ export default function DeliveryBoardPage() {
           </p>
         ) : null}
         {runAgent.data ? (
-          <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-ink/5 p-3 text-xs">
+          <pre
+            className="mt-3 max-h-40 overflow-auto rounded-lg bg-ink/5 p-3 text-xs"
+            data-testid="delivery-agent-output"
+          >
             {typeof runAgent.data.output === "string"
               ? runAgent.data.output
               : JSON.stringify(runAgent.data.output, null, 2)}
