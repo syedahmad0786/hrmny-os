@@ -487,11 +487,28 @@ test.describe("Demo funnel", () => {
     await expect(
       page.getByRole("heading", { name: /Notifications/i }),
     ).toBeVisible({ timeout: 60_000 });
-    await expect(page.locator("body")).toContainText(/Onboarding signed off/i);
-    await expect(page.locator("body")).toContainText(active!.name);
-    const open = page.getByRole("link", { name: /^Open$/i }).first();
+    const onboardRow = page
+      .locator("li")
+      .filter({ hasText: /Onboarding signed off/i })
+      .filter({ hasText: active!.name });
+    await expect(onboardRow).toBeVisible();
+    const open = onboardRow.getByRole("link", { name: /^Open$/i });
     await expect(open).toBeVisible();
     await expect(open).toHaveAttribute("href", /\?phase=\d+/);
+    await open.click();
+    await expect(page).toHaveURL(
+      new RegExp(`/clients/.+\\?phase=${active!.phaseIndex}`),
+    );
+    await expect(
+      page.getByRole("heading", { level: 1 }),
+    ).toBeVisible({ timeout: 60_000 });
+    const focused = page.getByTestId("onboarding-phase-focus");
+    await expect(focused).toBeVisible();
+    await expect(focused).toHaveAttribute(
+      "id",
+      `onboarding-phase-${active!.phaseIndex}`,
+    );
+    await expect(focused).toContainText(active!.name);
   });
 
   test("portal campaign reject lands in partner inbox and Approvals deep-link", async ({
