@@ -24,6 +24,33 @@ export type AgentToolResult = {
   error?: string;
 };
 
+/** Default allowlist for custom agents / on-command runs when vault row is empty. */
+export const DEFAULT_FUNNEL_AGENT_TOOLS = [
+  "memory.search",
+  "crm.read",
+  "delivery.read",
+  "outreach.read",
+  "onboarding.read",
+  "n8n.health",
+  "tasks.create",
+  "outreach.draft",
+  "crm.note",
+  "campaigns.draft",
+  "briefs.draft",
+  "crm.prospect",
+  "portal.invite",
+  "creative.sendToPortal",
+] as const;
+
+/** Empty or invalid allowlists fall back to the funnel defaults. */
+export function resolveAgentAllowedTools(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_FUNNEL_AGENT_TOOLS];
+  const cleaned = raw
+    .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+    .map((t) => t.trim().toLowerCase());
+  return cleaned.length > 0 ? cleaned : [...DEFAULT_FUNNEL_AGENT_TOOLS];
+}
+
 type ResolvedCrmScope = {
   dealId?: string;
   companyId?: string;
@@ -61,13 +88,6 @@ async function resolveClientCrmScope(
   };
 }
 
-function normalizeTools(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
-    .map((t) => t.trim().toLowerCase());
-}
-
 /**
  * Execute allowlisted agent tools inside the client/user/deal/task sandbox.
  * Unknown tools are skipped (ok:false) — never escalate privileges.
@@ -77,7 +97,7 @@ export async function runAgentTools(input: {
   prompt: string;
   scope: AgentToolScope;
 }): Promise<AgentToolResult[]> {
-  const allowed = normalizeTools(input.allowedTools);
+  const allowed = resolveAgentAllowedTools(input.allowedTools);
   if (!allowed.length) return [];
 
   const results: AgentToolResult[] = [];

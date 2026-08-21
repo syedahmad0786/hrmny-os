@@ -414,11 +414,34 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
         <p className="mt-2 text-sm text-red-700">{create.error.message}</p>
       ) : null}
       {runCustom.data ? (
-        <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-ink/5 p-3 text-xs">
-          {typeof runCustom.data.output === "string"
-            ? runCustom.data.output
-            : JSON.stringify(runCustom.data.output, null, 2)}
-        </pre>
+        <div className="mt-3 space-y-2">
+          <pre className="max-h-40 overflow-auto rounded-lg bg-ink/5 p-3 text-xs">
+            {typeof runCustom.data.output === "string"
+              ? runCustom.data.output
+              : JSON.stringify(runCustom.data.output, null, 2)}
+          </pre>
+          {"toolResults" in runCustom.data &&
+          Array.isArray(runCustom.data.toolResults) &&
+          runCustom.data.toolResults.length > 0 ? (
+            <ul className="rounded-lg border border-sand bg-white/70 p-3 text-xs">
+              <li className="mb-1 font-semibold uppercase tracking-[0.12em] text-muted">
+                Tool results
+              </li>
+              {runCustom.data.toolResults.map(
+                (
+                  row: { tool?: string; ok?: boolean; error?: string },
+                  idx: number,
+                ) => (
+                  <li key={`${row.tool ?? "tool"}-${idx}`}>
+                    <span className="font-mono">{row.tool ?? "?"}</span>
+                    {" · "}
+                    {row.ok ? "ok" : `failed${row.error ? `: ${row.error}` : ""}`}
+                  </li>
+                ),
+              )}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
       {runCustom.error ? (
         <p className="mt-2 text-sm text-red-700">{runCustom.error.message}</p>

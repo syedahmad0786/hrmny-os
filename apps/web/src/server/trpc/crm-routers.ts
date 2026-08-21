@@ -1308,7 +1308,7 @@ export const crmRouter = router({
         next: {
           crmDeal: `/crm/deals/${dealId}`,
           client: `/clients/${pack.client.clientId}`,
-          account: "/account",
+          account: `/account?clientId=${encodeURIComponent(pack.client.clientId)}`,
           finance: "/finance",
           billing: "/billing",
           creative: `/creative?clientId=${encodeURIComponent(pack.client.clientId)}`,

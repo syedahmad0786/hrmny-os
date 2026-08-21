@@ -125,6 +125,32 @@ function defaultTools(scope: {
 }
 
 export const chatRouter = router({
+  /** Enabled custom agents staff can bind to a chat thread (no AI-admin gate). */
+  listRunnableAgents: staffProcedure.query(async () => {
+    const db = getDb();
+    if (!db) {
+      return [] as Array<{
+        slug: string;
+        displayName: string;
+        customAgentId: string;
+      }>;
+    }
+    return db.execute<{
+      slug: string;
+      displayName: string;
+      customAgentId: string;
+    }>(sql`
+      select
+        custom_agent_id as "customAgentId",
+        slug,
+        display_name as "displayName"
+      from public.custom_agent
+      where enabled = true
+      order by display_name asc
+      limit 100
+    `);
+  }),
+
   listThreads: staffProcedure.query(async ({ ctx }) => {
     const employeeId = ctx.employeeId!;
     const db = getDb();

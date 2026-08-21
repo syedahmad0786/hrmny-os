@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Button } from "@hrmny/ui";
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -7,7 +8,7 @@ import { formatRelative } from "@/components/crm/format";
 import { DraftPreview } from "./draft-preview";
 import { KIND_LABELS, type ApprovalItem, type ApprovalKind } from "./types";
 
-type Feedback = { tone: "ok" | "blocked"; text: string };
+type Feedback = { tone: "ok" | "blocked"; text: string; reconnect?: boolean };
 
 const KIND_TONE: Record<ApprovalKind, string> = {
   outreach_send: "bg-amber-100 text-amber-800",
@@ -115,7 +116,11 @@ export default function ApprovalsPage() {
                       sent.externalId ? ` · ${sent.externalId}` : ""
                     }`,
               }
-            : { tone: "blocked", text: `Send blocked (${sent.code})` },
+            : {
+                tone: "blocked",
+                text: `Send blocked (${sent.code})`,
+                reconnect: true,
+              },
         }));
         await utils.leadgen.outreach.list.invalidate();
       } else if (item.kind === "campaign_publish") {
@@ -124,16 +129,29 @@ export default function ApprovalsPage() {
           ...f,
           [item.id]: res.ok
             ? { tone: "ok", text: "Published" }
-            : { tone: "blocked", text: res.reason },
+            : {
+                tone: "blocked",
+                text: res.reason,
+                reconnect: /connect|oauth|composio|linkedin|gmail|workspace/i.test(
+                  res.reason,
+                ),
+              },
         }));
         await utils.campaigns.list.invalidate();
         await utils.campaigns.pendingApproval.invalidate();
       }
       advanceFrom(item.id);
     } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed";
       setFeedback((f) => ({
         ...f,
-        [item.id]: { tone: "blocked", text: e instanceof Error ? e.message : "Failed" },
+        [item.id]: {
+          tone: "blocked",
+          text: message,
+          reconnect: /connect|oauth|revoked|precondition|workspace|linkedin|gmail/i.test(
+            message,
+          ),
+        },
       }));
     } finally {
       setBusyId(null);
@@ -328,15 +346,25 @@ export default function ApprovalsPage() {
               </div>
 
               {feedback[selected.id] ? (
-                <p
+                <div
                   className={`text-sm ${
                     feedback[selected.id]!.tone === "ok"
                       ? "text-emerald-700"
                       : "text-red-700"
                   }`}
                 >
-                  {feedback[selected.id]!.text}
-                </p>
+                  <p>{feedback[selected.id]!.text}</p>
+                  {feedback[selected.id]!.reconnect ? (
+                    <p className="mt-1">
+                      <Link
+                        href="/settings/connections"
+                        className="font-semibold underline"
+                      >
+                        Reconnect in Connections →
+                      </Link>
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
 
               <div className="mt-auto flex flex-wrap gap-2">

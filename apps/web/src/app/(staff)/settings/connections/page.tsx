@@ -195,7 +195,7 @@ export default function ConnectionsPage() {
         </section>
       ) : null}
 
-      <div>
+      <div id="direct-business-connections">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
           Direct business connections
         </p>
@@ -227,6 +227,11 @@ export default function ConnectionsPage() {
                     · {verifiedAsana ? "connected" : item.status}
                   </p>
                   <p className="mt-1 text-xs text-muted">{item.note}</p>
+                  {item.lastError ? (
+                    <p className="mt-1 text-xs font-medium text-red-700">
+                      {item.lastError}
+                    </p>
+                  ) : null}
                   {!item.allowed ? (
                     <p className="mt-1 text-xs font-semibold text-amber-800">
                       Blocked by the organization connected-app policy
@@ -331,8 +336,14 @@ export default function ConnectionsPage() {
                 >
                   {item.ready
                     ? item.toolkit === "canva" || item.toolkit === "linkedin"
-                      ? "Connect with Composio"
-                      : "Connect with OAuth"
+                      ? item.status === "connected"
+                        ? "Reconnect with Composio"
+                        : "Connect with Composio"
+                      : item.status === "error" || item.lastError
+                        ? "Reconnect (token revoked)"
+                        : item.status === "connected"
+                          ? "Reconnect with OAuth"
+                          : "Connect with OAuth"
                     : "Provider setup needed"}
                 </Button>
               ) : item.toolkit === "asana" && item.allowed ? (

@@ -4,18 +4,21 @@ import Link from "next/link";
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
-import { type FormEvent, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { type FormEvent, Suspense, useState } from "react";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function AccountRhythmPage() {
+function AccountRhythmPageInner() {
   const utils = trpc.useUtils();
+  const searchParams = useSearchParams();
   const session = trpc.auth.session.useQuery();
   const ids = trpc.m4.seedIds.useQuery();
   const reset = trpc.m4.reset.useMutation({
     onSuccess: () => void utils.invalidate(),
   });
-  const clientId = ids.data?.clientId;
+  const fromQuery = searchParams.get("clientId")?.trim() || "";
+  const clientId = fromQuery || ids.data?.clientId;
   const calendarId = ids.data?.calendarId;
 
   const month1 = trpc.clients.month1.get.useQuery(
@@ -445,5 +448,20 @@ export default function AccountRhythmPage() {
         ) : null}
       </section>
     </main>
+  );
+}
+
+export default function AccountRhythmPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex flex-col gap-6">
+          <h1 className="font-display text-3xl font-semibold">Account</h1>
+          <p className="text-muted">Loading…</p>
+        </main>
+      }
+    >
+      <AccountRhythmPageInner />
+    </Suspense>
   );
 }
