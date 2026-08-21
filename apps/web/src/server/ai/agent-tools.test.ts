@@ -125,4 +125,41 @@ describe("runAgentTools funnel writes", () => {
     expect(results.some((r) => r.tool === "crm.note" && r.ok)).toBe(true);
     expect(results.find((r) => r.tool === "crm.prospect")).toBeUndefined();
   });
+
+  it("delivery.read stays inside the bound client sandbox", async () => {
+    getDemoStore().resetM6Demo();
+    const { DEMO_CLIENT_ID, DEMO_CLIENT_B_ID } = await import("../demo-store");
+    const a = await runAgentTools({
+      allowedTools: ["delivery.read"],
+      prompt: "List delivery tasks",
+      scope: {
+        clientId: DEMO_CLIENT_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const b = await runAgentTools({
+      allowedTools: ["delivery.read"],
+      prompt: "List delivery tasks",
+      scope: {
+        clientId: DEMO_CLIENT_B_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+
+    const aData = a.find((r) => r.tool === "delivery.read")?.data as {
+      tasks?: Array<{ title?: string }>;
+    };
+    const bData = b.find((r) => r.tool === "delivery.read")?.data as {
+      tasks?: Array<{ title?: string }>;
+    };
+    const aBlob = JSON.stringify(aData ?? {});
+    const bBlob = JSON.stringify(bData ?? {});
+
+    expect(a.find((r) => r.tool === "delivery.read")?.ok).toBe(true);
+    expect(b.find((r) => r.tool === "delivery.read")?.ok).toBe(true);
+    expect(aBlob).toMatch(/Launch reel/i);
+    expect(aBlob).not.toMatch(/Other Co/i);
+    expect(bBlob).toMatch(/Other Co/i);
+    expect(bBlob).not.toMatch(/Launch reel/i);
+  });
 });

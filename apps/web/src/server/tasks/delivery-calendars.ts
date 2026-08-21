@@ -1,5 +1,6 @@
 import { sql } from "@hrmny/db";
 import { getDb } from "../db";
+import { getDemoStore, type DemoCalendar } from "../demo-store";
 
 export type DeliveryCalendarSlot = {
   calendarSlotId: string;
@@ -81,12 +82,41 @@ async function loadSlots(calendarId: string): Promise<DeliveryCalendarSlot[]> {
   return rows.map(mapSlot);
 }
 
+function demoCalendarToDelivery(cal: DemoCalendar): DeliveryCalendar {
+  return {
+    calendarId: cal.calendarId,
+    clientId: cal.clientId,
+    month: cal.month,
+    focusPoints: Array.isArray(cal.focusPoints) ? cal.focusPoints : [],
+    refApprovalState: cal.refApprovalState,
+    finalApprovalState: cal.finalApprovalState,
+    shootDate: cal.shootDate,
+    state: cal.state,
+    slots: (cal.slots ?? []).map((s) => ({
+      calendarSlotId: s.calendarSlotId,
+      calendarId: s.calendarId,
+      slotDate: s.slotDate,
+      slotLabel: s.slotLabel,
+      taskId: s.taskId,
+      position: s.position,
+    })),
+  };
+}
+
 export async function listDeliveryCalendars(input: {
   clientId: string;
   month?: string;
 }): Promise<DeliveryCalendar[]> {
   const db = getDb();
-  if (!db) return [];
+  if (!db) {
+    let calendars = [...getDemoStore().calendars.values()].filter(
+      (c) => c.clientId === input.clientId,
+    );
+    if (input.month) {
+      calendars = calendars.filter((c) => c.month === input.month);
+    }
+    return calendars.map(demoCalendarToDelivery);
+  }
 
   const rows = input.month
     ? await db.execute<CalendarRow>(sql`

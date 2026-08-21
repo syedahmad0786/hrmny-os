@@ -1,5 +1,6 @@
 import { sql } from "@hrmny/db";
 import { getDb } from "../db";
+import { getDemoStore, type DemoTask } from "../demo-store";
 
 export type DeliveryTask = {
   taskId: string;
@@ -59,12 +60,48 @@ function mapRow(row: TaskJoinRow): DeliveryTask {
   };
 }
 
+function demoTaskToDelivery(task: DemoTask): DeliveryTask {
+  return {
+    taskId: task.taskId,
+    clientId: task.clientId,
+    calendarId: task.calendarId,
+    month: task.month,
+    taskType: task.taskType,
+    title: task.title,
+    status: task.status,
+    situationalState: task.situationalState,
+    ownerEmployeeId: task.ownerEmployeeId,
+    deadline: task.deadline,
+    priority: task.priority,
+    qcPassed: task.qcPassed,
+    qcNotes: task.qcNotes,
+    clientRevisionCount: task.clientRevisionCount,
+    revisionBoundaryAck: task.revisionBoundaryAck,
+    briefId: task.briefId,
+  };
+}
+
+/** Memory-mode fallback so client sandboxes still resolve without Postgres. */
+function listDemoDeliveryTasks(filter?: {
+  clientId?: string;
+  status?: string;
+}): DeliveryTask[] {
+  if (!filter?.clientId) return [];
+  let tasks = [...getDemoStore().tasks.values()].filter(
+    (t) => t.clientId === filter.clientId,
+  );
+  if (filter.status) {
+    tasks = tasks.filter((t) => t.status === filter.status);
+  }
+  return tasks.map(demoTaskToDelivery);
+}
+
 export async function listDeliveryTasks(filter?: {
   clientId?: string;
   status?: string;
 }): Promise<DeliveryTask[]> {
   const db = getDb();
-  if (!db) return [];
+  if (!db) return listDemoDeliveryTasks(filter);
 
   if (filter?.clientId && filter?.status) {
     const rows = await db.execute<TaskJoinRow>(sql`
