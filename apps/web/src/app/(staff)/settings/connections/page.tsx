@@ -104,6 +104,7 @@ export default function ConnectionsPage() {
       .then(
         (body: {
           tools?: Record<string, string>;
+          blockers?: string[];
           connections?: {
             googleWorkspace?: number;
             canva?: number;
@@ -115,9 +116,19 @@ export default function ConnectionsPage() {
               linkedin?: number;
               xero?: number;
             };
+            lastErrors?: {
+              googleWorkspace?: string | null;
+              canva?: string | null;
+              linkedin?: string | null;
+              xero?: string | null;
+            };
           };
         }) => {
           if (cancelled) return;
+          if (Array.isArray(body.blockers)) {
+            setDemoBlockers(body.blockers);
+            return;
+          }
           const tools = body.tools ?? {};
           const connections = body.connections ?? {};
           const next: string[] = [];
@@ -131,10 +142,13 @@ export default function ConnectionsPage() {
             next.push("Connect Xero via OAuth for live billing mirror.");
           }
           if ((connections.googleWorkspace ?? 0) < 1) {
+            const err = connections.lastErrors?.googleWorkspace?.trim();
             next.push(
-              (connections.errors?.googleWorkspace ?? 0) > 0
-                ? "Reconnect Google Workspace (@hrmny.co) — token revoked; click Reconnect below (tokens are captured immediately after OAuth)."
-                : "Connect Google Workspace (@hrmny.co) for live HITL Gmail send.",
+              err
+                ? `Reconnect Google Workspace (@hrmny.co): ${err}`
+                : (connections.errors?.googleWorkspace ?? 0) > 0
+                  ? "Reconnect Google Workspace (@hrmny.co) — token revoked; click Reconnect below (tokens are captured immediately after OAuth)."
+                  : "Connect Google Workspace (@hrmny.co) for live HITL Gmail send.",
             );
           }
           if ((connections.linkedin ?? 0) < 1) {
