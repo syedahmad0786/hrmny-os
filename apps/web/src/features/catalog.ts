@@ -234,11 +234,11 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
     key: "portal.magic_link",
     name: "Portal magic-link access",
     description:
-      "Invite-only client sign-in via allowlisted email magic links; off keeps existing portal auth.",
+      "Invite-only client sign-in via allowlisted email magic links (Resend or Supabase OTP).",
     group: "Portal",
     source: "native",
     availability: "available",
-    defaultEnabled: false,
+    defaultEnabled: true,
   }),
   feature({
     key: "integrations.connections",
