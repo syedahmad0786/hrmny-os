@@ -116,11 +116,26 @@ describe("portal magic-link", () => {
       // Production auth path — stub token not returned.
       return;
     }
+    await setFeatureOverride({
+      featureKey: "portal.magic_link",
+      scopeType: "global",
+      scopeKey: "global",
+      enabled: false,
+      updatedByEmployeeId: ADMIN_ID,
+    });
     const result = await anon.portal.auth.magicLink({
       email: "alex@democo.example",
     });
     expect(result.sent).toBe(true);
     expect(result.stubToken ?? result.reason).toBeTruthy();
+  });
+
+  it("flag on by default: public magicLink stays enumeration-safe", async () => {
+    const invited = await anon.portal.auth.magicLink({
+      email: "alex@democo.example",
+    });
+    expect(invited.sent).toBe(true);
+    expect(invited.stubToken).toBeUndefined();
   });
 
   it("requestPortalMagicLink no-ops unknown emails", async () => {
