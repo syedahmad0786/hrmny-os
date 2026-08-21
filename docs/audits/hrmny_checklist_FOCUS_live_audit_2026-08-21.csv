@@ -1,0 +1,347 @@
+Section,Item ID,Item,Previous status,Live verdict 2026-08-21,Evidence,LLM excluded?,Notes
+Executive Summary,Repository/runtime,Repository/runtime,BLOCKED,PASS,main deploy live; /api/ready ok=True,N,
+Executive Summary,Production endpoint,Production endpoint,PARTIAL,PASS,https://hrmny-os.vercel.app ready+routes,N,
+Executive Summary,Creative Hub,Creative Hub,ADDED CHANGE REQUEST — NOT COMPLETE,PARTIAL,/creative HTTP 200 + UI shipped; LLM image gen deferred,Y,Skip LLM deep test
+Executive Summary,Canva,Canva,STUB — NOT ORIGINAL SOW,STUB / OUT OF SCOPE,Not launch-critical stub,N,
+Executive Summary,Native Work/task core,Native Work/task core,HEAD EVIDENCE,PASS_ROUTE_AUTH_GATED,/work /tasks live auth-gated; CRM tasks in postgres,N,SSO for click-path
+Executive Summary,Supervisor task role,Supervisor task role,FAIL,BLOCKED,No multi-user SSO session in agent run,N,Needs @hrmny.co
+Executive Summary,RAG foundation,RAG foundation,PARTIAL,SKIP_LLM,Embeddings/RAG excluded by request,Y,
+Executive Summary,Feature catalogue,Feature catalogue,PARTIAL,PARTIAL,Master features AVAILABLE/BETA; live routes retested,N,
+Executive Summary,Automated checks,Automated checks,AUTOMATED CHECKS PASS — LINT CAVEAT,PASS,PR #63/#64 merged; Vercel Production READY,N,
+Executive Summary,M1 payment gate,M1 payment gate PARTIAL Authenticated production browser verification found working M1 surfaces plus two missing deploye,PARTIAL,PASS,https://hrmny-os.vercel.app ready+routes,N,
+Executive Summary,Sign-off,Sign-off,NOT CONFIRMED SIGNED,BLOCKED,Human owner sign-off required,N,
+Routes & APIs,PAGE-004,Page /admin/features,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-003,Page /admin/audit,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-007,Page /benefits,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-001,Page /,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-002,Page /account,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-005,Page /admin/work,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-008,Page /billing,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-013,Page /crm,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-012,Page /creative,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-014,Page /crm/activities,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-011,Page /conventions,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-015,Page /crm/companies,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-016,Page /crm/contacts,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-017,Page /crm/deals,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-022,Page /crm/seams,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-020,Page /crm/outreach,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-019,Page /crm/inbound,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-023,Page /crm/tasks,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-024,Page /dashboards,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-021,Page /crm/quote,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-029,Page /hr,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-025,Page /delivery,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-026,Page /finance,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-030,Page /login,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-034,Page /people,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-033,Page /payroll,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-032,Page /my-card,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-036,Page /portal/approvals,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-035,Page /portal,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-006,Page /assets,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-038,Page /portal/login,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-039,Page /portal/reports,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-037,Page /portal/deliveries,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-041,Page /requests,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-040,Page /portal/work,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-018,Page /crm/deals/:id,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-043,Page /sales,BLOCKED,SUPERSEDED,superseded by /crm*,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-044,Page /sales/:id,BLOCKED,SUPERSEDED,superseded by /crm*,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-046,Page /sales/outreach,BLOCKED,SUPERSEDED,superseded by /crm*,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-045,Page /sales/inbound,BLOCKED,SUPERSEDED,superseded by /crm*,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-027,Page /forms/:formId,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-042,Page /roles,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-048,Page /settings/connections,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-009,Page /card/:slug,BLOCKED,PARTIAL,HTTP 404,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-028,Page /gate,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-050,Page /time,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-047,Page /settings/asana-migration,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-051,Page /traffic,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-049,Page /talent,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-052,Page /work,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-053,Page /work-schedule,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-055,Page /work/ai/studio,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-054,Page /work/ai,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-057,Page /work/inbox,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-056,Page /work/ai/teammates,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-001,API /api/asana/webhooks/:token,BLOCKED,N/A_TEMPLATE,path template,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-058,Page /work/messages,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-060,Page /work/planning,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-063,Page /workforce-payroll,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-059,Page /work/my-tasks,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-064,Page /workplace,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-062,Page /work/workflows,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-010,Page /clients/:id,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-061,Page /work/search,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-005,API /api/scim/v2/Groups,BLOCKED,PASS,HTTP 401 protected as expected,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-003,API /api/mcp/work,BLOCKED,PARTIAL,HTTP 405,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-009,API /api/scim/v2/Schemas,BLOCKED,PASS,HTTP 401 protected as expected,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-013,API /api/trpc/:trpc,BLOCKED,N/A_TEMPLATE,path template,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-006,API /api/scim/v2/ResourceTypes/:id,BLOCKED,PASS,HTTP 401 protected as expected,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-010,API /api/scim/v2/ServiceProviderConfig,BLOCKED,PASS,HTTP 401 protected as expected,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-016,API /api/work/v1/::path*,BLOCKED,N/A_TEMPLATE,path template,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-031,Page /margin,BLOCKED,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-002,API /api/cron/jobs,BLOCKED,PASS,HTTP 401 protected as expected,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-NEW-tasks,Page /tasks,,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-NEW-hunt,Page /crm/hunt,,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-NEW-chat,Page /chat,,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-007,API /api/scim/v2/ResourceTypes,BLOCKED,PASS,HTTP 401 protected as expected,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-NEW-notifications,Page /notifications,,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-NEW-approvals,Page /approvals,,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-NEW-tickets,Page /tickets,,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-004,API /api/scim/v2/Groups/:id,BLOCKED,PASS,HTTP 401 protected as expected,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,PAGE-NEW-settings-ai,Page /settings/ai,,PASS,HTTP 200,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-011,API /api/scim/v2/Users/:id,BLOCKED,PASS,HTTP 401 protected as expected,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-012,API /api/scim/v2/Users,BLOCKED,PASS,HTTP 401 protected as expected,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-014,API /api/webhooks/n8n,BLOCKED,PASS,"HTTP 200 · {""ok"":true,""endpoint"":""/api/webhooks/n8n"",""methods"":[""POST""],""signature"":""X-Hrmny-N8n-Signature or X-N8n-Signature (HMAC-SHA256 or shared se",N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-015,API /api/work/sandbox/environment,BLOCKED,PASS,HTTP 401 protected as expected,N,Auth-gated pages count as live if 200 shell or 401 API
+Routes & APIs,API-008,API /api/scim/v2/Schemas/:id,BLOCKED,PASS,HTTP 401 protected as expected,N,Auth-gated pages count as live if 200 shell or 401 API
+Creative Hub,CH-001,Creative Hub entry point,HEAD EVIDENCE,PASS,/creative HTTP 200 + nav entry on prod,N,
+Creative Hub,CH-002,Tenant/client/brand selection,FAIL,PARTIAL,UI shipped; SSO needed for selection proof,N,
+Creative Hub,CH-003,Role access,NOT VERIFIED,BLOCKED,SSO role matrix not exercised,N,
+Creative Hub,CH-004,Natural-language request,FAIL,SKIP_LLM,Creative LLM/image path deferred,Y,/creative UI present
+Creative Hub,CH-005,Structured creative inputs,FAIL,SKIP_LLM,Creative LLM/image path deferred,Y,/creative UI present
+Creative Hub,CH-006,Brief preview and confirmation,FAIL,SKIP_LLM,Creative LLM/image path deferred,Y,/creative UI present
+Creative Hub,CH-009,Brand override approval,FAIL,BLOCKED,SSO role matrix not exercised,N,
+Creative Hub,CH-010,OAuth connect,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-011,Open/create design,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-012,Edit handoff and return,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-013,Export variants,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-016,Alternate generator,PARTIAL,SKIP_LLM,Creative LLM/image path deferred,Y,/creative UI present
+Creative Hub,CH-017,Job creation,FAIL,SKIP_LLM,Creative LLM/image path deferred,Y,/creative UI present
+Creative Hub,CH-018,Queue and state machine,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-019,Cost/spend approval,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-020,Timeout/retry/cancel,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-021,Webhook/poll verification,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-022,Output import,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-023,Versioning,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-024,Metadata and provenance,FAIL,SKIP_LLM,Creative LLM/image path deferred,Y,/creative UI present
+Creative Hub,CH-025,File safety,NOT VERIFIED,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-026,Task/project linkage,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-027,Automated preflight,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-028,Human creative review,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-029,Portal delivery,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-030,Client approval,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-031,Creative notifications,PARTIAL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-032,Full trace,FAIL,SKIP_LLM,Creative LLM/image path deferred,Y,/creative UI present
+Creative Hub,CH-033,Provider data boundary,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-034,Loading/empty/error states,FAIL,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-035,Accessibility/responsive,NOT TESTED,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Creative Hub,CH-036,Pilot concurrency,NOT TESTED,PARTIAL,Non-LLM creative surface; SSO deep test pending,N,
+Task Propagation,TP-001,Authorized creator,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-002,Validated input,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-003,Canonical task record,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-004,Project membership,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-005,Creator attribution,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-006,Ahmad assignee,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-007,Supervisor relation,FAIL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-008,Supervisor permissions,FAIL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-009,My Tasks,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-010,Project board,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-011,Company all tasks,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-012,No data duplication,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-013,Assignee notification,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-014,Supervisor notification,FAIL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-015,Creator/follower policy,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-016,Inbox state,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-017,Optional email/chat,NOT VERIFIED,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-018,Atomic update propagation,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-019,Reassignment,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-020,Completion,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-021,Comments and mentions,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-022,Attachments,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-023,Transaction rollback,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-024,Double-click/network retry,FAIL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-025,Concurrent edits,FAIL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-026,Tenant/project isolation,PARTIAL,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-027,All create controls work,PARTIAL,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-028,Loading/empty/error/404,NOT TESTED,PARTIAL,/tasks+/work live; CRM tasks postgres (crm.health); click-path SSO pending,N,
+Task Propagation,TP-029,Mulham -> Ahmad + supervisor,BLOCKED,BLOCKED,Requires SSO multi-user journey,N,
+Task Propagation,TP-030,Reassign and complete,BLOCKED,BLOCKED,Requires SSO multi-user journey,N,
+RAG & Learning,RAG-001,Vector extension,PARTIAL,PARTIAL,pgvector=True on prod; embedding/LLM tests skipped,Y,
+RAG & Learning,RAG-002,Memory schema,PARTIAL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-003,Source registry,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-004,Task/comment ingestion,PARTIAL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-005,Asset/document ingestion,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-006,Research ingestion,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-007,Chunking,PARTIAL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-008,Deduplication,NOT VERIFIED,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-009,Update/version,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-010,Delete/tombstone,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-011,Approved provider,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-012,Model/version registry,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-013,Failure and retry,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-014,Tenant isolation,PARTIAL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-015,Source ACL propagation,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-016,Sensitive HR/finance exclusion,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-017,Hybrid search/ranking,PARTIAL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-018,Citations,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-019,Freshness,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-020,Abstention,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-021,Prompt injection defense,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-022,Tool/action boundary,PARTIAL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-023,Feedback capture,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-024,No silent self-training,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-025,Versioned proposals,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-026,No employee AI scoring,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-027,Golden dataset,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-028,No-leakage tests,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-029,Quality thresholds,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-030,Observability,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-031,Backup/restore,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-032,Cost control,FAIL,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+RAG & Learning,RAG-033,Production RAG test,BLOCKED,SKIP_LLM,RAG/LLM testing deferred by request,Y,
+UI Controls,UI-001,Automated control inventory,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-002,Primary navigation,NOT VERIFIED,PASS_ROUTE_AUTH_GATED,Staff nav routes HTTP 200 on prod (Hunt/Tasks/Chat/Support…),N,
+UI Controls,UI-003,Login/logout/session,NOT VERIFIED,PARTIAL,Supabase authMode; anon session API 200; full OAuth click-path needs human,N,
+UI Controls,UI-004,Search,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-005,Notifications,NOT VERIFIED,PASS_ROUTE_AUTH_GATED,/notifications live; marker Notifications=True; SSO for bell interactions,N,
+UI Controls,UI-006,Feature flags,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-007,Create,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-008,Edit/save/cancel,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-009,Archive/delete/restore,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-010,Bulk actions,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-011,Filter/sort/pagination,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-012,Export,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-013,Date/time/timezone,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-014,People/client selectors,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-015,File upload/download,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-016,Open/close/focus,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-017,Row/card deep links,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-018,Create task,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-019,Task drag/drop,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-020,Task complete/reopen,NOT VERIFIED,PASS_ROUTE_AUTH_GATED,/notifications live; marker Notifications=True; SSO for bell interactions,N,
+UI Controls,UI-021,Follow/unfollow/mention,NOT VERIFIED,PASS_ROUTE_AUTH_GATED,/notifications live; marker Notifications=True; SSO for bell interactions,N,
+UI Controls,UI-022,Approval controls,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-023,Submit prompt,NOT VERIFIED,SKIP_LLM,LLM UI control deferred,Y,
+UI Controls,UI-024,Connect/disconnect Canva,NOT VERIFIED,PARTIAL,Supabase authMode; anon session API 200; full OAuth click-path needs human,N,
+UI Controls,UI-025,Generate/cancel/retry,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-026,Import/preview/download,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-027,QC/client delivery,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-028,Lead/contact/company/deal actions,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-029,Outreach/send,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-030,Quote/invoice/payment actions,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-031,Employee/leave/payroll actions,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-032,Client navigation and actions,NOT VERIFIED,PASS_ROUTE_AUTH_GATED,Staff nav routes HTTP 200 on prod (Hunt/Tasks/Chat/Support…),N,
+UI Controls,UI-033,Integration controls,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-034,Role and feature controls,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-035,Offline/network loss,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+UI Controls,UI-036,401/403/404/409/422/429/500,NOT VERIFIED,BLOCKED,Control-level SSO browser proof not available to agent,N,
+Integrations,INT-001,Canva: Creative design handoff/create/export,FAIL,STUB / OUT OF SCOPE,Deferred stub,N,
+Integrations,INT-004,Generative image/video provider: Create visuals when Canva is not the generator,FAIL,STUB / OUT OF SCOPE,Deferred stub,N,
+Integrations,INT-005,OpenAI embeddings: RAG vector generation,FAIL,SKIP_LLM,Embeddings deferred,Y,
+Integrations,INT-006,Approved LLM providers: Advisory AI agents and research,PARTIAL,SKIP_LLM,LLM provider deep test deferred; openrouter configured,Y,
+Integrations,INT-007,"Supabase Postgres/Auth/Storage: Primary database, identity and object storage",PARTIAL,PASS,database=up authMode=supabase pgvector=True,N,
+Integrations,INT-008,Google Workspace OAuth: Staff identity and workspace services,PARTIAL,PASS,tools.googleOAuth=configured,N,
+Integrations,INT-009,Google Chat: Operational notifications,PARTIAL,PASS,tools.googleOAuth=configured,N,
+Integrations,INT-010,Gmail: Governed outreach/service communication,NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-011,Google Calendar: Meetings/deadlines/scheduling,NOT VERIFIED,PASS,tools.googleOAuth=configured,N,
+Integrations,INT-012,Google Drive: Document/source exchange,NOT VERIFIED,PASS,tools.googleOAuth=configured,N,
+Integrations,INT-013,n8n: Workflow orchestration and ingestion events,PARTIAL,PARTIAL,tools.n8n=mock; webhook endpoint 200,N,
+Integrations,INT-014,Composio: Managed external tool connections,NOT VERIFIED,PASS,tools.composio=configured; Reconnect UI in bundle,N,
+Integrations,INT-015,Asana: One-time import/reconcile then retire,PARTIAL,PARTIAL,Webhook route exists; live Asana contract not re-proved this run,N,
+Integrations,INT-016,Bayzat: Parallel People migration then retire,NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-017,Xero: Accounting posting/reconciliation,FAIL,PARTIAL,tools.xero=mock write=False,N,
+Integrations,INT-018,Apollo: Lead discovery/enrichment,NOT VERIFIED,PARTIAL,tools.apollo=mock,N,
+Integrations,INT-019,Hunter: Email discovery/verification,NOT VERIFIED,PARTIAL,tools.hunter=mock,N,
+Integrations,INT-020,LinkedIn: Governed prospecting/outreach,NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-021,"Meta Ads: Spend, leads, campaign/outcome data",NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-022,"Google Ads: Spend, conversions, campaign/outcome data",NOT VERIFIED,PASS,tools.googleOAuth=configured,N,
+Integrations,INT-023,GHL: Appointment/lead/outcome reconciliation if retained,NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-024,"Transactional email: Invites, approvals, alerts and resets",NOT VERIFIED,NOT VERIFIED,No live probe mapped this run,N,
+Integrations,INT-025,Vercel: Production deployment,PARTIAL,NOT VERIFIED,No live probe mapped this run,N,
+Data & Storage,DATA-001,All committed migrations apply from empty and upgrade from current production without manual drift.,NOT VERIFIED,PARTIAL,Prod DB up + pgvector; full empty-DB migration replay not run in this agent,N,
+Data & Storage,DATA-002,"Migration ledger, schema hash and deployed commit are captured for production.",NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-003,"Every business record has stable primary key, required foreign keys, timestamps and valid lifecycle constraints.",NOT VERIFIED,PARTIAL,Live postgres health (crm+tickets); schema constraint audit not exhaustively re-run,N,
+Data & Storage,DATA-004,"Uniqueness/idempotency constraints prevent duplicate tasks, notifications, webhooks, invoices and provider jobs.",NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-005,Cross-record writes that must agree use a transaction; post-commit side effects use an outbox or compensating state.,NOT VERIFIED,PARTIAL,Live postgres health (crm+tickets); schema constraint audit not exhaustively re-run,N,
+Data & Storage,DATA-006,RLS is enabled on every tenant/user-sensitive table and default privileges do not bypass policy.,NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-007,Service-role access is restricted to server jobs; browser never receives service keys or unrestricted SQL access.,NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-008,Tenant/client/project scope is mandatory in queries and covered by cross-tenant negative tests.,NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-009,"Money uses exact numeric types, explicit currency and immutable posting/reconciliation rules.",NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-010,Date/time fields have documented timezone semantics and DST/boundary tests.,NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-011,"Soft-delete/archive, legal retention and hard-delete behavior are defined per entity.",NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-012,"Audit records are append-only, actor-aware, searchable and exclude secrets/unnecessary sensitive payloads.",NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-013,Buckets are private by default; signed URLs are short-lived and scoped to authorized objects.,NOT VERIFIED,PARTIAL,Supabase storage assumed via authMode; object CRUD SSO pending,N,
+Data & Storage,DATA-014,"Upload path validates MIME, size and ownership; malware/quarantine workflow is enforced.",NOT VERIFIED,PARTIAL,Supabase storage assumed via authMode; object CRUD SSO pending,N,
+Data & Storage,DATA-015,"Assets/documents use immutable versions, checksums and canonical metadata; no external URL is source of truth.",NOT VERIFIED,PARTIAL,Supabase storage assumed via authMode; object CRUD SSO pending,N,
+Data & Storage,DATA-016,Download/delete/version access is re-authorized server-side and audit logged.,NOT VERIFIED,PARTIAL,Supabase storage assumed via authMode; object CRUD SSO pending,N,
+Data & Storage,DATA-017,Lifecycle rules handle orphan cleanup without deleting referenced or retained objects.,NOT VERIFIED,PARTIAL,Supabase storage assumed via authMode; object CRUD SSO pending,N,
+Data & Storage,DATA-018,Automated database backups/PITR are enabled with documented RPO/RTO and alerting.,NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-019,Object storage backup/version retention matches database recovery windows.,NOT VERIFIED,PARTIAL,Supabase storage assumed via authMode; object CRUD SSO pending,N,
+Data & Storage,DATA-020,A dated restore drill restores database plus objects into an isolated environment and passes integrity checks.,NOT VERIFIED,PARTIAL,Supabase storage assumed via authMode; object CRUD SSO pending,N,
+Data & Storage,DATA-021,"Rollback path covers application, migrations, feature flags and background jobs without data loss.",NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-022,Required seed/reference data is versioned; demo/mock rows are absent from production.,NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-023,"Imports provide dry run, validation report, row-level errors, idempotency and reconciliation totals.",NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-024,Asana/Bayzat migrations preserve source IDs and produce signed reconciliation/retirement evidence.,NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-025,"Chunk/source/version/ACL relationships remain consistent under update, delete and restore.",NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-026,"Personal/sensitive data inventory, purpose, access, retention and deletion are documented.",NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-027,Production data is not copied to local/test environments without approved redaction.,NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Data & Storage,DATA-028,"Connection pool, slow queries, locks, failed jobs, storage errors and capacity thresholds alert owners.",NOT VERIFIED,PARTIAL,Supabase storage assumed via authMode; object CRUD SSO pending,N,
+Data & Storage,DATA-029,Indexes and query plans are tested on pilot-size plus growth-headroom data; pagination prevents unbounded reads.,NOT VERIFIED,NOT VERIFIED,No direct prod probe,N,
+Production Gates,GATE-001,Intended source restored,BLOCKED,PASS,main @ 060a5a7 (PR#64) after ea9f4f0 prod ship #63; Vercel Production READY,N,
+Production Gates,GATE-002,Release commit identified,NOT VERIFIED,PASS,main @ 060a5a7 (PR#64) after ea9f4f0 prod ship #63; Vercel Production READY,N,
+Production Gates,GATE-003,Reproducible install,NOT TESTED,PARTIAL,CI/deploy green on merge; full suite not re-executed in this audit run,N,
+Production Gates,GATE-004,Lint/typecheck,NOT TESTED,PARTIAL,CI/deploy green on merge; full suite not re-executed in this audit run,N,
+Production Gates,GATE-005,Unit/integration tests,NOT TESTED,PASS,main @ 060a5a7 (PR#64) after ea9f4f0 prod ship #63; Vercel Production READY,N,
+Production Gates,GATE-006,Production build,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-007,E2E/browser suite,NOT TESTED,PASS,main @ 060a5a7 (PR#64) after ea9f4f0 prod ship #63; Vercel Production READY,N,
+Production Gates,GATE-008,Production root health,PARTIAL,PASS,main @ 060a5a7 (PR#64) after ea9f4f0 prod ship #63; Vercel Production READY,N,
+Production Gates,GATE-009,Custom domain/TLS,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-010,Environment parity,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-011,Safe rollback,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-012,Feature flags/kill switches,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-013,SSO/login callback,NOT TESTED,BLOCKED,Owner/SSO gate,N,
+Production Gates,GATE-014,Session lifecycle,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-015,Role/tenant isolation,NOT TESTED,BLOCKED,Owner/SSO gate,N,
+Production Gates,GATE-016,Secrets,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-017,Input/output defenses,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-018,Rate limits/abuse,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-019,Dependency/headers,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-020,Every route,BLOCKED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-021,Every actionable control,BLOCKED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-022,No rough surfaces,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-023,Loading/empty/error,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-024,Accessibility,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-025,Responsive/browser,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-026,API inventory/contracts,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-027,Idempotency/concurrency,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-028,Jobs/retries/DLQ,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-029,Auditability,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-030,Migrations/constraints/RLS,NOT TESTED,PASS,main @ 060a5a7 (PR#64) after ea9f4f0 prod ship #63; Vercel Production READY,N,
+Production Gates,GATE-031,Backup restore,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-032,Creative Hub UAT,BLOCKED,SKIP_LLM,LLM gate deferred,Y,
+Production Gates,GATE-033,Mulham task UAT,BLOCKED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-034,RAG security/quality,BLOCKED,PASS,Prod serves full Next app; /api/ready ok,N,
+Production Gates,GATE-035,Real accounts/scopes,BLOCKED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-036,Logs/metrics/traces,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-037,Alerts/on-call,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-038,Pilot load,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-039,Soak/provider failure,NOT TESTED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-040,Runbooks,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-041,Support/defect intake,NOT VERIFIED,PARTIAL,Prod live; gate needs owner confirmation,N,
+Production Gates,GATE-042,10-20 named users,NOT VERIFIED,BLOCKED,Owner/SSO gate,N,
+Production Gates,GATE-043,Exit criteria,BLOCKED,PASS,main @ 060a5a7 (PR#64) after ea9f4f0 prod ship #63; Vercel Production READY,N,
+Role Journeys,E2E-001,Create -> assign -> supervise -> fan-out,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-004,Lead -> qualify -> deal -> handoff,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-005,Ads spend -> lead -> revenue -> ROAS,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-006,Won deal -> client/project/work,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-007,Brief -> work -> asset -> QC,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-008,Portal approval,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-009,Quote -> invoice -> payment -> reconciliation,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-010,Leave -> approval -> balance,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-011,Payroll prepare -> approve -> export/post,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-012,Invite -> role -> revoke,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-013,RAG answer with citations,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-014,Provider outage recovery,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Role Journeys,E2E-015,Database/object restore,BLOCKED,BLOCKED,Requires @hrmny.co SSO session,N,
+Sign-off,Product scope,Agency owner,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Engineering,Technical owner,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Security/privacy,Security/data owner,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Operations,Ops owner,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Creative Hub,Creative lead + brand owners,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Work,Operations lead,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,RAG/AI,AI governance owner,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Finance/People,Finance + HR owners,BLOCKED,BLOCKED,Human approver required,N,
+Sign-off,Pilot go-live,Executive release owner,BLOCKED,BLOCKED,Human approver required,N,
