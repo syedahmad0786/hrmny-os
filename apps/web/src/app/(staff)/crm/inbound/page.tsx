@@ -170,11 +170,16 @@ export default function CrmInboundPage() {
             </div>
           </div>
           <div className="crm-panel-body">
-            <form className="crm-form-grid" onSubmit={handleSubmit}>
+            <form
+              className="crm-form-grid"
+              onSubmit={handleSubmit}
+              data-testid="inbound-capture-form"
+            >
               <div className="crm-field">
                 <label>Company</label>
                 <input
                   className="crm-input"
+                  data-testid="inbound-company"
                   required
                   value={companyName}
                   onChange={(e) => {
@@ -186,6 +191,7 @@ export default function CrmInboundPage() {
                   <label className="mt-1 flex items-center gap-2 text-[11px] text-[var(--muted)]">
                     <input
                       type="checkbox"
+                      data-testid="inbound-use-existing-company"
                       checked={useExistingCompany}
                       onChange={(e) => {
                         resetCreated();
@@ -200,6 +206,7 @@ export default function CrmInboundPage() {
                 <label>Contact name</label>
                 <input
                   className="crm-input"
+                  data-testid="inbound-contact-name"
                   required={!(contactMatch && useExistingContact)}
                   value={contactName}
                   onChange={(e) => {
@@ -212,6 +219,7 @@ export default function CrmInboundPage() {
                 <label>Email</label>
                 <input
                   className="crm-input"
+                  data-testid="inbound-email"
                   required
                   type="email"
                   value={contactEmail}
@@ -224,6 +232,7 @@ export default function CrmInboundPage() {
                   <label className="mt-1 flex items-center gap-2 text-[11px] text-[var(--muted)]">
                     <input
                       type="checkbox"
+                      data-testid="inbound-use-existing-contact"
                       checked={useExistingContact}
                       onChange={(e) => {
                         resetCreated();
@@ -239,6 +248,7 @@ export default function CrmInboundPage() {
                 <label>Sector / interest</label>
                 <input
                   className="crm-input"
+                  data-testid="inbound-sector"
                   value={sector}
                   onChange={(e) => setSector(e.target.value)}
                 />
@@ -247,6 +257,7 @@ export default function CrmInboundPage() {
                 <label>Market</label>
                 <select
                   className="crm-select"
+                  data-testid="inbound-market"
                   value={market}
                   onChange={(e) =>
                     setMarket(e.target.value as "UAE" | "KSA" | "Both")
@@ -261,16 +272,26 @@ export default function CrmInboundPage() {
                 <label>Message</label>
                 <textarea
                   className="crm-textarea"
+                  data-testid="inbound-message"
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                 />
               </div>
               <div className="crm-field wide">
-                <CrmBtn variant="primary" disabled={submitting} type="submit">
+                <CrmBtn
+                  variant="primary"
+                  data-testid="inbound-create-deal"
+                  disabled={submitting}
+                  type="submit"
+                >
                   {submitting ? "Creating…" : "Review + create deal"}
                 </CrmBtn>
                 {error ? (
-                  <div className="crm-note mt-3" role="alert">
+                  <div
+                    className="crm-note mt-3"
+                    role="alert"
+                    data-testid="inbound-error"
+                  >
                     <CrmTag kind="danger">Failed</CrmTag> {error}
                   </div>
                 ) : null}
