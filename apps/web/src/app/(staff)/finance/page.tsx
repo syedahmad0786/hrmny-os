@@ -232,7 +232,7 @@ function FinanceQueueInner() {
                   {inv.status} · {inv.contactName} · {inv.invoiceType} · AED{" "}
                   {inv.amount} (+VAT {inv.vatAmount}) · xero mirror id:{" "}
                   {inv.xeroInvoiceId ?? "—"}
-                  {inv.source === "os" ? (
+                  {"source" in inv && inv.source === "os" ? (
                     <span className="ml-2 text-xs text-muted">OS</span>
                   ) : null}
                   {focused ? (
