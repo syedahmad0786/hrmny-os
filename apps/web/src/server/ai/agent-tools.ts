@@ -331,6 +331,8 @@ export async function runAgentTools(input: {
 
   // ── Sandboxed writes (never send email / never escalate outside scope) ──
 
+  let createdTaskId: string | undefined;
+
   if (
     input.scope.clientId &&
     (want("tasks.create") || want("delivery.create") || want("tasks.write"))
@@ -339,13 +341,38 @@ export async function runAgentTools(input: {
       const { createDeliveryTask } = await import("../tasks/delivery-tasks");
       const title =
         input.prompt.trim().slice(0, 120) || "Agent-created delivery task";
-      const task = await createDeliveryTask({
+      let task = await createDeliveryTask({
         clientId: input.scope.clientId,
         taskType: "social_cutdowns",
         title: `[agent] ${title}`,
         status: "backlog",
         ownerEmployeeId: input.scope.employeeId ?? null,
       });
+      if (!task) {
+        const store = getDemoStore();
+        const taskId = crypto.randomUUID();
+        const demoTask = {
+          taskId,
+          clientId: input.scope.clientId,
+          calendarId: null as string | null,
+          month: null as string | null,
+          taskType: "social_cutdowns",
+          title: `[agent] ${title}`,
+          status: "backlog",
+          situationalState: null as string | null,
+          ownerEmployeeId: input.scope.employeeId ?? null,
+          deadline: null as string | null,
+          priority: "medium" as string | null,
+          qcPassed: false,
+          qcNotes: null as string | null,
+          clientRevisionCount: 0,
+          revisionBoundaryAck: false,
+          briefId: null as string | null,
+        };
+        store.tasks.set(taskId, demoTask);
+        task = demoTask;
+      }
+      if (task?.taskId) createdTaskId = task.taskId;
       results.push({
         tool: "tasks.create",
         ok: Boolean(task?.taskId),
@@ -365,6 +392,123 @@ export async function runAgentTools(input: {
         tool: "tasks.create",
         ok: false,
         error: err instanceof Error ? err.message : "tasks_create_failed",
+      });
+    }
+  }
+
+  if (
+    input.scope.clientId &&
+    (want("campaigns.draft") ||
+      want("campaign.create") ||
+      want("campaigns.write"))
+  ) {
+    try {
+      const { createCampaignDraft } = await import("../campaigns/repository");
+      const title =
+        input.prompt.trim().slice(0, 120) || "Agent campaign draft";
+      const scheduledFor = new Date().toISOString().slice(0, 10);
+      const row = await createCampaignDraft({
+        title: `[agent] ${title}`,
+        channel: "linkedin",
+        scheduledFor,
+        clientId: input.scope.clientId,
+      });
+      results.push({
+        tool: "campaigns.draft",
+        ok: true,
+        data: {
+          campaignItemId: row.campaignItemId,
+          clientId: row.clientId,
+          channel: row.channel,
+          status: row.status,
+          title: row.title,
+        },
+      });
+    } catch (err) {
+      results.push({
+        tool: "campaigns.draft",
+        ok: false,
+        error: err instanceof Error ? err.message : "campaigns_draft_failed",
+      });
+    }
+  }
+
+  const briefTaskId = input.scope.taskId ?? createdTaskId;
+  if (
+    briefTaskId &&
+    (want("briefs.draft") || want("brief.draft") || want("briefs.write"))
+  ) {
+    try {
+      const { validateDor } = await import("@hrmny/gate");
+      const { upsertDeliveryBriefForTask } = await import(
+        "../tasks/delivery-tasks"
+      );
+      const snippet = input.prompt.trim().slice(0, 200) || "Agent brief";
+      const body: Record<string, unknown> = {
+        title: `[agent] ${snippet.slice(0, 80)}`,
+        objective: snippet,
+        audience: "Target audience (agent draft — refine before lock)",
+        deliverables: "Creative deliverables (agent draft)",
+        deadline: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+        brandAssets: { logo: true, agentDraft: true },
+        channels: ["linkedin"],
+        successMetric: "Engagement (agent draft)",
+      };
+      const dor = validateDor(body);
+      const brief = await upsertDeliveryBriefForTask({
+        taskId: briefTaskId,
+        body,
+        dorComplete: dor.dorComplete,
+        missingRequiredCount: dor.missingRequiredCount,
+      });
+      if (brief) {
+        results.push({
+          tool: "briefs.draft",
+          ok: true,
+          data: {
+            briefId: brief.briefId,
+            taskId: brief.taskId,
+            dorComplete: brief.dorComplete,
+            missingRequiredCount: brief.missingRequiredCount,
+            lockedAt: brief.lockedAt,
+          },
+        });
+      } else {
+        // Memory / demo path when Postgres brief helpers return null
+        const store = getDemoStore();
+        const task = store.tasks.get(briefTaskId);
+        if (!task) throw new Error("task_not_found_for_brief");
+        const briefId = crypto.randomUUID();
+        const demoBrief = {
+          briefId,
+          taskId: briefTaskId,
+          body,
+          dorComplete: dor.dorComplete,
+          missingRequiredCount: dor.missingRequiredCount,
+          missing: [...dor.missing],
+          lockedAt: null as string | null,
+        };
+        store.briefs.set(briefId, demoBrief);
+        task.briefId = briefId;
+        task.status = "briefing";
+        results.push({
+          tool: "briefs.draft",
+          ok: true,
+          data: {
+            briefId,
+            taskId: briefTaskId,
+            dorComplete: dor.dorComplete,
+            missingRequiredCount: dor.missingRequiredCount,
+            lockedAt: null,
+            mode: "memory",
+          },
+        });
+      }
+    } catch (err) {
+      results.push({
+        tool: "briefs.draft",
+        ok: false,
+        error: err instanceof Error ? err.message : "briefs_draft_failed",
       });
     }
   }
