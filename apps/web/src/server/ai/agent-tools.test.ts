@@ -162,4 +162,67 @@ describe("runAgentTools funnel writes", () => {
     expect(bBlob).toMatch(/Other Co/i);
     expect(bBlob).not.toMatch(/Launch reel/i);
   });
+
+  it("crm.read and outreach.read isolate Demo Co vs Other Co sandboxes", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    const {
+      resetLeadgenStore,
+      seedClientSandboxOutreach,
+    } = await import("../leadgen/store");
+    const {
+      DEMO_CLIENT_ID,
+      DEMO_CLIENT_B_ID,
+      DEMO_DEAL_ID,
+      DEMO_CLIENT_B_DEAL_ID,
+    } = await import("../demo-store");
+
+    resetCrmMemory();
+    resetLeadgenStore();
+    getDemoStore().resetM6Demo();
+    seedClientSandboxOutreach({
+      dealIdA: DEMO_DEAL_ID,
+      dealIdB: DEMO_CLIENT_B_DEAL_ID,
+    });
+
+    const a = await runAgentTools({
+      allowedTools: ["crm.read", "outreach.read"],
+      prompt: "Summarize CRM and outreach",
+      scope: {
+        clientId: DEMO_CLIENT_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const b = await runAgentTools({
+      allowedTools: ["crm.read", "outreach.read"],
+      prompt: "Summarize CRM and outreach",
+      scope: {
+        clientId: DEMO_CLIENT_B_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+
+    const aCrm = a.find((r) => r.tool === "crm.read");
+    const bCrm = b.find((r) => r.tool === "crm.read");
+    const aOut = a.find((r) => r.tool === "outreach.read");
+    const bOut = b.find((r) => r.tool === "outreach.read");
+    const aCrmBlob = JSON.stringify(aCrm?.data ?? {});
+    const bCrmBlob = JSON.stringify(bCrm?.data ?? {});
+    const aOutBlob = JSON.stringify(aOut?.data ?? {});
+    const bOutBlob = JSON.stringify(bOut?.data ?? {});
+
+    expect(aCrm?.ok).toBe(true);
+    expect(bCrm?.ok).toBe(true);
+    expect(aOut?.ok).toBe(true);
+    expect(bOut?.ok).toBe(true);
+
+    expect(aCrmBlob).toMatch(/JW Marriott/i);
+    expect(aCrmBlob).not.toMatch(/Other Co/i);
+    expect(bCrmBlob).toMatch(/Other Co/i);
+    expect(bCrmBlob).not.toMatch(/JW Marriott/i);
+
+    expect(aOutBlob).toMatch(/Demo Co launch reel/i);
+    expect(aOutBlob).not.toMatch(/Other Co confidential/i);
+    expect(bOutBlob).toMatch(/Other Co confidential/i);
+    expect(bOutBlob).not.toMatch(/Demo Co launch reel/i);
+  });
 });
