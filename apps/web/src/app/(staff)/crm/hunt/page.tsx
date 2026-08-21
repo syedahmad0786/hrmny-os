@@ -92,9 +92,11 @@ export default function HuntClientsPage() {
   if ((ready?.connections?.canva ?? 0) < 1) {
     blockers.push("Connect Canva (Composio) for design → portal");
   }
-  if (toolReady?.resend === "mock") {
+  if (toolReady?.resend && toolReady.resend !== "live") {
     blockers.push(
-      "Set RESEND_MODE=live + RESEND_API_KEY + RESEND_FROM for real portal email",
+      toolReady.resend === "configured"
+        ? "Resend key present — set RESEND_MODE=live (+ RESEND_FROM) for real portal email"
+        : "Set RESEND_MODE=live + RESEND_API_KEY + RESEND_FROM for real portal email",
     );
   }
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
