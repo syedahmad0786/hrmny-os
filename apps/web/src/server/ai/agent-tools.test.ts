@@ -225,4 +225,97 @@ describe("runAgentTools funnel writes", () => {
     expect(bOutBlob).toMatch(/Other Co confidential/i);
     expect(bOutBlob).not.toMatch(/Demo Co launch reel/i);
   });
+
+  it("funnel writes stay inside Demo Co vs Other Co sandboxes", async () => {
+    const { DEMO_CLIENT_ID, DEMO_CLIENT_B_ID } = await import("../demo-store");
+    const { listCampaigns } = await import("../campaigns/repository");
+    getDemoStore().resetM6Demo();
+
+    const writes = [
+      "tasks.create",
+      "campaigns.draft",
+      "crm.note",
+      "portal.invite",
+      "creative.sendToPortal",
+    ] as const;
+
+    const a = await runAgentTools({
+      allowedTools: [...writes],
+      prompt: "Demo Co LinkedIn launch cutdowns for UAE retail",
+      scope: {
+        clientId: DEMO_CLIENT_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const b = await runAgentTools({
+      allowedTools: [...writes],
+      prompt: "Other Co confidential LinkedIn cutdowns — keep private",
+      scope: {
+        clientId: DEMO_CLIENT_B_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+
+    for (const tool of writes) {
+      expect(a.find((r) => r.tool === tool)?.ok).toBe(true);
+      expect(b.find((r) => r.tool === tool)?.ok).toBe(true);
+    }
+
+    const aBlob = JSON.stringify(a);
+    const bBlob = JSON.stringify(b);
+    expect(aBlob).toContain(DEMO_CLIENT_ID);
+    expect(aBlob).not.toContain(DEMO_CLIENT_B_ID);
+    expect(aBlob).not.toMatch(/Other Co/i);
+    expect(bBlob).toContain(DEMO_CLIENT_B_ID);
+    expect(bBlob).not.toContain(DEMO_CLIENT_ID);
+    expect(bBlob).toMatch(/Other Co/i);
+    expect(bBlob).not.toMatch(/Demo Co LinkedIn launch/i);
+
+    const aTask = a.find((r) => r.tool === "tasks.create")?.data as {
+      taskId?: string;
+      clientId?: string;
+    };
+    const bTask = b.find((r) => r.tool === "tasks.create")?.data as {
+      taskId?: string;
+      clientId?: string;
+    };
+    expect(aTask?.clientId).toBe(DEMO_CLIENT_ID);
+    expect(bTask?.clientId).toBe(DEMO_CLIENT_B_ID);
+
+    const store = getDemoStore();
+    expect(store.tasks.get(aTask!.taskId!)?.clientId).toBe(DEMO_CLIENT_ID);
+    expect(store.tasks.get(bTask!.taskId!)?.clientId).toBe(DEMO_CLIENT_B_ID);
+
+    const aCampaigns = await listCampaigns({ clientId: DEMO_CLIENT_ID });
+    const bCampaigns = await listCampaigns({ clientId: DEMO_CLIENT_B_ID });
+    expect(
+      aCampaigns.some((c) => /Demo Co LinkedIn launch/i.test(c.title)),
+    ).toBe(true);
+    expect(aCampaigns.every((c) => c.clientId === DEMO_CLIENT_ID)).toBe(true);
+    expect(
+      aCampaigns.some((c) => /Other Co confidential/i.test(c.title)),
+    ).toBe(false);
+    expect(
+      bCampaigns.some((c) => /Other Co confidential/i.test(c.title)),
+    ).toBe(true);
+    expect(bCampaigns.every((c) => c.clientId === DEMO_CLIENT_B_ID)).toBe(true);
+    expect(
+      bCampaigns.some((c) => /Demo Co LinkedIn launch/i.test(c.title)),
+    ).toBe(false);
+
+    const aPortal = a.find((r) => r.tool === "creative.sendToPortal")?.data as {
+      assetId?: string;
+      taskId?: string;
+    };
+    const bPortal = b.find((r) => r.tool === "creative.sendToPortal")?.data as {
+      assetId?: string;
+      taskId?: string;
+    };
+    expect(store.assets.get(aPortal!.assetId!)?.clientId).toBe(DEMO_CLIENT_ID);
+    expect(store.assets.get(bPortal!.assetId!)?.clientId).toBe(
+      DEMO_CLIENT_B_ID,
+    );
+    expect(store.tasks.get(aPortal!.taskId!)?.clientId).toBe(DEMO_CLIENT_ID);
+    expect(store.tasks.get(bPortal!.taskId!)?.clientId).toBe(DEMO_CLIENT_B_ID);
+  });
 });
