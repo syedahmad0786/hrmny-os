@@ -120,7 +120,7 @@ export default function ConnectionsPage() {
           }
           if (tools.resend === "mock") {
             next.push(
-              "Set RESEND_MODE=live + RESEND_API_KEY for real portal invite email.",
+              "Set RESEND_MODE=live + RESEND_API_KEY + RESEND_FROM for real portal invite email.",
             );
           }
           setDemoBlockers(next);

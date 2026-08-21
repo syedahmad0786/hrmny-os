@@ -1249,10 +1249,15 @@ export const crmRouter = router({
             const { sendPortalInviteMagicLink } = await import(
               "../auth/portal-magic-link"
             );
+            // Demo placeholder inboxes must not hit live Resend (bounces /
+            // rejects). Token + portalPath still return for the Hunt result.
+            const placeholderInbox = inviteEmail.endsWith("@example.com");
+            const { createResendMock } = await import("@hrmny/integrations");
             const sent = await sendPortalInviteMagicLink({
               email: inviteEmail,
               clientId: pack.client.clientId,
               displayName,
+              emailer: placeholderInbox ? createResendMock() : undefined,
             });
             portalInvite = {
               ...invited,
