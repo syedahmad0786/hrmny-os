@@ -293,64 +293,42 @@ test.describe("Demo funnel", () => {
 
   test("portal reject lands in partner /notifications inbox", async ({
     page,
-    request,
   }) => {
-    const portalHeaders = {
-      "x-dev-role": "portal_a",
-      "content-type": "application/json",
-    };
+    page.setExtraHTTPHeaders({ "x-dev-role": "portal_a" });
+    await page.goto("/portal/approvals", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /^Approvals$/i }),
+    ).toBeVisible({ timeout: 60_000 });
 
-    // Memory-mode demo store seeds pending Demo Co approvals (reject + approve isolated).
-    const list = await request.get("/api/trpc/portal.approvals.list", {
-      headers: portalHeaders,
-    });
-    const listText = await list.text();
-    expect(list.ok(), listText).toBeTruthy();
-    const listBody = JSON.parse(listText) as {
-      result?: { data?: { json?: Array<{ approvalId: string; status: string; title: string }> } };
-    };
-    const approvals =
-      listBody.result?.data?.json ??
-      (listBody.result?.data as unknown as Array<{
-        approvalId: string;
-        status: string;
-        title: string;
-      }>) ??
-      [];
-    const pending = (Array.isArray(approvals) ? approvals : []).find(
-      (a) =>
-        a.status === "pending" && /Approve launch reel cut/i.test(a.title),
-    );
-    expect(pending, listText).toBeTruthy();
+    const rejectRow = page
+      .locator("[data-approval-title]")
+      .filter({ hasText: /Approve launch reel cut/i });
+    await expect(rejectRow).toBeVisible({ timeout: 30_000 });
+    await expect(rejectRow).toHaveAttribute("data-approval-status", "pending");
 
-    const act = await request.post("/api/trpc/portal.approvals.act", {
-      headers: portalHeaders,
-      data: {
-        json: {
-          id: pending!.approvalId,
-          action: "reject",
-          feedback: "E2E: tighten the hook",
-        },
-      },
+    await rejectRow.getByTestId("portal-approval-reject").click();
+    await rejectRow
+      .getByTestId("portal-approval-reject-reason")
+      .fill("E2E: tighten the hook");
+    await rejectRow.getByTestId("portal-approval-reject-send").click();
+    await expect(rejectRow).toHaveAttribute("data-approval-status", "rejected", {
+      timeout: 30_000,
     });
-    const actText = await act.text();
-    expect(act.ok(), actText).toBeTruthy();
-    expect(actText).not.toMatch(/"error"/);
 
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/notifications", { waitUntil: "domcontentloaded" });
     await expect(
       page.getByRole("heading", { name: /Notifications/i }),
     ).toBeVisible({ timeout: 60_000 });
-    const rejectRow = page
+    const notifyRow = page
       .locator("li")
       .filter({ hasText: /Client revisions/i })
-      .filter({ hasText: pending!.title });
-    await expect(rejectRow).toBeVisible();
-    await expect(rejectRow).toContainText(/E2E: tighten the hook/i);
+      .filter({ hasText: /Approve launch reel cut/i });
+    await expect(notifyRow).toBeVisible();
+    await expect(notifyRow).toContainText(/E2E: tighten the hook/i);
 
     // Open must deep-link into Creative with the revised task focused.
-    const openLink = rejectRow.locator(
+    const openLink = notifyRow.locator(
       'a[href*="/creative?"][href*="taskId="]',
     );
     await expect(openLink).toBeVisible();
@@ -373,67 +351,40 @@ test.describe("Demo funnel", () => {
 
   test("portal approve lands in partner inbox and Creative deep-link", async ({
     page,
-    request,
   }) => {
-    const portalHeaders = {
-      "x-dev-role": "portal_a",
-      "content-type": "application/json",
-    };
+    page.setExtraHTTPHeaders({ "x-dev-role": "portal_a" });
+    await page.goto("/portal/approvals", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /^Approvals$/i }),
+    ).toBeVisible({ timeout: 60_000 });
 
-    const list = await request.get("/api/trpc/portal.approvals.list", {
-      headers: portalHeaders,
-    });
-    const listText = await list.text();
-    expect(list.ok(), listText).toBeTruthy();
-    const listBody = JSON.parse(listText) as {
-      result?: {
-        data?: {
-          json?: Array<{ approvalId: string; status: string; title: string }>;
-        };
-      };
-    };
-    const approvals =
-      listBody.result?.data?.json ??
-      (listBody.result?.data as unknown as Array<{
-        approvalId: string;
-        status: string;
-        title: string;
-      }>) ??
-      [];
-    const pending = (Array.isArray(approvals) ? approvals : []).find(
-      (a) =>
-        a.status === "pending" &&
-        /Approve product stills pack/i.test(a.title),
+    const approveRow = page
+      .locator("[data-approval-title]")
+      .filter({ hasText: /Approve product stills pack/i });
+    await expect(approveRow).toBeVisible({ timeout: 30_000 });
+    await expect(approveRow).toHaveAttribute("data-approval-status", "pending");
+
+    await approveRow.getByTestId("portal-approval-approve").click();
+    await expect(approveRow).toHaveAttribute(
+      "data-approval-status",
+      "approved",
+      { timeout: 30_000 },
     );
-    expect(pending, listText).toBeTruthy();
-
-    const act = await request.post("/api/trpc/portal.approvals.act", {
-      headers: portalHeaders,
-      data: {
-        json: {
-          id: pending!.approvalId,
-          action: "approve",
-          feedback: "E2E: ship it",
-        },
-      },
-    });
-    const actText = await act.text();
-    expect(act.ok(), actText).toBeTruthy();
-    expect(actText).not.toMatch(/"error"/);
 
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/notifications", { waitUntil: "domcontentloaded" });
     await expect(
       page.getByRole("heading", { name: /Notifications/i }),
     ).toBeVisible({ timeout: 60_000 });
-    const approveRow = page
+    const notifyRow = page
       .locator("li")
       .filter({ hasText: /Client approved/i })
-      .filter({ hasText: pending!.title });
-    await expect(approveRow).toBeVisible();
-    await expect(approveRow).toContainText(/E2E: ship it/i);
+      .filter({ hasText: /Approve product stills pack/i });
+    await expect(notifyRow).toBeVisible();
+    // UI approve path does not send optional feedback; subject/title still notify.
+    await expect(notifyRow).toContainText(/Approve product stills pack/i);
 
-    const openLink = approveRow.locator(
+    const openLink = notifyRow.locator(
       'a[href*="/creative?"][href*="taskId="]',
     );
     await expect(openLink).toBeVisible();
