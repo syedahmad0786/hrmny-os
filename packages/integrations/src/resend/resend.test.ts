@@ -37,14 +37,34 @@ describe("resend email adapter", () => {
     const prev = process.env.RESEND_API_KEY;
     delete process.env.RESEND_API_KEY;
     try {
-      expect(() => createResendLive({})).toThrow(/RESEND_API_KEY/);
+      expect(() => createResendLive({ from: "test@hrmny.co" })).toThrow(
+        /RESEND_API_KEY/,
+      );
     } finally {
       if (prev !== undefined) process.env.RESEND_API_KEY = prev;
     }
   });
 
-  it("live builds with an explicit key and records nothing", () => {
-    const r = createResendLive({ apiKey: "re_test_key" });
+  it("live fails loud without RESEND_FROM", () => {
+    const prevKey = process.env.RESEND_API_KEY;
+    const prevFrom = process.env.RESEND_FROM;
+    process.env.RESEND_API_KEY = "re_test_key";
+    delete process.env.RESEND_FROM;
+    try {
+      expect(() => createResendLive({})).toThrow(/RESEND_FROM/);
+    } finally {
+      if (prevKey === undefined) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = prevKey;
+      if (prevFrom === undefined) delete process.env.RESEND_FROM;
+      else process.env.RESEND_FROM = prevFrom;
+    }
+  });
+
+  it("live builds with an explicit key and from, records nothing", () => {
+    const r = createResendLive({
+      apiKey: "re_test_key",
+      from: "hrmny OS <noreply@hrmny.co>",
+    });
     expect(r.mode).toBe("live");
     expect(r.recorded()).toEqual([]);
   });

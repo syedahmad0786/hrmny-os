@@ -85,7 +85,9 @@ export async function GET() {
     ]);
 
   const resendMode =
-    process.env.RESEND_MODE?.toLowerCase() === "live" && has("RESEND_API_KEY")
+    process.env.RESEND_MODE?.toLowerCase() === "live" &&
+    has("RESEND_API_KEY") &&
+    has("RESEND_FROM")
       ? "live"
       : has("RESEND_API_KEY")
         ? "configured"

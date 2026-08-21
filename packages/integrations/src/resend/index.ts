@@ -40,8 +40,6 @@ export type ResendConfig = {
   from?: string;
 };
 
-const DEFAULT_FROM = "HRMNY OS <reports@hrmny.os>";
-
 function resolveMode(config: ResendConfig): "mock" | "live" {
   if (config.mode) return config.mode;
   return process.env.RESEND_MODE?.toLowerCase() === "live" ? "live" : "mock";
@@ -51,6 +49,17 @@ function assertRecipients(input: EmailSendInput): void {
   if (input.to.length === 0) {
     throw new Error("resend: refusing to send with no recipients");
   }
+}
+
+function resolveLiveFrom(config: ResendConfig): string {
+  const from = (config.from ?? process.env.RESEND_FROM)?.trim();
+  if (!from) {
+    throw new IntegrationMisconfiguredError(
+      "resend",
+      "RESEND_MODE=live but RESEND_FROM missing — set a verified sender (e.g. hrmny OS <noreply@yourdomain.com>)",
+    );
+  }
+  return from;
 }
 
 /** Mock — never sends; records each call so tests/CI can assert delivery. */
@@ -75,7 +84,7 @@ export function createResendMock(): EmailSendAdapter {
   };
 }
 
-/** Live Resend — POST /emails. Fails loud without RESEND_API_KEY. */
+/** Live Resend — POST /emails. Fails loud without RESEND_API_KEY + RESEND_FROM. */
 export function createResendLive(config: ResendConfig = {}): EmailSendAdapter {
   const apiKey = config.apiKey ?? process.env.RESEND_API_KEY;
   if (!apiKey) {
@@ -84,7 +93,7 @@ export function createResendLive(config: ResendConfig = {}): EmailSendAdapter {
       "RESEND_MODE=live but RESEND_API_KEY missing — fail loud",
     );
   }
-  const from = config.from ?? process.env.RESEND_FROM ?? DEFAULT_FROM;
+  const from = resolveLiveFrom(config);
   return {
     mode: "live",
     async send(input) {
