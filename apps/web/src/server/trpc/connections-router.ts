@@ -1766,6 +1766,12 @@ export const connectionsRouter = router({
     await requireAllowedApp("canva");
     const employeeId = requireEmployeeId(ctx.employeeId);
 
+    const stubDesigns = () =>
+      [
+        { id: "stub-design-1", title: "Brand kit cover (Canva stub)" },
+        { id: "stub-design-2", title: "Social template pack (Canva stub)" },
+      ] as const;
+
     if (process.env.COMPOSIO_API_KEY?.trim()) {
       try {
         const client = requireSystemComposio();
@@ -1776,37 +1782,33 @@ export const connectionsRouter = router({
             !candidate.is_disabled &&
             ACTIVE_COMPOSIO_STATUSES.has(candidate.status.toUpperCase()),
         );
-        if (!account) {
+        if (account) {
+          const { listCanvaUserDesigns } = await import("@hrmny/integrations");
+          const designs = await listCanvaUserDesigns({
+            client,
+            connectedAccountId: account.id,
+          });
+          const db = getDb();
+          if (db) {
+            const { writeAudit } = await import("../m1-persistence");
+            await writeAudit({
+              actorEmployeeId: employeeId,
+              action: "connections.canvaListDesigns",
+              entityType: "connection_account",
+              entityId: account.id,
+              before: null,
+              after: { count: designs.length, mode: "live" },
+              reason: null,
+            });
+          }
           return {
-            ok: false as const,
-            reason:
-              "Canva not connected — use Connections → Connect Canva (Composio)",
-            designs: [] as { id: string; title: string }[],
+            ok: true as const,
+            designs: designs.map((d) => ({ id: d.id, title: d.title })),
+            mode: "live" as const,
           };
         }
-        const { listCanvaUserDesigns } = await import("@hrmny/integrations");
-        const designs = await listCanvaUserDesigns({
-          client,
-          connectedAccountId: account.id,
-        });
-        const db = getDb();
-        if (db) {
-          const { writeAudit } = await import("../m1-persistence");
-          await writeAudit({
-            actorEmployeeId: employeeId,
-            action: "connections.canvaListDesigns",
-            entityType: "connection_account",
-            entityId: account.id,
-            before: null,
-            after: { count: designs.length, mode: "live" },
-            reason: null,
-          });
-        }
-        return {
-          ok: true as const,
-          designs: designs.map((d) => ({ id: d.id, title: d.title })),
-          mode: "live" as const,
-        };
+        // Composio configured but Canva OAuth missing — fall through to stub
+        // so Creative→portal demos still work until staff reconnects Canva.
       } catch (err) {
         throw new TRPCError({
           code: "BAD_GATEWAY",
@@ -1818,12 +1820,13 @@ export const connectionsRouter = router({
       }
     }
 
-    // Memory/demo path only when Composio is not configured (unit tests).
+    // Stub path: no COMPOSIO_API_KEY, or key present but Canva not connected.
     const store = getDemoStore();
     const canva = store.connections.find(
       (row) => row.toolkit === "canva" && row.status === "connected",
     );
-    if (!canva) {
+    // Memory mode without a local Canva row still requires Connect canva.
+    if (!process.env.COMPOSIO_API_KEY?.trim() && !canva) {
       return {
         ok: false as const,
         reason: "Canva not connected — use Connections → Connect canva",
@@ -1834,17 +1837,20 @@ export const connectionsRouter = router({
       actorEmployeeId: employeeId,
       action: "connections.canvaListDesigns",
       entityType: "connection_account",
-      entityId: canva.connectionAccountId,
+      entityId: canva?.connectionAccountId ?? "canva-stub",
       before: null,
-      after: { smoke: true, mode: "stub" },
+      after: {
+        smoke: true,
+        mode: "stub",
+        reason: process.env.COMPOSIO_API_KEY?.trim()
+          ? "composio_without_canva_account"
+          : "no_composio",
+      },
       reason: null,
     });
     return {
       ok: true as const,
-      designs: [
-        { id: "stub-design-1", title: "Brand kit cover (Canva stub)" },
-        { id: "stub-design-2", title: "Social template pack (Canva stub)" },
-      ],
+      designs: [...stubDesigns()],
       mode: "stub" as const,
     };
   }),
@@ -1877,6 +1883,14 @@ export const connectionsRouter = router({
         downloadUrl?: string;
       } = { designId: input.designId };
 
+      const stubPngBytes = () =>
+        new Uint8Array(
+          Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+            "base64",
+          ),
+        );
+
       if (process.env.COMPOSIO_API_KEY?.trim()) {
         try {
           const client = requireSystemComposio();
@@ -1887,36 +1901,39 @@ export const connectionsRouter = router({
               !candidate.is_disabled &&
               ACTIVE_COMPOSIO_STATUSES.has(candidate.status.toUpperCase()),
           );
-          if (!account) {
-            throw new TRPCError({
-              code: "PRECONDITION_FAILED",
-              message:
-                "Canva not connected — use Connections → Connect Canva (Composio)",
+          if (account && !input.designId.startsWith("stub-")) {
+            const { exportCanvaDesign } = await import("@hrmny/integrations");
+            const exported = await exportCanvaDesign({
+              client,
+              connectedAccountId: account.id,
+              designId: input.designId,
+              format: "png",
             });
+            const res = await fetch(exported.downloadUrl);
+            if (!res.ok) {
+              throw new Error(
+                `Canva download failed (${res.status}) for export ${exported.exportId}`,
+              );
+            }
+            bytes = new Uint8Array(await res.arrayBuffer());
+            contentType =
+              res.headers.get("content-type")?.split(";")[0]?.trim() ||
+              "image/png";
+            mode = "live";
+            exportMeta = {
+              designId: exported.designId,
+              exportId: exported.exportId,
+              downloadUrl: exported.downloadUrl,
+            };
+          } else {
+            // No Canva account (or explicit stub design id) — 1×1 PNG stub.
+            bytes = stubPngBytes();
+            exportMeta = {
+              designId: input.designId,
+              exportId: "stub-export",
+            };
+            mode = "stub";
           }
-          const { exportCanvaDesign } = await import("@hrmny/integrations");
-          const exported = await exportCanvaDesign({
-            client,
-            connectedAccountId: account.id,
-            designId: input.designId,
-            format: "png",
-          });
-          const res = await fetch(exported.downloadUrl);
-          if (!res.ok) {
-            throw new Error(
-              `Canva download failed (${res.status}) for export ${exported.exportId}`,
-            );
-          }
-          bytes = new Uint8Array(await res.arrayBuffer());
-          contentType =
-            res.headers.get("content-type")?.split(";")[0]?.trim() ||
-            "image/png";
-          mode = "live";
-          exportMeta = {
-            designId: exported.designId,
-            exportId: exported.exportId,
-            downloadUrl: exported.downloadUrl,
-          };
         } catch (err) {
           if (err instanceof TRPCError) throw err;
           throw new TRPCError({
@@ -1929,12 +1946,7 @@ export const connectionsRouter = router({
         }
       } else {
         // 1×1 PNG stub when Composio is not configured (unit / memory demos).
-        bytes = new Uint8Array(
-          Buffer.from(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-            "base64",
-          ),
-        );
+        bytes = stubPngBytes();
         exportMeta = { designId: input.designId, exportId: "stub-export" };
       }
 
