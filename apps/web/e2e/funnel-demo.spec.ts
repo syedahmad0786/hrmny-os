@@ -765,6 +765,133 @@ test.describe("Demo funnel", () => {
     );
   });
 
+  test("magic-link session grants isolate client A vs B without x-dev-role", async ({
+    request,
+  }) => {
+    const DEMO_CLIENT_ID = "c1000000-0000-4000-8000-0000000000a4";
+    const DEMO_CLIENT_B_ID = "c1000000-0000-4000-8000-0000000000b4";
+    const staffHeaders = {
+      "x-dev-role": "partner",
+      "content-type": "application/json",
+    };
+
+    async function mintAndVerify(clientId: string, email: string) {
+      const mint = await request.post(
+        "/api/trpc/clients.portalUsers.issueDemoToken",
+        {
+          headers: staffHeaders,
+          data: { json: { clientId, email } },
+        },
+      );
+      const mintText = await mint.text();
+      expect(mint.ok(), mintText).toBeTruthy();
+      const mintBody = JSON.parse(mintText) as {
+        result?: { data?: { json?: { token?: string }; token?: string } };
+      };
+      const token =
+        mintBody.result?.data?.json?.token ?? mintBody.result?.data?.token;
+      expect(token, mintText).toBeTruthy();
+      expect(token!.startsWith("ml_")).toBe(true);
+
+      const verify = await request.post("/api/trpc/portal.auth.verify", {
+        headers: { "content-type": "application/json" },
+        data: { json: { token } },
+      });
+      const verifyText = await verify.text();
+      expect(verify.ok(), verifyText).toBeTruthy();
+      const verifyBody = JSON.parse(verifyText) as {
+        result?: {
+          data?: {
+            json?: {
+              ok?: boolean;
+              clientId?: string;
+              sessionGrant?: string;
+            };
+            ok?: boolean;
+            clientId?: string;
+            sessionGrant?: string;
+          };
+        };
+      };
+      const verified =
+        verifyBody.result?.data?.json ?? verifyBody.result?.data ?? {};
+      expect(verified.ok, verifyText).toBe(true);
+      expect(verified.clientId).toBe(clientId);
+      expect(verified.sessionGrant?.startsWith("ps_")).toBe(true);
+      return verified.sessionGrant!;
+    }
+
+    const grantA = await mintAndVerify(
+      DEMO_CLIENT_ID,
+      "alex@democo.example",
+    );
+    const grantB = await mintAndVerify(
+      DEMO_CLIENT_B_ID,
+      "ops@otherco.example",
+    );
+    expect(grantA).not.toBe(grantB);
+
+    async function listWithGrant(path: string, grant: string) {
+      const res = await request.get(path, {
+        headers: {
+          "x-portal-grant": grant,
+          "content-type": "application/json",
+        },
+      });
+      const text = await res.text();
+      expect(res.ok(), `${path}: ${text}`).toBeTruthy();
+      // Must not depend on persona headers.
+      expect(text).not.toMatch(/x-dev-role/i);
+      const body = JSON.parse(text) as {
+        result?: { data?: { json?: unknown } };
+      };
+      return body.result?.data?.json ?? body.result?.data ?? null;
+    }
+
+    const aTasks = await listWithGrant(
+      "/api/trpc/portal.tasks.list",
+      grantA,
+    );
+    const aAssets = await listWithGrant(
+      "/api/trpc/portal.assets.list",
+      grantA,
+    );
+    const aApprovals = await listWithGrant(
+      "/api/trpc/portal.approvals.list",
+      grantA,
+    );
+    const bTasks = await listWithGrant(
+      "/api/trpc/portal.tasks.list",
+      grantB,
+    );
+    const bAssets = await listWithGrant(
+      "/api/trpc/portal.assets.list",
+      grantB,
+    );
+    const bApprovals = await listWithGrant(
+      "/api/trpc/portal.approvals.list",
+      grantB,
+    );
+
+    const blob = (value: unknown) => JSON.stringify(value ?? {});
+
+    expect(blob(aTasks)).toMatch(/Launch reel|Demo Co|Approve launch/i);
+    expect(blob(aTasks)).not.toMatch(/Other Co/i);
+    expect(blob(aAssets)).not.toMatch(/Other Co/i);
+    expect(blob(aApprovals)).toMatch(
+      /Approve launch reel cut|Approve product stills/i,
+    );
+    expect(blob(aApprovals)).not.toMatch(/Other Co/i);
+
+    expect(blob(bTasks)).toMatch(/Other Co/i);
+    expect(blob(bTasks)).not.toMatch(/Launch reel|Demo Co/i);
+    expect(blob(bAssets)).toMatch(/Other Co/i);
+    expect(blob(bAssets)).not.toMatch(/Launch reel|Demo Co/i);
+    expect(blob(bApprovals)).not.toMatch(
+      /Approve launch reel cut|Approve product stills|Demo Co/i,
+    );
+  });
+
   test("creative generate attaches to portal review", async ({
     page,
     request,
