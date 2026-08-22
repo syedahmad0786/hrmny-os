@@ -39,25 +39,56 @@ describe("runAgentTools funnel writes", () => {
     const campaign = byTool["campaigns.draft"]?.data as {
       status?: string;
       channel?: string;
+      next?: { creative?: string; delivery?: string };
     };
     expect(campaign?.status).toBe("draft");
     expect(campaign?.channel).toBe("linkedin");
+    expect(
+      (campaign as { next?: { creative?: string } }).next?.creative,
+    ).toContain(CLIENT_ID);
 
     const brief = byTool["briefs.draft"]?.data as {
       briefId?: string;
       dorComplete?: boolean;
+      taskId?: string;
+      next?: { traffic?: string; delivery?: string };
     };
     expect(brief?.briefId).toBeTruthy();
     expect(brief?.dorComplete).toBe(true);
+    expect(brief?.next?.traffic).toContain("/traffic?");
+    expect(brief?.next?.traffic).toContain(brief!.taskId!);
+
+    const createdTask = byTool["tasks.create"]?.data as {
+      taskId?: string;
+      next?: { delivery?: string; creative?: string; traffic?: string };
+    };
+    expect(createdTask?.next?.delivery).toContain(
+      `clientId=${encodeURIComponent(CLIENT_ID)}`,
+    );
+    expect(createdTask?.next?.creative).toContain("/creative?");
+    expect(createdTask?.next?.traffic).toBe(
+      `/traffic?clientId=${encodeURIComponent(CLIENT_ID)}`,
+    );
 
     const invite = byTool["portal.invite"]?.data as {
       portalPath?: string;
+      onboardingPath?: string;
       deliveryMode?: string;
+      portalInvite?: { portalPath?: string; onboardingPath?: string };
+      next?: { portal?: string; onboarding?: string; client?: string };
     };
     expect(invite?.portalPath).toMatch(/\/portal\/login\/verify/);
     expect(invite?.portalPath).toContain(
       encodeURIComponent("/portal/approvals"),
     );
+    expect(invite?.onboardingPath).toMatch(/\/portal\/login\/verify/);
+    expect(invite?.onboardingPath).toContain(
+      encodeURIComponent("/portal/onboarding"),
+    );
+    expect(invite?.portalInvite?.onboardingPath).toBe(invite?.onboardingPath);
+    expect(invite?.next?.portal).toBe(invite?.portalPath);
+    expect(invite?.next?.onboarding).toBe(invite?.onboardingPath);
+    expect(invite?.next?.client).toContain(CLIENT_ID);
     expect(invite?.deliveryMode).toBe("mock");
 
     const portalAsset = byTool["creative.sendToPortal"]?.data as {
@@ -65,10 +96,14 @@ describe("runAgentTools funnel writes", () => {
       taskId?: string;
       portalHref?: string;
       mode?: string;
+      next?: { creative?: string; delivery?: string; portal?: string };
     };
     expect(portalAsset?.assetId).toBeTruthy();
     expect(portalAsset?.taskId).toBeTruthy();
     expect(portalAsset?.portalHref).toMatch(/\/portal\/login\/verify\?token=/);
+    expect(portalAsset?.next?.portal).toBe(portalAsset?.portalHref);
+    expect(portalAsset?.next?.creative).toContain(CLIENT_ID);
+    expect(portalAsset?.next?.delivery).toContain(CLIENT_ID);
     if (portalAsset?.mode === "memory") {
       const store = getDemoStore();
       expect(store.assets.has(portalAsset.assetId!)).toBe(true);
