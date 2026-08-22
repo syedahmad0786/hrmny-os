@@ -254,6 +254,7 @@ export default function CrmDealDetailPage() {
                   <label key={label} className="crm-check-row">
                     <input
                       type="checkbox"
+                      data-testid={`deal-buaf-${(label.split(" ")[0] ?? "flag").toLowerCase()}`}
                       checked={val}
                       onChange={(e) => set(e.target.checked)}
                     />
@@ -267,6 +268,7 @@ export default function CrmDealDetailPage() {
                   <label>Temperature</label>
                   <select
                     className="crm-select"
+                    data-testid="deal-buaf-temperature"
                     value={temp}
                     onChange={(e) =>
                       setTemp(e.target.value as typeof temp)
@@ -289,6 +291,7 @@ export default function CrmDealDetailPage() {
               <div className="crm-approval-actions">
                 <CrmBtn
                   variant="primary"
+                  data-testid="deal-buaf-save"
                   disabled={update.isPending}
                   onClick={async () => {
                     const r = await update.mutateAsync({
@@ -305,6 +308,7 @@ export default function CrmDealDetailPage() {
                   Save BUAF
                 </CrmBtn>
                 <CrmBtn
+                  data-testid="deal-email-verify"
                   disabled={update.isPending || d.emailVerified}
                   onClick={async () => {
                     const r = await update.mutateAsync({

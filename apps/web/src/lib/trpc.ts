@@ -36,7 +36,8 @@ export function createTrpcClient() {
         transformer: superjson,
       fetch(url, options) {
         const signal = AbortSignal.any(
-          [options?.signal, AbortSignal.timeout(20_000)].filter(
+          // Closed-loop / Apollo import can exceed 20s on cold SQL demos.
+          [options?.signal, AbortSignal.timeout(60_000)].filter(
             (item): item is AbortSignal => Boolean(item),
           ),
         );

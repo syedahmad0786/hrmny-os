@@ -236,6 +236,7 @@ export default function HuntClientsPage() {
               </button>
               <button
                 type="button"
+                data-testid="hunt-closed-loop-apollo"
                 className="rounded-full border border-sand bg-white px-4 py-2 text-sm disabled:opacity-40"
                 disabled={demo.isPending}
                 onClick={() => {
@@ -254,12 +255,14 @@ export default function HuntClientsPage() {
                 <>
                   <Link
                     className="text-sm underline"
+                    data-testid="hunt-next-deal"
                     href={demo.data.next.crmDeal}
                   >
                     Deal
                   </Link>
                   <Link
                     className="text-sm underline"
+                    data-testid="hunt-next-client"
                     href={demo.data.next.client}
                   >
                     Client
@@ -274,6 +277,7 @@ export default function HuntClientsPage() {
                   ) : null}
                   <Link
                     className="text-sm underline"
+                    data-testid="hunt-next-creative"
                     href={demo.data.next.creative}
                   >
                     Creative
