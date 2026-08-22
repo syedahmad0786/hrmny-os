@@ -1,4 +1,9 @@
-import { createProvider, runHarness, type HarnessTool } from "@hrmny/ai";
+import {
+  createProvider,
+  runHarness,
+  runtimeLlmSnapshot,
+  type HarnessTool,
+} from "@hrmny/ai";
 import { sql } from "@hrmny/db";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -474,6 +479,9 @@ function defaultTools(scope: {
 }
 
 export const chatRouter = router({
+  /** Effective LLM provider + default model (no secrets). */
+  runtimeLlm: staffProcedure.query(() => runtimeLlmSnapshot()),
+
   /** Enabled custom agents staff can bind to a chat thread (no AI-admin gate). */
   listRunnableAgents: staffProcedure.query(async () => {
     const { listRunnableCustomAgents } = await import("./ai-admin-router");

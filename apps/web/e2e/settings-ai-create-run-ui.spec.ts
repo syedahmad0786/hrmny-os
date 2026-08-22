@@ -74,4 +74,35 @@ test.describe("Settings AI create → run UI", () => {
       { timeout: 30_000 },
     );
   });
+
+  test("shows runtime LLM provider and default model", async ({ page }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/settings/ai", { waitUntil: "domcontentloaded" });
+    const runtime = page.getByTestId("ai-runtime-llm");
+    await expect(runtime).toBeVisible({ timeout: 60_000 });
+    await expect(runtime).toContainText(/mock/i);
+  });
+
+  test("prune test agents removes e2e slugs but keeps coaches", async ({
+    page,
+  }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/settings/ai", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /AI control panel/i }),
+    ).toBeVisible({ timeout: 60_000 });
+
+    const slug = `e2e-cmd-${Date.now()}`;
+    await page.getByTestId("ai-agent-slug").fill(slug);
+    await page.getByTestId("ai-agent-name").fill("E2E Prune Target");
+    await page.getByTestId("ai-agent-create").click();
+    const row = page.getByTestId(`ai-agent-row-${slug}`);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+
+    await page.getByTestId("ai-agent-prune-test").click();
+    await expect(page.getByTestId(`ai-agent-row-${slug}`)).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("ai-agent-row-delivery-coach")).toBeVisible();
+  });
 });

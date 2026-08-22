@@ -1,3 +1,4 @@
+import { runtimeLlmSnapshot } from "@hrmny/ai";
 import { sql } from "@hrmny/db";
 import { NextResponse } from "next/server";
 import { getDb } from "@/server/db";
@@ -65,11 +66,14 @@ export async function GET() {
   };
 
   const blockers = buildDemoBlockers({ tools, connections });
+  const llm = runtimeLlmSnapshot();
 
   const body = {
     ok: database === "up",
     authMode: process.env.AUTH_MODE ?? "dev",
-    llmProvider: process.env.LLM_PROVIDER ?? "mock",
+    llmProvider: llm.provider,
+    llmDefaultModel: llm.defaultModel,
+    llmFreeOnly: llm.freeOnly,
     xeroWriteEnabled: process.env.XERO_WRITE_ENABLED === "true",
     database,
     pgvector,

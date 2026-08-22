@@ -18,6 +18,10 @@ test.describe("Chat OS settle agent UI", () => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
 
+    const runtime = page.getByTestId("chat-runtime-llm");
+    await expect(runtime).toBeVisible({ timeout: 60_000 });
+    await expect(runtime).toContainText(/mock/i);
+
     const sandbox = page.getByTestId("chat-sandbox-client");
     await expect(sandbox).toBeVisible({ timeout: 60_000 });
     await sandbox.selectOption({ label: "Staff / org scope" });
