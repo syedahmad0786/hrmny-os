@@ -10,6 +10,13 @@ export type LLMProviderName = "openrouter" | "anthropic" | "ollama" | "mock";
  */
 export const OPENROUTER_FREE_DEFAULT_MODEL = "liquid/lfm-2.5-2.6b:free";
 
+/** Ordered free-route failover when the primary free/default model flakes (429/empty). */
+export const OPENROUTER_FREE_FALLBACK_MODELS = [
+  OPENROUTER_FREE_DEFAULT_MODEL,
+  "nvidia/nemotron-nano-9b-v2:free",
+  "openrouter/free",
+] as const;
+
 export type LLMMessage = {
   role: "system" | "user" | "assistant";
   content: string;
@@ -663,58 +670,79 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
   return {
     name,
     async generate(options) {
-      const activeModel = selectedModel(options.model);
+      const primary = selectedModel(options.model);
       const signal = AbortSignal.timeout(60_000);
       if (name === "openrouter") {
-        const response = await fetch(
-          "https://openrouter.ai/api/v1/chat/completions",
-          {
-            method: "POST",
-            signal,
-            headers: {
-              authorization: `Bearer ${config.openRouterApiKey ?? process.env.OPENROUTER_API_KEY}`,
-              "content-type": "application/json",
-              ...(process.env.NEXT_PUBLIC_APP_URL
-                ? { "http-referer": process.env.NEXT_PUBLIC_APP_URL }
-                : {}),
-              "x-openrouter-title": "hrmny OS",
-            },
-            body: JSON.stringify({
-              model: activeModel,
-              messages: openRouterMessages(options),
-              temperature: options.temperature ?? 0.2,
-              max_tokens: 2_048,
-              stream: false,
-              ...(options.schema
-                ? { response_format: { type: "json_object" } }
-                : {}),
-            }),
-          },
-        );
-        const raw = await responseText(response);
-        const choice = (
-          raw.choices as Array<Record<string, unknown>> | undefined
-        )?.[0];
-        const message = choice?.message as Record<string, unknown> | undefined;
-        const content =
-          typeof message?.content === "string" ? message.content.trim() : "";
-        const reasoning =
-          typeof message?.reasoning === "string"
-            ? message.reasoning.trim()
-            : "";
-        // Free / reasoning-first OpenRouter models often return content=null and
-        // put the answer in `reasoning`. Prefer content; fall back to reasoning.
-        const text = content || reasoning;
-        if (!text) throw new Error("LLM provider returned no text");
-        const usage = raw.usage as Record<string, unknown> | undefined;
-        return parseResult(options, {
-          text,
-          provider: name,
-          model: typeof raw.model === "string" ? raw.model : activeModel,
-          requestId: typeof raw.id === "string" ? raw.id : undefined,
-          inputTokens: Number(usage?.prompt_tokens ?? 0) || undefined,
-          outputTokens: Number(usage?.completion_tokens ?? 0) || undefined,
-        });
+        const chain = [
+          primary,
+          ...OPENROUTER_FREE_FALLBACK_MODELS.filter((m) => m !== primary),
+        ];
+        let lastError: Error | undefined;
+        for (const activeModel of chain) {
+          try {
+            const response = await fetch(
+              "https://openrouter.ai/api/v1/chat/completions",
+              {
+                method: "POST",
+                signal,
+                headers: {
+                  authorization: `Bearer ${config.openRouterApiKey ?? process.env.OPENROUTER_API_KEY}`,
+                  "content-type": "application/json",
+                  ...(process.env.NEXT_PUBLIC_APP_URL
+                    ? { "http-referer": process.env.NEXT_PUBLIC_APP_URL }
+                    : {}),
+                  "x-openrouter-title": "hrmny OS",
+                },
+                body: JSON.stringify({
+                  model: activeModel,
+                  messages: openRouterMessages(options),
+                  temperature: options.temperature ?? 0.2,
+                  max_tokens: 2_048,
+                  stream: false,
+                  ...(options.schema
+                    ? { response_format: { type: "json_object" } }
+                    : {}),
+                }),
+              },
+            );
+            const raw = await responseText(response);
+            const choice = (
+              raw.choices as Array<Record<string, unknown>> | undefined
+            )?.[0];
+            const message = choice?.message as
+              | Record<string, unknown>
+              | undefined;
+            const content =
+              typeof message?.content === "string"
+                ? message.content.trim()
+                : "";
+            const reasoning =
+              typeof message?.reasoning === "string"
+                ? message.reasoning.trim()
+                : "";
+            // Free / reasoning-first OpenRouter models often return content=null
+            // and put the answer in `reasoning`. Prefer content; fall back.
+            const text = content || reasoning;
+            if (!text) {
+              throw new Error("LLM provider returned no text");
+            }
+            const usage = raw.usage as Record<string, unknown> | undefined;
+            return parseResult(options, {
+              text,
+              provider: name,
+              model: typeof raw.model === "string" ? raw.model : activeModel,
+              requestId: typeof raw.id === "string" ? raw.id : undefined,
+              inputTokens: Number(usage?.prompt_tokens ?? 0) || undefined,
+              outputTokens: Number(usage?.completion_tokens ?? 0) || undefined,
+            });
+          } catch (err) {
+            lastError =
+              err instanceof Error ? err : new Error(String(err));
+            // Try next free route on rate-limit / empty / upstream failure.
+            continue;
+          }
+        }
+        throw lastError ?? new Error("LLM provider failed");
       }
 
       if (name === "anthropic") {
@@ -733,7 +761,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
             "content-type": "application/json",
           },
           body: JSON.stringify({
-            model: activeModel,
+            model: primary,
             max_tokens: 2_048,
             temperature: options.temperature ?? 0.2,
             ...(system ? { system } : {}),
@@ -754,7 +782,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
         return parseResult(options, {
           text,
           provider: name,
-          model: typeof raw.model === "string" ? raw.model : activeModel,
+          model: typeof raw.model === "string" ? raw.model : primary,
           requestId: typeof raw.id === "string" ? raw.id : undefined,
           inputTokens: Number(usage?.input_tokens ?? 0) || undefined,
           outputTokens: Number(usage?.output_tokens ?? 0) || undefined,
@@ -768,7 +796,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
         signal,
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          model: activeModel,
+          model: primary,
           messages: ollamaMessages(options),
           stream: false,
           ...(options.schema ? { format: "json" } : {}),
@@ -782,7 +810,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
       return parseResult(options, {
         text,
         provider: name,
-        model: typeof raw.model === "string" ? raw.model : activeModel,
+        model: typeof raw.model === "string" ? raw.model : primary,
         inputTokens: Number(raw.prompt_eval_count ?? 0) || undefined,
         outputTokens: Number(raw.eval_count ?? 0) || undefined,
       });
