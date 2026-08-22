@@ -5,7 +5,8 @@ const PROPOSE_DEAL_ID = "e0000000-0000-4000-8000-000000000005";
 
 /**
  * Sales → onboarding via deal UI (mock-safe).
- * Propose → Advance to price_cost → Mark won → Handover pack → Creative.
+ * Propose → Advance to price_cost → Mark won → Handover pack →
+ * Portal approvals + Onboarding invite magic links → Creative.
  * Tolerates shared demo state when an earlier suite already advanced this seed.
  */
 test.describe("Deal won → handover UI", () => {
@@ -59,8 +60,34 @@ test.describe("Deal won → handover UI", () => {
     const creative = page.getByTestId("deal-handover-creative");
     await expect(creative).toBeVisible();
     await expect(creative).toHaveAttribute("href", /taskId=/);
+    const creativeHref = await creative.getAttribute("href");
+    expect(creativeHref).toBeTruthy();
 
-    await creative.click();
+    const portal = page.getByTestId("deal-handover-portal");
+    await expect(portal).toBeVisible();
+    await expect(portal).toHaveAttribute("href", /\/portal\/login\/verify/);
+    const onboardingInvite = page.getByTestId("deal-handover-onboarding-invite");
+    await expect(onboardingInvite).toBeVisible();
+    await expect(onboardingInvite).toHaveAttribute("href", /\/portal\/login\/verify/);
+    const onboardingHref = await onboardingInvite.getAttribute("href");
+    expect(onboardingHref).toBeTruthy();
+    expect(onboardingHref).not.toBe(await portal.getAttribute("href"));
+
+    await portal.click();
+    await expect(page).toHaveURL(/\/portal\/login\/verify/, { timeout: 60_000 });
+    await expect(page).toHaveURL(/token=/);
+    await expect(
+      page.getByRole("heading", { name: /^Approvals$/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/\/portal\/approvals/);
+
+    await page.goto(onboardingHref!, { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /^Onboarding$/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/\/portal\/onboarding/);
+
+    await page.goto(creativeHref!, { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(/\/creative\?.*taskId=/);
     await expect(page.getByRole("heading", { name: /Creative/i })).toBeVisible({
       timeout: 60_000,
