@@ -91,7 +91,17 @@ describe("nextLinksFromChatObservation", () => {
     ]);
   });
 
-  it("returns [] for plain text observations", () => {
-    expect(nextLinksFromChatObservation("crm.closed_loop ok")).toEqual([]);
+  it("prefers leading nextLinks and recovers them from truncated JSON", () => {
+    const links = [
+      { href: "/account?clientId=c1", label: "account" },
+      { href: "/portal/login/verify?token=p1", label: "portal" },
+    ];
+    expect(
+      nextLinksFromChatObservation(
+        JSON.stringify({ nextLinks: links, tools: [] }),
+      ),
+    ).toEqual(links);
+    const truncated = `{"nextLinks":${JSON.stringify(links)},"tools":[{"tool":"crm.read","ok":true,"data":{"dealCount":99,"deals":[`;
+    expect(nextLinksFromChatObservation(truncated)).toEqual(links);
   });
 });

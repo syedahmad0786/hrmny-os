@@ -2,6 +2,7 @@ import { createProvider, runHarness, type HarnessTool } from "@hrmny/ai";
 import { sql } from "@hrmny/db";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { nextLinksFromToolResults } from "../../lib/agent-next-links";
 import { getDb } from "../db";
 import { searchMemory } from "../ai/memory-db";
 import { staffProcedure, router } from "./trpc";
@@ -76,7 +77,10 @@ export function buildChatDefaultTools(scope: {
               typeof args.dealId === "string" ? args.dealId : undefined,
           },
         });
-        return { tools: results };
+        return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
       },
     },
     {
@@ -96,7 +100,10 @@ export function buildChatDefaultTools(scope: {
             employeeId: scope.employeeId,
           },
         });
-        return { tools: results };
+        return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
       },
     },
     {
@@ -114,7 +121,10 @@ export function buildChatDefaultTools(scope: {
               typeof args.dealId === "string" ? args.dealId : undefined,
           },
         });
-        return { tools: results };
+        return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
       },
     },
     {
@@ -152,7 +162,10 @@ export function buildChatDefaultTools(scope: {
               typeof args.taskId === "string" ? args.taskId : undefined,
           },
         });
-        return { tools: results };
+        return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
       },
     },
     ...(scope.clientId
@@ -173,7 +186,10 @@ export function buildChatDefaultTools(scope: {
                   employeeId: scope.employeeId,
                 },
               });
-              return { tools: results };
+              return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
             },
           } satisfies HarnessTool,
           {
@@ -195,7 +211,10 @@ export function buildChatDefaultTools(scope: {
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
-              return { tools: results };
+              return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
             },
           } satisfies HarnessTool,
           {
@@ -217,7 +236,10 @@ export function buildChatDefaultTools(scope: {
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
-              return { tools: results };
+              return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
             },
           } satisfies HarnessTool,
           {
@@ -239,7 +261,10 @@ export function buildChatDefaultTools(scope: {
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
-              return { tools: results };
+              return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
             },
           } satisfies HarnessTool,
           {
@@ -262,7 +287,10 @@ export function buildChatDefaultTools(scope: {
                   taskId: id || undefined,
                 },
               });
-              return { tools: results };
+              return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
             },
           } satisfies HarnessTool,
           {
@@ -286,7 +314,10 @@ export function buildChatDefaultTools(scope: {
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
-              return { tools: results };
+              return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
             },
           } satisfies HarnessTool,
           {
@@ -310,7 +341,10 @@ export function buildChatDefaultTools(scope: {
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
-              return { tools: results };
+              return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
             },
           } satisfies HarnessTool,
           {
@@ -337,7 +371,10 @@ export function buildChatDefaultTools(scope: {
                   taskId: id || undefined,
                 },
               });
-              return { tools: results };
+              return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
             },
           } satisfies HarnessTool,
           {
@@ -357,7 +394,10 @@ export function buildChatDefaultTools(scope: {
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
-              return { tools: results };
+              return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
             },
           } satisfies HarnessTool,
           {
@@ -377,7 +417,10 @@ export function buildChatDefaultTools(scope: {
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
-              return { tools: results };
+              return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
             },
           } satisfies HarnessTool,
         ]),
@@ -691,7 +734,9 @@ export const chatRouter = router({
                 employeeId,
               },
             });
+            // nextLinks first so 4k observation truncation keeps CTAs.
             return {
+              nextLinks: nextLinksFromToolResults(results),
               agentSlug: thread.agentSlug,
               tools: results,
             };
@@ -715,13 +760,16 @@ export const chatRouter = router({
                     employeeId,
                   },
                 });
+                const nextLinks = nextLinksFromToolResults(toolResults);
                 steps.push({
                   iteration: 0,
                   toolName: "agent_act",
-                  observation: JSON.stringify({ tools: toolResults }).slice(
-                    0,
-                    4000,
-                  ),
+                  nextLinks,
+                  // nextLinks first so truncation keeps closed-loop CTAs.
+                  observation: JSON.stringify({
+                    nextLinks,
+                    tools: toolResults,
+                  }).slice(0, 4000),
                 });
                 const res = await generateSafe({
                   messages: [
@@ -781,7 +829,40 @@ export const chatRouter = router({
                 return res.text;
               },
               onStep: (step) => {
-                steps.push(step as unknown as Record<string, unknown>);
+                const row = { ...(step as unknown as Record<string, unknown>) };
+                if (typeof row.observation === "string") {
+                  const links = nextLinksFromToolResults(
+                    (() => {
+                      try {
+                        const parsed = JSON.parse(row.observation) as {
+                          tools?: Array<{ data?: unknown }>;
+                          nextLinks?: unknown;
+                        };
+                        if (Array.isArray(parsed.nextLinks)) return [];
+                        return parsed.tools ?? [];
+                      } catch {
+                        return [];
+                      }
+                    })(),
+                  );
+                  // Prefer links already embedded; else recompute from tools.
+                  if (!Array.isArray(row.nextLinks) || row.nextLinks.length === 0) {
+                    const embedded = (() => {
+                      try {
+                        const parsed = JSON.parse(String(row.observation)) as {
+                          nextLinks?: unknown;
+                        };
+                        return Array.isArray(parsed.nextLinks)
+                          ? parsed.nextLinks
+                          : links;
+                      } catch {
+                        return links;
+                      }
+                    })();
+                    if (embedded.length) row.nextLinks = embedded;
+                  }
+                }
+                steps.push(row);
               },
             });
 

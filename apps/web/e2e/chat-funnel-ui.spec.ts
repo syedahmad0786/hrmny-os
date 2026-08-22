@@ -35,6 +35,17 @@ test.describe("Chat funnel_act starter UI", () => {
       /tasks\.create|creative\.sendToPortal/i,
     );
     await expect(observation).toContainText(/\/portal\/login\/verify\?token=/);
+    // Funnel tool payloads expose portal magic links as clickable next chips.
+    const funnel = page.getByTestId("chat-tool-funnel_act");
+    await expect(funnel.getByTestId("chat-tool-next")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(
+      funnel
+        .getByTestId("chat-next-portal")
+        .or(funnel.getByTestId("chat-next-onboarding"))
+        .or(funnel.getByTestId("chat-next-creative")),
+    ).toBeVisible();
     await expect(page.getByTestId("chat-assistant-message")).toContainText(
       /funnel|portal/i,
     );

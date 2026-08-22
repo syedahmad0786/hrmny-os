@@ -37,7 +37,14 @@ function StepFold({
         {tools.map((s, i) => {
           const name = String(s.toolName);
           const failed = observationLooksFailed(s.observation);
-          const nextLinks = nextLinksFromChatObservation(s.observation);
+          const nextLinks = Array.isArray(s.nextLinks)
+            ? (s.nextLinks as Array<{ href: string; label: string }>).filter(
+                (l) =>
+                  typeof l?.href === "string" &&
+                  l.href.startsWith("/") &&
+                  typeof l?.label === "string",
+              )
+            : nextLinksFromChatObservation(s.observation);
           return (
             <li
               key={i}

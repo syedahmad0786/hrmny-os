@@ -65,6 +65,7 @@ export function nextLinksFromToolResults(
 /**
  * Chat harness stores observations as JSON strings, typically
  * `{ tools: [{ tool, ok, data }] }` for agent_act / funnel_act.
+ * Prefer a leading `nextLinks` array when present (survives 4k truncation).
  */
 export function nextLinksFromChatObservation(
   observation: unknown,
@@ -76,11 +77,44 @@ export function nextLinksFromChatObservation(
     try {
       parsed = JSON.parse(trimmed) as unknown;
     } catch {
+      // Truncated JSON is common (harness slices to 4k). Recover a leading
+      // nextLinks array when the payload was cut mid-tools.
+      const m = trimmed.match(
+        /"nextLinks"\s*:\s*(\[\s*(?:\{[^\]]*\}|\s|,)*\])/,
+      );
+      if (m?.[1]) {
+        try {
+          const links = JSON.parse(m[1]) as unknown;
+          if (Array.isArray(links)) {
+            return links.filter(
+              (l): l is AgentNextLink =>
+                !!l &&
+                typeof l === "object" &&
+                typeof (l as AgentNextLink).href === "string" &&
+                typeof (l as AgentNextLink).label === "string" &&
+                (l as AgentNextLink).href.startsWith("/"),
+            );
+          }
+        } catch {
+          /* fall through */
+        }
+      }
       return [];
     }
   }
   if (!parsed || typeof parsed !== "object") return [];
   const record = parsed as Record<string, unknown>;
+  if (Array.isArray(record.nextLinks)) {
+    const fromMeta = record.nextLinks.filter(
+      (l): l is AgentNextLink =>
+        !!l &&
+        typeof l === "object" &&
+        typeof (l as AgentNextLink).href === "string" &&
+        typeof (l as AgentNextLink).label === "string" &&
+        (l as AgentNextLink).href.startsWith("/"),
+    );
+    if (fromMeta.length) return fromMeta;
+  }
   if (Array.isArray(record.tools)) {
     return nextLinksFromToolResults(
       record.tools as Array<{ data?: unknown }>,
