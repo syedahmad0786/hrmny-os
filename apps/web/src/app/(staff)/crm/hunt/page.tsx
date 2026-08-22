@@ -270,6 +270,7 @@ export default function HuntClientsPage() {
                   {demo.data.next.account ? (
                     <Link
                       className="text-sm underline"
+                      data-testid="hunt-next-account"
                       href={demo.data.next.account}
                     >
                       Account
@@ -285,6 +286,7 @@ export default function HuntClientsPage() {
                   {"approvals" in demo.data.next && demo.data.next.approvals ? (
                     <Link
                       className="text-sm underline"
+                      data-testid="hunt-next-approvals"
                       href={demo.data.next.approvals}
                     >
                       Approvals
@@ -293,6 +295,7 @@ export default function HuntClientsPage() {
                   {"outreach" in demo.data.next && demo.data.next.outreach ? (
                     <Link
                       className="text-sm underline"
+                      data-testid="hunt-next-outreach"
                       href={demo.data.next.outreach}
                     >
                       Outreach
@@ -301,6 +304,7 @@ export default function HuntClientsPage() {
                   {"finance" in demo.data.next && demo.data.next.finance ? (
                     <Link
                       className="text-sm underline"
+                      data-testid="hunt-next-finance"
                       href={demo.data.next.finance}
                     >
                       Finance
@@ -308,12 +312,14 @@ export default function HuntClientsPage() {
                   ) : null}
                   <Link
                     className="text-sm underline"
+                    data-testid="hunt-next-portal"
                     href={demo.data.next.portal}
                   >
                     Portal
                   </Link>
                   <Link
                     className="text-sm underline"
+                    data-testid="hunt-next-onboarding"
                     href={demo.data.next.onboarding}
                   >
                     Onboarding
@@ -369,6 +375,7 @@ export default function HuntClientsPage() {
                   <p className="mt-2 flex flex-wrap gap-3 text-sm">
                     <Link
                       className="underline"
+                      data-testid="hunt-status-account"
                       href={
                         demo.data.next.account ??
                         `/account?clientId=${encodeURIComponent(demo.data.clientId)}`
@@ -376,16 +383,25 @@ export default function HuntClientsPage() {
                     >
                       Open Account calendar →
                     </Link>
-                    <Link className="underline" href={demo.data.next.client}>
+                    <Link
+                      className="underline"
+                      data-testid="hunt-status-client"
+                      href={demo.data.next.client}
+                    >
                       Client onboarding
                     </Link>
-                    <Link className="underline" href={demo.data.next.creative}>
+                    <Link
+                      className="underline"
+                      data-testid="hunt-status-creative"
+                      href={demo.data.next.creative}
+                    >
                       Creative
                     </Link>
                     {"approvals" in demo.data.next &&
                     demo.data.next.approvals ? (
                       <Link
                         className="underline"
+                        data-testid="hunt-status-approvals"
                         href={demo.data.next.approvals}
                       >
                         Approvals (HITL)
@@ -394,19 +410,25 @@ export default function HuntClientsPage() {
                     {"outreach" in demo.data.next && demo.data.next.outreach ? (
                       <Link
                         className="underline"
+                        data-testid="hunt-status-outreach"
                         href={demo.data.next.outreach}
                       >
                         Outreach draft
                       </Link>
                     ) : null}
                     {"finance" in demo.data.next && demo.data.next.finance ? (
-                      <Link className="underline" href={demo.data.next.finance}>
+                      <Link
+                        className="underline"
+                        data-testid="hunt-status-finance"
+                        href={demo.data.next.finance}
+                      >
                         First invoice
                       </Link>
                     ) : null}
                     {demo.data.portalInvite?.portalPath ? (
                       <Link
                         className="underline"
+                        data-testid="hunt-status-portal"
                         href={demo.data.portalInvite.portalPath}
                       >
                         Portal approvals link (
@@ -416,6 +438,7 @@ export default function HuntClientsPage() {
                     {demo.data.portalInvite?.onboardingPath ? (
                       <Link
                         className="underline"
+                        data-testid="hunt-status-onboarding"
                         href={demo.data.portalInvite.onboardingPath}
                       >
                         Onboarding magic link
