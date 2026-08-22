@@ -8,7 +8,7 @@ import type { ReadySmoke } from "@/lib/ready-smoke";
 export function OnboardingReadyBanner({
   testIdPrefix,
 }: {
-  testIdPrefix: "account" | "client-onboarding";
+  testIdPrefix: "account" | "client-onboarding" | "delivery";
 }) {
   const [ready, setReady] = useState<ReadySmoke | null>(null);
 

@@ -13,6 +13,13 @@ test.describe("Settings AI create → run UI", () => {
       page.getByRole("heading", { name: /AI control panel/i }),
     ).toBeVisible({ timeout: 60_000 });
 
+    const platform = page.getByTestId("ai-platform-ready");
+    await expect(platform).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("ai-platform-ready-llm")).toBeVisible();
+    await expect(page.getByTestId("ai-platform-ready-tools")).toContainText(
+      /openrouter|mock/i,
+    );
+
     const sandbox = page.getByTestId("ai-sandbox-client");
     await expect(sandbox).toBeVisible();
     await expect

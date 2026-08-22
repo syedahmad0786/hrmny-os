@@ -16,6 +16,9 @@ test.describe("Delivery Run agent UI", () => {
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
     });
+    await expect(page.getByTestId("delivery-ready-banner")).toBeVisible({
+      timeout: 30_000,
+    });
 
     const taskSelect = page.getByTestId("delivery-task-select");
     await expect
@@ -85,6 +88,9 @@ test.describe("Delivery Run agent UI", () => {
     await page.goto("/delivery", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
+    });
+    await expect(page.getByTestId("delivery-ready-portal")).toBeVisible({
+      timeout: 30_000,
     });
 
     const taskSelect = page.getByTestId("delivery-task-select");

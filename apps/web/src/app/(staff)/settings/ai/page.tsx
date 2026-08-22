@@ -6,6 +6,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import type { AppRouter } from "@/server/trpc/root";
 import { formatAed, formatRelative } from "@/components/crm/format";
+import { PlatformReadyStrip } from "@/components/platform-ready-strip";
 import { nextLinksFromToolResults } from "@/lib/agent-next-links";
 
 type Dashboard = inferRouterOutputs<AppRouter>["aiAdmin"]["dashboard"];
@@ -88,6 +89,8 @@ export default function AiAdminPage() {
           {dashboard.data.llm.freeOnly ? " · free routes only" : ""}
         </p>
       ) : null}
+
+      <PlatformReadyStrip testId="ai-platform-ready" showTools />
 
       <section className="rounded-xl border border-sand bg-white/75 p-4">
         <label className="text-xs font-bold uppercase tracking-[0.12em] text-muted">
