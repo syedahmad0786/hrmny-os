@@ -16,7 +16,7 @@ function partnerCaller() {
   });
 }
 
-describe("chat agent binding (QM-style)", () => {
+describe("chat agent binding", () => {
   it("lists memory-mode agents so the dropdown is not empty", async () => {
     const caller = partnerCaller();
     const agents = await caller.chat.listRunnableAgents();

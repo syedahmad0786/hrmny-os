@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { observationLooksFailed, toolVerb } from "./tool-meta";
 
 type Effort = "low" | "medium" | "high" | "xhigh";
 type HarnessMode = "react" | "direct";
@@ -30,20 +31,29 @@ function StepFold({
       <summary>
         Worked · {tools.length} tool{tools.length === 1 ? "" : "s"}
       </summary>
-      <ol>
-        {tools.map((s, i) => (
-          <li
-            key={i}
-            data-testid={`chat-tool-${String(s.toolName)}`}
-          >
-            <strong>{String(s.toolName)}</strong>
-            {s.observation ? (
-              <span data-testid="chat-tool-observation">
-                {String(s.observation).slice(0, 2400)}
-              </span>
-            ) : null}
-          </li>
-        ))}
+      <ol className="hrmny-chat-tool-list">
+        {tools.map((s, i) => {
+          const name = String(s.toolName);
+          const failed = observationLooksFailed(s.observation);
+          return (
+            <li
+              key={i}
+              className={`hrmny-chat-tool-row${failed ? " is-failed" : " is-ok"}`}
+              data-testid={`chat-tool-${name}`}
+            >
+              <strong>{toolVerb(name, "done")}</strong>
+              <span className="hrmny-chat-tool-id">{name}</span>
+              {s.observation ? (
+                <span
+                  className="hrmny-chat-tool-detail"
+                  data-testid="chat-tool-observation"
+                >
+                  {String(s.observation).slice(0, 2400)}
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
       </ol>
     </details>
   );
@@ -111,12 +121,57 @@ export default function HrmnyChatPage() {
     });
   }, [messages.data, send.isPending]);
 
+  const selectedAgent = useMemo(
+    () => (agents.data ?? []).find((a) => a.slug === agentSlug),
+    [agents.data, agentSlug],
+  );
+  const sandboxClient = useMemo(
+    () => (clients.data ?? []).find((c) => c.clientId === clientId),
+    [clients.data, clientId],
+  );
+  const toolsPreview = useMemo(() => {
+    if (
+      selectedAgent &&
+      "toolsPreview" in selectedAgent &&
+      Array.isArray(selectedAgent.toolsPreview)
+    ) {
+      return selectedAgent.toolsPreview as string[];
+    }
+    return [] as string[];
+  }, [selectedAgent]);
+  const toolCount =
+    selectedAgent &&
+    "toolCount" in selectedAgent &&
+    typeof selectedAgent.toolCount === "number"
+      ? selectedAgent.toolCount
+      : toolsPreview.length;
+
+  const agentBySlug = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const a of agents.data ?? []) {
+      map.set(a.slug, a.displayName);
+    }
+    return map;
+  }, [agents.data]);
+  const clientNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of clients.data ?? []) {
+      map.set(c.clientId, c.name);
+    }
+    return map;
+  }, [clients.data]);
+
   const activeTitle = useMemo(
     () =>
       threads.data?.find((t) => t.chatThreadId === threadId)?.title ??
       "New conversation",
     [threads.data, threadId],
   );
+
+  const bindingLabel = selectedAgent
+    ? selectedAgent.displayName
+    : "Default Hrmny agent";
+  const sandboxLabel = sandboxClient?.name ?? "Staff / org scope";
 
   function submit(text: string) {
     const content = text.trim();
@@ -161,7 +216,7 @@ export default function HrmnyChatPage() {
             <span className="hrmny-chat-mark">h</span>
             <div>
               <strong>Hrmny</strong>
-              <small>Agent harness</small>
+              <small>Agents</small>
             </div>
           </div>
         </div>
@@ -183,24 +238,24 @@ export default function HrmnyChatPage() {
           <span>New chat</span>
         </button>
 
-        <div className="mx-3 mb-2 space-y-2">
-          <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+        <div className="hrmny-chat-bind-sidebar">
+          <label className="hrmny-chat-bind-label">
             Agent
             <select
-              className="mt-1 w-full rounded border border-sand bg-white px-2 py-1.5 text-xs text-ink"
+              className="hrmny-chat-bind-select"
               data-testid="chat-agent-slug"
               value={agentSlug}
               onChange={(e) => {
                 const next = e.target.value;
                 setAgentSlug(next);
-                // Agent binding is per-thread (QM-style scope). Changing it
-                // starts a fresh session so the selection is never a no-op.
+                // Agent binding is per-thread. Changing it starts a fresh
+                // session so the selection is never a no-op.
                 if ((activeThread?.agentSlug ?? "") !== next) {
                   setThreadId(null);
                 }
               }}
             >
-              <option value="">Default harness</option>
+              <option value="">Default Hrmny agent</option>
               {(agents.data ?? []).map((a) => (
                 <option key={a.customAgentId} value={a.slug}>
                   {a.displayName}
@@ -213,55 +268,39 @@ export default function HrmnyChatPage() {
           </label>
           {agentSlug ? (
             <p
-              className="text-[10px] leading-snug text-muted"
+              className="hrmny-chat-bind-hint"
               data-testid="chat-agent-hint"
             >
-              New messages use this agent&apos;s system prompt + allowlisted
-              tools
-              {(agents.data ?? []).find((a) => a.slug === agentSlug)?.model
-                ? ` · model ${(agents.data ?? []).find((a) => a.slug === agentSlug)?.model}`
-                : " · default free OpenRouter model"}
-              . Start chatting (or New chat) to bind a session.
-              {(() => {
-                const selected = (agents.data ?? []).find(
-                  (a) => a.slug === agentSlug,
-                );
-                const preview =
-                  selected &&
-                  "toolsPreview" in selected &&
-                  Array.isArray(selected.toolsPreview)
-                    ? (selected.toolsPreview as string[])
-                    : [];
-                if (!preview.length) return null;
-                return (
-                  <>
-                    <br />
-                    <span
-                      className="font-mono"
-                      data-testid="chat-agent-tools-preview"
-                    >
-                      {preview.join(", ")}
-                      {"toolCount" in selected! &&
-                      typeof selected!.toolCount === "number" &&
-                      selected!.toolCount > preview.length
-                        ? ` +${selected!.toolCount - preview.length}`
-                        : ""}
-                    </span>
-                  </>
-                );
-              })()}
+              Bound to this agent&apos;s prompt + allowlisted CRM/OS tools
+              {selectedAgent?.model
+                ? ` · ${selectedAgent.model}`
+                : " · free OpenRouter model"}
+              . New chat or send binds the session.
+              {toolsPreview.length ? (
+                <>
+                  <br />
+                  <span
+                    className="hrmny-chat-tools-preview"
+                    data-testid="chat-agent-tools-preview"
+                  >
+                    {toolsPreview.join(", ")}
+                    {toolCount > toolsPreview.length
+                      ? ` +${toolCount - toolsPreview.length}`
+                      : ""}
+                  </span>
+                </>
+              ) : null}
             </p>
           ) : null}
-          <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+          <label className="hrmny-chat-bind-label">
             Client sandbox
             <select
-              className="mt-1 w-full rounded border border-sand bg-white px-2 py-1.5 text-xs text-ink"
+              className="hrmny-chat-bind-select"
               data-testid="chat-sandbox-client"
               value={clientId}
               onChange={(e) => {
                 const next = e.target.value;
                 setClientId(next);
-                // Sandbox change must not reuse an org/other-client thread.
                 if ((activeThread?.clientId ?? "") !== next) {
                   setThreadId(null);
                 }
@@ -277,65 +316,103 @@ export default function HrmnyChatPage() {
           </label>
         </div>
 
-        <p className="hrmny-chat-section">Personal</p>
+        <p className="hrmny-chat-section">Sessions</p>
         <ul className="hrmny-chat-sessions">
-          {(threads.data ?? []).map((t) => (
-            <li key={t.chatThreadId}>
-              <button
-                type="button"
-                className={
-                  threadId === t.chatThreadId
-                    ? "hrmny-chat-session is-active"
-                    : "hrmny-chat-session"
-                }
-                onClick={() => setThreadId(t.chatThreadId)}
-              >
-                <span className="hrmny-chat-session-title">{t.title}</span>
-                <span className="hrmny-chat-session-meta">{t.harness}</span>
-              </button>
-            </li>
-          ))}
+          {(threads.data ?? []).map((t) => {
+            const agentLabel = t.agentSlug
+              ? (agentBySlug.get(t.agentSlug) ?? t.agentSlug)
+              : "Default";
+            const clientLabel = t.clientId
+              ? (clientNameById.get(t.clientId) ?? "Client")
+              : "Org";
+            const isActive = threadId === t.chatThreadId;
+            const isWorking = isActive && send.isPending;
+            return (
+              <li key={t.chatThreadId}>
+                <button
+                  type="button"
+                  className={
+                    isActive
+                      ? "hrmny-chat-session is-active"
+                      : "hrmny-chat-session"
+                  }
+                  onClick={() => setThreadId(t.chatThreadId)}
+                >
+                  <span className="hrmny-chat-session-title">
+                    {isWorking ? (
+                      <span
+                        className="hrmny-chat-working-dot"
+                        aria-hidden
+                      />
+                    ) : null}
+                    {t.title}
+                  </span>
+                  <span className="hrmny-chat-session-meta">
+                    {agentLabel} · {clientLabel}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
           {(threads.data?.length ?? 0) === 0 ? (
             <li className="hrmny-chat-empty-side">No sessions yet</li>
           ) : null}
         </ul>
-
-        <p className="hrmny-chat-attrib">
-          Shell patterned after{" "}
-          <a
-            href="https://github.com/yc-software/qm"
-            target="_blank"
-            rel="noreferrer"
-          >
-            QM
-          </a>
-          , rebranded for Hrmny.
-        </p>
       </aside>
 
       <section className="hrmny-chat-main">
         <header className="hrmny-chat-header">
           <div>
-            <p className="hrmny-chat-kicker">Conversation</p>
+            <p className="hrmny-chat-kicker">Hrmny chat</p>
             <h1>{activeTitle}</h1>
           </div>
           <div className="hrmny-chat-pills">
-            {activeThread?.agentSlug ? (
-              <span>Agent · {activeThread.agentSlug}</span>
-            ) : null}
-            {activeThread?.clientId ? <span>Client sandbox</span> : null}
+            <span data-testid="chat-pill-agent">{bindingLabel}</span>
+            <span data-testid="chat-pill-sandbox">{sandboxLabel}</span>
             <span>{harness === "react" ? "ReAct" : "Direct"}</span>
             <span>Effort · {effort}</span>
           </div>
         </header>
 
+        <div
+          className="hrmny-chat-context-banner"
+          data-testid="chat-context-banner"
+        >
+          <div>
+            <p className="hrmny-chat-context-title">
+              {bindingLabel}
+              {toolCount > 0 ? (
+                <span className="hrmny-chat-context-count">
+                  {" "}
+                  · {toolCount} tools
+                </span>
+              ) : null}
+            </p>
+            <p className="hrmny-chat-context-sub">
+              Sandbox: {sandboxLabel}. Agents call CRM, delivery, portal, and
+              finance tools inside this scope.
+            </p>
+          </div>
+          {toolsPreview.length ? (
+            <ul className="hrmny-chat-context-chips" aria-label="Allowlisted tools">
+              {toolsPreview.map((tool) => (
+                <li key={tool}>{tool}</li>
+              ))}
+              {toolCount > toolsPreview.length ? (
+                <li>+{toolCount - toolsPreview.length}</li>
+              ) : null}
+            </ul>
+          ) : null}
+        </div>
+
         <div className="hrmny-chat-transcript" ref={scroller}>
           {!threadId || (messages.data?.length ?? 0) === 0 ? (
             <div className="hrmny-chat-welcome">
-              <h2>What should Hrmny work on?</h2>
+              <h2>What should {bindingLabel} work on?</h2>
               <p>
-                Personal workspace with a QM-style harness — plan, call tools,
-                observe, answer. Scoped to your staff session.
+                Hrmny plans, calls allowlisted CRM/OS tools, observes results,
+                then answers — scoped to {sandboxLabel}
+                {toolCount > 0 ? ` · ${toolCount} tools bound` : ""}.
               </p>
               <div className="hrmny-chat-starters">
                 {!clientId ? (
@@ -385,7 +462,9 @@ export default function HrmnyChatPage() {
                     }
                   >
                     <div className="hrmny-chat-msg-role">
-                      {m.role === "user" ? "You" : "Hrmny"}
+                      {m.role === "user"
+                        ? "You"
+                        : selectedAgent?.displayName ?? "Hrmny"}
                     </div>
                     <div className="hrmny-chat-msg-body">
                       {m.role === "assistant" ? (
@@ -397,11 +476,18 @@ export default function HrmnyChatPage() {
                 );
               })}
               {send.isPending ? (
-                <article className="hrmny-chat-msg is-assistant is-working">
-                  <div className="hrmny-chat-msg-role">Hrmny</div>
+                <article
+                  className="hrmny-chat-msg is-assistant is-working"
+                  data-testid="chat-live-work"
+                >
+                  <div className="hrmny-chat-msg-role">
+                    {selectedAgent?.displayName ?? "Hrmny"}
+                  </div>
                   <div className="hrmny-chat-msg-body">
-                    <span className="hrmny-chat-working-dot" />
-                    Working…
+                    <div className="hrmny-chat-live-dock">
+                      <span className="hrmny-chat-working-dot" />
+                      Working · calling CRM/OS tools…
+                    </div>
                   </div>
                 </article>
               ) : null}
@@ -421,12 +507,12 @@ export default function HrmnyChatPage() {
         >
           <div className="hrmny-chat-composer-toolbar">
             <label>
-              Harness
+              Mode
               <select
                 value={harness}
                 onChange={(e) => setHarness(e.target.value as HarnessMode)}
               >
-                <option value="react">ReAct (QM-style)</option>
+                <option value="react">ReAct</option>
                 <option value="direct">Direct</option>
               </select>
             </label>
@@ -446,7 +532,7 @@ export default function HrmnyChatPage() {
           <div className="hrmny-chat-composer-row">
             <textarea
               rows={2}
-              placeholder="Message Hrmny…"
+              placeholder={`Message ${bindingLabel}…`}
               data-testid="chat-composer"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}

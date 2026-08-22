@@ -651,7 +651,7 @@ export const chatRouter = router({
       const system = [
         customSystem ||
           "You are Hrmny — the multiplayer agent harness for Creative Harmony staff.",
-        "Inspired by QM (YC Software): plan → act → observe, then answer.",
+        "Hrmny staff agent: plan → call allowlisted CRM/OS tools → observe → answer.",
         "Be concise. Prefer tools for factual lookups. Never invent client data.",
         `Effort level: ${effort}.`,
         !customSystem && thread.agentSlug

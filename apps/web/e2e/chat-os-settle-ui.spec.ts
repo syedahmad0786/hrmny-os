@@ -23,6 +23,9 @@ test.describe("Chat OS settle agent UI", () => {
       .toBeGreaterThan(1);
     await agent.selectOption({ value: "os-settle" });
     await expect(page.getByTestId("chat-agent-hint")).toBeVisible();
+    await expect(page.getByTestId("chat-context-banner")).toBeVisible();
+    await expect(page.getByTestId("chat-pill-agent")).toContainText(/OS settle/i);
+    await expect(page.getByTestId("chat-agent-tools-preview")).toBeVisible();
 
     await page.getByTestId("chat-new").click();
     await expect(page.getByTestId("chat-starter-os-settle")).toBeVisible({

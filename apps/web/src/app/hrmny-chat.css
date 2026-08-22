@@ -1,4 +1,4 @@
-/* Hrmny Chat — QM-inspired shell (MIT: yc-software/qm), rebranded for hrmny OS */
+/* Hrmny Chat — staff agent shell (third-party layout patterns: see NOTICE-qm.md) */
 
 .hrmny-chat {
   --hc-sidebar: 260px;
@@ -35,7 +35,7 @@
 .hrmny-chat.is-rail .hrmny-chat-new span:last-child,
 .hrmny-chat.is-rail .hrmny-chat-section,
 .hrmny-chat.is-rail .hrmny-chat-sessions,
-.hrmny-chat.is-rail .hrmny-chat-attrib {
+.hrmny-chat.is-rail .hrmny-chat-bind-sidebar {
   display: none;
 }
 
@@ -114,6 +114,48 @@
   line-height: 1;
 }
 
+.hrmny-chat-bind-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0 0.15rem;
+}
+
+.hrmny-chat-bind-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted, #78716c);
+}
+
+.hrmny-chat-bind-select {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+  border: 1px solid var(--sand, #e7e0d4);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.78rem;
+  color: var(--ink, #1c1917);
+}
+
+.hrmny-chat-bind-hint {
+  margin: 0;
+  font-size: 0.65rem;
+  line-height: 1.4;
+  color: var(--muted, #78716c);
+}
+
+.hrmny-chat-tools-preview {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .hrmny-chat-section {
   margin: 0.35rem 0.2rem 0;
   font-size: 0.65rem;
@@ -166,28 +208,15 @@
   display: block;
   margin-top: 0.15rem;
   font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  opacity: 0.65;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  opacity: 0.7;
 }
 
 .hrmny-chat-empty-side {
   padding: 0.75rem;
   font-size: 0.8rem;
   color: var(--muted, #78716c);
-}
-
-.hrmny-chat-attrib {
-  margin: 0;
-  padding: 0.4rem 0.2rem 0;
-  font-size: 0.65rem;
-  color: var(--muted, #78716c);
-  line-height: 1.4;
-}
-
-.hrmny-chat-attrib a {
-  color: inherit;
-  text-decoration: underline;
 }
 
 .hrmny-chat-main {
@@ -237,8 +266,60 @@
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
+  text-transform: none;
   color: var(--muted, #78716c);
+}
+
+.hrmny-chat-context-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1.25rem;
+  margin: 0;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--sand, #e7e0d4) 70%, transparent);
+  background: color-mix(in srgb, #fff 55%, transparent);
+}
+
+.hrmny-chat-context-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.hrmny-chat-context-count {
+  font-weight: 500;
+  color: var(--muted, #78716c);
+}
+
+.hrmny-chat-context-sub {
+  margin: 0.2rem 0 0;
+  max-width: 36rem;
+  font-size: 0.75rem;
+  color: var(--muted, #78716c);
+  line-height: 1.4;
+}
+
+.hrmny-chat-context-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 22rem;
+}
+
+.hrmny-chat-context-chips li {
+  border-radius: 6px;
+  border: 1px solid var(--sand, #e7e0d4);
+  background: #fff;
+  padding: 0.15rem 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  color: var(--ink, #1c1917);
 }
 
 .hrmny-chat-transcript {
@@ -340,18 +421,61 @@
   color: var(--ochre, #b45309);
 }
 
-.hrmny-chat-workfold ol {
+.hrmny-chat-tool-list {
   margin: 0.45rem 0 0.15rem;
-  padding-left: 1.1rem;
+  padding: 0;
+  list-style: none;
   color: var(--muted, #78716c);
 }
 
-.hrmny-chat-workfold li {
-  margin-bottom: 0.35rem;
+.hrmny-chat-tool-row {
+  margin-bottom: 0.45rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  border-left: 3px solid var(--sand, #e7e0d4);
+  background: color-mix(in srgb, #fff 60%, transparent);
 }
 
-.hrmny-chat-workfold li strong {
+.hrmny-chat-tool-row.is-ok {
+  border-left-color: #15803d;
+}
+
+.hrmny-chat-tool-row.is-failed {
+  border-left-color: #b91c1c;
+}
+
+.hrmny-chat-tool-row strong {
   display: block;
+  color: var(--ink, #1c1917);
+  font-size: 0.78rem;
+}
+
+.hrmny-chat-tool-id {
+  display: block;
+  margin-top: 0.1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  opacity: 0.75;
+}
+
+.hrmny-chat-tool-detail {
+  display: block;
+  margin-top: 0.25rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.hrmny-chat-live-dock {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 10px;
+  border: 1px solid var(--sand, #e7e0d4);
+  background: color-mix(in srgb, #fff 80%, transparent);
+  padding: 0.65rem 0.8rem;
+  font-size: 0.85rem;
   color: var(--ink, #1c1917);
 }
 
@@ -359,10 +483,11 @@
   display: inline-block;
   width: 0.55rem;
   height: 0.55rem;
-  margin-right: 0.45rem;
+  margin-right: 0.35rem;
   border-radius: 999px;
   background: var(--ochre, #b45309);
   animation: hrmny-pulse 1s ease-in-out infinite;
+  vertical-align: middle;
 }
 
 @keyframes hrmny-pulse {
@@ -467,17 +592,22 @@
   .hrmny-chat-sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--sand, #e7e0d4);
-    max-height: 220px;
+    max-height: 280px;
   }
 
   .hrmny-chat.is-rail .hrmny-chat-brand-lockup,
   .hrmny-chat.is-rail .hrmny-chat-new span:last-child,
   .hrmny-chat.is-rail .hrmny-chat-section,
-  .hrmny-chat.is-rail .hrmny-chat-sessions {
+  .hrmny-chat.is-rail .hrmny-chat-sessions,
+  .hrmny-chat.is-rail .hrmny-chat-bind-sidebar {
     display: initial;
   }
 
   .hrmny-chat.is-rail .hrmny-chat-sessions {
+    display: flex;
+  }
+
+  .hrmny-chat.is-rail .hrmny-chat-bind-sidebar {
     display: flex;
   }
 }
