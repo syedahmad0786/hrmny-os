@@ -6,6 +6,7 @@ import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
 import { deliveryRhythmFor } from "@/lib/delivery-rhythm";
 import Link from "next/link";
+import { nextLinksFromToolData } from "@/lib/agent-next-links";
 
 type AgentToolRow = {
   tool?: string;
@@ -13,31 +14,6 @@ type AgentToolRow = {
   error?: string;
   data?: unknown;
 };
-
-function nextLinksFromToolData(
-  data: unknown,
-): Array<{ href: string; label: string }> {
-  if (!data || typeof data !== "object") return [];
-  const record = data as Record<string, unknown>;
-  const links: Array<{ href: string; label: string }> = [];
-  const next = record.next;
-  if (next && typeof next === "object") {
-    for (const [key, value] of Object.entries(
-      next as Record<string, unknown>,
-    )) {
-      if (typeof value === "string" && value.startsWith("/")) {
-        links.push({ href: value, label: key });
-      }
-    }
-  }
-  if (
-    typeof record.portalPath === "string" &&
-    record.portalPath.startsWith("/")
-  ) {
-    links.push({ href: record.portalPath, label: "portal" });
-  }
-  return links;
-}
 
 export default function DeliveryBoardPage() {
   const utils = trpc.useUtils();
@@ -179,7 +155,15 @@ export default function DeliveryBoardPage() {
           {reviewHref.isPending ? "Minting portal…" : "Client portal"}
         </button>
         {" · "}
-        <Link href="/account" className="text-ochre underline">
+        <Link
+          href={
+            selected?.clientId
+              ? `/account?clientId=${encodeURIComponent(selected.clientId)}`
+              : "/account"
+          }
+          className="text-ochre underline"
+          data-testid="delivery-account-link"
+        >
           Account rhythm
         </Link>
         {" · "}

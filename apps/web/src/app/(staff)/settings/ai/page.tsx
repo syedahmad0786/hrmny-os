@@ -6,6 +6,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import type { AppRouter } from "@/server/trpc/root";
 import { formatAed, formatRelative } from "@/components/crm/format";
+import { nextLinksFromToolResults } from "@/lib/agent-next-links";
 
 type Dashboard = inferRouterOutputs<AppRouter>["aiAdmin"]["dashboard"];
 type AgentKey = Dashboard["agents"][number]["key"];
@@ -210,10 +211,76 @@ function AiAdminBody({
           <p className="mt-3 text-sm text-red-700">{runError}</p>
         ) : null}
         {lastRun ? (
-          <p className="mt-3 text-sm text-muted">
-            Last run: <span className="font-medium text-ink">{lastRun.agent}</span>{" "}
-            · {lastRun.gateOutcome} · {formatAed(lastRun.costAed)}
-          </p>
+          <div className="mt-3 space-y-2" data-testid="ai-admin-last-run">
+            <p className="text-sm text-muted">
+              Last run:{" "}
+              <span className="font-medium text-ink">{lastRun.agent}</span> ·{" "}
+              {lastRun.gateOutcome} · {formatAed(lastRun.costAed)}
+            </p>
+            {"output" in lastRun && lastRun.output != null ? (
+              <pre
+                data-testid="ai-admin-last-run-output"
+                className="max-h-32 overflow-auto rounded-lg bg-ink/5 p-3 text-xs"
+              >
+                {typeof lastRun.output === "string"
+                  ? lastRun.output
+                  : JSON.stringify(lastRun.output, null, 2)}
+              </pre>
+            ) : null}
+            {"toolResults" in lastRun &&
+            Array.isArray(lastRun.toolResults) &&
+            lastRun.toolResults.length > 0 ? (
+              <>
+                <ul
+                  data-testid="ai-admin-last-run-tools"
+                  className="rounded-lg border border-sand bg-white/70 p-3 text-xs"
+                >
+                  <li className="mb-1 font-semibold uppercase tracking-[0.12em] text-muted">
+                    Tool results
+                  </li>
+                  {lastRun.toolResults.map(
+                    (
+                      row: {
+                        tool?: string;
+                        ok?: boolean;
+                        error?: string;
+                        data?: unknown;
+                      },
+                      idx: number,
+                    ) => (
+                      <li key={`${row.tool ?? "tool"}-${idx}`}>
+                        <span className="font-mono">{row.tool ?? "?"}</span>
+                        {" · "}
+                        {row.ok
+                          ? "ok"
+                          : `failed${row.error ? `: ${row.error}` : ""}`}
+                      </li>
+                    ),
+                  )}
+                </ul>
+                {(() => {
+                  const links = nextLinksFromToolResults(lastRun.toolResults);
+                  if (!links.length) return null;
+                  return (
+                    <p
+                      className="flex flex-wrap gap-2 text-sm"
+                      data-testid="ai-admin-last-run-next"
+                    >
+                      {links.map((link) => (
+                        <Link
+                          key={`${link.label}-${link.href}`}
+                          href={link.href}
+                          className="text-ochre underline"
+                        >
+                          {link.label}
+                        </Link>
+                      ))}
+                    </p>
+                  );
+                })()}
+              </>
+            ) : null}
+          </div>
         ) : null}
       </section>
 
@@ -548,6 +615,31 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
               )}
             </ul>
           ) : null}
+          {(() => {
+            const rows =
+              "toolResults" in runCustom.data &&
+              Array.isArray(runCustom.data.toolResults)
+                ? runCustom.data.toolResults
+                : [];
+            const links = nextLinksFromToolResults(rows);
+            if (!links.length) return null;
+            return (
+              <p
+                className="flex flex-wrap gap-2 text-sm"
+                data-testid="ai-agent-run-next"
+              >
+                {links.map((link) => (
+                  <Link
+                    key={`${link.label}-${link.href}`}
+                    href={link.href}
+                    className="text-ochre underline"
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </p>
+            );
+          })()}
         </div>
       ) : null}
       {runCustom.error ? (

@@ -191,6 +191,12 @@ function OutreachInner() {
         description="AI proposes; the gate disposes. Every send needs a prior human approval — no unattended auto-send."
       />
 
+      {focusId ? (
+        <p className="sr-only" data-testid="outreach-active-id">
+          {focusId}
+        </p>
+      ) : null}
+
       {gateError ? (
         <div className="crm-note" role="alert">
           <CrmTag kind="danger">Blocked</CrmTag> {gateError}

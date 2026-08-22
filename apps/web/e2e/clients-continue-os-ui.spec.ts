@@ -120,6 +120,9 @@ test.describe("Clients Continue OS after handover", () => {
     // Continue Approvals must pin the same outreach id as Continue Outreach.
     expect(continueApprovalsId).toBe(continueOutreachId);
 
+    await expect(page.getByTestId("client-continue-portal")).toBeVisible();
+    await expect(page.getByTestId("client-continue-onboarding")).toBeVisible();
+
     await continueCreative.click();
     await expect(page).toHaveURL(new RegExp(`taskId=${continueTaskId}`));
     await expect(page.getByTestId("creative-task-id")).toHaveText(
@@ -189,5 +192,26 @@ test.describe("Clients Continue OS after handover", () => {
       continueApprovalsId!,
       { timeout: 60_000 },
     );
+
+    // clientId-only Account URL must resolve the same won-client calendar.
+    await page.goto(`/account?clientId=${clientId}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.getByTestId("account-active-calendar")).toHaveText(
+      continueCalendarId!,
+      { timeout: 60_000 },
+    );
+
+    // clientId-only Outreach URL must resolve the same won-client draft.
+    await page.goto(`/crm/outreach?clientId=${clientId}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.getByTestId("outreach-active-id")).toHaveText(
+      continueOutreachId!,
+      { timeout: 60_000 },
+    );
+    await expect(
+      page.getByTestId(`outreach-item-${continueOutreachId}`),
+    ).toBeVisible({ timeout: 60_000 });
   });
 });
