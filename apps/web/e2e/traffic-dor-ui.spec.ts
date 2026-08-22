@@ -30,6 +30,11 @@ test.describe("Traffic DoR → creative spawn UI", () => {
       page.getByRole("heading", { name: /Traffic · Definition of Ready/i }),
     ).toBeVisible({ timeout: 60_000 });
 
+    await expect(page.getByTestId("traffic-ready-banner")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("traffic-ready-db")).toContainText(/pgvector/i);
+
     const briefId = page.getByTestId("traffic-brief-id");
     await expect(briefId).toBeVisible();
     await expect
