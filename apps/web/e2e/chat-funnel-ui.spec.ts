@@ -10,6 +10,10 @@ test.describe("Chat funnel_act starter UI", () => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
 
+    await expect(page.getByTestId("chat-ready-strip")).toBeVisible({
+      timeout: 60_000,
+    });
+
     const sandbox = page.getByTestId("chat-sandbox-client");
     await expect(sandbox).toBeVisible({ timeout: 60_000 });
     await expect

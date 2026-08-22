@@ -121,6 +121,47 @@
   margin: 0 0.15rem;
 }
 
+.hrmny-chat-ready-strip {
+  margin: 0 0.15rem 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--sand, #e7e0d4);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.85);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--muted, #78716c);
+}
+
+.hrmny-chat-ready-llm,
+.hrmny-chat-ready-blockers {
+  margin: 0;
+}
+
+.hrmny-chat-ready-blockers {
+  margin-top: 0.25rem;
+  font-weight: 600;
+  color: var(--ink, #1c1917);
+}
+
+.hrmny-chat-ready-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1rem;
+  list-style: disc;
+}
+
+.hrmny-chat-ready-links {
+  margin: 0.4rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.hrmny-chat-ready-link {
+  color: var(--ochre, #b45309);
+  text-decoration: underline;
+  font-weight: 600;
+}
+
 .hrmny-chat-bind-label {
   display: block;
   font-size: 0.65rem;

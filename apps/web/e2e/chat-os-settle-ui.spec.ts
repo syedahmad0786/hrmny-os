@@ -21,6 +21,10 @@ test.describe("Chat OS settle agent UI", () => {
     const runtime = page.getByTestId("chat-runtime-llm");
     await expect(runtime).toBeVisible({ timeout: 60_000 });
     await expect(runtime).toContainText(/mock/i);
+    await expect(page.getByTestId("chat-ready-strip")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("chat-ready-connections")).toBeVisible();
 
     const sandbox = page.getByTestId("chat-sandbox-client");
     await expect(sandbox).toBeVisible({ timeout: 60_000 });
