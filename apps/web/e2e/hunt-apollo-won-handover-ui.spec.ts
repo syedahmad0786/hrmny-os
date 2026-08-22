@@ -225,7 +225,18 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     expect(outreachHref).toBeTruthy();
     expect(portalHref).not.toBe(onboardingHref);
 
-    await statusPortal.click();
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto(financeHref!, { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(/clientId=/);
+    await expect(page.locator("body")).toContainText(/finance|invoice/i);
+
+    await page.goto(outreachHref!, { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(/\/crm\/outreach/);
+    await expect(
+      page.getByRole("heading", { name: /Outreach drafts/i }),
+    ).toBeVisible({ timeout: 60_000 });
+
+    await page.goto(portalHref!, { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(/\/portal\/login\/verify/, { timeout: 60_000 });
     await expect(
       page.getByRole("heading", { name: /^Approvals$/i }),
@@ -237,15 +248,5 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
       page.getByRole("heading", { name: /^Onboarding$/i }),
     ).toBeVisible({ timeout: 60_000 });
     await expect(page).toHaveURL(/\/portal\/onboarding/);
-
-    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
-    await page.goto(financeHref!, { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveURL(/clientId=/);
-    await expect(page.locator("body")).toContainText(/finance|invoice/i);
-
-    await page.goto(outreachHref!, { waitUntil: "domcontentloaded" });
-    await expect(
-      page.getByRole("heading", { name: /Outreach drafts/i }),
-    ).toBeVisible({ timeout: 60_000 });
   });
 });
