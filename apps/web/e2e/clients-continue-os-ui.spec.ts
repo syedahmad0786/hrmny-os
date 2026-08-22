@@ -146,6 +146,15 @@ test.describe("Clients Continue OS after handover", () => {
       page.locator(`[data-testid="finance-invoice"]#os-invoice-${continueInvoiceId}`),
     ).toBeVisible({ timeout: 60_000 });
 
+    // clientId-only finance URL must resolve the same won-client first invoice.
+    await page.goto(`/finance?clientId=${clientId}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.getByTestId("finance-active-invoice")).toHaveText(
+      continueInvoiceId!,
+      { timeout: 60_000 },
+    );
+
     await page.goto(outreachHref, { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(new RegExp(`[?&]id=${continueOutreachId}`));
     await expect(
