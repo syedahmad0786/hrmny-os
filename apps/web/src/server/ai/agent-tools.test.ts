@@ -510,7 +510,7 @@ describe("runAgentTools funnel writes", () => {
     const results = await runAgentTools({
       allowedTools: [...DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS],
       prompt:
-        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign, sign off onboarding phase, advance month1, ref-approve calendar. company: OneShot Settle Co",
+        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, lock the brief, creative QC pass then advance, approve portal, approve campaign and publish campaign, sign off onboarding phase, advance month1, ref-approve calendar. company: OneShot Settle Co",
       scope: {
         employeeId: "c0000000-0000-4000-8000-000000000001",
       },
@@ -524,6 +524,11 @@ describe("runAgentTools funnel writes", () => {
       (byTool("finance.os_issue")?.data as { status?: string })?.status,
     ).toBe("issued");
     expect(byTool("outreach.os_approve")?.ok).toBe(true);
+    expect(byTool("briefs.os_lock")?.ok).toBe(true);
+    expect(
+      (byTool("briefs.os_lock")?.data as { spawnedTaskId?: string })
+        ?.spawnedTaskId,
+    ).toBeTruthy();
     expect(byTool("creative.os_qc")?.ok).toBe(true);
     expect(
       (byTool("creative.os_qc")?.data as { status?: string })?.status,

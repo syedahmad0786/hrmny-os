@@ -197,7 +197,17 @@ export async function runOsBriefLock(input: {
     };
   }
   brief.lockedAt = new Date().toISOString();
-  task.status = "brief_ready";
+  // Don't regress won-handover creative tasks already in qc/client_review.
+  const early = new Set([
+    "backlog",
+    "briefing",
+    "todo",
+    "in_progress",
+    "draft",
+  ]);
+  if (early.has(task.status) || !task.status) {
+    task.status = "brief_ready";
+  }
   store.pushHealth("brief.dor_complete", "info", {
     briefId: brief.briefId,
     taskId: task.taskId,

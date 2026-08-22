@@ -1298,8 +1298,27 @@ class MemoryDemoStore {
     ownerEmployeeId?: string | null;
   }): DemoTask {
     const month = new Date().toISOString().slice(0, 7);
+    const taskId = randomUUID();
+    const briefId = randomUUID();
+    // DoR-ready (≤2 missing) so briefs.os_lock can Traffic→Creative after won handover.
+    const body: Record<string, unknown> = {
+      objective: `Launch creative for ${input.title}`,
+      audience: "UAE decision-makers",
+      deliverables: "Social cutdowns + key visual",
+      deadline: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+      brandAssets: { logo: true, wonHandover: true },
+    };
+    this.briefs.set(briefId, {
+      briefId,
+      taskId,
+      body,
+      dorComplete: false,
+      missingRequiredCount: 2,
+      missing: ["channels", "successMetric"],
+      lockedAt: null,
+    });
     const task: DemoTask = {
-      taskId: randomUUID(),
+      taskId,
       clientId: input.clientId,
       calendarId: null,
       month,
@@ -1314,7 +1333,7 @@ class MemoryDemoStore {
       qcNotes: null,
       clientRevisionCount: 0,
       revisionBoundaryAck: false,
-      briefId: null,
+      briefId,
     };
     this.tasks.set(task.taskId, task);
     return task;

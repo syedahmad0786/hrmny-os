@@ -18,7 +18,7 @@ const STARTERS = [
 ] as const;
 
 const OS_SETTLE_STARTER =
-  "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign, sign off onboarding phase, advance month1, ref-approve calendar.";
+  "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, lock the brief then creative QC pass then advance, approve portal, approve campaign and publish campaign, sign off onboarding phase, advance month1, ref-approve calendar.";
 
 function StepFold({
   steps,
@@ -122,17 +122,22 @@ export default function HrmnyChatPage() {
 
   useEffect(() => {
     if (threadId) return;
+    // Match sandbox AND agent so selecting os-settle cannot be overwritten by
+    // an older org thread (which would drop agent_act from the harness).
     const preferred = (threads.data ?? []).find(
-      (t) => (t.clientId ?? "") === clientId,
+      (t) =>
+        (t.clientId ?? "") === clientId &&
+        (t.agentSlug ?? "") === agentSlug,
     );
-    // Only auto-open a session that matches the selected sandbox.
     if (preferred) setThreadId(preferred.chatThreadId);
-  }, [threadId, threads.data, clientId]);
+  }, [threadId, threads.data, clientId, agentSlug]);
 
   const activeThread = threads.data?.find((t) => t.chatThreadId === threadId);
 
   useEffect(() => {
     if (!activeThread) return;
+    // Keep React selects in sync with the bound thread — but never clobber a
+    // newer agent/sandbox choice that intentionally cleared threadId.
     setClientId(activeThread.clientId ?? "");
     setAgentSlug(activeThread.agentSlug ?? "");
   }, [
@@ -200,9 +205,10 @@ export default function HrmnyChatPage() {
     : "Default Hrmny agent";
   const sandboxLabel = sandboxClient?.name ?? "Staff / org scope";
 
-  function submit(text: string) {
+  function submit(text: string, harnessOverride?: HarnessMode) {
     const content = text.trim();
     if (!content) return;
+    const mode = harnessOverride ?? harness;
     if (!threadId) {
       create.mutate(
         {
@@ -217,14 +223,14 @@ export default function HrmnyChatPage() {
               threadId: row.chatThreadId,
               content,
               effort,
-              harness,
+              harness: mode,
             });
           },
         },
       );
       return;
     }
-    send.mutate({ threadId, content, effort, harness });
+    send.mutate({ threadId, content, effort, harness: mode });
   }
 
   return (
@@ -446,7 +452,9 @@ export default function HrmnyChatPage() {
                   <button
                     type="button"
                     data-testid="chat-starter-os-settle"
-                    onClick={() => submit(OS_SETTLE_STARTER)}
+                    // Direct harness always runs agent_act for the bound
+                    // allowlist (mock ReAct can pick sibling org tools first).
+                    onClick={() => submit(OS_SETTLE_STARTER, "direct")}
                     disabled={send.isPending || create.isPending}
                   >
                     {OS_SETTLE_STARTER.slice(0, 72)}…
