@@ -927,7 +927,7 @@ export async function runAgentTools(input: {
         prompt: input.prompt,
         actorEmployeeId:
           input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001",
-        taskId: input.scope.taskId ?? null,
+        taskId: input.scope.taskId ?? loopSeed.taskId ?? null,
         clientId: input.scope.clientId ?? null,
       });
       const clientId = out.clientId;

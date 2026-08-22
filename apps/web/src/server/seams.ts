@@ -325,7 +325,18 @@ function applyBriefLock(payload: Record<string, unknown>): Record<string, unknow
     briefId,
   };
   store.tasks.set(spawned.taskId, spawned);
-  sourceTask.status = "brief_ready";
+  // Don't regress won-handover creative tasks already in qc / client_review.
+  const early = new Set([
+    "backlog",
+    "briefing",
+    "todo",
+    "in_progress",
+    "draft",
+    "pending",
+  ]);
+  if (early.has(sourceTask.status)) {
+    sourceTask.status = "brief_ready";
+  }
   store.clientDeliveryStatus.set(spawned.clientId, {
     clientId: spawned.clientId,
     status: "brief_locked",

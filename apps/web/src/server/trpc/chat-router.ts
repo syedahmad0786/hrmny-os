@@ -268,6 +268,40 @@ export function buildChatDefaultTools(scope: {
             },
           } satisfies HarnessTool,
           {
+            name: "briefs_os_lock",
+            description:
+              "Lock a DoR-ready brief and spawn creative_spawn (Traffic→Creative). Prompt must mention lock brief + briefId or taskId UUID. No Canva required.",
+            run: async (args: Record<string, unknown>) => {
+              const { runAgentTools } = await import("../ai/agent-tools");
+              const briefId =
+                typeof args.briefId === "string" ? args.briefId : "";
+              const taskId =
+                typeof args.taskId === "string" ? args.taskId : "";
+              const base = String(
+                args.prompt ?? args.query ?? "Lock the brief",
+              );
+              let prompt = base;
+              if (briefId && !/brief(?:Id)?\s*[:=]/i.test(prompt)) {
+                prompt = `${prompt} briefId: ${briefId}`;
+              }
+              if (taskId && !/task(?:Id)?\s*[:=]/i.test(prompt)) {
+                prompt = `${prompt} taskId: ${taskId}`;
+              }
+              const results = await runAgentTools({
+                allowedTools: ["briefs.os_lock"],
+                prompt,
+                scope: {
+                  employeeId: scope.employeeId,
+                  taskId: taskId || undefined,
+                },
+              });
+              return {
+          nextLinks: nextLinksFromToolResults(results),
+          tools: results,
+        };
+            },
+          } satisfies HarnessTool,
+          {
             name: "creative_os_qc",
             description:
               "Org-only: pass/fail/waive creative QC on a delivery task. Prompt must mention pass QC + taskId UUID.",

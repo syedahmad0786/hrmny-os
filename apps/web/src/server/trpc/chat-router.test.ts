@@ -194,6 +194,49 @@ describe("chat harness funnel_act", () => {
     expect(approved?.data?.state).toBe("approved");
   });
 
+  it("briefs_os_lock after closed loop spawns creative next links", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const tools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
+    const closed = tools.find((t) => t.name === "crm_closed_loop");
+    const loopResult = (await closed!.run({
+      prompt: "Run demo closed loop for company: Chat Brief Lock Co",
+    })) as {
+      tools?: Array<{
+        tool: string;
+        ok: boolean;
+        data?: { taskId?: string; clientId?: string };
+      }>;
+    };
+    const taskId = loopResult.tools?.find((r) => r.tool === "crm.closed_loop")
+      ?.data?.taskId;
+    expect(taskId).toBeTruthy();
+
+    const lockTool = tools.find((t) => t.name === "briefs_os_lock");
+    expect(lockTool).toBeTruthy();
+    const lockResult = (await lockTool!.run({
+      prompt: "Lock the brief",
+      taskId,
+    })) as {
+      tools?: Array<{
+        tool: string;
+        ok: boolean;
+        data?: {
+          spawnedTaskId?: string;
+          next?: { creative?: string };
+        };
+      }>;
+      nextLinks?: Array<{ href: string; label: string }>;
+    };
+    const row = lockResult.tools?.find((r) => r.tool === "briefs.os_lock");
+    expect(row?.ok).toBe(true);
+    expect(row?.data?.spawnedTaskId).toBeTruthy();
+    expect(row?.data?.next?.creative).toContain(row!.data!.spawnedTaskId!);
+    expect(
+      (lockResult.nextLinks ?? []).some((l) => l.href.includes("/creative?")),
+    ).toBe(true);
+  });
+
   it("creative_os_qc after closed loop", async () => {
     const { resetCrmMemory } = await import("../crm/memory");
     resetCrmMemory();
