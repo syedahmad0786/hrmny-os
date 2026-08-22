@@ -201,8 +201,31 @@ export const m4DemoRouter = router({
       creativeTaskId: DEMO_CREATIVE_TASK_ID,
     };
   }),
-  seedIds: publicProcedure.query(async () => {
+  seedIds: publicProcedure
+    .input(z.object({ clientId: z.string().uuid().optional() }).optional())
+    .query(async ({ input }) => {
+    const scopedClientId = input?.clientId?.trim() || null;
     if (getDb()) {
+      if (scopedClientId) {
+        const forClient = await listDeliveryTasks({
+          clientId: scopedClientId,
+        });
+        const task =
+          forClient.find((t) => t.briefId) ?? forClient[0] ?? null;
+        const cals = await listDeliveryCalendars({
+          clientId: scopedClientId,
+        });
+        return {
+          clientId: scopedClientId,
+          calendarId: cals[0]?.calendarId ?? null,
+          taskId: task?.taskId ?? null,
+          briefId: task?.briefId ?? null,
+          creativeTaskId: task?.taskId ?? null,
+          source: cals[0]
+            ? ("durable_client" as const)
+            : ("durable_client_empty" as const),
+        };
+      }
       const recentCals = await listRecentDeliveryCalendars({ limit: 1 });
       const latestCal = recentCals[0];
       if (latestCal) {
@@ -276,6 +299,23 @@ export const m4DemoRouter = router({
     }
     const store = getDemoStore();
     if (store.calendars.size === 0) store.seedM4Demo();
+    if (scopedClientId) {
+      const tasks = [...store.tasks.values()].filter(
+        (t) => t.clientId === scopedClientId,
+      );
+      const task = tasks.find((t) => t.briefId) ?? tasks[0] ?? null;
+      const cal = [...store.calendars.values()].find(
+        (c) => c.clientId === scopedClientId,
+      );
+      return {
+        clientId: scopedClientId,
+        calendarId: cal?.calendarId ?? null,
+        taskId: task?.taskId ?? null,
+        briefId: task?.briefId ?? null,
+        creativeTaskId: task?.taskId ?? null,
+        source: "demo_store_client" as const,
+      };
+    }
     return {
       clientId: DEMO_CLIENT_ID,
       calendarId: DEMO_CALENDAR_ID,

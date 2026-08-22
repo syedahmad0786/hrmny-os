@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { nextLinksFromChatObservation } from "@/lib/agent-next-links";
 import { trpc } from "@/lib/trpc";
 import { observationLooksFailed, toolVerb } from "./tool-meta";
 
@@ -35,6 +37,14 @@ function StepFold({
         {tools.map((s, i) => {
           const name = String(s.toolName);
           const failed = observationLooksFailed(s.observation);
+          const nextLinks = Array.isArray(s.nextLinks)
+            ? (s.nextLinks as Array<{ href: string; label: string }>).filter(
+                (l) =>
+                  typeof l?.href === "string" &&
+                  l.href.startsWith("/") &&
+                  typeof l?.label === "string",
+              )
+            : nextLinksFromChatObservation(s.observation);
           return (
             <li
               key={i}
@@ -50,6 +60,23 @@ function StepFold({
                 >
                   {String(s.observation).slice(0, 2400)}
                 </span>
+              ) : null}
+              {nextLinks.length > 0 ? (
+                <p
+                  className="hrmny-chat-tool-next"
+                  data-testid="chat-tool-next"
+                >
+                  {nextLinks.map((link) => (
+                    <Link
+                      key={`${link.label}-${link.href}`}
+                      href={link.href}
+                      className="hrmny-chat-next-chip"
+                      data-testid={`chat-next-${link.label}`}
+                    >
+                      {link.label}
+                    </Link>
+                  ))}
+                </p>
               ) : null}
             </li>
           );

@@ -4,7 +4,8 @@ import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
 const DOR_FIELDS = [
   "objective",
@@ -16,13 +17,22 @@ const DOR_FIELDS = [
   "successMetric",
 ] as const;
 
-export default function TrafficDorPage() {
+function TrafficDorInner() {
   const utils = trpc.useUtils();
-  const ids = trpc.m4.seedIds.useQuery();
+  const searchParams = useSearchParams();
+  const clientIdFromQuery = searchParams.get("clientId")?.trim() || "";
+  const briefIdFromQuery = searchParams.get("briefId")?.trim() || "";
+  const ids = trpc.m4.seedIds.useQuery(
+    clientIdFromQuery ? { clientId: clientIdFromQuery } : undefined,
+  );
   const reset = trpc.m4.reset.useMutation({
     onSuccess: () => void utils.invalidate(),
   });
-  const briefId = ids.data?.briefId;
+  // Prefer explicit briefId, then client-scoped seed, then bare demo seed.
+  const briefId =
+    briefIdFromQuery ||
+    ids.data?.briefId ||
+    (!clientIdFromQuery ? undefined : null);
   const brief = trpc.briefs.get.useQuery(
     { id: briefId! },
     { enabled: Boolean(briefId) },
@@ -107,6 +117,11 @@ export default function TrafficDorPage() {
       </div>
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">
+        {clientIdFromQuery ? (
+          <p className="mb-2 text-xs text-muted" data-testid="traffic-active-client">
+            Active client {clientIdFromQuery.slice(0, 8)}…
+          </p>
+        ) : null}
         <p className="text-sm" data-testid="traffic-brief-id">
           Brief: <span className="font-mono text-xs">{briefId ?? "…"}</span>
         </p>
@@ -194,5 +209,13 @@ export default function TrafficDorPage() {
         ) : null}
       </section>
     </main>
+  );
+}
+
+export default function TrafficDorPage() {
+  return (
+    <Suspense fallback={<main className="p-6 text-sm text-muted">Loading traffic…</main>}>
+      <TrafficDorInner />
+    </Suspense>
   );
 }
