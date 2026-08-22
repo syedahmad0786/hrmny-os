@@ -16,6 +16,13 @@ test.describe("CRM inbound Capture UI", () => {
       page.getByRole("heading", { name: /Inbound leads/i }),
     ).toBeVisible({ timeout: 60_000 });
 
+    await expect(page.getByTestId("inbound-ready-banner")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("inbound-ready-apollo")).toContainText(
+      /Apollo:/i,
+    );
+
     await page.getByTestId("inbound-company").fill(company);
     await page.getByTestId("inbound-contact-name").fill("E2E Lead");
     await page.getByTestId("inbound-email").fill(email);
