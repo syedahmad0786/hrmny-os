@@ -4,14 +4,18 @@ import { useEffect, useState } from "react";
 import {
   formatReadyDbLine,
   formatReadyLlmLine,
+  formatReadyToolsLine,
   type ReadySmoke,
 } from "@/lib/ready-smoke";
 
 /** Lightweight `/api/ready` strip for Connections and other staff setup surfaces. */
 export function PlatformReadyStrip({
   testId = "platform-ready-strip",
+  showTools = false,
 }: {
   testId?: string;
+  /** Show n8n/apollo/openrouter/resend modes from /api/ready.tools */
+  showTools?: boolean;
 }) {
   const [ready, setReady] = useState<ReadySmoke | null>(null);
 
@@ -44,6 +48,11 @@ export function PlatformReadyStrip({
       <p className="mt-1 text-muted" data-testid={`${testId}-db`}>
         {formatReadyDbLine(ready)}
       </p>
+      {showTools ? (
+        <p className="mt-1 text-muted" data-testid={`${testId}-tools`}>
+          Tools {formatReadyToolsLine(ready)}
+        </p>
+      ) : null}
     </section>
   );
 }

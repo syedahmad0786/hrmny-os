@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { trpc } from "@/lib/trpc";
+import { PlatformReadyStrip } from "@/components/platform-ready-strip";
 
 export default function AutomationsSettingsPage() {
   const smoke = trpc.automation.smoke.useQuery(undefined, {
@@ -31,10 +32,19 @@ export default function AutomationsSettingsPage() {
         </p>
       </div>
 
-      <section className="rounded-xl border border-sand bg-white/75 p-4">
+      <PlatformReadyStrip
+        testId="automations-platform-ready"
+        showTools
+      />
+
+      <section
+        className="rounded-xl border border-sand bg-white/75 p-4"
+        data-testid="automations-n8n-smoke-section"
+      >
         <h2 className="font-display text-xl font-semibold">n8n smoke</h2>
         <button
           type="button"
+          data-testid="automations-n8n-smoke"
           className="mt-3 rounded-full bg-ink px-4 py-2 text-sm text-white disabled:opacity-40"
           disabled={smoke.isFetching}
           onClick={() => void smoke.refetch()}
@@ -42,23 +52,31 @@ export default function AutomationsSettingsPage() {
           {smoke.isFetching ? "Running…" : "Run n8n smoke"}
         </button>
         {smoke.error ? (
-          <p className="mt-3 text-sm text-red-700">{smoke.error.message}</p>
+          <p className="mt-3 text-sm text-red-700" data-testid="automations-n8n-error">
+            {smoke.error.message}
+          </p>
         ) : null}
         {smoke.data ? (
-          <div className="mt-4 space-y-2 text-sm">
-            <p>
+          <div
+            className="mt-4 space-y-2 text-sm"
+            data-testid="automations-n8n-result"
+          >
+            <p data-testid="automations-n8n-live">
               Live:{" "}
               <strong className="text-ochre">
                 {smoke.data.live ? "yes" : "no (mock or unhealthy)"}
               </strong>
             </p>
-            <p>
+            <p data-testid="automations-n8n-health">
               Mode {smoke.data.health.mode} · ok={" "}
               {String(smoke.data.health.ok)} · apiKeyConfigured={" "}
               {String(smoke.data.health.apiKeyConfigured)} · workflows{" "}
               {smoke.data.workflowCount}
             </p>
-            <ul className="mt-2 max-h-48 space-y-1 overflow-auto text-muted">
+            <ul
+              className="mt-2 max-h-48 space-y-1 overflow-auto text-muted"
+              data-testid="automations-n8n-workflows"
+            >
               {smoke.data.workflows.map((w) => (
                 <li key={w.id}>
                   {w.active ? "●" : "○"} {w.name}{" "}
@@ -73,11 +91,14 @@ export default function AutomationsSettingsPage() {
         ) : null}
       </section>
 
-      <section className="rounded-xl border border-sand bg-white/75 p-4">
+      <section
+        className="rounded-xl border border-sand bg-white/75 p-4"
+        data-testid="automations-event-map"
+      >
         <h2 className="font-display text-xl font-semibold">Event map</h2>
         <ul className="mt-3 space-y-2 text-sm text-muted">
           {(eventMap.data ?? []).map((e) => (
-            <li key={e.event}>
+            <li key={e.event} data-testid={`automations-event-${e.event}`}>
               <strong className="text-ink">{e.event}</strong> → {e.workflowName}{" "}
               {e.requiresHitl ? "(HITL)" : ""}
             </li>

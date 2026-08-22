@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatReadyDbLine,
   formatReadyLlmLine,
+  formatReadyToolsLine,
   type ReadySmoke,
 } from "./ready-smoke";
 
@@ -26,5 +27,17 @@ describe("ready-smoke formatters", () => {
     expect(formatReadyDbLine(ready)).toBe(
       "database up · pgvector on · portal magic-link enabled",
     );
+  });
+
+  it("formatReadyToolsLine summarizes integration tool modes", () => {
+    const ready: ReadySmoke = {
+      tools: {
+        n8n: "configured",
+        apollo: "mock",
+        openrouter: "configured",
+      },
+    };
+    expect(formatReadyToolsLine(ready)).toContain("n8n configured");
+    expect(formatReadyToolsLine(ready)).toContain("apollo mock");
   });
 });
