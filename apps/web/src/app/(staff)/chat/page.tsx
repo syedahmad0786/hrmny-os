@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ChatReadyStrip } from "@/components/chat-ready-strip";
 import { nextLinksFromChatObservation } from "@/lib/agent-next-links";
 import { trpc } from "@/lib/trpc";
 import { observationLooksFailed, toolVerb } from "./tool-meta";
@@ -262,6 +263,7 @@ export default function HrmnyChatPage() {
             {runtimeLlm.data.freeOnly ? " · free" : ""}
           </p>
         ) : null}
+        <ChatReadyStrip />
 
         <button
           type="button"
