@@ -4,7 +4,7 @@ import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
 function CreativeQcPageInner() {
   const utils = trpc.useUtils();
@@ -14,7 +14,30 @@ function CreativeQcPageInner() {
     onSuccess: () => void utils.invalidate(),
   });
   const taskIdFromQuery = searchParams.get("taskId")?.trim() || "";
-  const taskId = taskIdFromQuery || ids.data?.creativeTaskId;
+  const clientIdFromQuery = searchParams.get("clientId")?.trim() || "";
+  const clientTasks = trpc.tasks.list.useQuery(
+    { clientId: clientIdFromQuery },
+    { enabled: Boolean(clientIdFromQuery) && !taskIdFromQuery },
+  );
+  const resolvedClientTaskId = useMemo(() => {
+    if (taskIdFromQuery || !clientIdFromQuery) return null;
+    const rows = clientTasks.data ?? [];
+    const qc =
+      rows.find((t) => t.status === "qc") ??
+      rows.find((t) => t.status === "client_review") ??
+      rows.find((t) =>
+        /creative|cutdown|reel|social/i.test(
+          `${t.taskType ?? ""} ${t.title ?? ""}`,
+        ),
+      ) ??
+      rows[0];
+    return qc?.taskId ?? null;
+  }, [clientIdFromQuery, clientTasks.data, taskIdFromQuery]);
+  // When a won-client deeplink only has clientId, never fall back to Demo Co seed.
+  const taskId =
+    taskIdFromQuery ||
+    resolvedClientTaskId ||
+    (!clientIdFromQuery ? ids.data?.creativeTaskId : undefined);
   const task = trpc.tasks.get.useQuery(
     { id: taskId! },
     { enabled: Boolean(taskId) },
@@ -339,6 +362,11 @@ function CreativeQcPageInner() {
             ? ` · clientRevisions=${task.data.clientRevisionCount}`
             : ""}
         </p>
+        {taskId ? (
+          <p className="sr-only" data-testid="creative-task-id">
+            {taskId}
+          </p>
+        ) : null}
         {task.data?.status === "revisions" ? (
           <p
             className="mt-2 rounded-md border border-ochre/40 bg-cream/90 px-3 py-2 text-ink"

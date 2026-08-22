@@ -5,7 +5,8 @@ const PROPOSE_DEAL_ID = "e0000000-0000-4000-8000-000000000005";
 
 /**
  * Sales → onboarding via deal UI (mock-safe).
- * Propose → Advance to price_cost → Mark won → Handover pack → client board.
+ * Propose → Advance to price_cost → Mark won → Handover pack → Creative.
+ * Tolerates shared demo state when an earlier suite already advanced this seed.
  */
 test.describe("Deal won → handover UI", () => {
   test("Advance, Mark won, Handover pack opens client onboarding", async ({
@@ -26,18 +27,30 @@ test.describe("Deal won → handover UI", () => {
     const advance = page.getByTestId("deal-advance");
     if (await advance.isVisible()) {
       await advance.click();
-      await expect(page.getByTestId("deal-mark-won")).toBeVisible({
-        timeout: 30_000,
-      });
+      await expect(
+        page
+          .getByTestId("deal-mark-won")
+          .or(page.getByTestId("deal-handover"))
+          .or(page.getByTestId("deal-handover-next")),
+      ).toBeVisible({ timeout: 30_000 });
     }
 
-    await page.getByTestId("deal-mark-won").click();
-    await expect(page.getByTestId("deal-handover")).toBeVisible({
-      timeout: 30_000,
-    });
+    const markWon = page.getByTestId("deal-mark-won");
+    if (await markWon.isVisible()) {
+      await markWon.click();
+      await expect(
+        page
+          .getByTestId("deal-handover")
+          .or(page.getByTestId("deal-handover-next")),
+      ).toBeVisible({ timeout: 30_000 });
+    }
 
-    await page.getByTestId("deal-handover").click();
     const next = page.getByTestId("deal-handover-next");
+    if (!(await next.isVisible())) {
+      const handover = page.getByTestId("deal-handover");
+      await expect(handover).toBeVisible({ timeout: 30_000 });
+      await handover.click();
+    }
     await expect(next).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("deal-handover-client")).toBeVisible();
     await expect(page.getByTestId("deal-handover-finance")).toBeVisible();

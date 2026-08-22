@@ -6,6 +6,7 @@
 export function buildHandoverNextLinks(input: {
   clientId: string;
   taskId?: string | null;
+  calendarId?: string | null;
   invoiceId?: string | null;
   outreachId?: string | null;
   campaignItemId?: string | null;
@@ -33,6 +34,7 @@ export function buildHandoverNextLinks(input: {
   const {
     clientId,
     taskId,
+    calendarId,
     invoiceId,
     outreachId,
     campaignItemId,
@@ -47,9 +49,13 @@ export function buildHandoverNextLinks(input: {
   if (taskId?.trim()) {
     creativeQs.set("taskId", taskId.trim());
   }
+  const accountQs = new URLSearchParams({ clientId });
+  if (calendarId?.trim()) {
+    accountQs.set("calendarId", calendarId.trim());
+  }
   return {
     client: `/clients/${clientId}`,
-    account: `/account?clientId=${encodeURIComponent(clientId)}`,
+    account: `/account?${accountQs.toString()}`,
     creative: `/creative?${creativeQs.toString()}`,
     finance: invoiceId
       ? `/finance?invoiceId=${encodeURIComponent(invoiceId)}`

@@ -137,7 +137,8 @@ export default function CrmDealDetailPage() {
                 Mark won
               </CrmBtn>
             ) : null}
-            {d.closeOutcome === "won" && d.stage === "close" ? (
+            {d.closeOutcome === "won" &&
+            (d.stage === "close" || d.stage === "handover_pack") ? (
               <CrmBtn
                 variant="primary"
                 data-testid="deal-handover"
@@ -147,7 +148,9 @@ export default function CrmDealDetailPage() {
                   setLast(r);
                 }}
               >
-                Handover pack → client
+                {d.stage === "handover_pack"
+                  ? "Refresh handover links →"
+                  : "Handover pack → client"}
               </CrmBtn>
             ) : null}
             {d.stage === "handover_pack" ? (

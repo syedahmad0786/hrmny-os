@@ -18,8 +18,8 @@ function AccountRhythmPageInner() {
     onSuccess: () => void utils.invalidate(),
   });
   const fromQuery = searchParams.get("clientId")?.trim() || "";
+  const calendarIdFromQuery = searchParams.get("calendarId")?.trim() || "";
   const clientId = fromQuery || ids.data?.clientId;
-  const calendarId = ids.data?.calendarId;
 
   const month1 = trpc.clients.month1.get.useQuery(
     { clientId: clientId! },
@@ -29,6 +29,12 @@ function AccountRhythmPageInner() {
     { clientId: clientId! },
     { enabled: Boolean(clientId) },
   );
+  // Prefer ?calendarId=, then this client's first calendar; Demo seed only when
+  // no clientId query (bare /account).
+  const calendarId =
+    calendarIdFromQuery ||
+    calendars.data?.[0]?.calendarId ||
+    (!fromQuery ? ids.data?.calendarId : undefined);
   const escalate = trpc.calendars.escalations.useQuery();
   const advance = trpc.clients.month1.transition.useMutation({
     onSuccess: () => void utils.clients.month1.invalidate(),
@@ -149,11 +155,19 @@ function AccountRhythmPageInner() {
             Availability, Month-1 rhythm, and calendar controls
           </p>
           {clientId ? (
-            <p className="mt-1 text-xs text-muted">
+            <p
+              className="mt-1 text-xs text-muted"
+              data-testid="account-active-client"
+            >
               Active client {clientId.slice(0, 8)}…
               {ids.data && "source" in ids.data && ids.data.source
                 ? ` · ${ids.data.source.replaceAll("_", " ")}`
                 : ""}
+            </p>
+          ) : null}
+          {activeCalendarId ? (
+            <p className="sr-only" data-testid="account-active-calendar">
+              {activeCalendarId}
             </p>
           ) : null}
         </div>

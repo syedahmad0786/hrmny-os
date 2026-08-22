@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { useParams, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export default function ClientOnboardingPage() {
   const params = useParams<{ id: string }>();
@@ -19,6 +19,8 @@ export default function ClientOnboardingPage() {
   const client = trpc.clients.get.useQuery({ id });
   const onboarding = trpc.clients.onboarding.get.useQuery({ clientId: id });
   const immersion = trpc.clients.immersion.get.useQuery({ clientId: id });
+  const tasks = trpc.tasks.list.useQuery({ clientId: id });
+  const calendars = trpc.calendars.listByClient.useQuery({ clientId: id });
   const signoff = trpc.clients.onboarding.signoff.useMutation({
     onSuccess: () => void utils.clients.invalidate(),
   });
@@ -31,6 +33,31 @@ export default function ClientOnboardingPage() {
   const [audience, setAudience] = useState("");
   const [objective, setObjective] = useState("");
   const [portalMsg, setPortalMsg] = useState<string | null>(null);
+
+  const creativeTaskId = useMemo(() => {
+    const rows = tasks.data ?? [];
+    const qc =
+      rows.find((t) => t.status === "qc") ??
+      rows.find((t) => t.status === "client_review") ??
+      rows.find((t) =>
+        /creative|cutdown|reel|social/i.test(
+          `${t.taskType ?? ""} ${t.title ?? ""}`,
+        ),
+      ) ??
+      rows[0];
+    return qc?.taskId ?? null;
+  }, [tasks.data]);
+  const calendarId = calendars.data?.[0]?.calendarId ?? null;
+  const continueLinks = useMemo(() => {
+    const creativeQs = new URLSearchParams({ clientId: id });
+    if (creativeTaskId) creativeQs.set("taskId", creativeTaskId);
+    const accountQs = new URLSearchParams({ clientId: id });
+    if (calendarId) accountQs.set("calendarId", calendarId);
+    return {
+      account: `/account?${accountQs.toString()}`,
+      creative: `/creative?${creativeQs.toString()}`,
+    };
+  }, [id, creativeTaskId, calendarId]);
 
   useEffect(() => {
     if (focusPhase == null || Number.isNaN(focusPhase)) return;
@@ -58,15 +85,18 @@ export default function ClientOnboardingPage() {
         <nav
           className="mt-3 flex flex-wrap gap-2 text-sm"
           aria-label="Continue OS after handover"
+          data-testid="client-continue-os"
         >
           <Link
-            href={`/account?clientId=${encodeURIComponent(id)}`}
+            href={continueLinks.account}
+            data-testid="client-continue-account"
             className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
           >
             Account calendar →
           </Link>
           <Link
-            href={`/creative?clientId=${encodeURIComponent(id)}`}
+            href={continueLinks.creative}
+            data-testid="client-continue-creative"
             className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
           >
             Creative →
