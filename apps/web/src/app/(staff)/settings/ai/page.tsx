@@ -87,13 +87,19 @@ export default function AiAdminPage() {
           value={clientId}
           onChange={(e) => setClientId(e.target.value)}
         >
-          <option value="">Actor-only (no client scope)</option>
+          <option value="">Staff / org scope</option>
           {(clients.data ?? []).map((c) => (
             <option key={c.clientId} value={c.clientId}>
               {c.name}
             </option>
           ))}
         </select>
+        {clientId ? (
+          <p className="mt-2 text-xs text-muted" data-testid="ai-sandbox-hint">
+            Client sandbox applies to funnel agent runs. OS settle tools stay
+            org-scoped (sandbox cleared on Run).
+          </p>
+        ) : null}
       </section>
 
       {dashboard.isLoading ? (
@@ -593,6 +599,7 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
                       "crm.closed_loop",
                       "finance.os_approve",
                       "portal.os_approve",
+                      "clients.os_month1_advance",
                     ].includes(t),
                   );
                   runCustom.mutate({
@@ -605,6 +612,12 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
                 }}
               >
                 Run
+                {clientId &&
+                (agent.effectiveAllowedTools ?? []).some((t) =>
+                  ["crm.closed_loop", "finance.os_approve"].includes(t),
+                )
+                  ? " (org)"
+                  : ""}
               </button>
               <button
                 type="button"

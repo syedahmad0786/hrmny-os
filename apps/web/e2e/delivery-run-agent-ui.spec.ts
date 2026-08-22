@@ -63,11 +63,18 @@ test.describe("Delivery Run agent UI", () => {
       .fill("E2E dedicated: next delivery step for this client task?");
     const run = page.getByTestId("delivery-run-agent");
     await expect(run).toBeEnabled();
+    await expect(page.getByTestId("delivery-agent-sandbox-hint")).toBeVisible();
+    await expect(page.getByTestId("delivery-sandbox-client")).not.toHaveText("");
+    await expect(page.getByTestId("delivery-agent-allowlist")).toBeVisible();
     await run.click();
 
     const output = page.getByTestId("delivery-agent-output");
     await expect(output).toBeVisible({ timeout: 60_000 });
     await expect(output).not.toHaveText("");
     await expect(output).toContainText(/\w{8,}/);
+
+    // Delivery coach uses funnel tools — expect at least one tool observation.
+    const toolResults = page.getByTestId("delivery-agent-tool-results");
+    await expect(toolResults).toBeVisible({ timeout: 15_000 });
   });
 });

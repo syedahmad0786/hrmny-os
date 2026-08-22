@@ -222,6 +222,34 @@ export default function HrmnyChatPage() {
                 ? ` · model ${(agents.data ?? []).find((a) => a.slug === agentSlug)?.model}`
                 : " · default free OpenRouter model"}
               . Start chatting (or New chat) to bind a session.
+              {(() => {
+                const selected = (agents.data ?? []).find(
+                  (a) => a.slug === agentSlug,
+                );
+                const preview =
+                  selected &&
+                  "toolsPreview" in selected &&
+                  Array.isArray(selected.toolsPreview)
+                    ? (selected.toolsPreview as string[])
+                    : [];
+                if (!preview.length) return null;
+                return (
+                  <>
+                    <br />
+                    <span
+                      className="font-mono"
+                      data-testid="chat-agent-tools-preview"
+                    >
+                      {preview.join(", ")}
+                      {"toolCount" in selected! &&
+                      typeof selected!.toolCount === "number" &&
+                      selected!.toolCount > preview.length
+                        ? ` +${selected!.toolCount - preview.length}`
+                        : ""}
+                    </span>
+                  </>
+                );
+              })()}
             </p>
           ) : null}
           <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
