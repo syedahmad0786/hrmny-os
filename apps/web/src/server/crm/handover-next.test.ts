@@ -11,6 +11,7 @@ describe("buildHandoverNextLinks", () => {
     expect(next.creative).toContain("clientId=");
     expect(next.approvals).toBe("/approvals");
     expect(next.outreach).toBe("/crm/outreach");
+    expect(next.campaigns).toBe("/approvals");
     expect(next.portal).toBe("/portal/login");
     expect(next.onboarding).toBe("/portal/onboarding");
     expect(next.finance).toBe("/finance");
@@ -21,10 +22,12 @@ describe("buildHandoverNextLinks", () => {
       clientId: "c1000000-0000-4000-8000-000000000001",
       outreachId: "o-abc",
       invoiceId: "inv-1",
+      campaignItemId: "camp-1",
     });
     expect(next.outreach).toBe("/crm/outreach?id=o-abc");
     expect(next.approvals).toBe("/approvals?id=o-abc");
     expect(next.finance).toBe("/finance?invoiceId=inv-1");
+    expect(next.campaigns).toBe("/approvals?id=camp-1");
   });
 
   it("uses distinct magic-link paths for portal vs onboarding", () => {

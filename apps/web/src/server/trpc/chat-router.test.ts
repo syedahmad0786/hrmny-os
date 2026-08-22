@@ -221,14 +221,66 @@ describe("chat harness funnel_act", () => {
       tools?: Array<{
         tool: string;
         ok: boolean;
-        data?: { qcPassed?: boolean };
+        data?: { qcPassed?: boolean; status?: string };
       }>;
     };
     const row = qcResult.tools?.find((r) => r.tool === "creative.os_qc");
     expect(row?.ok).toBe(true);
     expect(row?.data?.qcPassed).toBe(true);
-    expect(
-      (row?.data as { status?: string } | undefined)?.status,
-    ).toBe("client_review");
+    expect(row?.data?.status).toBe("client_review");
+  });
+
+  it("campaigns_os_approve then publish after closed loop", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const tools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
+    expect(tools.some((t) => t.name === "campaigns_os_approve")).toBe(true);
+    expect(tools.some((t) => t.name === "campaigns_os_publish")).toBe(true);
+
+    const closed = tools.find((t) => t.name === "crm_closed_loop");
+    const loopResult = (await closed!.run({
+      prompt: "Run demo closed loop for company: Chat Campaign Co",
+    })) as {
+      tools?: Array<{
+        tool: string;
+        ok: boolean;
+        data?: { campaignItemId?: string };
+      }>;
+    };
+    const campaignItemId = loopResult.tools?.find(
+      (r) => r.tool === "crm.closed_loop",
+    )?.data?.campaignItemId;
+    expect(campaignItemId).toBeTruthy();
+
+    const approveTool = tools.find((t) => t.name === "campaigns_os_approve");
+    const approveResult = (await approveTool!.run({
+      prompt: "Approve OS campaign",
+      campaignItemId,
+    })) as {
+      tools?: Array<{ tool: string; ok: boolean; data?: { status?: string } }>;
+    };
+    const approved = approveResult.tools?.find(
+      (r) => r.tool === "campaigns.os_approve",
+    );
+    expect(approved?.ok).toBe(true);
+    expect(approved?.data?.status).toBe("approved");
+
+    const publishTool = tools.find((t) => t.name === "campaigns_os_publish");
+    const publishResult = (await publishTool!.run({
+      prompt: "Publish OS campaign stub",
+      campaignItemId,
+    })) as {
+      tools?: Array<{
+        tool: string;
+        ok: boolean;
+        data?: { status?: string; publishMode?: string };
+      }>;
+    };
+    const published = publishResult.tools?.find(
+      (r) => r.tool === "campaigns.os_publish",
+    );
+    expect(published?.ok).toBe(true);
+    expect(published?.data?.status).toBe("published");
+    expect(published?.data?.publishMode).toBe("stub");
   });
 });

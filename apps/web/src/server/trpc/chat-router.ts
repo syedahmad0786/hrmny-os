@@ -265,6 +265,54 @@ export function buildChatDefaultTools(scope: {
               return { tools: results };
             },
           } satisfies HarnessTool,
+          {
+            name: "campaigns_os_approve",
+            description:
+              "Org-only: approve a draft campaign. Prompt must mention approve + campaignItemId UUID.",
+            run: async (args: Record<string, unknown>) => {
+              const { runAgentTools } = await import("../ai/agent-tools");
+              const id =
+                typeof args.campaignItemId === "string"
+                  ? args.campaignItemId
+                  : "";
+              const base = String(
+                args.prompt ?? args.query ?? "Approve OS campaign",
+              );
+              const prompt = id
+                ? `${base} campaignItemId: ${id}`
+                : base;
+              const results = await runAgentTools({
+                allowedTools: ["campaigns.os_approve"],
+                prompt,
+                scope: { employeeId: scope.employeeId },
+              });
+              return { tools: results };
+            },
+          } satisfies HarnessTool,
+          {
+            name: "campaigns_os_publish",
+            description:
+              "Org-only: publish an approved campaign via LinkedIn stub (no live LI). Prompt must mention publish + campaignItemId.",
+            run: async (args: Record<string, unknown>) => {
+              const { runAgentTools } = await import("../ai/agent-tools");
+              const id =
+                typeof args.campaignItemId === "string"
+                  ? args.campaignItemId
+                  : "";
+              const base = String(
+                args.prompt ?? args.query ?? "Publish OS campaign stub",
+              );
+              const prompt = id
+                ? `${base} campaignItemId: ${id}`
+                : base;
+              const results = await runAgentTools({
+                allowedTools: ["campaigns.os_publish"],
+                prompt,
+                scope: { employeeId: scope.employeeId },
+              });
+              return { tools: results };
+            },
+          } satisfies HarnessTool,
         ]),
     {
       name: "now",

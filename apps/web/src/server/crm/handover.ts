@@ -124,6 +124,8 @@ export type HandoverPackResult = {
   } | null;
   /** HITL outreach draft for the won deal (reuses existing if any). */
   outreachId: string | null;
+  /** LinkedIn (or channel) campaign draft seeded for Approvals / publish. */
+  campaignItemId: string | null;
   /** Deep links for staff after won → OS. */
   next: {
     client: string;
@@ -134,6 +136,7 @@ export type HandoverPackResult = {
     portal: string;
     onboarding: string;
     outreach: string;
+    campaigns: string;
   };
 };
 
@@ -223,6 +226,26 @@ async function memoryHandoverPack(input: {
     ownerEmployeeId: input.actorEmployeeId ?? null,
   });
   fired.push("creative.task_seed");
+
+  let campaignItemId: string | null = null;
+  try {
+    const { createCampaignDraft } = await import("../campaigns/repository");
+    const draft = await createCampaignDraft({
+      title: `${demoClient.name} — launch LinkedIn teaser`,
+      channel: "linkedin",
+      scheduledFor: new Date().toISOString().slice(0, 10),
+      clientId: demoClient.clientId,
+      body: {
+        copy: `Excited to partner with ${demoClient.name} on creative that converts across the UAE.`,
+        kind: "won_handover_seed",
+        mode: "memory",
+      },
+    });
+    campaignItemId = draft.campaignItemId;
+    fired.push("campaign.draft_seed");
+  } catch {
+    campaignItemId = null;
+  }
 
   let invoiceId: string | null = null;
   try {
@@ -404,6 +427,7 @@ async function memoryHandoverPack(input: {
     clientId: client.clientId,
     invoiceId,
     outreachId,
+    campaignItemId,
     portalPath: portalInvite?.portalPath,
     onboardingPath: portalInvite?.onboardingPath,
   });
@@ -424,6 +448,7 @@ async function memoryHandoverPack(input: {
     calendarId: null,
     portalInvite,
     outreachId,
+    campaignItemId,
     next,
   };
 }
@@ -538,9 +563,10 @@ export async function durableHandoverPack(input: {
   });
   if (task) fired.push("creative.task_seed");
 
+  let campaignItemId: string | null = null;
   try {
     const { createCampaignDraft } = await import("../campaigns/repository");
-    await createCampaignDraft({
+    const draft = await createCampaignDraft({
       title: `${client.name} — launch LinkedIn teaser`,
       channel: "linkedin",
       scheduledFor: new Date().toISOString().slice(0, 10),
@@ -550,6 +576,7 @@ export async function durableHandoverPack(input: {
         kind: "won_handover_seed",
       },
     });
+    campaignItemId = draft.campaignItemId;
     fired.push("campaign.draft_seed");
   } catch {
     /* campaign seed best-effort — portal campaign-approvals can draft manually */
@@ -781,6 +808,7 @@ export async function durableHandoverPack(input: {
     clientId: client.clientId,
     invoiceId,
     outreachId,
+    campaignItemId,
     portalPath: portalInvite?.portalPath,
     onboardingPath: portalInvite?.onboardingPath,
   });
@@ -800,6 +828,7 @@ export async function durableHandoverPack(input: {
     calendarId,
     portalInvite,
     outreachId,
+    campaignItemId,
     next,
   };
 }
