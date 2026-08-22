@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@hrmny/ui";
+import { demoBlockerAnchor } from "@/lib/demo-blocker-anchor";
 import { trpc } from "@/lib/trpc";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import Link from "next/link";
@@ -21,21 +22,6 @@ const WORK_APP_FAMILIES = [
   { key: "communication", label: "Communication" },
   { key: "enterprise", label: "Enterprise workflows" },
 ] as const;
-
-/** Map /api/ready blocker copy → in-page Connections anchor. */
-function blockerAnchor(text: string): string | null {
-  const t = text.toLowerCase();
-  if (t.includes("apollo")) return "#conn-apollo";
-  if (t.includes("hunter")) return "#conn-hunter";
-  if (t.includes("xero")) return "#conn-xero";
-  if (t.includes("google workspace") || t.includes("googleworkspace")) {
-    return "#conn-google_workspace";
-  }
-  if (t.includes("linkedin")) return "#conn-linkedin";
-  if (t.includes("canva")) return "#conn-canva";
-  if (t.includes("resend")) return "#direct-business-connections";
-  return null;
-}
 
 export default function ConnectionsPage() {
   const utils = trpc.useUtils();
@@ -265,7 +251,7 @@ export default function ConnectionsPage() {
           </p>
           <ul className="mt-3 list-disc space-y-1 pl-5 text-ink">
             {demoBlockers.map((item) => {
-              const href = blockerAnchor(item);
+              const href = demoBlockerAnchor(item);
               return (
                 <li key={item} data-testid="connections-blocker">
                   {href ? (
