@@ -57,6 +57,7 @@ export const DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS = [
   "finance.os_approve",
   "finance.os_issue",
   "outreach.os_approve",
+  "briefs.os_lock",
   "creative.os_qc",
   "campaigns.os_approve",
   "campaigns.os_publish",
@@ -901,6 +902,74 @@ export async function runAgentTools(input: {
             err instanceof Error ? err.message : "outreach_os_approve_failed",
         });
       }
+    }
+  }
+
+
+  /**
+   * Lock a DoR-ready brief and spawn creative_spawn. Prompt-gated.
+   * Allowed in client sandbox or org scope. Never in DEFAULT_FUNNEL_AGENT_TOOLS.
+   * No Canva required — Traffic → Creative handoff on command.
+   */
+  const wantsBriefLock =
+    (want("briefs.os_lock") ||
+      want("brief.os_lock") ||
+      want("briefs.lock") ||
+      want("traffic.lock_brief")) &&
+    /(?:lock\s+(?:the\s+)?(?:dor\s+)?brief|brief\s+lock|os[_\s-]?lock(?:\s+brief)?|lock\s+dor)/i.test(
+      input.prompt,
+    );
+
+  if (wantsBriefLock) {
+    try {
+      const { runOsBriefLock } = await import("../tasks/os-brief-lock");
+      const out = await runOsBriefLock({
+        prompt: input.prompt,
+        actorEmployeeId:
+          input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001",
+        taskId: input.scope.taskId ?? null,
+        clientId: input.scope.clientId ?? null,
+      });
+      const clientId = out.clientId;
+      const spawnId = out.spawnedTaskId;
+      results.push({
+        tool: "briefs.os_lock",
+        ok: out.ok,
+        error: out.ok ? undefined : out.reason,
+        data: out.ok
+          ? {
+              briefId: out.briefId,
+              taskId: out.taskId,
+              clientId,
+              taskStatus: out.taskStatus,
+              spawnedTaskId: spawnId,
+              reuse: out.reuse ?? false,
+              seamEventId: out.seamEventId ?? null,
+              next: clientId
+                ? {
+                    traffic: `/traffic?clientId=${encodeURIComponent(clientId)}${
+                      out.taskId
+                        ? `&taskId=${encodeURIComponent(out.taskId)}`
+                        : ""
+                    }`,
+                    creative: spawnId
+                      ? `/creative?clientId=${encodeURIComponent(clientId)}&taskId=${encodeURIComponent(spawnId)}`
+                      : `/creative?clientId=${encodeURIComponent(clientId)}`,
+                    delivery: `/delivery?clientId=${encodeURIComponent(clientId)}`,
+                  }
+                : undefined,
+            }
+          : {
+              briefId: out.briefId,
+              code: out.code,
+            },
+      });
+    } catch (err) {
+      results.push({
+        tool: "briefs.os_lock",
+        ok: false,
+        error: err instanceof Error ? err.message : "briefs_os_lock_failed",
+      });
     }
   }
 
