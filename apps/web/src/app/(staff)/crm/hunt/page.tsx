@@ -365,7 +365,10 @@ export default function HuntClientsPage() {
                   <p className="mt-2 flex flex-wrap gap-3 text-sm">
                     <Link
                       className="underline"
-                      href={demo.data.next.account ?? "/account"}
+                      href={
+                        demo.data.next.account ??
+                        `/account?clientId=${encodeURIComponent(demo.data.clientId)}`
+                      }
                     >
                       Open Account calendar →
                     </Link>

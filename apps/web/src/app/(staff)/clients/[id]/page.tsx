@@ -171,12 +171,13 @@ export default function ClientOnboardingPage() {
           </Link>
           <button
             type="button"
+            data-testid="client-continue-portal"
             className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline disabled:opacity-50"
             disabled={reviewHref.isPending}
             onClick={() => {
               setPortalMsg(null);
               void reviewHref
-                .mutateAsync({ clientId: id })
+                .mutateAsync({ clientId: id, next: "/portal/approvals" })
                 .then((data) => {
                   window.location.assign(data.portalPath);
                 })
@@ -187,9 +188,37 @@ export default function ClientOnboardingPage() {
                 });
             }}
           >
-            {reviewHref.isPending
+            {reviewHref.isPending &&
+            (reviewHref.variables?.next == null ||
+              reviewHref.variables.next === "/portal/approvals")
               ? "Minting portal…"
               : "Portal approvals →"}
+          </button>
+          <button
+            type="button"
+            data-testid="client-continue-onboarding"
+            className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline disabled:opacity-50"
+            disabled={reviewHref.isPending}
+            onClick={() => {
+              setPortalMsg(null);
+              void reviewHref
+                .mutateAsync({ clientId: id, next: "/portal/onboarding" })
+                .then((data) => {
+                  window.location.assign(data.portalPath);
+                })
+                .catch((err: unknown) => {
+                  setPortalMsg(
+                    err instanceof Error
+                      ? err.message
+                      : "Onboarding invite failed",
+                  );
+                });
+            }}
+          >
+            {reviewHref.isPending &&
+            reviewHref.variables?.next === "/portal/onboarding"
+              ? "Minting onboarding…"
+              : "Portal onboarding →"}
           </button>
         </nav>
         {portalMsg ? (
