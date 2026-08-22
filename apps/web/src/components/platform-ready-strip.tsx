@@ -1,0 +1,49 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  formatReadyDbLine,
+  formatReadyLlmLine,
+  type ReadySmoke,
+} from "@/lib/ready-smoke";
+
+/** Lightweight `/api/ready` strip for Connections and other staff setup surfaces. */
+export function PlatformReadyStrip({
+  testId = "platform-ready-strip",
+}: {
+  testId?: string;
+}) {
+  const [ready, setReady] = useState<ReadySmoke | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/ready")
+      .then((r) => r.json())
+      .then((body: ReadySmoke) => {
+        if (!cancelled) setReady(body);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!ready) return null;
+
+  return (
+    <section
+      className="rounded-lg border border-sand bg-white/75 p-4 text-sm"
+      data-testid={testId}
+    >
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
+        Platform readiness
+      </p>
+      <p className="mt-2 text-muted" data-testid={`${testId}-llm`}>
+        LLM {formatReadyLlmLine(ready)}
+      </p>
+      <p className="mt-1 text-muted" data-testid={`${testId}-db`}>
+        {formatReadyDbLine(ready)}
+      </p>
+    </section>
+  );
+}

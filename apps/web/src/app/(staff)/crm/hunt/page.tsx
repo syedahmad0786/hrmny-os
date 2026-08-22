@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { demoBlockerConnectionsPath } from "@/lib/demo-blocker-anchor";
+import { formatReadyLlmLine, type ReadySmoke } from "@/lib/ready-smoke";
 
 const STEPS = [
   {
@@ -31,30 +32,6 @@ const STEPS = [
     body: "Guarded stage moves from first signal to handover.",
   },
 ] as const;
-
-type ReadySmoke = {
-  tools?: Record<string, string>;
-  portalMagicLink?: string;
-  blockers?: string[];
-  connections?: {
-    googleWorkspace?: number;
-    canva?: number;
-    linkedin?: number;
-    xero?: number;
-    errors?: {
-      googleWorkspace?: number;
-      canva?: number;
-      linkedin?: number;
-      xero?: number;
-    };
-    lastErrors?: {
-      googleWorkspace?: string | null;
-      canva?: string | null;
-      linkedin?: string | null;
-      xero?: string | null;
-    };
-  };
-};
 
 export default function HuntClientsPage() {
   const [result, setResult] = useState<string | null>(null);
@@ -346,6 +323,11 @@ export default function HuntClientsPage() {
                     Connections
                   </Link>
                 </p>
+                {ready ? (
+                  <p data-testid="hunt-runtime-llm">
+                    LLM {formatReadyLlmLine(ready)}
+                  </p>
+                ) : null}
                 {ready?.connections ? (
                   <p>
                     Connected accounts: GW {ready.connections.googleWorkspace ?? 0}{" "}

@@ -7,6 +7,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ConnectionHealth } from "./connection-health";
+import { PlatformReadyStrip } from "@/components/platform-ready-strip";
 
 const GOOGLE_WORKSPACE_SCOPES = [
   "https://www.googleapis.com/auth/gmail.modify",
@@ -124,6 +125,9 @@ export default function ConnectionsPage() {
         (body: {
           tools?: Record<string, string>;
           blockers?: string[];
+          llmProvider?: string;
+          llmDefaultModel?: string;
+          llmFreeOnly?: boolean;
           connections?: {
             googleWorkspace?: number;
             canva?: number;
@@ -237,6 +241,8 @@ export default function ConnectionsPage() {
           .
         </p>
       </div>
+
+      <PlatformReadyStrip testId="connections-platform-ready" />
 
       <ConnectionHealth />
 
