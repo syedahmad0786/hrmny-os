@@ -14,7 +14,7 @@ test.describe("Chat OS settle agent UI", () => {
     page,
   }) => {
     // Brief lock + full settle path regularly exceeds Playwright's 30s default.
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
 
@@ -32,23 +32,37 @@ test.describe("Chat OS settle agent UI", () => {
     await expect(page.getByTestId("chat-context-banner")).toBeVisible();
     await expect(page.getByTestId("chat-pill-agent")).toContainText(/OS settle/i);
     await expect(page.getByTestId("chat-agent-tools-preview")).toBeVisible();
+    await expect(page.getByTestId("chat-agent-tools-preview")).toContainText(
+      /closed_loop|briefs\.os_lock|finance\.os/i,
+    );
 
     await page.getByTestId("chat-new").click();
+    // Wait until the new session is bound to os-settle (avoids racing an
+    // older org thread that lacked agent_act).
+    await expect(page.getByTestId("chat-pill-agent")).toContainText(/OS settle/i, {
+      timeout: 30_000,
+    });
     await expect(page.getByTestId("chat-starter-os-settle")).toBeVisible({
       timeout: 30_000,
     });
     await page.getByTestId("chat-starter-os-settle").click();
 
     const work = page.getByTestId("chat-work-steps");
-    await expect(work).toBeVisible({ timeout: 90_000 });
-    // Prefer agent_act; settle may also surface briefs_os_lock / crm_closed_loop
-    // as discrete harness steps when the mock tool router picks them.
+    await expect(work).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByTestId("chat-assistant-message")).toBeVisible({
+      timeout: 30_000,
+    });
+    // Prefer agent_act; settle may also surface discrete harness tools when
+    // the mock router picks them. Observation text covers inner agent tools.
     const settleStep = page
       .getByTestId("chat-tool-agent_act")
       .or(page.getByTestId("chat-tool-briefs_os_lock"))
-      .or(page.getByTestId("chat-tool-crm_closed_loop"));
-    await expect(settleStep.first()).toBeVisible({ timeout: 60_000 });
+      .or(page.getByTestId("chat-tool-crm_closed_loop"))
+      .or(page.getByTestId("chat-tool-finance_os_approve"));
+    await expect(settleStep).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("chat-tool-observation").first()).toBeVisible();
-    await expect(page.getByTestId("chat-assistant-message")).toBeVisible();
+    await expect(work).toContainText(
+      /agent_act|briefs_os_lock|crm_closed_loop|closed_loop|briefs\.os_lock|finance/i,
+    );
   });
 });

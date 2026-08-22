@@ -122,17 +122,22 @@ export default function HrmnyChatPage() {
 
   useEffect(() => {
     if (threadId) return;
+    // Match sandbox AND agent so selecting os-settle cannot be overwritten by
+    // an older org thread (which would drop agent_act from the harness).
     const preferred = (threads.data ?? []).find(
-      (t) => (t.clientId ?? "") === clientId,
+      (t) =>
+        (t.clientId ?? "") === clientId &&
+        (t.agentSlug ?? "") === agentSlug,
     );
-    // Only auto-open a session that matches the selected sandbox.
     if (preferred) setThreadId(preferred.chatThreadId);
-  }, [threadId, threads.data, clientId]);
+  }, [threadId, threads.data, clientId, agentSlug]);
 
   const activeThread = threads.data?.find((t) => t.chatThreadId === threadId);
 
   useEffect(() => {
     if (!activeThread) return;
+    // Keep React selects in sync with the bound thread — but never clobber a
+    // newer agent/sandbox choice that intentionally cleared threadId.
     setClientId(activeThread.clientId ?? "");
     setAgentSlug(activeThread.agentSlug ?? "");
   }, [
