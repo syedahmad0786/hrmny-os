@@ -12,6 +12,15 @@ test.describe("Connections blocker anchors", () => {
       page.getByRole("heading", { name: /Connections/i }),
     ).toBeVisible({ timeout: 60_000 });
 
+    const platform = page.getByTestId("connections-platform-ready");
+    await expect(platform).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("connections-platform-ready-llm")).toContainText(
+      /mock|openrouter/i,
+    );
+    await expect(page.getByTestId("connections-platform-ready-db")).toContainText(
+      /pgvector/i,
+    );
+
     const apolloCard = page.getByTestId("conn-card-apollo");
     await expect(apolloCard).toBeVisible({ timeout: 30_000 });
 

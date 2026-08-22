@@ -16,6 +16,8 @@ test.describe("Hunt ready blockers", () => {
     await expect(page.getByTestId("hunt-ready-banner")).toBeVisible({
       timeout: 30_000,
     });
+    await expect(page.getByTestId("hunt-runtime-llm")).toBeVisible();
+    await expect(page.getByTestId("hunt-runtime-llm")).toContainText(/mock|openrouter/i);
 
     const blockers = page.getByTestId("hunt-ready-blockers");
     await expect(blockers).toBeVisible();
