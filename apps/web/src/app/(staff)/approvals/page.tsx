@@ -28,9 +28,26 @@ export default function ApprovalsPage() {
 function ApprovalsInner() {
   const utils = trpc.useUtils();
   const searchParams = useSearchParams();
-  const focusId = searchParams.get("id");
+  const focusIdFromQuery = searchParams.get("id")?.trim() || "";
+  const clientIdFromQuery = searchParams.get("clientId")?.trim() || "";
   // Outreach drafts awaiting a human send (leadgen router, gate: draft→approved→sent).
   const outreach = trpc.leadgen.outreach.list.useQuery({ state: "draft" });
+  const client = trpc.clients.get.useQuery(
+    { id: clientIdFromQuery },
+    { enabled: Boolean(clientIdFromQuery) && !focusIdFromQuery },
+  );
+  const resolvedClientOutreachId = useMemo(() => {
+    if (focusIdFromQuery || !clientIdFromQuery) return null;
+    const dealId =
+      client.data && "dealId" in client.data
+        ? (client.data.dealId as string | null | undefined)
+        : null;
+    if (!dealId) return null;
+    return (
+      (outreach.data ?? []).find((o) => o.dealId === dealId)?.id ?? null
+    );
+  }, [client.data, clientIdFromQuery, focusIdFromQuery, outreach.data]);
+  const focusId = focusIdFromQuery || resolvedClientOutreachId || null;
   // Campaign items approved and awaiting publish (campaigns router, gate: approved→published).
   const campaigns = trpc.campaigns.list.useQuery();
   // Items sitting in the client portal awaiting client sign-off — staff-visible, no staff action.
@@ -41,7 +58,7 @@ function ApprovalsInner() {
   const discardOutreach = trpc.leadgen.outreach.discard.useMutation();
   const moveCampaign = trpc.campaigns.transition.useMutation();
 
-  const [selectedId, setSelectedId] = useState<string | null>(focusId);
+  const [selectedId, setSelectedId] = useState<string | null>(focusIdFromQuery || null);
   const [feedback, setFeedback] = useState<Record<string, Feedback>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [ready, setReady] = useState<{

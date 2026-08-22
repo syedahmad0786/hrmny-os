@@ -106,6 +106,7 @@ test.describe("Clients Continue OS after handover", () => {
       "http://local",
     ).searchParams.get("id");
     expect(continueOutreachId).toBeTruthy();
+    expect(outreachHref).toMatch(/clientId=/);
 
     const continueApprovals = page.getByTestId("client-continue-approvals");
     await expect(continueApprovals).toHaveAttribute("href", /[?&]id=/);
@@ -179,5 +180,14 @@ test.describe("Clients Continue OS after handover", () => {
     await expect(
       page.getByTestId(`approvals-item-${continueApprovalsId}`),
     ).toBeVisible({ timeout: 60_000 });
+
+    // clientId-only Approvals URL must resolve the same won-client outreach draft.
+    await page.goto(`/approvals?clientId=${clientId}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page.getByTestId("approvals-active-id")).toHaveText(
+      continueApprovalsId!,
+      { timeout: 60_000 },
+    );
   });
 });

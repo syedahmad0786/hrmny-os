@@ -86,12 +86,16 @@ export default function ClientOnboardingPage() {
         if (invoiceId) qs.set("invoiceId", invoiceId);
         return `/finance?${qs.toString()}`;
       })(),
-      outreach: outreachId
-        ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
-        : "/crm/outreach",
-      approvals: approvalsId
-        ? `/approvals?id=${encodeURIComponent(approvalsId)}`
-        : "/approvals",
+      outreach: (() => {
+        const qs = new URLSearchParams({ clientId: id });
+        if (outreachId) qs.set("id", outreachId);
+        return `/crm/outreach?${qs.toString()}`;
+      })(),
+      approvals: (() => {
+        const qs = new URLSearchParams({ clientId: id });
+        if (approvalsId) qs.set("id", approvalsId);
+        return `/approvals?${qs.toString()}`;
+      })(),
     };
   }, [
     id,
