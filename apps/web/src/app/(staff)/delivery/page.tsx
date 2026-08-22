@@ -124,11 +124,30 @@ export default function DeliveryBoardPage() {
           {board.data?.ratio ?? 0}
         </span>
         {" · "}
-        <Link href="/traffic" className="text-ochre underline">
+        <Link
+          href={
+            selected?.clientId
+              ? `/traffic?clientId=${encodeURIComponent(selected.clientId)}`
+              : "/traffic"
+          }
+          className="text-ochre underline"
+          data-testid="delivery-traffic-link"
+        >
           Traffic / DoR
         </Link>
         {" · "}
-        <Link href="/creative" className="text-ochre underline">
+        <Link
+          href={(() => {
+            if (!selected?.clientId) return "/creative";
+            const qs = new URLSearchParams({
+              clientId: selected.clientId,
+            });
+            if (selected.taskId) qs.set("taskId", selected.taskId);
+            return `/creative?${qs.toString()}`;
+          })()}
+          className="text-ochre underline"
+          data-testid="delivery-creative-link"
+        >
           Creative QC
         </Link>
         {" · "}
@@ -141,7 +160,10 @@ export default function DeliveryBoardPage() {
             if (!selected?.clientId) return;
             setPortalMsg(null);
             void reviewHref
-              .mutateAsync({ clientId: selected.clientId })
+              .mutateAsync({
+                clientId: selected.clientId,
+                next: "/portal/approvals",
+              })
               .then((data) => {
                 window.location.assign(data.portalPath);
               })
@@ -152,7 +174,42 @@ export default function DeliveryBoardPage() {
               });
           }}
         >
-          {reviewHref.isPending ? "Minting portal…" : "Client portal"}
+          {reviewHref.isPending &&
+          (reviewHref.variables?.next == null ||
+            reviewHref.variables.next === "/portal/approvals")
+            ? "Minting portal…"
+            : "Client portal"}
+        </button>
+        {" · "}
+        <button
+          type="button"
+          className="text-ochre underline disabled:opacity-40"
+          data-testid="delivery-client-onboarding"
+          disabled={!selected?.clientId || reviewHref.isPending}
+          onClick={() => {
+            if (!selected?.clientId) return;
+            setPortalMsg(null);
+            void reviewHref
+              .mutateAsync({
+                clientId: selected.clientId,
+                next: "/portal/onboarding",
+              })
+              .then((data) => {
+                window.location.assign(data.portalPath);
+              })
+              .catch((err: unknown) => {
+                setPortalMsg(
+                  err instanceof Error
+                    ? err.message
+                    : "Onboarding invite failed",
+                );
+              });
+          }}
+        >
+          {reviewHref.isPending &&
+          reviewHref.variables?.next === "/portal/onboarding"
+            ? "Minting onboarding…"
+            : "Portal onboarding"}
         </button>
         {" · "}
         <Link

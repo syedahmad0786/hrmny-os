@@ -467,6 +467,30 @@
   line-height: 1.35;
 }
 
+.hrmny-chat-tool-next {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+
+.hrmny-chat-next-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--sand, #e7e0d4);
+  background: color-mix(in srgb, #fff 88%, var(--ochre, #c47a3a) 12%);
+  padding: 0.15rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--ochre, #c47a3a);
+  text-decoration: none;
+}
+
+.hrmny-chat-next-chip:hover {
+  text-decoration: underline;
+}
+
 .hrmny-chat-live-dock {
   display: flex;
   align-items: center;

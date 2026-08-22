@@ -40,6 +40,13 @@ test.describe("Chat OS settle agent UI", () => {
     await expect(agentAct.getByTestId("chat-tool-observation")).toContainText(
       /crm\.closed_loop|closed_loop/i,
     );
+    // Closed-loop tool payloads expose next.* / portal invites as clickable chips.
+    await expect(agentAct.getByTestId("chat-tool-next")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(
+      agentAct.getByTestId("chat-next-account").or(agentAct.getByTestId("chat-next-portal")),
+    ).toBeVisible();
     await expect(page.getByTestId("chat-assistant-message")).toBeVisible();
   });
 });
