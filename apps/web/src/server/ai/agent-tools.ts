@@ -61,6 +61,8 @@ export const DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS = [
   "campaigns.os_approve",
   "campaigns.os_publish",
   "portal.os_approve",
+  "onboarding.os_signoff",
+  "calendar.os_ref_approve",
 ] as const;
 
 export type AgentToolPreset = "funnel" | "demo_os_settle";
@@ -628,6 +630,8 @@ export async function runAgentTools(input: {
     outreachId?: string;
     taskId?: string;
     campaignItemId?: string;
+    clientId?: string;
+    calendarId?: string;
   } = {};
 
   if (wantsClosedLoop) {
@@ -657,6 +661,8 @@ export async function runAgentTools(input: {
         if (loop.outreachId) loopSeed.outreachId = loop.outreachId;
         if (loop.taskId) loopSeed.taskId = loop.taskId;
         if (loop.campaignItemId) loopSeed.campaignItemId = loop.campaignItemId;
+        if (loop.clientId) loopSeed.clientId = loop.clientId;
+        if (loop.calendarId) loopSeed.calendarId = loop.calendarId;
         results.push({
           tool: "crm.closed_loop",
           ok: true,
@@ -1117,6 +1123,134 @@ export async function runAgentTools(input: {
           ok: false,
           error:
             err instanceof Error ? err.message : "portal_os_approve_failed",
+        });
+      }
+    }
+  }
+
+  /**
+   * Onboarding phase signoff (active → signed_off). Org-only; prompt-gated.
+   * Seeds clientId from closed_loop when present. Default phaseIndex = 0.
+   */
+  const wantsOnboardingSignoff =
+    !input.scope.clientId &&
+    (want("onboarding.os_signoff") ||
+      want("onboarding.signoff") ||
+      want("clients.signoff")) &&
+    /(?:onboarding\s+sign\s*off|sign\s*off\s+(?:onboarding\s+)?phase|os[_\s-]?signoff|phase\s+sign\s*off)/i.test(
+      input.prompt,
+    );
+
+  if (wantsOnboardingSignoff) {
+    const {
+      signoffOsOnboardingPhase,
+      parseClientIdFromPrompt,
+      parsePhaseIndexFromPrompt,
+    } = await import("../clients/os-onboarding-signoff");
+    const clientId =
+      parseClientIdFromPrompt(input.prompt) ?? loopSeed.clientId ?? null;
+    const phaseIndex = parsePhaseIndexFromPrompt(input.prompt) ?? 0;
+    const employeeId =
+      input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
+    if (!clientId) {
+      results.push({
+        tool: "onboarding.os_signoff",
+        ok: false,
+        error: "clientId_required",
+      });
+    } else {
+      try {
+        const out = await signoffOsOnboardingPhase({
+          clientId,
+          phaseIndex,
+          actorEmployeeId: employeeId,
+        });
+        results.push({
+          tool: "onboarding.os_signoff",
+          ok: out.ok,
+          error: out.ok ? undefined : out.reason,
+          data: {
+            clientId: out.clientId,
+            phaseIndex: out.phaseIndex,
+            advanced: out.advanced,
+            phaseName: out.phaseName,
+            nextPhaseName: out.nextPhaseName,
+            next: {
+              client: `/clients/${encodeURIComponent(out.clientId)}`,
+              onboarding: `/clients/${encodeURIComponent(out.clientId)}`,
+            },
+          },
+        });
+      } catch (err) {
+        results.push({
+          tool: "onboarding.os_signoff",
+          ok: false,
+          error:
+            err instanceof Error
+              ? err.message
+              : "onboarding_os_signoff_failed",
+        });
+      }
+    }
+  }
+
+  /**
+   * Calendar ref-approve → ref_approved. Org-only; prompt-gated.
+   * Uses closed_loop calendarId seed when present (memory now seeds calendars).
+   */
+  const wantsCalendarRefApprove =
+    !input.scope.clientId &&
+    (want("calendar.os_ref_approve") ||
+      want("calendars.ref_approve") ||
+      want("calendar.refApprove")) &&
+    /(?:ref[_\s-]?approv|calendar\s+ref|os[_\s-]?ref[_\s-]?approv)/i.test(
+      input.prompt,
+    );
+
+  if (wantsCalendarRefApprove) {
+    const { refApproveOsCalendar, parseCalendarIdFromPrompt } = await import(
+      "../tasks/os-calendar-ref-approve"
+    );
+    const calendarId =
+      parseCalendarIdFromPrompt(input.prompt) ?? loopSeed.calendarId ?? null;
+    const employeeId =
+      input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
+    if (!calendarId) {
+      results.push({
+        tool: "calendar.os_ref_approve",
+        ok: false,
+        error: "calendarId_required",
+      });
+    } else {
+      try {
+        const out = await refApproveOsCalendar({
+          calendarId,
+          actorEmployeeId: employeeId,
+        });
+        results.push({
+          tool: "calendar.os_ref_approve",
+          ok: out.ok,
+          error: out.ok ? undefined : out.reason,
+          data: out.calendar
+            ? {
+                calendarId: out.calendar.calendarId,
+                clientId: out.calendar.clientId,
+                state: out.calendar.state,
+                refApprovalState: out.calendar.refApprovalState,
+                next: {
+                  account: `/account?clientId=${encodeURIComponent(out.calendar.clientId)}`,
+                },
+              }
+            : { calendarId },
+        });
+      } catch (err) {
+        results.push({
+          tool: "calendar.os_ref_approve",
+          ok: false,
+          error:
+            err instanceof Error
+              ? err.message
+              : "calendar_os_ref_approve_failed",
         });
       }
     }

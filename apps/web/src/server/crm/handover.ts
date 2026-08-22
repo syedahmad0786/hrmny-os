@@ -227,6 +227,38 @@ async function memoryHandoverPack(input: {
   });
   fired.push("creative.task_seed");
 
+  let calendarId: string | null = null;
+  try {
+    const month = new Date().toISOString().slice(0, 7);
+    calendarId = crypto.randomUUID();
+    const shoot = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
+    store.calendars.set(calendarId, {
+      calendarId,
+      clientId: demoClient.clientId,
+      month,
+      focusPoints: ["Launch reel", "Product stills"],
+      refApprovalState: "pending",
+      finalApprovalState: null,
+      shootDate: shoot,
+      state: "ref_pending",
+      slots: [
+        {
+          calendarSlotId: crypto.randomUUID(),
+          calendarId,
+          slotDate: shoot,
+          slotLabel: "Studio shoot",
+          taskId: creative.taskId,
+          position: 1,
+        },
+      ],
+    });
+    creative.calendarId = calendarId;
+    store.tasks.set(creative.taskId, creative);
+    fired.push("calendar.seed");
+  } catch {
+    calendarId = null;
+  }
+
   let campaignItemId: string | null = null;
   try {
     const { createCampaignDraft } = await import("../campaigns/repository");
@@ -445,7 +477,7 @@ async function memoryHandoverPack(input: {
     task,
     invoiceId,
     onboardingPhases: phases.length,
-    calendarId: null,
+    calendarId,
     portalInvite,
     outreachId,
     campaignItemId,

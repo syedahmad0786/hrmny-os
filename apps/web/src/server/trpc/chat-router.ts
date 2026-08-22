@@ -340,6 +340,46 @@ export function buildChatDefaultTools(scope: {
               return { tools: results };
             },
           } satisfies HarnessTool,
+          {
+            name: "onboarding_os_signoff",
+            description:
+              "Org-only: sign off an active onboarding phase. Prompt must mention sign off + optional clientId/phaseIndex.",
+            run: async (args: Record<string, unknown>) => {
+              const { runAgentTools } = await import("../ai/agent-tools");
+              const id =
+                typeof args.clientId === "string" ? args.clientId : "";
+              const base = String(
+                args.prompt ?? args.query ?? "Sign off onboarding phase",
+              );
+              const prompt = id ? `${base} clientId: ${id}` : base;
+              const results = await runAgentTools({
+                allowedTools: ["onboarding.os_signoff"],
+                prompt,
+                scope: { employeeId: scope.employeeId },
+              });
+              return { tools: results };
+            },
+          } satisfies HarnessTool,
+          {
+            name: "calendar_os_ref_approve",
+            description:
+              "Org-only: ref-approve a delivery calendar. Prompt must mention ref-approve + calendarId UUID.",
+            run: async (args: Record<string, unknown>) => {
+              const { runAgentTools } = await import("../ai/agent-tools");
+              const id =
+                typeof args.calendarId === "string" ? args.calendarId : "";
+              const base = String(
+                args.prompt ?? args.query ?? "Ref-approve calendar",
+              );
+              const prompt = id ? `${base} calendarId: ${id}` : base;
+              const results = await runAgentTools({
+                allowedTools: ["calendar.os_ref_approve"],
+                prompt,
+                scope: { employeeId: scope.employeeId },
+              });
+              return { tools: results };
+            },
+          } satisfies HarnessTool,
         ]),
     {
       name: "now",

@@ -423,7 +423,7 @@ describe("runAgentTools funnel writes", () => {
     const results = await runAgentTools({
       allowedTools: [...DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS],
       prompt:
-        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign. company: OneShot Settle Co",
+        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign, sign off onboarding phase, ref-approve calendar. company: OneShot Settle Co",
       scope: {
         employeeId: "c0000000-0000-4000-8000-000000000001",
       },
@@ -451,6 +451,11 @@ describe("runAgentTools funnel writes", () => {
       (byTool("campaigns.os_publish")?.data as { publishMode?: string })
         ?.publishMode,
     ).toBe("stub");
+    expect(byTool("onboarding.os_signoff")?.ok).toBe(true);
+    expect(byTool("calendar.os_ref_approve")?.ok).toBe(true);
+    expect(
+      (byTool("calendar.os_ref_approve")?.data as { state?: string })?.state,
+    ).toBe("ref_approved");
   });
 
   it("crm.prospect imports mock Apollo companies outside client sandbox", async () => {
