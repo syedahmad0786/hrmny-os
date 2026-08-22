@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Button, Card } from "@hrmny/ui";
 import { useState } from "react";
 import { CrmSubnav } from "@/components/crm/subnav";
+import { OnboardingReadyBanner } from "@/components/onboarding-ready-banner";
 import { trpc } from "@/lib/trpc";
 import { deliveryRhythmFor } from "@/lib/delivery-rhythm";
 
@@ -101,6 +102,8 @@ export default function ClientsPage() {
           + Add client
         </Button>
       </header>
+
+      <OnboardingReadyBanner testIdPrefix="clients" />
 
       {showCreate ? (
         <form

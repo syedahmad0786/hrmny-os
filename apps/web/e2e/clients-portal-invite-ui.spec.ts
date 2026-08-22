@@ -13,6 +13,9 @@ test.describe("Clients portal invite UI", () => {
     await expect(
       page.getByRole("heading", { name: /Client directory/i }),
     ).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("clients-ready-banner")).toBeVisible({
+      timeout: 30_000,
+    });
 
     await page.getByTestId(`clients-manage-portal-${DEMO_CLIENT_ID}`).click();
     await expect(page.getByTestId("clients-portal-access-panel")).toBeVisible({

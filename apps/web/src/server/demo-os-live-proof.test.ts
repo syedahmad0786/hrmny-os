@@ -1,6 +1,8 @@
 /**
  * Live Postgres proof for demo closed loop (requires DATABASE_URL).
  * Usage: cd apps/web && pnpm exec vitest run src/server/demo-os-live-proof.test.ts
+ * CI: workflow_dispatch or weekly when repo variable DEMO_OS_LIVE_PROOF=true
+ *      and secret DATABASE_URL is set (.github/workflows/demo-os-live-proof.yml).
  */
 import { describe, expect, it } from "vitest";
 import { createCaller } from "./trpc/root";
