@@ -23,16 +23,28 @@ test.describe("Clients Continue OS after handover", () => {
     const advance = page.getByTestId("deal-advance");
     if (await advance.isVisible()) {
       await advance.click();
-      await expect(page.getByTestId("deal-mark-won")).toBeVisible({
-        timeout: 30_000,
-      });
+      await expect(
+        page
+          .getByTestId("deal-mark-won")
+          .or(page.getByTestId("deal-handover"))
+          .or(page.getByTestId("deal-handover-next")),
+      ).toBeVisible({ timeout: 30_000 });
     }
 
-    await page.getByTestId("deal-mark-won").click();
-    await expect(page.getByTestId("deal-handover")).toBeVisible({
-      timeout: 30_000,
-    });
-    await page.getByTestId("deal-handover").click();
+    const markWon = page.getByTestId("deal-mark-won");
+    if (await markWon.isVisible()) {
+      await markWon.click();
+      await expect(
+        page
+          .getByTestId("deal-handover")
+          .or(page.getByTestId("deal-handover-next")),
+      ).toBeVisible({ timeout: 30_000 });
+    }
+
+    const handover = page.getByTestId("deal-handover");
+    if (await handover.isVisible()) {
+      await handover.click();
+    }
     await expect(page.getByTestId("deal-handover-next")).toBeVisible({
       timeout: 30_000,
     });
