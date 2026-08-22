@@ -29,6 +29,17 @@ describe("customAgents allowlist repair", () => {
     expect(coach?.displayName).toMatch(/Delivery coach/i);
   });
 
+  it("seeds OS settle demo agent with settle allowlist", async () => {
+    const caller = aiAdminCaller();
+    const listed = await caller.aiAdmin.customAgents.list();
+    const settle = listed.find((a) => a.slug === "os-settle");
+    expect(settle).toBeDefined();
+    expect(settle?.enabled).toBe(true);
+    expect(settle?.effectiveAllowedTools).toContain("crm.closed_loop");
+    expect(settle?.effectiveAllowedTools).toContain("onboarding.os_signoff");
+    expect(settle?.effectiveAllowedTools).toContain("calendar.os_ref_approve");
+  });
+
   it("create persists funnel defaults and repair fills empty allowlists", async () => {
     const caller = aiAdminCaller();
     const slug = `funnel-repair-${Date.now().toString(36)}`;

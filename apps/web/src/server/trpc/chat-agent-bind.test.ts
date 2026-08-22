@@ -24,6 +24,9 @@ describe("chat agent binding (QM-style)", () => {
     const coach = agents.find((a) => a.slug === "delivery-coach");
     expect(coach).toBeDefined();
     expect(coach?.toolCount).toBeGreaterThan(0);
+    const settle = agents.find((a) => a.slug === "os-settle");
+    expect(settle).toBeDefined();
+    expect(settle?.toolCount).toBeGreaterThan(5);
   });
 
   it("selecting an agent runs allowlisted tools on send (direct harness)", async () => {
