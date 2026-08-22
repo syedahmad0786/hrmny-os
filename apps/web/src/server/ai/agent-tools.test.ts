@@ -367,6 +367,58 @@ describe("runAgentTools funnel writes", () => {
     expect((row?.data as { status?: string })?.status).toBe("client_review");
   });
 
+
+  it("briefs.os_lock locks DoR-ready brief and spawns creative with next links", async () => {
+    const { DEMO_BRIEF_ID, getDemoStore } = await import("../demo-store");
+    getDemoStore().resetM4Demo();
+    // Fill DoR to ≤2 missing (same as Traffic UI lock path).
+    const store = getDemoStore();
+    const brief = store.briefs.get(DEMO_BRIEF_ID)!;
+    brief.body = {
+      objective: "Grow",
+      audience: "UAE retail",
+      deliverables: "3 reels",
+      deadline: "2026-09-30",
+      brandAssets: { logo: true },
+    };
+
+    const blocked = await runAgentTools({
+      allowedTools: ["briefs.os_lock"],
+      prompt: `Summarize brief ${DEMO_BRIEF_ID}`,
+      scope: {
+        clientId: CLIENT_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(blocked.find((r) => r.tool === "briefs.os_lock")).toBeUndefined();
+
+    const locked = await runAgentTools({
+      allowedTools: ["briefs.os_lock"],
+      prompt: `Lock the brief briefId: ${DEMO_BRIEF_ID}`,
+      scope: {
+        clientId: CLIENT_ID,
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const row = locked.find((r) => r.tool === "briefs.os_lock");
+    expect(row?.ok).toBe(true);
+    const data = row?.data as {
+      briefId?: string;
+      spawnedTaskId?: string;
+      taskStatus?: string;
+      next?: { creative?: string; traffic?: string };
+    };
+    expect(data?.briefId).toBe(DEMO_BRIEF_ID);
+    expect(data?.taskStatus).toBe("brief_ready");
+    expect(data?.spawnedTaskId).toBeTruthy();
+    expect(data?.next?.creative).toContain(CLIENT_ID);
+    expect(data?.next?.creative).toContain(data!.spawnedTaskId!);
+    expect(data?.next?.traffic).toContain("/traffic?");
+    const spawn = store.tasks.get(data!.spawnedTaskId!);
+    expect(spawn?.taskType).toBe("creative_spawn");
+    expect(spawn?.clientId).toBe(CLIENT_ID);
+  });
+
   it("campaigns.os_approve then os_publish stub after closed loop", async () => {
     const { resetCrmMemory } = await import("../crm/memory");
     resetCrmMemory();
