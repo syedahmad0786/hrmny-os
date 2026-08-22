@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { demoBlockerConnectionsPath } from "@/lib/demo-blocker-anchor";
 
 const STEPS = [
   {
@@ -331,7 +332,10 @@ export default function HuntClientsPage() {
               </Link>
             </div>
             {toolReady ? (
-              <div className="mt-3 space-y-2 text-xs text-muted">
+              <div
+                className="mt-3 space-y-2 text-xs text-muted"
+                data-testid="hunt-ready-banner"
+              >
                 <p>
                   Tools: apollo {toolReady.apollo} · hunter {toolReady.hunter} ·
                   n8n {toolReady.n8n} · xero {toolReady.xero} · composio{" "}
@@ -351,13 +355,36 @@ export default function HuntClientsPage() {
                   </p>
                 ) : null}
                 {blockers.length > 0 ? (
-                  <ul className="list-disc space-y-1 pl-4 text-ink/80">
-                    {blockers.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
+                  <ul
+                    className="list-disc space-y-1 pl-4 text-ink/80"
+                    data-testid="hunt-ready-blockers"
+                  >
+                    {blockers.map((item) => {
+                      const href = demoBlockerConnectionsPath(item);
+                      const anchor = href?.split("#")[1];
+                      return (
+                        <li key={item} data-testid="hunt-ready-blocker">
+                          {href ? (
+                            <Link
+                              href={href}
+                              className="underline"
+                              data-testid={
+                                anchor
+                                  ? `hunt-blocker-link-${anchor.replace("conn-", "")}`
+                                  : "hunt-blocker-link"
+                              }
+                            >
+                              {item}
+                            </Link>
+                          ) : (
+                            item
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 ) : (
-                  <p className="text-ink/80">
+                  <p className="text-ink/80" data-testid="hunt-ready-clear">
                     Live tool keys and OAuth connections look ready for demo.
                   </p>
                 )}
