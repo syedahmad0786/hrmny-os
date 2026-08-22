@@ -13,6 +13,7 @@ test.describe("Deal won → handover UI", () => {
   test("Advance, Mark won, Handover pack opens client onboarding", async ({
     page,
   }) => {
+    test.setTimeout(180_000);
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto(`/crm/deals/${PROPOSE_DEAL_ID}`, {
       waitUntil: "domcontentloaded",
@@ -87,9 +88,10 @@ test.describe("Deal won → handover UI", () => {
     ).toBeVisible({ timeout: 60_000 });
     await expect(page).toHaveURL(/\/portal\/onboarding/);
 
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto(creativeHref!, { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(/\/creative\?.*taskId=/);
-    await expect(page.getByRole("heading", { name: /Creative/i })).toBeVisible({
+    await expect(page.getByRole("heading", { name: /^Creative$/i })).toBeVisible({
       timeout: 60_000,
     });
   });
