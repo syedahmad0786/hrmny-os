@@ -254,7 +254,7 @@ export default function CrmDealDetailPage() {
                   <label key={label} className="crm-check-row">
                     <input
                       type="checkbox"
-                      data-testid={`deal-buaf-${label.split(" ")[0].toLowerCase()}`}
+                      data-testid={`deal-buaf-${(label.split(" ")[0] ?? "flag").toLowerCase()}`}
                       checked={val}
                       onChange={(e) => set(e.target.checked)}
                     />
