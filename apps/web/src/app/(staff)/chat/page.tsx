@@ -205,9 +205,10 @@ export default function HrmnyChatPage() {
     : "Default Hrmny agent";
   const sandboxLabel = sandboxClient?.name ?? "Staff / org scope";
 
-  function submit(text: string) {
+  function submit(text: string, harnessOverride?: HarnessMode) {
     const content = text.trim();
     if (!content) return;
+    const mode = harnessOverride ?? harness;
     if (!threadId) {
       create.mutate(
         {
@@ -222,14 +223,14 @@ export default function HrmnyChatPage() {
               threadId: row.chatThreadId,
               content,
               effort,
-              harness,
+              harness: mode,
             });
           },
         },
       );
       return;
     }
-    send.mutate({ threadId, content, effort, harness });
+    send.mutate({ threadId, content, effort, harness: mode });
   }
 
   return (
@@ -451,7 +452,9 @@ export default function HrmnyChatPage() {
                   <button
                     type="button"
                     data-testid="chat-starter-os-settle"
-                    onClick={() => submit(OS_SETTLE_STARTER)}
+                    // Direct harness always runs agent_act for the bound
+                    // allowlist (mock ReAct can pick sibling org tools first).
+                    onClick={() => submit(OS_SETTLE_STARTER, "direct")}
                     disabled={send.isPending || create.isPending}
                   >
                     {OS_SETTLE_STARTER.slice(0, 72)}…
