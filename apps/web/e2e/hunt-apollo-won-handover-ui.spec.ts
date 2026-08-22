@@ -167,4 +167,85 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
       timeout: 60_000,
     });
   });
+
+  test("Closed loop status panel finance outreach portal onboarding links", async ({
+    page,
+  }) => {
+    const query = `E2E Apollo Status ${Date.now()}`;
+
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
+      timeout: 60_000,
+    });
+
+    await page.getByTestId("hunt-apollo-query").fill(query);
+    await page.getByTestId("hunt-closed-loop-apollo").click();
+
+    const status = page.getByTestId("hunt-closed-loop-status");
+    await expect(status).toContainText(/Closed loop ready/i, {
+      timeout: 90_000,
+    });
+
+    const statusFinance = page.getByTestId("hunt-status-finance");
+    const statusOutreach = page.getByTestId("hunt-status-outreach");
+    const statusPortal = page.getByTestId("hunt-status-portal");
+    const statusOnboarding = page.getByTestId("hunt-status-onboarding");
+    await expect(statusFinance).toBeVisible();
+    await expect(statusOutreach).toBeVisible();
+    await expect(statusPortal).toBeVisible();
+    await expect(statusOnboarding).toBeVisible();
+    await expect(statusFinance).toHaveAttribute("href", /clientId=/);
+    await expect(statusOutreach).toHaveAttribute("href", /\/crm\/outreach/);
+    await expect(statusPortal).toHaveAttribute(
+      "href",
+      /\/portal\/login\/verify/,
+    );
+    await expect(statusOnboarding).toHaveAttribute(
+      "href",
+      /\/portal\/login\/verify/,
+    );
+
+    const nextFinance = page.getByTestId("hunt-next-finance");
+    const nextOutreach = page.getByTestId("hunt-next-outreach");
+    const nextPortal = page.getByTestId("hunt-next-portal");
+    const nextOnboarding = page.getByTestId("hunt-next-onboarding");
+    await expect(nextFinance).toBeVisible();
+    await expect(nextOutreach).toBeVisible();
+    await expect(nextPortal).toBeVisible();
+    await expect(nextOnboarding).toBeVisible();
+
+    const portalHref = await statusPortal.getAttribute("href");
+    const onboardingHref = await statusOnboarding.getAttribute("href");
+    expect(portalHref).toBeTruthy();
+    expect(onboardingHref).toBeTruthy();
+    expect(portalHref).not.toBe(onboardingHref);
+
+    await statusPortal.click();
+    await expect(page).toHaveURL(/\/portal\/login\/verify/, { timeout: 60_000 });
+    await expect(
+      page.getByRole("heading", { name: /^Approvals$/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/\/portal\/approvals/);
+
+    await page.goto(onboardingHref!, { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /^Onboarding$/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/\/portal\/onboarding/);
+
+    const financeHref = await nextFinance.getAttribute("href");
+    expect(financeHref).toBeTruthy();
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto(financeHref!, { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(/clientId=/);
+    await expect(page.locator("body")).toContainText(/finance|invoice/i);
+
+    const outreachHref = await nextOutreach.getAttribute("href");
+    expect(outreachHref).toBeTruthy();
+    await page.goto(outreachHref!, { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /Outreach drafts/i }),
+    ).toBeVisible({ timeout: 60_000 });
+  });
 });
