@@ -136,6 +136,16 @@ async function advanceToClientReview(input: {
       task,
     };
   }
+  if (task.status === "client_review" && !durable) {
+    const { ensureMemoryPortalApproval } = await import(
+      "../portal/os-portal-approve"
+    );
+    ensureMemoryPortalApproval({
+      taskId: task.taskId,
+      clientId: task.clientId,
+      title: task.title,
+    });
+  }
   return { ok: true, task };
 }
 

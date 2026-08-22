@@ -373,6 +373,49 @@ describe("runAgentTools funnel writes", () => {
     expect(data?.publishMode).toBe("stub");
   });
 
+  it("portal.os_approve after creative.os_qc client_review", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const loopResults = await runAgentTools({
+      allowedTools: ["crm.closed_loop"],
+      prompt: "Run demo closed loop for company: Portal Approve Co",
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const taskId = (
+      loopResults.find((r) => r.tool === "crm.closed_loop")?.data as {
+        taskId?: string;
+      }
+    )?.taskId;
+    expect(taskId).toBeTruthy();
+
+    const qc = await runAgentTools({
+      allowedTools: ["creative.os_qc"],
+      prompt: `Pass QC on creative taskId: ${taskId}`,
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(qc.find((r) => r.tool === "creative.os_qc")?.ok).toBe(true);
+    expect(
+      (qc.find((r) => r.tool === "creative.os_qc")?.data as { status?: string })
+        ?.status,
+    ).toBe("client_review");
+
+    const portal = await runAgentTools({
+      allowedTools: ["portal.os_approve"],
+      prompt: `Approve OS portal taskId: ${taskId}`,
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const row = portal.find((r) => r.tool === "portal.os_approve");
+    expect(row?.ok).toBe(true);
+    expect((row?.data as { status?: string })?.status).toBe("approved");
+    expect(getDemoStore().tasks.get(taskId!)?.status).toBe("approved");
+  });
+
   it("crm.prospect imports mock Apollo companies outside client sandbox", async () => {
     const results = await runAgentTools({
       allowedTools: ["crm.prospect"],

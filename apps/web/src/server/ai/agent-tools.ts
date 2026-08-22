@@ -939,6 +939,68 @@ export async function runAgentTools(input: {
   }
 
   /**
+   * Portal client approve/reject on a client_review task. Prompt-gated;
+   * org-only. Completes creative.os_qc → portal path without magic links.
+   */
+  const wantsPortalApprove =
+    !input.scope.clientId &&
+    (want("portal.os_approve") ||
+      want("portal.approve") ||
+      want("portal.approvals")) &&
+    /(?:os[_\s-]?approve|approve\s+(?:the\s+)?(?:os\s+)?portal|portal[^\n]{0,40}approv|client[_\s-]?approv|reject\s+(?:the\s+)?portal)/i.test(
+      input.prompt,
+    );
+
+  if (wantsPortalApprove) {
+    const { runOsPortalApprove, parseApprovalIdFromPrompt } = await import(
+      "../portal/os-portal-approve"
+    );
+    const approvalId =
+      parseApprovalIdFromPrompt(input.prompt) ?? input.scope.taskId ?? null;
+    const employeeId =
+      input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
+    if (!approvalId) {
+      results.push({
+        tool: "portal.os_approve",
+        ok: false,
+        error: "approvalId_required",
+      });
+    } else {
+      try {
+        const out = await runOsPortalApprove({
+          approvalId,
+          prompt: input.prompt,
+          actorEmployeeId: employeeId,
+        });
+        results.push({
+          tool: "portal.os_approve",
+          ok: out.ok,
+          error: out.ok ? undefined : out.reason,
+          data: {
+            approvalId: out.approvalId ?? approvalId,
+            clientId: out.clientId,
+            status: out.status,
+            action: out.action,
+            next: out.clientId
+              ? {
+                  portal: `/portal/approvals`,
+                  creative: `/creative?clientId=${encodeURIComponent(out.clientId)}`,
+                }
+              : undefined,
+          },
+        });
+      } catch (err) {
+        results.push({
+          tool: "portal.os_approve",
+          ok: false,
+          error:
+            err instanceof Error ? err.message : "portal_os_approve_failed",
+        });
+      }
+    }
+  }
+
+  /**
    * Org-wide prospect → won → handover → onboarding. Prompt-gated so
    * crm.* / * allowlists alone cannot fire a full closed loop on every run.
    * Never added to DEFAULT_FUNNEL_AGENT_TOOLS.
