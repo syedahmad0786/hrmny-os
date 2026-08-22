@@ -18,6 +18,7 @@ import {
   initials,
   tagKindForTemp,
 } from "@/components/crm/format";
+import { DemoReadinessPanel } from "@/components/demo-readiness-panel";
 import { DashStrip } from "./_components/dash-strip";
 
 export default function CrmPipelinePage() {
@@ -101,6 +102,8 @@ export default function CrmPipelinePage() {
           </>
         }
       />
+
+      <DemoReadinessPanel testIdPrefix="crm" />
 
       <CrmFilterBar>
         <input
