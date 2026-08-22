@@ -6,12 +6,15 @@ const PROPOSE_DEAL_ID = "e0000000-0000-4000-8000-000000000005";
 const DEMO_CREATIVE_TASK_ID = "b2000000-0000-4000-8000-0000000000a4";
 
 /**
- * After deal won → handover, Clients Continue-OS Creative/Account CTAs must
- * pin the won client's taskId/calendarId (not Demo Co seeds). Creative with
- * only ?clientId= must resolve the same won-client task.
+ * After deal won → handover, Clients Continue-OS CTAs must pin the won
+ * client's taskId/calendarId/invoiceId/outreach/approvals ids (not Demo Co
+ * seeds or bare queues). Creative with only ?clientId= must resolve the same
+ * won-client task.
  */
 test.describe("Clients Continue OS after handover", () => {
-  test("Creative + Account CTAs pin won-client ids", async ({ page }) => {
+  test("Continue OS CTAs pin won-client Creative/Account/Finance/Outreach", async ({
+    page,
+  }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto(`/crm/deals/${PROPOSE_DEAL_ID}`, {
       waitUntil: "domcontentloaded",
@@ -85,6 +88,28 @@ test.describe("Clients Continue OS after handover", () => {
     ).searchParams.get("calendarId");
     expect(continueCalendarId).toBeTruthy();
 
+    // Finance / Outreach / Approvals must pin won-client seeds (not bare queues).
+    const continueFinance = page.getByTestId("client-continue-finance");
+    await expect(continueFinance).toHaveAttribute("href", /invoiceId=/);
+    const financeHref = (await continueFinance.getAttribute("href")) ?? "";
+    const continueInvoiceId = new URL(
+      financeHref,
+      "http://local",
+    ).searchParams.get("invoiceId");
+    expect(continueInvoiceId).toBeTruthy();
+
+    const continueOutreach = page.getByTestId("client-continue-outreach");
+    await expect(continueOutreach).toHaveAttribute("href", /[?&]id=/);
+    const outreachHref = (await continueOutreach.getAttribute("href")) ?? "";
+    const continueOutreachId = new URL(
+      outreachHref,
+      "http://local",
+    ).searchParams.get("id");
+    expect(continueOutreachId).toBeTruthy();
+
+    const continueApprovals = page.getByTestId("client-continue-approvals");
+    await expect(continueApprovals).toHaveAttribute("href", /[?&]id=/);
+
     await continueCreative.click();
     await expect(page).toHaveURL(new RegExp(`taskId=${continueTaskId}`));
     await expect(page.getByTestId("creative-task-id")).toHaveText(
@@ -114,5 +139,17 @@ test.describe("Clients Continue OS after handover", () => {
       continueCalendarId!,
       { timeout: 60_000 },
     );
+
+    await page.goto(financeHref, { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(new RegExp(`invoiceId=${continueInvoiceId}`));
+    await expect(
+      page.locator(`[data-testid="finance-invoice"]#os-invoice-${continueInvoiceId}`),
+    ).toBeVisible({ timeout: 60_000 });
+
+    await page.goto(outreachHref, { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(new RegExp(`[?&]id=${continueOutreachId}`));
+    await expect(
+      page.getByTestId(`outreach-item-${continueOutreachId}`),
+    ).toBeVisible({ timeout: 60_000 });
   });
 });

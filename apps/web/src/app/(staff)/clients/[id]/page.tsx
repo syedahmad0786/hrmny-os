@@ -21,6 +21,16 @@ export default function ClientOnboardingPage() {
   const immersion = trpc.clients.immersion.get.useQuery({ clientId: id });
   const tasks = trpc.tasks.list.useQuery({ clientId: id });
   const calendars = trpc.calendars.listByClient.useQuery({ clientId: id });
+  const invoices = trpc.invoices.list.useQuery();
+  const dealId =
+    client.data && "dealId" in client.data && typeof client.data.dealId === "string"
+      ? client.data.dealId
+      : null;
+  const outreach = trpc.leadgen.outreach.list.useQuery(
+    { dealId: dealId! },
+    { enabled: Boolean(dealId) },
+  );
+  const campaigns = trpc.campaigns.list.useQuery({ clientId: id });
   const signoff = trpc.clients.onboarding.signoff.useMutation({
     onSuccess: () => void utils.clients.invalidate(),
   });
@@ -48,6 +58,16 @@ export default function ClientOnboardingPage() {
     return qc?.taskId ?? null;
   }, [tasks.data]);
   const calendarId = calendars.data?.[0]?.calendarId ?? null;
+  const invoiceId = useMemo(() => {
+    const rows = (invoices.data ?? []).filter((inv) => inv.clientId === id);
+    const first =
+      rows.find((inv) => inv.billingKind === "first") ??
+      rows.find((inv) => /first|handover|won/i.test(inv.ruleCited ?? "")) ??
+      rows[0];
+    return first?.invoiceId ?? null;
+  }, [id, invoices.data]);
+  const outreachId = outreach.data?.[0]?.id ?? null;
+  const campaignItemId = campaigns.data?.[0]?.id ?? null;
   const continueLinks = useMemo(() => {
     const creativeQs = new URLSearchParams({ clientId: id });
     if (creativeTaskId) creativeQs.set("taskId", creativeTaskId);
@@ -56,8 +76,26 @@ export default function ClientOnboardingPage() {
     return {
       account: `/account?${accountQs.toString()}`,
       creative: `/creative?${creativeQs.toString()}`,
+      finance: invoiceId
+        ? `/finance?invoiceId=${encodeURIComponent(invoiceId)}`
+        : "/finance",
+      outreach: outreachId
+        ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
+        : "/crm/outreach",
+      approvals: campaignItemId
+        ? `/approvals?id=${encodeURIComponent(campaignItemId)}`
+        : outreachId
+          ? `/approvals?id=${encodeURIComponent(outreachId)}`
+          : "/approvals",
     };
-  }, [id, creativeTaskId, calendarId]);
+  }, [
+    id,
+    creativeTaskId,
+    calendarId,
+    invoiceId,
+    outreachId,
+    campaignItemId,
+  ]);
 
   useEffect(() => {
     if (focusPhase == null || Number.isNaN(focusPhase)) return;
@@ -102,19 +140,22 @@ export default function ClientOnboardingPage() {
             Creative →
           </Link>
           <Link
-            href="/approvals"
+            href={continueLinks.approvals}
+            data-testid="client-continue-approvals"
             className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
           >
             Approvals →
           </Link>
           <Link
-            href="/crm/outreach"
+            href={continueLinks.outreach}
+            data-testid="client-continue-outreach"
             className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
           >
             Outreach →
           </Link>
           <Link
-            href="/finance"
+            href={continueLinks.finance}
+            data-testid="client-continue-finance"
             className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
           >
             Finance →
