@@ -187,16 +187,40 @@ export default function HrmnyChatPage() {
               className="mt-1 w-full rounded border border-sand bg-white px-2 py-1.5 text-xs text-ink"
               data-testid="chat-agent-slug"
               value={agentSlug}
-              onChange={(e) => setAgentSlug(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setAgentSlug(next);
+                // Agent binding is per-thread (QM-style scope). Changing it
+                // starts a fresh session so the selection is never a no-op.
+                if ((activeThread?.agentSlug ?? "") !== next) {
+                  setThreadId(null);
+                }
+              }}
             >
               <option value="">Default harness</option>
               {(agents.data ?? []).map((a) => (
                 <option key={a.customAgentId} value={a.slug}>
                   {a.displayName}
+                  {"toolCount" in a && typeof a.toolCount === "number"
+                    ? ` · ${a.toolCount} tools`
+                    : ""}
                 </option>
               ))}
             </select>
           </label>
+          {agentSlug ? (
+            <p
+              className="text-[10px] leading-snug text-muted"
+              data-testid="chat-agent-hint"
+            >
+              New messages use this agent&apos;s system prompt + allowlisted
+              tools
+              {(agents.data ?? []).find((a) => a.slug === agentSlug)?.model
+                ? ` · model ${(agents.data ?? []).find((a) => a.slug === agentSlug)?.model}`
+                : " · default free OpenRouter model"}
+              . Start chatting (or New chat) to bind a session.
+            </p>
+          ) : null}
           <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
             Client sandbox
             <select

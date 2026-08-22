@@ -359,28 +359,16 @@ function defaultTools(scope: {
 export const chatRouter = router({
   /** Enabled custom agents staff can bind to a chat thread (no AI-admin gate). */
   listRunnableAgents: staffProcedure.query(async () => {
-    const db = getDb();
-    if (!db) {
-      return [] as Array<{
-        slug: string;
-        displayName: string;
-        customAgentId: string;
-      }>;
-    }
-    return db.execute<{
-      slug: string;
-      displayName: string;
-      customAgentId: string;
-    }>(sql`
-      select
-        custom_agent_id as "customAgentId",
-        slug,
-        display_name as "displayName"
-      from public.custom_agent
-      where enabled = true
-      order by display_name asc
-      limit 100
-    `);
+    const { listRunnableCustomAgents } = await import("./ai-admin-router");
+    const agents = await listRunnableCustomAgents();
+    return agents.map((a) => ({
+      customAgentId: a.customAgentId,
+      slug: a.slug,
+      displayName: a.displayName,
+      model: a.model,
+      toolCount: a.allowedTools.length,
+      toolsPreview: a.allowedTools.slice(0, 6),
+    }));
   }),
 
   listThreads: staffProcedure.query(async ({ ctx }) => {
@@ -570,39 +558,35 @@ export const chatRouter = router({
         `);
       }
 
-      const provider = createProvider({});
+      const providerBase = createProvider({});
       let customSystem = "";
+      let agentModel: string | undefined;
+      let agentTools: string[] = [];
       if (thread.agentSlug) {
-        const dbAgent = getDb();
-        if (dbAgent) {
-          const rows = await dbAgent.execute<{
-            systemPrompt: string;
-            displayName: string;
-            responsibility: string;
-          }>(sql`
-            select
-              system_prompt as "systemPrompt",
-              display_name as "displayName",
-              responsibility
-            from public.custom_agent
-            where slug = ${thread.agentSlug}
-              and enabled = true
-            limit 1
-          `);
-          const custom = rows[0];
-          if (custom) {
-            customSystem = [
-              custom.systemPrompt?.trim() ||
-                `You are ${custom.displayName} (${thread.agentSlug}).`,
-              custom.responsibility?.trim()
-                ? `Responsibility: ${custom.responsibility.trim()}`
-                : "",
-            ]
-              .filter(Boolean)
-              .join("\n");
-          }
+        const { getRunnableCustomAgentBySlug } = await import(
+          "./ai-admin-router"
+        );
+        const custom = await getRunnableCustomAgentBySlug(thread.agentSlug);
+        if (custom) {
+          customSystem = [
+            custom.systemPrompt?.trim() ||
+              `You are ${custom.displayName} (${thread.agentSlug}).`,
+            custom.responsibility?.trim()
+              ? `Responsibility: ${custom.responsibility.trim()}`
+              : "",
+            custom.allowedTools.length
+              ? `Allowlisted tools: ${custom.allowedTools.join(", ")}.`
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+          agentModel = custom.model?.trim() || undefined;
+          agentTools = custom.allowedTools;
         }
       }
+      const provider = agentModel
+        ? createProvider({ defaultModel: agentModel })
+        : providerBase;
       const system = [
         customSystem ||
           "You are Hrmny — the multiplayer agent harness for Creative Harmony staff.",
@@ -612,15 +596,91 @@ export const chatRouter = router({
         !customSystem && thread.agentSlug
           ? `Preferred agent persona: ${thread.agentSlug}.`
           : "",
-        thread.clientId ? `Client sandbox id: ${thread.clientId}.` : "",
+        thread.clientId
+          ? `Client sandbox id: ${thread.clientId}.`
+          : "Org / staff scope (no client sandbox).",
+        agentTools.length
+          ? "When the user asks you to act, call agent_act with their prompt so allowlisted OS/CRM tools can run."
+          : "",
       ]
         .filter(Boolean)
         .join("\n");
+
+      const harnessTools: HarnessTool[] = [
+        ...defaultTools({
+          employeeId,
+          clientId: thread.clientId,
+        }),
+      ];
+      if (agentTools.length) {
+        harnessTools.unshift({
+          name: "agent_act",
+          description:
+            "Run this custom agent's allowlisted tools (CRM/OS/funnel) inside the current sandbox. Pass the user intent as prompt.",
+          run: async (args: Record<string, unknown>) => {
+            const { runAgentTools } = await import("../ai/agent-tools");
+            const prompt = String(
+              args.prompt ?? args.query ?? input.content,
+            ).slice(0, 4000);
+            const results = await runAgentTools({
+              allowedTools: agentTools,
+              prompt,
+              scope: {
+                clientId: thread.clientId ?? undefined,
+                employeeId,
+              },
+            });
+            return {
+              agentSlug: thread.agentSlug,
+              tools: results,
+            };
+          },
+        } satisfies HarnessTool);
+      }
 
       const steps: Array<Record<string, unknown>> = [];
       const harnessResult =
         input.harness === "direct"
           ? await (async () => {
+              // Direct mode still executes allowlisted agent tools once so
+              // selecting an agent is never a no-op.
+              if (agentTools.length) {
+                const { runAgentTools } = await import("../ai/agent-tools");
+                const toolResults = await runAgentTools({
+                  allowedTools: agentTools,
+                  prompt: input.content,
+                  scope: {
+                    clientId: thread.clientId ?? undefined,
+                    employeeId,
+                  },
+                });
+                steps.push({
+                  iteration: 0,
+                  toolName: "agent_act",
+                  observation: JSON.stringify({ tools: toolResults }).slice(
+                    0,
+                    4000,
+                  ),
+                });
+                const res = await provider.generate({
+                  messages: [
+                    { role: "system", content: system },
+                    {
+                      role: "user",
+                      content: `${input.content}\n\ntoolResults: ${JSON.stringify(toolResults).slice(0, 6000)}`,
+                    },
+                  ],
+                  temperature,
+                  task: "generic",
+                });
+                return {
+                  answer: res.text,
+                  steps: [
+                    ...steps,
+                    { iteration: 1, answer: res.text },
+                  ],
+                };
+              }
               const res = await provider.generate({
                 messages: [
                   { role: "system", content: system },
@@ -637,10 +697,7 @@ export const chatRouter = router({
           : await runHarness({
               system,
               user: input.content,
-              tools: defaultTools({
-                employeeId,
-                clientId: thread.clientId,
-              }),
+              tools: harnessTools,
               maxIterations,
               generate: async (messages) => {
                 const folded = messages.map((m) => {
@@ -675,6 +732,8 @@ export const chatRouter = router({
         toolName: null,
         metadata: {
           provider: provider.name,
+          model: agentModel ?? process.env.LLM_DEFAULT_MODEL ?? null,
+          agentSlug: thread.agentSlug,
           harness: input.harness ?? "react",
           effort,
           steps:

@@ -3,6 +3,13 @@ import { mockExtractInvoice, InvoiceProposeSchema } from "./invoice-extract";
 
 export type LLMProviderName = "openrouter" | "anthropic" | "ollama" | "mock";
 
+/**
+ * Default OpenRouter free route for demos / agent tests.
+ * Prefer content-bearing free models; `openrouter/free` may resolve to
+ * reasoning-only upstreams (handled by content→reasoning fallback).
+ */
+export const OPENROUTER_FREE_DEFAULT_MODEL = "liquid/lfm-2.5-2.6b:free";
+
 export type LLMMessage = {
   role: "system" | "user" | "assistant";
   content: string;
@@ -215,6 +222,33 @@ export function createMockProvider(
           text:
             "Advanced the client funnel: drafted tasks/briefs/campaigns, " +
             "queued a portal invite, and sent creative into portal review.",
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+
+      // Custom agent allowlist runner (chat agent_act).
+      const catalogHasAgentAct = /(?:^|\n)-\s*agent_act\s*:/i.test(blob);
+      const sawAgentActObservation = /Observation from agent_act/i.test(blob);
+      if (catalogHasAgentAct && !sawAgentActObservation) {
+        const prompt = userText.trim().slice(0, 400) || "Run agent tools";
+        return {
+          text: [
+            "```tool",
+            JSON.stringify({
+              name: "agent_act",
+              arguments: { prompt },
+            }),
+            "```",
+          ].join("\n"),
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+      if (sawAgentActObservation) {
+        return {
+          text:
+            "Ran the selected agent's allowlisted tools in the current sandbox and summarized the results.",
           provider: "mock",
           model: options.model ?? defaultModel,
         };
@@ -593,7 +627,10 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
   const name = resolveName(config);
   if (name === "mock") return createMockProvider(config.defaultModel);
 
-  const model = config.defaultModel ?? process.env.LLM_DEFAULT_MODEL;
+  const model =
+    config.defaultModel ??
+    process.env.LLM_DEFAULT_MODEL ??
+    (name === "openrouter" ? OPENROUTER_FREE_DEFAULT_MODEL : undefined);
   const parseResult = (
     options: LLMGenerateOptions,
     result: Omit<LLMGenerateResult, "object">,
@@ -646,6 +683,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
               model: activeModel,
               messages: openRouterMessages(options),
               temperature: options.temperature ?? 0.2,
+              max_tokens: 2_048,
               stream: false,
               ...(options.schema
                 ? { response_format: { type: "json_object" } }
@@ -658,8 +696,15 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
           raw.choices as Array<Record<string, unknown>> | undefined
         )?.[0];
         const message = choice?.message as Record<string, unknown> | undefined;
-        const text =
-          typeof message?.content === "string" ? message.content : "";
+        const content =
+          typeof message?.content === "string" ? message.content.trim() : "";
+        const reasoning =
+          typeof message?.reasoning === "string"
+            ? message.reasoning.trim()
+            : "";
+        // Free / reasoning-first OpenRouter models often return content=null and
+        // put the answer in `reasoning`. Prefer content; fall back to reasoning.
+        const text = content || reasoning;
         if (!text) throw new Error("LLM provider returned no text");
         const usage = raw.usage as Record<string, unknown> | undefined;
         return parseResult(options, {

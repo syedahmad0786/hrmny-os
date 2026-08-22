@@ -75,7 +75,7 @@ function demoDeliveryAgentRow(): CustomAgentRow {
 }
 
 /** Ensure memory-mode (and empty durable) registries expose a runnable demo agent. */
-async function ensureDemoDeliveryAgent() {
+export async function ensureDemoDeliveryAgent() {
   const db = getDb();
   if (!db) {
     if (
@@ -107,6 +107,75 @@ async function ensureDemoDeliveryAgent() {
   } catch {
     /* table/constraint missing in some envs — memory path still covers CI */
   }
+}
+
+export type RunnableCustomAgent = {
+  customAgentId: string;
+  slug: string;
+  displayName: string;
+  model: string | null;
+  allowedTools: string[];
+  systemPrompt: string;
+  responsibility: string;
+};
+
+/** Staff chat + Settings: list enabled custom agents (memory or durable). */
+export async function listRunnableCustomAgents(): Promise<
+  RunnableCustomAgent[]
+> {
+  await ensureDemoDeliveryAgent();
+  const db = getDb();
+  if (!db) {
+    return memCustomAgents
+      .filter((a) => a.enabled)
+      .map((a) => ({
+        customAgentId: a.customAgentId,
+        slug: a.slug,
+        displayName: a.displayName,
+        model: a.model,
+        allowedTools: resolveAgentAllowedTools(a.allowedTools),
+        systemPrompt: a.systemPrompt,
+        responsibility: a.responsibility,
+      }));
+  }
+  const rows = await db.execute<{
+    customAgentId: string;
+    slug: string;
+    displayName: string;
+    model: string | null;
+    allowedTools: unknown;
+    systemPrompt: string;
+    responsibility: string;
+  }>(sql`
+    select
+      custom_agent_id as "customAgentId",
+      slug,
+      display_name as "displayName",
+      model,
+      coalesce(allowed_tools, '[]'::jsonb) as "allowedTools",
+      system_prompt as "systemPrompt",
+      responsibility
+    from public.custom_agent
+    where enabled = true
+    order by display_name asc
+    limit 100
+  `);
+  return rows.map((a) => ({
+    customAgentId: a.customAgentId,
+    slug: a.slug,
+    displayName: a.displayName,
+    model: a.model,
+    allowedTools: resolveAgentAllowedTools(a.allowedTools),
+    systemPrompt: a.systemPrompt,
+    responsibility: a.responsibility,
+  }));
+}
+
+export async function getRunnableCustomAgentBySlug(
+  slug: string,
+): Promise<RunnableCustomAgent | null> {
+  const all = await listRunnableCustomAgents();
+  return all.find((a) => a.slug === slug) ?? null;
 }
 
 function requireAiAdmin(ctx: TrpcContext) {
