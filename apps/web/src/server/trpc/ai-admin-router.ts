@@ -18,7 +18,7 @@ import {
   resolveAgentToolPreset,
   type AgentToolPreset,
 } from "../ai/agent-tools";
-import { OPENROUTER_FREE_DEFAULT_MODEL } from "@hrmny/ai";
+import { OPENROUTER_FREE_DEFAULT_MODEL, runtimeLlmSnapshot } from "@hrmny/ai";
 import { getDb } from "../db";
 import { writeAudit } from "../m1-persistence";
 import { persistMemoryChunk, searchMemory } from "../ai/memory-db";
@@ -348,6 +348,7 @@ export const aiAdminRouter = router({
           at: run.created_at,
         })),
         monthlyCapAed: monthlyCapAed(),
+        llm: runtimeLlmSnapshot(),
       };
     }),
 

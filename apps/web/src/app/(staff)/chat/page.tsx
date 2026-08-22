@@ -92,6 +92,9 @@ export default function HrmnyChatPage() {
   const agents = trpc.chat.listRunnableAgents.useQuery(undefined, {
     staleTime: 60_000,
   });
+  const runtimeLlm = trpc.chat.runtimeLlm.useQuery(undefined, {
+    staleTime: 60_000,
+  });
   const clients = trpc.clients.list.useQuery(undefined, { staleTime: 60_000 });
   const [agentSlug, setAgentSlug] = useState("");
   const [clientId, setClientId] = useState("");
@@ -253,6 +256,12 @@ export default function HrmnyChatPage() {
             </div>
           </div>
         </div>
+        {runtimeLlm.data ? (
+          <p className="hrmny-chat-runtime-llm" data-testid="chat-runtime-llm">
+            {runtimeLlm.data.provider} · {runtimeLlm.data.defaultModel}
+            {runtimeLlm.data.freeOnly ? " · free" : ""}
+          </p>
+        ) : null}
 
         <button
           type="button"

@@ -90,6 +90,38 @@ export type CreateProviderConfig = {
   defaultModel?: string;
 };
 
+export function resolveEffectiveLlmProvider(
+  config: CreateProviderConfig = {},
+): LLMProviderName {
+  return resolveName(config);
+}
+
+export function resolveDefaultLlmModel(
+  provider?: LLMProviderName,
+  config: CreateProviderConfig = {},
+): string {
+  const name = provider ?? resolveEffectiveLlmProvider(config);
+  const fromEnv = process.env.LLM_DEFAULT_MODEL?.trim();
+  if (fromEnv) return fromEnv;
+  if (name === "openrouter") return OPENROUTER_FREE_DEFAULT_MODEL;
+  if (name === "mock") return "mock";
+  return "unknown";
+}
+
+/** No secrets — shared by /api/ready and staff UIs. */
+export function runtimeLlmSnapshot(config: CreateProviderConfig = {}): {
+  provider: LLMProviderName;
+  defaultModel: string;
+  openRouterConfigured: boolean;
+  freeOnly: boolean;
+} {
+  const provider = resolveEffectiveLlmProvider(config);
+  const defaultModel = resolveDefaultLlmModel(provider, config);
+  const openRouterConfigured = Boolean(process.env.OPENROUTER_API_KEY?.trim());
+  const freeOnly = provider === "openrouter";
+  return { provider, defaultModel, openRouterConfigured, freeOnly };
+}
+
 function resolveName(config: CreateProviderConfig): LLMProviderName {
   const fromEnv = process.env.LLM_PROVIDER?.toLowerCase() as
     LLMProviderName | undefined;

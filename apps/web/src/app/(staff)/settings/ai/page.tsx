@@ -78,6 +78,17 @@ export default function AiAdminPage() {
         <AdminNav />
       </header>
 
+      {dashboard.data?.llm ? (
+        <p
+          className="text-xs text-muted"
+          data-testid="ai-runtime-llm"
+        >
+          Runtime LLM: {dashboard.data.llm.provider} ·{" "}
+          {dashboard.data.llm.defaultModel}
+          {dashboard.data.llm.freeOnly ? " · free routes only" : ""}
+        </p>
+      ) : null}
+
       <section className="rounded-xl border border-sand bg-white/75 p-4">
         <label className="text-xs font-bold uppercase tracking-[0.12em] text-muted">
           Memory sandbox client

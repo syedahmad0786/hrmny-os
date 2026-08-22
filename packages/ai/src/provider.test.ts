@@ -8,6 +8,8 @@ import {
   OPENROUTER_FREE_FALLBACK_MODELS,
   assertOpenRouterFreeRoute,
   isOpenRouterFreeRoute,
+  resolveDefaultLlmModel,
+  runtimeLlmSnapshot,
   priceForModel,
   withMetering,
   type CostEvent,
@@ -313,6 +315,28 @@ describe("openrouter free-model failover", () => {
     expect(() => assertOpenRouterFreeRoute("anthropic/claude-3.5-sonnet")).toThrow(
       /free allowlist/i,
     );
+  });
+
+  it("runtimeLlmSnapshot reflects env without secrets", () => {
+    process.env.LLM_PROVIDER = "mock";
+    delete process.env.LLM_DEFAULT_MODEL;
+    delete process.env.OPENROUTER_API_KEY;
+    expect(runtimeLlmSnapshot()).toEqual({
+      provider: "mock",
+      defaultModel: "mock",
+      openRouterConfigured: false,
+      freeOnly: false,
+    });
+
+    process.env.LLM_PROVIDER = "openrouter";
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    delete process.env.LLM_DEFAULT_MODEL;
+    expect(runtimeLlmSnapshot().provider).toBe("openrouter");
+    expect(runtimeLlmSnapshot().defaultModel).toBe(OPENROUTER_FREE_DEFAULT_MODEL);
+    expect(runtimeLlmSnapshot().freeOnly).toBe(true);
+
+    process.env.LLM_DEFAULT_MODEL = "stealth/ox-alpha";
+    expect(resolveDefaultLlmModel("openrouter")).toBe("stealth/ox-alpha");
   });
 
   it("retries the next free model after a 429", async () => {
