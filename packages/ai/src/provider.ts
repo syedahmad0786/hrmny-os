@@ -10,9 +10,34 @@ export type LLMProviderName = "openrouter" | "anthropic" | "ollama" | "mock";
  */
 export const OPENROUTER_FREE_DEFAULT_MODEL = "liquid/lfm-2.5-2.6b:free";
 
+/**
+ * Free preview routes ($0/$0 on OpenRouter) without a `:free` suffix.
+ * Keep this list tight — never add paid catalog models here.
+ */
+export const OPENROUTER_FREE_PREVIEW_MODELS = ["stealth/ox-alpha"] as const;
+
+/** True when OpenRouter lists the route as free (:free suffix, openrouter/free, or preview allowlist). */
+export function isOpenRouterFreeRoute(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  if (!m) return false;
+  if (m === "openrouter/free") return true;
+  if (m.endsWith(":free")) return true;
+  return OPENROUTER_FREE_PREVIEW_MODELS.some((p) => p.toLowerCase() === m);
+}
+
+/** Refuse paid OpenRouter models — demos and CI must stay on free routes only. */
+export function assertOpenRouterFreeRoute(model: string): void {
+  if (!isOpenRouterFreeRoute(model)) {
+    throw new Error(
+      `OpenRouter model "${model}" is not on the free allowlist (:free, openrouter/free, stealth/ox-alpha).`,
+    );
+  }
+}
+
 /** Ordered free-route failover when the primary free/default model flakes (429/empty). */
 export const OPENROUTER_FREE_FALLBACK_MODELS = [
   OPENROUTER_FREE_DEFAULT_MODEL,
+  "stealth/ox-alpha",
   "nvidia/nemotron-nano-9b-v2:free",
   "openrouter/free",
 ] as const;
@@ -679,6 +704,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
         ];
         let lastError: Error | undefined;
         for (const activeModel of chain) {
+          assertOpenRouterFreeRoute(activeModel);
           try {
             const response = await fetch(
               "https://openrouter.ai/api/v1/chat/completions",
