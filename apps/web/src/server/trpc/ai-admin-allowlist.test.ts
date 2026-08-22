@@ -97,11 +97,19 @@ describe("customAgents allowlist repair", () => {
     const run = await caller.aiAdmin.customAgents.run({
       id: settle.customAgentId,
       prompt:
-        "Run closed loop for demo OS settle without attaching a client sandbox.",
+        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign.",
     });
     expect(run.slug).toBe(settleSlug);
     expect(Array.isArray(run.toolResults)).toBe(true);
-    const loop = run.toolResults!.find((r) => r.tool === "crm.closed_loop");
-    expect(loop?.ok).toBe(true);
+    const byTool = (name: string) =>
+      run.toolResults!.find((r) => r.tool === name);
+    expect(byTool("crm.closed_loop")?.ok).toBe(true);
+    expect(byTool("finance.os_approve")?.ok).toBe(true);
+    expect(byTool("finance.os_issue")?.ok).toBe(true);
+    expect(byTool("outreach.os_approve")?.ok).toBe(true);
+    expect(byTool("creative.os_qc")?.ok).toBe(true);
+    expect(byTool("portal.os_approve")?.ok).toBe(true);
+    expect(byTool("campaigns.os_approve")?.ok).toBe(true);
+    expect(byTool("campaigns.os_publish")?.ok).toBe(true);
   });
 });

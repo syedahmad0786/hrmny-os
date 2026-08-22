@@ -416,6 +416,43 @@ describe("runAgentTools funnel writes", () => {
     expect(getDemoStore().tasks.get(taskId!)?.status).toBe("approved");
   });
 
+  it("one-shot OS settle chains closed_loop IDs into settle tools", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const { DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS } = await import("./agent-tools");
+    const results = await runAgentTools({
+      allowedTools: [...DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS],
+      prompt:
+        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign. company: OneShot Settle Co",
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+
+    const byTool = (name: string) => results.find((r) => r.tool === name);
+    expect(byTool("crm.closed_loop")?.ok).toBe(true);
+    expect(byTool("finance.os_approve")?.ok).toBe(true);
+    expect(byTool("finance.os_issue")?.ok).toBe(true);
+    expect(
+      (byTool("finance.os_issue")?.data as { status?: string })?.status,
+    ).toBe("issued");
+    expect(byTool("outreach.os_approve")?.ok).toBe(true);
+    expect(byTool("creative.os_qc")?.ok).toBe(true);
+    expect(
+      (byTool("creative.os_qc")?.data as { status?: string })?.status,
+    ).toBe("client_review");
+    expect(byTool("portal.os_approve")?.ok).toBe(true);
+    expect(
+      (byTool("portal.os_approve")?.data as { status?: string })?.status,
+    ).toBe("approved");
+    expect(byTool("campaigns.os_approve")?.ok).toBe(true);
+    expect(byTool("campaigns.os_publish")?.ok).toBe(true);
+    expect(
+      (byTool("campaigns.os_publish")?.data as { publishMode?: string })
+        ?.publishMode,
+    ).toBe("stub");
+  });
+
   it("crm.prospect imports mock Apollo companies outside client sandbox", async () => {
     const results = await runAgentTools({
       allowedTools: ["crm.prospect"],

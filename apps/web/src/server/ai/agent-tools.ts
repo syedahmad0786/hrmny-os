@@ -610,16 +610,96 @@ export async function runAgentTools(input: {
   }
 
   /**
+   * Org-wide prospect → won → handover → onboarding. Runs BEFORE settle tools
+   * so one-shot OS settle can chain IDs from the loop. Prompt-gated; never in
+   * DEFAULT_FUNNEL_AGENT_TOOLS.
+   */
+  const wantsClosedLoop =
+    !input.scope.clientId &&
+    (want("crm.closed_loop") ||
+      want("crm.runDemoClosedLoop") ||
+      want("funnel.closed_loop")) &&
+    /closed\s*loop|runDemoClosedLoop|won\s*handover|prospect\s*(?:→|->|to)\s*won/i.test(
+      input.prompt,
+    );
+
+  const loopSeed: {
+    invoiceId?: string;
+    outreachId?: string;
+    taskId?: string;
+    campaignItemId?: string;
+  } = {};
+
+  if (wantsClosedLoop) {
+    try {
+      const { runDemoClosedLoopCore } = await import("../crm/closed-loop");
+      const viaApollo =
+        /via\s*apollo|closed\s*loop[^\n]{0,40}apollo|apollo[^\n]{0,40}closed\s*loop/i.test(
+          input.prompt,
+        );
+      const companyMatch = input.prompt.match(
+        /(?:company|for)\s*[:=]\s*["']?([A-Za-z0-9 .&'-]{2,80}?)["']?(?:\s|$|,|\.|via)/i,
+      );
+      const loop = await runDemoClosedLoopCore({
+        companyName: companyMatch?.[1]?.trim(),
+        viaApollo,
+        actorEmployeeId: input.scope.employeeId,
+      });
+      if (!loop.ok) {
+        results.push({
+          tool: "crm.closed_loop",
+          ok: false,
+          error: `${loop.step}: ${loop.reason}`,
+          data: loop,
+        });
+      } else {
+        if (loop.invoiceId) loopSeed.invoiceId = loop.invoiceId;
+        if (loop.outreachId) loopSeed.outreachId = loop.outreachId;
+        if (loop.taskId) loopSeed.taskId = loop.taskId;
+        if (loop.campaignItemId) loopSeed.campaignItemId = loop.campaignItemId;
+        results.push({
+          tool: "crm.closed_loop",
+          ok: true,
+          data: {
+            clientId: loop.clientId,
+            clientName: loop.clientName,
+            dealId: loop.dealId,
+            companyId: loop.companyId,
+            taskId: loop.taskId,
+            calendarId: loop.calendarId,
+            outreachId: loop.outreachId,
+            invoiceId: loop.invoiceId,
+            campaignItemId: loop.campaignItemId,
+            onboardingPhases: loop.onboardingPhases,
+            viaApollo: loop.viaApollo,
+            apolloMode: loop.apolloMode,
+            portalInvite: loop.portalInvite,
+            next: loop.next,
+            fired: loop.fired,
+          },
+        });
+      }
+    } catch (err) {
+      results.push({
+        tool: "crm.closed_loop",
+        ok: false,
+        error: err instanceof Error ? err.message : "crm_closed_loop_failed",
+      });
+    }
+  }
+
+  /**
    * OS finance approve/issue (propose → approve → issue). Prompt-gated;
    * never in DEFAULT_FUNNEL_AGENT_TOOLS. Org-only (no client sandbox).
-   * Issue is OS-only when Xero write is disabled.
+   * Issue is OS-only when Xero write is disabled. Accepts IDs from prompt or
+   * from crm.closed_loop seed in the same run (one-shot settle).
    */
   const wantsFinanceApprove =
     !input.scope.clientId &&
     (want("finance.os_approve") ||
       want("finance.approve") ||
       want("invoices.approve")) &&
-    /(?:os[_\s-]?approve|approve\s+(?:the\s+)?(?:os\s+)?invoice|invoice[^\n]{0,40}approv)/i.test(
+    /(?:finance\s+approve|os[_\s-]?approve|approve\s+(?:and\s+issue\b|(?:the\s+)?(?:os\s+)?invoice)|invoice[^\n]{0,40}approv)/i.test(
       input.prompt,
     );
 
@@ -628,7 +708,7 @@ export async function runAgentTools(input: {
     (want("finance.os_issue") ||
       want("finance.issue") ||
       want("invoices.issue")) &&
-    /(?:os[_\s-]?issue|issue\s+(?:the\s+)?(?:os\s+)?invoice|invoice[^\n]{0,40}issue|mark\s+issued)/i.test(
+    /(?:finance\s+issue|approve\s+and\s+issue|os[_\s-]?issue|issue\s+(?:the\s+)?(?:os\s+)?invoice|invoice[^\n]{0,40}issue|mark\s+issued)/i.test(
       input.prompt,
     );
 
@@ -638,7 +718,8 @@ export async function runAgentTools(input: {
       issueOsInvoice,
       parseInvoiceIdFromPrompt,
     } = await import("../finance/os-invoice-actions");
-    const invoiceId = parseInvoiceIdFromPrompt(input.prompt);
+    const invoiceId =
+      parseInvoiceIdFromPrompt(input.prompt) ?? loopSeed.invoiceId ?? null;
     const employeeId =
       input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
 
@@ -742,7 +823,8 @@ export async function runAgentTools(input: {
     const { approveOsOutreach, parseOutreachIdFromPrompt } = await import(
       "../leadgen/os-outreach-actions"
     );
-    const outreachId = parseOutreachIdFromPrompt(input.prompt);
+    const outreachId =
+      parseOutreachIdFromPrompt(input.prompt) ?? loopSeed.outreachId ?? null;
     const employeeId =
       input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
     if (!outreachId) {
@@ -803,7 +885,10 @@ export async function runAgentTools(input: {
       "../tasks/os-creative-qc"
     );
     const taskId =
-      parseTaskIdFromPrompt(input.prompt) ?? input.scope.taskId ?? null;
+      parseTaskIdFromPrompt(input.prompt) ??
+      input.scope.taskId ??
+      loopSeed.taskId ??
+      null;
     const employeeId =
       input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
     if (!taskId) {
@@ -879,7 +964,10 @@ export async function runAgentTools(input: {
       publishOsCampaign,
       parseCampaignIdFromPrompt,
     } = await import("../campaigns/os-campaign-actions");
-    const campaignItemId = parseCampaignIdFromPrompt(input.prompt);
+    const campaignItemId =
+      parseCampaignIdFromPrompt(input.prompt) ??
+      loopSeed.campaignItemId ??
+      null;
     const employeeId =
       input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
 
@@ -987,7 +1075,10 @@ export async function runAgentTools(input: {
       "../portal/os-portal-approve"
     );
     const approvalId =
-      parseApprovalIdFromPrompt(input.prompt) ?? input.scope.taskId ?? null;
+      parseApprovalIdFromPrompt(input.prompt) ??
+      input.scope.taskId ??
+      loopSeed.taskId ??
+      null;
     const employeeId =
       input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
     if (!approvalId) {
@@ -1032,73 +1123,9 @@ export async function runAgentTools(input: {
   }
 
   /**
-   * Org-wide prospect → won → handover → onboarding. Prompt-gated so
-   * crm.* / * allowlists alone cannot fire a full closed loop on every run.
-   * Never added to DEFAULT_FUNNEL_AGENT_TOOLS.
+   * Org-wide closed loop already ran above (before settle tools) when gated.
+   * crm.prospect is the lighter org import path when closed_loop did not fire.
    */
-  const wantsClosedLoop =
-    !input.scope.clientId &&
-    (want("crm.closed_loop") ||
-      want("crm.runDemoClosedLoop") ||
-      want("funnel.closed_loop")) &&
-    /closed\s*loop|runDemoClosedLoop|won\s*handover|prospect\s*(?:→|->|to)\s*won/i.test(
-      input.prompt,
-    );
-
-  if (wantsClosedLoop) {
-    try {
-      const { runDemoClosedLoopCore } = await import("../crm/closed-loop");
-      const viaApollo =
-        /via\s*apollo|closed\s*loop[^\n]{0,40}apollo|apollo[^\n]{0,40}closed\s*loop/i.test(
-          input.prompt,
-        );
-      const companyMatch = input.prompt.match(
-        /(?:company|for)\s*[:=]\s*["']?([A-Za-z0-9 .&'-]{2,80}?)["']?(?:\s|$|,|\.|via)/i,
-      );
-      const loop = await runDemoClosedLoopCore({
-        companyName: companyMatch?.[1]?.trim(),
-        viaApollo,
-        actorEmployeeId: input.scope.employeeId,
-      });
-      if (!loop.ok) {
-        results.push({
-          tool: "crm.closed_loop",
-          ok: false,
-          error: `${loop.step}: ${loop.reason}`,
-          data: loop,
-        });
-      } else {
-        results.push({
-          tool: "crm.closed_loop",
-          ok: true,
-          data: {
-            clientId: loop.clientId,
-            clientName: loop.clientName,
-            dealId: loop.dealId,
-            companyId: loop.companyId,
-            taskId: loop.taskId,
-            calendarId: loop.calendarId,
-            outreachId: loop.outreachId,
-            invoiceId: loop.invoiceId,
-            campaignItemId: loop.campaignItemId,
-            onboardingPhases: loop.onboardingPhases,
-            viaApollo: loop.viaApollo,
-            apolloMode: loop.apolloMode,
-            portalInvite: loop.portalInvite,
-            next: loop.next,
-            fired: loop.fired,
-          },
-        });
-      }
-    } catch (err) {
-      results.push({
-        tool: "crm.closed_loop",
-        ok: false,
-        error: err instanceof Error ? err.message : "crm_closed_loop_failed",
-      });
-    }
-  }
-
   if (
     !wantsClosedLoop &&
     !input.scope.clientId &&
