@@ -6,6 +6,8 @@ import {
   estimateCostAed,
   OPENROUTER_FREE_DEFAULT_MODEL,
   OPENROUTER_FREE_FALLBACK_MODELS,
+  assertOpenRouterFreeRoute,
+  isOpenRouterFreeRoute,
   priceForModel,
   withMetering,
   type CostEvent,
@@ -299,7 +301,18 @@ describe("openrouter free-model failover", () => {
     expect(OPENROUTER_FREE_FALLBACK_MODELS[0]).toBe(
       OPENROUTER_FREE_DEFAULT_MODEL,
     );
-    expect(OPENROUTER_FREE_FALLBACK_MODELS.length).toBeGreaterThanOrEqual(2);
+    expect(OPENROUTER_FREE_FALLBACK_MODELS).toContain("stealth/ox-alpha");
+    expect(OPENROUTER_FREE_FALLBACK_MODELS.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("allowlists only free OpenRouter routes", () => {
+    expect(isOpenRouterFreeRoute("liquid/lfm-2.5-2.6b:free")).toBe(true);
+    expect(isOpenRouterFreeRoute("stealth/ox-alpha")).toBe(true);
+    expect(isOpenRouterFreeRoute("openrouter/free")).toBe(true);
+    expect(isOpenRouterFreeRoute("openai/gpt-4o")).toBe(false);
+    expect(() => assertOpenRouterFreeRoute("anthropic/claude-3.5-sonnet")).toThrow(
+      /free allowlist/i,
+    );
   });
 
   it("retries the next free model after a 429", async () => {
