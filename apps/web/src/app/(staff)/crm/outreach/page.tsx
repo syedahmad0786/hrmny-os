@@ -11,6 +11,7 @@ import {
   CrmTag,
 } from "@/components/crm/ui";
 import { formatRelative } from "@/components/crm/format";
+import { HitlReadyBanner } from "@/components/hitl-ready-banner";
 
 /** Serialized shape of a @hrmny/gate TransitionResult refusal. */
 type GateOutcome =
@@ -190,6 +191,10 @@ function OutreachInner() {
         title="Outreach drafts"
         description="AI proposes; the gate disposes. Every send needs a prior human approval — no unattended auto-send."
       />
+
+      <div className="mt-4">
+        <HitlReadyBanner testIdPrefix="outreach" />
+      </div>
 
       {focusId ? (
         <p className="sr-only" data-testid="outreach-active-id">
