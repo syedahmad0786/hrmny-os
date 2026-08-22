@@ -295,6 +295,42 @@ describe("runAgentTools funnel writes", () => {
     ).toBeUndefined();
   });
 
+  it("creative.os_qc passes QC on closed-loop task (prompt-gated)", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const loopResults = await runAgentTools({
+      allowedTools: ["crm.closed_loop"],
+      prompt: "Run demo closed loop for company: Creative Qc Co",
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const loop = loopResults.find((r) => r.tool === "crm.closed_loop");
+    expect(loop?.ok).toBe(true);
+    const taskId = (loop?.data as { taskId?: string })?.taskId;
+    expect(taskId).toBeTruthy();
+
+    const blocked = await runAgentTools({
+      allowedTools: ["creative.os_qc"],
+      prompt: `Summarize task ${taskId}`,
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(blocked.find((r) => r.tool === "creative.os_qc")).toBeUndefined();
+
+    const passed = await runAgentTools({
+      allowedTools: ["creative.os_qc"],
+      prompt: `Pass QC on creative taskId: ${taskId}`,
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const row = passed.find((r) => r.tool === "creative.os_qc");
+    expect(row?.ok).toBe(true);
+    expect((row?.data as { qcPassed?: boolean })?.qcPassed).toBe(true);
+  });
+
   it("crm.prospect imports mock Apollo companies outside client sandbox", async () => {
     const results = await runAgentTools({
       allowedTools: ["crm.prospect"],

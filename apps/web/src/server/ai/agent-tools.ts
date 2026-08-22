@@ -755,6 +755,70 @@ export async function runAgentTools(input: {
   }
 
   /**
+   * Creative QC pass/fail/waive on a delivery task. Prompt-gated; org-only.
+   * Never in DEFAULT_FUNNEL_AGENT_TOOLS. No live Canva required.
+   */
+  const wantsCreativeQc =
+    !input.scope.clientId &&
+    (want("creative.os_qc") ||
+      want("creative.qc") ||
+      want("tasks.qc")) &&
+    /(?:pass\s+(?:qc|quality)|qc\s+pass|creative\s+qc|os[_\s-]?qc|waive\s+qc|fail\s+qc)/i.test(
+      input.prompt,
+    );
+
+  if (wantsCreativeQc) {
+    const { runOsCreativeQc, parseTaskIdFromPrompt } = await import(
+      "../tasks/os-creative-qc"
+    );
+    const taskId =
+      parseTaskIdFromPrompt(input.prompt) ?? input.scope.taskId ?? null;
+    const employeeId =
+      input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
+    if (!taskId) {
+      results.push({
+        tool: "creative.os_qc",
+        ok: false,
+        error: "taskId_required",
+      });
+    } else {
+      try {
+        const out = await runOsCreativeQc({
+          taskId,
+          prompt: input.prompt,
+          actorEmployeeId: employeeId,
+        });
+        results.push({
+          tool: "creative.os_qc",
+          ok: out.ok,
+          error: out.ok ? undefined : out.reason,
+          data: out.task
+            ? {
+                taskId: out.task.taskId,
+                clientId: out.task.clientId,
+                status: out.task.status,
+                qcPassed: out.task.qcPassed,
+                qcNotes: out.task.qcNotes,
+                title: out.task.title,
+                seamEventId: out.seamEventId ?? null,
+                next: {
+                  creative: `/creative?clientId=${encodeURIComponent(out.task.clientId)}`,
+                },
+              }
+            : { taskId },
+        });
+      } catch (err) {
+        results.push({
+          tool: "creative.os_qc",
+          ok: false,
+          error:
+            err instanceof Error ? err.message : "creative_os_qc_failed",
+        });
+      }
+    }
+  }
+
+  /**
    * Org-wide prospect → won → handover → onboarding. Prompt-gated so
    * crm.* / * allowlists alone cannot fire a full closed loop on every run.
    * Never added to DEFAULT_FUNNEL_AGENT_TOOLS.

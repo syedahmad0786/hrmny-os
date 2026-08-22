@@ -385,6 +385,43 @@ export function createMockProvider(
         };
       }
 
+      const catalogHasCreativeQc =
+        /(?:^|\n)-\s*(?:creative\.os_qc|creative_os_qc|tasks\.qc)\s*:/i.test(
+          blob,
+        );
+      const sawCreativeQcObs =
+        /Observation from (?:creative\.os_qc|creative_os_qc)/i.test(blob);
+      const wantsCreativeQc =
+        /(?:pass\s+(?:qc|quality)|qc\s+pass|creative\s+qc|os[_\s-]?qc|waive\s+qc|fail\s+qc)/i.test(
+          userText,
+        );
+      if (catalogHasCreativeQc && wantsCreativeQc && !sawCreativeQcObs) {
+        const prompt =
+          userText.trim().slice(0, 400) || "Pass QC on creative task";
+        const toolName = /(?:^|\n)-\s*creative_os_qc\s*:/i.test(blob)
+          ? "creative_os_qc"
+          : "creative.os_qc";
+        return {
+          text: [
+            "```tool",
+            JSON.stringify({
+              name: toolName,
+              arguments: { prompt },
+            }),
+            "```",
+          ].join("\n"),
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+      if (sawCreativeQcObs) {
+        return {
+          text: "Recorded creative QC on the delivery task.",
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+
       return {
         text: `[mock:${options.model ?? defaultModel}] stub response`,
         provider: "mock",
