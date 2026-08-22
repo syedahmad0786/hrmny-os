@@ -3,6 +3,7 @@
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
+import { TrafficReadyBanner } from "@/components/traffic-ready-banner";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
@@ -115,6 +116,8 @@ function TrafficDorInner() {
           </Button>
         ) : null}
       </div>
+
+      <TrafficReadyBanner />
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">
         {clientIdFromQuery ? (
