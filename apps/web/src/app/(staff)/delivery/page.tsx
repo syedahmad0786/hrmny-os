@@ -7,6 +7,7 @@ import { showDemoResets } from "@/lib/feature-flags";
 import { deliveryRhythmFor } from "@/lib/delivery-rhythm";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { OnboardingReadyBanner } from "@/components/onboarding-ready-banner";
 import { nextLinksFromToolData } from "@/lib/agent-next-links";
 
 type AgentToolRow = {
@@ -117,6 +118,8 @@ function DeliveryBoardPageInner() {
           </Button>
         ) : null}
       </div>
+
+      <OnboardingReadyBanner testIdPrefix="delivery" />
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">
         <p className="text-sm font-medium">Contract → delivery rhythm</p>
