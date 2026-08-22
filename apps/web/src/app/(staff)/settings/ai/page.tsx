@@ -421,6 +421,9 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
   const repair = trpc.aiAdmin.customAgents.repairEmptyAllowlists.useMutation({
     onSuccess: () => void utils.aiAdmin.customAgents.list.invalidate(),
   });
+  const pruneTest = trpc.aiAdmin.customAgents.pruneTestAgents.useMutation({
+    onSuccess: () => void utils.aiAdmin.customAgents.list.invalidate(),
+  });
   const runCustom = trpc.aiAdmin.customAgents.run.useMutation({
     onSuccess: () => void utils.aiAdmin.dashboard.invalidate(),
   });
@@ -465,6 +468,26 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
           ) : null}
         </div>
       ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+        <button
+          type="button"
+          data-testid="ai-agent-prune-test"
+          className="rounded-full border border-ink/20 bg-white px-3 py-1 text-xs font-medium disabled:opacity-40"
+          disabled={pruneTest.isPending}
+          onClick={() => pruneTest.mutate()}
+        >
+          {pruneTest.isPending ? "Pruning…" : "Prune test agents"}
+        </button>
+        <span className="text-xs text-muted">
+          Removes proof-agent-*, e2e-cmd-*, e2e-os-* (keeps Delivery coach & OS
+          settle).
+        </span>
+        {pruneTest.data ? (
+          <span className="text-xs text-muted">
+            Removed {pruneTest.data.removed.length} ({pruneTest.data.mode})
+          </span>
+        ) : null}
+      </div>
       <div className="mt-4 grid gap-2 md:grid-cols-3">
         <input
           data-testid="ai-agent-slug"
