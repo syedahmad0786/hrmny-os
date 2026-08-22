@@ -453,7 +453,7 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
           onClick={() => {
             setToolPreset("demo_os_settle");
             setRunPrompt(
-              "Run closed loop then settle OS: finance approve and issue, outreach approve, creative QC pass then advance, portal approve, campaign approve and publish.",
+              "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign.",
             );
           }}
         >
