@@ -22,6 +22,21 @@ const WORK_APP_FAMILIES = [
   { key: "enterprise", label: "Enterprise workflows" },
 ] as const;
 
+/** Map /api/ready blocker copy → in-page Connections anchor. */
+function blockerAnchor(text: string): string | null {
+  const t = text.toLowerCase();
+  if (t.includes("apollo")) return "#conn-apollo";
+  if (t.includes("hunter")) return "#conn-hunter";
+  if (t.includes("xero")) return "#conn-xero";
+  if (t.includes("google workspace") || t.includes("googleworkspace")) {
+    return "#conn-google_workspace";
+  }
+  if (t.includes("linkedin")) return "#conn-linkedin";
+  if (t.includes("canva")) return "#conn-canva";
+  if (t.includes("resend")) return "#direct-business-connections";
+  return null;
+}
+
 export default function ConnectionsPage() {
   const utils = trpc.useUtils();
   const list = trpc.connections.list.useQuery();
@@ -32,13 +47,31 @@ export default function ConnectionsPage() {
     retry: false,
   });
   const saveKey = trpc.connections.saveApiKey.useMutation({
-    onSuccess: () =>
+    onSuccess: (_data, vars) => {
+      setKeys((current) => ({
+        ...current,
+        [vars.toolkit]: "",
+      }));
+      setKeyNotes((current) => ({
+        ...current,
+        [vars.toolkit]: `${vars.toolkit} connected · live-probed`,
+      }));
       void Promise.all([
         utils.connections.list.invalidate(),
         utils.connections.workApps.invalidate(),
         utils.connections.asanaStatus.invalidate(),
-      ]),
+      ]).then(() => {
+        // Refresh /api/ready blockers after vault write.
+        void fetch("/api/ready")
+          .then((r) => r.json())
+          .then((body: { blockers?: string[] }) => {
+            if (Array.isArray(body.blockers)) setDemoBlockers(body.blockers);
+          })
+          .catch(() => undefined);
+      });
+    },
   });
+  const [keyNotes, setKeyNotes] = useState<Record<string, string>>({});
   const startXeroOAuth = trpc.connections.startXeroOAuth.useMutation();
   const startOAuth = trpc.connections.startOAuth.useMutation();
   const probeGoogle = trpc.connections.probeGoogleWorkspace.useMutation({
@@ -231,9 +264,24 @@ export default function ConnectionsPage() {
             live on production.
           </p>
           <ul className="mt-3 list-disc space-y-1 pl-5 text-ink">
-            {demoBlockers.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
+            {demoBlockers.map((item) => {
+              const href = blockerAnchor(item);
+              return (
+                <li key={item} data-testid="connections-blocker">
+                  {href ? (
+                    <a
+                      href={href}
+                      className="text-ochre underline"
+                      data-testid={`connections-blocker-link-${href.replace("#conn-", "")}`}
+                    >
+                      {item}
+                    </a>
+                  ) : (
+                    item
+                  )}
+                </li>
+              );
+            })}
           </ul>
           <p className="mt-3 text-xs text-muted">
             Also see{" "}
@@ -261,7 +309,9 @@ export default function ConnectionsPage() {
           return (
             <section
               key={item.toolkit}
-              className="rounded-lg border border-sand bg-white/70 p-4"
+              id={`conn-${item.toolkit}`}
+              data-testid={`conn-card-${item.toolkit}`}
+              className="rounded-lg border border-sand bg-white/70 p-4 scroll-mt-24"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -306,55 +356,70 @@ export default function ConnectionsPage() {
                       disconnect.mutate({ id: item.connectionAccountId! })
                     }
                   >
-                    Disconnect
+                    {item.toolkit === "google_workspace" &&
+                    (item.status === "error" || item.lastError)
+                      ? "Clear dead token"
+                      : "Disconnect"}
                   </Button>
                 ) : null}
               </div>
 
               {item.authType === "api_key" ? (
-                <div className="mt-4 flex gap-2">
-                  <input
-                    className="min-w-0 flex-1 rounded border border-sand bg-white px-3 py-2"
-                    type="password"
-                    disabled={!item.allowed}
-                    autoComplete="off"
-                    placeholder={
-                      item.hasSecret
-                        ? "Paste replacement key (live-probed)"
-                        : "Paste API key (live-probed on save)"
-                    }
-                    value={keys[item.toolkit] ?? ""}
-                    onChange={(event) =>
-                      setKeys((current) => ({
-                        ...current,
-                        [item.toolkit]: event.target.value,
-                      }))
-                    }
-                  />
-                  <Button
-                    type="button"
-                    disabled={
-                      !item.allowed ||
-                      !keys[item.toolkit]?.trim() ||
-                      saveKey.isPending
-                    }
-                    onClick={() => {
-                      saveKey.mutate({
-                        toolkit: item.toolkit as
-                          | "apollo"
-                          | "hunter"
-                          | "bayzat"
-                          | "n8n",
-                        apiKey: keys[item.toolkit]!,
-                      });
-                      setKeys((current) => ({
-                        ...current,
-                        [item.toolkit]: "",
-                      }));
-                    }}
-                  >
-                    {item.hasSecret ? "Replace" : "Connect"}
-                  </Button>
+                <div className="mt-4 flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    <input
+                      className="min-w-0 flex-1 rounded border border-sand bg-white px-3 py-2"
+                      type="password"
+                      disabled={!item.allowed}
+                      autoComplete="off"
+                      placeholder={
+                        item.hasSecret
+                          ? "Paste replacement key (live-probed)"
+                          : "Paste API key (live-probed on save)"
+                      }
+                      value={keys[item.toolkit] ?? ""}
+                      onChange={(event) =>
+                        setKeys((current) => ({
+                          ...current,
+                          [item.toolkit]: event.target.value,
+                        }))
+                      }
+                    />
+                    <Button
+                      type="button"
+                      disabled={
+                        !item.allowed ||
+                        !keys[item.toolkit]?.trim() ||
+                        saveKey.isPending
+                      }
+                      onClick={() => {
+                        saveKey.mutate({
+                          toolkit: item.toolkit as
+                            | "apollo"
+                            | "hunter"
+                            | "bayzat"
+                            | "n8n",
+                          apiKey: keys[item.toolkit]!,
+                        });
+                      }}
+                    >
+                      {item.hasSecret ? "Replace" : "Connect"}
+                    </Button>
+                  </div>
+                  {keyNotes[item.toolkit] ? (
+                    <p
+                      className="text-xs text-emerald-700"
+                      data-testid={`conn-key-note-${item.toolkit}`}
+                    >
+                      {keyNotes[item.toolkit]}
+                    </p>
+                  ) : null}
+                  {saveKey.error &&
+                  saveKey.variables?.toolkit === item.toolkit ? (
+                    <p className="text-xs text-red-700" role="alert">
+                      {saveKey.error.message}
+                    </p>
+                  ) : null}
                 </div>
               ) : item.authType === "oauth" ? (
                 <div className="mt-4 flex flex-wrap gap-2">

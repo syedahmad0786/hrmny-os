@@ -48,5 +48,11 @@ test.describe("Creative Pass QC UI", () => {
     );
     await expect(meta).toContainText(/status=client_review/i);
     await expect(meta).toContainText(/qcPassed=true/i);
+    await expect(page.getByTestId("creative-portal-review")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(
+      page.getByTestId("creative-portal-review").locator("a"),
+    ).toHaveAttribute("href", /\/portal\//);
   });
 });

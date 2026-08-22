@@ -56,6 +56,7 @@ function CreativeQcPageInner() {
       );
     },
   });
+  const reviewHref = trpc.clients.portalUsers.reviewHref.useMutation();
   const [msg, setMsg] = useState<string | null>(null);
   const [portalHref, setPortalHref] = useState<string | null>(null);
   const [prompt, setPrompt] = useState(
@@ -110,6 +111,23 @@ function CreativeQcPageInner() {
         ? `QC passed → ${result.newState}`
         : `Still blocked: ${result.blockedBy?.[0]?.reason}`,
     );
+    if (result.ok) {
+      const clientForPortal =
+        portalClientId ||
+        task.data?.clientId ||
+        ids.data?.clientId ||
+        "";
+      if (clientForPortal) {
+        try {
+          const href = await reviewHref.mutateAsync({
+            clientId: clientForPortal,
+          });
+          if (href.portalPath) setPortalHref(href.portalPath);
+        } catch {
+          /* portal mint optional — QC still succeeded */
+        }
+      }
+    }
   }
 
   return (
