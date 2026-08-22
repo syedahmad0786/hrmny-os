@@ -32,9 +32,24 @@ export default function CrmOutreachPage() {
 function OutreachInner() {
   const utils = trpc.useUtils();
   const searchParams = useSearchParams();
-  const focusId = searchParams.get("id");
+  const focusIdFromQuery = searchParams.get("id")?.trim() || "";
+  const clientIdFromQuery = searchParams.get("clientId")?.trim() || "";
   const items = trpc.leadgen.outreach.list.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
+  const client = trpc.clients.get.useQuery(
+    { id: clientIdFromQuery },
+    { enabled: Boolean(clientIdFromQuery) && !focusIdFromQuery },
+  );
+  const resolvedClientOutreachId = useMemo(() => {
+    if (focusIdFromQuery || !clientIdFromQuery) return null;
+    const dealId =
+      client.data && "dealId" in client.data
+        ? (client.data.dealId as string | null | undefined)
+        : null;
+    if (!dealId) return null;
+    return (items.data ?? []).find((o) => o.dealId === dealId)?.id ?? null;
+  }, [client.data, clientIdFromQuery, focusIdFromQuery, items.data]);
+  const focusId = focusIdFromQuery || resolvedClientOutreachId || null;
 
   const [gateError, setGateError] = useState<string | null>(null);
   const [sendNote, setSendNote] = useState<string | null>(null);

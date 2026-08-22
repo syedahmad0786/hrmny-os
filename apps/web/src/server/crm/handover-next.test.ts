@@ -12,14 +12,20 @@ describe("buildHandoverNextLinks", () => {
       "/creative?clientId=c1000000-0000-4000-8000-000000000001",
     );
     expect(next.creative).not.toContain("taskId=");
-    expect(next.approvals).toBe("/approvals");
-    expect(next.outreach).toBe("/crm/outreach");
+    expect(next.approvals).toBe(
+      "/approvals?clientId=c1000000-0000-4000-8000-000000000001",
+    );
+    expect(next.outreach).toBe(
+      "/crm/outreach?clientId=c1000000-0000-4000-8000-000000000001",
+    );
     expect(next.campaigns).toBe(
       "/creative?clientId=c1000000-0000-4000-8000-000000000001",
     );
     expect(next.portal).toBe("/portal/login");
     expect(next.onboarding).toBe("/portal/onboarding");
-    expect(next.finance).toBe("/finance");
+    expect(next.finance).toBe(
+      "/finance?clientId=c1000000-0000-4000-8000-000000000001",
+    );
   });
 
   it("pins creative to seeded QC taskId when present", () => {
@@ -55,9 +61,12 @@ describe("buildHandoverNextLinks", () => {
       invoiceId: "inv-1",
       campaignItemId: "camp-1",
     });
-    expect(next.outreach).toBe("/crm/outreach?id=o-abc");
-    expect(next.approvals).toBe("/approvals?id=o-abc");
-    expect(next.finance).toBe("/finance?invoiceId=inv-1");
+    expect(next.outreach).toContain("clientId=c1000000-0000-4000-8000-000000000001");
+    expect(next.outreach).toContain("id=o-abc");
+    expect(next.approvals).toContain("clientId=c1000000-0000-4000-8000-000000000001");
+    expect(next.approvals).toContain("id=o-abc");
+    expect(next.finance).toContain("clientId=c1000000-0000-4000-8000-000000000001");
+    expect(next.finance).toContain("invoiceId=inv-1");
     // Draft campaign ids must not land in Approvals (inbox is approved-only).
     expect(next.campaigns).toBe(
       "/creative?clientId=c1000000-0000-4000-8000-000000000001",

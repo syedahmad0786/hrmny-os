@@ -53,7 +53,9 @@ test.describe("Deal won → handover UI", () => {
     }
     await expect(next).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("deal-handover-client")).toBeVisible();
-    await expect(page.getByTestId("deal-handover-finance")).toBeVisible();
+    const finance = page.getByTestId("deal-handover-finance");
+    await expect(finance).toBeVisible();
+    await expect(finance).toHaveAttribute("href", /clientId=/);
     const creative = page.getByTestId("deal-handover-creative");
     await expect(creative).toBeVisible();
     await expect(creative).toHaveAttribute("href", /taskId=/);
