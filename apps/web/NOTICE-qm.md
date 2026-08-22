@@ -1,15 +1,18 @@
 THIRD-PARTY NOTICE — Hrmny Chat shell
 
 Portions of the Hrmny chat interface interaction model and layout
-(sidebar session rail, transcript + composer, effort/harness controls,
-work-fold / working indicator patterns) are adapted from:
+(sidebar session rail, transcript + composer, effort/mode controls,
+work-fold / working indicator patterns) are adapted from an MIT-licensed
+upstream agent chat shell:
 
-  QM — https://github.com/yc-software/qm
-  Copyright (c) 2026 QM contributors
+  https://github.com/yc-software/qm
+  Copyright (c) 2026 upstream contributors
   Licensed under the MIT License
 
-The Hrmny implementation is a React/Next.js rebrand and reimplementation
-for Creative Harmony (hrmny OS). It does not vendor the QM Lit/Vite plugin
-or runtime; the agent loop uses hrmny's OpenRouter harness (`@hrmny/ai`).
+The Hrmny product brand is Creative Harmony (Hrmny). This notice is
+legal attribution only — the staff UI must not surface third-party
+product names. The implementation is a React/Next.js reimplementation
+for hrmny OS and does not vendor the upstream Lit/Vite plugin or
+runtime; the agent loop uses hrmny's OpenRouter harness (`@hrmny/ai`).
 
-See: https://github.com/yc-software/qm/blob/main/LICENSE
+See the upstream LICENSE for full MIT terms.

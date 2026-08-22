@@ -784,7 +784,7 @@ export const appRouter = router({
   tickets: ticketsRouter,
   /** OS notifications (durable inbox separate from work.personal.inbox). */
   notifications: notificationsRouter,
-  /** Staff chat — OpenRouter + ReAct harness (DeepSeek/QM-style). */
+  /** Staff chat — OpenRouter + ReAct harness. */
   chat: chatRouter,
   /** Creative image generation via OpenRouter / mock SVG. */
   creativeGen: creativeGenRouter,
