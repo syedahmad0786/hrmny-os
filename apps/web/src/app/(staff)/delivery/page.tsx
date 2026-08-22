@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
 import { deliveryRhythmFor } from "@/lib/delivery-rhythm";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { nextLinksFromToolData } from "@/lib/agent-next-links";
 
 type AgentToolRow = {
@@ -15,8 +16,11 @@ type AgentToolRow = {
   data?: unknown;
 };
 
-export default function DeliveryBoardPage() {
+function DeliveryBoardPageInner() {
   const utils = trpc.useUtils();
+  const searchParams = useSearchParams();
+  const taskIdFromQuery = searchParams.get("taskId")?.trim() || "";
+  const clientIdFromQuery = searchParams.get("clientId")?.trim() || "";
   const reset = trpc.m4.reset.useMutation({
     onSuccess: () => void utils.invalidate(),
   });
@@ -56,6 +60,26 @@ export default function DeliveryBoardPage() {
   const [prompt, setPrompt] = useState(
     "Suggest the next delivery action for this task sandbox.",
   );
+  // Hydrate from agent next.delivery deeplinks (?taskId= / ?clientId=).
+  useEffect(() => {
+    if (!flatTasks.length || taskKey) return;
+    if (taskIdFromQuery) {
+      const hit = flatTasks.find((t) => t.taskId === taskIdFromQuery);
+      if (hit) {
+        setTaskKey(hit.taskId);
+        return;
+      }
+    }
+    if (clientIdFromQuery) {
+      const forClient = flatTasks.filter((t) => t.clientId === clientIdFromQuery);
+      const pick =
+        forClient.find((t) => t.status === "qc") ??
+        forClient.find((t) => t.status === "client_review") ??
+        forClient.find((t) => t.status === "brief_ready") ??
+        forClient[0];
+      if (pick) setTaskKey(pick.taskId);
+    }
+  }, [flatTasks, taskKey, taskIdFromQuery, clientIdFromQuery]);
   const selected = flatTasks.find((t) => t.taskId === taskKey);
   const selectedAgent = (agents.data ?? []).find(
     (a) => a.customAgentId === agentId,
@@ -474,5 +498,20 @@ export default function DeliveryBoardPage() {
         </ul>
       </section>
     </main>
+  );
+}
+
+export default function DeliveryBoardPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex flex-col gap-6 p-6">
+          <h1 className="font-display text-3xl font-semibold">Delivery board</h1>
+          <p className="text-muted">Loading…</p>
+        </main>
+      }
+    >
+      <DeliveryBoardPageInner />
+    </Suspense>
   );
 }
