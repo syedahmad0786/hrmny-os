@@ -44,3 +44,9 @@ export function formatReadyDbLine(ready: ReadySmoke): string {
   const portal = ready.portalMagicLink ?? "—";
   return `database ${db} · pgvector ${vec} · portal magic-link ${portal}`;
 }
+
+export function formatReadyToolsLine(ready: ReadySmoke): string {
+  const t = ready.tools ?? {};
+  const keys = ["n8n", "apollo", "hunter", "openrouter", "resend"] as const;
+  return keys.map((k) => `${k} ${t[k] ?? "—"}`).join(" · ");
+}
