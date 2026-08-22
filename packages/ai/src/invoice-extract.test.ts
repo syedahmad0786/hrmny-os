@@ -35,7 +35,7 @@ describe("live provider transport", () => {
         authorization: "Bearer test-key",
       });
       expect(JSON.parse(String(init?.body))).toMatchObject({
-        model: "test/model",
+        model: "stealth/ox-alpha",
         response_format: { type: "json_object" },
         messages: [
           {
@@ -53,7 +53,7 @@ describe("live provider transport", () => {
       return new Response(
         JSON.stringify({
           id: "generation-1",
-          model: "test/model",
+          model: "stealth/ox-alpha",
           choices: [{ message: { content: '{"ok":true}' } }],
           usage: { prompt_tokens: 12, completion_tokens: 4 },
         }),
@@ -64,7 +64,7 @@ describe("live provider transport", () => {
       const provider = createProvider({
         provider: "openrouter",
         openRouterApiKey: "test-key",
-        defaultModel: "test/model",
+        defaultModel: "stealth/ox-alpha",
       });
       const result = await provider.generate({
         messages: [{ role: "user", content: "Return JSON" }],
