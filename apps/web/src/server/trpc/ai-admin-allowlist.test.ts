@@ -97,7 +97,7 @@ describe("customAgents allowlist repair", () => {
     const run = await caller.aiAdmin.customAgents.run({
       id: settle.customAgentId,
       prompt:
-        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign.",
+        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign, sign off onboarding phase, ref-approve calendar.",
     });
     expect(run.slug).toBe(settleSlug);
     expect(Array.isArray(run.toolResults)).toBe(true);
@@ -111,5 +111,7 @@ describe("customAgents allowlist repair", () => {
     expect(byTool("portal.os_approve")?.ok).toBe(true);
     expect(byTool("campaigns.os_approve")?.ok).toBe(true);
     expect(byTool("campaigns.os_publish")?.ok).toBe(true);
+    expect(byTool("onboarding.os_signoff")?.ok).toBe(true);
+    expect(byTool("calendar.os_ref_approve")?.ok).toBe(true);
   });
 });
