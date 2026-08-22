@@ -7,6 +7,38 @@ import { showDemoResets } from "@/lib/feature-flags";
 import { deliveryRhythmFor } from "@/lib/delivery-rhythm";
 import Link from "next/link";
 
+type AgentToolRow = {
+  tool?: string;
+  ok?: boolean;
+  error?: string;
+  data?: unknown;
+};
+
+function nextLinksFromToolData(
+  data: unknown,
+): Array<{ href: string; label: string }> {
+  if (!data || typeof data !== "object") return [];
+  const record = data as Record<string, unknown>;
+  const links: Array<{ href: string; label: string }> = [];
+  const next = record.next;
+  if (next && typeof next === "object") {
+    for (const [key, value] of Object.entries(
+      next as Record<string, unknown>,
+    )) {
+      if (typeof value === "string" && value.startsWith("/")) {
+        links.push({ href: value, label: key });
+      }
+    }
+  }
+  if (
+    typeof record.portalPath === "string" &&
+    record.portalPath.startsWith("/")
+  ) {
+    links.push({ href: record.portalPath, label: "portal" });
+  }
+  return links;
+}
+
 export default function DeliveryBoardPage() {
   const utils = trpc.useUtils();
   const reset = trpc.m4.reset.useMutation({
@@ -25,6 +57,14 @@ export default function DeliveryBoardPage() {
     ...deliveryRhythmFor(c.engagementType),
   }));
 
+  const clientNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of clients.data ?? []) {
+      map.set(c.clientId, c.name);
+    }
+    return map;
+  }, [clients.data]);
+
   const flatTasks = useMemo(
     () =>
       (board.data?.board ?? []).flatMap((col) =>
@@ -41,6 +81,18 @@ export default function DeliveryBoardPage() {
     "Suggest the next delivery action for this task sandbox.",
   );
   const selected = flatTasks.find((t) => t.taskId === taskKey);
+  const selectedAgent = (agents.data ?? []).find(
+    (a) => a.customAgentId === agentId,
+  );
+  const sandboxClientName = selected?.clientId
+    ? (clientNameById.get(selected.clientId) ?? selected.clientId.slice(0, 8))
+    : null;
+  const toolResults =
+    runAgent.data &&
+    "toolResults" in runAgent.data &&
+    Array.isArray(runAgent.data.toolResults)
+      ? (runAgent.data.toolResults as AgentToolRow[])
+      : [];
 
   return (
     <main className="flex flex-col gap-6">
@@ -156,7 +208,11 @@ export default function DeliveryBoardPage() {
             <option value="">Select task…</option>
             {flatTasks.map((t) => (
               <option key={t.taskId} value={t.taskId}>
-                {t.title} · {t.status}
+                {t.title}
+                {t.clientId
+                  ? ` · ${clientNameById.get(t.clientId) ?? "client"}`
+                  : ""}{" "}
+                · {t.status}
               </option>
             ))}
           </select>
@@ -173,6 +229,9 @@ export default function DeliveryBoardPage() {
               .map((a) => (
                 <option key={a.customAgentId} value={a.customAgentId}>
                   {a.displayName}
+                  {Array.isArray(a.effectiveAllowedTools)
+                    ? ` · ${a.effectiveAllowedTools.length} tools`
+                    : ""}
                 </option>
               ))}
           </select>
@@ -195,6 +254,46 @@ export default function DeliveryBoardPage() {
             {runAgent.isPending ? "Running…" : "Run agent"}
           </button>
         </div>
+        {selected || selectedAgent ? (
+          <p
+            className="mt-2 text-xs text-muted"
+            data-testid="delivery-agent-sandbox-hint"
+          >
+            {selected ? (
+              <>
+                Client sandbox:{" "}
+                <span
+                  className="text-ink"
+                  data-testid="delivery-sandbox-client"
+                >
+                  {sandboxClientName}
+                </span>
+                {" · task "}
+                <span className="font-mono text-ink">
+                  {selected.taskId.slice(0, 8)}
+                </span>
+              </>
+            ) : (
+              "Pick a task to bind the client sandbox."
+            )}
+            {selectedAgent &&
+            Array.isArray(selectedAgent.effectiveAllowedTools) &&
+            selectedAgent.effectiveAllowedTools.length > 0 ? (
+              <>
+                {" · allowlist "}
+                <span
+                  className="font-mono"
+                  data-testid="delivery-agent-allowlist"
+                >
+                  {selectedAgent.effectiveAllowedTools.slice(0, 6).join(", ")}
+                  {selectedAgent.effectiveAllowedTools.length > 6
+                    ? ` +${selectedAgent.effectiveAllowedTools.length - 6}`
+                    : ""}
+                </span>
+              </>
+            ) : null}
+          </p>
+        ) : null}
         <textarea
           className="mt-2 min-h-[56px] w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm"
           value={prompt}
@@ -212,14 +311,68 @@ export default function DeliveryBoardPage() {
           </p>
         ) : null}
         {runAgent.data ? (
-          <pre
-            className="mt-3 max-h-40 overflow-auto rounded-lg bg-ink/5 p-3 text-xs"
-            data-testid="delivery-agent-output"
-          >
-            {typeof runAgent.data.output === "string"
-              ? runAgent.data.output
-              : JSON.stringify(runAgent.data.output, null, 2)}
-          </pre>
+          <div className="mt-3 space-y-2">
+            <pre
+              className="max-h-40 overflow-auto rounded-lg bg-ink/5 p-3 text-xs"
+              data-testid="delivery-agent-output"
+            >
+              {typeof runAgent.data.output === "string"
+                ? runAgent.data.output
+                : JSON.stringify(runAgent.data.output, null, 2)}
+            </pre>
+            {toolResults.length > 0 ? (
+              <ul
+                data-testid="delivery-agent-tool-results"
+                className="rounded-lg border border-sand bg-white/70 p-3 text-xs"
+              >
+                <li className="mb-1 font-semibold uppercase tracking-[0.12em] text-muted">
+                  Tool results
+                </li>
+                {toolResults.map((row, idx) => {
+                  const links = nextLinksFromToolData(row.data);
+                  return (
+                    <li
+                      key={`${row.tool ?? "tool"}-${idx}`}
+                      data-testid={`delivery-agent-tool-${row.tool ?? "unknown"}`}
+                      className="mt-2 border-t border-sand/60 pt-2 first:mt-0 first:border-0 first:pt-0"
+                    >
+                      <span className="font-mono">{row.tool ?? "?"}</span>
+                      {" · "}
+                      {row.ok
+                        ? "ok"
+                        : `failed${row.error ? `: ${row.error}` : ""}`}
+                      {row.data != null ? (
+                        <pre
+                          data-testid="delivery-agent-tool-result-data"
+                          className="mt-1 max-h-28 overflow-auto rounded bg-ink/5 p-2 font-mono text-[11px] text-ink/80"
+                        >
+                          {typeof row.data === "string"
+                            ? row.data
+                            : JSON.stringify(row.data)}
+                        </pre>
+                      ) : null}
+                      {links.length > 0 ? (
+                        <p
+                          className="mt-1 flex flex-wrap gap-2"
+                          data-testid="delivery-agent-tool-next"
+                        >
+                          {links.map((link) => (
+                            <Link
+                              key={`${link.href}-${link.label}`}
+                              href={link.href}
+                              className="text-ochre underline"
+                            >
+                              {link.label}
+                            </Link>
+                          ))}
+                        </p>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
         ) : null}
         {runAgent.error ? (
           <p className="mt-2 text-sm text-red-700">{runAgent.error.message}</p>
@@ -244,6 +397,7 @@ export default function DeliveryBoardPage() {
                   >
                     <p className="font-medium leading-snug">{t.title}</p>
                     <p className="text-xs text-muted">
+                      {clientNameById.get(t.clientId) ?? "—"} ·{" "}
                       {t.priority ?? "—"} · {t.taskType}
                     </p>
                     <button
