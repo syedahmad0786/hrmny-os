@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   MonthlyCapExceededError,
   createMockProvider,
+  createProvider,
   estimateCostAed,
+  OPENROUTER_FREE_DEFAULT_MODEL,
+  OPENROUTER_FREE_FALLBACK_MODELS,
   priceForModel,
   withMetering,
   type CostEvent,
@@ -288,5 +291,53 @@ describe("withMetering", () => {
       messages: [{ role: "user", content: "hi" }],
     });
     expect(result.text).toBe("ok");
+  });
+});
+
+describe("openrouter free-model failover", () => {
+  it("exposes an ordered free fallback chain", () => {
+    expect(OPENROUTER_FREE_FALLBACK_MODELS[0]).toBe(
+      OPENROUTER_FREE_DEFAULT_MODEL,
+    );
+    expect(OPENROUTER_FREE_FALLBACK_MODELS.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("retries the next free model after a 429", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      if (body.model === OPENROUTER_FREE_DEFAULT_MODEL) {
+        return new Response(JSON.stringify({ error: "rate limited" }), {
+          status: 429,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          id: "gen-1",
+          model: body.model,
+          choices: [
+            { message: { role: "assistant", content: "failover ok" } },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 2 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.LLM_PROVIDER = "openrouter";
+
+    const provider = createProvider({
+      provider: "openrouter",
+      defaultModel: OPENROUTER_FREE_DEFAULT_MODEL,
+      openRouterApiKey: "sk-test",
+    });
+    const result = await provider.generate({
+      messages: [{ role: "user", content: "hi" }],
+      task: "generic",
+    });
+    expect(result.text).toBe("failover ok");
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    vi.unstubAllGlobals();
   });
 });

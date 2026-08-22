@@ -627,6 +627,27 @@ export const chatRouter = router({
       const provider = agentModel
         ? createProvider({ defaultModel: agentModel })
         : providerBase;
+      const generateSafe = async (
+        args: Parameters<typeof provider.generate>[0],
+      ) => {
+        try {
+          return await provider.generate(args);
+        } catch (err) {
+          // Demo-ready: free OpenRouter routes flake (429/empty). Keep tool
+          // results usable by falling back to mock like Settings AI run.
+          const mock = createProvider({ provider: "mock" });
+          const fallback = await mock.generate({
+            ...args,
+            model: "mock",
+          });
+          return {
+            ...fallback,
+            text: `${fallback.text}\n\n(note: live LLM unavailable — ${
+              err instanceof Error ? err.message.slice(0, 120) : "llm_error"
+            })`,
+          };
+        }
+      };
       const system = [
         customSystem ||
           "You are Hrmny — the multiplayer agent harness for Creative Harmony staff.",
@@ -702,7 +723,7 @@ export const chatRouter = router({
                     4000,
                   ),
                 });
-                const res = await provider.generate({
+                const res = await generateSafe({
                   messages: [
                     { role: "system", content: system },
                     {
@@ -721,7 +742,7 @@ export const chatRouter = router({
                   ],
                 };
               }
-              const res = await provider.generate({
+              const res = await generateSafe({
                 messages: [
                   { role: "system", content: system },
                   { role: "user", content: input.content },
@@ -752,7 +773,7 @@ export const chatRouter = router({
                     content: m.content,
                   };
                 });
-                const res = await provider.generate({
+                const res = await generateSafe({
                   messages: folded,
                   temperature,
                   task: "generic",
