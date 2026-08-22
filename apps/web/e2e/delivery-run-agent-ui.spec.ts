@@ -77,4 +77,41 @@ test.describe("Delivery Run agent UI", () => {
     const toolResults = page.getByTestId("delivery-agent-tool-results");
     await expect(toolResults).toBeVisible({ timeout: 15_000 });
   });
+
+  test("Portal onboarding mint opens portal onboarding route", async ({
+    page,
+  }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/delivery", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
+      timeout: 60_000,
+    });
+
+    const taskSelect = page.getByTestId("delivery-task-select");
+    await expect
+      .poll(async () => taskSelect.locator("option").count(), {
+        timeout: 60_000,
+      })
+      .toBeGreaterThan(1);
+
+    const taskOptions = taskSelect.locator("option");
+    const taskCount = await taskOptions.count();
+    let pickedTask = false;
+    for (let i = 0; i < taskCount; i++) {
+      const value = (await taskOptions.nth(i).getAttribute("value")) ?? "";
+      if (value === DEMO_CREATIVE_TASK_ID) {
+        await taskSelect.selectOption(DEMO_CREATIVE_TASK_ID);
+        pickedTask = true;
+        break;
+      }
+    }
+    if (!pickedTask) {
+      await taskSelect.selectOption({ index: 1 });
+    }
+
+    const onboarding = page.getByTestId("delivery-client-onboarding");
+    await expect(onboarding).toBeEnabled({ timeout: 30_000 });
+    await onboarding.click();
+    await expect(page).toHaveURL(/\/portal\/onboarding/, { timeout: 60_000 });
+  });
 });

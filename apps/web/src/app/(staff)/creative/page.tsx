@@ -3,6 +3,7 @@
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
+import { CreativeReadyBanner } from "@/components/creative-ready-banner";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
@@ -172,6 +173,8 @@ function CreativeQcPageInner() {
           </Button>
         ) : null}
       </div>
+
+      <CreativeReadyBanner />
 
       <section className="rounded-lg border border-sand bg-white/70 p-4 text-sm">
         <h2 className="font-display text-lg font-semibold">Image generation</h2>
