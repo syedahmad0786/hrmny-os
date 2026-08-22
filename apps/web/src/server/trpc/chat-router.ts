@@ -242,6 +242,29 @@ export function buildChatDefaultTools(scope: {
               return { tools: results };
             },
           } satisfies HarnessTool,
+          {
+            name: "creative_os_qc",
+            description:
+              "Org-only: pass/fail/waive creative QC on a delivery task. Prompt must mention pass QC + taskId UUID.",
+            run: async (args: Record<string, unknown>) => {
+              const { runAgentTools } = await import("../ai/agent-tools");
+              const id =
+                typeof args.taskId === "string" ? args.taskId : "";
+              const base = String(
+                args.prompt ?? args.query ?? "Pass QC on creative task",
+              );
+              const prompt = id ? `${base} taskId: ${id}` : base;
+              const results = await runAgentTools({
+                allowedTools: ["creative.os_qc"],
+                prompt,
+                scope: {
+                  employeeId: scope.employeeId,
+                  taskId: id || undefined,
+                },
+              });
+              return { tools: results };
+            },
+          } satisfies HarnessTool,
         ]),
     {
       name: "now",

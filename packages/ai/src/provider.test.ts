@@ -236,6 +236,27 @@ describe("withMetering", () => {
     expect(first.text).toMatch(/"name"\s*:\s*"outreach\.os_approve"/);
   });
 
+  it("emits creative.os_qc fence when catalog lists it", async () => {
+    const mock = createMockProvider();
+    const first = await mock.generate({
+      task: "generic",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Available tools:\n- creative.os_qc: Pass creative QC\n- now: time",
+        },
+        {
+          role: "user",
+          content:
+            "Pass QC on creative taskId: a1000000-0000-4000-8000-000000000066",
+        },
+      ],
+    });
+    expect(first.text).toMatch(/```tool/);
+    expect(first.text).toMatch(/"name"\s*:\s*"creative\.os_qc"/);
+  });
+
   it("fails closed when month-to-date spend is at the cap", async () => {
     const onCost = vi.fn();
     const metered = withMetering(tokenProvider, {

@@ -193,4 +193,39 @@ describe("chat harness funnel_act", () => {
     expect(approved?.ok).toBe(true);
     expect(approved?.data?.state).toBe("approved");
   });
+
+  it("creative_os_qc after closed loop", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const tools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
+    const closed = tools.find((t) => t.name === "crm_closed_loop");
+    const loopResult = (await closed!.run({
+      prompt: "Run demo closed loop for company: Chat Creative Qc Co",
+    })) as {
+      tools?: Array<{
+        tool: string;
+        ok: boolean;
+        data?: { taskId?: string };
+      }>;
+    };
+    const taskId = loopResult.tools?.find((r) => r.tool === "crm.closed_loop")
+      ?.data?.taskId;
+    expect(taskId).toBeTruthy();
+
+    const qcTool = tools.find((t) => t.name === "creative_os_qc");
+    expect(qcTool).toBeTruthy();
+    const qcResult = (await qcTool!.run({
+      prompt: "Pass QC",
+      taskId,
+    })) as {
+      tools?: Array<{
+        tool: string;
+        ok: boolean;
+        data?: { qcPassed?: boolean };
+      }>;
+    };
+    const row = qcResult.tools?.find((r) => r.tool === "creative.os_qc");
+    expect(row?.ok).toBe(true);
+    expect(row?.data?.qcPassed).toBe(true);
+  });
 });
