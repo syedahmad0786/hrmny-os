@@ -19,6 +19,12 @@ test.describe("Approvals stub publish UI", () => {
       page.getByRole("heading", { name: /Approval inbox/i }),
     ).toBeVisible({ timeout: 60_000 });
 
+    await expect(page.getByTestId("approvals-ready-banner")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("approvals-ready-gw")).toBeVisible();
+    await expect(page.getByTestId("approvals-ready-linkedin")).toBeVisible();
+
     const row = page.getByTestId(`approvals-item-${APPROVED_CAMPAIGN_ID}`);
     // Shared demo state: if an earlier suite already published this seed,
     // the row may be gone — tolerate and skip the click path.
