@@ -321,11 +321,13 @@ function CreativeQcPageInner() {
                 <li
                   key={design.id}
                   className="flex flex-wrap items-center justify-between gap-2 border-b border-sand/60 pb-2"
+                  data-testid={`canva-design-${design.id}`}
                 >
                   <span className="min-w-0 flex-1 truncate">{design.title}</span>
                   <Button
                     type="button"
                     variant="ghost"
+                    data-testid={`canva-attach-${design.id}`}
                     disabled={!portalClientId || canvaAttach.isPending}
                     onClick={() => {
                       if (!portalClientId) return;
