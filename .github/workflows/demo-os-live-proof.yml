@@ -1,0 +1,42 @@
+# Optional Postgres closed-loop proof against a real database.
+# Requires repository secret DATABASE_URL (prod or staging pooler).
+# Enable scheduled runs by setting repository variable DEMO_OS_LIVE_PROOF=true.
+name: Demo OS live proof
+
+on:
+  workflow_dispatch:
+  schedule:
+  # Weekly Sunday 04:00 UTC when DEMO_OS_LIVE_PROOF is enabled (see job if).
+    - cron: "0 4 * * 0"
+
+concurrency:
+  group: demo-os-live-proof
+  cancel-in-progress: true
+
+jobs:
+  live-proof:
+    if: github.event_name == 'workflow_dispatch' || vars.DEMO_OS_LIVE_PROOF == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Live Postgres closed-loop proof
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AUTH_MODE: dev
+          ALLOW_DEV_AUTH: "true"
+          LLM_PROVIDER: mock
+        run: |
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "DATABASE_URL secret missing — add it to run live proof."
+            exit 1
+          fi
+          pnpm --filter @hrmny/web exec vitest run src/server/demo-os-live-proof.test.ts
