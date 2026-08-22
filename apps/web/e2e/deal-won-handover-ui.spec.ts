@@ -45,12 +45,12 @@ test.describe("Deal won → handover UI", () => {
       ).toBeVisible({ timeout: 30_000 });
     }
 
-    const handover = page.getByTestId("deal-handover");
-    if (await handover.isVisible()) {
+    const next = page.getByTestId("deal-handover-next");
+    if (!(await next.isVisible())) {
+      const handover = page.getByTestId("deal-handover");
+      await expect(handover).toBeVisible({ timeout: 30_000 });
       await handover.click();
     }
-
-    const next = page.getByTestId("deal-handover-next");
     await expect(next).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("deal-handover-client")).toBeVisible();
     await expect(page.getByTestId("deal-handover-finance")).toBeVisible();
