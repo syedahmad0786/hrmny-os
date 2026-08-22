@@ -49,10 +49,15 @@ export default function ClientsPage() {
     onSuccess: async (data) => {
       setPortalName("");
       setPortalEmail("");
+      const mode = data.delivery?.mode;
       setInviteDeliveryNote(
-        data.delivery
-          ? `Invite emailed (${data.delivery.mode}) — open ${data.portalPath}`
-          : null,
+        mode === "live"
+          ? `Invite emailed — open ${data.portalPath}`
+          : mode === "mock"
+            ? `Invite ready (email not sent — Resend mock). Open magic link: ${data.portalPath}`
+            : data.portalPath
+              ? `Invite ready — open ${data.portalPath}`
+              : null,
       );
       if (data.portalPath) setDemoPortalLink(data.portalPath);
       await Promise.all([
@@ -64,10 +69,13 @@ export default function ClientsPage() {
   const issueDemoToken = trpc.clients.portalUsers.issueDemoToken.useMutation({
     onSuccess: (data) => {
       setDemoPortalLink(data.portalPath);
+      const mode = data.delivery?.mode;
       setInviteDeliveryNote(
-        data.delivery
-          ? `Magic link emailed (${data.delivery.mode})`
-          : null,
+        mode === "live"
+          ? "Magic link emailed"
+          : mode === "mock"
+            ? "Magic link ready (email not sent — Resend mock)"
+            : null,
       );
     },
   });
