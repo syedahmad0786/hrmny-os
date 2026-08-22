@@ -76,9 +76,11 @@ export default function ClientOnboardingPage() {
     return {
       account: `/account?${accountQs.toString()}`,
       creative: `/creative?${creativeQs.toString()}`,
-      finance: invoiceId
-        ? `/finance?invoiceId=${encodeURIComponent(invoiceId)}`
-        : "/finance",
+      finance: (() => {
+        const qs = new URLSearchParams({ clientId: id });
+        if (invoiceId) qs.set("invoiceId", invoiceId);
+        return `/finance?${qs.toString()}`;
+      })(),
       outreach: outreachId
         ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
         : "/crm/outreach",

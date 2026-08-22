@@ -10,7 +10,8 @@ import { showDemoResets } from "@/lib/feature-flags";
 function FinanceQueueInner() {
   const utils = trpc.useUtils();
   const searchParams = useSearchParams();
-  const focusInvoiceId = searchParams.get("invoiceId");
+  const invoiceIdFromQuery = searchParams.get("invoiceId")?.trim() || "";
+  const clientIdFromQuery = searchParams.get("clientId")?.trim() || "";
   const session = trpc.auth.session.useQuery();
   const canViewMargin = session.data?.canViewMargin ?? false;
   const proposals = trpc.invoices.proposals.useQuery();
@@ -36,6 +37,21 @@ function FinanceQueueInner() {
     "ACME Supplies LLC invoice AED 2100.00 — TRN on file",
   );
   const demoResets = showDemoResets();
+
+  // When Continue OS / deeplink only has clientId, pin that client's first
+  // invoice — never leave the queue on an unrelated Demo Co row.
+  const resolvedClientInvoiceId = useMemo(() => {
+    if (invoiceIdFromQuery || !clientIdFromQuery) return null;
+    const rows = (invoices.data ?? []).filter(
+      (inv) => inv.clientId === clientIdFromQuery,
+    );
+    const first =
+      rows.find((inv) => inv.billingKind === "first") ??
+      rows.find((inv) => /first|handover|won/i.test(inv.ruleCited ?? "")) ??
+      rows[0];
+    return first?.invoiceId ?? null;
+  }, [clientIdFromQuery, invoiceIdFromQuery, invoices.data]);
+  const focusInvoiceId = invoiceIdFromQuery || resolvedClientInvoiceId || "";
 
   const orderedInvoices = useMemo(() => {
     const list = invoices.data ?? [];
@@ -64,6 +80,11 @@ function FinanceQueueInner() {
   return (
     <main className="flex flex-col gap-6">
       <h1 className="font-display text-3xl font-semibold">Finance queue</h1>
+      {focusInvoiceId ? (
+        <p className="sr-only" data-testid="finance-active-invoice">
+          {focusInvoiceId}
+        </p>
+      ) : null}
       <p className="text-muted">
         Intake → AI propose (HITL) → approve → mark issued in OS. Xero remains
         source of truth — OS reads/mirrors only and never writes.
