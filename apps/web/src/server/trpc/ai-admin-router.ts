@@ -23,6 +23,7 @@ import { getDb } from "../db";
 import { writeAudit } from "../m1-persistence";
 import { persistMemoryChunk, searchMemory } from "../ai/memory-db";
 import { boundRunAgent, persistAgentRun } from "../ai/run-agent-bound";
+import { isPrunableTestAgentSlug } from "@/lib/test-agent-slugs";
 import { router, staffProcedure, type TrpcContext } from "./trpc";
 
 /**
@@ -558,6 +559,61 @@ export const aiAdminRouter = router({
       return {
         ok: true as const,
         repaired: rows.length,
+        mode: "durable" as const,
+      };
+    }),
+
+    /** Remove vitest/Playwright agent clutter (proof-agent-*, e2e-cmd-*, e2e-os-*). */
+    pruneTestAgents: staffProcedure.mutation(async ({ ctx }) => {
+      const actor = requireAiAdmin(ctx);
+      const db = getDb();
+      if (!db) {
+        const removed: string[] = [];
+        for (let i = memCustomAgents.length - 1; i >= 0; i--) {
+          const row = memCustomAgents[i]!;
+          if (isPrunableTestAgentSlug(row.slug)) {
+            memCustomAgents.splice(i, 1);
+            removed.push(row.slug);
+          }
+        }
+        await writeAudit({
+          actorEmployeeId: actor.employeeId,
+          action: "ai.custom_agent.prune_test",
+          entityType: "custom_agent",
+          entityId: "batch",
+          before: { slugs: removed },
+          after: { removed: removed.length, mode: "memory" },
+          reason: null,
+        });
+        return {
+          ok: true as const,
+          removed,
+          mode: "memory" as const,
+        };
+      }
+      const rows = await db.execute<{ slug: string }>(sql`
+        delete from public.custom_agent
+        where (
+          slug like 'proof-agent-%'
+          or slug like 'e2e-cmd-%'
+          or slug like 'e2e-os-%'
+        )
+        and slug not in ('delivery-coach', 'os-settle')
+        returning slug
+      `);
+      const removed = rows.map((r) => r.slug);
+      await writeAudit({
+        actorEmployeeId: actor.employeeId,
+        action: "ai.custom_agent.prune_test",
+        entityType: "custom_agent",
+        entityId: "batch",
+        before: { slugs: removed },
+        after: { removed: removed.length, mode: "durable" },
+        reason: null,
+      });
+      return {
+        ok: true as const,
+        removed,
         mode: "durable" as const,
       };
     }),

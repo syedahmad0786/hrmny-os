@@ -126,4 +126,30 @@ describe("customAgents allowlist repair", () => {
     expect(byTool("onboarding.os_signoff")?.ok).toBe(true);
     expect(byTool("calendar.os_ref_approve")?.ok).toBe(true);
   });
+
+  it("pruneTestAgents removes proof/e2e slugs but keeps seeded coaches", async () => {
+    const caller = aiAdminCaller();
+    const proof = await caller.aiAdmin.customAgents.create({
+      slug: `proof-agent-${Date.now()}`,
+      displayName: "Proof Agent",
+    });
+    const e2e = await caller.aiAdmin.customAgents.create({
+      slug: `e2e-cmd-${Date.now()}`,
+      displayName: "E2E Command Coach",
+    });
+    const keep = await caller.aiAdmin.customAgents.create({
+      slug: `brand-voice-${Date.now()}`,
+      displayName: "Brand Voice",
+    });
+    const pruned = await caller.aiAdmin.customAgents.pruneTestAgents();
+    expect(pruned.removed).toContain(proof.slug);
+    expect(pruned.removed).toContain(e2e.slug);
+    expect(pruned.removed).not.toContain(keep.slug);
+    const listed = await caller.aiAdmin.customAgents.list();
+    expect(listed.some((a) => a.slug === proof.slug)).toBe(false);
+    expect(listed.some((a) => a.slug === e2e.slug)).toBe(false);
+    expect(listed.some((a) => a.slug === "delivery-coach")).toBe(true);
+    expect(listed.some((a) => a.slug === "os-settle")).toBe(true);
+    expect(listed.some((a) => a.slug === keep.slug)).toBe(true);
+  });
 });
