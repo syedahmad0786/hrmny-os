@@ -473,6 +473,7 @@ function ApprovalsInner() {
 
               {feedback[selected.id] ? (
                 <div
+                  data-testid="approvals-feedback"
                   className={`text-sm ${
                     feedback[selected.id]!.tone === "ok"
                       ? "text-emerald-700"
@@ -504,6 +505,7 @@ function ApprovalsInner() {
                   <>
                     <Button
                       type="button"
+                      data-testid="approvals-approve"
                       disabled={busyId === selected.id}
                       onClick={() => void approve(selected)}
                     >
