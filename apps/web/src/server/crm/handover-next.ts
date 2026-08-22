@@ -5,6 +5,7 @@
 
 export function buildHandoverNextLinks(input: {
   clientId: string;
+  taskId?: string | null;
   invoiceId?: string | null;
   outreachId?: string | null;
   campaignItemId?: string | null;
@@ -31,6 +32,7 @@ export function buildHandoverNextLinks(input: {
 } {
   const {
     clientId,
+    taskId,
     invoiceId,
     outreachId,
     campaignItemId,
@@ -39,10 +41,16 @@ export function buildHandoverNextLinks(input: {
   } = input;
   const portalMagic = portalPath?.trim() || null;
   const onboardingMagic = onboardingPath?.trim() || null;
+  const creativeQs = new URLSearchParams({
+    clientId,
+  });
+  if (taskId?.trim()) {
+    creativeQs.set("taskId", taskId.trim());
+  }
   return {
     client: `/clients/${clientId}`,
     account: `/account?clientId=${encodeURIComponent(clientId)}`,
-    creative: `/creative?clientId=${encodeURIComponent(clientId)}`,
+    creative: `/creative?${creativeQs.toString()}`,
     finance: invoiceId
       ? `/finance?invoiceId=${encodeURIComponent(invoiceId)}`
       : "/finance",

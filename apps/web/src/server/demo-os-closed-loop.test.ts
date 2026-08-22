@@ -94,6 +94,12 @@ describe("demo OS closed loop", () => {
     expect(result.onboardingPhases).toBeGreaterThanOrEqual(1);
     expect(result.taskId).toBeTruthy();
     expect(result.next.client).toMatch(/^\/clients\//);
+    expect(result.next.creative).toContain(
+      `taskId=${encodeURIComponent(result.taskId!)}`,
+    );
+    expect(result.next.creative).toContain(
+      `clientId=${encodeURIComponent(result.clientId)}`,
+    );
     expect(result.fired).toEqual(
       expect.arrayContaining(["client.create", "onboarding.seed", "creative.task_seed"]),
     );
@@ -112,6 +118,10 @@ describe("demo OS closed loop", () => {
     expect(result.viaApollo).toBe(false);
     expect(result.clientName).toMatch(/Memory Prospect/);
     expect(result.next.client).toContain(result.clientId);
+    expect(result.taskId).toBeTruthy();
+    expect(result.next.creative).toContain(
+      `taskId=${encodeURIComponent(result.taskId!)}`,
+    );
     expect(result.portalInvite?.portalPath ?? "").toMatch(/\/portal\//);
   });
 });

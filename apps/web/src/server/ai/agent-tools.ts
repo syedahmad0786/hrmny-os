@@ -926,7 +926,7 @@ export async function runAgentTools(input: {
                 seamEventId: out.seamEventId ?? null,
                 advanced: out.advanced ?? false,
                 next: {
-                  creative: `/creative?clientId=${encodeURIComponent(out.task.clientId)}`,
+                  creative: `/creative?clientId=${encodeURIComponent(out.task.clientId)}&taskId=${encodeURIComponent(out.task.taskId)}`,
                   portal: `/portal/approvals`,
                 },
               }
