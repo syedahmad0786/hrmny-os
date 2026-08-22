@@ -447,6 +447,11 @@ export async function runAgentTools(input: {
               status: task.status,
               taskType: task.taskType,
               title: task.title,
+              next: {
+                delivery: `/delivery?clientId=${encodeURIComponent(task.clientId)}&taskId=${encodeURIComponent(task.taskId)}`,
+                creative: `/creative?clientId=${encodeURIComponent(task.clientId)}&taskId=${encodeURIComponent(task.taskId)}`,
+                traffic: `/traffic?clientId=${encodeURIComponent(task.clientId)}`,
+              },
             }
           : undefined,
         error: task ? undefined : "task_create_failed",
@@ -486,6 +491,10 @@ export async function runAgentTools(input: {
           channel: row.channel,
           status: row.status,
           title: row.title,
+          next: {
+            creative: `/creative?clientId=${encodeURIComponent(row.clientId ?? input.scope.clientId!)}`,
+            delivery: `/delivery?clientId=${encodeURIComponent(row.clientId ?? input.scope.clientId!)}`,
+          },
         },
       });
     } catch (err) {
@@ -535,6 +544,14 @@ export async function runAgentTools(input: {
             dorComplete: brief.dorComplete,
             missingRequiredCount: brief.missingRequiredCount,
             lockedAt: brief.lockedAt,
+            next: {
+              traffic: input.scope.clientId
+                ? `/traffic?clientId=${encodeURIComponent(input.scope.clientId)}&taskId=${encodeURIComponent(brief.taskId)}`
+                : `/traffic?taskId=${encodeURIComponent(brief.taskId)}`,
+              delivery: input.scope.clientId
+                ? `/delivery?clientId=${encodeURIComponent(input.scope.clientId)}&taskId=${encodeURIComponent(brief.taskId)}`
+                : `/delivery?taskId=${encodeURIComponent(brief.taskId)}`,
+            },
           },
         });
       } else {
@@ -565,6 +582,14 @@ export async function runAgentTools(input: {
             missingRequiredCount: dor.missingRequiredCount,
             lockedAt: null,
             mode: "memory",
+            next: {
+              traffic: input.scope.clientId
+                ? `/traffic?clientId=${encodeURIComponent(input.scope.clientId)}&taskId=${encodeURIComponent(briefTaskId)}`
+                : `/traffic?taskId=${encodeURIComponent(briefTaskId)}`,
+              delivery: input.scope.clientId
+                ? `/delivery?clientId=${encodeURIComponent(input.scope.clientId)}&taskId=${encodeURIComponent(briefTaskId)}`
+                : `/delivery?taskId=${encodeURIComponent(briefTaskId)}`,
+            },
           },
         });
       }
@@ -601,6 +626,11 @@ export async function runAgentTools(input: {
           dealId: item.dealId,
           state: item.state,
           subject: item.subject,
+          next: {
+            deal: `/crm/deals/${encodeURIComponent(item.dealId)}`,
+            approvals: `/approvals?id=${encodeURIComponent(item.id)}`,
+            outreach: `/crm/outreach?id=${encodeURIComponent(item.id)}`,
+          },
         },
       });
     } catch (err) {
@@ -1401,6 +1431,12 @@ export async function runAgentTools(input: {
             stage: d.stage,
             emailVerified: d.emailVerified,
           })),
+          next: imported.deals[0]
+            ? {
+                deal: `/crm/deals/${encodeURIComponent(imported.deals[0].dealId)}`,
+                hunt: "/crm/hunt",
+              }
+            : { hunt: "/crm/hunt" },
         },
       });
     } catch (err) {
@@ -1430,12 +1466,20 @@ export async function runAgentTools(input: {
         emailMatch?.[0]?.toLowerCase() ??
         `portal+${input.scope.clientId.slice(0, 8)}@example.com`;
       const placeholderInbox = email.endsWith("@example.com");
+      const emailer = placeholderInbox ? createResendMock() : undefined;
       const sent = await sendPortalInviteMagicLink({
         clientId: input.scope.clientId,
         email,
         displayName: "Agent portal invite",
         next: "/portal/approvals",
-        emailer: placeholderInbox ? createResendMock() : undefined,
+        emailer,
+      });
+      const sentOnboarding = await sendPortalInviteMagicLink({
+        clientId: input.scope.clientId,
+        email,
+        displayName: "Agent portal invite",
+        next: "/portal/onboarding",
+        emailer,
       });
       results.push({
         tool: "portal.invite",
@@ -1444,8 +1488,18 @@ export async function runAgentTools(input: {
           email: sent.email,
           clientId: sent.clientId,
           portalPath: sent.portalPath,
+          onboardingPath: sentOnboarding.portalPath,
           deliveryMode: sent.delivery.mode,
           deliveryId: sent.delivery.id,
+          portalInvite: {
+            portalPath: sent.portalPath,
+            onboardingPath: sentOnboarding.portalPath,
+          },
+          next: {
+            portal: sent.portalPath,
+            onboarding: sentOnboarding.portalPath,
+            client: `/clients/${encodeURIComponent(sent.clientId)}`,
+          },
         },
       });
     } catch (err) {
@@ -1531,15 +1585,28 @@ export async function runAgentTools(input: {
         results.push({
           tool: "creative.sendToPortal",
           ok: true,
-          data: {
-            assetId: asset.assetId,
-            taskId,
-            clientId: input.scope.clientId,
-            portalHref: await (
+          data: await (async () => {
+            const clientId = input.scope.clientId!;
+            const portalHref = await (
               await import("../auth/portal-review-href")
-            ).portalReviewHref(input.scope.clientId),
-            mode: "memory",
-          },
+            ).portalReviewHref(clientId);
+            return {
+              assetId: asset.assetId,
+              taskId,
+              clientId,
+              portalHref,
+              mode: "memory" as const,
+              next: {
+                creative: taskId
+                  ? `/creative?clientId=${encodeURIComponent(clientId)}&taskId=${encodeURIComponent(taskId)}`
+                  : `/creative?clientId=${encodeURIComponent(clientId)}`,
+                delivery: taskId
+                  ? `/delivery?clientId=${encodeURIComponent(clientId)}&taskId=${encodeURIComponent(taskId)}`
+                  : `/delivery?clientId=${encodeURIComponent(clientId)}`,
+                portal: portalHref,
+              },
+            };
+          })(),
         });
       } else {
         const {
@@ -1597,15 +1664,28 @@ export async function runAgentTools(input: {
         results.push({
           tool: "creative.sendToPortal",
           ok: true,
-          data: {
-            assetId,
-            taskId,
-            clientId: input.scope.clientId,
-            portalHref: await (
+          data: await (async () => {
+            const clientId = input.scope.clientId!;
+            const portalHref = await (
               await import("../auth/portal-review-href")
-            ).portalReviewHref(input.scope.clientId),
-            mode: "durable",
-          },
+            ).portalReviewHref(clientId);
+            return {
+              assetId,
+              taskId,
+              clientId,
+              portalHref,
+              mode: "durable" as const,
+              next: {
+                creative: taskId
+                  ? `/creative?clientId=${encodeURIComponent(clientId)}&taskId=${encodeURIComponent(taskId)}`
+                  : `/creative?clientId=${encodeURIComponent(clientId)}`,
+                delivery: taskId
+                  ? `/delivery?clientId=${encodeURIComponent(clientId)}&taskId=${encodeURIComponent(taskId)}`
+                  : `/delivery?clientId=${encodeURIComponent(clientId)}`,
+                portal: portalHref,
+              },
+            };
+          })(),
         });
       }
     } catch (err) {
