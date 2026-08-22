@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
+import { OnboardingReadyBanner } from "@/components/onboarding-ready-banner";
 import { useSearchParams } from "next/navigation";
 import { type FormEvent, Suspense, useState } from "react";
 
@@ -181,6 +182,8 @@ function AccountRhythmPageInner() {
           </Button>
         ) : null}
       </div>
+
+      <OnboardingReadyBanner testIdPrefix="account" />
 
       {outOfOfficeEnabled ? (
         <section className="rounded-lg border border-sand bg-white/70 p-4">

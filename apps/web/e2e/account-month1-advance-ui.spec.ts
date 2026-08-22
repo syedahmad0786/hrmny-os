@@ -15,6 +15,10 @@ test.describe("Account Month-1 Advance UI", () => {
     await expect(page.getByRole("heading", { name: /^Account$/i })).toBeVisible(
       { timeout: 60_000 },
     );
+    await expect(page.getByTestId("account-ready-banner")).toBeVisible({
+      timeout: 30_000,
+    });
+
     await expect(
       page.getByRole("heading", { name: /Month-1 phases/i }),
     ).toBeVisible();

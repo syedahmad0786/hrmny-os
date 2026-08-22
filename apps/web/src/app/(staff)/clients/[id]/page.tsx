@@ -5,6 +5,7 @@ import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { OnboardingReadyBanner } from "@/components/onboarding-ready-banner";
 
 export default function ClientOnboardingPage() {
   const params = useParams<{ id: string }>();
@@ -129,6 +130,7 @@ export default function ClientOnboardingPage() {
             ? String(client.data.renewalDate)
             : "—"}
         </p>
+        <OnboardingReadyBanner testIdPrefix="client-onboarding" />
         <nav
           className="mt-3 flex flex-wrap gap-2 text-sm"
           aria-label="Continue OS after handover"

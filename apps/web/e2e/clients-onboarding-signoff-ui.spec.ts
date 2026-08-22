@@ -18,6 +18,9 @@ test.describe("Staff clients onboarding signoff UI", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
       timeout: 60_000,
     });
+    await expect(page.getByTestId("client-onboarding-ready-banner")).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(
       page.getByRole("heading", { name: /Onboarding board/i }),
     ).toBeVisible();
