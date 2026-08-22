@@ -6,6 +6,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { showDemoResets } from "@/lib/feature-flags";
+import { FinanceReadyBanner } from "@/components/finance-ready-banner";
 
 function FinanceQueueInner() {
   const utils = trpc.useUtils();
@@ -89,6 +90,7 @@ function FinanceQueueInner() {
         Intake → AI propose (HITL) → approve → mark issued in OS. Xero remains
         source of truth — OS reads/mirrors only and never writes.
       </p>
+      <FinanceReadyBanner />
       <p className="text-sm">
         <Link className="underline" href="/billing">
           Billing & invoices

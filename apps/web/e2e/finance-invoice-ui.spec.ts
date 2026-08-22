@@ -12,6 +12,13 @@ test.describe("Finance invoice UI", () => {
       page.getByRole("heading", { name: /Finance queue/i }),
     ).toBeVisible({ timeout: 60_000 });
 
+    await expect(page.getByTestId("finance-ready-banner")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("finance-ready-write")).toContainText(
+      /OS only|write disabled/i,
+    );
+
     // Unique amount so this run's invoice is findable among demo rows.
     const amount = `314${String(Date.now()).slice(-4)}.50`;
     const hint = `ACME Supplies LLC invoice AED ${amount} — TRN on file · e2e`;
