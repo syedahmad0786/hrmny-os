@@ -14,6 +14,9 @@ const STARTERS = [
   "List my unread notifications and tickets",
 ] as const;
 
+const OS_SETTLE_STARTER =
+  "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign, sign off onboarding phase, ref-approve calendar.";
+
 function StepFold({
   steps,
 }: {
@@ -307,6 +310,16 @@ export default function HrmnyChatPage() {
                 observe, answer. Scoped to your staff session.
               </p>
               <div className="hrmny-chat-starters">
+                {!clientId ? (
+                  <button
+                    type="button"
+                    data-testid="chat-starter-os-settle"
+                    onClick={() => submit(OS_SETTLE_STARTER)}
+                    disabled={send.isPending || create.isPending}
+                  >
+                    {OS_SETTLE_STARTER.slice(0, 72)}…
+                  </button>
+                ) : null}
                 {STARTERS.filter((s) =>
                   s.includes("funnel drafts") ? Boolean(clientId) : true,
                 ).map((s) => (

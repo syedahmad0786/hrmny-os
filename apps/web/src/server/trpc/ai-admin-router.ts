@@ -12,11 +12,13 @@ import {
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
+  DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS,
   DEFAULT_FUNNEL_AGENT_TOOLS,
   resolveAgentAllowedTools,
   resolveAgentToolPreset,
   type AgentToolPreset,
 } from "../ai/agent-tools";
+import { OPENROUTER_FREE_DEFAULT_MODEL } from "@hrmny/ai";
 import { getDb } from "../db";
 import { writeAudit } from "../m1-persistence";
 import { persistMemoryChunk, searchMemory } from "../ai/memory-db";
@@ -54,6 +56,10 @@ const memCustomAgents: CustomAgentRow[] = [];
 export const DEMO_DELIVERY_AGENT_ID = "a9000000-0000-4000-8000-0000000000d1";
 export const DEMO_DELIVERY_AGENT_SLUG = "delivery-coach";
 
+/** Org-only OS settle agent for Chat / Settings demos (closed loop → settle). */
+export const DEMO_OS_SETTLE_AGENT_ID = "a9000000-0000-4000-8000-0000000000d2";
+export const DEMO_OS_SETTLE_AGENT_SLUG = "os-settle";
+
 function demoDeliveryAgentRow(): CustomAgentRow {
   const now = new Date().toISOString();
   return {
@@ -74,7 +80,27 @@ function demoDeliveryAgentRow(): CustomAgentRow {
   };
 }
 
-/** Ensure memory-mode (and empty durable) registries expose a runnable demo agent. */
+function demoOsSettleAgentRow(): CustomAgentRow {
+  const now = new Date().toISOString();
+  return {
+    customAgentId: DEMO_OS_SETTLE_AGENT_ID,
+    slug: DEMO_OS_SETTLE_AGENT_SLUG,
+    displayName: "OS settle",
+    responsibility:
+      "Org-only closed loop then finance/outreach/QC/portal/campaigns/onboarding/calendar settle.",
+    systemPrompt:
+      "You are the Hrmny OS settle agent. Prefer agent_act / allowlisted OS tools. Run closed loop then settle: finance, outreach, creative QC, portal, campaigns, onboarding signoff, calendar ref-approve. Stay org-scoped (no client sandbox).",
+    model: OPENROUTER_FREE_DEFAULT_MODEL,
+    enabled: true,
+    producesDrafts: true,
+    allowedTools: [...DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS],
+    createdByEmployeeId: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/** Ensure memory-mode (and empty durable) registries expose runnable demo agents. */
 export async function ensureDemoDeliveryAgent() {
   const db = getDb();
   if (!db) {
@@ -82,6 +108,9 @@ export async function ensureDemoDeliveryAgent() {
       !memCustomAgents.some((a) => a.slug === DEMO_DELIVERY_AGENT_SLUG)
     ) {
       memCustomAgents.unshift(demoDeliveryAgentRow());
+    }
+    if (!memCustomAgents.some((a) => a.slug === DEMO_OS_SETTLE_AGENT_SLUG)) {
+      memCustomAgents.unshift(demoOsSettleAgentRow());
     }
     return;
   }
@@ -100,6 +129,24 @@ export async function ensureDemoDeliveryAgent() {
         true,
         true,
         ${JSON.stringify([...DEFAULT_FUNNEL_AGENT_TOOLS])}::jsonb,
+        null
+      )
+      on conflict (slug) do nothing
+    `);
+    await db.execute(sql`
+      insert into public.custom_agent (
+        custom_agent_id, slug, display_name, responsibility, system_prompt,
+        model, enabled, produces_drafts, allowed_tools, created_by_employee_id
+      ) values (
+        ${DEMO_OS_SETTLE_AGENT_ID}::uuid,
+        ${DEMO_OS_SETTLE_AGENT_SLUG},
+        ${"OS settle"},
+        ${"Org-only closed loop then finance/outreach/QC/portal/campaigns/onboarding/calendar settle."},
+        ${"You are the Hrmny OS settle agent. Prefer agent_act / allowlisted OS tools. Run closed loop then settle: finance, outreach, creative QC, portal, campaigns, onboarding signoff, calendar ref-approve. Stay org-scoped (no client sandbox)."},
+        ${OPENROUTER_FREE_DEFAULT_MODEL},
+        true,
+        true,
+        ${JSON.stringify([...DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS])}::jsonb,
         null
       )
       on conflict (slug) do nothing
