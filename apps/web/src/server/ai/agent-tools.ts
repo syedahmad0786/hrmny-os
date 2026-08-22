@@ -492,8 +492,8 @@ export async function runAgentTools(input: {
           status: row.status,
           title: row.title,
           next: {
-            creative: `/creative?clientId=${encodeURIComponent(row.clientId)}`,
-            delivery: `/delivery?clientId=${encodeURIComponent(row.clientId)}`,
+            creative: `/creative?clientId=${encodeURIComponent(row.clientId ?? input.scope.clientId!)}`,
+            delivery: `/delivery?clientId=${encodeURIComponent(row.clientId ?? input.scope.clientId!)}`,
           },
         },
       });
@@ -1586,22 +1586,23 @@ export async function runAgentTools(input: {
           tool: "creative.sendToPortal",
           ok: true,
           data: await (async () => {
+            const clientId = input.scope.clientId!;
             const portalHref = await (
               await import("../auth/portal-review-href")
-            ).portalReviewHref(input.scope.clientId);
+            ).portalReviewHref(clientId);
             return {
               assetId: asset.assetId,
               taskId,
-              clientId: input.scope.clientId,
+              clientId,
               portalHref,
               mode: "memory" as const,
               next: {
                 creative: taskId
-                  ? `/creative?clientId=${encodeURIComponent(input.scope.clientId)}&taskId=${encodeURIComponent(taskId)}`
-                  : `/creative?clientId=${encodeURIComponent(input.scope.clientId)}`,
+                  ? `/creative?clientId=${encodeURIComponent(clientId)}&taskId=${encodeURIComponent(taskId)}`
+                  : `/creative?clientId=${encodeURIComponent(clientId)}`,
                 delivery: taskId
-                  ? `/delivery?clientId=${encodeURIComponent(input.scope.clientId)}&taskId=${encodeURIComponent(taskId)}`
-                  : `/delivery?clientId=${encodeURIComponent(input.scope.clientId)}`,
+                  ? `/delivery?clientId=${encodeURIComponent(clientId)}&taskId=${encodeURIComponent(taskId)}`
+                  : `/delivery?clientId=${encodeURIComponent(clientId)}`,
                 portal: portalHref,
               },
             };
@@ -1664,22 +1665,23 @@ export async function runAgentTools(input: {
           tool: "creative.sendToPortal",
           ok: true,
           data: await (async () => {
+            const clientId = input.scope.clientId!;
             const portalHref = await (
               await import("../auth/portal-review-href")
-            ).portalReviewHref(input.scope.clientId);
+            ).portalReviewHref(clientId);
             return {
               assetId,
               taskId,
-              clientId: input.scope.clientId,
+              clientId,
               portalHref,
               mode: "durable" as const,
               next: {
                 creative: taskId
-                  ? `/creative?clientId=${encodeURIComponent(input.scope.clientId)}&taskId=${encodeURIComponent(taskId)}`
-                  : `/creative?clientId=${encodeURIComponent(input.scope.clientId)}`,
+                  ? `/creative?clientId=${encodeURIComponent(clientId)}&taskId=${encodeURIComponent(taskId)}`
+                  : `/creative?clientId=${encodeURIComponent(clientId)}`,
                 delivery: taskId
-                  ? `/delivery?clientId=${encodeURIComponent(input.scope.clientId)}&taskId=${encodeURIComponent(taskId)}`
-                  : `/delivery?clientId=${encodeURIComponent(input.scope.clientId)}`,
+                  ? `/delivery?clientId=${encodeURIComponent(clientId)}&taskId=${encodeURIComponent(taskId)}`
+                  : `/delivery?clientId=${encodeURIComponent(clientId)}`,
                 portal: portalHref,
               },
             };
