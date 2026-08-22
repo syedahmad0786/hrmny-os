@@ -12,6 +12,7 @@ import {
   CrmTag,
 } from "@/components/crm/ui";
 import { formatLane } from "@/components/crm/format";
+import { ProspectingReadyBanner } from "@/components/prospecting-ready-banner";
 
 export default function CrmInboundPage() {
   const router = useRouter();
@@ -160,6 +161,8 @@ export default function CrmInboundPage() {
         title="Inbound leads"
         description="Review new interest before creating a clean company, contact and deal."
       />
+
+      <ProspectingReadyBanner testIdPrefix="inbound" />
 
       <section className="crm-split">
         <div className="crm-panel">
