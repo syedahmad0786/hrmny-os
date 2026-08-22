@@ -12,6 +12,11 @@ test.describe("Outreach HITL UI", () => {
       page.getByRole("heading", { name: /Outreach drafts/i }),
     ).toBeVisible({ timeout: 60_000 });
 
+    await expect(page.getByTestId("outreach-ready-banner")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("outreach-ready-gw")).toBeVisible();
+
     const deal = page.getByTestId("outreach-draft-deal");
     await expect(deal).toBeVisible();
     await expect
