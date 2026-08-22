@@ -33,6 +33,19 @@ describe("buildHandoverNextLinks", () => {
     );
   });
 
+  it("pins account to calendarId when present", () => {
+    const next = buildHandoverNextLinks({
+      clientId: "c1000000-0000-4000-8000-000000000001",
+      calendarId: "a3000000-0000-4000-8000-0000000000a4",
+    });
+    expect(next.account).toContain(
+      "clientId=c1000000-0000-4000-8000-000000000001",
+    );
+    expect(next.account).toContain(
+      "calendarId=a3000000-0000-4000-8000-0000000000a4",
+    );
+  });
+
   it("pins outreach + approvals to the draft id when present", () => {
     const next = buildHandoverNextLinks({
       clientId: "c1000000-0000-4000-8000-000000000001",

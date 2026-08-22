@@ -458,6 +458,7 @@ async function memoryHandoverPack(input: {
   const next = buildHandoverNextLinks({
     clientId: client.clientId,
     taskId: task.taskId,
+    calendarId,
     invoiceId,
     outreachId,
     campaignItemId,
@@ -840,6 +841,7 @@ export async function durableHandoverPack(input: {
   const next = buildHandoverNextLinks({
     clientId: client.clientId,
     taskId: task?.taskId ?? null,
+    calendarId,
     invoiceId,
     outreachId,
     campaignItemId,
