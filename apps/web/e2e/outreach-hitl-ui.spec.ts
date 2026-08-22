@@ -57,6 +57,8 @@ test.describe("Outreach HITL UI", () => {
     ).toHaveCount(0);
 
     // Explicitly never click Send via Gmail in this mock-safe path.
-    await expect(page.getByRole("button", { name: /Send via Gmail/i })).toBeVisible();
+    await expect(
+      approvedRow.getByRole("button", { name: /Send via Gmail/i }),
+    ).toBeVisible();
   });
 });

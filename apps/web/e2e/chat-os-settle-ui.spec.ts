@@ -32,11 +32,11 @@ test.describe("Chat OS settle agent UI", () => {
 
     const work = page.getByTestId("chat-work-steps");
     await expect(work).toBeVisible({ timeout: 90_000 });
-    await expect(page.getByTestId("chat-tool-agent_act")).toBeVisible({
-      timeout: 60_000,
-    });
-    const observation = page.getByTestId("chat-tool-observation");
-    await expect(observation).toContainText(/crm\.closed_loop|closed_loop/i);
+    const agentAct = page.getByTestId("chat-tool-agent_act");
+    await expect(agentAct).toBeVisible({ timeout: 60_000 });
+    await expect(agentAct.getByTestId("chat-tool-observation")).toContainText(
+      /crm\.closed_loop|closed_loop/i,
+    );
     await expect(page.getByTestId("chat-assistant-message")).toBeVisible();
   });
 });
