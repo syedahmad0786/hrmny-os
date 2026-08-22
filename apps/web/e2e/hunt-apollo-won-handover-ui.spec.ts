@@ -32,6 +32,66 @@ async function advanceToMarkWon(page: Page) {
   });
 }
 
+/** Apollo prospect → deal UI → Mark won → handover next links. */
+async function ensureApolloDealHandoverNext(page: Page, query: string) {
+  page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+  await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
+    timeout: 60_000,
+  });
+
+  await page.getByTestId("hunt-apollo-query").fill(query);
+  await page.getByTestId("hunt-apollo-prospect").click();
+
+  const status = page.getByTestId("hunt-closed-loop-status");
+  await expect(status).toContainText(/Apollo \(mock/i, { timeout: 30_000 });
+  await expect(status).toContainText(/discover deal/i);
+
+  const open = page.getByTestId("hunt-apollo-open-deal");
+  await expect(open).toBeVisible();
+  await open.click();
+
+  await expect(page).toHaveURL(/\/crm\/deals\/[0-9a-f-]{36}/i, {
+    timeout: 30_000,
+  });
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
+    timeout: 60_000,
+  });
+
+  for (const id of [
+    "deal-buaf-budget",
+    "deal-buaf-urgency",
+    "deal-buaf-access",
+    "deal-buaf-fit",
+  ]) {
+    await page.getByTestId(id).check();
+  }
+  await page.getByTestId("deal-buaf-temperature").selectOption("warm");
+  await page.getByTestId("deal-buaf-save").click();
+
+  const emailVerify = page.getByTestId("deal-email-verify");
+  await expect(emailVerify).toBeVisible();
+  if (await emailVerify.isEnabled()) {
+    await emailVerify.click();
+  }
+  await expect(emailVerify).toBeDisabled({ timeout: 15_000 });
+
+  await advanceToMarkWon(page);
+  await page.getByTestId("deal-mark-won").click();
+  await expect(
+    page
+      .getByTestId("deal-handover")
+      .or(page.getByTestId("deal-handover-next")),
+  ).toBeVisible({ timeout: 30_000 });
+
+  const next = page.getByTestId("deal-handover-next");
+  if (!(await next.isVisible())) {
+    await page.getByTestId("deal-handover").click();
+  }
+  await expect(next).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("deal-handover-client")).toBeVisible();
+}
+
 test.describe("Hunt Apollo → won → handover continuity", () => {
   test.setTimeout(180_000);
 
@@ -39,67 +99,8 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     page,
   }) => {
     const query = `E2E Apollo Won ${Date.now()}`;
+    await ensureApolloDealHandoverNext(page, query);
 
-    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
-    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
-      timeout: 60_000,
-    });
-
-    await page.getByTestId("hunt-apollo-query").fill(query);
-    await page.getByTestId("hunt-apollo-prospect").click();
-
-    const status = page.getByTestId("hunt-closed-loop-status");
-    await expect(status).toContainText(/Apollo \(mock/i, { timeout: 30_000 });
-    await expect(status).toContainText(/discover deal/i);
-
-    const open = page.getByTestId("hunt-apollo-open-deal");
-    await expect(open).toBeVisible();
-    await open.click();
-
-    await expect(page).toHaveURL(/\/crm\/deals\/[0-9a-f-]{36}/i, {
-      timeout: 30_000,
-    });
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
-      timeout: 60_000,
-    });
-    await expect(page.locator("body")).toContainText(/discover/i);
-
-    // Satisfy qualify→engage (BUAF Fit + Warm+) and engage→scope (email + voice).
-    for (const id of [
-      "deal-buaf-budget",
-      "deal-buaf-urgency",
-      "deal-buaf-access",
-      "deal-buaf-fit",
-    ]) {
-      await page.getByTestId(id).check();
-    }
-    await page.getByTestId("deal-buaf-temperature").selectOption("warm");
-    await page.getByTestId("deal-buaf-save").click();
-
-    // Apollo mock may already mark email verified — only click when enabled.
-    const emailVerify = page.getByTestId("deal-email-verify");
-    await expect(emailVerify).toBeVisible();
-    if (await emailVerify.isEnabled()) {
-      await emailVerify.click();
-    }
-    await expect(emailVerify).toBeDisabled({ timeout: 15_000 });
-
-    await advanceToMarkWon(page);
-
-    await page.getByTestId("deal-mark-won").click();
-    await expect(
-      page
-        .getByTestId("deal-handover")
-        .or(page.getByTestId("deal-handover-next")),
-    ).toBeVisible({ timeout: 30_000 });
-
-    const next = page.getByTestId("deal-handover-next");
-    if (!(await next.isVisible())) {
-      await page.getByTestId("deal-handover").click();
-    }
-    await expect(next).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("deal-handover-client")).toBeVisible();
     const finance = page.getByTestId("deal-handover-finance");
     await expect(finance).toBeVisible();
     await expect(finance).toHaveAttribute("href", /clientId=/);
@@ -112,6 +113,42 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     await expect(page.getByRole("heading", { name: /Creative/i })).toBeVisible({
       timeout: 60_000,
     });
+  });
+
+  test("Apollo prospect handover portal and onboarding magic links", async ({
+    page,
+  }) => {
+    const query = `E2E Apollo Portal ${Date.now()}`;
+    await ensureApolloDealHandoverNext(page, query);
+
+    const portal = page.getByTestId("deal-handover-portal");
+    await expect(portal).toBeVisible();
+    await expect(portal).toHaveAttribute("href", /\/portal\/login\/verify/);
+    const onboardingInvite = page.getByTestId("deal-handover-onboarding-invite");
+    await expect(onboardingInvite).toBeVisible();
+    await expect(onboardingInvite).toHaveAttribute(
+      "href",
+      /\/portal\/login\/verify/,
+    );
+    const portalHref = await portal.getAttribute("href");
+    const onboardingHref = await onboardingInvite.getAttribute("href");
+    expect(portalHref).toBeTruthy();
+    expect(onboardingHref).toBeTruthy();
+    expect(portalHref).not.toBe(onboardingHref);
+
+    await portal.click();
+    await expect(page).toHaveURL(/\/portal\/login\/verify/, { timeout: 60_000 });
+    await expect(page).toHaveURL(/token=/);
+    await expect(
+      page.getByRole("heading", { name: /^Approvals$/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/\/portal\/approvals/);
+
+    await page.goto(onboardingHref!, { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /^Onboarding$/i }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/\/portal\/onboarding/);
   });
 
   test("Closed loop via Apollo opens Deal → Client → Creative", async ({
