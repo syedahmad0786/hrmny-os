@@ -422,6 +422,92 @@ export function createMockProvider(
         };
       }
 
+      const catalogHasCampaignApprove =
+        /(?:^|\n)-\s*(?:campaigns\.os_approve|campaigns_os_approve)\s*:/i.test(
+          blob,
+        );
+      const catalogHasCampaignPublish =
+        /(?:^|\n)-\s*(?:campaigns\.os_publish|campaigns_os_publish)\s*:/i.test(
+          blob,
+        );
+      const sawCampaignApproveObs =
+        /Observation from (?:campaigns\.os_approve|campaigns_os_approve)/i.test(
+          blob,
+        );
+      const sawCampaignPublishObs =
+        /Observation from (?:campaigns\.os_publish|campaigns_os_publish)/i.test(
+          blob,
+        );
+      const wantsCampaignApprove =
+        /(?:os[_\s-]?approve|approve\s+(?:the\s+)?(?:os\s+)?campaign|campaign[^\n]{0,40}approv)/i.test(
+          userText,
+        );
+      const wantsCampaignPublish =
+        /(?:os[_\s-]?publish|publish\s+(?:the\s+)?(?:os\s+)?campaign|campaign[^\n]{0,40}publish|stub\s+publish)/i.test(
+          userText,
+        );
+      if (
+        catalogHasCampaignApprove &&
+        wantsCampaignApprove &&
+        !sawCampaignApproveObs
+      ) {
+        const prompt =
+          userText.trim().slice(0, 400) || "Approve OS campaign";
+        const toolName = /(?:^|\n)-\s*campaigns_os_approve\s*:/i.test(blob)
+          ? "campaigns_os_approve"
+          : "campaigns.os_approve";
+        return {
+          text: [
+            "```tool",
+            JSON.stringify({
+              name: toolName,
+              arguments: { prompt },
+            }),
+            "```",
+          ].join("\n"),
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+      if (sawCampaignApproveObs && !wantsCampaignPublish) {
+        return {
+          text: "Approved the campaign draft — ready to publish (stub or live).",
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+      if (
+        catalogHasCampaignPublish &&
+        wantsCampaignPublish &&
+        !sawCampaignPublishObs
+      ) {
+        const prompt =
+          userText.trim().slice(0, 400) || "Publish OS campaign stub";
+        const toolName = /(?:^|\n)-\s*campaigns_os_publish\s*:/i.test(blob)
+          ? "campaigns_os_publish"
+          : "campaigns.os_publish";
+        return {
+          text: [
+            "```tool",
+            JSON.stringify({
+              name: toolName,
+              arguments: { prompt },
+            }),
+            "```",
+          ].join("\n"),
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+      if (sawCampaignPublishObs) {
+        return {
+          text:
+            "Published the campaign in OS (stub mode when LinkedIn is unconnected).",
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+
       return {
         text: `[mock:${options.model ?? defaultModel}] stub response`,
         provider: "mock",

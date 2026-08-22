@@ -7,6 +7,7 @@ export function buildHandoverNextLinks(input: {
   clientId: string;
   invoiceId?: string | null;
   outreachId?: string | null;
+  campaignItemId?: string | null;
   /**
    * Magic-link verify path that lands on portal approvals (own single-use token).
    * Preferred over bare /portal/*.
@@ -26,8 +27,16 @@ export function buildHandoverNextLinks(input: {
   portal: string;
   onboarding: string;
   outreach: string;
+  campaigns: string;
 } {
-  const { clientId, invoiceId, outreachId, portalPath, onboardingPath } = input;
+  const {
+    clientId,
+    invoiceId,
+    outreachId,
+    campaignItemId,
+    portalPath,
+    onboardingPath,
+  } = input;
   const portalMagic = portalPath?.trim() || null;
   const onboardingMagic = onboardingPath?.trim() || null;
   return {
@@ -47,5 +56,8 @@ export function buildHandoverNextLinks(input: {
     outreach: outreachId
       ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
       : "/crm/outreach",
+    campaigns: campaignItemId
+      ? `/approvals?id=${encodeURIComponent(campaignItemId)}`
+      : "/approvals",
   };
 }

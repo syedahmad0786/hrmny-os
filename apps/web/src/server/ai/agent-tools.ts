@@ -821,6 +821,124 @@ export async function runAgentTools(input: {
   }
 
   /**
+   * Campaign draft → approved / approved → published (stub). Prompt-gated;
+   * org-only. Never in DEFAULT_FUNNEL_AGENT_TOOLS. Stub publish needs no LI.
+   */
+  const wantsCampaignApprove =
+    !input.scope.clientId &&
+    (want("campaigns.os_approve") ||
+      want("campaign.os_approve") ||
+      want("campaigns.approve")) &&
+    /(?:os[_\s-]?approve|approve\s+(?:the\s+)?(?:os\s+)?campaign|campaign[^\n]{0,40}approv)/i.test(
+      input.prompt,
+    );
+
+  const wantsCampaignPublish =
+    !input.scope.clientId &&
+    (want("campaigns.os_publish") ||
+      want("campaign.os_publish") ||
+      want("campaigns.publish")) &&
+    /(?:os[_\s-]?publish|publish\s+(?:the\s+)?(?:os\s+)?campaign|campaign[^\n]{0,40}publish|stub\s+publish)/i.test(
+      input.prompt,
+    );
+
+  if (wantsCampaignApprove || wantsCampaignPublish) {
+    const {
+      approveOsCampaign,
+      publishOsCampaign,
+      parseCampaignIdFromPrompt,
+    } = await import("../campaigns/os-campaign-actions");
+    const campaignItemId = parseCampaignIdFromPrompt(input.prompt);
+    const employeeId =
+      input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
+
+    if (wantsCampaignApprove) {
+      if (!campaignItemId) {
+        results.push({
+          tool: "campaigns.os_approve",
+          ok: false,
+          error: "campaignItemId_required",
+        });
+      } else {
+        try {
+          const out = await approveOsCampaign({
+            campaignItemId,
+            actor: { employeeId },
+          });
+          results.push({
+            tool: "campaigns.os_approve",
+            ok: out.ok,
+            error: out.ok ? undefined : out.reason,
+            data: out.campaign
+              ? {
+                  campaignItemId: out.campaign.campaignItemId,
+                  status: out.campaign.status,
+                  title: out.campaign.title,
+                  channel: out.campaign.channel,
+                  next: {
+                    campaigns: `/approvals?id=${encodeURIComponent(out.campaign.campaignItemId)}`,
+                  },
+                }
+              : { campaignItemId },
+          });
+        } catch (err) {
+          results.push({
+            tool: "campaigns.os_approve",
+            ok: false,
+            error:
+              err instanceof Error
+                ? err.message
+                : "campaigns_os_approve_failed",
+          });
+        }
+      }
+    }
+
+    if (wantsCampaignPublish) {
+      if (!campaignItemId) {
+        results.push({
+          tool: "campaigns.os_publish",
+          ok: false,
+          error: "campaignItemId_required",
+        });
+      } else {
+        try {
+          const out = await publishOsCampaign({
+            campaignItemId,
+            actor: { employeeId },
+          });
+          results.push({
+            tool: "campaigns.os_publish",
+            ok: out.ok,
+            error: out.ok ? undefined : out.reason,
+            data: out.campaign
+              ? {
+                  campaignItemId: out.campaign.campaignItemId,
+                  status: out.campaign.status,
+                  title: out.campaign.title,
+                  channel: out.campaign.channel,
+                  publishMode: out.campaign.publishMode ?? "stub",
+                  next: {
+                    campaigns: `/approvals?id=${encodeURIComponent(out.campaign.campaignItemId)}`,
+                  },
+                }
+              : { campaignItemId },
+          });
+        } catch (err) {
+          results.push({
+            tool: "campaigns.os_publish",
+            ok: false,
+            error:
+              err instanceof Error
+                ? err.message
+                : "campaigns_os_publish_failed",
+          });
+        }
+      }
+    }
+  }
+
+  /**
    * Org-wide prospect → won → handover → onboarding. Prompt-gated so
    * crm.* / * allowlists alone cannot fire a full closed loop on every run.
    * Never added to DEFAULT_FUNNEL_AGENT_TOOLS.
@@ -869,6 +987,7 @@ export async function runAgentTools(input: {
             calendarId: loop.calendarId,
             outreachId: loop.outreachId,
             invoiceId: loop.invoiceId,
+            campaignItemId: loop.campaignItemId,
             onboardingPhases: loop.onboardingPhases,
             viaApollo: loop.viaApollo,
             apolloMode: loop.apolloMode,

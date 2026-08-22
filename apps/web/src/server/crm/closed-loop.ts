@@ -29,6 +29,7 @@ export type ClosedLoopSuccess = {
   portalInvite: HandoverPackResult["portalInvite"];
   outreachId: string | null;
   invoiceId: string | null;
+  campaignItemId: string | null;
   onboardingPhases: number;
   fired: string[];
   viaApollo: boolean;
@@ -215,6 +216,7 @@ export async function runDemoClosedLoopCore(
     portalInvite: pack.portalInvite,
     outreachId: pack.outreachId,
     invoiceId: pack.invoiceId,
+    campaignItemId: pack.campaignItemId,
     onboardingPhases: pack.onboardingPhases,
     fired: pack.pack.fired,
     viaApollo: Boolean(input.viaApollo),

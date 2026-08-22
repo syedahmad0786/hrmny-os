@@ -332,6 +332,47 @@ describe("runAgentTools funnel writes", () => {
     expect((row?.data as { status?: string })?.status).toBe("client_review");
   });
 
+  it("campaigns.os_approve then os_publish stub after closed loop", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const loopResults = await runAgentTools({
+      allowedTools: ["crm.closed_loop"],
+      prompt: "Run demo closed loop for company: Campaign Agent Co",
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const loop = loopResults.find((r) => r.tool === "crm.closed_loop");
+    expect(loop?.ok).toBe(true);
+    const campaignItemId = (loop?.data as { campaignItemId?: string })
+      ?.campaignItemId;
+    expect(campaignItemId).toBeTruthy();
+
+    const approved = await runAgentTools({
+      allowedTools: ["campaigns.os_approve"],
+      prompt: `Approve OS campaign campaignItemId: ${campaignItemId}`,
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const approve = approved.find((r) => r.tool === "campaigns.os_approve");
+    expect(approve?.ok).toBe(true);
+    expect((approve?.data as { status?: string })?.status).toBe("approved");
+
+    const published = await runAgentTools({
+      allowedTools: ["campaigns.os_publish"],
+      prompt: `Publish OS campaign stub campaignItemId: ${campaignItemId}`,
+      scope: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+      },
+    });
+    const pub = published.find((r) => r.tool === "campaigns.os_publish");
+    expect(pub?.ok).toBe(true);
+    const data = pub?.data as { status?: string; publishMode?: string };
+    expect(data?.status).toBe("published");
+    expect(data?.publishMode).toBe("stub");
+  });
+
   it("crm.prospect imports mock Apollo companies outside client sandbox", async () => {
     const results = await runAgentTools({
       allowedTools: ["crm.prospect"],
