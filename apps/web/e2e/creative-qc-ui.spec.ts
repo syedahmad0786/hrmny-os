@@ -20,6 +20,12 @@ test.describe("Creative Pass QC UI", () => {
       { timeout: 60_000 },
     );
 
+    await expect(page.getByTestId("creative-ready-banner")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("creative-ready-canva")).toBeVisible();
+    await expect(page.getByTestId("creative-ready-dam")).toContainText(/DAM/i);
+
     const meta = page.getByTestId("creative-task-meta");
     await expect(meta).toBeVisible({ timeout: 30_000 });
 
