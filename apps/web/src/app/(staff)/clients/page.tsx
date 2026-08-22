@@ -207,6 +207,7 @@ export default function ClientsPage() {
               </Link>
               <button
                 type="button"
+                data-testid={`clients-manage-portal-${client.clientId}`}
                 className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
                 onClick={() => setAccessClientId(client.clientId)}
               >
@@ -223,7 +224,10 @@ export default function ClientsPage() {
       </section>
 
       {accessClientId ? (
-        <section className="rounded-xl border border-sand bg-white/75 p-5">
+        <section
+          className="rounded-xl border border-sand bg-white/75 p-5"
+          data-testid="clients-portal-access-panel"
+        >
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="font-display text-xl font-semibold">
@@ -255,6 +259,7 @@ export default function ClientsPage() {
           >
             <input
               className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+              data-testid="clients-portal-invite-name"
               placeholder="Contact name"
               minLength={2}
               required
@@ -263,13 +268,18 @@ export default function ClientsPage() {
             />
             <input
               className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+              data-testid="clients-portal-invite-email"
               type="email"
               placeholder="contact@client.com"
               required
               value={portalEmail}
               onChange={(event) => setPortalEmail(event.target.value)}
             />
-            <Button type="submit" disabled={invitePortalUser.isPending}>
+            <Button
+              type="submit"
+              data-testid="clients-portal-invite-submit"
+              disabled={invitePortalUser.isPending}
+            >
               Grant access
             </Button>
           </form>
@@ -279,7 +289,12 @@ export default function ClientsPage() {
             </p>
           ) : null}
           {inviteDeliveryNote ? (
-            <p className="mt-3 text-sm text-muted">{inviteDeliveryNote}</p>
+            <p
+              className="mt-3 text-sm text-muted"
+              data-testid="clients-portal-invite-note"
+            >
+              {inviteDeliveryNote}
+            </p>
           ) : null}
           {issueDemoToken.error ? (
             <p className="mt-3 text-sm text-red-700">
@@ -287,9 +302,16 @@ export default function ClientsPage() {
             </p>
           ) : null}
           {demoPortalLink ? (
-            <p className="mt-3 rounded-lg border border-sand bg-cream/40 p-3 text-sm">
+            <p
+              className="mt-3 rounded-lg border border-sand bg-cream/40 p-3 text-sm"
+              data-testid="clients-portal-demo-link"
+            >
               Demo portal link (single-use):{" "}
-              <a className="font-medium text-ochre underline" href={demoPortalLink}>
+              <a
+                className="font-medium text-ochre underline"
+                href={demoPortalLink}
+                data-testid="clients-portal-demo-link-href"
+              >
                 {demoPortalLink}
               </a>
             </p>
