@@ -354,6 +354,9 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [toolPreset, setToolPreset] = useState<"funnel" | "demo_os_settle">(
+    "funnel",
+  );
   const [runPrompt, setRunPrompt] = useState(
     "Summarize next onboarding and creative actions for this client sandbox.",
   );
@@ -364,8 +367,9 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
       <h2 className="font-display text-xl font-semibold">Custom agents</h2>
       <p className="mt-1 text-sm text-muted">
         Create, modify, remove, and run agents on command with client/user/task
-        memory sandboxes. New agents get funnel tools (tasks, briefs, campaigns,
-        portal, creative). Mock LLM when OpenRouter credits are empty.
+        memory sandboxes. Funnel tools are the default; OS settle tools run
+        closed-loop → finance → outreach → QC → portal → campaigns (org-only —
+        leave client sandbox empty). Mock LLM when OpenRouter credits are empty.
       </p>
       {(list.data ?? []).some((a) => a.toolsEmpty) ? (
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-ink">
@@ -413,11 +417,53 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
               slug: slug.trim(),
               displayName: name.trim(),
               systemPrompt: prompt.trim() || undefined,
+              toolPreset,
             })
           }
         >
           Create agent
         </button>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Tool preset">
+        <button
+          type="button"
+          data-testid="ai-agent-preset-funnel"
+          className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+            toolPreset === "funnel"
+              ? "bg-ink text-white"
+              : "border border-sand bg-white text-ink"
+          }`}
+          onClick={() => {
+            setToolPreset("funnel");
+            setRunPrompt(
+              "Summarize next onboarding and creative actions for this client sandbox.",
+            );
+          }}
+        >
+          Funnel tools
+        </button>
+        <button
+          type="button"
+          data-testid="ai-agent-preset-os-settle"
+          className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+            toolPreset === "demo_os_settle"
+              ? "bg-ink text-white"
+              : "border border-sand bg-white text-ink"
+          }`}
+          onClick={() => {
+            setToolPreset("demo_os_settle");
+            setRunPrompt(
+              "Run closed loop then settle OS: finance approve and issue, outreach approve, creative QC pass then advance, portal approve, campaign approve and publish.",
+            );
+          }}
+        >
+          OS settle tools
+        </button>
+        <span className="self-center text-xs text-muted">
+          {toolPreset === "demo_os_settle"
+            ? "Run with no client sandbox (org-only gates)."
+            : "Default funnel allowlist."}
+        </span>
       </div>
       <textarea
         data-testid="ai-agent-system-prompt"
@@ -539,14 +585,24 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
                 data-testid={`ai-agent-run-${agent.slug}`}
                 className="rounded-full border border-sand bg-white px-3 py-1.5 text-xs disabled:opacity-40"
                 disabled={!agent.enabled || runCustom.isPending || !runPrompt.trim()}
-                onClick={() =>
+                onClick={() => {
+                  const hasOsSettle = (
+                    agent.effectiveAllowedTools ?? []
+                  ).some((t) =>
+                    [
+                      "crm.closed_loop",
+                      "finance.os_approve",
+                      "portal.os_approve",
+                    ].includes(t),
+                  );
                   runCustom.mutate({
                     id: agent.customAgentId,
                     prompt: runPrompt.trim(),
-                    clientId: clientId || undefined,
+                    // OS settle tools are org-only; skip client sandbox when preset tools present
+                    clientId: hasOsSettle ? undefined : clientId || undefined,
                     taskId: taskId.trim() || undefined,
-                  })
-                }
+                  });
+                }}
               >
                 Run
               </button>

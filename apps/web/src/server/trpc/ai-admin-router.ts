@@ -11,7 +11,12 @@ import {
 } from "@hrmny/ai";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { DEFAULT_FUNNEL_AGENT_TOOLS, resolveAgentAllowedTools } from "../ai/agent-tools";
+import {
+  DEFAULT_FUNNEL_AGENT_TOOLS,
+  resolveAgentAllowedTools,
+  resolveAgentToolPreset,
+  type AgentToolPreset,
+} from "../ai/agent-tools";
 import { getDb } from "../db";
 import { writeAudit } from "../m1-persistence";
 import { persistMemoryChunk, searchMemory } from "../ai/memory-db";
@@ -449,11 +454,18 @@ export const aiAdminRouter = router({
           systemPrompt: z.string().max(8000).optional(),
           model: z.string().max(120).optional(),
           producesDrafts: z.boolean().optional(),
+          /** funnel (default) or demo_os_settle — ignored when allowedTools is set. */
+          toolPreset: z.enum(["funnel", "demo_os_settle"]).optional(),
           allowedTools: z.array(z.string()).max(40).optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
         const actor = requireAiAdmin(ctx);
+        const presetTools = [
+          ...resolveAgentToolPreset(input.toolPreset as AgentToolPreset | undefined),
+        ];
+        const tools =
+          input.allowedTools !== undefined ? input.allowedTools : presetTools;
         const db = getDb();
         if (!db) {
           if (memCustomAgents.some((a) => a.slug === input.slug)) {
@@ -471,7 +483,7 @@ export const aiAdminRouter = router({
             model: input.model ?? null,
             enabled: true,
             producesDrafts: input.producesDrafts ?? true,
-            allowedTools: input.allowedTools ?? [...DEFAULT_FUNNEL_AGENT_TOOLS],
+            allowedTools: tools,
             createdByEmployeeId: actor.employeeId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -483,7 +495,7 @@ export const aiAdminRouter = router({
             entityType: "custom_agent",
             entityId: row.customAgentId,
             before: null,
-            after: { slug: row.slug },
+            after: { slug: row.slug, toolPreset: input.toolPreset ?? "funnel" },
             reason: null,
           });
           return row;
@@ -500,9 +512,7 @@ export const aiAdminRouter = router({
               ${input.systemPrompt ?? ""},
               ${input.model ?? null},
               ${input.producesDrafts ?? true},
-              ${JSON.stringify(
-                input.allowedTools ?? [...DEFAULT_FUNNEL_AGENT_TOOLS],
-              )}::jsonb,
+              ${JSON.stringify(tools)}::jsonb,
               ${actor.employeeId}::uuid
             )
             returning
@@ -523,7 +533,7 @@ export const aiAdminRouter = router({
             entityType: "custom_agent",
             entityId: row.customAgentId,
             before: null,
-            after: { slug: row.slug },
+            after: { slug: row.slug, toolPreset: input.toolPreset ?? "funnel" },
             reason: null,
           });
           return row;

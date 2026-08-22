@@ -4,7 +4,10 @@ process.env.LLM_PROVIDER = "mock";
 import { describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "../auth/session";
 import { createCaller } from "./root";
-import { DEFAULT_FUNNEL_AGENT_TOOLS } from "../ai/agent-tools";
+import {
+  DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS,
+  DEFAULT_FUNNEL_AGENT_TOOLS,
+} from "../ai/agent-tools";
 
 function aiAdminCaller() {
   const user = resolveDevUser("partner");
@@ -66,5 +69,39 @@ describe("customAgents allowlist repair", () => {
     expect(after?.effectiveAllowedTools).toEqual(
       DEFAULT_FUNNEL_AGENT_TOOLS.map((t) => t.toLowerCase()),
     );
+  });
+
+  it("toolPreset demo_os_settle persists OS settle tools; funnel create excludes them", async () => {
+    const caller = aiAdminCaller();
+    const settleSlug = `os-settle-${Date.now().toString(36)}`;
+    const settle = await caller.aiAdmin.customAgents.create({
+      slug: settleSlug,
+      displayName: "OS settle agent",
+      toolPreset: "demo_os_settle",
+    });
+    expect(settle.allowedTools).toEqual([...DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS]);
+    expect(settle.allowedTools).toContain("crm.closed_loop");
+    expect(settle.allowedTools).toContain("portal.os_approve");
+    expect(settle.allowedTools).not.toContain("crm.prospect");
+
+    const funnelSlug = `funnel-only-${Date.now().toString(36)}`;
+    const funnel = await caller.aiAdmin.customAgents.create({
+      slug: funnelSlug,
+      displayName: "Funnel only agent",
+      toolPreset: "funnel",
+    });
+    expect(funnel.allowedTools).toEqual([...DEFAULT_FUNNEL_AGENT_TOOLS]);
+    expect(funnel.allowedTools).not.toContain("crm.closed_loop");
+    expect(funnel.allowedTools).not.toContain("finance.os_approve");
+
+    const run = await caller.aiAdmin.customAgents.run({
+      id: settle.customAgentId,
+      prompt:
+        "Run closed loop for demo OS settle without attaching a client sandbox.",
+    });
+    expect(run.slug).toBe(settleSlug);
+    expect(Array.isArray(run.toolResults)).toBe(true);
+    const loop = run.toolResults!.find((r) => r.tool === "crm.closed_loop");
+    expect(loop?.ok).toBe(true);
   });
 });

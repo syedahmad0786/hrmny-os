@@ -42,6 +42,37 @@ export const DEFAULT_FUNNEL_AGENT_TOOLS = [
   "creative.sendToPortal",
 ] as const;
 
+/**
+ * Demo / Settings preset for org-only OS settle tools (closed loop → finance →
+ * outreach → creative QC → portal → campaigns). Never used as empty-allowlist
+ * fallback — that stays funnel-only. Prompt gates still apply per tool.
+ */
+export const DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS = [
+  "memory.search",
+  "crm.read",
+  "delivery.read",
+  "outreach.read",
+  "onboarding.read",
+  "crm.closed_loop",
+  "finance.os_approve",
+  "finance.os_issue",
+  "outreach.os_approve",
+  "creative.os_qc",
+  "campaigns.os_approve",
+  "campaigns.os_publish",
+  "portal.os_approve",
+] as const;
+
+export type AgentToolPreset = "funnel" | "demo_os_settle";
+
+/** Resolve create-time toolPreset to an allowlist (explicit allowedTools wins). */
+export function resolveAgentToolPreset(
+  preset: AgentToolPreset | undefined,
+): readonly string[] {
+  if (preset === "demo_os_settle") return DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS;
+  return DEFAULT_FUNNEL_AGENT_TOOLS;
+}
+
 /** Empty or invalid allowlists fall back to the funnel defaults. */
 export function resolveAgentAllowedTools(raw: unknown): string[] {
   const normalize = (tools: readonly string[]) =>
