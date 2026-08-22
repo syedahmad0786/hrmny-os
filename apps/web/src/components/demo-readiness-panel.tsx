@@ -95,7 +95,11 @@ export function DemoReadinessPanel({
         <Link href="/crm/inbound" className="underline">
           Inbound capture
         </Link>
-        <Link href="/settings/connections" className="underline">
+        <Link
+          href="/settings/connections"
+          className="underline"
+          data-testid={`${testIdPrefix}-demo-connections`}
+        >
           Connections
         </Link>
         <Link href="/settings/ai" className="underline">

@@ -16,6 +16,6 @@ test.describe("CRM demo readiness panel", () => {
     await expect(page.getByTestId("crm-demo-llm")).toBeVisible();
     await expect(page.getByTestId("crm-demo-blockers-count")).toBeVisible();
     await expect(panel.getByRole("link", { name: /Hunt closed loop/i })).toBeVisible();
-    await expect(panel.getByRole("link", { name: /Connections/i })).toBeVisible();
+    await expect(page.getByTestId("crm-demo-connections")).toBeVisible();
   });
 });
