@@ -37,10 +37,11 @@ export function buildHandoverNextLinks(input: {
     calendarId,
     invoiceId,
     outreachId,
-    campaignItemId,
+    campaignItemId: _campaignItemId,
     portalPath,
     onboardingPath,
   } = input;
+  void _campaignItemId;
   const portalMagic = portalPath?.trim() || null;
   const onboardingMagic = onboardingPath?.trim() || null;
   const creativeQs = new URLSearchParams({
@@ -70,8 +71,8 @@ export function buildHandoverNextLinks(input: {
     outreach: outreachId
       ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
       : "/crm/outreach",
-    campaigns: campaignItemId
-      ? `/approvals?id=${encodeURIComponent(campaignItemId)}`
-      : "/approvals",
+    // Do not pin draft campaignItemIds into Approvals — that inbox only lists
+    // approved campaigns (+ outreach drafts). Keep Hunt Approvals on outreach.
+    campaigns: `/creative?clientId=${encodeURIComponent(clientId)}`,
   };
 }

@@ -265,6 +265,11 @@ function ApprovalsInner() {
           <h1 className="mt-1 font-display text-3xl font-semibold">
             Approval inbox
           </h1>
+          {selected ? (
+            <p className="sr-only" data-testid="approvals-active-id">
+              {selected.id}
+            </p>
+          ) : null}
           <p className="mt-2 max-w-3xl text-sm text-muted">
             AI proposes; a human disposes. Nothing is sent, published, or shared
             with a client until you approve it here — every decision is a gated
@@ -361,6 +366,8 @@ function ApprovalsInner() {
                   <button
                     type="button"
                     onClick={() => setSelectedId(item.id)}
+                    data-testid={`approvals-item-${item.id}`}
+                    data-selected={item.id === selected?.id ? "true" : undefined}
                     className={`w-full rounded-xl border p-4 text-left transition ${
                       active
                         ? "border-ochre bg-white"

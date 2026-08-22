@@ -67,12 +67,17 @@ export default function ClientOnboardingPage() {
     return first?.invoiceId ?? null;
   }, [id, invoices.data]);
   const outreachId = outreach.data?.[0]?.id ?? null;
-  const campaignItemId = campaigns.data?.[0]?.id ?? null;
+  // Approvals inbox only lists campaigns with status === "approved".
+  // Handover seeds drafts — prefer outreach (always in the inbox), then an
+  // approved campaign item. Never pin a draft campaign id (silent misfocus).
+  const approvedCampaignItemId =
+    campaigns.data?.find((c) => c.status === "approved")?.id ?? null;
   const continueLinks = useMemo(() => {
     const creativeQs = new URLSearchParams({ clientId: id });
     if (creativeTaskId) creativeQs.set("taskId", creativeTaskId);
     const accountQs = new URLSearchParams({ clientId: id });
     if (calendarId) accountQs.set("calendarId", calendarId);
+    const approvalsId = outreachId ?? approvedCampaignItemId;
     return {
       account: `/account?${accountQs.toString()}`,
       creative: `/creative?${creativeQs.toString()}`,
@@ -84,11 +89,9 @@ export default function ClientOnboardingPage() {
       outreach: outreachId
         ? `/crm/outreach?id=${encodeURIComponent(outreachId)}`
         : "/crm/outreach",
-      approvals: campaignItemId
-        ? `/approvals?id=${encodeURIComponent(campaignItemId)}`
-        : outreachId
-          ? `/approvals?id=${encodeURIComponent(outreachId)}`
-          : "/approvals",
+      approvals: approvalsId
+        ? `/approvals?id=${encodeURIComponent(approvalsId)}`
+        : "/approvals",
     };
   }, [
     id,
@@ -96,7 +99,7 @@ export default function ClientOnboardingPage() {
     calendarId,
     invoiceId,
     outreachId,
-    campaignItemId,
+    approvedCampaignItemId,
   ]);
 
   useEffect(() => {
