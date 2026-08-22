@@ -14,7 +14,9 @@ describe("buildHandoverNextLinks", () => {
     expect(next.creative).not.toContain("taskId=");
     expect(next.approvals).toBe("/approvals");
     expect(next.outreach).toBe("/crm/outreach");
-    expect(next.campaigns).toBe("/approvals");
+    expect(next.campaigns).toBe(
+      "/creative?clientId=c1000000-0000-4000-8000-000000000001",
+    );
     expect(next.portal).toBe("/portal/login");
     expect(next.onboarding).toBe("/portal/onboarding");
     expect(next.finance).toBe("/finance");
@@ -56,7 +58,11 @@ describe("buildHandoverNextLinks", () => {
     expect(next.outreach).toBe("/crm/outreach?id=o-abc");
     expect(next.approvals).toBe("/approvals?id=o-abc");
     expect(next.finance).toBe("/finance?invoiceId=inv-1");
-    expect(next.campaigns).toBe("/approvals?id=camp-1");
+    // Draft campaign ids must not land in Approvals (inbox is approved-only).
+    expect(next.campaigns).toBe(
+      "/creative?clientId=c1000000-0000-4000-8000-000000000001",
+    );
+    expect(next.campaigns).not.toContain("camp-1");
   });
 
   it("uses distinct magic-link paths for portal vs onboarding", () => {

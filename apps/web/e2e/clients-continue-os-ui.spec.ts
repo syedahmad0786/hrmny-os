@@ -109,6 +109,15 @@ test.describe("Clients Continue OS after handover", () => {
 
     const continueApprovals = page.getByTestId("client-continue-approvals");
     await expect(continueApprovals).toHaveAttribute("href", /[?&]id=/);
+    const approvalsHref = (await continueApprovals.getAttribute("href")) ?? "";
+    const continueApprovalsId = new URL(
+      approvalsHref,
+      "http://local",
+    ).searchParams.get("id");
+    expect(continueApprovalsId).toBeTruthy();
+    // Approvals inbox lists outreach drafts, not handover campaign drafts —
+    // Continue Approvals must pin the same outreach id as Continue Outreach.
+    expect(continueApprovalsId).toBe(continueOutreachId);
 
     await continueCreative.click();
     await expect(page).toHaveURL(new RegExp(`taskId=${continueTaskId}`));
@@ -159,6 +168,16 @@ test.describe("Clients Continue OS after handover", () => {
     await expect(page).toHaveURL(new RegExp(`[?&]id=${continueOutreachId}`));
     await expect(
       page.getByTestId(`outreach-item-${continueOutreachId}`),
+    ).toBeVisible({ timeout: 60_000 });
+
+    await page.goto(approvalsHref, { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(new RegExp(`[?&]id=${continueApprovalsId}`));
+    await expect(page.getByTestId("approvals-active-id")).toHaveText(
+      continueApprovalsId!,
+      { timeout: 60_000 },
+    );
+    await expect(
+      page.getByTestId(`approvals-item-${continueApprovalsId}`),
     ).toBeVisible({ timeout: 60_000 });
   });
 });
