@@ -220,6 +220,28 @@ export function buildChatDefaultTools(scope: {
               return { tools: results };
             },
           } satisfies HarnessTool,
+          {
+            name: "outreach_os_approve",
+            description:
+              "Org-only: approve a drafted outreach (HITL). Prompt must mention approve + outreachId UUID. Does not send.",
+            run: async (args: Record<string, unknown>) => {
+              const { runAgentTools } = await import("../ai/agent-tools");
+              const id =
+                typeof args.outreachId === "string" ? args.outreachId : "";
+              const base = String(
+                args.prompt ?? args.query ?? "Approve OS outreach",
+              );
+              const prompt = id
+                ? `${base} outreachId: ${id}`
+                : base;
+              const results = await runAgentTools({
+                allowedTools: ["outreach.os_approve"],
+                prompt,
+                scope: { employeeId: scope.employeeId },
+              });
+              return { tools: results };
+            },
+          } satisfies HarnessTool,
         ]),
     {
       name: "now",

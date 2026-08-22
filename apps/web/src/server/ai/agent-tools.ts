@@ -695,6 +695,66 @@ export async function runAgentTools(input: {
   }
 
   /**
+   * OS outreach approve (draft → approved). Prompt-gated; never sends.
+   * Org-only. Never in DEFAULT_FUNNEL_AGENT_TOOLS.
+   */
+  const wantsOutreachApprove =
+    !input.scope.clientId &&
+    (want("outreach.os_approve") ||
+      want("outreach.approve") ||
+      want("leadgen.approve")) &&
+    /(?:os[_\s-]?approve|approve\s+(?:the\s+)?(?:os\s+)?outreach|outreach[^\n]{0,40}approv|approve\s+hitl)/i.test(
+      input.prompt,
+    );
+
+  if (wantsOutreachApprove) {
+    const { approveOsOutreach, parseOutreachIdFromPrompt } = await import(
+      "../leadgen/os-outreach-actions"
+    );
+    const outreachId = parseOutreachIdFromPrompt(input.prompt);
+    const employeeId =
+      input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
+    if (!outreachId) {
+      results.push({
+        tool: "outreach.os_approve",
+        ok: false,
+        error: "outreachId_required",
+      });
+    } else {
+      try {
+        const out = await approveOsOutreach({
+          outreachId,
+          actor: { employeeId },
+        });
+        results.push({
+          tool: "outreach.os_approve",
+          ok: out.ok,
+          error: out.ok ? undefined : out.reason,
+          data: out.outreach
+            ? {
+                id: out.outreach.id,
+                state: out.outreach.state,
+                dealId: out.outreach.dealId,
+                subject: out.outreach.subject,
+                next: {
+                  approvals: `/approvals?id=${encodeURIComponent(out.outreach.id)}`,
+                  outreach: `/crm/outreach?id=${encodeURIComponent(out.outreach.id)}`,
+                },
+              }
+            : { id: outreachId },
+        });
+      } catch (err) {
+        results.push({
+          tool: "outreach.os_approve",
+          ok: false,
+          error:
+            err instanceof Error ? err.message : "outreach_os_approve_failed",
+        });
+      }
+    }
+  }
+
+  /**
    * Org-wide prospect → won → handover → onboarding. Prompt-gated so
    * crm.* / * allowlists alone cannot fire a full closed loop on every run.
    * Never added to DEFAULT_FUNNEL_AGENT_TOOLS.
