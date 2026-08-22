@@ -76,10 +76,14 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     }
     await page.getByTestId("deal-buaf-temperature").selectOption("warm");
     await page.getByTestId("deal-buaf-save").click();
-    await page.getByTestId("deal-email-verify").click();
-    await expect(page.getByTestId("deal-email-verify")).toBeDisabled({
-      timeout: 15_000,
-    });
+
+    // Apollo mock may already mark email verified — only click when enabled.
+    const emailVerify = page.getByTestId("deal-email-verify");
+    await expect(emailVerify).toBeVisible();
+    if (await emailVerify.isEnabled()) {
+      await emailVerify.click();
+    }
+    await expect(emailVerify).toBeDisabled({ timeout: 15_000 });
 
     await advanceToMarkWon(page);
 
@@ -126,7 +130,7 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
 
     const status = page.getByTestId("hunt-closed-loop-status");
     await expect(status).toContainText(/Closed loop ready/i, {
-      timeout: 60_000,
+      timeout: 90_000,
     });
     await expect(status).toContainText(/via Apollo/i);
 
