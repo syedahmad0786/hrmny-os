@@ -63,6 +63,7 @@ export const DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS = [
   "portal.os_approve",
   "onboarding.os_signoff",
   "calendar.os_ref_approve",
+  "clients.os_month1_advance",
 ] as const;
 
 export type AgentToolPreset = "funnel" | "demo_os_settle";
@@ -1189,6 +1190,88 @@ export async function runAgentTools(input: {
             err instanceof Error
               ? err.message
               : "onboarding_os_signoff_failed",
+        });
+      }
+    }
+  }
+
+  /**
+   * Month-1 phase advance (active → done, next → active). Org-only; prompt-gated.
+   * Seeds clientId from closed_loop when present. Complements onboarding.os_signoff
+   * (Account Month-1 board is a separate memory map; durable path shares onboarding).
+   */
+  const wantsMonth1Advance =
+    !input.scope.clientId &&
+    (want("clients.os_month1_advance") ||
+      want("month1.advance") ||
+      want("clients.month1")) &&
+    /(?:month[_\s-]?1|month1)\s*(?:advance|phase)|advance\s+(?:month[_\s-]?1|month1)|os[_\s-]?month1/i.test(
+      input.prompt,
+    );
+
+  if (wantsMonth1Advance) {
+    const {
+      advanceOsMonth1,
+      parseClientIdFromPrompt,
+      parsePhaseIndexFromPrompt,
+    } = await import("../clients/os-month1-advance");
+    const { getDb } = await import("../db");
+    const clientId =
+      parseClientIdFromPrompt(input.prompt) ?? loopSeed.clientId ?? null;
+    const toPhaseRaw = parsePhaseIndexFromPrompt(input.prompt);
+    const employeeId =
+      input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
+    if (!clientId) {
+      results.push({
+        tool: "clients.os_month1_advance",
+        ok: false,
+        error: "clientId_required",
+      });
+    } else if (
+      getDb() &&
+      results.some((r) => r.tool === "onboarding.os_signoff" && r.ok)
+    ) {
+      // Durable Account month1 is the onboarding map — skip second advance.
+      results.push({
+        tool: "clients.os_month1_advance",
+        ok: true,
+        data: {
+          clientId,
+          skipped: "onboarding_already_signed",
+          next: {
+            account: `/account?clientId=${encodeURIComponent(clientId)}`,
+          },
+        },
+      });
+    } else {
+      try {
+        const out = await advanceOsMonth1({
+          clientId,
+          toPhase: toPhaseRaw ?? undefined,
+          actorEmployeeId: employeeId,
+        });
+        results.push({
+          tool: "clients.os_month1_advance",
+          ok: out.ok,
+          error: out.ok ? undefined : out.reason ?? out.code,
+          data: {
+            clientId: out.clientId,
+            fromPhase: out.fromPhase,
+            toPhase: out.toPhase,
+            phases: out.phases,
+            next: {
+              account: `/account?clientId=${encodeURIComponent(out.clientId)}`,
+            },
+          },
+        });
+      } catch (err) {
+        results.push({
+          tool: "clients.os_month1_advance",
+          ok: false,
+          error:
+            err instanceof Error
+              ? err.message
+              : "clients_os_month1_advance_failed",
         });
       }
     }

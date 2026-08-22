@@ -447,6 +447,16 @@ const MONTH1_PHASE_NAMES = [
   "Month-1 close",
 ] as const;
 
+/** Seven Month-1 phases; phase 0 starts active (matches Account UI + month1 router). */
+export function seedMonth1Phases(): DemoMonth1Phase[] {
+  return MONTH1_PHASE_NAMES.map((name, i) => ({
+    phaseIndex: i,
+    name,
+    status: i === 0 ? ("active" as const) : ("pending" as const),
+    gate: `month1.g${i}`,
+  }));
+}
+
 const ONBOARDING_PHASE_NAMES = [
   "Kickoff & access",
   "Immersion & discovery",
@@ -762,15 +772,7 @@ class MemoryDemoStore {
     };
     this.clients.set(client.clientId, client);
     this.onboarding.set(client.clientId, seedOnboarding());
-    this.month1.set(
-      client.clientId,
-      MONTH1_PHASE_NAMES.map((name, i) => ({
-        phaseIndex: i,
-        name,
-        status: i === 0 ? "active" : "pending",
-        gate: `month1.g${i}`,
-      })),
-    );
+    this.month1.set(client.clientId, seedMonth1Phases());
 
     const calendar: DemoCalendar = {
       calendarId: DEMO_CALENDAR_ID,
@@ -1285,6 +1287,7 @@ class MemoryDemoStore {
     };
     this.clients.set(client.clientId, client);
     this.onboarding.set(client.clientId, seedOnboarding());
+    this.month1.set(client.clientId, seedMonth1Phases());
     return client;
   }
 
