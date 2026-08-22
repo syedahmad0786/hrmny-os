@@ -217,8 +217,12 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
 
     const portalHref = await statusPortal.getAttribute("href");
     const onboardingHref = await statusOnboarding.getAttribute("href");
+    const financeHref = await nextFinance.getAttribute("href");
+    const outreachHref = await nextOutreach.getAttribute("href");
     expect(portalHref).toBeTruthy();
     expect(onboardingHref).toBeTruthy();
+    expect(financeHref).toBeTruthy();
+    expect(outreachHref).toBeTruthy();
     expect(portalHref).not.toBe(onboardingHref);
 
     await statusPortal.click();
@@ -234,15 +238,11 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     ).toBeVisible({ timeout: 60_000 });
     await expect(page).toHaveURL(/\/portal\/onboarding/);
 
-    const financeHref = await nextFinance.getAttribute("href");
-    expect(financeHref).toBeTruthy();
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto(financeHref!, { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(/clientId=/);
     await expect(page.locator("body")).toContainText(/finance|invoice/i);
 
-    const outreachHref = await nextOutreach.getAttribute("href");
-    expect(outreachHref).toBeTruthy();
     await page.goto(outreachHref!, { waitUntil: "domcontentloaded" });
     await expect(
       page.getByRole("heading", { name: /Outreach drafts/i }),
