@@ -801,8 +801,10 @@ export async function runAgentTools(input: {
                 qcNotes: out.task.qcNotes,
                 title: out.task.title,
                 seamEventId: out.seamEventId ?? null,
+                advanced: out.advanced ?? false,
                 next: {
                   creative: `/creative?clientId=${encodeURIComponent(out.task.clientId)}`,
+                  portal: `/portal/approvals`,
                 },
               }
             : { taskId },

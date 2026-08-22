@@ -227,5 +227,8 @@ describe("chat harness funnel_act", () => {
     const row = qcResult.tools?.find((r) => r.tool === "creative.os_qc");
     expect(row?.ok).toBe(true);
     expect(row?.data?.qcPassed).toBe(true);
+    expect(
+      (row?.data as { status?: string } | undefined)?.status,
+    ).toBe("client_review");
   });
 });

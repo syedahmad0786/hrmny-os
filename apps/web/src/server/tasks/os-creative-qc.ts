@@ -1,9 +1,18 @@
 /**
  * Shared creative QC pass/fail/waive for agent `creative.os_qc`.
- * Mirrors staff `tasks.qc` (memory + durable) without requiring live Canva.
+ * Mirrors staff Creative UI `passThenAdvance`: QC then qc → client_review
+ * so portal approvals can list the task. No live Canva required.
  */
+import {
+  bootstrapGateRegistry,
+  transition,
+  type ActorContext,
+  type EntitySnapshot,
+} from "@hrmny/gate";
 import { getDemoStore, type DemoTask } from "../demo-store";
 import { getDb } from "../db";
+
+bootstrapGateRegistry();
 
 export type OsCreativeQcResult = {
   ok: boolean;
@@ -17,6 +26,7 @@ export type OsCreativeQcResult = {
     title: string;
   } | null;
   seamEventId?: string | null;
+  advanced?: boolean;
 };
 
 export function parseTaskIdFromPrompt(prompt: string): string | null {
@@ -34,6 +44,119 @@ function parseDecision(prompt: string): "pass" | "fail" | "waive" {
   if (/\bwaive\b/i.test(prompt)) return "waive";
   if (/\bfail\b|\breject\b/i.test(prompt)) return "fail";
   return "pass";
+}
+
+function actorFor(employeeId: string): ActorContext {
+  return {
+    employeeId,
+    roles: ["partner", "creative_director", "cd"],
+    permissions: [],
+  };
+}
+
+function taskSnapshot(task: DemoTask): EntitySnapshot {
+  const waived = Boolean(
+    (task as DemoTask & { qcWaived?: boolean }).qcWaived,
+  );
+  return {
+    entityType: "task",
+    entityId: task.taskId,
+    state: task.status,
+    data: {
+      qcPassed: task.qcPassed,
+      qcWaived: waived,
+      clientRevisionCount: task.clientRevisionCount,
+      revisionBoundaryAck: task.revisionBoundaryAck,
+      missingRequiredCount: 0,
+    },
+  };
+}
+
+/** Mirror Creative UI: after QC pass/waive, advance qc → client_review. */
+async function advanceToClientReview(input: {
+  task: DemoTask;
+  actorEmployeeId: string;
+  durable: boolean;
+}): Promise<{ ok: boolean; reason?: string; task: DemoTask }> {
+  const { task, actorEmployeeId, durable } = input;
+  if (task.status !== "qc") {
+    return { ok: true, task };
+  }
+  const store = getDemoStore();
+  const result = await transition(
+    actorFor(actorEmployeeId),
+    taskSnapshot(task),
+    {
+      to: "client_review",
+      from: "qc",
+      payload: { qcPassed: true },
+    },
+    {
+      authorize: async () => true,
+      apply: async ({ request }) => {
+        if (durable) {
+          const { updateDeliveryTaskStatus } = await import("./delivery-tasks");
+          const updated = await updateDeliveryTaskStatus({
+            taskId: task.taskId,
+            status: request.to,
+            qcPassed: true,
+          });
+          if (updated) {
+            task.status = updated.status as DemoTask["status"];
+            task.qcPassed = updated.qcPassed;
+          } else {
+            task.status = request.to as DemoTask["status"];
+            task.qcPassed = true;
+          }
+        } else {
+          task.status = request.to as DemoTask["status"];
+          task.qcPassed = true;
+          store.tasks.set(task.taskId, task);
+        }
+        return taskSnapshot(task);
+      },
+      audit: async (event) => {
+        const row = store.appendAudit({
+          actorEmployeeId: event.actorEmployeeId,
+          action: event.action,
+          entityType: event.entityType,
+          entityId: event.entityId ?? task.taskId,
+          before: event.before,
+          after: event.after,
+          reason: event.reason ?? null,
+        });
+        return { auditId: row.auditEventId };
+      },
+    },
+  );
+  if (!result.ok) {
+    return {
+      ok: false,
+      reason: result.blockedBy?.[0]?.reason ?? "GATE_BLOCKED",
+      task,
+    };
+  }
+  return { ok: true, task };
+}
+
+function resultFromTask(
+  task: DemoTask,
+  seamEventId: string | null,
+  advanced: boolean,
+): OsCreativeQcResult {
+  return {
+    ok: true,
+    task: {
+      taskId: task.taskId,
+      clientId: task.clientId,
+      status: task.status,
+      qcPassed: task.qcPassed,
+      qcNotes: task.qcNotes,
+      title: task.title,
+    },
+    seamEventId,
+    advanced,
+  };
 }
 
 export async function runOsCreativeQc(input: {
@@ -58,12 +181,34 @@ export async function runOsCreativeQc(input: {
     if (!existing) {
       return { ok: false, reason: "NOT_FOUND", task: null };
     }
-    const task = await setDeliveryTaskQc({
+    const updated = await setDeliveryTaskQc({
       taskId: input.taskId,
       decision,
       notes,
     });
-    if (!task) return { ok: false, reason: "NOT_FOUND", task: null };
+    if (!updated) return { ok: false, reason: "NOT_FOUND", task: null };
+
+    const task: DemoTask = {
+      taskId: updated.taskId,
+      clientId: updated.clientId,
+      calendarId: updated.calendarId,
+      month: updated.month,
+      taskType: updated.taskType,
+      title: updated.title,
+      status: updated.status as DemoTask["status"],
+      situationalState: updated.situationalState,
+      ownerEmployeeId: updated.ownerEmployeeId,
+      deadline: updated.deadline,
+      priority: updated.priority,
+      qcPassed: updated.qcPassed,
+      qcNotes: updated.qcNotes,
+      clientRevisionCount: updated.clientRevisionCount,
+      revisionBoundaryAck: updated.revisionBoundaryAck,
+      briefId: updated.briefId,
+    };
+    if (decision === "waive") {
+      (task as DemoTask & { qcWaived?: boolean }).qcWaived = true;
+    }
 
     let seamEventId: string | null = null;
     if (task.qcPassed) {
@@ -100,18 +245,33 @@ export async function runOsCreativeQc(input: {
       reason: notes,
     });
 
-    return {
-      ok: true,
-      task: {
-        taskId: task.taskId,
-        clientId: task.clientId,
-        status: task.status,
-        qcPassed: task.qcPassed,
-        qcNotes: task.qcNotes,
-        title: task.title,
-      },
-      seamEventId,
-    };
+    let advanced = false;
+    if (task.qcPassed) {
+      const adv = await advanceToClientReview({
+        task,
+        actorEmployeeId: input.actorEmployeeId,
+        durable: true,
+      });
+      if (!adv.ok) {
+        return {
+          ok: false,
+          reason: adv.reason,
+          task: {
+            taskId: task.taskId,
+            clientId: task.clientId,
+            status: task.status,
+            qcPassed: task.qcPassed,
+            qcNotes: task.qcNotes,
+            title: task.title,
+          },
+          seamEventId,
+          advanced: false,
+        };
+      }
+      advanced = task.status === "client_review";
+    }
+
+    return resultFromTask(task, seamEventId, advanced);
   }
 
   const store = getDemoStore();
@@ -162,16 +322,31 @@ export async function runOsCreativeQc(input: {
     reason: notes,
   });
 
-  return {
-    ok: true,
-    task: {
-      taskId: task.taskId,
-      clientId: task.clientId,
-      status: task.status,
-      qcPassed: task.qcPassed,
-      qcNotes: task.qcNotes,
-      title: task.title,
-    },
-    seamEventId,
-  };
+  let advanced = false;
+  if (task.qcPassed) {
+    const adv = await advanceToClientReview({
+      task,
+      actorEmployeeId: input.actorEmployeeId,
+      durable: false,
+    });
+    if (!adv.ok) {
+      return {
+        ok: false,
+        reason: adv.reason,
+        task: {
+          taskId: task.taskId,
+          clientId: task.clientId,
+          status: task.status,
+          qcPassed: task.qcPassed,
+          qcNotes: task.qcNotes,
+          title: task.title,
+        },
+        seamEventId,
+        advanced: false,
+      };
+    }
+    advanced = task.status === "client_review";
+  }
+
+  return resultFromTask(task, seamEventId, advanced);
 }

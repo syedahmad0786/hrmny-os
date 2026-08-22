@@ -329,6 +329,7 @@ describe("runAgentTools funnel writes", () => {
     const row = passed.find((r) => r.tool === "creative.os_qc");
     expect(row?.ok).toBe(true);
     expect((row?.data as { qcPassed?: boolean })?.qcPassed).toBe(true);
+    expect((row?.data as { status?: string })?.status).toBe("client_review");
   });
 
   it("crm.prospect imports mock Apollo companies outside client sandbox", async () => {
