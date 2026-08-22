@@ -457,6 +457,7 @@ async function memoryHandoverPack(input: {
 
   const next = buildHandoverNextLinks({
     clientId: client.clientId,
+    taskId: task.taskId,
     invoiceId,
     outreachId,
     campaignItemId,
@@ -838,6 +839,7 @@ export async function durableHandoverPack(input: {
   const packId = crypto.randomUUID();
   const next = buildHandoverNextLinks({
     clientId: client.clientId,
+    taskId: task?.taskId ?? null,
     invoiceId,
     outreachId,
     campaignItemId,

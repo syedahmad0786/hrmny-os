@@ -8,13 +8,29 @@ describe("buildHandoverNextLinks", () => {
     });
     expect(next.client).toBe("/clients/c1000000-0000-4000-8000-000000000001");
     expect(next.account).toContain("clientId=");
-    expect(next.creative).toContain("clientId=");
+    expect(next.creative).toBe(
+      "/creative?clientId=c1000000-0000-4000-8000-000000000001",
+    );
+    expect(next.creative).not.toContain("taskId=");
     expect(next.approvals).toBe("/approvals");
     expect(next.outreach).toBe("/crm/outreach");
     expect(next.campaigns).toBe("/approvals");
     expect(next.portal).toBe("/portal/login");
     expect(next.onboarding).toBe("/portal/onboarding");
     expect(next.finance).toBe("/finance");
+  });
+
+  it("pins creative to seeded QC taskId when present", () => {
+    const next = buildHandoverNextLinks({
+      clientId: "c1000000-0000-4000-8000-000000000001",
+      taskId: "b2000000-0000-4000-8000-0000000000a4",
+    });
+    expect(next.creative).toContain(
+      "clientId=c1000000-0000-4000-8000-000000000001",
+    );
+    expect(next.creative).toContain(
+      "taskId=b2000000-0000-4000-8000-0000000000a4",
+    );
   });
 
   it("pins outreach + approvals to the draft id when present", () => {

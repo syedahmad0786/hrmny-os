@@ -55,6 +55,10 @@ describe.runIf(hasDb)("demo OS live Postgres proof", () => {
       ).toBe(true);
       expect(loop.next.account).toContain("clientId=");
       expect(loop.next.creative).toContain("clientId=");
+      expect(loop.taskId).toBeTruthy();
+      expect(loop.next.creative).toContain(
+        `taskId=${encodeURIComponent(loop.taskId!)}`,
+      );
       expect(loop.next.approvals).toContain(
         `id=${encodeURIComponent(loop.outreachId!)}`,
       );

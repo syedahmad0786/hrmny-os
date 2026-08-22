@@ -41,18 +41,14 @@ test.describe("Deal won → handover UI", () => {
     await expect(next).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("deal-handover-client")).toBeVisible();
     await expect(page.getByTestId("deal-handover-finance")).toBeVisible();
-    await expect(page.getByTestId("deal-handover-creative")).toBeVisible();
+    const creative = page.getByTestId("deal-handover-creative");
+    await expect(creative).toBeVisible();
+    await expect(creative).toHaveAttribute("href", /taskId=/);
 
-    await page.getByTestId("deal-handover-client").click();
-    await expect(page).toHaveURL(/\/clients\/.+/);
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
+    await creative.click();
+    await expect(page).toHaveURL(/\/creative\?.*taskId=/);
+    await expect(page.getByRole("heading", { name: /Creative/i })).toBeVisible({
       timeout: 60_000,
     });
-    await expect(
-      page.getByRole("heading", { name: /Onboarding board/i }),
-    ).toBeVisible({ timeout: 30_000 });
-    await expect(
-      page.getByRole("navigation", { name: /Continue OS after handover/i }),
-    ).toBeVisible();
   });
 });
