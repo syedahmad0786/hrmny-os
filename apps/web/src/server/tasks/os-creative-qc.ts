@@ -136,6 +136,18 @@ async function advanceToClientReview(input: {
       task,
     };
   }
+  // Gate apply mutates task.status; re-read as string so TS doesn't keep "qc".
+  const advancedStatus = String(task.status);
+  if (advancedStatus === "client_review" && !durable) {
+    const { ensureMemoryPortalApproval } = await import(
+      "../portal/os-portal-approve"
+    );
+    ensureMemoryPortalApproval({
+      taskId: task.taskId,
+      clientId: task.clientId,
+      title: task.title,
+    });
+  }
   return { ok: true, task };
 }
 

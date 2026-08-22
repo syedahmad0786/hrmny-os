@@ -283,4 +283,35 @@ describe("chat harness funnel_act", () => {
     expect(published?.data?.status).toBe("published");
     expect(published?.data?.publishMode).toBe("stub");
   });
+
+  it("portal_os_approve after creative_os_qc", async () => {
+    const { resetCrmMemory } = await import("../crm/memory");
+    resetCrmMemory();
+    const tools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
+    expect(tools.some((t) => t.name === "portal_os_approve")).toBe(true);
+
+    const closed = tools.find((t) => t.name === "crm_closed_loop");
+    const loopResult = (await closed!.run({
+      prompt: "Run demo closed loop for company: Chat Portal Co",
+    })) as {
+      tools?: Array<{ tool: string; data?: { taskId?: string } }>;
+    };
+    const taskId = loopResult.tools?.find((r) => r.tool === "crm.closed_loop")
+      ?.data?.taskId;
+    expect(taskId).toBeTruthy();
+
+    const qcTool = tools.find((t) => t.name === "creative_os_qc");
+    await qcTool!.run({ prompt: "Pass QC", taskId });
+
+    const portalTool = tools.find((t) => t.name === "portal_os_approve");
+    const portalResult = (await portalTool!.run({
+      prompt: "Approve OS portal",
+      taskId,
+    })) as {
+      tools?: Array<{ tool: string; ok: boolean; data?: { status?: string } }>;
+    };
+    const row = portalResult.tools?.find((r) => r.tool === "portal.os_approve");
+    expect(row?.ok).toBe(true);
+    expect(row?.data?.status).toBe("approved");
+  });
 });

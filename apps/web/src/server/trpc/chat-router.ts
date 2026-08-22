@@ -313,6 +313,33 @@ export function buildChatDefaultTools(scope: {
               return { tools: results };
             },
           } satisfies HarnessTool,
+          {
+            name: "portal_os_approve",
+            description:
+              "Org-only: approve/reject a client_review portal item. Prompt must mention portal approve + taskId/approvalId UUID.",
+            run: async (args: Record<string, unknown>) => {
+              const { runAgentTools } = await import("../ai/agent-tools");
+              const id =
+                typeof args.approvalId === "string"
+                  ? args.approvalId
+                  : typeof args.taskId === "string"
+                    ? args.taskId
+                    : "";
+              const base = String(
+                args.prompt ?? args.query ?? "Approve OS portal",
+              );
+              const prompt = id ? `${base} taskId: ${id}` : base;
+              const results = await runAgentTools({
+                allowedTools: ["portal.os_approve"],
+                prompt,
+                scope: {
+                  employeeId: scope.employeeId,
+                  taskId: id || undefined,
+                },
+              });
+              return { tools: results };
+            },
+          } satisfies HarnessTool,
         ]),
     {
       name: "now",
