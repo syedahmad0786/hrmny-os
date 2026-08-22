@@ -761,7 +761,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
             "content-type": "application/json",
           },
           body: JSON.stringify({
-            model: activeModel,
+            model: primary,
             max_tokens: 2_048,
             temperature: options.temperature ?? 0.2,
             ...(system ? { system } : {}),
@@ -782,7 +782,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
         return parseResult(options, {
           text,
           provider: name,
-          model: typeof raw.model === "string" ? raw.model : activeModel,
+          model: typeof raw.model === "string" ? raw.model : primary,
           requestId: typeof raw.id === "string" ? raw.id : undefined,
           inputTokens: Number(usage?.input_tokens ?? 0) || undefined,
           outputTokens: Number(usage?.output_tokens ?? 0) || undefined,
@@ -796,7 +796,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
         signal,
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          model: activeModel,
+          model: primary,
           messages: ollamaMessages(options),
           stream: false,
           ...(options.schema ? { format: "json" } : {}),
@@ -810,7 +810,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
       return parseResult(options, {
         text,
         provider: name,
-        model: typeof raw.model === "string" ? raw.model : activeModel,
+        model: typeof raw.model === "string" ? raw.model : primary,
         inputTokens: Number(raw.prompt_eval_count ?? 0) || undefined,
         outputTokens: Number(raw.eval_count ?? 0) || undefined,
       });
