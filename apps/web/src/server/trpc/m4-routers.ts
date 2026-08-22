@@ -1316,7 +1316,17 @@ export const month1Router = router({
           gate: `month1.g${p.phaseIndex}`,
         }));
       }
-      return getDemoStore().month1.get(input.clientId) ?? [];
+      const store = getDemoStore();
+      const existing = store.month1.get(input.clientId);
+      if (existing?.length) return existing;
+      // Heal closed-loop clients that predate month1 seed on won handover.
+      if (store.clients.get(input.clientId)) {
+        const { seedMonth1Phases } = await import("../demo-store");
+        const seeded = seedMonth1Phases();
+        store.month1.set(input.clientId, seeded);
+        return seeded;
+      }
+      return [];
     }),
 
   transition: protectedProcedure
@@ -1327,74 +1337,22 @@ export const month1Router = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      if (getDb()) {
-        const {
-          ensureClientOnboarding,
-          getClientOnboarding,
-          signoffOnboardingPhase,
-        } = await import("../clients/onboarding");
-        let phases = await getClientOnboarding(input.clientId);
-        if (!phases.length) {
-          phases = await ensureClientOnboarding(input.clientId);
-        }
-        const active = phases.find((p) => p.status === "active");
-        if (!active) throw new Error("NO_ACTIVE_PHASE");
-        if (
-          input.toPhase !== active.phaseIndex + 1 &&
-          input.toPhase !== active.phaseIndex
-        ) {
+      const { advanceOsMonth1 } = await import("../clients/os-month1-advance");
+      const out = await advanceOsMonth1({
+        clientId: input.clientId,
+        toPhase: input.toPhase,
+        actorEmployeeId: ctx.employeeId,
+      });
+      if (!out.ok) {
+        if (out.code === "GATE_BLOCKED") {
           return {
             ok: false as const,
             code: "GATE_BLOCKED" as const,
-            reason: `Month-1 gate: advance only to next phase (active P${active.phaseIndex})`,
+            reason: out.reason ?? "GATE_BLOCKED",
           };
         }
-        if (input.toPhase === active.phaseIndex + 1) {
-          const signed = await signoffOnboardingPhase({
-            clientId: input.clientId,
-            phaseIndex: active.phaseIndex,
-          });
-          phases = signed?.phases ?? phases;
-        }
-        return {
-          ok: true as const,
-          phases: phases.map((p) => ({
-            phaseIndex: p.phaseIndex,
-            name: p.name,
-            status:
-              p.status === "signed_off"
-                ? ("done" as const)
-                : (p.status as "active" | "pending"),
-            gate: `month1.g${p.phaseIndex}`,
-          })),
-        };
+        throw new Error(out.reason ?? out.code ?? "month1_transition_failed");
       }
-      const store = getDemoStore();
-      const phases = store.month1.get(input.clientId);
-      if (!phases) throw new Error("NOT_FOUND");
-      const active = phases.find((p) => p.status === "active");
-      if (!active) throw new Error("NO_ACTIVE_PHASE");
-      if (input.toPhase !== active.phaseIndex + 1 && input.toPhase !== active.phaseIndex) {
-        return {
-          ok: false as const,
-          code: "GATE_BLOCKED" as const,
-          reason: `Month-1 gate: advance only to next phase (active P${active.phaseIndex})`,
-        };
-      }
-      if (input.toPhase === active.phaseIndex + 1) {
-        active.status = "done";
-        const next = phases.find((p) => p.phaseIndex === input.toPhase);
-        if (next) next.status = "active";
-      }
-      store.appendAudit({
-        actorEmployeeId: ctx.employeeId!,
-        action: "clients.month1.transition",
-        entityType: "client",
-        entityId: input.clientId,
-        before: null,
-        after: { toPhase: input.toPhase },
-        reason: null,
-      });
-      return { ok: true as const, phases };
+      return { ok: true as const, phases: out.phases ?? [] };
     }),
 });

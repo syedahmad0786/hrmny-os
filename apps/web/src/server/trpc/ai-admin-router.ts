@@ -87,9 +87,9 @@ function demoOsSettleAgentRow(): CustomAgentRow {
     slug: DEMO_OS_SETTLE_AGENT_SLUG,
     displayName: "OS settle",
     responsibility:
-      "Org-only closed loop then finance/outreach/QC/portal/campaigns/onboarding/calendar settle.",
+      "Org-only closed loop then finance/outreach/QC/portal/campaigns/onboarding/month1/calendar settle.",
     systemPrompt:
-      "You are the Hrmny OS settle agent. Prefer agent_act / allowlisted OS tools. Run closed loop then settle: finance, outreach, creative QC, portal, campaigns, onboarding signoff, calendar ref-approve. Stay org-scoped (no client sandbox).",
+      "You are the Hrmny OS settle agent. Prefer agent_act / allowlisted OS tools. Run closed loop then settle: finance, outreach, creative QC, portal, campaigns, onboarding signoff, month1 advance, calendar ref-approve. Stay org-scoped (no client sandbox).",
     model: OPENROUTER_FREE_DEFAULT_MODEL,
     enabled: true,
     producesDrafts: true,
@@ -141,15 +141,21 @@ export async function ensureDemoDeliveryAgent() {
         ${DEMO_OS_SETTLE_AGENT_ID}::uuid,
         ${DEMO_OS_SETTLE_AGENT_SLUG},
         ${"OS settle"},
-        ${"Org-only closed loop then finance/outreach/QC/portal/campaigns/onboarding/calendar settle."},
-        ${"You are the Hrmny OS settle agent. Prefer agent_act / allowlisted OS tools. Run closed loop then settle: finance, outreach, creative QC, portal, campaigns, onboarding signoff, calendar ref-approve. Stay org-scoped (no client sandbox)."},
+        ${"Org-only closed loop then finance/outreach/QC/portal/campaigns/onboarding/month1/calendar settle."},
+        ${"You are the Hrmny OS settle agent. Prefer agent_act / allowlisted OS tools. Run closed loop then settle: finance, outreach, creative QC, portal, campaigns, onboarding signoff, month1 advance, calendar ref-approve. Stay org-scoped (no client sandbox)."},
         ${OPENROUTER_FREE_DEFAULT_MODEL},
         true,
         true,
         ${JSON.stringify([...DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS])}::jsonb,
         null
       )
-      on conflict (slug) do nothing
+      on conflict (slug) do update set
+        responsibility = excluded.responsibility,
+        system_prompt = excluded.system_prompt,
+        allowed_tools = excluded.allowed_tools,
+        model = coalesce(public.custom_agent.model, excluded.model),
+        enabled = true,
+        updated_at = now()
     `);
   } catch {
     /* table/constraint missing in some envs — memory path still covers CI */

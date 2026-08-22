@@ -38,6 +38,7 @@ describe("customAgents allowlist repair", () => {
     expect(settle?.effectiveAllowedTools).toContain("crm.closed_loop");
     expect(settle?.effectiveAllowedTools).toContain("onboarding.os_signoff");
     expect(settle?.effectiveAllowedTools).toContain("calendar.os_ref_approve");
+    expect(settle?.effectiveAllowedTools).toContain("clients.os_month1_advance");
   });
 
   it("create persists funnel defaults and repair fills empty allowlists", async () => {
