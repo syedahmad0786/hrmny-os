@@ -198,7 +198,8 @@ export const salesOsRouter = router({
     .mutation(({ input }) => processIntentLeads(input.csv)),
 
   replies: router({
-    apply: staffProcedure
+    /** Not named `apply` — tRPC proxies collide with Function.prototype.apply. */
+    applyIntent: staffProcedure
       .input(
         z.object({
           dealId: z.string().uuid(),
@@ -286,7 +287,7 @@ export const salesOsRouter = router({
     propose: staffProcedure
       .input(z.object({ focus: z.string().optional() }).optional())
       .mutation(({ input }) => proposeEvolve(input?.focus)),
-    apply: staffProcedure
+    accept: staffProcedure
       .input(z.object({ id: z.string() }))
       .mutation(({ input, ctx }) => applyEvolve(input.id, ctx.employeeId)),
     reject: staffProcedure

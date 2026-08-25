@@ -19,7 +19,7 @@ export default function SalesOsSettingsPage() {
   const propose = trpc.salesOs.evolve.propose.useMutation({
     onSuccess: () => void utils.salesOs.evolve.invalidate(),
   });
-  const apply = trpc.salesOs.evolve.apply.useMutation({
+  const apply = trpc.salesOs.evolve.accept.useMutation({
     onSuccess: () => {
       void utils.salesOs.evolve.invalidate();
       void utils.salesOs.settings.invalidate();
