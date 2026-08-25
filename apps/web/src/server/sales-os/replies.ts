@@ -116,7 +116,7 @@ export async function ingestGmailReply(input: {
     actorEmployeeId: input.actorEmployeeId,
     email: input.fromEmail,
   });
-  return { intent: classified, applied: true as const, ...applied };
+  return { ...applied, intent: classified, applied: true as const };
 }
 
 function heuristicIntent(body: string): ReplyIntent {
