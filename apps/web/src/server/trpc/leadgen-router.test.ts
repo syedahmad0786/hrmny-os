@@ -78,7 +78,8 @@ describe("outreach HITL gate flow", () => {
     const item = await draftOutreach({ dealId: deal.dealId, body: "Hello there" });
     expect(item.state).toBe("draft");
     expect(item.recipient).toBe("sara@acme.example");
-    expect(item.body).toBe("Hello there");
+    expect(item.body).toContain("Hello there");
+    expect(item.body).toContain("— hrmny outreach —");
   });
 
   it("REFUSES an empty-body draft when the agent is disabled — nothing inserted", async () => {

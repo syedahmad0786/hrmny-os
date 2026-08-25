@@ -42,6 +42,19 @@ describe("reply-intent → deal-stage mapping", () => {
     expect(res).toEqual({ intent: "not_now", toStage: null, moved: false });
   });
 
+  it("records suppression on unsubscribe without a stage move", async () => {
+    const move = vi.fn<MoveDealStage>();
+    const res = await applyReplyIntent({
+      dealId: "d1",
+      intent: "unsubscribe",
+      moveDealStage: move,
+    });
+    expect(move).not.toHaveBeenCalled();
+    expect(res.toStage).toBeNull();
+    expect(res.moved).toBe(false);
+    expect(res.reason).toBe("suppressed_and_closed");
+  });
+
   it("surfaces a failed move reason", async () => {
     const move = vi
       .fn<MoveDealStage>()

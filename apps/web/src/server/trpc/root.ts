@@ -59,6 +59,7 @@ import { campaignsRouter } from "./campaigns-router";
 import { analyticsRouter } from "./analytics-router";
 import { portalApprovalsRouter } from "./portal-approvals-router";
 import { leadgenRouter } from "./leadgen-router";
+import { salesOsRouter } from "./sales-os-router";
 import { scorecardsRouter } from "./scorecards-router";
 import { aiPolicyRouter } from "./ai-policy-router";
 import { peopleReconRouter } from "./people-recon-router";
@@ -813,6 +814,7 @@ export const appRouter = router({
   campaigns: campaignsRouter,
   analytics: analyticsRouter,
   leadgen: leadgenRouter,
+  salesOs: salesOsRouter,
   scorecards: scorecardsRouter,
   aiPolicy: aiPolicyRouter,
   peopleRecon: peopleReconRouter,

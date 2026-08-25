@@ -164,7 +164,14 @@ export async function draftOutreach(input: {
   const contact = deal.primaryContactId
     ? await getContact(deal.primaryContactId)
     : null;
-  const recipient = contact?.email ?? "";
+  const channel = input.channel ?? "gmail";
+  const { isEmailChannel, isLinkedInChannel, ensureFooter, buildComplianceFooter } =
+    await import("../sales-os/compliance");
+  const { getSalesOsSettings } = await import("../sales-os/store");
+  const settings = await getSalesOsSettings();
+  const recipient = isLinkedInChannel(channel)
+    ? (contact?.linkedinUrl ?? contact?.email ?? "")
+    : (contact?.email ?? "");
 
   let subject = input.subject ?? "Quick idea for your team";
   let body = input.body;
@@ -172,7 +179,12 @@ export async function draftOutreach(input: {
     const runAgent = input.runAgent ?? defaultRunAgent;
     const run = await runAgent({
       agent: "outreach-draft",
-      input: { dealId: input.dealId, company: deal.companyName },
+      input: {
+        dealId: input.dealId,
+        company: deal.companyName,
+        sopVoice: settings.outreach.voice,
+        channel,
+      },
     });
     const out = (typeof run.output === "object" && run.output ? run.output : {}) as Record<
       string,
@@ -197,12 +209,26 @@ export async function draftOutreach(input: {
           : JSON.stringify(run.output);
   }
 
+  if (isEmailChannel(channel) && body) {
+    body = ensureFooter(
+      body,
+      buildComplianceFooter({
+        senderName: settings.outreach.senderName,
+        senderTitle: settings.outreach.senderTitle,
+        physicalAddress: settings.outreach.physicalAddress,
+        unsubscribeUrl: `${settings.outreach.unsubscribePath}?email=${encodeURIComponent(recipient)}`,
+      }),
+    );
+  }
+
   return insertOutreach({
     dealId: input.dealId,
-    channel: input.channel ?? "gmail",
+    channel,
     recipient,
     subject,
-    body,
+    body: body ?? "",
+    contactId: contact?.contactId ?? null,
+    linkedinUrl: contact?.linkedinUrl ?? null,
   });
 }
 
@@ -273,6 +299,31 @@ export async function sendOutreach(input: {
 > {
   const item = await getOutreach(input.id);
   if (!item) throw new Error(`Outreach not found: ${input.id}`);
+  const { assertEmailSendAllowed, isEmailChannel, isLinkedInChannel, ensureFooter } =
+    await import("../sales-os/compliance");
+  if (isLinkedInChannel(item.channel)) {
+    return {
+      ok: true,
+      newState: item.state,
+      auditId: "copy_draft",
+      sendMode: "copy_draft",
+      copyDraft: true,
+    };
+  }
+  if (isEmailChannel(item.channel)) {
+    const allowed = await assertEmailSendAllowed({ email: item.recipient });
+    if (!allowed.ok) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: allowed.reason,
+      });
+    }
+    if (!item.body.includes("— hrmny outreach —")) {
+      const nextBody = ensureFooter(item.body);
+      await patchOutreach(input.id, { body: nextBody });
+      item.body = nextBody;
+    }
+  }
   const composio =
     input.composio ??
     (await resolveComposioSend(input.actor.employeeId, input.actor.roles));
@@ -321,6 +372,14 @@ export async function sendOutreach(input: {
             state: "sent",
             sentAt: new Date().toISOString(),
             externalId: res.externalId,
+          });
+          const { recordEmailEvent } = await import("../sales-os/store");
+          await recordEmailEvent({
+            outreachItemId: input.id,
+            contactId: item.contactId,
+            kind: "sent",
+            provider: "gmail",
+            externalId: res.externalId ?? null,
           });
           return outreachEntity(next!);
         },

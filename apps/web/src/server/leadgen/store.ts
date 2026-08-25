@@ -32,6 +32,11 @@ export type OutreachItem = {
   approvedBy: string | null;
   sentAt: string | null;
   externalId: string | null;
+  contactId: string | null;
+  reworkFeedback: string | null;
+  linkedinUrl: string | null;
+  cadenceTouch: number;
+  acceptedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -103,6 +108,11 @@ export function seedClientSandboxOutreach(input: {
     approvedBy: null,
     sentAt: null,
     externalId: null,
+    contactId: null,
+    reworkFeedback: null,
+    linkedinUrl: null,
+    cadenceTouch: 1,
+    acceptedAt: null,
     createdAt: now,
     updatedAt: now,
   });
@@ -117,6 +127,11 @@ export function seedClientSandboxOutreach(input: {
     approvedBy: null,
     sentAt: null,
     externalId: null,
+    contactId: null,
+    reworkFeedback: null,
+    linkedinUrl: null,
+    cadenceTouch: 1,
+    acceptedAt: null,
     createdAt: now,
     updatedAt: now,
   });
@@ -148,6 +163,11 @@ function mapOutreach(r: typeof outreachItems.$inferSelect): OutreachItem {
     approvedBy: r.approvedBy ?? null,
     sentAt: r.sentAt ? r.sentAt.toISOString() : null,
     externalId: r.externalId ?? null,
+    contactId: r.contactId ?? null,
+    reworkFeedback: r.reworkFeedback ?? null,
+    linkedinUrl: r.linkedinUrl ?? null,
+    cadenceTouch: r.cadenceTouch ?? 1,
+    acceptedAt: r.acceptedAt ? r.acceptedAt.toISOString() : null,
     createdAt: iso(r.createdAt),
     updatedAt: iso(r.updatedAt),
   };
@@ -159,6 +179,10 @@ export async function insertOutreach(input: {
   recipient: string;
   subject?: string | null;
   body: string;
+  contactId?: string | null;
+  linkedinUrl?: string | null;
+  cadenceTouch?: number;
+  reworkFeedback?: string | null;
 }): Promise<OutreachItem> {
   return withDb(
     async (db) => {
@@ -171,6 +195,10 @@ export async function insertOutreach(input: {
           recipient: input.recipient,
           subject: input.subject ?? null,
           body: input.body,
+          contactId: input.contactId ?? null,
+          linkedinUrl: input.linkedinUrl ?? null,
+          cadenceTouch: input.cadenceTouch ?? 1,
+          reworkFeedback: input.reworkFeedback ?? null,
         })
         .returning();
       return mapOutreach(row!);
@@ -188,6 +216,11 @@ export async function insertOutreach(input: {
         approvedBy: null,
         sentAt: null,
         externalId: null,
+        contactId: input.contactId ?? null,
+        reworkFeedback: input.reworkFeedback ?? null,
+        linkedinUrl: input.linkedinUrl ?? null,
+        cadenceTouch: input.cadenceTouch ?? 1,
+        acceptedAt: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -253,6 +286,12 @@ export async function patchOutreach(
       if (patch.body !== undefined) set.body = patch.body;
       if (patch.recipient !== undefined) set.recipient = patch.recipient;
       if (patch.channel !== undefined) set.channel = patch.channel;
+      if (patch.contactId !== undefined) set.contactId = patch.contactId;
+      if (patch.reworkFeedback !== undefined) set.reworkFeedback = patch.reworkFeedback;
+      if (patch.linkedinUrl !== undefined) set.linkedinUrl = patch.linkedinUrl;
+      if (patch.cadenceTouch !== undefined) set.cadenceTouch = patch.cadenceTouch;
+      if (patch.acceptedAt !== undefined)
+        set.acceptedAt = patch.acceptedAt ? new Date(patch.acceptedAt) : null;
       const [row] = await db
         .update(outreachItems)
         .set(set)

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { demoBlockerConnectionsPath } from "@/lib/demo-blocker-anchor";
 import { formatReadyLlmLine, type ReadySmoke } from "@/lib/ready-smoke";
+import { ResearchConsole } from "../_components/research-console";
 
 const STEPS = [
   {
@@ -485,6 +486,9 @@ export default function HuntClientsPage() {
         <footer className="ops-command-footer">
           <nav className="ops-quick-paths" aria-label="Related">
             <span>Also</span>
+            <Link href="/crm/research">
+              Research gates <span aria-hidden>↗</span>
+            </Link>
             <Link href="/crm/tasks">
               Sales tasks <span aria-hidden>↗</span>
             </Link>
@@ -494,12 +498,16 @@ export default function HuntClientsPage() {
             <Link href="/settings/connections">
               Connections <span aria-hidden>↗</span>
             </Link>
-            <Link href="/settings/ai">
-              Agents <span aria-hidden>↗</span>
+            <Link href="/crm/settings/sales-os">
+              Sales OS <span aria-hidden>↗</span>
             </Link>
           </nav>
         </footer>
       </section>
+
+      <div className="mx-auto max-w-6xl px-4 pb-16">
+        <ResearchConsole />
+      </div>
     </main>
   );
 }

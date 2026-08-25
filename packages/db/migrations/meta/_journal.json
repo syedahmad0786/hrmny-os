@@ -498,6 +498,13 @@
       "when": 1787310000000,
       "tag": "0071_portal_session_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1787673600000,
+      "tag": "0072_sales_os",
+      "breakpoints": true
     }
   ]
 }

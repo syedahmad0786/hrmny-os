@@ -70,6 +70,13 @@ export async function runLeadgenDailyCron(
     ),
   });
 
+  const { runDailyResearch } = await import("../sales-os/research");
+  const { flagStaleEmails } = await import("../sales-os/stale");
+  const { buildSalesOsDigest } = await import("../sales-os/digest");
+  const research = await runDailyResearch({ date: now }).catch(() => null);
+  const stale = await flagStaleEmails(now).catch(() => 0);
+  const salesDigest = await buildSalesOsDigest(now).catch(() => null);
+
   await emitHealthSignal(LEADGEN_DAILY_SIGNAL, "info", {
     date: todayIso,
     count: digest.count,
@@ -77,6 +84,13 @@ export async function runLeadgenDailyCron(
     hotCount: digest.hotCount,
     apolloSource: apollo.source,
     hunterSource: hunter.source,
+    researched: research?.created.length ?? 0,
+    sector: research?.sector ?? null,
+    staleEmails: stale,
+    approvalQueue:
+      (salesDigest?.researchedWaiting ?? 0) +
+      (salesDigest?.contactsWaiting ?? 0) +
+      (salesDigest?.outreachDrafts ?? 0),
   }).catch(() => undefined);
 
   memoryLastRunDay = todayIso;
