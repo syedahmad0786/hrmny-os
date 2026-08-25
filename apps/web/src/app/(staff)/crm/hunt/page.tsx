@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { demoBlockerConnectionsPath } from "@/lib/demo-blocker-anchor";
+import {
+  demoBlockerConnectionsPath,
+  prioritizeDemoBlockers,
+} from "@/lib/demo-blocker-anchor";
 import { formatReadyLlmLine, type ReadySmoke } from "@/lib/ready-smoke";
 import { ResearchConsole } from "../_components/research-console";
 
@@ -98,6 +101,7 @@ export default function HuntClientsPage() {
           }
           return next;
         })();
+  const orderedBlockers = prioritizeDemoBlockers(blockers);
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
     onSuccess: (data) => {
       if (!data.ok) {
@@ -320,7 +324,10 @@ export default function HuntClientsPage() {
                   {toolReady.composio} · resend {toolReady.resend ?? "—"} ·
                   portal magic-link {ready?.portalMagicLink ?? "—"}
                   {" · "}
-                  <Link href="/settings/connections" className="underline">
+                  <Link
+                    href="/settings/connections#conn-google_workspace"
+                    className="underline"
+                  >
                     Connections
                   </Link>
                 </p>
@@ -337,12 +344,12 @@ export default function HuntClientsPage() {
                     {ready.connections.xero ?? 0}
                   </p>
                 ) : null}
-                {blockers.length > 0 ? (
+                {orderedBlockers.length > 0 ? (
                   <ul
                     className="list-disc space-y-1 pl-4 text-ink/80"
                     data-testid="hunt-ready-blockers"
                   >
-                    {blockers.map((item) => {
+                    {orderedBlockers.map((item) => {
                       const href = demoBlockerConnectionsPath(item);
                       const anchor = href?.split("#")[1];
                       return (

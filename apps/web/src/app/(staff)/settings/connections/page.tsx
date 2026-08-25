@@ -1,22 +1,17 @@
 "use client";
 
 import { Button } from "@hrmny/ui";
-import { demoBlockerAnchor } from "@/lib/demo-blocker-anchor";
+import {
+  demoBlockerAnchor,
+  isOptionalLaterDemoBlocker,
+  prioritizeDemoBlockers,
+} from "@/lib/demo-blocker-anchor";
+import { isGoogleWorkspaceReconnectRequired } from "@/lib/google-workspace-error";
 import { trpc } from "@/lib/trpc";
-import { getSupabaseBrowserClient } from "@/lib/supabase";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ConnectionHealth } from "./connection-health";
 import { PlatformReadyStrip } from "@/components/platform-ready-strip";
-
-const GOOGLE_WORKSPACE_SCOPES = [
-  "https://www.googleapis.com/auth/gmail.modify",
-  "https://www.googleapis.com/auth/gmail.send",
-  "https://www.googleapis.com/auth/calendar.events",
-  "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/drive.readonly",
-  "https://www.googleapis.com/auth/spreadsheets",
-].join(" ");
 
 const WORK_APP_FAMILIES = [
   { key: "files", label: "Cloud files" },
@@ -52,7 +47,8 @@ export default function ConnectionsPage() {
         void fetch("/api/ready")
           .then((r) => r.json())
           .then((body: { blockers?: string[] }) => {
-            if (Array.isArray(body.blockers)) setDemoBlockers(body.blockers);
+            if (Array.isArray(body.blockers))
+              setDemoBlockers(prioritizeDemoBlockers(body.blockers));
           })
           .catch(() => undefined);
       });
@@ -60,6 +56,8 @@ export default function ConnectionsPage() {
   });
   const [keyNotes, setKeyNotes] = useState<Record<string, string>>({});
   const startXeroOAuth = trpc.connections.startXeroOAuth.useMutation();
+  const startGoogleWorkspaceOAuth =
+    trpc.connections.startGoogleWorkspaceOAuth.useMutation();
   const startOAuth = trpc.connections.startOAuth.useMutation();
   const probeGoogle = trpc.connections.probeGoogleWorkspace.useMutation({
     onSuccess: () =>
@@ -104,18 +102,53 @@ export default function ConnectionsPage() {
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [redirect, setRedirect] = useState<string | null>(null);
   const [demoBlockers, setDemoBlockers] = useState<string[]>([]);
-  const autoProbedGw = useRef(false);
+  const [oauthBanner, setOauthBanner] = useState<{
+    kind: "ok" | "err";
+    text: string;
+  } | null>(null);
 
   useEffect(() => {
-    if (autoProbedGw.current || !list.data) return;
-    const gw = list.data.find((row) => row.toolkit === "google_workspace");
-    if (!gw) return;
-    if (gw.status !== "error" && !gw.lastError) return;
-    autoProbedGw.current = true;
-    void probeGoogle.mutateAsync().catch(() => undefined);
-    // One-shot heal attempt when Connections first sees a GW error row.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
-  }, [list.data]);
+    const params = new URLSearchParams(window.location.search);
+    const gw = params.get("gw");
+    const xero = params.get("xero");
+    if (gw === "connected") {
+      setOauthBanner({
+        kind: "ok",
+        text: `Google Workspace connected${
+          params.get("account") ? `: ${params.get("account")}` : ""
+        }. Mailbox send can go live after HITL approve.`,
+      });
+    } else if (gw === "error") {
+      setOauthBanner({
+        kind: "err",
+        text: `Google Workspace connect failed: ${params.get("reason") ?? "unknown"}. Confirm the Google Cloud redirect URI is ${window.location.origin}/api/integrations/google-workspace/callback, then Reconnect.`,
+      });
+    } else if (xero === "connected") {
+      setOauthBanner({
+        kind: "ok",
+        text: `Xero connected${
+          params.get("tenant") ? ` · tenant ${params.get("tenant")}` : ""
+        }.`,
+      });
+    } else if (xero === "error") {
+      setOauthBanner({
+        kind: "err",
+        text: `Xero connect failed: ${params.get("reason") ?? "unknown"}`,
+      });
+    }
+    if (gw || xero === "connected" || xero === "error") {
+      const id =
+        gw != null ? "conn-google_workspace" : xero != null ? "conn-xero" : null;
+      if (id) {
+        window.setTimeout(() => {
+          document.getElementById(id)?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        }, 200);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -149,7 +182,7 @@ export default function ConnectionsPage() {
         }) => {
           if (cancelled) return;
           if (Array.isArray(body.blockers)) {
-            setDemoBlockers(body.blockers);
+            setDemoBlockers(prioritizeDemoBlockers(body.blockers));
             return;
           }
           const tools = body.tools ?? {};
@@ -191,7 +224,7 @@ export default function ConnectionsPage() {
                 : "Set RESEND_MODE=live + RESEND_API_KEY + RESEND_FROM for real portal invite email.",
             );
           }
-          setDemoBlockers(next);
+          setDemoBlockers(prioritizeDemoBlockers(next));
         },
       )
       .catch(() => undefined);
@@ -201,31 +234,16 @@ export default function ConnectionsPage() {
   }, [list.dataUpdatedAt]);
 
   async function connectGoogleWorkspace() {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
-    localStorage.setItem("hrmny-google-workspace-connect", "pending");
-    try {
-      sessionStorage.removeItem("hrmny-gw-oauth-tokens");
-    } catch {
-      /* ignore */
-    }
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/settings/connections`,
-        scopes: GOOGLE_WORKSPACE_SCOPES,
-        queryParams: {
-          access_type: "offline",
-          prompt: "consent",
-          hd: "hrmny.co",
-        },
-      },
-    });
-    if (error) {
-      localStorage.removeItem("hrmny-google-workspace-connect");
-      throw error;
-    }
+    const result = await startGoogleWorkspaceOAuth.mutateAsync();
+    window.location.assign(result.redirectUrl);
   }
+
+  const requiredBlockers = demoBlockers.filter(
+    (item) => !isOptionalLaterDemoBlocker(item),
+  );
+  const laterBlockers = demoBlockers.filter((item) =>
+    isOptionalLaterDemoBlocker(item),
+  );
 
   return (
     <main className="flex flex-col gap-6">
@@ -246,35 +264,83 @@ export default function ConnectionsPage() {
 
       <ConnectionHealth />
 
+      {oauthBanner ? (
+        <p
+          role="status"
+          data-testid="connections-oauth-banner"
+          className={`rounded-lg border p-4 text-sm ${
+            oauthBanner.kind === "ok"
+              ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+              : "border-red-300 bg-red-50 text-red-800"
+          }`}
+        >
+          {oauthBanner.text}
+        </p>
+      ) : null}
+
       {demoBlockers.length > 0 ? (
         <section className="rounded-lg border border-ochre/40 bg-cream/50 p-4 text-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
             Live demo blockers
           </p>
           <p className="mt-1 text-muted">
-            Close these gaps so prospecting → sales → creative → portal can run
-            live on production.
+            Google Workspace is required for mailbox send. Apollo, Hunter, Xero,
+            LinkedIn, Canva, and Resend can wait — paste or connect later.
           </p>
-          <ul className="mt-3 list-disc space-y-1 pl-5 text-ink">
-            {demoBlockers.map((item) => {
-              const href = demoBlockerAnchor(item);
-              return (
-                <li key={item} data-testid="connections-blocker">
-                  {href ? (
-                    <a
-                      href={href}
-                      className="text-ochre underline"
-                      data-testid={`connections-blocker-link-${href.replace("#conn-", "")}`}
-                    >
-                      {item}
-                    </a>
-                  ) : (
-                    item
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          {requiredBlockers.length > 0 ? (
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-ink">
+              {requiredBlockers.map((item) => {
+                const href = demoBlockerAnchor(item);
+                return (
+                  <li key={item} data-testid="connections-blocker">
+                    {href ? (
+                      <a
+                        href={href}
+                        className="text-ochre underline"
+                        data-testid={`connections-blocker-link-${href.replace("#conn-", "")}`}
+                      >
+                        {item}
+                      </a>
+                    ) : (
+                      item
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="mt-3 text-sm text-ink">
+              Mailbox reconnect is the only required action. Optional tools are
+              listed below.
+            </p>
+          )}
+          {laterBlockers.length > 0 ? (
+            <>
+              <p className="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted">
+                Add later
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-muted">
+                {laterBlockers.map((item) => {
+                  const href = demoBlockerAnchor(item);
+                  return (
+                    <li key={item} data-testid="connections-blocker">
+                      {href ? (
+                        <a
+                          href={href}
+                          className="underline"
+                          data-testid={`connections-blocker-link-${href.replace("#conn-", "")}`}
+                        >
+                          {item}
+                        </a>
+                      ) : (
+                        item
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          ) : null}
           <p className="mt-3 text-xs text-muted">
             Also see{" "}
             <Link href="/crm/hunt" className="underline">
@@ -290,7 +356,8 @@ export default function ConnectionsPage() {
           Direct business connections
         </p>
         <p className="mt-1 text-sm text-muted">
-          Workspace and business API keys managed directly by hrmny OS.
+          Reconnect Google Workspace first. Apollo, Hunter, and other keys stay
+          optional until the client pastes them.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -423,6 +490,7 @@ export default function ConnectionsPage() {
                       !item.ready ||
                       startOAuth.isPending ||
                       startXeroOAuth.isPending ||
+                      startGoogleWorkspaceOAuth.isPending ||
                       authorizeManaged.isPending
                     }
                     onClick={() => {
@@ -433,7 +501,9 @@ export default function ConnectionsPage() {
                       if (item.toolkit === "xero") {
                         void startXeroOAuth
                           .mutateAsync()
-                          .then((result) => setRedirect(result.redirectUrl));
+                          .then((result) =>
+                            window.location.assign(result.redirectUrl),
+                          );
                         return;
                       }
                       if (
@@ -459,6 +529,14 @@ export default function ConnectionsPage() {
                       : "Provider setup needed"}
                   </Button>
                   {item.toolkit === "google_workspace" &&
+                  isGoogleWorkspaceReconnectRequired(item.lastError) ? (
+                    <p className="w-full text-xs text-red-700">
+                      Heal cannot restore a revoked Google token. Use Reconnect —
+                      it starts a dedicated Google consent that writes tokens to
+                      Vault with the same client used for refresh.
+                    </p>
+                  ) : null}
+                  {item.toolkit === "google_workspace" &&
                   item.ready &&
                   (item.status === "error" ||
                     item.status === "connected" ||
@@ -466,12 +544,17 @@ export default function ConnectionsPage() {
                     <Button
                       type="button"
                       variant="ghost"
-                      disabled={probeGoogle.isPending}
+                      disabled={
+                        probeGoogle.isPending ||
+                        isGoogleWorkspaceReconnectRequired(item.lastError)
+                      }
                       onClick={() => void probeGoogle.mutateAsync()}
                     >
                       {probeGoogle.isPending
                         ? "Testing…"
-                        : "Test / heal token"}
+                        : isGoogleWorkspaceReconnectRequired(item.lastError)
+                          ? "Heal unavailable — reconnect"
+                          : "Test / heal token"}
                     </Button>
                   ) : null}
                   {probeGoogle.data && item.toolkit === "google_workspace" ? (
@@ -490,6 +573,11 @@ export default function ConnectionsPage() {
                             "reason" in probeGoogle.data
                               ? probeGoogle.data.reason
                               : "unknown"
+                          }${
+                            "reconnectRequired" in probeGoogle.data &&
+                            probeGoogle.data.reconnectRequired
+                              ? " — use Reconnect"
+                              : ""
                           }`}
                     </p>
                   ) : null}
@@ -782,6 +870,8 @@ export default function ConnectionsPage() {
       {saveKey.error ||
       disconnect.error ||
       startOAuth.error ||
+      startXeroOAuth.error ||
+      startGoogleWorkspaceOAuth.error ||
       asanaStatus.error ||
       managedToolkits.error ||
       managedAccounts.error ||
@@ -796,6 +886,8 @@ export default function ConnectionsPage() {
               saveKey.error ??
               disconnect.error ??
               startOAuth.error ??
+              startXeroOAuth.error ??
+              startGoogleWorkspaceOAuth.error ??
               asanaStatus.error ??
               managedToolkits.error ??
               managedAccounts.error ??

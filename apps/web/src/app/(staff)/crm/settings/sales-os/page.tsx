@@ -311,7 +311,9 @@ export default function SalesOsSettingsPage() {
           <p>
             Production <code>/api/ready</code> (2026-08-25): OpenRouter and
             Composio configured; Apollo/Hunter mock; Google Workspace token
-            expired. The standalone{" "}
+            expired. Reconnect uses dedicated Google OAuth (not Heal, not
+            Supabase SSO). OpenRouter tests use free <code>stealth/ox-alpha</code>.
+            The standalone{" "}
             <a
               href="https://hrmny-sales-growth.vercel.app"
               className="underline"

@@ -41,7 +41,7 @@ Required before first live mailbox send:
 | Apollo.io | People search / org enrich / intent CSV | **Mock** on `hrmny-os`. Ayham shared access (Aug 21); key still not pasted in Connections. The Vercel Sales & Growth app shows “Apollo Connected” in **Demo Mode** — that is not the CRM vault. |
 | Hunter | Email verify | **Mock.** Paste key in Connections. |
 | NeverBounce | Verify fallback | No Connections card. Set `NEVERBOUNCE_API_KEY` (credits were 0 historically). |
-| OpenRouter | Research + draft + classify + reflect | **Configured** on production (`liquid/lfm-2.5-2.6b:free`). Meeting notes still flag a credit top-up. |
+| OpenRouter | Research + draft + classify + reflect | **Configured**. Code default is now `stealth/ox-alpha` (free). Production `/api/ready` may still show `liquid/lfm-2.5-2.6b:free` until `LLM_DEFAULT_MODEL` is unset or set to `stealth/ox-alpha`. Paid models stay blocked. |
 
 Do **not** connect for outbound: LinkedIn unofficial MCP / Playwright /
 Phantombuster / Dripify, Resend/Mailgun/SES for cold mail, Apollo sequences,
@@ -53,16 +53,24 @@ Cursor’s Harmony/Browser MCP was down in this run. Composio cloud Chrome and
 Playwright/Chromium were used instead. Neither had an `@hrmny.co` Google
 session, so OAuth could not be completed from the agent VM.
 
-1. On your machine, open Harmony Chrome signed in as `@hrmny.co`.
-2. Go to [https://hrmny-os.vercel.app/settings/connections](https://hrmny-os.vercel.app/settings/connections).
-3. **Reconnect Google Workspace** (clear the dead token if shown, then OAuth).
-   Use Workspace only — not personal Gmail.
-4. Paste **Apollo** and **Hunter** keys. Get the Apollo passcode from Ayham if
-   the shared login still needs it.
-5. Confirm OpenRouter credits. Set `NEVERBOUNCE_API_KEY` if verify-fallback
-   credits are funded.
-6. `/crm/settings/sales-os` is on this PR — it 404s on production until merge.
-   After merge, the Sales OS page shows the same `/api/ready` blockers.
+1. In Google Cloud Console, on the **same** OAuth client as
+   `GOOGLE_OAUTH_CLIENT_ID` / `SECRET` (the client used for token refresh), add
+   Authorized redirect URI:
+   `https://hrmny-os.vercel.app/api/integrations/google-workspace/callback`
+   (plus `http://localhost:3000/api/integrations/google-workspace/callback` for
+   local). Do **not** use the Supabase `/auth/v1/callback` for mailbox tokens.
+2. On your machine, open Harmony Chrome signed in as `@hrmny.co`.
+3. Go to [https://hrmny-os.vercel.app/settings/connections#conn-google_workspace](https://hrmny-os.vercel.app/settings/connections#conn-google_workspace).
+4. If the last error is “Token has been expired or revoked”, **Heal will stay
+   disabled** — that is correct. Click **Reconnect**. Dedicated Google consent
+   writes access + refresh tokens to Vault.
+5. Use Workspace only — not personal Gmail. After Google returns, you should
+   land on Connections with `?gw=connected`.
+6. Apollo and Hunter keys can wait. Get the Apollo passcode from Ayham when
+   ready to paste.
+7. Confirm OpenRouter stays on a free route (`stealth/ox-alpha`). Set
+   `NEVERBOUNCE_API_KEY` if verify-fallback credits are funded.
+8. `/crm/settings/sales-os` is on this PR — it 404s on production until merge.
 
 ### Import sources found
 
