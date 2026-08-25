@@ -35,17 +35,43 @@ v3.0 (2026-02-27). Staff edit them in Sales OS; `/evolve` proposes diffs.
 
 Required before first live mailbox send:
 
-| Connection | Purpose |
-|---|---|
-| Google Workspace | HITL Gmail send + reply ingest (`@hrmny.co` only) |
-| Apollo.io | People search / org enrich / intent CSV |
-| Hunter | Email verify |
-| NeverBounce | Verify fallback |
-| OpenRouter | Research + draft + classify + reflect |
+| Connection | Purpose | Live status 2026-08-25 |
+|---|---|---|
+| Google Workspace | HITL Gmail send + reply ingest (`@hrmny.co` only) | **Blocked.** Production has 1 error row: token expired/revoked (400). Staff Connections UI needs `@hrmny.co` SSO. Cloud Chrome / Playwright had no Workspace session. |
+| Apollo.io | People search / org enrich / intent CSV | **Mock** on `hrmny-os`. Ayham shared access (Aug 21); key still not pasted in Connections. The Vercel Sales & Growth app shows “Apollo Connected” in **Demo Mode** — that is not the CRM vault. |
+| Hunter | Email verify | **Mock.** Paste key in Connections. |
+| NeverBounce | Verify fallback | No Connections card. Set `NEVERBOUNCE_API_KEY` (credits were 0 historically). |
+| OpenRouter | Research + draft + classify + reflect | **Configured** on production (`liquid/lfm-2.5-2.6b:free`). Meeting notes still flag a credit top-up. |
 
 Do **not** connect for outbound: LinkedIn unofficial MCP / Playwright /
 Phantombuster / Dripify, Resend/Mailgun/SES for cold mail, Apollo sequences,
 Outreach.io, Instantly.
+
+### How to finish connections (human, Harmony Chrome)
+
+Cursor’s Harmony/Browser MCP was down in this run. Composio cloud Chrome and
+Playwright/Chromium were used instead. Neither had an `@hrmny.co` Google
+session, so OAuth could not be completed from the agent VM.
+
+1. On your machine, open Harmony Chrome signed in as `@hrmny.co`.
+2. Go to [https://hrmny-os.vercel.app/settings/connections](https://hrmny-os.vercel.app/settings/connections).
+3. **Reconnect Google Workspace** (clear the dead token if shown, then OAuth).
+   Use Workspace only — not personal Gmail.
+4. Paste **Apollo** and **Hunter** keys. Get the Apollo passcode from Ayham if
+   the shared login still needs it.
+5. Confirm OpenRouter credits. Set `NEVERBOUNCE_API_KEY` if verify-fallback
+   credits are funded.
+6. `/crm/settings/sales-os` is on this PR — it 404s on production until merge.
+   After merge, the Sales OS page shows the same `/api/ready` blockers.
+
+### Import sources found
+
+| Source | Where | Notes |
+|---|---|---|
+| Official spec v3.0 | [Drive doc](https://docs.google.com/document/d/1nn_zPF5srzhoVqVmhNE7VeAETs4UQzgDJq4WmJAiG8Y/edit) | Already seeded into Sales OS defaults |
+| `sales-growth.zip` (670 MB) | Drive `1uMxKjk_IHMli6mXuUrWbTZaXiREQUpf3`, owner `ay@hrmny.co` | June prototype + likely `dashboard.db`. Too large to pull in this VM. |
+| `hrmny_OS_Module1_Handover.zip` (54 MB) | Drive `1G9jJ-TlZpQGpod8gus2dP0bDfBFVBEEt` | Briefs + anonymized sample CSVs only — no `dashboard.db` |
+| Vercel `hrmny-sales-growth` | `prj_yZoAIb0VTohQVroTTxss6IFqEWJI` on Ahmad’s personal team | Live at `https://hrmny-sales-growth.vercel.app` in Demo Mode. Last production deploy is old. Keep archived after the parallel window. |
 
 ## Compliance before go-live
 

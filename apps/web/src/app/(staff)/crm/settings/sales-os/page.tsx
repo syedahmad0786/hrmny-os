@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { trpc } from "@/lib/trpc";
+import { DemoReadinessPanel } from "@/components/demo-readiness-panel";
 import { CrmBtn, CrmEmpty, CrmPageHeader, CrmTag } from "@/components/crm/ui";
 
 export default function SalesOsSettingsPage() {
@@ -50,6 +52,21 @@ export default function SalesOsSettingsPage() {
           {settings.data.source.date}). Sector today: {settings.data.sectorToday}.
         </p>
       ) : null}
+
+      <DemoReadinessPanel testIdPrefix="sales-os" />
+      <p className="text-xs text-[var(--muted)] mb-4">
+        HITL Gmail needs a live{" "}
+        <Link
+          href="/settings/connections#conn-google_workspace"
+          className="underline"
+        >
+          Google Workspace
+        </Link>{" "}
+        reconnect as <code>@hrmny.co</code>. Apollo and Hunter stay mock until
+        keys are pasted on Connections. NeverBounce is env-only
+        (<code>NEVERBOUNCE_API_KEY</code>). Do not connect LinkedIn send
+        automation.
+      </p>
 
       {digest.data ? (
         <div className="grid gap-2 md:grid-cols-4 mb-4">
@@ -283,8 +300,26 @@ export default function SalesOsSettingsPage() {
             Asana “Lead Pipeline 2026” is no longer the deal system of record.
           </p>
           <p>
-            Connect from Settings → Connections: Google Workspace, Apollo, Hunter,
-            NeverBounce, OpenRouter. Do not connect LinkedIn MCP / Playwright.
+            Connect from{" "}
+            <Link href="/settings/connections" className="underline">
+              Settings → Connections
+            </Link>
+            : Google Workspace, Apollo, Hunter, OpenRouter. NeverBounce is
+            <code> NEVERBOUNCE_API_KEY</code>. Do not connect LinkedIn MCP /
+            Playwright for outbound.
+          </p>
+          <p>
+            Production <code>/api/ready</code> (2026-08-25): OpenRouter and
+            Composio configured; Apollo/Hunter mock; Google Workspace token
+            expired. The standalone{" "}
+            <a
+              href="https://hrmny-sales-growth.vercel.app"
+              className="underline"
+            >
+              hrmny-sales-growth
+            </a>{" "}
+            app is still in Demo Mode — archive it after the parallel window,
+            do not treat its Apollo/LinkedIn badges as CRM connections.
           </p>
           <p>
             SPF / DKIM / DMARC on hrmny.co must be live before the first mailbox
