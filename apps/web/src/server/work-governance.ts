@@ -1,13 +1,15 @@
 import { sql } from "@hrmny/db";
 import { getDb } from "./db";
 
+export type WorkAppPolicy = "allow_all" | "approved_only" | "disabled";
+
 export type WorkOrganizationPolicy = {
   approvedDomains: string[];
   defaultProjectPrivacy: "organization" | "private";
   defaultTeamPrivacy: "public" | "request" | "private";
   guestInvitePolicy: "admins" | "members" | "disabled";
   externalSharingEnabled: boolean;
-  appPolicy: "allow_all" | "approved_only" | "disabled";
+  appPolicy: WorkAppPolicy;
   sessionTimeoutMinutes: number;
   updatedAt: string;
 };
@@ -66,6 +68,34 @@ const CURATED_WORK_APPS = new Set([
   "zoom",
 ]);
 
+/**
+ * First-party CRM / Sales OS connections. Work `app_policy = disabled` is a
+ * kill-switch for Composio / Work apps — it must not grey out mailbox or
+ * enrichment Connect buttons.
+ */
+export const FIRST_PARTY_CRM_APPS = new Set([
+  "google_workspace",
+  "apollo",
+  "hunter",
+  "n8n",
+  "bayzat",
+  "asana",
+  "canva",
+  "linkedin",
+  "xero",
+]);
+
+export function normalizeAppPolicy(value: unknown): WorkAppPolicy {
+  if (value === "allow_all" || value === "approved_only" || value === "disabled") {
+    return value;
+  }
+  return "approved_only";
+}
+
+export function isFirstPartyCrmApp(toolkit: string) {
+  return FIRST_PARTY_CRM_APPS.has(toolkit.trim().toLowerCase());
+}
+
 export function normalizeDomains(domains: readonly string[]) {
   return [...new Set(domains.map((domain) => domain.trim().toLowerCase()))]
     .filter((domain) => /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(domain))
@@ -75,37 +105,47 @@ export function normalizeDomains(domains: readonly string[]) {
 export async function getWorkOrganizationPolicy(): Promise<WorkOrganizationPolicy> {
   const db = getDb();
   if (!db) return demoPolicy;
-  const rows = await db.execute<{
-    approvedDomains: unknown;
-    defaultProjectPrivacy: WorkOrganizationPolicy["defaultProjectPrivacy"];
-    defaultTeamPrivacy: WorkOrganizationPolicy["defaultTeamPrivacy"];
-    guestInvitePolicy: WorkOrganizationPolicy["guestInvitePolicy"];
-    externalSharingEnabled: boolean;
-    appPolicy: WorkOrganizationPolicy["appPolicy"];
-    sessionTimeoutMinutes: number;
-    updatedAt: Date | string;
-  }>(sql`
-    select approved_domains as "approvedDomains",
-      default_project_privacy as "defaultProjectPrivacy",
-      default_team_privacy as "defaultTeamPrivacy",
-      guest_invite_policy as "guestInvitePolicy",
-      external_sharing_enabled as "externalSharingEnabled",
-      app_policy as "appPolicy",
-      session_timeout_minutes as "sessionTimeoutMinutes",
-      updated_at as "updatedAt"
-    from public.work_organization_policy where organization_key = 'default'
-  `);
-  const row = rows[0];
-  if (!row) return defaultPolicy();
-  return {
-    ...row,
-    approvedDomains: Array.isArray(row.approvedDomains)
-      ? row.approvedDomains.filter(
-          (domain): domain is string => typeof domain === "string",
-        )
-      : [],
-    updatedAt: new Date(row.updatedAt).toISOString(),
-  };
+  try {
+    const rows = await db.execute<{
+      approvedDomains: unknown;
+      approved_domains?: unknown;
+      defaultProjectPrivacy: WorkOrganizationPolicy["defaultProjectPrivacy"];
+      defaultTeamPrivacy: WorkOrganizationPolicy["defaultTeamPrivacy"];
+      guestInvitePolicy: WorkOrganizationPolicy["guestInvitePolicy"];
+      externalSharingEnabled: boolean;
+      appPolicy?: unknown;
+      app_policy?: unknown;
+      sessionTimeoutMinutes: number;
+      updatedAt: Date | string;
+    }>(sql`
+      select approved_domains as "approvedDomains",
+        default_project_privacy as "defaultProjectPrivacy",
+        default_team_privacy as "defaultTeamPrivacy",
+        guest_invite_policy as "guestInvitePolicy",
+        external_sharing_enabled as "externalSharingEnabled",
+        app_policy as "appPolicy",
+        session_timeout_minutes as "sessionTimeoutMinutes",
+        updated_at as "updatedAt"
+      from public.work_organization_policy where organization_key = 'default'
+    `);
+    const row = rows[0];
+    if (!row) return defaultPolicy();
+    const domains = Array.isArray(row.approvedDomains)
+      ? row.approvedDomains
+      : Array.isArray(row.approved_domains)
+        ? row.approved_domains
+        : [];
+    return {
+      ...row,
+      appPolicy: normalizeAppPolicy(row.appPolicy ?? row.app_policy),
+      approvedDomains: domains.filter(
+        (domain): domain is string => typeof domain === "string",
+      ),
+      updatedAt: new Date(row.updatedAt).toISOString(),
+    };
+  } catch {
+    return defaultPolicy();
+  }
 }
 
 export async function saveWorkOrganizationPolicy(
@@ -114,6 +154,7 @@ export async function saveWorkOrganizationPolicy(
 ) {
   const policy = {
     ...input,
+    appPolicy: normalizeAppPolicy(input.appPolicy),
     approvedDomains: normalizeDomains(input.approvedDomains),
   };
   const db = getDb();
@@ -148,12 +189,12 @@ export async function saveWorkOrganizationPolicy(
 }
 
 export async function isWorkConnectedAppAllowed(toolkit: string) {
+  const slug = toolkit.trim().toLowerCase();
+  if (isFirstPartyCrmApp(slug)) return true;
   const policy = await getWorkOrganizationPolicy();
-  if (policy.appPolicy === "disabled") return false;
-  return (
-    policy.appPolicy === "allow_all" ||
-    CURATED_WORK_APPS.has(toolkit.trim().toLowerCase())
-  );
+  const appPolicy = normalizeAppPolicy(policy.appPolicy);
+  if (appPolicy === "disabled") return false;
+  return appPolicy === "allow_all" || CURATED_WORK_APPS.has(slug);
 }
 
 export async function isWorkViewOnlyMember(employeeId: string | null) {

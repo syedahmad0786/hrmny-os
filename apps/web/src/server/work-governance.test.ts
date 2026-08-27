@@ -10,7 +10,9 @@ import {
 import { clearDemoWorkAdmin, rowsToCsv } from "./trpc/work-admin-router";
 import {
   clearDemoWorkGovernance,
+  isFirstPartyCrmApp,
   isWorkConnectedAppAllowed,
+  normalizeAppPolicy,
   normalizeDomains,
 } from "./work-governance";
 
@@ -42,6 +44,8 @@ describe("Work governance", () => {
   });
 
   it("allows curated apps under the default approved-only policy", async () => {
+    expect(normalizeAppPolicy("nope")).toBe("approved_only");
+    expect(isFirstPartyCrmApp("google_workspace")).toBe(true);
     expect(await isWorkConnectedAppAllowed("asana")).toBe(true);
     expect(await isWorkConnectedAppAllowed("slack")).toBe(true);
     expect(await isWorkConnectedAppAllowed("unreviewed_app")).toBe(false);
@@ -59,7 +63,32 @@ describe("Work governance", () => {
       appPolicy: "disabled",
       sessionTimeoutMinutes: 720,
     });
-    expect(await isWorkConnectedAppAllowed("asana")).toBe(false);
+    expect(await isWorkConnectedAppAllowed("slack")).toBe(false);
+    expect(await isWorkConnectedAppAllowed("composio")).toBe(false);
+    expect(await isWorkConnectedAppAllowed("unreviewed_app")).toBe(false);
+    for (const toolkit of [
+      "google_workspace",
+      "apollo",
+      "hunter",
+      "n8n",
+      "xero",
+      "canva",
+      "linkedin",
+      "asana",
+    ]) {
+      expect(await isWorkConnectedAppAllowed(toolkit)).toBe(true);
+    }
+    const rows = await caller("partner").connections.list();
+    expect(rows.find((row) => row.toolkit === "google_workspace")?.allowed).toBe(
+      true,
+    );
+    expect(rows.find((row) => row.toolkit === "apollo")?.allowed).toBe(true);
+    expect(rows.find((row) => row.toolkit === "hunter")?.allowed).toBe(true);
+    const policy = await caller("partner").connections.organizationPolicy();
+    expect(policy).toMatchObject({
+      appPolicy: "disabled",
+      firstPartyAlwaysAllowed: true,
+    });
   });
 
   it("governs every Work app family before Composio is called", async () => {

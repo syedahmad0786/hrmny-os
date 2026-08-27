@@ -10,6 +10,7 @@ export type ReadySmoke = {
   keyStore?: "vault" | "memory";
   pgvector?: boolean;
   portalMagicLink?: string;
+  connectedAppPolicy?: "allow_all" | "approved_only" | "disabled";
   tools?: Record<string, string>;
   blockers?: string[];
   connections?: {

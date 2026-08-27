@@ -556,12 +556,20 @@ function OrganizationPanel({
           onChange={(value) => setGuestPolicy(value as typeof guestPolicy)}
           options={["admins", "members", "disabled"]}
         />
-        <Select
-          label="Connected app policy"
-          value={appPolicy}
-          onChange={(value) => setAppPolicy(value as typeof appPolicy)}
-          options={["allow_all", "approved_only", "disabled"]}
-        />
+        <div className="text-sm">
+          <Select
+            label="Connected app policy"
+            value={appPolicy}
+            onChange={(value) => setAppPolicy(value as typeof appPolicy)}
+            options={["allow_all", "approved_only", "disabled"]}
+          />
+          <p className="mt-1 text-xs text-muted">
+            <strong>approved only</strong> is the default curated list.
+            <strong> disabled</strong> blocks Work / Composio apps only —
+            Google Workspace, Apollo, Hunter, and other first-party CRM
+            connections stay available.
+          </p>
+        </div>
         <label className="text-sm">
           <span className="mb-1 block font-medium">
             Session timeout (minutes)

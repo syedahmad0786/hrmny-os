@@ -13,6 +13,63 @@ import { useEffect, useState } from "react";
 import { ConnectionHealth } from "./connection-health";
 import { PlatformReadyStrip } from "@/components/platform-ready-strip";
 
+function AppPolicyBanner() {
+  const policy = trpc.connections.organizationPolicy.useQuery();
+  if (!policy.data) return null;
+  const disabled = policy.data.appPolicy === "disabled";
+  return (
+    <section
+      data-testid="connections-app-policy"
+      className={`rounded-lg border p-4 text-sm ${
+        disabled
+          ? "border-amber-300 bg-amber-50 text-amber-950"
+          : "border-sand bg-white/75 text-ink"
+      }`}
+    >
+      <p className="text-xs font-semibold uppercase tracking-[0.16em]">
+        Connected-app policy
+      </p>
+      <p className="mt-1">
+        {disabled ? (
+          <>
+            Work / Composio apps are blocked because organization policy is{" "}
+            <strong>disabled</strong>. Google Workspace, Apollo, Hunter, and
+            other first-party CRM cards stay connectable. An admin can reopen
+            Work apps under{" "}
+            <Link href="/admin/work" className="underline">
+              Admin → Work
+            </Link>{" "}
+            by setting the policy to approved only.
+          </>
+        ) : (
+          <>
+            Organization policy is{" "}
+            <strong>{policy.data.appPolicy.replaceAll("_", " ")}</strong>.
+            First-party CRM apps are always allowed. Unreviewed Composio tools
+            stay off the approved list. Change this in{" "}
+            <Link href="/admin/work" className="underline">
+              Admin → Work
+            </Link>
+            .
+          </>
+        )}
+      </p>
+    </section>
+  );
+}
+
+function PolicyBlockedNote() {
+  return (
+    <p className="mt-1 text-xs font-semibold text-amber-800">
+      This Work / Composio app is off the approved list. First-party CRM
+      connections stay available.{" "}
+      <Link href="/admin/work" className="underline">
+        Admin → Work
+      </Link>
+    </p>
+  );
+}
+
 function BackendStoreBanner() {
   const [ready, setReady] = useState<{
     database?: "up" | "down";
@@ -319,6 +376,7 @@ export default function ConnectionsPage() {
 
       <PlatformReadyStrip testId="connections-platform-ready" />
       <BackendStoreBanner />
+      <AppPolicyBanner />
 
       <ConnectionHealth />
 
@@ -449,11 +507,7 @@ export default function ConnectionsPage() {
                       {item.lastError}
                     </p>
                   ) : null}
-                  {!item.allowed ? (
-                    <p className="mt-1 text-xs font-semibold text-amber-800">
-                      Blocked by the organization connected-app policy
-                    </p>
-                  ) : null}
+                  {!item.allowed ? <PolicyBlockedNote /> : null}
                   {asanaUser ? (
                     <p className="mt-1 text-xs font-medium text-ink">
                       {asanaUser.email ?? asanaUser.name}
@@ -737,9 +791,7 @@ export default function ConnectionsPage() {
                   ) : null}
                 </div>
                 {!toolkit.allowed ? (
-                  <p className="mt-2 text-xs font-semibold text-amber-800">
-                    Blocked by the organization connected-app policy
-                  </p>
+                  <PolicyBlockedNote />
                 ) : (
                   <p className="mt-2 text-xs text-muted">
                     Each teammate connects their own Composio account.
@@ -797,7 +849,12 @@ export default function ConnectionsPage() {
 
           {!workApps.data.bridgeAllowed ? (
             <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-              Composio is blocked by the organization connected-app policy.
+              Composio Work apps are blocked by organization policy. First-party
+              CRM cards above stay connectable.{" "}
+              <Link href="/admin/work" className="underline">
+                Reopen in Admin → Work
+              </Link>
+              .
             </p>
           ) : !workApps.data.bridgeConfigured ? (
             <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
@@ -859,11 +916,7 @@ export default function ConnectionsPage() {
                           {item.note}
                         </p>
                       </div>
-                      {!item.allowed ? (
-                        <p className="mt-2 text-xs font-semibold text-amber-800">
-                          Blocked by the connected-app policy
-                        </p>
-                      ) : null}
+                      {!item.allowed ? <PolicyBlockedNote /> : null}
                       {item.connectedAccountId ? (
                         <Button
                           className="mt-3"
