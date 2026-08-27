@@ -5,6 +5,7 @@ import { getDb } from "@/server/db";
 import { featureEnabled } from "@/server/features";
 import { toolConfiguredStatus } from "@/server/integrations/resolve-keys";
 import { buildDemoBlockers, connectionSmoke } from "@/server/ready/smoke";
+import { googleWorkspaceRedirectUri } from "@/server/google-workspace-oauth";
 import { healDisabledConnectedAppPolicy } from "@/server/work-governance";
 
 /** Lightweight deploy smoke — no secrets, no business data. */
@@ -82,6 +83,7 @@ export async function GET() {
     pgvector,
     portalMagicLink: portalMagicLink ? "enabled" : "disabled",
     connectedAppPolicy: orgHeal.policy.appPolicy,
+    googleOAuthRedirectUri: googleWorkspaceRedirectUri(),
     tools,
     /** Connected staff accounts (counts + lastError snippets — no secrets). */
     connections,

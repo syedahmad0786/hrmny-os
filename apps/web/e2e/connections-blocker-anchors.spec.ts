@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 /**
  * Connections live-demo blockers deep-link to Direct business cards
- * so humans can paste Apollo/Hunter / reconnect GW without scrolling blind.
+ * so humans can paste Apollo / reconnect GW without scrolling blind.
  */
 test.describe("Connections blocker anchors", () => {
   test("Apollo blocker scrolls to Apollo paste card", async ({ page }) => {
@@ -31,10 +31,8 @@ test.describe("Connections blocker anchors", () => {
       await expect(apolloCard).toBeVisible();
     }
 
-    const hunterLink = page.getByTestId("connections-blocker-link-hunter");
-    if ((await hunterLink.count()) > 0) {
-      await hunterLink.click();
-      await expect(page.getByTestId("conn-card-hunter")).toBeInViewport();
-    }
+    await expect(page.getByTestId("connections-blocker-link-hunter")).toHaveCount(
+      0,
+    );
   });
 });

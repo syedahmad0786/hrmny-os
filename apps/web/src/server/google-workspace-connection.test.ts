@@ -165,9 +165,19 @@ describe("Google Workspace connection", () => {
         roles: user.roles,
         canViewMargin: sessionCanViewMargin(user),
       });
-      const result = await caller.connections.startGoogleWorkspaceOAuth();
+      const result = await caller.connections.startGoogleWorkspaceOAuth({
+        origin: "https://hrmny-os.vercel.app",
+      });
       expect(result.redirectUrl).toContain("accounts.google.com");
-      const built = await buildGoogleWorkspaceAuthorizeUrl(user.employeeId!);
+      expect(result.redirectUri).toBe(
+        "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback",
+      );
+      expect(new URL(result.redirectUrl).searchParams.get("redirect_uri")).toBe(
+        result.redirectUri,
+      );
+      const built = await buildGoogleWorkspaceAuthorizeUrl(user.employeeId!, {
+        requestOrigin: "https://hrmny-os.vercel.app",
+      });
       expect(new URL(built.redirectUrl).searchParams.get("hd")).toBe("hrmny.co");
     } finally {
       if (prevId === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_ID;

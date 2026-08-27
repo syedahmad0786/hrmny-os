@@ -66,9 +66,6 @@ export default function HuntClientsPage() {
           if (toolReady?.apollo === "mock") {
             next.push("Paste Apollo API key in Connections");
           }
-          if (toolReady?.hunter === "mock") {
-            next.push("Paste Hunter API key in Connections");
-          }
           if (toolReady?.xero === "mock" || (ready?.connections?.xero ?? 0) < 1) {
             next.push("Connect Xero OAuth in Connections");
           }
@@ -137,7 +134,7 @@ export default function HuntClientsPage() {
         n > 0
           ? `Apollo (${payload.mode}${
               payload.verifyMode !== "skipped"
-                ? ` · hunter ${payload.verifyMode}`
+                ? ` · verify ${payload.verifyMode}`
                 : ""
             }) imported ${n} durable discover deal(s)${
               payload.deals[0]?.emailVerified ? " with verified email" : ""
@@ -319,8 +316,8 @@ export default function HuntClientsPage() {
                 data-testid="hunt-ready-banner"
               >
                 <p>
-                  Tools: apollo {toolReady.apollo} · hunter {toolReady.hunter} ·
-                  n8n {toolReady.n8n} · xero {toolReady.xero} · composio{" "}
+                  Tools: apollo {toolReady.apollo} · n8n {toolReady.n8n} · xero{" "}
+                  {toolReady.xero} · composio{" "}
                   {toolReady.composio} · resend {toolReady.resend ?? "—"} ·
                   portal magic-link {ready?.portalMagicLink ?? "—"}
                   {" · "}

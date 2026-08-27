@@ -65,13 +65,6 @@ export const CONNECTION_CATALOG = [
     note: "Optional until keys are pasted — prospecting stays mock. Paste later without a deployment.",
   },
   {
-    toolkit: "hunter",
-    label: "Hunter",
-    authType: "api_key",
-    ready: true,
-    note: "Optional until keys are pasted — verify stays mock. Paste later without a deployment.",
-  },
-  {
     toolkit: "n8n",
     label: "n8n",
     authType: "api_key",
@@ -1643,14 +1636,18 @@ export const connectionsRouter = router({
    * Do not use Supabase signInWithOAuth for mailbox tokens — provider tokens
    * vanish before save, and Google often omits a new refresh token.
    */
-  startGoogleWorkspaceOAuth: staffProcedure.mutation(async ({ ctx }) => {
-    await requireAllowedApp("google_workspace");
-    const employeeId = requireEmployeeId(ctx.employeeId);
-    const { buildGoogleWorkspaceAuthorizeUrl } = await import(
-      "../google-workspace-oauth"
-    );
-    return buildGoogleWorkspaceAuthorizeUrl(employeeId);
-  }),
+  startGoogleWorkspaceOAuth: staffProcedure
+    .input(z.object({ origin: z.string().url().optional() }).optional())
+    .mutation(async ({ ctx, input }) => {
+      await requireAllowedApp("google_workspace");
+      const employeeId = requireEmployeeId(ctx.employeeId);
+      const { buildGoogleWorkspaceAuthorizeUrl } = await import(
+        "../google-workspace-oauth"
+      );
+      return buildGoogleWorkspaceAuthorizeUrl(employeeId, {
+        requestOrigin: input?.origin,
+      });
+    }),
 
   disconnect: staffProcedure
     .input(z.object({ id: z.string().min(1) }))

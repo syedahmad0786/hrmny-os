@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { ReadySmoke } from "@/lib/ready-smoke";
 
-/** Apollo / Hunter tool modes from `/api/ready` for prospecting surfaces. */
+/** Apollo tool mode from `/api/ready` for prospecting surfaces. Hunter is retired. */
 export function ProspectingReadyBanner({
   testIdPrefix = "inbound",
 }: {
@@ -28,9 +28,7 @@ export function ProspectingReadyBanner({
   if (!ready) return null;
 
   const apollo = ready.tools?.apollo ?? "—";
-  const hunter = ready.tools?.hunter ?? "—";
   const apolloLive = apollo !== "mock";
-  const hunterLive = hunter !== "mock";
 
   return (
     <div
@@ -51,16 +49,7 @@ export function ProspectingReadyBanner({
         {!apolloLive ? "." : null}
       </p>
       <p className="mt-1" data-testid={`${testIdPrefix}-ready-hunter`}>
-        Hunter: {hunter}
-        {hunterLive
-          ? " — email verify available on Apollo import."
-          : " — verify skipped/mock until key is pasted in "}
-        {!hunterLive ? (
-          <Link href="/settings/connections#conn-hunter" className="underline">
-            Connections
-          </Link>
-        ) : null}
-        {!hunterLive ? "." : null}
+        Hunter is retired and is not required for Hunt or email verify.
       </p>
       <p className="mt-1 text-xs">
         Manual inbound capture below always creates a discover-stage deal in OS.

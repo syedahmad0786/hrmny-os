@@ -22,8 +22,9 @@ test.describe("Connections Google Workspace OAuth", () => {
     await expect(page.getByTestId("conn-card-apollo")).not.toContainText(
       /Blocked by the organization connected-app policy/i,
     );
-    await expect(page.getByTestId("conn-card-hunter")).not.toContainText(
-      /Blocked by the organization connected-app policy/i,
+    await expect(page.getByTestId("conn-card-hunter")).toHaveCount(0);
+    await expect(page.getByTestId("conn-gw-redirect")).toContainText(
+      "/api/integrations/google-workspace/callback",
     );
 
     const banner = page.getByTestId("connections-oauth-banner");

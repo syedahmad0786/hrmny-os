@@ -11,6 +11,7 @@ export type ReadySmoke = {
   pgvector?: boolean;
   portalMagicLink?: string;
   connectedAppPolicy?: "allow_all" | "approved_only" | "disabled";
+  googleOAuthRedirectUri?: string;
   tools?: Record<string, string>;
   blockers?: string[];
   connections?: {
@@ -50,6 +51,6 @@ export function formatReadyDbLine(ready: ReadySmoke): string {
 
 export function formatReadyToolsLine(ready: ReadySmoke): string {
   const t = ready.tools ?? {};
-  const keys = ["n8n", "apollo", "hunter", "openrouter", "resend"] as const;
+  const keys = ["n8n", "apollo", "openrouter", "resend"] as const;
   return keys.map((k) => `${k} ${t[k] ?? "—"}`).join(" · ");
 }
