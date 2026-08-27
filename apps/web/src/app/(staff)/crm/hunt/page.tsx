@@ -58,46 +58,7 @@ export default function HuntClientsPage() {
   }, []);
 
   const toolReady = ready?.tools ?? null;
-  const blockers: string[] =
-    ready?.blockers != null
-      ? ready.blockers
-      : (() => {
-          const next: string[] = [];
-          if (toolReady?.apollo === "mock") {
-            next.push("Paste Apollo API key in Connections");
-          }
-          if (toolReady?.xero === "mock" || (ready?.connections?.xero ?? 0) < 1) {
-            next.push("Connect Xero OAuth in Connections");
-          }
-          if ((ready?.connections?.googleWorkspace ?? 0) < 1) {
-            const err = ready?.connections?.lastErrors?.googleWorkspace?.trim();
-            next.push(
-              err
-                ? `Reconnect Google Workspace: ${err}`
-                : (ready?.connections?.errors?.googleWorkspace ?? 0) > 0
-                  ? "Reconnect Google Workspace (token revoked) for live HITL Gmail"
-                  : "Reconnect Google Workspace for live HITL Gmail",
-            );
-          }
-          if ((ready?.connections?.linkedin ?? 0) < 1) {
-            next.push(
-              "Connect LinkedIn (Composio) for live posts — OS stub publish works without it",
-            );
-          }
-          if ((ready?.connections?.canva ?? 0) < 1) {
-            next.push(
-              "Connect Canva (Composio) for live designs — stub list/attach works without it",
-            );
-          }
-          if (toolReady?.resend && toolReady.resend !== "live") {
-            next.push(
-              toolReady.resend === "configured"
-                ? "Resend key present — set RESEND_MODE=live (+ RESEND_FROM) for real portal email"
-                : "Set RESEND_MODE=live + RESEND_API_KEY + RESEND_FROM for real portal email",
-            );
-          }
-          return next;
-        })();
+  const blockers: string[] = ready?.blockers ?? [];
   const orderedBlockers = prioritizeDemoBlockers(blockers);
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
     onSuccess: (data) => {
@@ -372,7 +333,9 @@ export default function HuntClientsPage() {
                   </ul>
                 ) : (
                   <p className="text-ink/80" data-testid="hunt-ready-clear">
-                    Live tool keys and OAuth connections look ready for demo.
+                    Hunt is open. Connect Google Workspace when you want live
+                    HITL Gmail. Apollo, Xero, LinkedIn, Canva, and Resend can
+                    wait.
                   </p>
                 )}
               </div>

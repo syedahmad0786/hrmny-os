@@ -24,15 +24,12 @@ test.describe("Connections blocker anchors", () => {
     const apolloCard = page.getByTestId("conn-card-apollo");
     await expect(apolloCard).toBeVisible({ timeout: 30_000 });
 
-    const apolloLink = page.getByTestId("connections-blocker-link-apollo");
-    if ((await apolloLink.count()) > 0) {
-      await apolloLink.click();
-      await apolloCard.scrollIntoViewIfNeeded();
-      await expect(apolloCard).toBeVisible();
-    }
-
+    await expect(page.getByTestId("connections-blocker-link-apollo")).toHaveCount(
+      0,
+    );
     await expect(page.getByTestId("connections-blocker-link-hunter")).toHaveCount(
       0,
     );
+    await expect(page.getByText(/Live demo blockers/i)).toHaveCount(0);
   });
 });

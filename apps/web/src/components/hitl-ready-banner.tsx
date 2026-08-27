@@ -40,8 +40,8 @@ export function HitlReadyBanner({
         {(ready.connections?.googleWorkspace ?? 0) < 1 ? (
           <>
             {(ready.connections?.errors?.googleWorkspace ?? 0) > 0
-              ? "Gmail HITL Approve & send is blocked until Google Workspace is reconnected (token revoked)."
-              : "Gmail HITL Approve & send is blocked until Google Workspace is connected."}{" "}
+              ? "Connect Google Workspace to send live Gmail — the current token was revoked."
+              : "Connect Google Workspace to send live Gmail. Hunt and drafts stay open without it."}{" "}
             <Link
               href="/settings/connections#conn-google_workspace"
               className="underline"

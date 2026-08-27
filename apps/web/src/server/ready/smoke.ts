@@ -132,59 +132,17 @@ export async function connectionSmoke(): Promise<ReadyConnectionBucket> {
 }
 
 /**
- * Human-actionable live-demo blockers derived from ready smoke.
- * Pure — shared by /api/ready and staff UIs.
+ * Hunt / Chat / Connections used this list as a "blocked" wall.
+ * Missing Apollo, Xero, LinkedIn, Canva, Resend, or mailbox is optional —
+ * staff can still hunt, draft, and run the closed loop. Do not put
+ * connect-later tools back on this list.
  */
-export function buildDemoBlockers(input: {
+export function buildDemoBlockers(_input: {
   tools: ReadyToolsSlice;
   connections: Pick<
     ReadyConnectionBucket,
     "googleWorkspace" | "canva" | "linkedin" | "xero" | "errors" | "lastErrors"
   >;
 }): string[] {
-  const { tools, connections } = input;
-  const blockers: string[] = [];
-
-  if (tools.apollo === "mock") {
-    blockers.push("Paste Apollo API key in Connections");
-  }
-  if (tools.xero === "mock" || connections.xero < 1) {
-    blockers.push("Connect Xero OAuth in Connections");
-  }
-  if (connections.googleWorkspace < 1) {
-    const err = connections.lastErrors.googleWorkspace?.trim();
-    if (err) {
-      blockers.push(`Reconnect Google Workspace: ${err}`);
-    } else if (connections.errors.googleWorkspace > 0) {
-      blockers.push(
-        "Reconnect Google Workspace (token revoked) for live HITL Gmail",
-      );
-    } else {
-      blockers.push("Reconnect Google Workspace for live HITL Gmail");
-    }
-  }
-  if (connections.linkedin < 1) {
-    const err = connections.lastErrors.linkedin?.trim();
-    blockers.push(
-      err
-        ? `Connect LinkedIn for live posts (${err}) — OS stub publish works without it`
-        : "Connect LinkedIn (Composio) for live posts — OS stub publish works without it",
-    );
-  }
-  if (connections.canva < 1) {
-    const err = connections.lastErrors.canva?.trim();
-    blockers.push(
-      err
-        ? `Connect Canva for live designs (${err}) — stub list/attach works without it`
-        : "Connect Canva (Composio) for live designs — stub list/attach works without it",
-    );
-  }
-  if (tools.resend && tools.resend !== "live") {
-    blockers.push(
-      tools.resend === "configured"
-        ? "Resend key present — set RESEND_MODE=live (+ RESEND_FROM) for real portal email"
-        : "Set RESEND_MODE=live + RESEND_API_KEY + RESEND_FROM for real portal email",
-    );
-  }
-  return blockers;
+  return [];
 }

@@ -1,13 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Hunt readiness banner mirrors /api/ready blockers with deep links
- * into Connections (same anchors as settings/connections).
+ * Hunt stays open. Optional tools are not shown as a blocker wall.
  */
 test.describe("Hunt ready blockers", () => {
-  test("Apollo blocker deep-links to Connections Apollo card", async ({
-    page,
-  }) => {
+  test("Hunt is open without a demo-blocker list", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
@@ -17,21 +14,13 @@ test.describe("Hunt ready blockers", () => {
       timeout: 30_000,
     });
     await expect(page.getByTestId("hunt-runtime-llm")).toBeVisible();
-    await expect(page.getByTestId("hunt-runtime-llm")).toContainText(/mock|openrouter/i);
+    await expect(page.getByTestId("hunt-runtime-llm")).toContainText(
+      /mock|openrouter/i,
+    );
 
-    const blockers = page.getByTestId("hunt-ready-blockers");
-    await expect(blockers).toBeVisible();
-
-    const apolloLink = page.getByTestId("hunt-blocker-link-apollo");
-    if ((await apolloLink.count()) > 0) {
-      await apolloLink.click();
-      await expect(page).toHaveURL(/\/settings\/connections/);
-      const apolloCard = page.getByTestId("conn-card-apollo");
-      await expect(apolloCard).toBeVisible({ timeout: 30_000 });
-      await apolloCard.scrollIntoViewIfNeeded();
-      await expect(apolloCard).toBeInViewport();
-    }
-
+    await expect(page.getByTestId("hunt-ready-blockers")).toHaveCount(0);
+    await expect(page.getByTestId("hunt-ready-clear")).toBeVisible();
     await expect(page.getByTestId("hunt-blocker-link-hunter")).toHaveCount(0);
+    await expect(page.getByTestId("hunt-blocker-link-apollo")).toHaveCount(0);
   });
 });

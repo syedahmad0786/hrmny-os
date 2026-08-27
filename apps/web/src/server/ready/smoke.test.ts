@@ -1,8 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { buildDemoBlockers } from "./smoke";
 
+const emptyConnections = {
+  googleWorkspace: 0,
+  canva: 0,
+  linkedin: 0,
+  xero: 0,
+  errors: {
+    googleWorkspace: 0,
+    canva: 0,
+    linkedin: 0,
+    xero: 0,
+  },
+  lastErrors: {
+    googleWorkspace: null,
+    canva: null,
+    linkedin: null,
+    xero: null,
+  },
+};
+
 describe("buildDemoBlockers", () => {
-  it("lists mock tools and zero connections", () => {
+  it("does not wall Hunt when optional tools are mock or disconnected", () => {
     const blockers = buildDemoBlockers({
       tools: {
         apollo: "mock",
@@ -10,65 +29,28 @@ describe("buildDemoBlockers", () => {
         xero: "mock",
         resend: "mock",
       },
-      connections: {
-        googleWorkspace: 0,
-        canva: 0,
-        linkedin: 0,
-        xero: 0,
-        errors: {
-          googleWorkspace: 0,
-          canva: 0,
-          linkedin: 0,
-          xero: 0,
-        },
-        lastErrors: {
-          googleWorkspace: null,
-          canva: null,
-          linkedin: null,
-          xero: null,
-        },
-      },
+      connections: emptyConnections,
     });
-    expect(blockers.some((b) => /Apollo/i.test(b))).toBe(true);
-    expect(blockers.some((b) => /Hunter/i.test(b))).toBe(false);
-    expect(blockers.some((b) => /Xero/i.test(b))).toBe(true);
-    expect(blockers.some((b) => /Google Workspace/i.test(b))).toBe(true);
-    expect(blockers.some((b) => /LinkedIn/i.test(b))).toBe(true);
-    expect(blockers.some((b) => /stub publish/i.test(b))).toBe(true);
-    expect(blockers.some((b) => /Canva/i.test(b))).toBe(true);
-    expect(blockers.some((b) => /stub list/i.test(b))).toBe(true);
-    expect(blockers.some((b) => /RESEND/i.test(b))).toBe(true);
+    expect(blockers).toEqual([]);
   });
 
-  it("surfaces googleWorkspace lastError snippet", () => {
-    const blockers = buildDemoBlockers({
-      tools: { apollo: "live", hunter: "live", xero: "live", resend: "live" },
-      connections: {
-        googleWorkspace: 0,
-        canva: 1,
-        linkedin: 1,
-        xero: 1,
-        errors: {
-          googleWorkspace: 1,
-          canva: 0,
-          linkedin: 0,
-          xero: 0,
+  it("does not treat a Google Workspace lastError as a product blocker", () => {
+    expect(
+      buildDemoBlockers({
+        tools: { apollo: "live", hunter: "live", xero: "live", resend: "live" },
+        connections: {
+          ...emptyConnections,
+          errors: { ...emptyConnections.errors, googleWorkspace: 1 },
+          lastErrors: {
+            ...emptyConnections.lastErrors,
+            googleWorkspace: "Google token refresh failed (400): invalid_grant",
+          },
         },
-        lastErrors: {
-          googleWorkspace:
-            "Google token refresh failed (400): invalid_grant",
-          canva: null,
-          linkedin: null,
-          xero: null,
-        },
-      },
-    });
-    expect(blockers).toHaveLength(1);
-    expect(blockers[0]).toMatch(/invalid_grant/);
-    expect(blockers[0]).toMatch(/Google Workspace/);
+      }),
+    ).toEqual([]);
   });
 
-  it("returns empty when everything live", () => {
+  it("stays empty when everything is live", () => {
     expect(
       buildDemoBlockers({
         tools: {
@@ -78,22 +60,11 @@ describe("buildDemoBlockers", () => {
           resend: "live",
         },
         connections: {
+          ...emptyConnections,
           googleWorkspace: 1,
           canva: 1,
           linkedin: 1,
           xero: 1,
-          errors: {
-            googleWorkspace: 0,
-            canva: 0,
-            linkedin: 0,
-            xero: 0,
-          },
-          lastErrors: {
-            googleWorkspace: null,
-            canva: null,
-            linkedin: null,
-            xero: null,
-          },
         },
       }),
     ).toEqual([]);
