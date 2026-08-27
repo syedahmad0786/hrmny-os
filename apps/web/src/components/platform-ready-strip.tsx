@@ -48,6 +48,14 @@ export function PlatformReadyStrip({
       <p className="mt-1 text-muted" data-testid={`${testId}-db`}>
         {formatReadyDbLine(ready)}
       </p>
+      {ready.connectedAppPolicy ? (
+        <p className="mt-1 text-muted" data-testid={`${testId}-app-policy`}>
+          Connected-app policy {ready.connectedAppPolicy.replaceAll("_", " ")}
+          {ready.connectedAppPolicy === "disabled"
+            ? " · first-party CRM stays open"
+            : ""}
+        </p>
+      ) : null}
       {showTools ? (
         <p className="mt-1 text-muted" data-testid={`${testId}-tools`}>
           Tools {formatReadyToolsLine(ready)}

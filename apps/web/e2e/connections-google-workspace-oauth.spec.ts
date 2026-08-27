@@ -17,6 +17,14 @@ test.describe("Connections Google Workspace OAuth", () => {
     const gwCard = page.getByTestId("conn-card-google_workspace");
     await expect(gwCard).toBeVisible({ timeout: 30_000 });
     await expect(gwCard.getByRole("heading", { name: /Google Workspace/i })).toBeVisible();
+    await expect(gwCard).not.toContainText(/Blocked by the organization connected-app policy/i);
+    await expect(page.getByTestId("connections-app-policy")).toBeVisible();
+    await expect(page.getByTestId("conn-card-apollo")).not.toContainText(
+      /Blocked by the organization connected-app policy/i,
+    );
+    await expect(page.getByTestId("conn-card-hunter")).not.toContainText(
+      /Blocked by the organization connected-app policy/i,
+    );
 
     const banner = page.getByTestId("connections-oauth-banner");
     await expect(banner).toBeVisible({ timeout: 15_000 });

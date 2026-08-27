@@ -14,7 +14,11 @@ import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
 import { router, staffProcedure } from "./trpc";
 import { randomUUID } from "node:crypto";
-import { isWorkConnectedAppAllowed } from "../work-governance";
+import {
+  FIRST_PARTY_CRM_APPS,
+  getWorkOrganizationPolicy,
+  isWorkConnectedAppAllowed,
+} from "../work-governance";
 import { featureEnabled } from "../features";
 import { xeroClientConfigured } from "../finance/xero-tokens";
 import {
@@ -732,6 +736,15 @@ export async function getGoogleWorkspaceAccessToken(
 }
 
 export const connectionsRouter = router({
+  organizationPolicy: staffProcedure.query(async () => {
+    const policy = await getWorkOrganizationPolicy();
+    return {
+      appPolicy: policy.appPolicy,
+      firstPartyAlwaysAllowed: true as const,
+      firstPartyCrmApps: [...FIRST_PARTY_CRM_APPS],
+    };
+  }),
+
   list: staffProcedure
     .input(
       z.object({ scope: z.enum(["staff", "portal"]).optional() }).optional(),
