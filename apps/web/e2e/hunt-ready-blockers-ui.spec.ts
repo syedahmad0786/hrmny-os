@@ -32,12 +32,6 @@ test.describe("Hunt ready blockers", () => {
       await expect(apolloCard).toBeInViewport();
     }
 
-    const hunterLink = page.getByTestId("hunt-blocker-link-hunter");
-    if ((await hunterLink.count()) > 0) {
-      await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
-      await hunterLink.click();
-      await expect(page).toHaveURL(/\/settings\/connections#?conn-hunter/);
-      await expect(page.getByTestId("conn-card-hunter")).toBeInViewport();
-    }
+    await expect(page.getByTestId("hunt-blocker-link-hunter")).toHaveCount(0);
   });
 });

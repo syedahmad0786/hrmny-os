@@ -15,6 +15,8 @@ const ENV_KEYS = [
   "GOOGLE_OAUTH_REDIRECT_URI",
   "GOOGLE_WORKSPACE_REDIRECT_URI",
   "NEXT_PUBLIC_APP_URL",
+  "VERCEL_ENV",
+  "VERCEL_URL",
   "client_id",
   "client_secret",
 ] as const;
@@ -37,10 +39,15 @@ describe("google workspace oauth helpers", () => {
   rememberEnv();
   afterEach(() => restoreEnv());
 
-  it("round-trips a signed employee state", () => {
+  it("round-trips a signed employee state with the redirect URI", () => {
     const employeeId = "c0000000-0000-4000-8000-000000000011";
-    const state = signGoogleWorkspaceOAuthState(employeeId);
-    expect(verifyGoogleWorkspaceOAuthState(state)).toEqual({ employeeId });
+    const redirectUri =
+      "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback";
+    const state = signGoogleWorkspaceOAuthState(employeeId, redirectUri);
+    expect(verifyGoogleWorkspaceOAuthState(state)).toEqual({
+      employeeId,
+      redirectUri,
+    });
   });
 
   it("rejects tampered or expired-looking state", () => {
@@ -60,6 +67,37 @@ describe("google workspace oauth helpers", () => {
     delete process.env.GOOGLE_WORKSPACE_REDIRECT_URI;
     process.env.NEXT_PUBLIC_APP_URL = "https://hrmny-os.vercel.app";
     expect(googleWorkspaceRedirectUri()).toBe(
+      "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback",
+    );
+  });
+
+  it("uses the page origin when allowlisted so staff do not need GOOGLE_OAUTH_REDIRECT_URI", () => {
+    delete process.env.GOOGLE_OAUTH_REDIRECT_URI;
+    delete process.env.GOOGLE_WORKSPACE_REDIRECT_URI;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    expect(
+      googleWorkspaceRedirectUri("https://hrmny-os.vercel.app"),
+    ).toBe(
+      "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback",
+    );
+  });
+
+  it("falls back to the stable production alias when Vercel env is production", () => {
+    delete process.env.GOOGLE_OAUTH_REDIRECT_URI;
+    delete process.env.GOOGLE_WORKSPACE_REDIRECT_URI;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    process.env.VERCEL_ENV = "production";
+    process.env.VERCEL_URL = "hrmny-os-abc123.vercel.app";
+    expect(googleWorkspaceRedirectUri()).toBe(
+      "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback",
+    );
+  });
+
+  it("rejects a forged origin and keeps the production callback", () => {
+    delete process.env.GOOGLE_OAUTH_REDIRECT_URI;
+    delete process.env.GOOGLE_WORKSPACE_REDIRECT_URI;
+    process.env.NEXT_PUBLIC_APP_URL = "https://hrmny-os.vercel.app";
+    expect(googleWorkspaceRedirectUri("https://evil.example")).toBe(
       "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback",
     );
   });
@@ -88,7 +126,7 @@ describe("google workspace oauth helpers", () => {
     process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-secret";
     process.env.NEXT_PUBLIC_APP_URL = "https://hrmny-os.vercel.app";
     delete process.env.GOOGLE_OAUTH_REDIRECT_URI;
-    const { redirectUrl } = await buildGoogleWorkspaceAuthorizeUrl(
+    const { redirectUrl, redirectUri } = await buildGoogleWorkspaceAuthorizeUrl(
       "c0000000-0000-4000-8000-000000000011",
     );
     const url = new URL(redirectUrl);
@@ -99,6 +137,9 @@ describe("google workspace oauth helpers", () => {
     expect(url.searchParams.get("prompt")).toBe("consent");
     expect(url.searchParams.get("hd")).toBe("hrmny.co");
     expect(url.searchParams.get("redirect_uri")).toBe(
+      "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback",
+    );
+    expect(redirectUri).toBe(
       "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback",
     );
     expect(url.searchParams.get("scope") ?? "").toContain("gmail.send");

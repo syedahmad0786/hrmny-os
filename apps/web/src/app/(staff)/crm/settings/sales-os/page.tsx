@@ -62,8 +62,8 @@ export default function SalesOsSettingsPage() {
         >
           Google Workspace
         </Link>{" "}
-        reconnect as <code>@hrmny.co</code>. Apollo and Hunter stay mock until
-        keys are pasted on Connections. NeverBounce is env-only
+        reconnect as <code>@hrmny.co</code>. Apollo stays mock until a key is
+        pasted on Connections. Hunter is not used. NeverBounce is env-only
         (<code>NEVERBOUNCE_API_KEY</code>). Do not connect LinkedIn send
         automation.
       </p>
@@ -304,13 +304,13 @@ export default function SalesOsSettingsPage() {
             <Link href="/settings/connections" className="underline">
               Settings → Connections
             </Link>
-            : Google Workspace, Apollo, Hunter, OpenRouter. NeverBounce is
-            <code> NEVERBOUNCE_API_KEY</code>. Do not connect LinkedIn MCP /
-            Playwright for outbound.
+            : Google Workspace, Apollo, OpenRouter. NeverBounce is
+            <code> NEVERBOUNCE_API_KEY</code>. Hunter is not used. Do not
+            connect LinkedIn MCP / Playwright for outbound.
           </p>
           <p>
             Production <code>/api/ready</code> (2026-08-25): OpenRouter and
-            Composio configured; Apollo/Hunter mock; Google Workspace token
+            Composio configured; Apollo mock; Hunter retired; Google Workspace token
             expired. Reconnect uses dedicated Google OAuth (not Heal, not
             Supabase SSO). OpenRouter tests use free <code>stealth/ox-alpha</code>.
             The standalone{" "}

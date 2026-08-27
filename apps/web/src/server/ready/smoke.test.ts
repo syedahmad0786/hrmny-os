@@ -30,7 +30,7 @@ describe("buildDemoBlockers", () => {
       },
     });
     expect(blockers.some((b) => /Apollo/i.test(b))).toBe(true);
-    expect(blockers.some((b) => /Hunter/i.test(b))).toBe(true);
+    expect(blockers.some((b) => /Hunter/i.test(b))).toBe(false);
     expect(blockers.some((b) => /Xero/i.test(b))).toBe(true);
     expect(blockers.some((b) => /Google Workspace/i.test(b))).toBe(true);
     expect(blockers.some((b) => /LinkedIn/i.test(b))).toBe(true);

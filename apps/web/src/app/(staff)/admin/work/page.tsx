@@ -566,8 +566,8 @@ function OrganizationPanel({
           <p className="mt-1 text-xs text-muted">
             <strong>approved only</strong> is the default curated list.
             <strong> disabled</strong> blocks Work / Composio apps only —
-            Google Workspace, Apollo, Hunter, and other first-party CRM
-            connections stay available.
+            Google Workspace, Apollo, and other first-party CRM connections
+            stay available. Hunter is not used.
           </p>
         </div>
         <label className="text-sm">

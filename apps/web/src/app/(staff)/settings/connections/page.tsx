@@ -43,7 +43,7 @@ function AppPolicyBanner() {
           <>
             Organization policy is still <strong>disabled</strong> in the
             database, so Work / Composio extras stay grey. First-party CRM
-            cards (Google Workspace, Apollo, Hunter) stay connectable.
+            cards (Google Workspace, Apollo) stay connectable.
           </>
         ) : (
           <>
@@ -89,6 +89,7 @@ function BackendStoreBanner() {
     database?: "up" | "down";
     keyStore?: "vault" | "memory";
     tools?: Record<string, string>;
+    googleOAuthRedirectUri?: string;
   } | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -118,9 +119,9 @@ function BackendStoreBanner() {
       </p>
       {vault ? (
         <p className="mt-1">
-          Keys and OAuth tokens save to Supabase Vault. Paste Apollo / Hunter
-          here — a live probe runs first. Google Reconnect uses dedicated OAuth
-          (not Heal).
+          Keys and OAuth tokens save to Supabase Vault. Paste Apollo here — a
+          live probe runs first. Google Reconnect uses dedicated OAuth (not
+          Heal). Hunter is retired and is not required.
         </p>
       ) : (
         <p className="mt-1">
@@ -133,6 +134,15 @@ function BackendStoreBanner() {
           {ready.tools?.googleOAuth ?? "—"}.
         </p>
       )}
+      <p className="mt-2 text-xs" data-testid="conn-gw-redirect">
+        Google callback this page sends:{" "}
+        <code>
+          {typeof window !== "undefined"
+            ? `${window.location.origin}/api/integrations/google-workspace/callback`
+            : (ready.googleOAuthRedirectUri ??
+              "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback")}
+        </code>
+      </p>
     </section>
   );
 }
@@ -319,9 +329,6 @@ export default function ConnectionsPage() {
           if (tools.apollo === "mock") {
             next.push("Paste an Apollo API key below (or in Vercel env).");
           }
-          if (tools.hunter === "mock") {
-            next.push("Paste a Hunter API key below (or in Vercel env).");
-          }
           if (tools.xero === "mock" || (connections.xero ?? 0) < 1) {
             next.push("Connect Xero via OAuth for live billing mirror.");
           }
@@ -362,7 +369,9 @@ export default function ConnectionsPage() {
   }, [list.dataUpdatedAt]);
 
   async function connectGoogleWorkspace() {
-    const result = await startGoogleWorkspaceOAuth.mutateAsync();
+    const result = await startGoogleWorkspaceOAuth.mutateAsync({
+      origin: window.location.origin,
+    });
     window.location.assign(result.redirectUrl);
   }
 
@@ -414,7 +423,7 @@ export default function ConnectionsPage() {
             Live demo blockers
           </p>
           <p className="mt-1 text-muted">
-            Google Workspace is required for mailbox send. Apollo, Hunter, Xero,
+            Google Workspace is required for mailbox send. Apollo, Xero,
             LinkedIn, Canva, and Resend can wait — paste or connect later.
           </p>
           {requiredBlockers.length > 0 ? (
@@ -486,8 +495,8 @@ export default function ConnectionsPage() {
           Direct business connections
         </p>
         <p className="mt-1 text-sm text-muted">
-          Reconnect Google Workspace first. Apollo, Hunter, and other keys stay
-          optional until the client pastes them.
+          Reconnect Google Workspace first. Apollo and other keys stay optional
+          until pasted. Hunter is not used.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">

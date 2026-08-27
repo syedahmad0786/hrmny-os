@@ -66,18 +66,112 @@ export function googleWorkspaceClientConfigured(): boolean {
   return Boolean(googleWorkspaceClientId() && googleWorkspaceClientSecret());
 }
 
-export function googleWorkspaceRedirectUri(): string {
+export const GOOGLE_WORKSPACE_CALLBACK_PATH =
+  "/api/integrations/google-workspace/callback";
+
+export const PRODUCTION_APP_ORIGIN = "https://hrmny-os.vercel.app";
+
+export function normalizeAppOrigin(value: string): string {
+  const trimmed = value.trim().replace(/\/+$/, "");
+  if (!trimmed) throw new Error("empty origin");
+  const withProto = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+  const url = new URL(withProto);
+  if (url.username || url.password) throw new Error("invalid origin");
+  return `${url.protocol}//${url.host}`;
+}
+
+export function defaultGoogleWorkspaceOrigin(): string {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (appUrl) return normalizeAppOrigin(appUrl);
+  if (process.env.VERCEL_ENV === "production") return PRODUCTION_APP_ORIGIN;
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return normalizeAppOrigin(vercel);
+  return "http://localhost:3000";
+}
+
+export function isAllowedGoogleWorkspaceOrigin(origin: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(normalizeAppOrigin(origin));
+  } catch {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1") {
+    return parsed.protocol === "http:";
+  }
+  if (parsed.protocol !== "https:") return false;
+  if (host === "hrmny-os.vercel.app") return true;
+  if (host.endsWith(".vercel.app") && host.startsWith("hrmny-os")) return true;
+  const extras = [process.env.NEXT_PUBLIC_APP_URL, process.env.VERCEL_URL]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .map((value) => {
+      try {
+        return new URL(normalizeAppOrigin(value)).host.toLowerCase();
+      } catch {
+        return "";
+      }
+    });
+  return extras.includes(host);
+}
+
+export function resolveGoogleWorkspaceOrigin(requestOrigin?: string): string {
+  if (requestOrigin?.trim()) {
+    try {
+      const origin = normalizeAppOrigin(requestOrigin);
+      if (isAllowedGoogleWorkspaceOrigin(origin)) return origin;
+    } catch {
+      // Ignore a forged or unparseable origin and fall back.
+    }
+  }
+  return defaultGoogleWorkspaceOrigin();
+}
+
+export function explicitGoogleWorkspaceRedirectUri(): string | null {
   return (
     process.env.GOOGLE_OAUTH_REDIRECT_URI?.trim() ||
     process.env.GOOGLE_WORKSPACE_REDIRECT_URI?.trim() ||
-    `${process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3000"}/api/integrations/google-workspace/callback`
+    null
   );
 }
 
-export function signGoogleWorkspaceOAuthState(employeeId: string): string {
+export function googleWorkspaceRedirectUri(requestOrigin?: string): string {
+  return (
+    explicitGoogleWorkspaceRedirectUri() ||
+    `${resolveGoogleWorkspaceOrigin(requestOrigin)}${GOOGLE_WORKSPACE_CALLBACK_PATH}`
+  );
+}
+
+export function isAllowedGoogleWorkspaceRedirectUri(redirectUri: string): boolean {
+  const explicit = explicitGoogleWorkspaceRedirectUri();
+  if (explicit && redirectUri === explicit) return true;
+  try {
+    const url = new URL(redirectUri);
+    return (
+      url.pathname === GOOGLE_WORKSPACE_CALLBACK_PATH &&
+      isAllowedGoogleWorkspaceOrigin(url.origin)
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function googleWorkspaceConnectionsDest(redirectUri: string): URL {
+  const dest = new URL("/settings/connections", new URL(redirectUri).origin);
+  dest.hash = "conn-google_workspace";
+  return dest;
+}
+
+export function signGoogleWorkspaceOAuthState(
+  employeeId: string,
+  redirectUri = googleWorkspaceRedirectUri(),
+): string {
   const body = Buffer.from(
     JSON.stringify({
       employeeId,
+      redirectUri,
       n: randomUUID(),
       exp: Date.now() + 15 * 60_000,
     }),
@@ -90,6 +184,7 @@ export function signGoogleWorkspaceOAuthState(employeeId: string): string {
 
 export function verifyGoogleWorkspaceOAuthState(state: string): {
   employeeId: string;
+  redirectUri: string;
 } {
   const [body, sig] = state.split(".");
   if (!body || !sig) throw new Error("Invalid Google Workspace OAuth state");
@@ -105,6 +200,7 @@ export function verifyGoogleWorkspaceOAuthState(state: string): {
     Buffer.from(body, "base64url").toString("utf8"),
   ) as {
     employeeId?: string;
+    redirectUri?: string;
     exp?: number;
   };
   if (!payload.employeeId || typeof payload.exp !== "number") {
@@ -113,7 +209,14 @@ export function verifyGoogleWorkspaceOAuthState(state: string): {
   if (payload.exp < Date.now()) {
     throw new Error("Google Workspace OAuth state expired");
   }
-  return { employeeId: payload.employeeId };
+  const redirectUri =
+    typeof payload.redirectUri === "string" && payload.redirectUri.trim()
+      ? payload.redirectUri.trim()
+      : googleWorkspaceRedirectUri();
+  if (!isAllowedGoogleWorkspaceRedirectUri(redirectUri)) {
+    throw new Error("Invalid Google Workspace OAuth redirect");
+  }
+  return { employeeId: payload.employeeId, redirectUri };
 }
 
 export function formatGoogleOAuthError(status: number, detail: string): string {
@@ -134,8 +237,12 @@ export function formatGoogleOAuthError(status: number, detail: string): string {
   return reason;
 }
 
-export async function buildGoogleWorkspaceAuthorizeUrl(employeeId: string): Promise<{
+export async function buildGoogleWorkspaceAuthorizeUrl(
+  employeeId: string,
+  opts?: { requestOrigin?: string },
+): Promise<{
   redirectUrl: string;
+  redirectUri: string;
 }> {
   const clientId = googleWorkspaceClientId();
   if (!clientId || !googleWorkspaceClientSecret()) {
@@ -143,10 +250,11 @@ export async function buildGoogleWorkspaceAuthorizeUrl(employeeId: string): Prom
       "GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET required for Google Workspace OAuth",
     );
   }
-  const state = signGoogleWorkspaceOAuthState(employeeId);
+  const redirectUri = googleWorkspaceRedirectUri(opts?.requestOrigin);
+  const state = signGoogleWorkspaceOAuthState(employeeId, redirectUri);
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: googleWorkspaceRedirectUri(),
+    redirect_uri: redirectUri,
     response_type: "code",
     scope: GOOGLE_WORKSPACE_OAUTH_SCOPES.join(" "),
     access_type: "offline",
@@ -157,6 +265,7 @@ export async function buildGoogleWorkspaceAuthorizeUrl(employeeId: string): Prom
   });
   return {
     redirectUrl: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
+    redirectUri,
   };
 }
 
@@ -313,7 +422,10 @@ export async function persistGoogleWorkspaceTokens(input: {
   };
 }
 
-async function exchangeGoogleAuthorizationCode(code: string) {
+async function exchangeGoogleAuthorizationCode(
+  code: string,
+  redirectUri: string,
+) {
   const clientId = googleWorkspaceClientId();
   const clientSecret = googleWorkspaceClientSecret();
   if (!clientId || !clientSecret) {
@@ -326,7 +438,7 @@ async function exchangeGoogleAuthorizationCode(code: string) {
       code,
       client_id: clientId,
       client_secret: clientSecret,
-      redirect_uri: googleWorkspaceRedirectUri(),
+      redirect_uri: redirectUri,
       grant_type: "authorization_code",
     }),
   });
@@ -340,12 +452,18 @@ async function exchangeGoogleAuthorizationCode(code: string) {
 export async function completeGoogleWorkspaceOAuth(input: {
   code: string;
   state: string;
-}): Promise<{ account: string; connectionAccountId: string }> {
-  const { employeeId } = verifyGoogleWorkspaceOAuthState(input.state);
+}): Promise<{
+  account: string;
+  connectionAccountId: string;
+  redirectUri: string;
+}> {
+  const { employeeId, redirectUri } = verifyGoogleWorkspaceOAuthState(
+    input.state,
+  );
   if (!googleWorkspaceClientConfigured()) {
     throw new Error("Google OAuth client credentials are not configured");
   }
-  const tokens = await exchangeGoogleAuthorizationCode(input.code);
+  const tokens = await exchangeGoogleAuthorizationCode(input.code, redirectUri);
   const profileResponse = await fetch(
     "https://www.googleapis.com/oauth2/v3/userinfo",
     { headers: { authorization: `Bearer ${tokens.access_token}` } },
@@ -368,5 +486,6 @@ export async function completeGoogleWorkspaceOAuth(input: {
   return {
     account: saved.email,
     connectionAccountId: saved.connectionAccountId,
+    redirectUri,
   };
 }

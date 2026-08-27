@@ -148,9 +148,6 @@ export function buildDemoBlockers(input: {
   if (tools.apollo === "mock") {
     blockers.push("Paste Apollo API key in Connections");
   }
-  if (tools.hunter === "mock") {
-    blockers.push("Paste Hunter API key in Connections");
-  }
   if (tools.xero === "mock" || connections.xero < 1) {
     blockers.push("Connect Xero OAuth in Connections");
   }
