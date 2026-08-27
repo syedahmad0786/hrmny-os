@@ -1,5 +1,6 @@
 import { and, connectionAccount, eq, sql } from "@hrmny/db";
 import { getDb } from "../db";
+import { getMemoryApiKey } from "./memory-keys";
 
 export type ApiKeyToolkit = "apollo" | "hunter" | "bayzat" | "n8n";
 
@@ -14,12 +15,20 @@ const ENV_KEY: Record<ApiKeyToolkit, string> = {
 export async function resolveIntegrationApiKey(
   toolkit: ApiKeyToolkit,
   employeeId?: string | null,
-): Promise<{ apiKey: string | null; source: "env" | "vault" | "none" }> {
+): Promise<{
+  apiKey: string | null;
+  source: "env" | "vault" | "memory" | "none";
+}> {
   const fromEnv = process.env[ENV_KEY[toolkit]]?.trim();
   if (fromEnv) return { apiKey: fromEnv, source: "env" };
 
   const db = getDb();
-  if (!db) return { apiKey: null, source: "none" };
+  if (!db) {
+    const mem = getMemoryApiKey(toolkit);
+    return mem
+      ? { apiKey: mem, source: "memory" }
+      : { apiKey: null, source: "none" };
+  }
 
   if (employeeId) {
     const [row] = await db

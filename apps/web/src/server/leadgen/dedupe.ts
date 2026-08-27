@@ -3,8 +3,11 @@ import {
   createCompany,
   createContact,
   createDeal,
+  listCompanies,
   listContacts,
 } from "../crm/repository";
+import { isSuppressed } from "../sales-os/store";
+import { strongerDedupeKey } from "../sales-os/enrich";
 
 /**
  * Dedupe M8 lead candidates into the CRM. Idempotent: matching an existing
@@ -56,23 +59,65 @@ export async function dedupeIntoCrm(
   // Within-run company cache so two leads at one company reuse one company row.
   const companyByDomain = new Map<string, string>();
 
+  const companies = await listCompanies();
+  const companyByName = new Map(companies.map((c) => [c.name.toLowerCase(), c]));
+  const knownKeys = new Set<string>();
+  for (const existing of await listContacts()) {
+    for (const k of strongerDedupeKey({
+      email: existing.email,
+      linkedinUrl: existing.linkedinUrl,
+      fullName: `${existing.firstName} ${existing.lastName ?? ""}`.trim(),
+    })) {
+      knownKeys.add(k);
+    }
+  }
+
   for (const cand of candidates) {
     const email = cand.email?.trim() ?? null;
 
     if (email) {
+      const suppressed = await isSuppressed({ email });
+      if (suppressed) {
+        skipped.push({
+          externalId: cand.externalId,
+          email,
+          contactId: `suppressed:${suppressed.reason}`,
+        });
+        continue;
+      }
       const existing = await findContactByEmail(email);
       if (existing) {
         skipped.push({ externalId: cand.externalId, email, contactId: existing });
         continue;
       }
     }
+    const keys = strongerDedupeKey({
+      email,
+      linkedinUrl: cand.linkedinUrl,
+      companyName: cand.companyName,
+      fullName: cand.fullName,
+    });
+    if (keys.some((k) => knownKeys.has(k))) {
+      skipped.push({
+        externalId: cand.externalId,
+        email: email ?? "",
+        contactId: "deduped",
+      });
+      continue;
+    }
 
     let companyId: string | null = null;
     if (cand.companyName || cand.companyDomain) {
       const domainKey = (cand.companyDomain ?? cand.companyName ?? "").toLowerCase();
       const cached = domainKey ? companyByDomain.get(domainKey) : undefined;
+      const named = cand.companyName
+        ? companyByName.get(cand.companyName.toLowerCase())
+        : undefined;
       if (cached) {
         companyId = cached;
+      } else if (named) {
+        companyId = named.companyId;
+        if (domainKey) companyByDomain.set(domainKey, companyId);
       } else {
         const company = await createCompany({
           name: cand.companyName ?? cand.companyDomain ?? "Unknown Co",
@@ -81,6 +126,7 @@ export async function dedupeIntoCrm(
         });
         companyId = company.companyId;
         if (domainKey) companyByDomain.set(domainKey, companyId);
+        companyByName.set(company.name.toLowerCase(), company);
       }
     }
 
@@ -101,6 +147,7 @@ export async function dedupeIntoCrm(
       leadSourceLane: "apollo_intent",
     });
 
+    for (const k of keys) knownKeys.add(k);
     created.push({
       externalId: cand.externalId,
       email,

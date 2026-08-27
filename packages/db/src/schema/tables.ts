@@ -1430,6 +1430,11 @@ export const outreachItems = pgTable(
     approvedBy: uuid("approved_by"),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     externalId: text("external_id"),
+    contactId: uuid("contact_id"),
+    reworkFeedback: text("rework_feedback"),
+    linkedinUrl: text("linkedin_url"),
+    cadenceTouch: integer("cadence_touch").default(1).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -1440,6 +1445,7 @@ export const outreachItems = pgTable(
   (table) => [
     index("outreach_items_deal_idx").on(table.dealId, table.state),
     index("outreach_items_state_idx").on(table.state, table.createdAt),
+    index("outreach_items_contact_idx").on(table.contactId),
   ],
 );
 
@@ -1570,4 +1576,152 @@ export const crmQuote = pgTable(
     uniqueIndex("crm_quote_deal_version_uniq").on(table.dealId, table.version),
     index("crm_quote_deal_idx").on(table.dealId),
   ],
+);
+
+/** Sales OS singleton SOP settings (migration 0072). */
+export const salesOsSettings = pgTable("sales_os_settings", {
+  salesOsSettingsId: text("sales_os_settings_id").primaryKey().default("default"),
+  settings: jsonb("settings").$type<Record<string, unknown>>().default({}).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedBy: uuid("updated_by"),
+});
+
+export const salesOsEvolveProposal = pgTable("sales_os_evolve_proposal", {
+  salesOsEvolveProposalId: uuid("sales_os_evolve_proposal_id")
+    .defaultRandom()
+    .primaryKey(),
+  focus: text("focus").default("").notNull(),
+  summary: text("summary").default("").notNull(),
+  proposed: jsonb("proposed").$type<Record<string, unknown>>().default({}).notNull(),
+  state: text("state").default("proposed").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+});
+
+export const companyResearch = pgTable(
+  "company_research",
+  {
+    companyResearchId: uuid("company_research_id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id").references(() => company.companyId),
+    name: text("name").notNull(),
+    sector: text("sector"),
+    market: text("market"),
+    website: text("website"),
+    whyThis: text("why_this").default("").notNull(),
+    evidence: text("evidence"),
+    leadSourceLane: text("lead_source_lane").default("industry_scanning").notNull(),
+    estimatedValueAed: numeric("estimated_value_aed", { precision: 14, scale: 2 }),
+    suggestedServices: text("suggested_services"),
+    buafBudget: integer("buaf_budget").default(0).notNull(),
+    buafUrgency: integer("buaf_urgency").default(0).notNull(),
+    buafAccess: integer("buaf_access").default(0).notNull(),
+    buafFit: integer("buaf_fit").default(0).notNull(),
+    buafTotal: integer("buaf_total").default(0).notNull(),
+    temperature: text("temperature").default("cool").notNull(),
+    approvalState: text("approval_state").default("researched").notNull(),
+    reworkFeedback: text("rework_feedback"),
+    decidedBy: uuid("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("company_research_state_idx").on(table.approvalState, table.createdAt),
+    index("company_research_company_idx").on(table.companyId),
+  ],
+);
+
+export const contactResearch = pgTable(
+  "contact_research",
+  {
+    contactResearchId: uuid("contact_research_id").defaultRandom().primaryKey(),
+    companyResearchId: uuid("company_research_id").notNull(),
+    companyId: uuid("company_id").references(() => company.companyId),
+    contactId: uuid("contact_id").references(() => contact.contactId),
+    dealId: uuid("deal_id").references(() => deal.dealId),
+    fullName: text("full_name").notNull(),
+    title: text("title"),
+    seniority: text("seniority"),
+    email: text("email"),
+    linkedinUrl: text("linkedin_url"),
+    emailVerified: boolean("email_verified").default(false).notNull(),
+    emailVerdict: text("email_verdict"),
+    enrichSource: text("enrich_source").default("apollo").notNull(),
+    enrichExternalId: text("enrich_external_id"),
+    enrichProvider: text("enrich_provider"),
+    approvalState: text("approval_state").default("found").notNull(),
+    reworkFeedback: text("rework_feedback"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("contact_research_company_idx").on(
+      table.companyResearchId,
+      table.approvalState,
+    ),
+  ],
+);
+
+export const suppressionEntry = pgTable(
+  "suppression_entry",
+  {
+    suppressionEntryId: uuid("suppression_entry_id").defaultRandom().primaryKey(),
+    email: text("email"),
+    domain: text("domain"),
+    reason: text("reason").notNull(),
+    source: text("source"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("suppression_entry_email_idx").on(table.email),
+    index("suppression_entry_domain_idx").on(table.domain),
+  ],
+);
+
+export const emailEvent = pgTable(
+  "email_event",
+  {
+    emailEventId: uuid("email_event_id").defaultRandom().primaryKey(),
+    outreachItemId: uuid("outreach_item_id"),
+    contactId: uuid("contact_id"),
+    kind: text("kind").notNull(),
+    provider: text("provider").default("gmail").notNull(),
+    externalId: text("external_id"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().default({}).notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("email_event_outreach_idx").on(table.outreachItemId, table.occurredAt),
+    index("email_event_kind_idx").on(table.kind, table.occurredAt),
+  ],
+);
+
+export const intelSignal = pgTable(
+  "intel_signal",
+  {
+    intelSignalId: uuid("intel_signal_id").defaultRandom().primaryKey(),
+    companyId: uuid("company_id").references(() => company.companyId),
+    contactId: uuid("contact_id").references(() => contact.contactId),
+    signalType: text("signal_type").default("other").notNull(),
+    source: text("source"),
+    signalDate: date("signal_date"),
+    summary: text("summary").default("").notNull(),
+    evidenceUrl: text("evidence_url"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("intel_signal_company_idx").on(table.companyId, table.createdAt)],
+);
+
+export const salesOsCreditLedger = pgTable(
+  "sales_os_credit_ledger",
+  {
+    salesOsCreditLedgerId: uuid("sales_os_credit_ledger_id")
+      .defaultRandom()
+      .primaryKey(),
+    month: text("month").notNull(),
+    kind: text("kind").notNull(),
+    count: integer("count").default(1).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("sales_os_credit_ledger_month_idx").on(table.month, table.kind)],
 );

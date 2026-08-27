@@ -102,7 +102,7 @@ export function ConnectionHealth() {
               <p className="mt-2 flex-1 text-xs text-muted">{provider.detail}</p>
               {provider.status === "error" ? (
                 <a
-                  href="#direct-business-connections"
+                  href={`#conn-${provider.key}`}
                   className="mt-2 text-xs font-semibold text-ochre underline"
                 >
                   Reconnect below →

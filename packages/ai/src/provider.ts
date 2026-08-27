@@ -8,7 +8,7 @@ export type LLMProviderName = "openrouter" | "anthropic" | "ollama" | "mock";
  * Prefer content-bearing free models; `openrouter/free` may resolve to
  * reasoning-only upstreams (handled by content→reasoning fallback).
  */
-export const OPENROUTER_FREE_DEFAULT_MODEL = "liquid/lfm-2.5-2.6b:free";
+export const OPENROUTER_FREE_DEFAULT_MODEL = "stealth/ox-alpha";
 
 /**
  * Free preview routes ($0/$0 on OpenRouter) without a `:free` suffix.
@@ -37,7 +37,7 @@ export function assertOpenRouterFreeRoute(model: string): void {
 /** Ordered free-route failover when the primary free/default model flakes (429/empty). */
 export const OPENROUTER_FREE_FALLBACK_MODELS = [
   OPENROUTER_FREE_DEFAULT_MODEL,
-  "stealth/ox-alpha",
+  "liquid/lfm-2.5-2.6b:free",
   "nvidia/nemotron-nano-9b-v2:free",
   "openrouter/free",
 ] as const;

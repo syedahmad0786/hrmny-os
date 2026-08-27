@@ -16,47 +16,56 @@ import { router, staffProcedure } from "./trpc";
 import { randomUUID } from "node:crypto";
 import { isWorkConnectedAppAllowed } from "../work-governance";
 import { featureEnabled } from "../features";
+import { xeroClientConfigured } from "../finance/xero-tokens";
+import {
+  GoogleProfileSchema,
+  GoogleTokenResponseSchema,
+  GoogleWorkspaceSecretSchema,
+  googleWorkspaceClientConfigured,
+  googleWorkspaceClientId,
+  googleWorkspaceClientSecret,
+  persistGoogleWorkspaceTokens,
+} from "../google-workspace-oauth";
+import { isGoogleWorkspaceReconnectRequired } from "@/lib/google-workspace-error";
+import { isHardApiKeyRejection } from "@/lib/api-key-rejection";
+import {
+  hasMemoryApiKey,
+  saveMemoryApiKey,
+} from "../integrations/memory-keys";
+
+export { GoogleProfileSchema };
 
 const composioStub = createComposioStub();
 const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat", "n8n"]);
 const oauthToolkit = z.enum(["gmail", "calendar", "canva", "linkedin"]);
 
-export const GoogleProfileSchema = z.object({
-  email: z
-    .string()
-    .email()
-    .refine((email) => email.toLowerCase().endsWith("@hrmny.co"), {
-      message: "Connect an @hrmny.co Google Workspace account",
-    }),
-  email_verified: z.literal(true),
-});
-
-const GoogleWorkspaceSecretSchema = z.object({
-  accessToken: z.string().min(20),
-  refreshToken: z.string().min(20),
-  expiresAt: z.string().datetime(),
-});
-
-const GoogleTokenResponseSchema = z.object({
-  access_token: z.string().min(20),
-  expires_in: z.number().int().positive(),
-  refresh_token: z.string().min(20).optional(),
-});
+function catalogItemReady(toolkit: string, fallback: boolean): boolean {
+  if (toolkit === "google_workspace") return googleWorkspaceClientConfigured();
+  if (toolkit === "xero") return xeroClientConfigured();
+  return fallback;
+}
 
 export const CONNECTION_CATALOG = [
+  {
+    toolkit: "google_workspace",
+    label: "Google Workspace",
+    authType: "oauth",
+    ready: true,
+    note: "Required for HITL Gmail. Dedicated OAuth writes tokens to Vault using the same Google client that refreshes them. Heal cannot restore a revoked token — use Reconnect.",
+  },
   {
     toolkit: "apollo",
     label: "Apollo",
     authType: "api_key",
     ready: true,
-    note: "Paste or replace the key without a deployment.",
+    note: "Optional until keys are pasted — prospecting stays mock. Paste later without a deployment.",
   },
   {
     toolkit: "hunter",
     label: "Hunter",
     authType: "api_key",
     ready: true,
-    note: "Paste or replace the key without a deployment.",
+    note: "Optional until keys are pasted — verify stays mock. Paste later without a deployment.",
   },
   {
     toolkit: "n8n",
@@ -71,13 +80,6 @@ export const CONNECTION_CATALOG = [
     authType: "api_key",
     ready: true,
     note: "API key storage is ready; CSV remains the fallback.",
-  },
-  {
-    toolkit: "google_workspace",
-    label: "Google Workspace",
-    authType: "oauth",
-    ready: true,
-    note: "Gmail, Calendar, Drive, and Sheets via the existing Google SSO app.",
   },
   {
     toolkit: "asana",
@@ -655,12 +657,8 @@ export async function getGoogleWorkspaceAccessToken(
     return stored.accessToken;
   }
 
-  const clientId = (
-    process.env.GOOGLE_OAUTH_CLIENT_ID ?? process.env.client_id
-  )?.trim();
-  const clientSecret = (
-    process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? process.env.client_secret
-  )?.trim();
+  const clientId = googleWorkspaceClientId();
+  const clientSecret = googleWorkspaceClientSecret();
   if (!clientId || !clientSecret) {
     throw new Error("Google OAuth client credentials are not configured");
   }
@@ -758,21 +756,15 @@ export const connectionsRouter = router({
           const row = existing.find(
             (candidate) => candidate.toolkit === item.toolkit,
           );
-        return {
+          return {
             ...item,
-            ready:
-              item.toolkit === "xero"
-                ? Boolean(
-                    process.env.XERO_CLIENT_ID?.trim() &&
-                      process.env.XERO_CLIENT_SECRET?.trim(),
-                  )
-                : item.ready,
+            ready: catalogItemReady(item.toolkit, item.ready),
             allowed: allowed.get(item.toolkit) ?? false,
             connectionAccountId: row?.connectionAccountId ?? null,
             scope: row?.scope ?? "staff",
             status: row?.status ?? "disconnected",
             externalConnectionId: row?.externalConnectionId ?? null,
-            hasSecret: false,
+            hasSecret: hasMemoryApiKey(item.toolkit),
             lastTestedAt: null,
             lastError: null,
           };
@@ -809,13 +801,7 @@ export const connectionsRouter = router({
         const row = findStaffConnectionRow(rows, item.toolkit);
         return {
           ...item,
-          ready:
-            item.toolkit === "xero"
-              ? Boolean(
-                  process.env.XERO_CLIENT_ID?.trim() &&
-                    process.env.XERO_CLIENT_SECRET?.trim(),
-                )
-              : item.ready,
+          ready: catalogItemReady(item.toolkit, item.ready),
           allowed: allowed.get(item.toolkit) ?? false,
           connectionAccountId: row?.connectionAccountId ?? null,
           scope: "staff" as const,
@@ -843,14 +829,61 @@ export const connectionsRouter = router({
         "../integrations/probe-api-key"
       );
       const probed = await probeIntegrationApiKey(input.toolkit, input.apiKey);
+      let probeWarning: string | null = null;
       if (!probed.ok) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Key rejected by ${input.toolkit}: ${probed.reason}`,
-        });
+        if (isHardApiKeyRejection(probed.reason)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Key rejected by ${input.toolkit}: ${probed.reason}`,
+          });
+        }
+        probeWarning = probed.reason;
       }
 
-      const db = requireDb();
+      const db = getDb();
+      if (!db) {
+        saveMemoryApiKey(input.toolkit, input.apiKey);
+        const store = getDemoStore();
+        let row = store.connections.find(
+          (candidate) =>
+            candidate.toolkit === input.toolkit && candidate.scope === "staff",
+        );
+        if (!row) {
+          row = {
+            connectionAccountId: randomUUID(),
+            toolkit: input.toolkit,
+            scope: "staff",
+            status: "connected",
+            externalConnectionId: null,
+          };
+          store.connections.push(row);
+        } else {
+          row.status = "connected";
+        }
+        store.appendAudit({
+          actorEmployeeId: employeeId,
+          action: "connections.connectKey",
+          entityType: "connection_account",
+          entityId: row.connectionAccountId,
+          before: null,
+          after: {
+            toolkit: input.toolkit,
+            status: "connected",
+            store: "memory",
+            probed: probed.ok,
+          },
+          reason: probeWarning,
+        });
+        return {
+          connectionAccountId: row.connectionAccountId,
+          toolkit: input.toolkit,
+          status: "connected" as const,
+          hasSecret: true,
+          probed: probed.ok,
+          store: "memory" as const,
+          probeWarning,
+        };
+      }
       const [existing] = await db
         .select()
         .from(connectionAccount)
@@ -932,7 +965,9 @@ export const connectionsRouter = router({
         toolkit: row.toolkit,
         status: row.status,
         hasSecret: true,
-        probed: true as const,
+        probed: probed.ok,
+        store: "vault" as const,
+        probeWarning,
       };
     }),
 
@@ -1423,7 +1458,7 @@ export const connectionsRouter = router({
     .input(
       z.object({
         accessToken: z.string().min(20).max(8192),
-        refreshToken: z.string().min(20).max(8192),
+        refreshToken: z.string().min(20).max(8192).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -1439,95 +1474,25 @@ export const connectionsRouter = router({
           message: "Google rejected the connection token",
         });
       }
-      const profile = GoogleProfileSchema.parse(await profileResponse.json());
-      const db = requireDb();
-      const [existing] = await db
-        .select()
-        .from(connectionAccount)
-        .where(
-          and(
-            eq(connectionAccount.ownerEmployeeId, employeeId),
-            eq(connectionAccount.toolkit, "google_workspace"),
-            eq(connectionAccount.scope, "staff"),
-          ),
-        )
-        .limit(1);
-      const expiresAt = new Date(Date.now() + 55 * 60 * 1000);
-      const secret = JSON.stringify({
+      const parsed = GoogleProfileSchema.safeParse(await profileResponse.json());
+      if (!parsed.success) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Connect an @hrmny.co Google Workspace account",
+        });
+      }
+      const saved = await persistGoogleWorkspaceTokens({
+        employeeId,
         accessToken: input.accessToken,
         refreshToken: input.refreshToken,
-        expiresAt: expiresAt.toISOString(),
-      });
-
-      const saved = await db.transaction(async (tx) => {
-        let secretId = existing?.secretId ?? null;
-        if (secretId) {
-          await tx.execute(
-            sql`select vault.update_secret(${secretId}::uuid, ${secret})`,
-          );
-        } else {
-          const created = await tx.execute(
-            sql<{ id: string }>`
-              select vault.create_secret(
-                ${secret},
-                ${`hrmny:${employeeId}:google_workspace`},
-                'Google Workspace OAuth tokens managed by hrmny OS'
-              ) as id
-            `,
-          );
-          const createdId = created[0]?.id;
-          secretId = typeof createdId === "string" ? createdId : null;
-        }
-        if (!secretId) throw new Error("Vault did not return a secret id");
-
-        const values = {
-          ownerEmployeeId: employeeId,
-          toolkit: "google_workspace",
-          scope: "staff",
-          authType: "oauth",
-          label: "Google Workspace",
-          secretId,
-          externalConnectionId: profile.email.toLowerCase(),
-          status: "connected",
-          expiresAt,
-          lastTestedAt: new Date(),
-          lastError: null,
-          updatedAt: new Date(),
-        };
-        const [row] = existing
-          ? await tx
-              .update(connectionAccount)
-              .set(values)
-              .where(
-                eq(
-                  connectionAccount.connectionAccountId,
-                  existing.connectionAccountId,
-                ),
-              )
-              .returning()
-          : await tx.insert(connectionAccount).values(values).returning();
-        await tx.insert(auditEvent).values({
-          actorEmployeeId: employeeId,
-          action: existing
-            ? "connections.replaceOAuth"
-            : "connections.connectOAuth",
-          entityType: "connection_account",
-          entityId: row!.connectionAccountId,
-          before: existing ? { status: existing.status } : null,
-          after: {
-            toolkit: "google_workspace",
-            status: "connected",
-            account: profile.email.toLowerCase(),
-          },
-        });
-        return row!;
+        email: parsed.data.email,
       });
 
       return {
         connectionAccountId: saved.connectionAccountId,
-        toolkit: saved.toolkit,
-        status: saved.status,
-        account: profile.email.toLowerCase(),
+        toolkit: "google_workspace",
+        status: "connected",
+        account: saved.email,
       };
     }),
 
@@ -1546,6 +1511,7 @@ export const connectionsRouter = router({
           ok: false as const,
           status: "missing" as const,
           reason: "No Google Workspace connection found — connect first",
+          reconnectRequired: true,
         };
       }
       const db = getDb();
@@ -1589,10 +1555,12 @@ export const connectionsRouter = router({
         lastError,
       };
     } catch (err) {
+      const reason = err instanceof Error ? err.message : "probe_failed";
       return {
         ok: false as const,
         status: "error" as const,
-        reason: err instanceof Error ? err.message : "probe_failed",
+        reason,
+        reconnectRequired: isGoogleWorkspaceReconnectRequired(reason),
       };
     }
   }),
@@ -1647,6 +1615,20 @@ export const connectionsRouter = router({
     const employeeId = requireEmployeeId(ctx.employeeId);
     const { buildXeroAuthorizeUrl } = await import("../finance/xero-tokens");
     return buildXeroAuthorizeUrl(employeeId);
+  }),
+
+  /**
+   * Dedicated Google Workspace OAuth (same GOOGLE_OAUTH_* client as refresh).
+   * Do not use Supabase signInWithOAuth for mailbox tokens — provider tokens
+   * vanish before save, and Google often omits a new refresh token.
+   */
+  startGoogleWorkspaceOAuth: staffProcedure.mutation(async ({ ctx }) => {
+    await requireAllowedApp("google_workspace");
+    const employeeId = requireEmployeeId(ctx.employeeId);
+    const { buildGoogleWorkspaceAuthorizeUrl } = await import(
+      "../google-workspace-oauth"
+    );
+    return buildGoogleWorkspaceAuthorizeUrl(employeeId);
   }),
 
   disconnect: staffProcedure

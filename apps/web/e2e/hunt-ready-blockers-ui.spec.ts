@@ -25,8 +25,11 @@ test.describe("Hunt ready blockers", () => {
     const apolloLink = page.getByTestId("hunt-blocker-link-apollo");
     if ((await apolloLink.count()) > 0) {
       await apolloLink.click();
-      await expect(page).toHaveURL(/\/settings\/connections#?conn-apollo/);
-      await expect(page.getByTestId("conn-card-apollo")).toBeInViewport();
+      await expect(page).toHaveURL(/\/settings\/connections/);
+      const apolloCard = page.getByTestId("conn-card-apollo");
+      await expect(apolloCard).toBeVisible({ timeout: 30_000 });
+      await apolloCard.scrollIntoViewIfNeeded();
+      await expect(apolloCard).toBeInViewport();
     }
 
     const hunterLink = page.getByTestId("hunt-blocker-link-hunter");

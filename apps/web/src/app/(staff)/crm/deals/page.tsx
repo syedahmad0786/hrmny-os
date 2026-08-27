@@ -26,12 +26,21 @@ export default function CrmDealsPage() {
   const utils = trpc.useUtils();
   const deals = trpc.crm.deals.list.useQuery();
   const stages = trpc.crm.stages.useQuery();
+  const digest = trpc.salesOs.digest.useQuery();
   const create = trpc.crm.deals.create.useMutation({
     onSuccess: () => void utils.crm.deals.invalidate(),
   });
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("all");
   const [name, setName] = useState("");
+
+  const stallByDeal = useMemo(() => {
+    const m = new Map<string, { daysInStage: number; maxDays: number }>();
+    for (const s of digest.data?.stalled ?? []) {
+      m.set(s.dealId, { daysInStage: s.daysInStage, maxDays: s.maxDays });
+    }
+    return m;
+  }, [digest.data]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -93,6 +102,37 @@ export default function CrmDealsPage() {
         </div>
       </CrmFilterBar>
 
+      {digest.data ? (
+        <section className="crm-panel mb-4" data-testid="sales-os-pipeline-review">
+          <div className="crm-panel-head">
+            <div>
+              <h3>Pipeline review</h3>
+              <p>
+                Coverage {digest.data.coverage.coverageX.toFixed(1)}× vs{" "}
+                {digest.data.coverage.targetX}× H1 · {digest.data.stalled.length} stalled
+              </p>
+            </div>
+            <CrmTag kind={digest.data.coverage.healthy ? "success" : "warn"}>
+              {digest.data.coverage.healthy ? "Healthy" : "Thin coverage"}
+            </CrmTag>
+          </div>
+          {digest.data.stalled.length > 0 ? (
+            <div className="crm-panel-body">
+              <ul className="text-sm space-y-1">
+                {digest.data.stalled.slice(0, 8).map((s) => (
+                  <li key={s.dealId}>
+                    <Link className="underline" href={`/crm/deals/${s.dealId}`}>
+                      {s.companyName}
+                    </Link>{" "}
+                    · {s.daysInStage}d in {s.stage.replace(/_/g, " ")} (max {s.maxDays})
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {deals.isLoading ? (
         <CrmEmpty title="Loading deals…" />
       ) : rows.length === 0 ? (
@@ -109,6 +149,7 @@ export default function CrmDealsPage() {
                 <th>Value</th>
                 <th>Email</th>
                 <th>Owner</th>
+                <th>Stall</th>
                 <th>Next step</th>
               </tr>
             </thead>
@@ -144,6 +185,16 @@ export default function CrmDealsPage() {
                       <span className="crm-initials">
                         {initials(d.ownerEmployeeId ? "AM" : "CH")}
                       </span>
+                    </td>
+                    <td>
+                      {stallByDeal.has(d.dealId) ? (
+                        <CrmTag kind="danger">
+                          {stallByDeal.get(d.dealId)!.daysInStage}d /{" "}
+                          {stallByDeal.get(d.dealId)!.maxDays}
+                        </CrmTag>
+                      ) : (
+                        <CrmTag kind="success">ok</CrmTag>
+                      )}
                     </td>
                     <td>Updated {formatRelative(d.updatedAt)}</td>
                   </tr>

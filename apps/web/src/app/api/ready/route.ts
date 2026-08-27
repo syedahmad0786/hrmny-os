@@ -76,6 +76,7 @@ export async function GET() {
     llmFreeOnly: llm.freeOnly,
     xeroWriteEnabled: process.env.XERO_WRITE_ENABLED === "true",
     database,
+    keyStore: database === "up" ? "vault" : "memory",
     pgvector,
     portalMagicLink: portalMagicLink ? "enabled" : "disabled",
     tools,

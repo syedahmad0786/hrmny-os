@@ -58,6 +58,9 @@ function OutreachInner() {
   const [draftDealId, setDraftDealId] = useState("");
   const [draftSubject, setDraftSubject] = useState("");
   const [draftBody, setDraftBody] = useState("");
+  const [draftChannel, setDraftChannel] = useState("gmail");
+  const [reworkFeedback, setReworkFeedback] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const invalidate = () => void utils.leadgen.outreach.invalidate();
   const onErr = (e: { message: string }) => setGateError(e.message);
@@ -83,6 +86,45 @@ function OutreachInner() {
     },
     onError: onErr,
   });
+  const markSent = trpc.salesOs.linkedin.markSent.useMutation({
+    onSuccess: invalidate,
+    onError: onErr,
+  });
+  const markAccepted = trpc.salesOs.linkedin.markAccepted.useMutation({
+    onSuccess: invalidate,
+    onError: onErr,
+  });
+  const markSkipped = trpc.salesOs.linkedin.markSkipped.useMutation({
+    onSuccess: invalidate,
+    onError: onErr,
+  });
+  const rework = trpc.salesOs.outreach.rework.useMutation({
+    onSuccess: () => {
+      setReworkFeedback("");
+      invalidate();
+    },
+    onError: onErr,
+  });
+
+  function isLinkedIn(channel: string) {
+    return channel === "linkedin" || channel.startsWith("linkedin_");
+  }
+
+  function linkedInHref(item: NonNullable<typeof items.data>[number]) {
+    const raw = item.linkedinUrl ?? item.recipient;
+    if (raw.startsWith("http")) return raw;
+    return "https://www.linkedin.com/";
+  }
+
+  async function copyBody(item: NonNullable<typeof items.data>[number]) {
+    try {
+      await navigator.clipboard.writeText(item.body);
+      setCopiedId(item.id);
+      setSendNote("Copied — paste into LinkedIn, then mark sent.");
+    } catch {
+      setGateError("Clipboard copy failed — select the draft and copy manually.");
+    }
+  }
 
   const companyByDeal = useMemo(() => {
     const m = new Map<string, string>();
@@ -130,6 +172,14 @@ function OutreachInner() {
           ].filter(Boolean);
           setSendNote(parts.length ? `Sent · ${parts.join(" · ")}` : "Sent");
         }
+      } else if (verb === "Mark sent") {
+        setSendNote("Marked sent — LinkedIn assist recorded against the weekly cap.");
+      } else if (verb === "Accepted") {
+        setSendNote("Connection marked accepted — follow-up can be sent.");
+      } else if (verb === "Rework") {
+        setSendNote("Returned to draft with feedback.");
+      } else if (verb === "Skip") {
+        setSendNote("LinkedIn assist skipped.");
       }
       return;
     }
@@ -172,8 +222,9 @@ function OutreachInner() {
       className={`crm-approval-mini${focusId === item.id ? " is-focused" : ""}`}
     >
       <div className="flex items-center justify-between gap-2">
-        <CrmTag kind={item.channel === "gmail" ? "ochre" : "info"}>
+        <CrmTag kind={isLinkedIn(item.channel) ? "info" : "ochre"}>
           {item.channel} · {item.state}
+          {item.cadenceTouch ? ` · touch ${item.cadenceTouch}` : ""}
         </CrmTag>
         <span className="text-[10px] text-[var(--muted)]">
           {companyByDeal.get(item.dealId) ?? "Deal"} → {item.recipient || "—"}
@@ -181,6 +232,12 @@ function OutreachInner() {
       </div>
       <h4 data-testid="outreach-item-subject">{item.subject ?? "(no subject)"}</h4>
       <p style={{ whiteSpace: "pre-wrap" }}>{item.body}</p>
+      {item.reworkFeedback ? (
+        <p className="text-xs text-[var(--muted)]">Rework: {item.reworkFeedback}</p>
+      ) : null}
+      {item.acceptedAt ? (
+        <p className="text-xs text-[var(--muted)]">Connection accepted</p>
+      ) : null}
       <div className="crm-approval-actions">{actions}</div>
     </article>
   );
@@ -189,7 +246,7 @@ function OutreachInner() {
     <main>
       <CrmPageHeader
         title="Outreach drafts"
-        description="AI proposes; the gate disposes. Every send needs a prior human approval — no unattended auto-send."
+        description="AI proposes; the gate disposes. Email send is two clicks (approve ≠ send). LinkedIn is copy + open + mark sent — never automated."
       />
 
       <div className="mt-4">
@@ -253,6 +310,21 @@ function OutreachInner() {
                       Approve draft
                     </CrmBtn>
                     <CrmBtn
+                      disabled={busyId !== null || !reworkFeedback.trim()}
+                      data-testid="outreach-rework"
+                      onClick={() =>
+                        void run(item.id, "Rework", async () => {
+                          await rework.mutateAsync({
+                            id: item.id,
+                            feedback: reworkFeedback.trim(),
+                          });
+                          return { ok: true };
+                        })
+                      }
+                    >
+                      Rework
+                    </CrmBtn>
+                    <CrmBtn
                       disabled={busyId !== null}
                       onClick={() =>
                         void run(item.id, "Discard", () =>
@@ -266,6 +338,18 @@ function OutreachInner() {
                 ),
               )
             )}
+            {byState.drafts.length > 0 ? (
+              <div className="crm-field mt-3">
+                <label>Rework feedback</label>
+                <input
+                  className="crm-input"
+                  data-testid="outreach-rework-feedback"
+                  value={reworkFeedback}
+                  onChange={(e) => setReworkFeedback(e.target.value)}
+                  placeholder="More specific to this launch"
+                />
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -273,7 +357,7 @@ function OutreachInner() {
           <div className="crm-panel-head">
             <div>
               <h3>Approved — ready to send</h3>
-              <p>Send executes the Gmail action and marks sent atomically</p>
+              <p>Gmail send after suppression + cap checks. LinkedIn is copy-assist only.</p>
             </div>
             <CrmTag kind="success">{byState.approved.length} ready</CrmTag>
           </div>
@@ -289,29 +373,88 @@ function OutreachInner() {
               byState.approved.map((item) =>
                 renderItem(
                   item,
-                  <>
-                    <CrmBtn
-                      variant="primary"
-                      disabled={busyId !== null}
-                      onClick={() =>
-                        void run(item.id, "Send", () =>
-                          send.mutateAsync({ id: item.id }),
-                        )
-                      }
-                    >
-                      Send via Gmail
-                    </CrmBtn>
-                    <CrmBtn
-                      disabled={busyId !== null}
-                      onClick={() =>
-                        void run(item.id, "Discard", () =>
-                          discard.mutateAsync({ id: item.id }),
-                        )
-                      }
-                    >
-                      Discard
-                    </CrmBtn>
-                  </>,
+                  isLinkedIn(item.channel) ? (
+                    <>
+                      <CrmBtn
+                        variant="primary"
+                        data-testid="outreach-copy-linkedin"
+                        disabled={busyId !== null}
+                        onClick={() => void copyBody(item)}
+                      >
+                        {copiedId === item.id ? "Copied" : "Copy"}
+                      </CrmBtn>
+                      <a
+                        className="crm-btn"
+                        data-testid="outreach-open-linkedin"
+                        href={linkedInHref(item)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open LinkedIn
+                      </a>
+                      <CrmBtn
+                        data-testid="outreach-mark-sent"
+                        disabled={busyId !== null}
+                        onClick={() =>
+                          void run(item.id, "Mark sent", async () => {
+                            await markSent.mutateAsync({ id: item.id });
+                            return { ok: true };
+                          })
+                        }
+                      >
+                        Mark sent
+                      </CrmBtn>
+                      {item.channel === "linkedin_connect" ? (
+                        <CrmBtn
+                          data-testid="outreach-mark-accepted"
+                          disabled={busyId !== null}
+                          onClick={() =>
+                            void run(item.id, "Accepted", async () => {
+                              await markAccepted.mutateAsync({ id: item.id });
+                              return { ok: true };
+                            })
+                          }
+                        >
+                          Mark accepted
+                        </CrmBtn>
+                      ) : null}
+                      <CrmBtn
+                        disabled={busyId !== null}
+                        onClick={() =>
+                          void run(item.id, "Skip", async () => {
+                            await markSkipped.mutateAsync({ id: item.id });
+                            return { ok: true };
+                          })
+                        }
+                      >
+                        Skip
+                      </CrmBtn>
+                    </>
+                  ) : (
+                    <>
+                      <CrmBtn
+                        variant="primary"
+                        disabled={busyId !== null}
+                        onClick={() =>
+                          void run(item.id, "Send", () =>
+                            send.mutateAsync({ id: item.id }),
+                          )
+                        }
+                      >
+                        Send via Gmail
+                      </CrmBtn>
+                      <CrmBtn
+                        disabled={busyId !== null}
+                        onClick={() =>
+                          void run(item.id, "Discard", () =>
+                            discard.mutateAsync({ id: item.id }),
+                          )
+                        }
+                      >
+                        Discard
+                      </CrmBtn>
+                    </>
+                  ),
                 ),
               )
             )}
@@ -339,7 +482,7 @@ function OutreachInner() {
                 // gate banner instead of an unhandled rejection.
                 draft.mutate({
                   dealId: draftDealId,
-                  channel: "gmail",
+                  channel: draftChannel,
                   subject: draftSubject.trim() || undefined,
                   body: draftBody.trim() || undefined,
                 });
@@ -362,6 +505,19 @@ function OutreachInner() {
                       {d.companyName} · {String(d.stage).replace(/_/g, " ")}
                     </option>
                   ))}
+                </select>
+              </div>
+              <div className="crm-field">
+                <label>Channel</label>
+                <select
+                  className="crm-select"
+                  data-testid="outreach-draft-channel"
+                  value={draftChannel}
+                  onChange={(e) => setDraftChannel(e.target.value)}
+                >
+                  <option value="gmail">Email (Gmail HITL)</option>
+                  <option value="linkedin_connect">LinkedIn connect (copy)</option>
+                  <option value="linkedin_followup">LinkedIn follow-up (copy)</option>
                 </select>
               </div>
               <div className="crm-field">
@@ -406,16 +562,20 @@ function OutreachInner() {
                 Gmail <span><CrmTag kind="warn">Approval required</CrmTag></span>
               </div>
               <div className="crm-check-row">
-                LinkedIn <span><CrmTag kind="info">Copy only</CrmTag></span>
+                LinkedIn <span><CrmTag kind="info">Copy + mark sent</CrmTag></span>
               </div>
               <div className="crm-check-row">
                 Auto-send <span><CrmTag kind="danger">Disabled</CrmTag></span>
               </div>
+              <div className="crm-check-row">
+                Tracking pixels <span><CrmTag kind="danger">Off</CrmTag></span>
+              </div>
             </div>
             <div className="crm-note">
-              LinkedIn has no OAuth automation in V1. Approved copy is manually
-              pasted by staff. Sends without a prior approve are refused by the
-              outreach gate and audited.
+              LinkedIn is never automated. Copy the draft, send in LinkedIn, then
+              mark sent / accepted. Follow-up stays locked until the connect is
+              marked Accepted. Email send checks suppression, daily cap, and the
+              identity footer first.
             </div>
           </div>
         </aside>
@@ -432,12 +592,13 @@ function OutreachInner() {
                 <th>Subject</th>
                 <th>State</th>
                 <th>Updated</th>
+                <th />
               </tr>
             </thead>
             <tbody>
               {byState.history.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>No sent or discarded outreach yet.</td>
+                  <td colSpan={7}>No sent or discarded outreach yet.</td>
                 </tr>
               ) : (
                 byState.history.map((item) => (
@@ -455,9 +616,28 @@ function OutreachInner() {
                         kind={item.state === "sent" ? "success" : "danger"}
                       >
                         {item.state}
+                        {item.acceptedAt ? " · accepted" : ""}
                       </CrmTag>
                     </td>
                     <td>{formatRelative(item.updatedAt)}</td>
+                    <td>
+                      {item.channel === "linkedin_connect" &&
+                      item.state === "sent" &&
+                      !item.acceptedAt ? (
+                        <CrmBtn
+                          data-testid="outreach-mark-accepted-history"
+                          disabled={busyId !== null}
+                          onClick={() =>
+                            void run(item.id, "Accepted", async () => {
+                              await markAccepted.mutateAsync({ id: item.id });
+                              return { ok: true };
+                            })
+                          }
+                        >
+                          Mark accepted
+                        </CrmBtn>
+                      ) : null}
+                    </td>
                   </tr>
                 ))
               )}

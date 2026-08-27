@@ -36,6 +36,9 @@ export default function CrmInboundPage() {
   const [useExistingContact, setUseExistingContact] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [intentCsv, setIntentCsv] = useState("");
+  const [intentNote, setIntentNote] = useState<string | null>(null);
+  const importIntent = trpc.salesOs.intentCsv.useMutation();
 
   // Ids created by a previous, partially-failed submit. A retry reuses them
   // instead of re-creating the company/contact/deal. Cleared whenever an
@@ -332,6 +335,43 @@ export default function CrmInboundPage() {
             )}
           </div>
         </aside>
+      </section>
+
+      <section className="crm-panel mt-4" data-testid="inbound-intent-csv">
+        <div className="crm-panel-head">
+          <div>
+            <h3>Apollo intent CSV</h3>
+            <p>
+              Monthly intent export → Gate 1 as lane <code>apollo_intent</code>. No-go
+              rows are skipped.
+            </p>
+          </div>
+        </div>
+        <div className="crm-panel-body">
+          <textarea
+            className="crm-textarea"
+            data-testid="inbound-intent-csv-input"
+            value={intentCsv}
+            onChange={(e) => setIntentCsv(e.target.value)}
+            placeholder="company,domain,intent,employees"
+          />
+          <CrmBtn
+            className="mt-2"
+            variant="primary"
+            data-testid="inbound-intent-import"
+            disabled={importIntent.isPending || intentCsv.trim().length < 3}
+            onClick={() =>
+              importIntent.mutateAsync({ csv: intentCsv }).then((r) =>
+                setIntentNote(
+                  `Imported ${r.created.length} companies · skipped ${r.skipped.length}`,
+                ),
+              )
+            }
+          >
+            {importIntent.isPending ? "Importing…" : "Import intent leads"}
+          </CrmBtn>
+          {intentNote ? <p className="crm-note mt-2">{intentNote}</p> : null}
+        </div>
       </section>
 
       <div className="mt-4">

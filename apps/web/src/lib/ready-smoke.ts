@@ -7,6 +7,7 @@ export type ReadySmoke = {
   llmFreeOnly?: boolean;
   xeroWriteEnabled?: boolean;
   database?: "up" | "down";
+  keyStore?: "vault" | "memory";
   pgvector?: boolean;
   portalMagicLink?: string;
   tools?: Record<string, string>;
@@ -42,7 +43,8 @@ export function formatReadyDbLine(ready: ReadySmoke): string {
   const db = ready.database ?? "—";
   const vec = ready.pgvector ? "on" : "off";
   const portal = ready.portalMagicLink ?? "—";
-  return `database ${db} · pgvector ${vec} · portal magic-link ${portal}`;
+  const store = ready.keyStore ?? (ready.database === "up" ? "vault" : "memory");
+  return `database ${db} · key store ${store} · pgvector ${vec} · portal magic-link ${portal}`;
 }
 
 export function formatReadyToolsLine(ready: ReadySmoke): string {

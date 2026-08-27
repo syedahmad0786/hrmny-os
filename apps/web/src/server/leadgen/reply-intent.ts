@@ -43,6 +43,19 @@ export async function applyReplyIntent(input: {
 }): Promise<ApplyReplyIntentResult> {
   const toStage = intentToTransition[input.intent];
   if (toStage === null) {
+    if (input.intent === "unsubscribe") {
+      const { honorUnsubscribe } = await import("../sales-os/replies");
+      await honorUnsubscribe({
+        dealId: input.dealId,
+        source: "reply-intent",
+      });
+      return {
+        intent: input.intent,
+        toStage: null,
+        moved: false,
+        reason: "suppressed_and_closed",
+      };
+    }
     return { intent: input.intent, toStage: null, moved: false };
   }
   const move = input.moveDealStage ?? repoMoveDealStage;

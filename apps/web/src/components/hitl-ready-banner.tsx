@@ -42,7 +42,10 @@ export function HitlReadyBanner({
             {(ready.connections?.errors?.googleWorkspace ?? 0) > 0
               ? "Gmail HITL Approve & send is blocked until Google Workspace is reconnected (token revoked)."
               : "Gmail HITL Approve & send is blocked until Google Workspace is connected."}{" "}
-            <Link href="/settings/connections" className="underline">
+            <Link
+              href="/settings/connections#conn-google_workspace"
+              className="underline"
+            >
               Reconnect in Connections
             </Link>
           </>

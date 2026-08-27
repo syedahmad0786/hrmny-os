@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 
 const CRM_TABS: { href: string; label: string; exact?: boolean }[] = [
   { href: "/crm", label: "Pipeline", exact: true },
+  { href: "/crm/hunt", label: "Hunt" },
+  { href: "/crm/research", label: "Research" },
   { href: "/clients", label: "Clients" },
   { href: "/crm/deals", label: "Deals" },
   { href: "/crm/companies", label: "Companies" },
@@ -15,6 +17,7 @@ const CRM_TABS: { href: string; label: string; exact?: boolean }[] = [
   { href: "/crm/inbound", label: "Inbound" },
   { href: "/crm/seams", label: "Email + calendar" },
   { href: "/crm/quote", label: "Commercial" },
+  { href: "/crm/settings/sales-os", label: "Sales OS" },
 ];
 
 export function CrmSubnav() {

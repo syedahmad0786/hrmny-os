@@ -332,7 +332,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         if (error || !providerToken || !refreshToken) {
           throw new Error(
             error?.message ??
-              "Google tokens expired before save — click Reconnect again (tokens must be captured right after OAuth).",
+              "Google tokens expired before save — use Reconnect on Connections (dedicated Google OAuth, not Heal).",
           );
         }
         saveGoogleWorkspace.mutate({

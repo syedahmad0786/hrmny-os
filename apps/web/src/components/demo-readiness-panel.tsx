@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { demoBlockerConnectionsPath } from "@/lib/demo-blocker-anchor";
+import {
+  demoBlockerConnectionsPath,
+  isOptionalLaterDemoBlocker,
+  prioritizeDemoBlockers,
+} from "@/lib/demo-blocker-anchor";
 import { formatReadyLlmLine, type ReadySmoke } from "@/lib/ready-smoke";
 
 /**
@@ -30,8 +34,9 @@ export function DemoReadinessPanel({
 
   if (!ready) return null;
 
-  const blockers = ready.blockers ?? [];
-  const liveReady = blockers.length === 0;
+  const blockers = prioritizeDemoBlockers(ready.blockers ?? []);
+  const required = blockers.filter((item) => !isOptionalLaterDemoBlocker(item));
+  const later = blockers.filter((item) => isOptionalLaterDemoBlocker(item));
 
   return (
     <section
@@ -46,9 +51,13 @@ export function DemoReadinessPanel({
           className="text-xs text-muted"
           data-testid={`${testIdPrefix}-demo-blockers-count`}
         >
-          {liveReady
-            ? "Live integrations ready"
-            : `${blockers.length} blocker${blockers.length === 1 ? "" : "s"}`}
+          {required.length > 0
+            ? `${required.length} required${
+                later.length ? ` · ${later.length} later` : ""
+              }`
+            : later.length > 0
+              ? `${later.length} optional later`
+              : "Live integrations ready"}
         </p>
       </div>
       <p className="mt-2 text-muted" data-testid={`${testIdPrefix}-demo-llm`}>

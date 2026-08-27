@@ -1,0 +1,338 @@
+import { z } from "zod";
+import { TRPCError } from "@trpc/server";
+import { salesgrowth } from "@hrmny/integrations";
+import { runSalesGrowthImport } from "../crm/salesgrowth-import";
+import { addCredit } from "../sales-os/store";
+import {
+  applyEvolve,
+  applySalesOsReplyIntent,
+  assertLinkedInAssistAllowed,
+  buildSalesOsDigest,
+  decideCompany,
+  decideContact,
+  DEFAULT_SALES_OS_SETTINGS,
+  draftChannelsForApprovedContact,
+  enrichApprovedCompany,
+  getSalesOsSettings,
+  honorUnsubscribe,
+  ingestGmailReply,
+  ingestManualResearch,
+  listCompanyResearch,
+  listContactResearch,
+  listEvolveProposals,
+  listIntelSignals,
+  listSuppression,
+  OUTREACH_GUIDELINES,
+  processIntentLeads,
+  proposeEvolve,
+  rejectEvolve,
+  RESEARCH_GUIDELINES,
+  runDailyResearch,
+  SALES_OS_SOP_SOURCE,
+  saveSalesOsSettings,
+  sectorForDate,
+  suppressTarget,
+  weekKey,
+  type SalesOsSettings,
+} from "../sales-os";
+import { getOutreach, listOutreach, patchOutreach } from "../leadgen/store";
+import { router, staffProcedure } from "./trpc";
+
+const settingsPatch = z.object({
+  icp: z
+    .object({
+      target: z.string().optional(),
+      primarySectors: z.array(z.string()).optional(),
+      secondarySectors: z.array(z.string()).optional(),
+      noGo: z.array(z.string()).optional(),
+      minEmployeesGlobal: z.number().optional(),
+      minEmployeesMena: z.number().optional(),
+      minSeniority: z.string().optional(),
+    })
+    .optional(),
+  caps: z
+    .object({
+      apolloContactsPerMonth: z.number().optional(),
+      emailPerDay: z.number().optional(),
+      linkedinConnectsPerWeek: z.number().optional(),
+      companiesPerResearchRun: z.number().optional(),
+      pauseAllOutreach: z.boolean().optional(),
+    })
+    .optional(),
+  outreach: z
+    .object({
+      senderName: z.string().optional(),
+      senderTitle: z.string().optional(),
+      physicalAddress: z.string().optional(),
+      voice: z.string().optional(),
+    })
+    .optional(),
+});
+
+export const salesOsRouter = router({
+  settings: router({
+    get: staffProcedure.query(async () => {
+      const settings = await getSalesOsSettings();
+      return {
+        settings,
+        defaults: DEFAULT_SALES_OS_SETTINGS,
+        source: SALES_OS_SOP_SOURCE,
+        guidelines: { outreach: OUTREACH_GUIDELINES, research: RESEARCH_GUIDELINES },
+        sectorToday: sectorForDate(settings),
+      };
+    }),
+    save: staffProcedure.input(settingsPatch).mutation(async ({ input, ctx }) => {
+      const current = await getSalesOsSettings();
+      const next: SalesOsSettings = {
+        ...current,
+        icp: { ...current.icp, ...input.icp },
+        caps: { ...current.caps, ...input.caps },
+        outreach: { ...current.outreach, ...input.outreach },
+      };
+      return saveSalesOsSettings(next, ctx.employeeId);
+    }),
+  }),
+
+  research: router({
+    list: staffProcedure
+      .input(
+        z
+          .object({
+            state: z.enum(["researched", "approved", "rejected", "rework"]).optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => listCompanyResearch(input)),
+    runDaily: staffProcedure
+      .input(z.object({ sector: z.string().optional() }).optional())
+      .mutation(({ input }) => runDailyResearch({ sector: input?.sector })),
+    ingest: staffProcedure
+      .input(
+        z.object({
+          name: z.string().min(2),
+          sector: z.string().optional(),
+          whyThis: z.string().min(8),
+          website: z.string().optional(),
+          evidence: z.string().optional(),
+          estimatedValueAed: z.number().optional(),
+          suggestedServices: z.string().optional(),
+          employeesGlobal: z.number().optional(),
+          employeesMena: z.number().optional(),
+          leadSourceLane: z.string().optional(),
+        }),
+      )
+      .mutation(({ input }) => ingestManualResearch(input)),
+    decide: staffProcedure
+      .input(
+        z.object({
+          id: z.string(),
+          action: z.enum(["approve", "reject", "rework"]),
+          feedback: z.string().optional(),
+        }),
+      )
+      .mutation(({ input, ctx }) =>
+        decideCompany(input.id, input.action, {
+          actorId: ctx.employeeId,
+          feedback: input.feedback,
+        }),
+      ),
+    enrich: staffProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ input }) => enrichApprovedCompany(input.id)),
+  }),
+
+  contacts: router({
+    list: staffProcedure
+      .input(
+        z
+          .object({
+            companyResearchId: z.string().optional(),
+            state: z.enum(["found", "approved", "rejected", "rework"]).optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => listContactResearch(input)),
+    decide: staffProcedure
+      .input(
+        z.object({
+          id: z.string(),
+          action: z.enum(["approve", "reject", "rework"]),
+          feedback: z.string().optional(),
+        }),
+      )
+      .mutation(({ input, ctx }) =>
+        decideContact(input.id, input.action, {
+          actorId: ctx.employeeId,
+          feedback: input.feedback,
+        }),
+      ),
+    draft: staffProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ input }) => draftChannelsForApprovedContact(input.id)),
+  }),
+
+  suppression: router({
+    list: staffProcedure.query(() => listSuppression()),
+    add: staffProcedure
+      .input(
+        z.object({
+          email: z.string().email().optional(),
+          domain: z.string().optional(),
+          reason: z.enum(["unsubscribe", "bounce", "complaint", "dnc", "no_go"]),
+        }),
+      )
+      .mutation(({ input }) =>
+        suppressTarget({
+          email: input.email,
+          domain: input.domain,
+          reason: input.reason,
+          source: "staff",
+        }),
+      ),
+  }),
+
+  digest: staffProcedure.query(() => buildSalesOsDigest()),
+
+  intentCsv: staffProcedure
+    .input(z.object({ csv: z.string().min(3) }))
+    .mutation(({ input }) => processIntentLeads(input.csv)),
+
+  replies: router({
+    /** Not named `apply` — tRPC proxies collide with Function.prototype.apply. */
+    applyIntent: staffProcedure
+      .input(
+        z.object({
+          dealId: z.string().uuid(),
+          intent: z.enum(["interested", "question", "not_now", "unsubscribe", "other"]),
+          email: z.string().optional(),
+        }),
+      )
+      .mutation(({ input, ctx }) =>
+        applySalesOsReplyIntent({
+          dealId: input.dealId,
+          intent: input.intent,
+          actorEmployeeId: ctx.employeeId,
+          email: input.email,
+        }),
+      ),
+    ingest: staffProcedure
+      .input(
+        z.object({
+          fromEmail: z.string().email(),
+          body: z.string().min(1),
+          dealId: z.string().uuid().optional(),
+          outreachItemId: z.string().optional(),
+        }),
+      )
+      .mutation(({ input, ctx }) =>
+        ingestGmailReply({ ...input, actorEmployeeId: ctx.employeeId }),
+      ),
+  }),
+
+  linkedin: router({
+    markSent: staffProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(async ({ input }) => {
+        const item = await getOutreach(input.id);
+        if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Outreach not found" });
+        if (!item.channel.startsWith("linkedin")) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Assisted send is LinkedIn-only",
+          });
+        }
+        if (item.state !== "approved") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Approve the draft before marking sent",
+          });
+        }
+        if (item.channel === "linkedin_followup") {
+          const connect = (await listOutreach({ dealId: item.dealId })).find(
+            (o) => o.channel === "linkedin_connect" && o.acceptedAt,
+          );
+          if (!connect) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "Mark the connection Accepted before sending the follow-up",
+            });
+          }
+        }
+        const cap = await assertLinkedInAssistAllowed();
+        if (!cap.ok) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: cap.reason });
+        }
+        await addCredit("linkedin_assist", 1, weekKey());
+        return patchOutreach(input.id, {
+          state: "sent",
+          sentAt: new Date().toISOString(),
+        });
+      }),
+    markAccepted: staffProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(async ({ input }) => {
+        const item = await getOutreach(input.id);
+        if (!item || item.channel !== "linkedin_connect") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Not a connection item" });
+        }
+        return patchOutreach(input.id, { acceptedAt: new Date().toISOString() });
+      }),
+    markSkipped: staffProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ input }) => patchOutreach(input.id, { state: "discarded" })),
+  }),
+
+  evolve: router({
+    list: staffProcedure.query(() => listEvolveProposals()),
+    propose: staffProcedure
+      .input(z.object({ focus: z.string().optional() }).optional())
+      .mutation(({ input }) => proposeEvolve(input?.focus)),
+    accept: staffProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ input, ctx }) => applyEvolve(input.id, ctx.employeeId)),
+    reject: staffProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(({ input }) => rejectEvolve(input.id)),
+  }),
+
+  intel: staffProcedure
+    .input(z.object({ companyId: z.string().uuid().optional() }).optional())
+    .query(({ input }) => listIntelSignals(input?.companyId)),
+
+  importSalesGrowth: staffProcedure
+    .input(
+      z.object({
+        data: z.unknown(),
+        apply: z.boolean().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const parsed = salesgrowth.parseSalesGrowthExport
+        ? salesgrowth.parseSalesGrowthExport(input.data)
+        : (input.data as Parameters<typeof runSalesGrowthImport>[0]);
+      return runSalesGrowthImport(parsed, { apply: input.apply ?? false });
+    }),
+
+  outreach: router({
+    rework: staffProcedure
+      .input(z.object({ id: z.string(), feedback: z.string().min(2) }))
+      .mutation(async ({ input }) => {
+        const item = await getOutreach(input.id);
+        if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Outreach not found" });
+        if (item.state !== "draft" && item.state !== "approved") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Only draft or approved items can be sent back for rework",
+          });
+        }
+        return patchOutreach(input.id, {
+          state: "draft",
+          reworkFeedback: input.feedback.trim(),
+        });
+      }),
+  }),
+
+  honorUnsubscribe: staffProcedure
+    .input(z.object({ dealId: z.string().uuid().optional(), email: z.string().email() }))
+    .mutation(({ input }) => honorUnsubscribe(input)),
+});

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   demoBlockerAnchor,
   demoBlockerConnectionsPath,
+  isOptionalLaterDemoBlocker,
+  prioritizeDemoBlockers,
 } from "./demo-blocker-anchor";
 
 describe("demoBlockerAnchor", () => {
@@ -19,5 +21,24 @@ describe("demoBlockerAnchor", () => {
       "/settings/connections#direct-business-connections",
     );
     expect(demoBlockerAnchor("unknown blocker")).toBeNull();
+  });
+
+  it("treats Apollo / Hunter / Xero as optional later", () => {
+    expect(isOptionalLaterDemoBlocker("Paste Apollo API key in Connections")).toBe(
+      true,
+    );
+    expect(
+      isOptionalLaterDemoBlocker("Reconnect Google Workspace: revoked"),
+    ).toBe(false);
+  });
+
+  it("sorts Google Workspace ahead of optional keys", () => {
+    expect(
+      prioritizeDemoBlockers([
+        "Paste Apollo API key in Connections",
+        "Reconnect Google Workspace: revoked",
+        "Connect Xero OAuth in Connections",
+      ])[0],
+    ).toMatch(/Google Workspace/);
   });
 });
