@@ -21,5 +21,6 @@ export {
   createN8nMock,
   createN8nLive,
   createN8nAdapter,
+  N8N_FETCH_TIMEOUT_MS,
   type N8nAdapterConfig,
 } from "./client";

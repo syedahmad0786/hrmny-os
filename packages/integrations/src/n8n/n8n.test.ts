@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createN8nMock,
   createN8nAdapter,
+  createN8nLive,
+  N8N_FETCH_TIMEOUT_MS,
   normalizeN8nBaseUrl,
   resolveN8nWebhookUrl,
   getN8nWebhookUrlOverride,
@@ -123,5 +125,34 @@ describe("n8n mock adapter", () => {
     const status = await n8n.getExecutionStatus("exec-1");
     expect(status.finished).toBe(true);
     expect(status.status).toBe("success");
+  });
+
+  it("does not infer live from a key when mode is mock", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const n8n = createN8nAdapter({
+      apiKey: "n8n-e2e-backend-key",
+      mode: "mock",
+    });
+    const health = await n8n.health();
+    expect(health.mode).toBe("mock");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("live health fetch is bounded by N8N_FETCH_TIMEOUT_MS", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const n8n = createN8nLive({
+      apiKey: "live-key",
+      baseUrl: "https://hrmny.app.n8n.cloud",
+    });
+    await n8n.health();
+    expect(fetchMock).toHaveBeenCalled();
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(N8N_FETCH_TIMEOUT_MS).toBe(8_000);
   });
 });

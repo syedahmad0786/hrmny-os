@@ -136,6 +136,7 @@ export {
   createN8nMock,
   createN8nLive,
   createN8nAdapter,
+  N8N_FETCH_TIMEOUT_MS,
   type N8nConfig,
   type N8nCrmEvent,
   type N8nEventMapEntry,

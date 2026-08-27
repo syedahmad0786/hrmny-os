@@ -27,6 +27,7 @@ Recorded 2026-08-27 during the Harmony OS completion audit (cloud agent, no `sys
 11. **Portal staff chrome** was already redirected in `StaffShell`. Inventory P1 `portal-staff-soft-boundary` is closed in code; leftover risk is a brief flash before `auth.session` resolves. No `middleware.ts` added (would need a cookie/session design).
 12. **Sentry SDK not added.** Env-only DSN without a project is dead code. Human gate #18 first.
 13. **Inventory docs are historical.** We appended a delta pointer rather than rewriting 600+ baseline rows.
+14. **Pasted n8n keys stay mock unless `N8N_MODE=live`.** Connections e2e writes `n8n-e2e-backend-key` into the process-local memory store. Inferring live from "key present" then hung `automation.smoke` on n8n Cloud (no fetch timeout) and failed CI on main. Memory-source keys now force mock; live REST calls use an 8s abort. Env/vault keys keep the previous live inference.
 
 ## Failures and workarounds
 
