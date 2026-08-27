@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { runAgent } from "@hrmny/ai";
+import { createAdsInsightsAdapter } from "@hrmny/integrations";
 import { router, staffProcedure } from "./trpc";
 import { listDeals } from "../crm/repository";
 import { getDemoStore } from "../demo-store";
@@ -112,5 +113,32 @@ export const analyticsRouter = router({
         },
         runAgent,
       );
+    }),
+
+  /**
+   * Read-only ads pacing snapshot. Mock by default; live adapter fails loud
+   * until Meta/Google read tokens and an approved M11 scope arrive. Never writes budgets.
+   */
+  adsInsights: staffProcedure
+    .input(
+      z
+        .object({
+          platform: z.enum(["meta", "google"]).default("meta"),
+          accountId: z.string().optional(),
+          since: z.string().optional(),
+          until: z.string().optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input }) => {
+      const platform = input?.platform ?? "meta";
+      const adapter = createAdsInsightsAdapter({ platform, mode: "mock" });
+      const accounts = await adapter.listAccounts();
+      const accountId = input?.accountId ?? accounts[0]?.accountId ?? "mock";
+      const until = input?.until ?? new Date().toISOString().slice(0, 10);
+      const since =
+        input?.since ??
+        new Date(Date.now() - 26 * 86400000).toISOString().slice(0, 10);
+      return adapter.getInsights({ accountId, since, until });
     }),
 });

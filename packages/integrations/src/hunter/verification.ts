@@ -11,6 +11,14 @@ import type {
  * verified-email deal transition — a payment trigger — so the adapter NEVER
  * invents a verdict: anything not explicitly deliverable stays `unknown` /
  * `emailVerified:false`. Mock by default; live fails loud without its key.
+ *
+ * Official live endpoints (verified 2026-08-27):
+ * - Hunter: GET https://api.hunter.io/v2/email-verifier
+ *   https://hunter.io/api-documentation/v2#email-verifier
+ *   https://github.com/hunter-io
+ * - NeverBounce: GET https://api.neverbounce.com/v4.2/single/check
+ *   https://developers.neverbounce.com/reference/single-check
+ *   https://github.com/NeverBounce/NeverBounceApi-Node
  */
 
 export type EmailVerificationConfig = {
@@ -19,13 +27,41 @@ export type EmailVerificationConfig = {
   apiKey?: string;
 };
 
-function resolveMode(config: EmailVerificationConfig): "mock" | "live" {
+export function resolveEmailVerificationProvider(
+  config: EmailVerificationConfig = {},
+): EmailVerificationProvider {
+  if (config.provider === "hunter" || config.provider === "neverbounce") {
+    return config.provider;
+  }
+  const env = process.env.EMAIL_VERIFICATION_PROVIDER?.toLowerCase();
+  if (env === "neverbounce" || env === "hunter") return env;
+  return "hunter";
+}
+
+function envModeFor(provider: EmailVerificationProvider): string | undefined {
+  if (provider === "neverbounce") {
+    return process.env.NEVERBOUNCE_MODE?.toLowerCase();
+  }
+  return process.env.HUNTER_MODE?.toLowerCase();
+}
+
+function envKeyFor(provider: EmailVerificationProvider): string | undefined {
+  if (provider === "neverbounce") {
+    return process.env.NEVERBOUNCE_API_KEY?.trim();
+  }
+  return process.env.HUNTER_API_KEY?.trim();
+}
+
+export function resolveEmailVerificationMode(
+  config: EmailVerificationConfig = {},
+  provider: EmailVerificationProvider = resolveEmailVerificationProvider(config),
+): "mock" | "live" {
   if (config.mode === "mock") return "mock";
   if (config.mode === "live") return "live";
-  const env = process.env.HUNTER_MODE?.toLowerCase();
+  const env = envModeFor(provider);
   if (env === "live") return "live";
   if (env === "mock") return "mock";
-  if ((config.apiKey ?? process.env.HUNTER_API_KEY)?.trim()) return "live";
+  if ((config.apiKey ?? envKeyFor(provider))?.trim()) return "live";
   return "mock";
 }
 
@@ -109,7 +145,10 @@ export function createHunterVerificationLive(
   };
 }
 
-/** Live NeverBounce — GET /v4/single/check. Only `valid` verifies. */
+/**
+ * Live NeverBounce — GET /v4.2/single/check (official current; v4 remains
+ * a documented alias). Only `valid` verifies. Auth: `key` query param.
+ */
 export function createNeverBounceVerificationLive(
   config: EmailVerificationConfig = {},
 ): EmailVerificationAdapter {
@@ -124,7 +163,7 @@ export function createNeverBounceVerificationLive(
     provider: "neverbounce",
     mode: "live",
     async verify(email: string) {
-      const url = new URL("https://api.neverbounce.com/v4/single/check");
+      const url = new URL("https://api.neverbounce.com/v4.2/single/check");
       url.searchParams.set("key", apiKey);
       url.searchParams.set("email", email);
       const res = await fetch(url);
@@ -134,7 +173,7 @@ export function createNeverBounceVerificationLive(
           `Verify failed: HTTP ${res.status}`,
         );
       }
-      const data = (await res.json()) as { result?: string };
+      const data = (await res.json()) as { result?: string; status?: string };
       const verdict = String(data.result ?? "unknown");
       return {
         email,
@@ -149,8 +188,8 @@ export function createNeverBounceVerificationLive(
 export function createEmailVerificationAdapter(
   config: EmailVerificationConfig = {},
 ): EmailVerificationAdapter {
-  const provider = config.provider ?? "hunter";
-  if (resolveMode(config) === "mock") {
+  const provider = resolveEmailVerificationProvider(config);
+  if (resolveEmailVerificationMode(config, provider) === "mock") {
     return createEmailVerificationMock(provider);
   }
   return provider === "neverbounce"

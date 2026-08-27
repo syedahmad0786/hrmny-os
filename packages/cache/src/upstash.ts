@@ -47,10 +47,31 @@ export function createUpstashCache(config: UpstashConfig): CacheClient {
       await command(["DEL", key]);
     },
     async invalidatePrefix(prefix) {
-      // P0 stub: SCAN not fully wired — callers should prefer explicit keys.
-      // Return 0 so callers can fall back to TTL expiry.
-      void prefix;
-      return 0;
+      // Official Upstash Redis REST: POST ["SCAN", cursor, "MATCH", glob, "COUNT", n]
+      // https://upstash.com/docs/redis/features/restapi
+      // https://github.com/upstash/upstash-redis
+      const glob = prefix.endsWith("*") ? prefix : `${prefix}*`;
+      let cursor = "0";
+      let deleted = 0;
+      for (let i = 0; i < 50; i += 1) {
+        const scanned = await command<[string | number, string[]]>([
+          "SCAN",
+          cursor,
+          "MATCH",
+          glob,
+          "COUNT",
+          "100",
+        ]);
+        const next = String(scanned?.[0] ?? "0");
+        const keys = Array.isArray(scanned?.[1]) ? scanned[1] : [];
+        for (const key of keys) {
+          await command(["DEL", key]);
+          deleted += 1;
+        }
+        cursor = next;
+        if (cursor === "0") break;
+      }
+      return deleted;
     },
   };
 }

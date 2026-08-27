@@ -54,4 +54,11 @@ describe("verifyN8nSignature", () => {
     vi.stubEnv("N8N_WEBHOOK_SECRET", "");
     expect(verifyN8nSignature(BODY, null).ok).toBe(true);
   });
+
+  it("fails closed in non-production when N8N_WEBHOOK_REQUIRE_SECRET=true", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("N8N_WEBHOOK_SECRET", "");
+    vi.stubEnv("N8N_WEBHOOK_REQUIRE_SECRET", "true");
+    expect(verifyN8nSignature(BODY, null).ok).toBe(false);
+  });
 });

@@ -2,6 +2,7 @@ import { sql } from "@hrmny/db";
 import {
   createEmailVerificationAdapter,
   createLeadSourceAdapter,
+  resolveEmailVerificationProvider,
 } from "@hrmny/integrations";
 import { getDb } from "../db";
 import { emitHealthSignal } from "../m1-persistence";
@@ -61,13 +62,19 @@ export async function runLeadgenDailyCron(
     resolveIntegrationApiKey("hunter"),
   ]);
 
+  const verifyProvider = resolveEmailVerificationProvider();
+  const neverbounceKey = process.env.NEVERBOUNCE_API_KEY?.trim();
+  const verifierKey =
+    verifyProvider === "neverbounce" ? neverbounceKey : hunter.apiKey;
+
   const digest = await runDailyLeadGen({
     leadSource: createLeadSourceAdapter(
       apollo.apiKey ? { mode: "live", apiKey: apollo.apiKey } : undefined,
     ),
-    verifier: createEmailVerificationAdapter(
-      hunter.apiKey ? { mode: "live", apiKey: hunter.apiKey } : undefined,
-    ),
+    verifier: createEmailVerificationAdapter({
+      provider: verifyProvider,
+      ...(verifierKey ? { mode: "live" as const, apiKey: verifierKey } : {}),
+    }),
   });
 
   const { runDailyResearch } = await import("../sales-os/research");

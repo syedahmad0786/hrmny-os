@@ -12,7 +12,9 @@ import { getDb } from "../db";
 type Row = MemoryChunk & { id: string };
 
 const EMBED_MODEL =
-  process.env.LLM_EMBED_MODEL?.trim() || "openai/text-embedding-3-small";
+  process.env.LLM_EMBED_MODEL?.trim() ||
+  process.env.EMBEDDING_MODEL?.trim() ||
+  "openai/text-embedding-3-small";
 
 /** Deterministic 1536-d bag-of-tokens vector when OpenRouter embeddings unavailable. */
 function localEmbed(text: string): number[] {
@@ -192,6 +194,37 @@ async function vectorSearch(
  * Retrieve with deal/client/user sandbox filters.
  * Prefers pgvector cosine when embeddings exist; falls back to keyword.
  */
+/**
+ * Fill null embeddings with the current embedder. Under LLM_PROVIDER=mock this
+ * is the local hash vector (zero spend). Live OpenRouter is used only when
+ * LLM_PROVIDER is not mock and a key is present.
+ */
+export async function backfillMissingEmbeddings(
+  limit = 50,
+): Promise<{ updated: number; skipped?: string }> {
+  const db = getDb();
+  if (!db) return { updated: 0, skipped: "no_db" };
+  const rows = await db.execute<{ id: string; content: string }>(sql`
+    select id, content
+    from public.memory_chunk
+    where embedding is null
+    order by created_at asc
+    limit ${limit}
+  `);
+  let updated = 0;
+  for (const row of rows) {
+    const embedding = await embedText(row.content);
+    const vectorLiteral = `[${embedding.join(",")}]`;
+    await db.execute(sql`
+      update public.memory_chunk
+      set embedding = ${vectorLiteral}::vector
+      where id = ${row.id}::uuid
+    `);
+    updated += 1;
+  }
+  return { updated };
+}
+
 export async function searchMemory(
   input: RetrieveMemoryInput,
 ): Promise<RetrievedChunk[]> {

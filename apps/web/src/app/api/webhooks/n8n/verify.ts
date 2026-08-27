@@ -22,7 +22,10 @@ export function verifyN8nSignature(
     process.env.HRMNY_N8N_WEBHOOK_SECRET?.trim() ||
     process.env.CRON_SECRET?.trim();
   if (!secret) {
-    if (process.env.NODE_ENV === "production") {
+    const requireSecret =
+      process.env.NODE_ENV === "production" ||
+      process.env.N8N_WEBHOOK_REQUIRE_SECRET === "true";
+    if (requireSecret) {
       return { ok: false, reason: "N8N_WEBHOOK_SECRET not configured" };
     }
     return {

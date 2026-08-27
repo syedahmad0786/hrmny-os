@@ -102,8 +102,16 @@ export {
   createHunterVerificationLive,
   createNeverBounceVerificationLive,
   createEmailVerificationAdapter,
+  resolveEmailVerificationProvider,
+  resolveEmailVerificationMode,
   type EmailVerificationConfig,
 } from "./hunter/verification";
+export {
+  createAdsInsightsMock,
+  createAdsInsightsLive,
+  createAdsInsightsAdapter,
+  type AdsInsightsConfig,
+} from "./ads/mock";
 export {
   createMemoryObjectStore,
   createSupabaseObjectStore,

@@ -15,6 +15,7 @@ import { runScheduledWorkRuleJob } from "@/server/trpc/work-management-router";
 import { runDueReports } from "@/server/inngest/report-scheduler";
 import { runCrmTaskDigest } from "@/server/reminders/crm-task-digest";
 import { runLeadgenDailyCron } from "@/server/leadgen/daily-cron";
+import { runReconSweepers } from "@/server/recon/cron-sweepers";
 
 export const dynamic = "force-dynamic";
 
@@ -210,7 +211,7 @@ export async function GET(request: Request) {
       delayedJobs: Number(lag!.count),
     });
   }
-  const [workWebhooks, expiredAiRuns, dueReports, crmTaskDigest, leadgenDaily] =
+  const [workWebhooks, expiredAiRuns, dueReports, crmTaskDigest, leadgenDaily, recon] =
     await Promise.all([
       deliverPendingWorkWebhooks(),
       cleanupExpiredWorkAiRuns(),
@@ -228,6 +229,11 @@ export async function GET(request: Request) {
         ran: false,
         error: String(error).slice(0, 500),
       })),
+      // Xero mirror, competitor scan, retainer drafts, memory embed backfill.
+      // Mock-safe; never fatal to the job run.
+      runReconSweepers().catch((error) => ({
+        error: String(error).slice(0, 500),
+      })),
     ]);
   return Response.json({
     claimed: claimed.length,
@@ -238,5 +244,6 @@ export async function GET(request: Request) {
     dueReports,
     crmTaskDigest,
     leadgenDaily,
+    recon,
   });
 }

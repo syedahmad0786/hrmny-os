@@ -1,9 +1,6 @@
 import { z } from "zod";
 import { writeAudit } from "../m1-persistence";
-import {
-  SCORECARD_ENTITY_KINDS,
-  type ScorecardEntityKind,
-} from "../scorecards/engine";
+import { SCORECARD_ENTITY_KINDS } from "../scorecards/engine";
 import {
   getDefinition,
   getSnapshot,
@@ -12,7 +9,7 @@ import {
   listSnapshots,
   overrideSnapshot,
   saveDefinition,
-  scoreDealFromBuaf,
+  scoreEntity,
   setDefinitionActive,
   type StoredSnapshot,
 } from "../scorecards/store";
@@ -24,8 +21,8 @@ import {
 } from "./trpc";
 
 /**
- * Explainable ratings tRPC surface — importable module. The orchestrator wires
- * this onto appRouter (NOT registered in root.ts here). Reads are staff-level;
+ * Explainable ratings tRPC surface — registered on appRouter as `scorecards`.
+ * Reads are staff-level;
  * definition mutations are admin-gated (allow:admin:features, the same gate
  * feature-lab/asana-migration use); overrides are audited via writeAudit.
  *
@@ -135,9 +132,9 @@ const snapshotsRouter = router({
     .query(({ input }) => listOverrides(input.snapshotId)),
 
   /**
-   * Recompute an entity's score from fresh evidence. v1 has one evidence
-   * collector: deal → BUAF. Other kinds return an explicit "not wired yet"
-   * rather than a silent empty score — the collector seam per kind is future work.
+   * Recompute an entity's score from fresh evidence. Collectors: deal→BUAF,
+   * lead→fit, client→health, campaign→delivery, vendor→profile,
+   * system_health→safety locks. Unknown kinds still fail loud.
    */
   recompute: staffProcedure
     .input(
@@ -147,7 +144,7 @@ const snapshotsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const snap = await recomputeEntity(input.entityKind, input.entityId);
+      const snap = await scoreEntity(input);
       return filterSnapshotForViewer(snap, ctx);
     }),
 
@@ -180,18 +177,6 @@ const snapshotsRouter = router({
       return override;
     }),
 });
-
-async function recomputeEntity(
-  entityKind: ScorecardEntityKind,
-  entityId: string,
-): Promise<StoredSnapshot> {
-  if (entityKind === "deal") {
-    return scoreDealFromBuaf({ dealId: entityId });
-  }
-  throw new Error(
-    `No evidence collector wired for entity kind "${entityKind}" yet`,
-  );
-}
 
 export const scorecardsRouter = router({
   definitions: definitionsRouter,

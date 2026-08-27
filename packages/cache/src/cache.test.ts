@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { createMemoryCache, cacheKeys } from "./index";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMemoryCache, createUpstashCache, cacheKeys } from "./index";
 
 describe("@hrmny/cache memory", () => {
   it("get/set/del and prefix invalidate", async () => {
@@ -25,5 +25,39 @@ describe("@hrmny/cache memory", () => {
   it("exports stable key helpers", () => {
     expect(cacheKeys.dealList("staff")).toBe("crm:deals:staff");
     expect(cacheKeys.memoryRetrieve("d1", "h")).toBe("mem:retrieve:d1:h");
+  });
+});
+
+describe("@hrmny/cache upstash SCAN invalidatePrefix", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("scans MATCH prefix* and deletes each key", async () => {
+    const calls: unknown[][] = [];
+    vi.stubGlobal(
+      "fetch",
+      async (_url: string, init: { body: string }) => {
+        const body = JSON.parse(init.body) as unknown[];
+        calls.push(body);
+        if (body[0] === "SCAN") {
+          return {
+            ok: true,
+            json: async () => ({ result: ["0", ["crm:deals:a", "crm:deals:b"]] }),
+          };
+        }
+        if (body[0] === "DEL") {
+          return { ok: true, json: async () => ({ result: 1 }) };
+        }
+        throw new Error(`unexpected ${JSON.stringify(body)}`);
+      },
+    );
+    const c = createUpstashCache({
+      url: "https://example.upstash.io",
+      token: "t",
+    });
+    expect(await c.invalidatePrefix("crm:deals:")).toBe(2);
+    expect(calls[0]).toEqual(["SCAN", "0", "MATCH", "crm:deals:*", "COUNT", "100"]);
+    expect(calls.filter((row) => row[0] === "DEL")).toHaveLength(2);
   });
 });

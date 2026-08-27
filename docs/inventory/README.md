@@ -58,3 +58,15 @@ This inventory was captured at `be160d3`. **PRs #19–#25 merged to `main` after
 | #25 | feat(portal): invite-only magic-link client access (feature-flagged) — moves portal auth toward the `gap-live-auth-rls` fix |
 
 > These add new surfaces (scorecards, reconciliation, AI-policy, portal feedback, scheduled reports, magic-link portal auth) and a crawler/manifest gate; the unregistered routers from #19–#21 are documented in [API-SURFACE.md](./API-SURFACE.md), and the crawler finding from #22 is filed as P1 `portal-staff-soft-boundary` in [DEFECTS.md](./DEFECTS.md). All other tables reflect `be160d3` exactly.
+
+## Current-state re-audit (2026-08-27)
+
+The tables above remain the `be160d3` baseline. A full current-HEAD audit — official-docs verification, two-sided bridges, human gates, and delivery scores — lives in [docs/audits/2026-08-27-os-completion/](../audits/2026-08-27-os-completion/README.md).
+
+Material deltas since this inventory (do not treat the baseline tables as current):
+
+- Scorecards, AI policy, people recon, and reports routers **are registered** on `appRouter`.
+- `/api/inbound/lead` exists; n8n HMAC verification is constant-time.
+- Connection health reads `connections.list` (no hardcoded `MOCK_PROVIDERS`).
+- Portal actors are redirected out of staff chrome in `StaffShell`.
+- Xero + Composio webhook receivers and recon cron sweepers landed in the 2026-08-27 completion PR.

@@ -1,0 +1,34 @@
+{
+  "harness": "system_harness-equivalent",
+  "clientKey": "harmony",
+  "projectKey": "hrmny-os",
+  "ranAt": "2026-08-27T22:48:00.000Z",
+  "repo": "https://github.com/syedahmad0786/hrmny-os",
+  "baseSha": "b697fb0",
+  "branch": "ahmadbukhari097/harmony-os-audit-complete-1f15",
+  "safetyLocks": {
+    "XERO_WRITE_ENABLED": false,
+    "LLM_PROVIDER": "mock",
+    "DAM_STORAGE": "memory"
+  },
+  "scores": {
+    "planReadiness": 78,
+    "deliveryEvidence": 71
+  },
+  "implementedLocally": [
+    "email-verification-provider-decouple",
+    "neverbounce-v4.2-path",
+    "ads-insights-mock",
+    "scorecard-collectors",
+    "cron-recon-sweepers",
+    "xero-webhook-official",
+    "composio-webhook-official",
+    "upstash-scan-invalidate",
+    "inbound-lead-tests",
+    "env-example-sync",
+    "ownership-register"
+  ],
+  "humanGates": 22,
+  "providerReadbackAuthorized": false,
+  "docs": "docs/audits/2026-08-27-os-completion/"
+}

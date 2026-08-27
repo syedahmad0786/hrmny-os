@@ -29,6 +29,43 @@ describe("EmailVerificationAdapter (Hunter / NeverBounce-shaped)", () => {
     expect(v.provider).toBe("hunter");
   });
 
+  it("NeverBounce live does not require HUNTER_MODE", () => {
+    const prevH = process.env.HUNTER_MODE;
+    const prevN = process.env.NEVERBOUNCE_MODE;
+    const prevK = process.env.NEVERBOUNCE_API_KEY;
+    delete process.env.HUNTER_MODE;
+    process.env.NEVERBOUNCE_MODE = "live";
+    process.env.NEVERBOUNCE_API_KEY = "nb-test-key";
+    try {
+      const v = createEmailVerificationAdapter({ provider: "neverbounce" });
+      expect(v.provider).toBe("neverbounce");
+      expect(v.mode).toBe("live");
+    } finally {
+      if (prevH !== undefined) process.env.HUNTER_MODE = prevH;
+      else delete process.env.HUNTER_MODE;
+      if (prevN !== undefined) process.env.NEVERBOUNCE_MODE = prevN;
+      else delete process.env.NEVERBOUNCE_MODE;
+      if (prevK !== undefined) process.env.NEVERBOUNCE_API_KEY = prevK;
+      else delete process.env.NEVERBOUNCE_API_KEY;
+    }
+  });
+
+  it("EMAIL_VERIFICATION_PROVIDER selects NeverBounce mock without Hunter live", () => {
+    const prev = process.env.EMAIL_VERIFICATION_PROVIDER;
+    const prevH = process.env.HUNTER_MODE;
+    delete process.env.HUNTER_MODE;
+    process.env.EMAIL_VERIFICATION_PROVIDER = "neverbounce";
+    try {
+      const v = createEmailVerificationAdapter();
+      expect(v.provider).toBe("neverbounce");
+      expect(v.mode).toBe("mock");
+    } finally {
+      if (prev !== undefined) process.env.EMAIL_VERIFICATION_PROVIDER = prev;
+      else delete process.env.EMAIL_VERIFICATION_PROVIDER;
+      if (prevH !== undefined) process.env.HUNTER_MODE = prevH;
+    }
+  });
+
   it("live providers fail loud without their key", () => {
     const prevH = process.env.HUNTER_API_KEY;
     const prevN = process.env.NEVERBOUNCE_API_KEY;

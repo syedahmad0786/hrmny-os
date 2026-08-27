@@ -124,6 +124,6 @@ export async function GET() {
     methods: ["POST"],
     signature:
       "X-Hrmny-N8n-Signature or X-N8n-Signature (HMAC-SHA256 or shared secret)",
-    docs: "hrmny_OS_Execution/11-N8N-SETUP.md",
+    docs: "docs/automations/n8n/README.md",
   });
 }

@@ -9,13 +9,26 @@ import {
   type Db,
 } from "@hrmny/db";
 import { getDb } from "../db";
-import { getDeal } from "../crm/repository";
+import { getCompany, getDeal } from "../crm/repository";
+import { getCampaign } from "../campaigns/repository";
+import { getDemoStore } from "../demo-store";
 import {
   assertScorableKind,
+  campaignDeliveryEvidence,
+  CAMPAIGN_DELIVERY_V1,
+  clientHealthEvidence,
+  CLIENT_HEALTH_V1,
   compute,
   dealBuafEvidence,
   DEAL_BUAF_V1,
+  leadFitEvidence,
+  LEAD_FIT_V1,
+  SEEDED_DEFINITIONS,
+  systemHealthEvidence,
+  SYSTEM_HEALTH_V1,
   validateWeights,
+  vendorProfileEvidence,
+  VENDOR_PROFILE_V1,
   type ScorecardDefinition,
   type ScorecardEntityKind,
   type ScorecardFactor,
@@ -53,9 +66,9 @@ let memory: ScorecardMemory | null = null;
 
 function seedMemory(): ScorecardMemory {
   return {
-    definitions: new Map([
-      [DEAL_BUAF_V1.scorecardDefinitionId, { ...DEAL_BUAF_V1 }],
-    ]),
+    definitions: new Map(
+      SEEDED_DEFINITIONS.map((d) => [d.scorecardDefinitionId, { ...d }]),
+    ),
     snapshots: new Map(),
     overrides: new Map(),
   };
@@ -455,4 +468,106 @@ export async function scoreDealFromBuaf(input: {
     definitionId: definition.scorecardDefinitionId,
     snapshot,
   });
+}
+
+async function persistFrom(
+  definition: ScorecardDefinition,
+  entityId: string,
+  evidence: ReturnType<typeof dealBuafEvidence>,
+): Promise<StoredSnapshot> {
+  return insertSnapshot({
+    definitionId: definition.scorecardDefinitionId,
+    snapshot: compute(definition, entityId, evidence),
+  });
+}
+
+export async function scoreLead(input: {
+  dealId: string;
+  now?: number;
+}): Promise<StoredSnapshot> {
+  const deal = await getDeal(input.dealId);
+  if (!deal) throw new Error(`Lead/deal not found: ${input.dealId}`);
+  const definition = (await getActiveDefinition("lead-fit-v1")) ?? LEAD_FIT_V1;
+  return persistFrom(definition, deal.dealId, leadFitEvidence(deal, input.now));
+}
+
+export async function scoreClient(input: {
+  clientId: string;
+}): Promise<StoredSnapshot> {
+  const client = getDemoStore().clients.get(input.clientId);
+  if (!client) throw new Error(`Client not found: ${input.clientId}`);
+  const definition =
+    (await getActiveDefinition("client-health-v1")) ?? CLIENT_HEALTH_V1;
+  return persistFrom(
+    definition,
+    client.clientId,
+    clientHealthEvidence({
+      clientId: client.clientId,
+      lifecycleStatus: client.lifecycleStatus,
+      engagementType: client.engagementType,
+      fee: client.fee,
+      contractValue: client.contractValue,
+    }),
+  );
+}
+
+export async function scoreCampaign(input: {
+  campaignItemId: string;
+}): Promise<StoredSnapshot> {
+  const item = await getCampaign(input.campaignItemId);
+  if (!item) throw new Error(`Campaign not found: ${input.campaignItemId}`);
+  const definition =
+    (await getActiveDefinition("campaign-delivery-v1")) ?? CAMPAIGN_DELIVERY_V1;
+  return persistFrom(
+    definition,
+    item.campaignItemId,
+    campaignDeliveryEvidence(item),
+  );
+}
+
+export async function scoreVendor(input: {
+  companyId: string;
+}): Promise<StoredSnapshot> {
+  const company = await getCompany(input.companyId);
+  if (!company) throw new Error(`Vendor/company not found: ${input.companyId}`);
+  const definition =
+    (await getActiveDefinition("vendor-profile-v1")) ?? VENDOR_PROFILE_V1;
+  return persistFrom(
+    definition,
+    company.companyId,
+    vendorProfileEvidence(company),
+  );
+}
+
+export async function scoreSystemHealth(input?: {
+  entityId?: string;
+}): Promise<StoredSnapshot> {
+  const entityId = input?.entityId ?? "hrmny-os";
+  const definition =
+    (await getActiveDefinition("system-health-v1")) ?? SYSTEM_HEALTH_V1;
+  return persistFrom(definition, entityId, systemHealthEvidence());
+}
+
+export async function scoreEntity(input: {
+  entityKind: ScorecardEntityKind;
+  entityId: string;
+}): Promise<StoredSnapshot> {
+  switch (input.entityKind) {
+    case "deal":
+      return scoreDealFromBuaf({ dealId: input.entityId });
+    case "lead":
+      return scoreLead({ dealId: input.entityId });
+    case "client":
+      return scoreClient({ clientId: input.entityId });
+    case "campaign":
+      return scoreCampaign({ campaignItemId: input.entityId });
+    case "vendor":
+      return scoreVendor({ companyId: input.entityId });
+    case "system_health":
+      return scoreSystemHealth({ entityId: input.entityId });
+    default:
+      throw new Error(
+        `No evidence collector wired for entity kind "${input.entityKind as string}" yet`,
+      );
+  }
 }
