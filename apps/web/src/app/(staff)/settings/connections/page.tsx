@@ -14,7 +14,16 @@ import { ConnectionHealth } from "./connection-health";
 import { PlatformReadyStrip } from "@/components/platform-ready-strip";
 
 function AppPolicyBanner() {
+  const utils = trpc.useUtils();
   const policy = trpc.connections.organizationPolicy.useQuery();
+  const reopen = trpc.connections.reopenApprovedAppPolicy.useMutation({
+    onSuccess: () =>
+      void Promise.all([
+        utils.connections.organizationPolicy.invalidate(),
+        utils.connections.list.invalidate(),
+        utils.connections.workApps.invalidate(),
+      ]),
+  });
   if (!policy.data) return null;
   const disabled = policy.data.appPolicy === "disabled";
   return (
@@ -32,28 +41,33 @@ function AppPolicyBanner() {
       <p className="mt-1">
         {disabled ? (
           <>
-            Work / Composio apps are blocked because organization policy is{" "}
-            <strong>disabled</strong>. Google Workspace, Apollo, Hunter, and
-            other first-party CRM cards stay connectable. An admin can reopen
-            Work apps under{" "}
-            <Link href="/admin/work" className="underline">
-              Admin → Work
-            </Link>{" "}
-            by setting the policy to approved only.
+            Organization policy is still <strong>disabled</strong> in the
+            database, so Work / Composio extras stay grey. First-party CRM
+            cards (Google Workspace, Apollo, Hunter) stay connectable.
           </>
         ) : (
           <>
             Organization policy is{" "}
-            <strong>{policy.data.appPolicy.replaceAll("_", " ")}</strong>.
-            First-party CRM apps are always allowed. Unreviewed Composio tools
-            stay off the approved list. Change this in{" "}
-            <Link href="/admin/work" className="underline">
-              Admin → Work
-            </Link>
-            .
+            <strong>{policy.data.appPolicy.replaceAll("_", " ")}</strong>
+            {policy.data.healed ? " (just reopened)" : ""}. First-party CRM
+            apps are always allowed.
           </>
         )}
       </p>
+      {disabled ? (
+        <button
+          type="button"
+          data-testid="connections-reopen-app-policy"
+          className="mt-3 rounded-lg bg-ink px-3 py-2 text-sm text-white"
+          disabled={reopen.isPending}
+          onClick={() => reopen.mutate()}
+        >
+          {reopen.isPending ? "Reopening…" : "Reopen approved apps now"}
+        </button>
+      ) : null}
+      {reopen.error ? (
+        <p className="mt-2 text-sm text-red-700">{reopen.error.message}</p>
+      ) : null}
     </section>
   );
 }
