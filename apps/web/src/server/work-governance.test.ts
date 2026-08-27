@@ -10,6 +10,8 @@ import {
 import { clearDemoWorkAdmin, rowsToCsv } from "./trpc/work-admin-router";
 import {
   clearDemoWorkGovernance,
+  getWorkOrganizationPolicy,
+  healDisabledConnectedAppPolicy,
   isFirstPartyCrmApp,
   isWorkConnectedAppAllowed,
   normalizeAppPolicy,
@@ -78,17 +80,23 @@ describe("Work governance", () => {
     ]) {
       expect(await isWorkConnectedAppAllowed(toolkit)).toBe(true);
     }
+    expect((await getWorkOrganizationPolicy()).appPolicy).toBe("disabled");
     const rows = await caller("partner").connections.list();
     expect(rows.find((row) => row.toolkit === "google_workspace")?.allowed).toBe(
       true,
     );
     expect(rows.find((row) => row.toolkit === "apollo")?.allowed).toBe(true);
     expect(rows.find((row) => row.toolkit === "hunter")?.allowed).toBe(true);
+    expect((await getWorkOrganizationPolicy()).appPolicy).toBe("approved_only");
+    expect(await isWorkConnectedAppAllowed("slack")).toBe(true);
+    expect(await isWorkConnectedAppAllowed("composio")).toBe(true);
     const policy = await caller("partner").connections.organizationPolicy();
     expect(policy).toMatchObject({
-      appPolicy: "disabled",
+      appPolicy: "approved_only",
+      healed: false,
       firstPartyAlwaysAllowed: true,
     });
+    expect((await healDisabledConnectedAppPolicy()).healed).toBe(false);
   });
 
   it("governs every Work app family before Composio is called", async () => {

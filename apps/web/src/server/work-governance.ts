@@ -197,6 +197,53 @@ export async function isWorkConnectedAppAllowed(toolkit: string) {
   return appPolicy === "allow_all" || CURATED_WORK_APPS.has(slug);
 }
 
+/**
+ * Production left `app_policy = disabled`, which greys out Work / Composio
+ * Connect. Migration 0073 does not auto-run on Vercel. Loading Connections or
+ * `/api/ready` flips the default org row back to the curated allowlist.
+ */
+export async function healDisabledConnectedAppPolicy(
+  employeeId?: string | null,
+): Promise<{ healed: boolean; policy: WorkOrganizationPolicy }> {
+  const current = await getWorkOrganizationPolicy();
+  if (normalizeAppPolicy(current.appPolicy) !== "disabled") {
+    return { healed: false, policy: current };
+  }
+  const db = getDb();
+  if (!db) {
+    demoPolicy = {
+      ...current,
+      appPolicy: "approved_only",
+      updatedAt: new Date().toISOString(),
+    };
+    return { healed: true, policy: demoPolicy };
+  }
+  const actor =
+    employeeId &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      employeeId,
+    )
+      ? employeeId
+      : null;
+  if (actor) {
+    await db.execute(sql`
+      update public.work_organization_policy
+      set app_policy = 'approved_only',
+          updated_by_employee_id = ${actor}::uuid,
+          updated_at = now()
+      where organization_key = 'default' and app_policy = 'disabled'
+    `);
+  } else {
+    await db.execute(sql`
+      update public.work_organization_policy
+      set app_policy = 'approved_only',
+          updated_at = now()
+      where organization_key = 'default' and app_policy = 'disabled'
+    `);
+  }
+  return { healed: true, policy: await getWorkOrganizationPolicy() };
+}
+
 export async function isWorkViewOnlyMember(employeeId: string | null) {
   if (!employeeId) return false;
   const db = getDb();

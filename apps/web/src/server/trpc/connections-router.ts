@@ -16,7 +16,7 @@ import { router, staffProcedure } from "./trpc";
 import { randomUUID } from "node:crypto";
 import {
   FIRST_PARTY_CRM_APPS,
-  getWorkOrganizationPolicy,
+  healDisabledConnectedAppPolicy,
   isWorkConnectedAppAllowed,
 } from "../work-governance";
 import { featureEnabled } from "../features";
@@ -290,7 +290,7 @@ async function requireAllowedApp(toolkit: string) {
   if (!(await isWorkConnectedAppAllowed(toolkit))) {
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: `${toolkit} is blocked by the organization connected-app policy`,
+      message: `${toolkit} is off the approved Work app list. First-party CRM connections stay available.`,
     });
   }
 }
@@ -736,13 +736,20 @@ export async function getGoogleWorkspaceAccessToken(
 }
 
 export const connectionsRouter = router({
-  organizationPolicy: staffProcedure.query(async () => {
-    const policy = await getWorkOrganizationPolicy();
+  organizationPolicy: staffProcedure.query(async ({ ctx }) => {
+    const { healed, policy } = await healDisabledConnectedAppPolicy(
+      ctx.employeeId,
+    );
     return {
       appPolicy: policy.appPolicy,
+      healed,
       firstPartyAlwaysAllowed: true as const,
       firstPartyCrmApps: [...FIRST_PARTY_CRM_APPS],
     };
+  }),
+
+  reopenApprovedAppPolicy: staffProcedure.mutation(async ({ ctx }) => {
+    return healDisabledConnectedAppPolicy(ctx.employeeId);
   }),
 
   list: staffProcedure
@@ -751,6 +758,7 @@ export const connectionsRouter = router({
     )
     .query(async ({ ctx }) => {
       const employeeId = requireEmployeeId(ctx.employeeId);
+      await healDisabledConnectedAppPolicy(employeeId);
       const allowed = new Map(
         await Promise.all(
           CONNECTION_CATALOG.map(

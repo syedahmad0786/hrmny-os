@@ -5,7 +5,7 @@ import { getDb } from "@/server/db";
 import { featureEnabled } from "@/server/features";
 import { toolConfiguredStatus } from "@/server/integrations/resolve-keys";
 import { buildDemoBlockers, connectionSmoke } from "@/server/ready/smoke";
-import { getWorkOrganizationPolicy } from "@/server/work-governance";
+import { healDisabledConnectedAppPolicy } from "@/server/work-governance";
 
 /** Lightweight deploy smoke — no secrets, no business data. */
 export async function GET() {
@@ -25,7 +25,7 @@ export async function GET() {
     }
   }
   const has = (k: string) => Boolean(process.env[k]?.trim());
-  const [apollo, hunter, xero, n8n, connections, portalMagicLink, orgPolicy] =
+  const [apollo, hunter, xero, n8n, connections, portalMagicLink, orgHeal] =
     await Promise.all([
       toolConfiguredStatus("apollo"),
       toolConfiguredStatus("hunter"),
@@ -33,7 +33,7 @@ export async function GET() {
       toolConfiguredStatus("n8n"),
       connectionSmoke(),
       featureEnabled("portal.magic_link", {}),
-      getWorkOrganizationPolicy(),
+      healDisabledConnectedAppPolicy(),
     ]);
 
   const resendMode =
@@ -81,7 +81,7 @@ export async function GET() {
     keyStore: database === "up" ? "vault" : "memory",
     pgvector,
     portalMagicLink: portalMagicLink ? "enabled" : "disabled",
-    connectedAppPolicy: orgPolicy.appPolicy,
+    connectedAppPolicy: orgHeal.policy.appPolicy,
     tools,
     /** Connected staff accounts (counts + lastError snippets — no secrets). */
     connections,
