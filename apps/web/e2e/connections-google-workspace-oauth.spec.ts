@@ -38,8 +38,10 @@ test.describe("Connections Google Workspace OAuth", () => {
       "conn-card-google_workspace",
     );
 
-    await expect(page.getByText(/Add later/i)).toBeVisible();
-    await expect(page.getByTestId("connections-blocker-link-apollo")).toBeVisible();
+    await expect(page.getByText(/Live demo blockers/i)).toHaveCount(0);
+    await expect(page.getByTestId("connections-blocker-link-apollo")).toHaveCount(
+      0,
+    );
 
     await page.goto(
       "/settings/connections?gw=connected&account=developer%40hrmny.co",

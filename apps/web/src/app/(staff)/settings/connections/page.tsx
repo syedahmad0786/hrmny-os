@@ -1,11 +1,6 @@
 "use client";
 
 import { Button } from "@hrmny/ui";
-import {
-  demoBlockerAnchor,
-  isOptionalLaterDemoBlocker,
-  prioritizeDemoBlockers,
-} from "@/lib/demo-blocker-anchor";
 import { isGoogleWorkspaceReconnectRequired } from "@/lib/google-workspace-error";
 import { trpc } from "@/lib/trpc";
 import Link from "next/link";
@@ -180,16 +175,7 @@ export default function ConnectionsPage() {
         utils.connections.list.invalidate(),
         utils.connections.workApps.invalidate(),
         utils.connections.asanaStatus.invalidate(),
-      ]).then(() => {
-        // Refresh /api/ready blockers after vault write.
-        void fetch("/api/ready")
-          .then((r) => r.json())
-          .then((body: { blockers?: string[] }) => {
-            if (Array.isArray(body.blockers))
-              setDemoBlockers(prioritizeDemoBlockers(body.blockers));
-          })
-          .catch(() => undefined);
-      });
+      ]);
     },
   });
   const [keyNotes, setKeyNotes] = useState<Record<string, string>>({});
@@ -239,7 +225,6 @@ export default function ConnectionsPage() {
   });
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [redirect, setRedirect] = useState<string | null>(null);
-  const [demoBlockers, setDemoBlockers] = useState<string[]>([]);
   const [oauthBanner, setOauthBanner] = useState<{
     kind: "ok" | "err";
     text: string;
@@ -288,99 +273,12 @@ export default function ConnectionsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/ready")
-      .then((r) => r.json())
-      .then(
-        (body: {
-          tools?: Record<string, string>;
-          blockers?: string[];
-          llmProvider?: string;
-          llmDefaultModel?: string;
-          llmFreeOnly?: boolean;
-          connections?: {
-            googleWorkspace?: number;
-            canva?: number;
-            linkedin?: number;
-            xero?: number;
-            errors?: {
-              googleWorkspace?: number;
-              canva?: number;
-              linkedin?: number;
-              xero?: number;
-            };
-            lastErrors?: {
-              googleWorkspace?: string | null;
-              canva?: string | null;
-              linkedin?: string | null;
-              xero?: string | null;
-            };
-          };
-        }) => {
-          if (cancelled) return;
-          if (Array.isArray(body.blockers)) {
-            setDemoBlockers(prioritizeDemoBlockers(body.blockers));
-            return;
-          }
-          const tools = body.tools ?? {};
-          const connections = body.connections ?? {};
-          const next: string[] = [];
-          if (tools.apollo === "mock") {
-            next.push("Paste an Apollo API key below (or in Vercel env).");
-          }
-          if (tools.xero === "mock" || (connections.xero ?? 0) < 1) {
-            next.push("Connect Xero via OAuth for live billing mirror.");
-          }
-          if ((connections.googleWorkspace ?? 0) < 1) {
-            const err = connections.lastErrors?.googleWorkspace?.trim();
-            next.push(
-              err
-                ? `Reconnect Google Workspace (@hrmny.co): ${err}`
-                : (connections.errors?.googleWorkspace ?? 0) > 0
-                  ? "Reconnect Google Workspace (@hrmny.co) — token revoked; click Reconnect below (tokens are captured immediately after OAuth)."
-                  : "Connect Google Workspace (@hrmny.co) for live HITL Gmail send.",
-            );
-          }
-          if ((connections.linkedin ?? 0) < 1) {
-            next.push(
-              "Connect LinkedIn with Composio for live posts (OS stub publish works without it).",
-            );
-          }
-          if ((connections.canva ?? 0) < 1) {
-            next.push(
-              "Connect Canva with Composio for live designs (stub list/attach works without it).",
-            );
-          }
-          if (tools.resend && tools.resend !== "live") {
-            next.push(
-              tools.resend === "configured"
-                ? "Resend API key is set — flip RESEND_MODE=live and set RESEND_FROM for real portal invite email."
-                : "Set RESEND_MODE=live + RESEND_API_KEY + RESEND_FROM for real portal invite email.",
-            );
-          }
-          setDemoBlockers(prioritizeDemoBlockers(next));
-        },
-      )
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [list.dataUpdatedAt]);
-
   async function connectGoogleWorkspace() {
     const result = await startGoogleWorkspaceOAuth.mutateAsync({
       origin: window.location.origin,
     });
     window.location.assign(result.redirectUrl);
   }
-
-  const requiredBlockers = demoBlockers.filter(
-    (item) => !isOptionalLaterDemoBlocker(item),
-  );
-  const laterBlockers = demoBlockers.filter((item) =>
-    isOptionalLaterDemoBlocker(item),
-  );
 
   return (
     <main className="flex flex-col gap-6">
@@ -417,86 +315,13 @@ export default function ConnectionsPage() {
         </p>
       ) : null}
 
-      {demoBlockers.length > 0 ? (
-        <section className="rounded-lg border border-ochre/40 bg-cream/50 p-4 text-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
-            Live demo blockers
-          </p>
-          <p className="mt-1 text-muted">
-            Google Workspace is required for mailbox send. Apollo, Xero,
-            LinkedIn, Canva, and Resend can wait — paste or connect later.
-          </p>
-          {requiredBlockers.length > 0 ? (
-            <ul className="mt-3 list-disc space-y-1 pl-5 text-ink">
-              {requiredBlockers.map((item) => {
-                const href = demoBlockerAnchor(item);
-                return (
-                  <li key={item} data-testid="connections-blocker">
-                    {href ? (
-                      <a
-                        href={href}
-                        className="text-ochre underline"
-                        data-testid={`connections-blocker-link-${href.replace("#conn-", "")}`}
-                      >
-                        {item}
-                      </a>
-                    ) : (
-                      item
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <p className="mt-3 text-sm text-ink">
-              Mailbox reconnect is the only required action. Optional tools are
-              listed below.
-            </p>
-          )}
-          {laterBlockers.length > 0 ? (
-            <>
-              <p className="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted">
-                Add later
-              </p>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-muted">
-                {laterBlockers.map((item) => {
-                  const href = demoBlockerAnchor(item);
-                  return (
-                    <li key={item} data-testid="connections-blocker">
-                      {href ? (
-                        <a
-                          href={href}
-                          className="underline"
-                          data-testid={`connections-blocker-link-${href.replace("#conn-", "")}`}
-                        >
-                          {item}
-                        </a>
-                      ) : (
-                        item
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
-          ) : null}
-          <p className="mt-3 text-xs text-muted">
-            Also see{" "}
-            <Link href="/crm/hunt" className="underline">
-              Hunt readiness
-            </Link>
-            .
-          </p>
-        </section>
-      ) : null}
-
       <div id="direct-business-connections">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
           Direct business connections
         </p>
         <p className="mt-1 text-sm text-muted">
-          Reconnect Google Workspace first. Apollo and other keys stay optional
-          until pasted. Hunter is not used.
+          Hunt is open. Connect Google Workspace when you want live HITL Gmail.
+          Apollo and other keys are optional. Hunter is not used.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
