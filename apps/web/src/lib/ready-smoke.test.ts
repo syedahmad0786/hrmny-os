@@ -25,7 +25,7 @@ describe("ready-smoke formatters", () => {
       portalMagicLink: "enabled",
     };
     expect(formatReadyDbLine(ready)).toBe(
-      "database up · pgvector on · portal magic-link enabled",
+      "database up · key store vault · pgvector on · portal magic-link enabled",
     );
   });
 

@@ -13,6 +13,59 @@ import { useEffect, useState } from "react";
 import { ConnectionHealth } from "./connection-health";
 import { PlatformReadyStrip } from "@/components/platform-ready-strip";
 
+function BackendStoreBanner() {
+  const [ready, setReady] = useState<{
+    database?: "up" | "down";
+    keyStore?: "vault" | "memory";
+    tools?: Record<string, string>;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/ready")
+      .then((r) => r.json())
+      .then((body) => {
+        if (!cancelled) setReady(body);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!ready) return null;
+  const vault = ready.database === "up" && ready.keyStore !== "memory";
+  return (
+    <section
+      data-testid="connections-backend-store"
+      className={`rounded-lg border p-4 text-sm ${
+        vault
+          ? "border-emerald-300 bg-emerald-50 text-emerald-950"
+          : "border-amber-300 bg-amber-50 text-amber-950"
+      }`}
+    >
+      <p className="text-xs font-semibold uppercase tracking-[0.16em]">
+        Connection backend
+      </p>
+      {vault ? (
+        <p className="mt-1">
+          Keys and OAuth tokens save to Supabase Vault. Paste Apollo / Hunter
+          here — a live probe runs first. Google Reconnect uses dedicated OAuth
+          (not Heal).
+        </p>
+      ) : (
+        <p className="mt-1">
+          This process has no database. Pasted keys save in memory for this
+          server instance so Connect is not a dead button. Use{" "}
+          <a className="underline" href="https://hrmny-os.vercel.app/settings/connections">
+            production Connections
+          </a>{" "}
+          as an @hrmny.co staff seat for Vault persistence. Google OAuth client:{" "}
+          {ready.tools?.googleOAuth ?? "—"}.
+        </p>
+      )}
+    </section>
+  );
+}
+
 const WORK_APP_FAMILIES = [
   { key: "files", label: "Cloud files" },
   { key: "communication", label: "Communication" },
@@ -36,7 +89,11 @@ export default function ConnectionsPage() {
       }));
       setKeyNotes((current) => ({
         ...current,
-        [vars.toolkit]: `${vars.toolkit} connected · live-probed`,
+        [vars.toolkit]:
+          vars.toolkit +
+          ` connected · ${_data.store ?? "vault"}` +
+          (_data.probed ? " · live-probed" : "") +
+          (_data.probeWarning ? ` · probe warning: ${_data.probeWarning}` : ""),
       }));
       void Promise.all([
         utils.connections.list.invalidate(),
@@ -261,6 +318,7 @@ export default function ConnectionsPage() {
       </div>
 
       <PlatformReadyStrip testId="connections-platform-ready" />
+      <BackendStoreBanner />
 
       <ConnectionHealth />
 

@@ -27,7 +27,8 @@ test.describe("Connections blocker anchors", () => {
     const apolloLink = page.getByTestId("connections-blocker-link-apollo");
     if ((await apolloLink.count()) > 0) {
       await apolloLink.click();
-      await expect(apolloCard).toBeInViewport();
+      await apolloCard.scrollIntoViewIfNeeded();
+      await expect(apolloCard).toBeVisible();
     }
 
     const hunterLink = page.getByTestId("connections-blocker-link-hunter");

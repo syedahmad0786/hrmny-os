@@ -45,6 +45,22 @@ test.describe("Connections Google Workspace OAuth", () => {
     );
   });
 
+  test("pasting an n8n key saves through the backend", async ({ page }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/settings/connections", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("connections-backend-store")).toBeVisible({
+      timeout: 30_000,
+    });
+    const n8n = page.getByTestId("conn-card-n8n");
+    await expect(n8n).toBeVisible({ timeout: 30_000 });
+    await n8n.locator('input[type="password"]').fill("n8n-e2e-backend-key");
+    await n8n.getByRole("button", { name: /^Connect$/i }).click();
+    await expect(page.getByTestId("conn-key-note-n8n")).toContainText(
+      /connected/i,
+      { timeout: 20_000 },
+    );
+  });
+
   test("HITL and Hunt deep-link to the mailbox card", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/outreach", { waitUntil: "domcontentloaded" });

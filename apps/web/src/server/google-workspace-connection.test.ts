@@ -27,6 +27,37 @@ describe("Google Workspace connection", () => {
     ).toThrow();
   });
 
+  it("saveApiKey persists in memory when DATABASE_URL is missing", async () => {
+    const { clearMemoryApiKeys, getMemoryApiKey } = await import(
+      "./integrations/memory-keys"
+    );
+    const prev = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = "";
+    clearMemoryApiKeys();
+    try {
+      const user = resolveDevUser("partner");
+      const caller = createCaller({
+        user,
+        employeeId: user.employeeId,
+        roles: user.roles,
+        canViewMargin: sessionCanViewMargin(user),
+      });
+      const saved = await caller.connections.saveApiKey({
+        toolkit: "n8n",
+        apiKey: "n8n-memory-test-key",
+      });
+      expect(saved.store).toBe("memory");
+      expect(saved.hasSecret).toBe(true);
+      expect(getMemoryApiKey("n8n")).toBe("n8n-memory-test-key");
+      const rows = await caller.connections.list();
+      expect(rows.find((row) => row.toolkit === "n8n")?.hasSecret).toBe(true);
+    } finally {
+      clearMemoryApiKeys();
+      if (prev === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = prev;
+    }
+  });
+
   it("returns null without DATABASE_URL (memory mode)", async () => {
     const prev = process.env.DATABASE_URL;
     process.env.DATABASE_URL = "";

@@ -27,6 +27,11 @@ import {
   persistGoogleWorkspaceTokens,
 } from "../google-workspace-oauth";
 import { isGoogleWorkspaceReconnectRequired } from "@/lib/google-workspace-error";
+import { isHardApiKeyRejection } from "@/lib/api-key-rejection";
+import {
+  hasMemoryApiKey,
+  saveMemoryApiKey,
+} from "../integrations/memory-keys";
 
 export { GoogleProfileSchema };
 
@@ -759,7 +764,7 @@ export const connectionsRouter = router({
             scope: row?.scope ?? "staff",
             status: row?.status ?? "disconnected",
             externalConnectionId: row?.externalConnectionId ?? null,
-            hasSecret: false,
+            hasSecret: hasMemoryApiKey(item.toolkit),
             lastTestedAt: null,
             lastError: null,
           };
@@ -824,14 +829,61 @@ export const connectionsRouter = router({
         "../integrations/probe-api-key"
       );
       const probed = await probeIntegrationApiKey(input.toolkit, input.apiKey);
+      let probeWarning: string | null = null;
       if (!probed.ok) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Key rejected by ${input.toolkit}: ${probed.reason}`,
-        });
+        if (isHardApiKeyRejection(probed.reason)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Key rejected by ${input.toolkit}: ${probed.reason}`,
+          });
+        }
+        probeWarning = probed.reason;
       }
 
-      const db = requireDb();
+      const db = getDb();
+      if (!db) {
+        saveMemoryApiKey(input.toolkit, input.apiKey);
+        const store = getDemoStore();
+        let row = store.connections.find(
+          (candidate) =>
+            candidate.toolkit === input.toolkit && candidate.scope === "staff",
+        );
+        if (!row) {
+          row = {
+            connectionAccountId: randomUUID(),
+            toolkit: input.toolkit,
+            scope: "staff",
+            status: "connected",
+            externalConnectionId: null,
+          };
+          store.connections.push(row);
+        } else {
+          row.status = "connected";
+        }
+        store.appendAudit({
+          actorEmployeeId: employeeId,
+          action: "connections.connectKey",
+          entityType: "connection_account",
+          entityId: row.connectionAccountId,
+          before: null,
+          after: {
+            toolkit: input.toolkit,
+            status: "connected",
+            store: "memory",
+            probed: probed.ok,
+          },
+          reason: probeWarning,
+        });
+        return {
+          connectionAccountId: row.connectionAccountId,
+          toolkit: input.toolkit,
+          status: "connected" as const,
+          hasSecret: true,
+          probed: probed.ok,
+          store: "memory" as const,
+          probeWarning,
+        };
+      }
       const [existing] = await db
         .select()
         .from(connectionAccount)
@@ -913,7 +965,9 @@ export const connectionsRouter = router({
         toolkit: row.toolkit,
         status: row.status,
         hasSecret: true,
-        probed: true as const,
+        probed: probed.ok,
+        store: "vault" as const,
+        probeWarning,
       };
     }),
 
