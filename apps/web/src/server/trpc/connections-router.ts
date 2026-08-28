@@ -846,14 +846,17 @@ export const connectionsRouter = router({
       const configuredMode = process.env[`${input.toolkit.toUpperCase()}_MODE`]
         ?.trim()
         .toLowerCase();
-      const localConfiguredMock = !db && configuredMode === "mock";
-      const probed = await probeIntegrationApiKey(input.toolkit, input.apiKey, {
-        allowConfiguredMock: localConfiguredMock,
-      });
+      // A database-less dev/CI runtime is mock unless live mode is explicit.
+      // Never transmit a pasted test key merely because a mode variable was
+      // omitted. Vault-backed runtimes still perform the real read-only probe.
+      const localConfiguredMock = !db && configuredMode !== "live";
+      const probed = localConfiguredMock
+        ? ({ ok: false, reason: "LOCAL_MOCK_MODE" } as const)
+        : await probeIntegrationApiKey(input.toolkit, input.apiKey);
       let probeWarning: string | null = localConfiguredMock
         ? "Local mock mode: stored in process memory; provider acceptance was not verified."
         : null;
-      if (!probed.ok) {
+      if (!probed.ok && !localConfiguredMock) {
         if (isHardApiKeyRejection(probed.reason)) {
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -976,7 +979,7 @@ export const connectionsRouter = router({
           after: {
             toolkit: input.toolkit,
             status: "connected",
-            probed: true,
+            probed: probed.ok,
           },
         });
         return saved!;

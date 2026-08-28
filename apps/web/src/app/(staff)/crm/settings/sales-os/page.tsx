@@ -147,8 +147,11 @@ export default function SalesOsSettingsPage() {
             waterfall options are disabled. Gmail and LinkedIn remain human-send
             workflows—nothing here sends automatically.
           </p>
-          <Link href="/settings/connections" className="growth-text-link">
-            Open connection settings →
+          <Link
+            href="/settings/connections#conn-google_workspace"
+            className="growth-text-link"
+          >
+            Google Workspace connection →
           </Link>
         </div>
       </details>
