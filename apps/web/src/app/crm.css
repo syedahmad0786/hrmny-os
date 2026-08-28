@@ -101,6 +101,7 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 
 .desk-shell {
   min-height: 100vh;
+  min-width: 0;
   background:
     radial-gradient(
       circle at 80% 10%,
@@ -269,6 +270,7 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 
 .desk-workspace {
   min-height: 100vh;
+  min-width: 0;
   margin-left: var(--sidebar);
 }
 
@@ -416,6 +418,7 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 
 .desk-content {
   min-height: calc(100vh - var(--topbar));
+  min-width: 0;
   padding: 26px 28px 46px;
 }
 
@@ -733,6 +736,8 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 }
 
 .crm-page {
+  width: 100%;
+  min-width: 0;
   max-width: 1580px;
   margin: 0 auto;
   animation: crmPageIn 0.28s ease both;
@@ -1806,6 +1811,8 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 
 .growth-page {
   display: grid;
+  width: 100%;
+  min-width: 0;
   gap: 18px;
   max-width: 1420px;
   margin: 0 auto;
@@ -2272,9 +2279,22 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 }
 
 @media (max-width: 720px) {
+  .crm-subnav {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .crm-subnav > a,
   .crm-subnav-more {
-    width: 100%;
+    min-width: 0;
+    flex: 1 1 calc(33.333% - 2px);
     margin-left: 0;
+    text-align: center;
+  }
+
+  .crm-subnav-more > summary {
+    width: 100%;
+    justify-content: center;
   }
 
   .crm-subnav-menu {
