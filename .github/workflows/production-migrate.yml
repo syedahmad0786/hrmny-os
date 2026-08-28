@@ -1,4 +1,4 @@
-name: HRMNY production migration
+name: HRMNY production migration 0068-0074
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       confirmation:
-        description: Type the exact migration confirmation phrase from the runbook
+        description: Type APPLY ADDITIVE MIGRATIONS 0068 THROUGH 0074 TO HRMNY PRODUCTION
         required: true
         type: string
 
@@ -28,7 +28,7 @@ jobs:
     name: Guard, migrate, and read back
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: production
+    environment: Production
     env:
       HRMNY_PRODUCTION_DATABASE_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
       HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
@@ -48,7 +48,7 @@ jobs:
         env:
           PRODUCTION_MIGRATION_PHASE: preflight
         run: pnpm --filter @hrmny/db exec tsx src/production-migration-guard.ts
-      - name: Apply reviewed migration journal
+      - name: Append reviewed additive migrations 0068 through 0074
         env:
           DIRECT_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
         run: pnpm --filter @hrmny/db migrate

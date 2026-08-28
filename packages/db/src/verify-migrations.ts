@@ -26,11 +26,20 @@ const journal = JSON.parse(
   await readFile(`${migrationsDirectory}meta/_journal.json`, "utf8"),
 ) as { entries: Array<{ tag: string }> };
 const head = "0074_integration_inbox_invoice_metadata";
-assert.equal(journal.entries.at(-1)?.tag, head, "Migration journal head drifted.");
+assert.equal(
+  journal.entries.at(-1)?.tag,
+  head,
+  "Migration journal head drifted.",
+);
 
 const options = { max: 1, onnotice: () => undefined } as const;
 const admin = postgres(adminUrl.toString(), options);
-const databaseNames = ["hrmny_migration_fresh", "hrmny_migration_upgrade"];
+const databaseNames = [
+  "hrmny_migration_fresh",
+  "hrmny_migration_upgrade",
+  "hrmny_migration_upgrade_band",
+];
+const migrationBandStart = "0068_os_modules";
 
 function databaseUrl(name: string): string {
   const url = new URL(adminUrl);
@@ -61,6 +70,32 @@ async function prepareSupabaseDatabase(connection: Sql): Promise<void> {
 }
 
 async function assertCurrentHead(connection: Sql): Promise<void> {
+  const [priorBridge] = await connection<Array<{ ok: boolean }>>`
+    select
+      to_regclass('public.portal_session_grant') is not null
+      and to_regclass('public.sales_os_settings') is not null
+      and to_regclass('public.sales_os_evolve_proposal') is not null
+      and to_regclass('public.company_research') is not null
+      and to_regclass('public.contact_research') is not null
+      and to_regclass('public.suppression_entry') is not null
+      and to_regclass('public.email_event') is not null
+      and to_regclass('public.intel_signal') is not null
+      and to_regclass('public.sales_os_credit_ledger') is not null
+      and (
+        select count(*) from information_schema.columns
+        where table_schema = 'public' and table_name = 'outreach_items'
+          and column_name in (
+            'contact_id', 'rework_feedback', 'linkedin_url',
+            'cadence_touch', 'accepted_at'
+          )
+      ) = 5 as ok
+  `;
+  assert.equal(
+    priorBridge?.ok,
+    true,
+    "The 0068-0074 additive band installs the complete Sales OS bridge schema.",
+  );
+
   const [inbox] = await connection<Array<{ ok: boolean }>>`
     select
       to_regclass('public.integration_inbox') is not null
@@ -141,6 +176,7 @@ async function assertCurrentHead(connection: Sql): Promise<void> {
 
 let fresh: Sql | undefined;
 let upgrade: Sql | undefined;
+let upgradeBand: Sql | undefined;
 try {
   for (const name of databaseNames) await recreateDatabase(name);
 
@@ -158,12 +194,33 @@ try {
   await applyMigration(upgrade, head);
   await assertCurrentHead(upgrade);
 
+  upgradeBand = postgres(databaseUrl(databaseNames[2]!), options);
+  await prepareSupabaseDatabase(upgradeBand);
+  const migrationBandStartIndex = journal.entries.findIndex(
+    ({ tag }) => tag === migrationBandStart,
+  );
+  assert(
+    migrationBandStartIndex >= 0,
+    "The 0068-0074 migration band start is missing.",
+  );
+  for (const { tag } of journal.entries.slice(0, migrationBandStartIndex)) {
+    await applyMigration(upgradeBand, tag);
+  }
+  for (const { tag } of journal.entries.slice(migrationBandStartIndex)) {
+    await applyMigration(upgradeBand, tag);
+  }
+  for (const { tag } of journal.entries.slice(migrationBandStartIndex)) {
+    await applyMigration(upgradeBand, tag);
+  }
+  await assertCurrentHead(upgradeBand);
+
   console.log(
-    `Verified ${journal.entries.length} fresh migrations and idempotent 0073 -> 0074 upgrade.`,
+    `Verified ${journal.entries.length} fresh migrations, idempotent 0073 -> 0074, and idempotent current-schema 0068 -> 0074 additive band.`,
   );
 } finally {
   await fresh?.end({ timeout: 5 });
   await upgrade?.end({ timeout: 5 });
+  await upgradeBand?.end({ timeout: 5 });
   for (const name of databaseNames) {
     await admin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
   }
