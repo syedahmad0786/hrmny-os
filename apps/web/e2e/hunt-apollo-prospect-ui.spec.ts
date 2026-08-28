@@ -77,6 +77,13 @@ test.describe("Hunt Apollo prospect UI", () => {
     }));
     expect(widths.scroll).toBeLessThanOrEqual(widths.client + 1);
 
+    await page.keyboard.press("Control+k");
+    await expect(page).toHaveURL(/\/work\/search$/);
+    await page.goBack({ waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: "Find the next right client." }),
+    ).toBeVisible();
+
     await page.locator("summary").filter({ hasText: "More" }).click();
     await expect(page.getByRole("link", { name: "Companies" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Sales settings" })).toBeVisible();
