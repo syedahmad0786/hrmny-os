@@ -193,3 +193,15 @@ Ayham and Maolham should sign each domain separately:
 - backup/restore or agreed recovery drill.
 
 A green deployment is not UAT. Record actor, environment, fixture IDs, expected/actual outcome, defects, acceptance, and any waived limitation.
+
+## 14. Canonical production database bridge (legacy 70 → 77)
+
+1. Read the official Supabase backup/PITR state. If no usable provider recovery point exists, produce database and Storage exports before SQL. Record object counts and hashes; encrypt outside the repository; decrypt and hash-verify once; remove only verified plaintext staging.
+2. Bind `HRMNY_PRODUCTION_DATABASE_URL` only as a GitHub **Production** environment secret. The URL must identify project `klrugedztqxlvyghyzxs`, database `postgres`, and direct/session port 5432. Never print it.
+3. Run the guard in `preflight`. Require count 70, head `1785182400000`, legacy fingerprint `cc60d88830c9f5d749ac6f3136ee769bf9275652b47bd8cc27b87e0651b3affd`, no `integration_inbox`, and all four reconciled legacy-schema checks. Any difference is a hard stop.
+4. Dispatch only `.github/workflows/production-migrate.yml` from the reviewed `main` SHA with the recovery receipt and exact confirmation `APPLY ADDITIVE MIGRATIONS 0068 THROUGH 0074 TO HRMNY PRODUCTION`. Do not run ad-hoc `psql` and do not edit `drizzle.__drizzle_migrations`.
+5. The workflow appends migrations 0068–0074 once. Its verify phase must report 77 rows, head `1787947200000`, unchanged first-70 fingerprint, and a seven-row fingerprint equal to hashes derived from the checked-out SQL.
+6. Independently read back 17 secured bridge tables, five Sales OS outreach columns, enabled Work app policy, inbox uniqueness, eight invoice columns, and browser-role revokes. Then require `/api/ready` to report `integrationInbox=true`.
+7. If the write or readback is uncertain, do not rerun. Compare the journal, schema, workflow logs, and recovery receipt first. Forward-fix or restore only after a new reviewed decision.
+
+Recovery artifacts for this run are under `C:\Users\ahmad\AppData\Local\HRMNY-Recovery\20260828T121351Z` and are DPAPI CurrentUser encrypted. The database ciphertext SHA-256 is `B089798800544FD31A89620595C8D61F80DE61989D27307F2F0996290819AC7C`; the Storage ciphertext SHA-256 is `0FD3BB65068645FDD81290A7B8353037949E6042112688E8B7CEE7A4C64CDFED`. They are not a substitute for a completed restore drill.
