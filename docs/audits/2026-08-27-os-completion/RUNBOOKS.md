@@ -73,12 +73,16 @@ Do not use this command against Supabase production. Production migration is a s
 ## 4. Production migration and application verification
 
 1. Confirm backup/PITR and separate Storage-object recovery receipt.
-2. Confirm direct migration connection, runtime pool connection, database version/extensions, and one migration writer.
-3. Review lock/rewrite risk of migration 0074; it is additive, but table locks and live traffic still matter.
-4. Apply the reviewed migration once through the approved deployment mechanism.
-5. Verify migration journal/checksum, columns, FKs, unique index, RLS, grants, and application queries.
-6. Deploy the exact tested SHA; check `/api/ready` and error telemetry.
-7. If failure occurs, stop traffic-changing actions. Prefer forward-fix; restore only with explicit destructive approval and RPO/RTO acknowledgement.
+2. Save the canonical direct or Supavisor **session** connection as the GitHub `production` environment secret `HRMNY_PRODUCTION_DATABASE_URL`. Never paste it into workflow inputs or logs. Transaction-pool port 6543 is refused.
+3. Confirm one migration writer/reviewer, then dispatch **HRMNY production migration** with:
+   - project ref `klrugedztqxlvyghyzxs`;
+   - the backup/PITR receipt reference;
+   - exact phrase `APPLY ADDITIVE MIGRATION 0074 TO HRMNY PRODUCTION`.
+4. The read-only guard must see database `postgres`, canonical project metadata, 73 journal entries, journal head `0073`, and no `integration_inbox`. Any drift stops the run before SQL.
+5. Review lock/rewrite risk of migration 0074; it is additive, but table locks and live traffic still matter. The workflow then applies the checked-in journal once.
+6. Require the post-readback to prove 74 entries/head `0074`, the inbox unique index, RLS, blocked browser roles, and all eight invoice gate columns.
+7. Deploy the exact tested SHA; check `/api/ready` and error telemetry.
+8. If failure occurs, stop traffic-changing actions. Prefer forward-fix; restore only with explicit destructive approval and RPO/RTO acknowledgement.
 
 ## 5. Xero read-only activation
 
