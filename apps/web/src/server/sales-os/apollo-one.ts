@@ -72,7 +72,7 @@ async function configuredLiveSource(
 
 export async function searchApolloPeopleFree(
   input: {
-    query: string;
+    query?: string;
     titles?: string[];
     perPage?: number;
     actorEmployeeId?: string | null;
@@ -94,9 +94,13 @@ export async function searchApolloPeopleFree(
         })
       : createLeadSourceMock();
   }
+  const query = input.query?.trim();
+  const titles = input.titles
+    ?.map((title) => title.trim())
+    .filter((title) => title.length > 0);
   const candidates = await source.searchLeads({
-    query: input.query.trim(),
-    titles: input.titles,
+    query: query || undefined,
+    titles: titles?.length ? titles : undefined,
     locations: ["United Arab Emirates"],
     page: 1,
     perPage: Math.min(Math.max(input.perPage ?? 8, 1), 10),

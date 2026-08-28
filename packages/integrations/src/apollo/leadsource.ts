@@ -161,6 +161,12 @@ export function createLeadSourceLive(
   return {
     mode: "live",
     async searchLeads(criteria: LeadSearchCriteria) {
+      if (criteria.industries?.length) {
+        throw new IntegrationMisconfiguredError(
+          "apollo",
+          "Apollo People Search does not document a direct industry parameter; use documented titles, locations, or q_keywords in this adapter",
+        );
+      }
       const res = await fetch(
         "https://api.apollo.io/api/v1/mixed_people/api_search",
         {
@@ -170,7 +176,7 @@ export function createLeadSourceLive(
           body: JSON.stringify({
             q_keywords: criteria.query,
             person_titles: criteria.titles,
-            organization_industries: criteria.industries,
+            include_similar_titles: criteria.titles?.length ? true : undefined,
             person_locations: criteria.locations,
             organization_num_employees_ranges:
               criteria.employeeCountMin != null ||

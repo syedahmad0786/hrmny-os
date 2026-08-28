@@ -77,11 +77,20 @@ export const salesOsRouter = router({
     status: staffProcedure.query(() => getApolloOnePersonCanaryStatus()),
     search: staffProcedure
       .input(
-        z.object({
-          query: z.string().trim().min(2).max(160),
-          titles: z.array(z.string().trim().min(2).max(120)).max(8).optional(),
-          perPage: z.number().int().min(1).max(10).optional(),
-        }),
+        z
+          .object({
+            query: z.string().trim().min(2).max(160).optional(),
+            titles: z
+              .array(z.string().trim().min(2).max(120))
+              .min(1)
+              .max(8)
+              .optional(),
+            perPage: z.number().int().min(1).max(10).optional(),
+          })
+          .refine(
+            (input) => Boolean(input.query) || Boolean(input.titles?.length),
+            "Provide at least one job title or keyword",
+          ),
       )
       .mutation(async ({ input, ctx }) => {
         const result = await searchApolloPeopleFree({

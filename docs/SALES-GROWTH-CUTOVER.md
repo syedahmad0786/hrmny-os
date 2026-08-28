@@ -27,7 +27,8 @@ The detailed company/contact/deal/admin objects remain available under the CRM *
 
 - Operation: `POST https://api.apollo.io/api/v1/mixed_people/api_search`.
 - Apollo documents People API Search as 0 credits and says it does not return email or phone data.
-- HRMNY sends an explicit role/market/company query, bounds results to 10, returns normalized fields to the browser, and does not write CRM state.
+- HRMNY sends the visible Job title as `person_titles`, fixes the market to `person_locations=["United Arab Emirates"]`, enables similar title matches, and sends the optional company/industry phrase only as documented `q_keywords`. It bounds results to 10, returns normalized fields to the browser, and does not write CRM state.
+- The current People Search reference does not document `organization_industries`; the Apollo adapter refuses that unsupported mapping instead of guessing a vendor field.
 
 ### One approved connection proof
 
