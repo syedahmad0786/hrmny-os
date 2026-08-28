@@ -3,6 +3,7 @@ import {
   createLeadSourceAdapter,
   createLeadSourceLive,
   createLeadSourceMock,
+  mapApolloLeadPerson,
 } from "./leadsource";
 
 describe("LeadSourceAdapter (Apollo-shaped)", () => {
@@ -40,6 +41,24 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
 
   it("factory defaults to mock without APOLLO_MODE=live", () => {
     expect(createLeadSourceAdapter().mode).toBe("mock");
+  });
+
+  it("maps Apollo's documented search identity without de-obfuscating it", () => {
+    expect(
+      mapApolloLeadPerson({
+        id: "person-1",
+        first_name: "Elena",
+        last_name_obfuscated: "Mo***s",
+        title: "Marketing Director",
+        organization: { name: "Northwind Systems" },
+      }),
+    ).toMatchObject({
+      externalId: "person-1",
+      fullName: "Elena Mo***s",
+      title: "Marketing Director",
+      companyName: "Northwind Systems",
+      source: "apollo",
+    });
   });
 
   it("a connected key does not activate live mode", () => {

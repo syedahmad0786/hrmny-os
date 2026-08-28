@@ -73,6 +73,8 @@ Recorded during harness run `20260828T044131Z`. These are repository-local decis
 
 29. **Make production migration target-locked and inert by default.** A manual GitHub workflow now requires a dedicated production secret, the exact canonical Supabase ref, a backup/PITR receipt reference, and an exact confirmation phrase. Its read-only preflight requires journal head 0073 and refuses another project, transaction pooling, an already-present inbox, or journal drift; post-readback independently checks head 0074, RLS, browser-role revokes, uniqueness, and invoice metadata. The workflow cannot prove that a typed backup receipt is genuine, so provider-side backup verification remains a human gate.
 
+30. **Render only Apollo's documented search identity.** Live People Search proved that the discovery response carries `first_name` and `last_name_obfuscated`, not the enrichment-only `name` field. The adapter now prefers a complete `name` when Apollo supplies one and otherwise joins only those documented search fields. Tradeoff: reviewers see an intentionally obfuscated surname until the separately approved People Match; HRMNY never guesses or de-obfuscates it.
+
 ## Failures encountered and resolved
 
 | Failure                                                                                 | Cause                                                                                               | Resolution                                                                                                                                                                                             |
