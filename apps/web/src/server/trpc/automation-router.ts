@@ -3,12 +3,8 @@
  * Wired for automation-orchestrator agent tools: n8n.propose, n8n.trigger, n8n.listWorkflows.
  */
 import { z } from "zod";
-import {
-  createN8nAdapter,
-  N8N_EVENT_MAP,
-  type N8nCrmEvent,
-} from "@hrmny/integrations";
-import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
+import { N8N_EVENT_MAP, type N8nCrmEvent } from "@hrmny/integrations";
+import { createResolvedN8nAdapter } from "../integrations/n8n-adapter";
 import { protectedProcedure, router } from "./trpc";
 
 const crmEventSchema = z.enum([
@@ -21,10 +17,7 @@ const crmEventSchema = z.enum([
 ]);
 
 async function n8nClient(employeeId?: string | null) {
-  const resolved = await resolveIntegrationApiKey("n8n", employeeId);
-  return createN8nAdapter(
-    resolved.apiKey ? { apiKey: resolved.apiKey } : {},
-  );
+  return createResolvedN8nAdapter(employeeId);
 }
 
 export const automationRouter = router({
@@ -46,11 +39,19 @@ export const automationRouter = router({
   smoke: protectedProcedure.query(async ({ ctx }) => {
     const n8n = await n8nClient(ctx.employeeId);
     const health = await n8n.health();
-    const workflows = await n8n.listWorkflows();
+    let workflows: Awaited<ReturnType<typeof n8n.listWorkflows>> = [];
+    let listError: string | undefined;
+    try {
+      workflows = await n8n.listWorkflows();
+    } catch (err) {
+      listError = err instanceof Error ? err.message : "listWorkflows failed";
+    }
     return {
-      live: health.mode === "live" && health.ok,
+      live: health.mode === "live" && health.ok && !listError,
       health: {
         ...health,
+        ok: health.ok && !listError,
+        detail: listError ?? health.detail,
         eventMapCount: N8N_EVENT_MAP.length,
         blockedOnApiKey: !health.apiKeyConfigured,
       },

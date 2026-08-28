@@ -71,6 +71,17 @@ function apiHeaders(apiKey: string): HeadersInit {
   };
 }
 
+/** Live REST/webhook calls must not hang CI or the automations smoke button. */
+export const N8N_FETCH_TIMEOUT_MS = 8_000;
+
+function n8nFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const timeout = AbortSignal.timeout(N8N_FETCH_TIMEOUT_MS);
+  const signal = init.signal
+    ? AbortSignal.any([init.signal, timeout])
+    : timeout;
+  return fetch(url, { ...init, signal });
+}
+
 /** Mock n8n — no network; used when key absent or N8N_MODE=mock. */
 export function createN8nMock(config: N8nAdapterConfig = {}): N8nAdapter {
   const resolved = resolveN8nConfig({ ...config, mode: "mock" });
@@ -135,7 +146,7 @@ function createN8nClient(
       }
       const apiKey = config.apiKey!;
       try {
-        const res = await fetch(`${baseUrl}/api/v1/workflows?limit=1`, {
+        const res = await n8nFetch(`${baseUrl}/api/v1/workflows?limit=1`, {
           method: "GET",
           headers: apiHeaders(apiKey),
         });
@@ -174,7 +185,7 @@ function createN8nClient(
         return MOCK_WORKFLOWS.map((w) => ({ ...w }));
       }
       const apiKey = config.apiKey!;
-      const res = await fetch(`${baseUrl}/api/v1/workflows?limit=50`, {
+      const res = await n8nFetch(`${baseUrl}/api/v1/workflows?limit=50`, {
         method: "GET",
         headers: apiHeaders(apiKey),
       });
@@ -210,7 +221,7 @@ function createN8nClient(
         };
       }
       const apiKey = config.apiKey!;
-      const res = await fetch(
+      const res = await n8nFetch(
         `${baseUrl}/api/v1/executions/${encodeURIComponent(executionId)}`,
         {
           method: "GET",
@@ -311,7 +322,7 @@ function createN8nClient(
         );
       }
 
-      const res = await fetch(url, {
+      const res = await n8nFetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

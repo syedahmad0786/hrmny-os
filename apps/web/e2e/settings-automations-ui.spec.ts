@@ -22,7 +22,12 @@ test.describe("Settings Automations UI", () => {
 
     await page.getByTestId("automations-n8n-smoke").click();
     const result = page.getByTestId("automations-n8n-result");
-    await expect(result).toBeVisible({ timeout: 30_000 });
+    const error = page.getByTestId("automations-n8n-error");
+    await expect(result.or(error)).toBeVisible({ timeout: 30_000 });
+    if (await error.isVisible()) {
+      throw new Error(`n8n smoke error: ${await error.textContent()}`);
+    }
+    await expect(result).toBeVisible();
     await expect(page.getByTestId("automations-n8n-live")).toContainText(
       /Live:/i,
     );

@@ -53,6 +53,8 @@ Recorded during harness run `20260828T003923Z`. These are repository-local decis
 
 19. **Retain the browser rerun failure.** The clean bridge-backed run passed 74/74. An immediate later rerun exhausted Windows loopback tuples because the reliable workaround closes each response; 29,363 port-3500 socket rows were observed and Chromium returned `EADDRINUSE`. Experimental keep-alive/static-origin variants were reverted to the proven adapter. Acceptance must be repeated on a fresh runner or approved preview, not inferred from the failed rerun.
 
+20. **Keep pasted n8n test keys in mock mode.** A credential reference is not activation. Process-memory keys remain mock unless `N8N_MODE=live`; live REST and webhook calls use an eight-second abort, and outbound webhooks still require the dedicated OS-to-n8n secret.
+
 ## Failures encountered and resolved
 
 | Failure | Cause | Resolution |

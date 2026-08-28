@@ -7,7 +7,6 @@ import { getClientOnboarding } from "../clients/onboarding";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
 import { searchMemory } from "./memory-db";
-import { createN8nAdapter } from "@hrmny/integrations";
 import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
 
 export type AgentToolScope = {
@@ -369,13 +368,10 @@ export async function runAgentTools(input: {
 
   if (want("n8n.health") || want("n8n") || want("automation.smoke")) {
     try {
-      const resolved = await resolveIntegrationApiKey(
-        "n8n",
-        input.scope.employeeId,
+      const { createResolvedN8nAdapter } = await import(
+        "../integrations/n8n-adapter"
       );
-      const n8n = createN8nAdapter(
-        resolved.apiKey ? { apiKey: resolved.apiKey } : {},
-      );
+      const n8n = await createResolvedN8nAdapter(input.scope.employeeId);
       const health = await n8n.health();
       results.push({
         tool: "n8n.health",
