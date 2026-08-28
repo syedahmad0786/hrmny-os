@@ -159,6 +159,8 @@ For Apollo, Hunter, NeverBounce, and paid embeddings:
 
 This release has a narrower owner authorization than the generic paid-provider flow:
 
+Authenticated free-read acceptance passed on merge `5d441bae1445f8a7fc2c3796c4d64853bef20108`: the production form sent Marketing Director as a structured title with fixed UAE location and returned eight review candidates at 0 credits. It did not unlock email/phone or write CRM state. The paid canary remains unexecuted.
+
 1. Verify `/api/ready` reports the Apollo credential configured and verify the exact production deployment SHA.
 2. In Sales Growth, run People Search first. It is a 0-credit read and must return reviewable professional candidates without an email/phone unlock. Treat a status containing `Apollo mock` as a failed provider-acceptance receipt even if `/api/ready` says the credential reference is configured.
 3. Select one candidate by the deterministic fit rule recorded with the acceptance receipt. Confirm the dialog that states one credit and the disabled phone/personal-email/waterfall fields.
@@ -168,6 +170,8 @@ This release has a narrower owner authorization than the generic paid-provider f
 7. If the call times out or the receipt is `processing`/`failed`, stop. Compare Apollo usage with CRM and the receipt before requesting any new allowance. Never delete the receipt to retry.
 
 ## 12. Sales Growth and Chat browser acceptance
+
+The authenticated production pass on merge `5d441bae1445f8a7fc2c3796c4d64853bef20108` satisfied the free-read/UI portion: eight live candidates at 0 credits, `Ctrl+K` navigation, 97 Chat test records hidden by default, 390×844 containment, and zero console errors on Sales Growth and Chat. The paid destination/replay steps below remain separate gates.
 
 1. Open `/crm/hunt` at the exact deployment SHA. Confirm the full operating loop, free-search action, connection guardrails, and research gates are visible without scrolling through a branded splash screen.
 2. Confirm primary CRM navigation contains Sales Growth, Research, Pipeline, Outreach, and Tasks; detailed records/settings are under **More**.
