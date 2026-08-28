@@ -64,6 +64,8 @@ The detailed company/contact/deal/admin objects remain available under the CRM *
 
 Accept each state separately:
 
+Authenticated free-read and UX acceptance passed on production merge `5d441bae1445f8a7fc2c3796c4d64853bef20108`: Marketing Director plus the fixed UAE market returned eight live review candidates at 0 credits; no email/phone was unlocked and no CRM record was written. `Ctrl+K`, Chat's default hiding of 97 test records, 390×844 containment, and zero Sales Growth/Chat console errors also passed. Migration, paid provider, destination, replay, recovery drill, and client UAT remain separate states.
+
 1. **Code:** lint, typecheck, unit/contract tests, and production build pass at one SHA.
 2. **Migration:** additive receipt schema is present; journal/index/RLS/grants read back.
 3. **Deployment:** production resolves to the exact merged SHA and `/api/ready` is healthy.
