@@ -57,7 +57,7 @@ export function DemoReadinessPanel({
               }`
             : later.length > 0
               ? `${later.length} optional later`
-              : "Live integrations ready"}
+              : "Connection references ready"}
         </p>
       </div>
       <p className="mt-2 text-muted" data-testid={`${testIdPrefix}-demo-llm`}>
@@ -93,13 +93,13 @@ export function DemoReadinessPanel({
         </ul>
       ) : (
         <p className="mt-2 text-muted" data-testid={`${testIdPrefix}-demo-clear`}>
-          Tool keys and OAuth connections look ready for a live prospecting →
-          onboarding demo.
+          Configured references are ready for browser acceptance. Provider
+          acceptance and destination readback remain separate checks.
         </p>
       )}
       <p className="mt-3 flex flex-wrap gap-3 text-xs">
         <Link href="/crm/hunt" className="underline font-medium text-ink">
-          Hunt closed loop
+          Sales Growth
         </Link>
         <Link href="/crm/inbound" className="underline">
           Inbound capture
