@@ -151,7 +151,28 @@ For Apollo, Hunter, NeverBounce, and paid embeddings:
 5. Record request/result, credit/usage delta, CRM/memory readback, duplicate behavior, and failure path.
 6. Return the paid flag to false if the pilot is complete.
 
-## 12. UAT and acceptance
+### Apollo one-person production canary
+
+This release has a narrower owner authorization than the generic paid-provider flow:
+
+1. Verify `/api/ready` reports the Apollo credential configured and verify the exact production deployment SHA.
+2. In Sales Growth, run People Search first. It is a 0-credit read and must return reviewable professional candidates without an email/phone unlock.
+3. Select one candidate by the deterministic fit rule recorded with the acceptance receipt. Confirm the dialog that states one credit and the disabled phone/personal-email/waterfall fields.
+4. Execute only `salesOs.apollo.enrichOne`. Do not enable the global paid flag and do not invoke organization search, bulk match, waterfall, phone, Hunter, NeverBounce, sequence, or outbound actions.
+5. Read back the fixed `integration_inbox` receipt, one conservative `apollo_contact` ledger count, and the reconciled CRM company/contact/open deal. Confirm the CRM note carries the receipt ID and all four paid-field flags as false.
+6. Re-submit the same candidate only as a replay test: it must return the completed result without a provider call or second ledger entry. A different candidate must fail locally before Apollo.
+7. If the call times out or the receipt is `processing`/`failed`, stop. Compare Apollo usage with CRM and the receipt before requesting any new allowance. Never delete the receipt to retry.
+
+## 12. Sales Growth and Chat browser acceptance
+
+1. Open `/crm/hunt` at the exact deployment SHA. Confirm the full operating loop, free-search action, connection guardrails, and research gates are visible without scrolling through a branded splash screen.
+2. Confirm primary CRM navigation contains Sales Growth, Research, Pipeline, Outreach, and Tasks; detailed records/settings are under **More**.
+3. Run one free Apollo search and verify candidate names/roles/company profiles are returned, the status explicitly says 0 credits, and no CRM deal is created yet.
+4. After the separately bounded Apollo canary, follow its CRM link and verify company, contact, deal, source note, and open-pipeline status.
+5. Open `/chat`. Confirm generated proof/E2E agents, clients, and sessions are absent by default, a hidden-record count is disclosed, and **Show test records** restores them without any deletion.
+6. Check desktop and narrow viewport keyboard focus, menu operation, labels, empty states, console errors, and authenticated navigation loops.
+
+## 13. UAT and acceptance
 
 Ayham and Maolham should sign each domain separately:
 

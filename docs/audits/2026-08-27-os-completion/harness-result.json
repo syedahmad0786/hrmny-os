@@ -2,11 +2,11 @@
   "schemaVersion": 2,
   "harness": {
     "name": "system_harness",
-    "runId": "20260828T003923Z",
+    "runId": "20260828T044131Z",
     "generatedStatus": "planning-complete-needs-user-actions",
     "generatedPlanReadiness": 58,
     "generatedDeliveryEvidence": 0,
-    "artifactsRead": 18,
+    "artifactsRead": 27,
     "secretValuesRead": false
   },
   "repository": {
@@ -31,10 +31,10 @@
     },
     "tests": {
       "state": "tested",
-      "passed": 772,
+      "passed": 781,
       "skipped": 3,
       "failed": 0,
-      "testFilesPassed": 149,
+      "testFilesPassed": 152,
       "testFilesSkipped": 2
     },
     "build": {

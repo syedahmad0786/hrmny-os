@@ -1,19 +1,6 @@
-import type { ReactNode } from "react";
-import { Montserrat, Syne } from "next/font/google";
+import type { CSSProperties, ReactNode } from "react";
 import "./globals.css";
 import "./crm.css";
-
-const syne = Syne({
-  subsets: ["latin"],
-  variable: "--font-display",
-  display: "swap",
-});
-
-const montserrat = Montserrat({
-  subsets: ["latin"],
-  variable: "--font-body",
-  display: "swap",
-});
 
 export const metadata = {
   title: "hrmny OS — Build desk",
@@ -26,7 +13,17 @@ export default function RootLayout({
   children: ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${syne.variable} ${montserrat.variable}`}>
+    <html
+      lang="en"
+      style={
+        {
+          "--font-display":
+            '"Aptos Display", "Segoe UI Variable Display", "Arial Narrow", sans-serif',
+          "--font-body":
+            'Montserrat, Aptos, "Segoe UI Variable Text", "Segoe UI", sans-serif',
+        } as CSSProperties
+      }
+    >
       <body>
         <div className="grain" aria-hidden />
         {children}

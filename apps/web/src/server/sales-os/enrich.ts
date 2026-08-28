@@ -1,14 +1,9 @@
-import type { EmailVerificationAdapter, LeadSourceAdapter } from "@hrmny/integrations";
-import {
-  createEmailVerificationAdapter,
-  createLeadSourceAdapter,
-} from "@hrmny/integrations";
+import type { LeadSourceAdapter } from "@hrmny/integrations";
+import { createLeadSourceAdapter } from "@hrmny/integrations";
 import { listCompanies, listContacts } from "../crm/repository";
 import { contactsForTemperature } from "./sops";
 import { isSuppressed } from "./store";
 import {
-  addCredit,
-  creditUsed,
   getCompanyResearch,
   getSalesOsSettings,
   insertContactResearch,
@@ -19,7 +14,6 @@ import type { ContactResearchRow } from "./types";
 
 export type EnrichDeps = {
   leadSource?: LeadSourceAdapter;
-  verifier?: EmailVerificationAdapter;
 };
 
 export function strongerDedupeKey(input: {
@@ -29,7 +23,8 @@ export function strongerDedupeKey(input: {
   fullName?: string | null;
 }): string[] {
   const keys: string[] = [];
-  if (input.email?.trim()) keys.push(`email:${input.email.trim().toLowerCase()}`);
+  if (input.email?.trim())
+    keys.push(`email:${input.email.trim().toLowerCase()}`);
   if (input.linkedinUrl?.trim()) {
     keys.push(
       `li:${input.linkedinUrl
@@ -80,7 +75,11 @@ export async function existingDedupeKeys(): Promise<Set<string>> {
 export async function enrichApprovedCompany(
   companyResearchId: string,
   deps: EnrichDeps = {},
-): Promise<{ created: ContactResearchRow[]; skipped: string[]; creditsUsed: number }> {
+): Promise<{
+  created: ContactResearchRow[];
+  skipped: string[];
+  creditsUsed: number;
+}> {
   const company = await getCompanyResearch(companyResearchId);
   if (!company) throw new Error("Company research not found");
   if (company.approvalState !== "approved") {
@@ -89,28 +88,23 @@ export async function enrichApprovedCompany(
   const settings = await getSalesOsSettings();
   const maxContacts = contactsForTemperature(company.temperature);
   if (maxContacts === 0) {
-    return { created: [], skipped: ["cool_or_cold_no_credits"], creditsUsed: 0 };
+    return {
+      created: [],
+      skipped: ["cool_or_cold_no_credits"],
+      creditsUsed: 0,
+    };
   }
-  const used = await creditUsed("apollo_contact");
-  const remaining = Math.max(0, settings.caps.apolloContactsPerMonth - used);
-  if (remaining <= 0) {
-    return { created: [], skipped: ["apollo_monthly_cap"], creditsUsed: 0 };
-  }
-
   const leadSource = deps.leadSource ?? createLeadSourceAdapter();
-  const verifier = deps.verifier ?? createEmailVerificationAdapter();
   const candidates = await leadSource.searchLeads({
     query: `${company.name} ${company.sector ?? ""} UAE`,
     titles: settings.stakeholderTitles,
     locations: ["United Arab Emirates"],
-    perPage: Math.min(maxContacts, remaining),
+    perPage: maxContacts,
   });
 
   const known = await existingDedupeKeys();
   const created: ContactResearchRow[] = [];
   const skipped: string[] = [];
-  let credits = 0;
-
   for (const cand of candidates) {
     if (created.length >= maxContacts) break;
     const keys = strongerDedupeKey({
@@ -130,7 +124,9 @@ export async function enrichApprovedCompany(
         continue;
       }
     }
-    const verification = cand.email ? await verifier.verify(cand.email) : null;
+    const verified = new Set(["verified", "valid"]).has(
+      cand.emailStatus?.trim().toLowerCase() ?? "",
+    );
     const row = await insertContactResearch({
       companyResearchId: company.id,
       companyId: company.companyId,
@@ -141,20 +137,18 @@ export async function enrichApprovedCompany(
       seniority: cand.title ?? null,
       email: cand.email ?? null,
       linkedinUrl: cand.linkedinUrl ?? null,
-      emailVerified: verification?.emailVerified ?? false,
-      emailVerdict: verification?.verdict ?? (cand.email ? "unknown" : null),
+      emailVerified: verified,
+      emailVerdict: cand.emailStatus ?? (cand.email ? "unknown" : null),
       enrichSource: cand.source,
       enrichExternalId: cand.externalId,
-      enrichProvider: verification?.provider ?? "apollo",
+      enrichProvider: "apollo_search",
       approvalState: "found",
       reworkFeedback: null,
     });
     for (const k of keys) known.add(k);
     created.push(row);
-    credits += 1;
-    await addCredit("apollo_contact", 1);
   }
 
   await patchCompanyResearch(company.id, {});
-  return { created, skipped, creditsUsed: credits };
+  return { created, skipped, creditsUsed: 0 };
 }

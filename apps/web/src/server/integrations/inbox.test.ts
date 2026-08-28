@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  completeIntegrationReceipt,
+  failIntegrationReceipt,
+  getIntegrationReceipt,
   hashIntegrationPayload,
   recordIntegrationReceipt,
   resetIntegrationReceiptMemory,
@@ -10,7 +13,9 @@ describe("integration inbox", () => {
 
   it("uses a deterministic SHA-256 payload hash", () => {
     expect(hashIntegrationPayload("same")).toBe(hashIntegrationPayload("same"));
-    expect(hashIntegrationPayload("same")).not.toBe(hashIntegrationPayload("other"));
+    expect(hashIntegrationPayload("same")).not.toBe(
+      hashIntegrationPayload("other"),
+    );
   });
 
   it("marks a repeated provider event as a duplicate", async () => {
@@ -46,5 +51,40 @@ describe("integration inbox", () => {
         rawBody: '{"value":2}',
       }),
     ).rejects.toThrow(/PAYLOAD_MISMATCH/);
+  });
+
+  it("moves a claimed receipt through completed readback", async () => {
+    const claimed = await recordIntegrationReceipt({
+      provider: "apollo",
+      externalEventId: "one-person-canary",
+      operation: "people.match",
+      rawBody: '{"id":"person-1"}',
+      status: "processing",
+    });
+    await completeIntegrationReceipt(claimed.receiptId, {
+      matched: true,
+      contactId: "contact-1",
+    });
+    expect(
+      await getIntegrationReceipt("apollo", "one-person-canary"),
+    ).toMatchObject({
+      receiptId: claimed.receiptId,
+      status: "completed",
+      result: { matched: true, contactId: "contact-1" },
+    });
+  });
+
+  it("retains a fail-closed receipt after an uncertain provider attempt", async () => {
+    const claimed = await recordIntegrationReceipt({
+      provider: "apollo",
+      externalEventId: "uncertain-canary",
+      operation: "people.match",
+      rawBody: '{"id":"person-2"}',
+      status: "processing",
+    });
+    await failIntegrationReceipt(claimed.receiptId, "provider timeout");
+    expect(
+      await getIntegrationReceipt("apollo", "uncertain-canary"),
+    ).toMatchObject({ status: "failed" });
   });
 });

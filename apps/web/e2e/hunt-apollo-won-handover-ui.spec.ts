@@ -41,6 +41,7 @@ async function ensureApolloDealHandoverNext(page: Page, query: string) {
   });
 
   await page.getByTestId("hunt-apollo-query").fill(query);
+  await page.getByTestId("hunt-test-tools").click();
   await page.getByTestId("hunt-apollo-prospect").click();
 
   const status = page.getByTestId("hunt-closed-loop-status");
@@ -124,7 +125,9 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     const portal = page.getByTestId("deal-handover-portal");
     await expect(portal).toBeVisible();
     await expect(portal).toHaveAttribute("href", /\/portal\/login\/verify/);
-    const onboardingInvite = page.getByTestId("deal-handover-onboarding-invite");
+    const onboardingInvite = page.getByTestId(
+      "deal-handover-onboarding-invite",
+    );
     await expect(onboardingInvite).toBeVisible();
     await expect(onboardingInvite).toHaveAttribute(
       "href",
@@ -137,7 +140,9 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     expect(portalHref).not.toBe(onboardingHref);
 
     await portal.click();
-    await expect(page).toHaveURL(/\/portal\/login\/verify/, { timeout: 60_000 });
+    await expect(page).toHaveURL(/\/portal\/login\/verify/, {
+      timeout: 60_000,
+    });
     await expect(page).toHaveURL(/token=/);
     await expect(
       page.getByRole("heading", { name: /^Approvals$/i }),
@@ -163,6 +168,7 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     });
 
     await page.getByTestId("hunt-apollo-query").fill(query);
+    await page.getByTestId("hunt-test-tools").click();
     await page.getByTestId("hunt-closed-loop-apollo").click();
 
     const status = page.getByTestId("hunt-closed-loop-status");
@@ -217,6 +223,7 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     });
 
     await page.getByTestId("hunt-apollo-query").fill(query);
+    await page.getByTestId("hunt-test-tools").click();
     await page.getByTestId("hunt-closed-loop-apollo").click();
 
     const status = page.getByTestId("hunt-closed-loop-status");
@@ -274,7 +281,9 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     ).toBeVisible({ timeout: 60_000 });
 
     await page.goto(portalHref!, { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveURL(/\/portal\/login\/verify/, { timeout: 60_000 });
+    await expect(page).toHaveURL(/\/portal\/login\/verify/, {
+      timeout: 60_000,
+    });
     await expect(
       page.getByRole("heading", { name: /^Approvals$/i }),
     ).toBeVisible({ timeout: 60_000 });

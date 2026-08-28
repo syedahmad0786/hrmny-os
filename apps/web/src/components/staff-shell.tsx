@@ -8,6 +8,7 @@ import { initials } from "@/components/crm/format";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { featureForPathname } from "@/features/catalog";
 import { PwaRegister } from "@/components/pwa-register";
+import { isSyntheticRecordName } from "@/lib/synthetic-records";
 
 const PRIMARY_NAV = [
   {
@@ -19,7 +20,7 @@ const PRIMARY_NAV = [
   },
   {
     href: "/crm/hunt",
-    label: "Hunt",
+    label: "Sales",
     index: "02",
     features: ["crm.workspace"],
     match: (p: string) =>
@@ -30,7 +31,7 @@ const PRIMARY_NAV = [
   },
   {
     href: "/tasks",
-    label: "Tasks",
+    label: "Work",
     index: "03",
     features: ["work.my_tasks"],
     match: (p: string) =>
@@ -81,15 +82,15 @@ const PRIMARY_NAV = [
   },
   {
     href: "/dashboards",
-    label: "Dashboards",
-    index: "05b",
+    label: "Insights",
+    index: "08",
     features: ["analytics.dashboards", "finance.workspace", "core.home"],
     match: (p: string) => p === "/dashboards" || p.startsWith("/dashboards/"),
   },
   {
     href: "/people",
     label: "People",
-    index: "08",
+    index: "09",
     features: [
       "people.core_hr",
       "people.leave_attendance",
@@ -114,8 +115,8 @@ const PRIMARY_NAV = [
   },
   {
     href: "/admin/features",
-    label: "Admin",
-    index: "09",
+    label: "Settings",
+    index: "10",
     features: [
       "admin.feature_lab",
       "work.admin_console",
@@ -371,7 +372,13 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   }
 
   const dealCount = useMemo(
-    () => String((deals.data ?? []).length || ""),
+    () =>
+      String(
+        (deals.data ?? []).filter(
+          (deal) =>
+            !deal.closeOutcome && !isSyntheticRecordName(deal.companyName),
+        ).length || "",
+      ),
     [deals.data],
   );
 
@@ -515,7 +522,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
             <span className="desk-search-copy">
               Search clients, deals, tasks…
             </span>
-            <kbd>⌘ K</kbd>
+            <kbd>Ctrl K</kbd>
           </Link>
           <div className="desk-top-actions">
             {(users.data ?? []).length > 0 ? (
@@ -544,7 +551,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
             >
               {pathname.startsWith("/client-preview")
                 ? "← Staff admin"
-                : "View client portal"}
+                : "Client view"}
             </Link>
             <Link
               href="/admin/audit"

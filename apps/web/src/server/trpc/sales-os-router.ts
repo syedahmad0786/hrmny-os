@@ -12,7 +12,9 @@ import {
   decideContact,
   DEFAULT_SALES_OS_SETTINGS,
   draftChannelsForApprovedContact,
+  enrichOneApolloPerson,
   enrichApprovedCompany,
+  getApolloOnePersonCanaryStatus,
   getSalesOsSettings,
   honorUnsubscribe,
   ingestGmailReply,
@@ -28,6 +30,7 @@ import {
   rejectEvolve,
   RESEARCH_GUIDELINES,
   runDailyResearch,
+  searchApolloPeopleFree,
   SALES_OS_SOP_SOURCE,
   saveSalesOsSettings,
   sectorForDate,
@@ -70,6 +73,47 @@ const settingsPatch = z.object({
 });
 
 export const salesOsRouter = router({
+  apollo: router({
+    status: staffProcedure.query(() => getApolloOnePersonCanaryStatus()),
+    search: staffProcedure
+      .input(
+        z.object({
+          query: z.string().trim().min(2).max(160),
+          titles: z.array(z.string().trim().min(2).max(120)).max(8).optional(),
+          perPage: z.number().int().min(1).max(10).optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const result = await searchApolloPeopleFree(input);
+        return {
+          mode: result.mode,
+          candidates: result.candidates.map(
+            ({ raw: _raw, ...candidate }) => candidate,
+          ),
+        };
+      }),
+    enrichOne: staffProcedure
+      .input(
+        z.object({
+          candidate: z.object({
+            externalId: z.string().trim().min(1).max(180).optional(),
+            email: z.string().trim().email().optional(),
+            fullName: z.string().trim().min(2).max(180).optional(),
+            companyName: z.string().trim().min(1).max(180).optional(),
+            companyDomain: z.string().trim().min(1).max(255).optional(),
+            linkedinUrl: z.string().trim().url().max(500).optional(),
+          }),
+          confirmCreditUse: z.literal(true),
+        }),
+      )
+      .mutation(({ input, ctx }) =>
+        enrichOneApolloPerson({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+        }),
+      ),
+  }),
+
   settings: router({
     get: staffProcedure.query(async () => {
       const settings = await getSalesOsSettings();
@@ -77,20 +121,25 @@ export const salesOsRouter = router({
         settings,
         defaults: DEFAULT_SALES_OS_SETTINGS,
         source: SALES_OS_SOP_SOURCE,
-        guidelines: { outreach: OUTREACH_GUIDELINES, research: RESEARCH_GUIDELINES },
+        guidelines: {
+          outreach: OUTREACH_GUIDELINES,
+          research: RESEARCH_GUIDELINES,
+        },
         sectorToday: sectorForDate(settings),
       };
     }),
-    save: staffProcedure.input(settingsPatch).mutation(async ({ input, ctx }) => {
-      const current = await getSalesOsSettings();
-      const next: SalesOsSettings = {
-        ...current,
-        icp: { ...current.icp, ...input.icp },
-        caps: { ...current.caps, ...input.caps },
-        outreach: { ...current.outreach, ...input.outreach },
-      };
-      return saveSalesOsSettings(next, ctx.employeeId);
-    }),
+    save: staffProcedure
+      .input(settingsPatch)
+      .mutation(async ({ input, ctx }) => {
+        const current = await getSalesOsSettings();
+        const next: SalesOsSettings = {
+          ...current,
+          icp: { ...current.icp, ...input.icp },
+          caps: { ...current.caps, ...input.caps },
+          outreach: { ...current.outreach, ...input.outreach },
+        };
+        return saveSalesOsSettings(next, ctx.employeeId);
+      }),
   }),
 
   research: router({
@@ -98,7 +147,9 @@ export const salesOsRouter = router({
       .input(
         z
           .object({
-            state: z.enum(["researched", "approved", "rejected", "rework"]).optional(),
+            state: z
+              .enum(["researched", "approved", "rejected", "rework"])
+              .optional(),
           })
           .optional(),
       )
@@ -147,7 +198,9 @@ export const salesOsRouter = router({
         z
           .object({
             companyResearchId: z.string().optional(),
-            state: z.enum(["found", "approved", "rejected", "rework"]).optional(),
+            state: z
+              .enum(["found", "approved", "rejected", "rework"])
+              .optional(),
           })
           .optional(),
       )
@@ -178,7 +231,13 @@ export const salesOsRouter = router({
         z.object({
           email: z.string().email().optional(),
           domain: z.string().optional(),
-          reason: z.enum(["unsubscribe", "bounce", "complaint", "dnc", "no_go"]),
+          reason: z.enum([
+            "unsubscribe",
+            "bounce",
+            "complaint",
+            "dnc",
+            "no_go",
+          ]),
         }),
       )
       .mutation(({ input }) =>
@@ -203,7 +262,13 @@ export const salesOsRouter = router({
       .input(
         z.object({
           dealId: z.string().uuid(),
-          intent: z.enum(["interested", "question", "not_now", "unsubscribe", "other"]),
+          intent: z.enum([
+            "interested",
+            "question",
+            "not_now",
+            "unsubscribe",
+            "other",
+          ]),
           email: z.string().optional(),
         }),
       )
@@ -234,7 +299,11 @@ export const salesOsRouter = router({
       .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
         const item = await getOutreach(input.id);
-        if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Outreach not found" });
+        if (!item)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Outreach not found",
+          });
         if (!item.channel.startsWith("linkedin")) {
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -254,13 +323,17 @@ export const salesOsRouter = router({
           if (!connect) {
             throw new TRPCError({
               code: "PRECONDITION_FAILED",
-              message: "Mark the connection Accepted before sending the follow-up",
+              message:
+                "Mark the connection Accepted before sending the follow-up",
             });
           }
         }
         const cap = await assertLinkedInAssistAllowed();
         if (!cap.ok) {
-          throw new TRPCError({ code: "PRECONDITION_FAILED", message: cap.reason });
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: cap.reason,
+          });
         }
         await addCredit("linkedin_assist", 1, weekKey());
         return patchOutreach(input.id, {
@@ -273,9 +346,14 @@ export const salesOsRouter = router({
       .mutation(async ({ input }) => {
         const item = await getOutreach(input.id);
         if (!item || item.channel !== "linkedin_connect") {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Not a connection item" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Not a connection item",
+          });
         }
-        return patchOutreach(input.id, { acceptedAt: new Date().toISOString() });
+        return patchOutreach(input.id, {
+          acceptedAt: new Date().toISOString(),
+        });
       }),
     markSkipped: staffProcedure
       .input(z.object({ id: z.string() }))
@@ -318,7 +396,11 @@ export const salesOsRouter = router({
       .input(z.object({ id: z.string(), feedback: z.string().min(2) }))
       .mutation(async ({ input }) => {
         const item = await getOutreach(input.id);
-        if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Outreach not found" });
+        if (!item)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Outreach not found",
+          });
         if (item.state !== "draft" && item.state !== "approved") {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
@@ -333,6 +415,11 @@ export const salesOsRouter = router({
   }),
 
   honorUnsubscribe: staffProcedure
-    .input(z.object({ dealId: z.string().uuid().optional(), email: z.string().email() }))
+    .input(
+      z.object({
+        dealId: z.string().uuid().optional(),
+        email: z.string().email(),
+      }),
+    )
     .mutation(({ input }) => honorUnsubscribe(input)),
 });

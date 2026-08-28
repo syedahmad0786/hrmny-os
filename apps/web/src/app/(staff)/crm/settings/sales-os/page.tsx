@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { trpc } from "@/lib/trpc";
+import { useState } from "react";
 import { DemoReadinessPanel } from "@/components/demo-readiness-panel";
 import { CrmBtn, CrmEmpty, CrmPageHeader, CrmTag } from "@/components/crm/ui";
+import { trpc } from "@/lib/trpc";
 
 export default function SalesOsSettingsPage() {
   const utils = trpc.useUtils();
@@ -30,61 +30,41 @@ export default function SalesOsSettingsPage() {
   const reject = trpc.salesOs.evolve.reject.useMutation({
     onSuccess: () => void utils.salesOs.evolve.invalidate(),
   });
-  const importSg = trpc.salesOs.importSalesGrowth.useMutation();
-  const intent = trpc.salesOs.intentCsv.useMutation();
+  const importSalesGrowth = trpc.salesOs.importSalesGrowth.useMutation();
+  const importIntent = trpc.salesOs.intentCsv.useMutation();
   const [dnc, setDnc] = useState("");
   const [csv, setCsv] = useState("");
   const [json, setJson] = useState("");
   const [note, setNote] = useState<string | null>(null);
-
-  const s = settings.data?.settings;
+  const current = settings.data?.settings;
 
   return (
-    <main data-testid="sales-os-settings">
+    <main data-testid="sales-os-settings" className="growth-settings">
+      <Link href="/crm/hunt" className="growth-text-link">
+        ← Back to Sales Growth
+      </Link>
       <CrmPageHeader
-        title="Sales OS"
-        description="Replaces the Claude Sales & Growth slash commands. SOPs, caps, suppression, evolve, and historical import."
+        title="Sales Growth settings"
+        description="Operating limits, suppression, connection diagnostics, and governed learning. Daily selling work stays on the Sales Growth page."
       />
-
-      {settings.data ? (
-        <p className="text-xs text-[var(--muted)] mb-4">
-          Seeded from {settings.data.source.title} ({settings.data.source.version},{" "}
-          {settings.data.source.date}). Sector today: {settings.data.sectorToday}.
-        </p>
-      ) : null}
-
-      <DemoReadinessPanel testIdPrefix="sales-os" />
-      <p className="text-xs text-[var(--muted)] mb-4">
-        HITL Gmail needs a live{" "}
-        <Link
-          href="/settings/connections#conn-google_workspace"
-          className="underline"
-        >
-          Google Workspace
-        </Link>{" "}
-        reconnect as <code>@hrmny.co</code>. Apollo stays mock until a key is
-        pasted on Connections. Hunter is not used. NeverBounce is env-only
-        (<code>NEVERBOUNCE_API_KEY</code>). Do not connect LinkedIn send
-        automation.
-      </p>
 
       {digest.data ? (
         <div className="grid gap-2 md:grid-cols-4 mb-4">
           <div className="crm-metric">
-            <span className="crm-metric-label">Gate 1 queue</span>
+            <span className="crm-metric-label">Companies to review</span>
             <strong>{digest.data.researchedWaiting}</strong>
           </div>
           <div className="crm-metric">
-            <span className="crm-metric-label">Gate 2 queue</span>
+            <span className="crm-metric-label">People to review</span>
             <strong>{digest.data.contactsWaiting}</strong>
           </div>
           <div className="crm-metric">
-            <span className="crm-metric-label">Coverage</span>
+            <span className="crm-metric-label">Pipeline coverage</span>
             <strong>{digest.data.coverage.coverageX.toFixed(1)}×</strong>
             <small>target {digest.data.coverage.targetX}×</small>
           </div>
           <div className="crm-metric">
-            <span className="crm-metric-label">Stalled deals</span>
+            <span className="crm-metric-label">Needs attention</span>
             <strong>{digest.data.stalled.length}</strong>
           </div>
         </div>
@@ -92,43 +72,48 @@ export default function SalesOsSettingsPage() {
 
       <section className="crm-panel mb-4">
         <div className="crm-panel-head">
-          <h3>Caps + kill switch</h3>
+          <div>
+            <h3>Operating limits</h3>
+            <p>Hard ceilings keep the team in control.</p>
+          </div>
         </div>
         <div className="crm-panel-body crm-form-grid">
           <label className="crm-field">
-            Email / day
+            Approved emails per day
             <input
               className="crm-input"
               type="number"
-              defaultValue={s?.caps.emailPerDay}
+              defaultValue={current?.caps.emailPerDay}
               data-testid="sales-os-email-cap"
-              onBlur={(e) =>
-                save.mutate({ caps: { emailPerDay: Number(e.target.value) } })
-              }
-            />
-          </label>
-          <label className="crm-field">
-            LinkedIn assists / week
-            <input
-              className="crm-input"
-              type="number"
-              defaultValue={s?.caps.linkedinConnectsPerWeek}
-              onBlur={(e) =>
+              onBlur={(event) =>
                 save.mutate({
-                  caps: { linkedinConnectsPerWeek: Number(e.target.value) },
+                  caps: { emailPerDay: Number(event.target.value) },
                 })
               }
             />
           </label>
           <label className="crm-field">
-            Apollo contacts / month
+            LinkedIn assists per week
             <input
               className="crm-input"
               type="number"
-              defaultValue={s?.caps.apolloContactsPerMonth}
-              onBlur={(e) =>
+              defaultValue={current?.caps.linkedinConnectsPerWeek}
+              onBlur={(event) =>
                 save.mutate({
-                  caps: { apolloContactsPerMonth: Number(e.target.value) },
+                  caps: { linkedinConnectsPerWeek: Number(event.target.value) },
+                })
+              }
+            />
+          </label>
+          <label className="crm-field">
+            Apollo enrichments per month
+            <input
+              className="crm-input"
+              type="number"
+              defaultValue={current?.caps.apolloContactsPerMonth}
+              onBlur={(event) =>
+                save.mutate({
+                  caps: { apolloContactsPerMonth: Number(event.target.value) },
                 })
               }
             />
@@ -136,10 +121,12 @@ export default function SalesOsSettingsPage() {
           <label className="crm-check-row">
             <input
               type="checkbox"
-              checked={s?.caps.pauseAllOutreach ?? false}
+              checked={current?.caps.pauseAllOutreach ?? false}
               data-testid="sales-os-pause"
-              onChange={(e) =>
-                save.mutate({ caps: { pauseAllOutreach: e.target.checked } })
+              onChange={(event) =>
+                save.mutate({
+                  caps: { pauseAllOutreach: event.target.checked },
+                })
               }
             />
             Pause all outreach
@@ -147,16 +134,36 @@ export default function SalesOsSettingsPage() {
         </div>
       </section>
 
-      <section className="crm-panel mb-4">
-        <div className="crm-panel-head">
-          <h3>No-go + suppression</h3>
+      <details className="growth-settings-detail">
+        <summary>
+          Connection diagnostics
+          <span>Open when a provider needs attention</span>
+        </summary>
+        <div className="growth-settings-detail-body">
+          <DemoReadinessPanel testIdPrefix="sales-os" />
+          <p>
+            Apollo People Search is a 0-credit read. The production connection
+            test permits one People Match only; phone, personal-email, and both
+            waterfall options are disabled. Gmail and LinkedIn remain human-send
+            workflows—nothing here sends automatically.
+          </p>
+          <Link href="/settings/connections" className="growth-text-link">
+            Open connection settings →
+          </Link>
         </div>
-        <div className="crm-panel-body">
-          <p className="text-sm mb-2">{s?.icp.noGo.join(" · ")}</p>
+      </details>
+
+      <details className="growth-settings-detail">
+        <summary>
+          Compliance and suppression
+          <span>Do-not-contact and no-go controls</span>
+        </summary>
+        <div className="growth-settings-detail-body">
+          <p>{current?.icp.noGo.join(" · ")}</p>
           <form
             className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
+            onSubmit={(event) => {
+              event.preventDefault();
               if (!dnc.includes("@")) return;
               addSuppression.mutate({ email: dnc, reason: "dnc" });
               setDnc("");
@@ -164,9 +171,9 @@ export default function SalesOsSettingsPage() {
           >
             <input
               className="crm-input"
-              placeholder="Add DNC email"
+              placeholder="Add do-not-contact email"
               value={dnc}
-              onChange={(e) => setDnc(e.target.value)}
+              onChange={(event) => setDnc(event.target.value)}
             />
             <CrmBtn type="submit">Add</CrmBtn>
           </form>
@@ -178,157 +185,169 @@ export default function SalesOsSettingsPage() {
             ))}
           </ul>
         </div>
-      </section>
+      </details>
 
-      <section className="crm-panel mb-4">
-        <div className="crm-panel-head">
-          <h3>Reflect / evolve</h3>
-          <CrmBtn onClick={() => propose.mutate({})}>Propose weekly changes</CrmBtn>
+      <details className="growth-settings-detail">
+        <summary>
+          Weekly learning
+          <span>Proposals never apply themselves</span>
+        </summary>
+        <div className="growth-settings-detail-body">
+          <CrmBtn onClick={() => propose.mutate({})}>
+            Propose weekly changes
+          </CrmBtn>
+          <div className="crm-approval-stack mt-3">
+            {(proposals.data ?? []).length === 0 ? (
+              <CrmEmpty
+                title="No proposals"
+                hint="Review after a week of outcomes."
+              />
+            ) : (
+              (proposals.data ?? []).map((proposal) => (
+                <article key={proposal.id} className="crm-approval-mini">
+                  <CrmTag
+                    kind={proposal.state === "proposed" ? "warn" : "info"}
+                  >
+                    {proposal.state}
+                  </CrmTag>
+                  <p>{proposal.summary}</p>
+                  {proposal.state === "proposed" ? (
+                    <div className="crm-approval-actions">
+                      <CrmBtn
+                        variant="primary"
+                        onClick={() => apply.mutate({ id: proposal.id })}
+                      >
+                        Apply
+                      </CrmBtn>
+                      <CrmBtn
+                        onClick={() => reject.mutate({ id: proposal.id })}
+                      >
+                        Reject
+                      </CrmBtn>
+                    </div>
+                  ) : null}
+                </article>
+              ))
+            )}
+          </div>
         </div>
-        <div className="crm-panel-body">
-          {(proposals.data ?? []).length === 0 ? (
-            <CrmEmpty title="No proposals" hint="Run propose after a week of outcomes." />
-          ) : (
-            (proposals.data ?? []).map((p) => (
-              <article key={p.id} className="crm-approval-mini">
-                <CrmTag kind={p.state === "proposed" ? "warn" : "info"}>{p.state}</CrmTag>
-                <p>{p.summary}</p>
-                {p.state === "proposed" ? (
-                  <div className="crm-approval-actions">
-                    <CrmBtn variant="primary" onClick={() => apply.mutate({ id: p.id })}>
-                      Apply
-                    </CrmBtn>
-                    <CrmBtn onClick={() => reject.mutate({ id: p.id })}>Reject</CrmBtn>
-                  </div>
-                ) : null}
-              </article>
-            ))
-          )}
-        </div>
-      </section>
+      </details>
 
-      <section className="crm-split">
-        <div className="crm-panel">
-          <div className="crm-panel-head">
-            <h3>Apollo intent CSV</h3>
-          </div>
-          <div className="crm-panel-body">
-            <textarea
-              className="crm-textarea"
-              data-testid="sales-os-intent-csv"
-              value={csv}
-              onChange={(e) => setCsv(e.target.value)}
-              placeholder="company,domain,intent,employees"
-            />
-            <CrmBtn
-              className="mt-2"
-              onClick={() =>
-                intent.mutateAsync({ csv }).then((r) =>
-                  setNote(`Intent: ${r.created.length} created, ${r.skipped.length} skipped`),
-                )
-              }
-            >
-              Import intent leads
-            </CrmBtn>
-          </div>
-        </div>
-        <aside className="crm-panel">
-          <div className="crm-panel-head">
-            <h3>June dashboard.db import</h3>
-          </div>
-          <div className="crm-panel-body">
-            <p className="text-sm mb-2">
-              Paste the JSON export from <code>parseSalesGrowthExport</code>. Dry-run
-              first, then apply. Lineage keeps re-imports idempotent.
-            </p>
-            <textarea
-              className="crm-textarea"
-              data-testid="sales-os-import-json"
-              value={json}
-              onChange={(e) => setJson(e.target.value)}
-              placeholder='{"companies":[],"contacts":[],...}'
-            />
-            <div className="crm-approval-actions mt-2">
-              <CrmBtn
-                onClick={() => {
-                  try {
-                    const data = JSON.parse(json);
-                    importSg
-                      .mutateAsync({ data, apply: false })
-                      .then((r) =>
+      <details className="growth-settings-detail">
+        <summary>
+          Data imports and cutover
+          <span>Administrative tools</span>
+        </summary>
+        <div className="growth-settings-detail-body">
+          <div className="crm-split">
+            <div className="crm-panel">
+              <div className="crm-panel-head">
+                <h3>Apollo intent CSV</h3>
+              </div>
+              <div className="crm-panel-body">
+                <textarea
+                  className="crm-textarea"
+                  data-testid="sales-os-intent-csv"
+                  value={csv}
+                  onChange={(event) => setCsv(event.target.value)}
+                  placeholder="company,domain,intent,employees"
+                />
+                <CrmBtn
+                  className="mt-2"
+                  onClick={() =>
+                    importIntent
+                      .mutateAsync({ csv })
+                      .then((response) =>
                         setNote(
-                          `Dry run: imported ${r.report.totals.imported} / skipped ${r.report.totals.skipped}`,
+                          `Intent: ${response.created.length} created, ${response.skipped.length} skipped`,
                         ),
-                      );
-                  } catch (err) {
-                    setNote(err instanceof Error ? err.message : "Invalid JSON");
+                      )
                   }
-                }}
-              >
-                Dry run
-              </CrmBtn>
-              <CrmBtn
-                variant="primary"
-                onClick={() => {
-                  const data = JSON.parse(json);
-                  importSg
-                    .mutateAsync({ data, apply: true })
-                    .then((r) =>
-                      setNote(
-                        `Applied: imported ${r.report.totals.imported} / skipped ${r.report.totals.skipped}`,
-                      ),
-                    );
-                }}
-              >
-                Apply import
-              </CrmBtn>
+                >
+                  Import intent leads
+                </CrmBtn>
+              </div>
             </div>
+            <aside className="crm-panel">
+              <div className="crm-panel-head">
+                <h3>Historical JSON import</h3>
+              </div>
+              <div className="crm-panel-body">
+                <p>
+                  Dry-run first. Lineage keeps accepted re-imports idempotent.
+                </p>
+                <textarea
+                  className="crm-textarea"
+                  data-testid="sales-os-import-json"
+                  value={json}
+                  onChange={(event) => setJson(event.target.value)}
+                  placeholder='{"companies":[],"contacts":[]}'
+                />
+                <div className="crm-approval-actions mt-2">
+                  <CrmBtn
+                    onClick={() => {
+                      try {
+                        const data = JSON.parse(json);
+                        importSalesGrowth
+                          .mutateAsync({ data, apply: false })
+                          .then((response) =>
+                            setNote(
+                              `Dry run: imported ${response.report.totals.imported} / skipped ${response.report.totals.skipped}`,
+                            ),
+                          );
+                      } catch (error) {
+                        setNote(
+                          error instanceof Error
+                            ? error.message
+                            : "Invalid JSON",
+                        );
+                      }
+                    }}
+                  >
+                    Dry run
+                  </CrmBtn>
+                  <CrmBtn
+                    variant="primary"
+                    onClick={() => {
+                      try {
+                        const data = JSON.parse(json);
+                        importSalesGrowth
+                          .mutateAsync({ data, apply: true })
+                          .then((response) =>
+                            setNote(
+                              `Applied: imported ${response.report.totals.imported} / skipped ${response.report.totals.skipped}`,
+                            ),
+                          );
+                      } catch (error) {
+                        setNote(
+                          error instanceof Error
+                            ? error.message
+                            : "Invalid JSON",
+                        );
+                      }
+                    }}
+                  >
+                    Apply import
+                  </CrmBtn>
+                </div>
+              </div>
+            </aside>
           </div>
-        </aside>
-      </section>
+          <p>
+            Supabase PostgreSQL remains the CRM source of truth. Legacy exports
+            are imported with dry-run and lineage; legacy projects are not
+            deleted by this screen.
+          </p>
+          <p>
+            Source contract: {settings.data?.source.title ?? "Sales Growth SOP"}
+            {settings.data
+              ? ` · ${settings.data.source.version} · sector today ${settings.data.sectorToday}`
+              : ""}
+          </p>
+        </div>
+      </details>
 
       {note ? <p className="crm-note mt-4">{note}</p> : null}
-
-      <section className="crm-panel mt-4">
-        <div className="crm-panel-head">
-          <h3>Cutover</h3>
-        </div>
-        <div className="crm-panel-body text-sm space-y-2">
-          <p>
-            Parallel-run this CRM module beside Claude Code for two weeks, then
-            archive (do not delete) Vercel project <code>hrmny-sales-growth</code>.
-            Asana “Lead Pipeline 2026” is no longer the deal system of record.
-          </p>
-          <p>
-            Connect from{" "}
-            <Link href="/settings/connections" className="underline">
-              Settings → Connections
-            </Link>
-            : Google Workspace, Apollo, OpenRouter. NeverBounce is
-            <code> NEVERBOUNCE_API_KEY</code>. Hunter is not used. Do not
-            connect LinkedIn MCP / Playwright for outbound.
-          </p>
-          <p>
-            Production <code>/api/ready</code> (2026-08-25): OpenRouter and
-            Composio configured; Apollo mock; Hunter retired; Google Workspace token
-            expired. Reconnect uses dedicated Google OAuth (not Heal, not
-            Supabase SSO). OpenRouter tests use free <code>stealth/ox-alpha</code>.
-            The standalone{" "}
-            <a
-              href="https://hrmny-sales-growth.vercel.app"
-              className="underline"
-            >
-              hrmny-sales-growth
-            </a>{" "}
-            app is still in Demo Mode — archive it after the parallel window,
-            do not treat its Apollo/LinkedIn badges as CRM connections.
-          </p>
-          <p>
-            SPF / DKIM / DMARC on hrmny.co must be live before the first mailbox
-            send. See docs/SALES-GROWTH-CUTOVER.md.
-          </p>
-        </div>
-      </section>
     </main>
   );
 }

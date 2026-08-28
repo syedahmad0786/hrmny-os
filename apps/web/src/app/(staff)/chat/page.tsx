@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatReadyStrip } from "@/components/chat-ready-strip";
 import { nextLinksFromChatObservation } from "@/lib/agent-next-links";
+import {
+  isSyntheticAgent,
+  isSyntheticChatThread,
+  isSyntheticRecordName,
+} from "@/lib/synthetic-records";
 import { trpc } from "@/lib/trpc";
 import { observationLooksFailed, toolVerb } from "./tool-meta";
 
@@ -110,7 +115,64 @@ export default function HrmnyChatPage() {
   const [effort, setEffort] = useState<Effort>("medium");
   const [harness, setHarness] = useState<HarnessMode>("react");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showTestRecords, setShowTestRecords] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+
+  const allClientNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const client of clients.data ?? [])
+      map.set(client.clientId, client.name);
+    return map;
+  }, [clients.data]);
+  const visibleAgents = useMemo(
+    () =>
+      (agents.data ?? []).filter(
+        (item) =>
+          showTestRecords ||
+          !isSyntheticAgent({ slug: item.slug, displayName: item.displayName }),
+      ),
+    [agents.data, showTestRecords],
+  );
+  const visibleClients = useMemo(
+    () =>
+      (clients.data ?? []).filter(
+        (item) => showTestRecords || !isSyntheticRecordName(item.name),
+      ),
+    [clients.data, showTestRecords],
+  );
+  const visibleThreads = useMemo(
+    () =>
+      (threads.data ?? []).filter(
+        (item) =>
+          showTestRecords ||
+          !isSyntheticChatThread({
+            title: item.title,
+            agentSlug: item.agentSlug,
+            clientName: item.clientId
+              ? allClientNameById.get(item.clientId)
+              : null,
+          }),
+      ),
+    [allClientNameById, showTestRecords, threads.data],
+  );
+  const syntheticCount = useMemo(
+    () =>
+      (agents.data ?? []).filter((item) =>
+        isSyntheticAgent({ slug: item.slug, displayName: item.displayName }),
+      ).length +
+      (clients.data ?? []).filter((item) => isSyntheticRecordName(item.name))
+        .length +
+      (threads.data ?? []).filter((item) =>
+        isSyntheticChatThread({
+          title: item.title,
+          agentSlug: item.agentSlug,
+          clientName: item.clientId
+            ? allClientNameById.get(item.clientId)
+            : null,
+        }),
+      ).length,
+    [agents.data, allClientNameById, clients.data, threads.data],
+  );
 
   const messages = trpc.chat.messages.useQuery(
     { threadId: threadId! },
@@ -128,15 +190,14 @@ export default function HrmnyChatPage() {
     if (threadId) return;
     // Match sandbox AND agent so selecting os-settle cannot be overwritten by
     // an older org thread (which would drop agent_act from the harness).
-    const preferred = (threads.data ?? []).find(
+    const preferred = visibleThreads.find(
       (t) =>
-        (t.clientId ?? "") === clientId &&
-        (t.agentSlug ?? "") === agentSlug,
+        (t.clientId ?? "") === clientId && (t.agentSlug ?? "") === agentSlug,
     );
     if (preferred) setThreadId(preferred.chatThreadId);
-  }, [threadId, threads.data, clientId, agentSlug]);
+  }, [threadId, visibleThreads, clientId, agentSlug]);
 
-  const activeThread = threads.data?.find((t) => t.chatThreadId === threadId);
+  const activeThread = visibleThreads.find((t) => t.chatThreadId === threadId);
 
   useEffect(() => {
     if (!activeThread) return;
@@ -154,12 +215,12 @@ export default function HrmnyChatPage() {
   }, [messages.data, send.isPending]);
 
   const selectedAgent = useMemo(
-    () => (agents.data ?? []).find((a) => a.slug === agentSlug),
-    [agents.data, agentSlug],
+    () => visibleAgents.find((a) => a.slug === agentSlug),
+    [visibleAgents, agentSlug],
   );
   const sandboxClient = useMemo(
-    () => (clients.data ?? []).find((c) => c.clientId === clientId),
-    [clients.data, clientId],
+    () => visibleClients.find((c) => c.clientId === clientId),
+    [visibleClients, clientId],
   );
   const toolsPreview = useMemo(() => {
     if (
@@ -180,24 +241,24 @@ export default function HrmnyChatPage() {
 
   const agentBySlug = useMemo(() => {
     const map = new Map<string, string>();
-    for (const a of agents.data ?? []) {
+    for (const a of visibleAgents) {
       map.set(a.slug, a.displayName);
     }
     return map;
-  }, [agents.data]);
+  }, [visibleAgents]);
   const clientNameById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const c of clients.data ?? []) {
+    for (const c of visibleClients) {
       map.set(c.clientId, c.name);
     }
     return map;
-  }, [clients.data]);
+  }, [visibleClients]);
 
   const activeTitle = useMemo(
     () =>
-      threads.data?.find((t) => t.chatThreadId === threadId)?.title ??
+      visibleThreads.find((t) => t.chatThreadId === threadId)?.title ??
       "New conversation",
-    [threads.data, threadId],
+    [visibleThreads, threadId],
   );
 
   const bindingLabel = selectedAgent
@@ -296,7 +357,7 @@ export default function HrmnyChatPage() {
               }}
             >
               <option value="">Default Hrmny agent</option>
-              {(agents.data ?? []).map((a) => (
+              {visibleAgents.map((a) => (
                 <option key={a.customAgentId} value={a.slug}>
                   {a.displayName}
                   {"toolCount" in a && typeof a.toolCount === "number"
@@ -307,10 +368,7 @@ export default function HrmnyChatPage() {
             </select>
           </label>
           {agentSlug ? (
-            <p
-              className="hrmny-chat-bind-hint"
-              data-testid="chat-agent-hint"
-            >
+            <p className="hrmny-chat-bind-hint" data-testid="chat-agent-hint">
               Bound to this agent&apos;s prompt + allowlisted CRM/OS tools
               {selectedAgent?.model
                 ? ` · ${selectedAgent.model}`
@@ -347,7 +405,7 @@ export default function HrmnyChatPage() {
               }}
             >
               <option value="">Staff / org scope</option>
-              {(clients.data ?? []).map((c) => (
+              {visibleClients.map((c) => (
                 <option key={c.clientId} value={c.clientId}>
                   {c.name}
                 </option>
@@ -356,9 +414,32 @@ export default function HrmnyChatPage() {
           </label>
         </div>
 
+        {syntheticCount > 0 ? (
+          <p
+            className="hrmny-chat-synthetic"
+            data-testid="chat-synthetic-notice"
+          >
+            {syntheticCount} automated test record
+            {syntheticCount === 1 ? "" : "s"}{" "}
+            {showTestRecords ? "shown" : "hidden"}.
+            <button
+              type="button"
+              data-testid="chat-toggle-synthetic"
+              onClick={() => {
+                setShowTestRecords((value) => !value);
+                setThreadId(null);
+                setAgentSlug("");
+                setClientId("");
+              }}
+            >
+              {showTestRecords ? "Hide test records" : "Show test records"}
+            </button>
+          </p>
+        ) : null}
+
         <p className="hrmny-chat-section">Sessions</p>
         <ul className="hrmny-chat-sessions">
-          {(threads.data ?? []).map((t) => {
+          {visibleThreads.map((t) => {
             const agentLabel = t.agentSlug
               ? (agentBySlug.get(t.agentSlug) ?? t.agentSlug)
               : "Default";
@@ -380,10 +461,7 @@ export default function HrmnyChatPage() {
                 >
                   <span className="hrmny-chat-session-title">
                     {isWorking ? (
-                      <span
-                        className="hrmny-chat-working-dot"
-                        aria-hidden
-                      />
+                      <span className="hrmny-chat-working-dot" aria-hidden />
                     ) : null}
                     {t.title}
                   </span>
@@ -394,7 +472,7 @@ export default function HrmnyChatPage() {
               </li>
             );
           })}
-          {(threads.data?.length ?? 0) === 0 ? (
+          {visibleThreads.length === 0 ? (
             <li className="hrmny-chat-empty-side">No sessions yet</li>
           ) : null}
         </ul>
@@ -434,7 +512,10 @@ export default function HrmnyChatPage() {
             </p>
           </div>
           {toolsPreview.length ? (
-            <ul className="hrmny-chat-context-chips" aria-label="Allowlisted tools">
+            <ul
+              className="hrmny-chat-context-chips"
+              aria-label="Allowlisted tools"
+            >
               {toolsPreview.map((tool) => (
                 <li key={tool}>{tool}</li>
               ))}
@@ -506,7 +587,7 @@ export default function HrmnyChatPage() {
                     <div className="hrmny-chat-msg-role">
                       {m.role === "user"
                         ? "You"
-                        : selectedAgent?.displayName ?? "Hrmny"}
+                        : (selectedAgent?.displayName ?? "Hrmny")}
                     </div>
                     <div className="hrmny-chat-msg-body">
                       {m.role === "assistant" ? (

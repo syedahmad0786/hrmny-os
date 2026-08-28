@@ -43,12 +43,24 @@ export type LeadCandidate = {
   raw: Record<string, unknown>;
 };
 
+export type LeadEnrichmentIdentity = {
+  /** Apollo person id returned by zero-credit People Search when available. */
+  externalId?: string;
+  email?: string;
+  fullName?: string;
+  companyName?: string;
+  companyDomain?: string;
+  linkedinUrl?: string;
+};
+
 export interface LeadSourceAdapter {
   readonly mode: "mock" | "live";
   /** ICP search → candidates for CRM dedupe. Never writes the CRM itself. */
   searchLeads(criteria: LeadSearchCriteria): Promise<LeadCandidate[]>;
-  /** Enrich a single known contact (email match). */
-  enrichLead(email: string): Promise<LeadCandidate | null>;
+  /** Enrich one explicitly approved contact. The caller owns cost policy. */
+  enrichLead(
+    identity: string | LeadEnrichmentIdentity,
+  ): Promise<LeadCandidate | null>;
 }
 
 /** ── M8: email verification (Hunter / NeverBounce-shaped) ──────────── */

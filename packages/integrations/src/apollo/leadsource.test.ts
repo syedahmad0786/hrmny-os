@@ -32,6 +32,10 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
     expect((await src.enrichLead("cmo@acme.example"))?.email).toBe(
       "cmo@acme.example",
     );
+    expect(
+      (await src.enrichLead({ externalId: "person-1", fullName: "Mina Lead" }))
+        ?.externalId,
+    ).toBe("person-1");
   });
 
   it("factory defaults to mock without APOLLO_MODE=live", () => {
@@ -72,13 +76,31 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       allowPaidOperations: true,
     });
     await source.searchLeads({ query: "UAE creative" });
-    await source.enrichLead("person@example.com");
+    await source.enrichLead({
+      externalId: "person-1",
+      fullName: "Mina Lead",
+      companyName: "Example",
+      companyDomain: "example.com",
+      linkedinUrl: "https://linkedin.com/in/mina-lead",
+    });
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "https://api.apollo.io/api/v1/mixed_people/api_search",
     );
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
       "https://api.apollo.io/api/v1/people/match",
     );
+    const request = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toEqual({
+      id: "person-1",
+      name: "Mina Lead",
+      organization_name: "Example",
+      domain: "example.com",
+      linkedin_url: "https://linkedin.com/in/mina-lead",
+      reveal_personal_emails: false,
+      reveal_phone_number: false,
+      run_waterfall_email: false,
+      run_waterfall_phone: false,
+    });
   });
 
   it("allows zero-credit people search but gates paid enrichment", async () => {

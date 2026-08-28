@@ -1,17 +1,17 @@
 # Decisions, reasons, tradeoffs, and failures
 
-Recorded during harness run `20260828T003923Z`. These are repository-local decisions, not provider or client acceptance.
+Recorded during harness run `20260828T044131Z`. These are repository-local decisions, not provider or client acceptance.
 
 ## Constraints preserved
 
-| Constraint | Decision and reason |
-| --- | --- |
-| No destructive action without approval | Migration verification is guarded by an explicit `MIGRATION_TEST_ALLOW_DROP=true` flag and a local-only URL check. It was not run because it drops/recreates a disposable database. |
-| No external or production writes | No push, pull request, deployment, provider configuration, workflow activation, message, invoice, or tenant mutation was performed. |
-| Secrets by reference only | Only environment-variable names and declared store boundaries were inspected. No `.env` values or unrelated vaults were read. |
-| Xero read-only | `XERO_WRITE_ENABLED=false` remains the operational lock. Payment state can only arrive through canonical Xero readback. |
-| Paid operations need a separate gate | Apollo enrichment/search and Hunter/NeverBounce verification require explicit per-provider approval flags even when a key exists. |
-| Client and employee isolation | Inbound receipts are provider/event scoped and memory search now requires an explicit client, employee, deal, company, or task scope. |
+| Constraint                             | Decision and reason                                                                                                                                                                                                                       |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No destructive action without approval | Migration verification is guarded by an explicit `MIGRATION_TEST_ALLOW_DROP=true` flag and a local-only URL check. It was not run because it drops/recreates a disposable database.                                                       |
+| Exact external-effect ceiling          | The owner later authorized promotion of the exact tested revision and exactly one Apollo People Enrichment. No other credit-bearing operation, outreach send, publication, destructive action, or unrelated external write is authorized. |
+| Secrets by reference only              | Only environment-variable names and declared store boundaries were inspected. No `.env` values or unrelated vaults were read.                                                                                                             |
+| Xero read-only                         | `XERO_WRITE_ENABLED=false` remains the operational lock. Payment state can only arrive through canonical Xero readback.                                                                                                                   |
+| Paid operations need a separate gate   | Apollo enrichment/search and Hunter/NeverBounce verification require explicit per-provider approval flags even when a key exists.                                                                                                         |
+| Client and employee isolation          | Inbound receipts are provider/event scoped and memory search now requires an explicit client, employee, deal, company, or task scope.                                                                                                     |
 
 ## Material decisions
 
@@ -55,20 +55,34 @@ Recorded during harness run `20260828T003923Z`. These are repository-local decis
 
 20. **Keep pasted n8n test keys in mock mode.** A credential reference is not activation. Process-memory keys remain mock unless `N8N_MODE=live`; live REST and webhook calls use an eight-second abort, and outbound webhooks still require the dedicated OS-to-n8n secret.
 
+21. **Separate Apollo discovery from enrichment.** People API Search is exposed as an explicit 0-credit read and does not create CRM records. The old company-search button remains available only in `AUTH_MODE=dev` test tools because it can create synthetic deals and is not the production prospecting path.
+
+22. **Use one immutable Apollo canary allowance.** People Match has no documented provider idempotency key. HRMNY claims a fixed `integration_inbox` event before the call, forces phone/personal-email/waterfall flags off, records one credit conservatively, reconciles one company/contact/open deal, and blocks every second candidate or uncertain retry. Tradeoff: a failed provider attempt requires manual usage/destination reconciliation rather than an automatic retry.
+
+23. **Do not fabricate or separately verify Apollo data.** The one-person import never creates `hello@domain`, never invokes Hunter/NeverBounce, and treats only Apollo `verified`/`valid` status as positive evidence. This avoids extra credits and prevents guessed data from becoming CRM truth.
+
+24. **Make Sales Growth a loop, not a module maze.** The primary path is `Signal → Research → Person → Outreach → Pipeline → Learn`. Detailed objects and administrative surfaces move under **More**, while test/demo generators are collapsed and clearly labeled.
+
+25. **Hide, do not delete, automated records.** Known E2E/proof agents, clients, and sessions are filtered from Chat by default with a visible count and reveal control. The Sales badge excludes synthetic and closed deals. This cleans the client view without destroying audit/test evidence.
+
+26. **Use Twenty as evidence, not a code donor.** Twenty's high-star, record-first CRM layout informed navigation density and progressive disclosure. No Twenty code or assets were copied because the repository's AGPL/enterprise licensing boundary is not appropriate for silent reuse.
+
+27. **Separate configured from provider-accepted.** The Sales Growth UI labels an Apollo secret reference as present but does not show the green acceptance state until a live People Search succeeds or a completed live canary receipt exists. Both Apollo operations have a 20-second timeout. This keeps availability, provider acceptance, and destination reconciliation from collapsing into one optimistic badge.
+
 ## Failures encountered and resolved
 
-| Failure | Cause | Resolution |
-| --- | --- | --- |
-| Initial harness output had an unconfirmed client and shallow stack | Unconfigured project contract | Declared systems of record, canonical repo/worktree, stack, environments, URLs, and safety policy; reran as `20260828T003923Z`. |
-| Harness still asked for hosting and unrelated pairwise bridges | It scans multiple historical nested projects and its reviewed topology catalog has no HRMNY match | Recorded the catalog limitation; used repository evidence and HRMNY-specific contracts, without editing the shared catalog. |
-| Connection unit test reached a real n8n URL and received 401 | New fail-closed credential probe was not mocked in the test | Stubbed `fetch` in that test; production probe remains live and fail-closed. |
-| Invoice issue tests failed after removing fabricated TRN | Tests had relied on an implicit fake legal identifier | Added an explicit 15-digit test-only fixture in invoice-issuance suites; production still requires `HRMNY_TAX_REGISTRATION_NUMBER`. |
-| First lint cleanup caused missing `employeeId` type errors | A broad patch removed the wrong same-shaped local declaration | Restored the required declaration, removed the actual unused one, reran lint/typecheck. |
-| Standard `python` could not import the harness | Shell resolved to a Hermes venv without the module | Used the installed Python 3.13 runtime with the verified catalog root on `PYTHONPATH`. |
-| Native local Next server sent dynamic headers but not response bodies on Node 22 and 24 | Windows-local Next adapter transport; direct handlers and static files remained healthy | Added a bounded local-only acceptance bridge and preserved native deployed-adapter verification as an external preview gate. |
-| Immediate second Chromium suite collapsed after 28 scenarios | Forced-close bridge traffic left 29,363 loopback socket rows; new connections returned `EADDRINUSE` | Stopped local servers normally, made no OS/network changes, restored the already-proven adapter, and documented a fresh-runner requirement. The clean receipt remains 74/74; the rerun remains failed. |
-| Memory handover could create a duplicate first-creative task | Replay path always appended instead of reconciling the existing client/title/kind task | Reuse the canonical task and added a replay regression test. |
-| Approval result disappeared when the queue advanced | Feedback was rendered only inside the current-queue branch | Persist the latest human-gated outcome after the queue becomes empty. |
+| Failure                                                                                 | Cause                                                                                               | Resolution                                                                                                                                                                                             |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Initial harness output had an unconfirmed client and shallow stack                      | Unconfigured project contract                                                                       | Declared systems of record, canonical repo/worktree, stack, environments, URLs, and safety policy; reran as `20260828T003923Z`.                                                                        |
+| Harness still asked for hosting and unrelated pairwise bridges                          | It scans multiple historical nested projects and its reviewed topology catalog has no HRMNY match   | Recorded the catalog limitation; used repository evidence and HRMNY-specific contracts, without editing the shared catalog.                                                                            |
+| Connection unit test reached a real n8n URL and received 401                            | New fail-closed credential probe was not mocked in the test                                         | Stubbed `fetch` in that test; production probe remains live and fail-closed.                                                                                                                           |
+| Invoice issue tests failed after removing fabricated TRN                                | Tests had relied on an implicit fake legal identifier                                               | Added an explicit 15-digit test-only fixture in invoice-issuance suites; production still requires `HRMNY_TAX_REGISTRATION_NUMBER`.                                                                    |
+| First lint cleanup caused missing `employeeId` type errors                              | A broad patch removed the wrong same-shaped local declaration                                       | Restored the required declaration, removed the actual unused one, reran lint/typecheck.                                                                                                                |
+| Standard `python` could not import the harness                                          | Shell resolved to a Hermes venv without the module                                                  | Used the installed Python 3.13 runtime with the verified catalog root on `PYTHONPATH`.                                                                                                                 |
+| Native local Next server sent dynamic headers but not response bodies on Node 22 and 24 | Windows-local Next adapter transport; direct handlers and static files remained healthy             | Added a bounded local-only acceptance bridge and preserved native deployed-adapter verification as an external preview gate.                                                                           |
+| Immediate second Chromium suite collapsed after 28 scenarios                            | Forced-close bridge traffic left 29,363 loopback socket rows; new connections returned `EADDRINUSE` | Stopped local servers normally, made no OS/network changes, restored the already-proven adapter, and documented a fresh-runner requirement. The clean receipt remains 74/74; the rerun remains failed. |
+| Memory handover could create a duplicate first-creative task                            | Replay path always appended instead of reconciling the existing client/title/kind task              | Reuse the canonical task and added a replay regression test.                                                                                                                                           |
+| Approval result disappeared when the queue advanced                                     | Feedback was rendered only inside the current-queue branch                                          | Persist the latest human-gated outcome after the queue becomes empty.                                                                                                                                  |
 
 ## Recovery and rollback decisions
 
