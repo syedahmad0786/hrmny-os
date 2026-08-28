@@ -24,7 +24,6 @@ describe("/api/inbound/lead", () => {
   it("returns 503 when no webhook secret is configured", async () => {
     vi.stubEnv("N8N_WEBHOOK_SECRET", "");
     vi.stubEnv("HRMNY_N8N_WEBHOOK_SECRET", "");
-    vi.stubEnv("CRON_SECRET", "");
     const res = await POST(jsonRequest({ company: "Acme", email: "a@b.co" }));
     expect(res.status).toBe(503);
   });
@@ -43,7 +42,13 @@ describe("/api/inbound/lead", () => {
   it("returns 400 when company/email aliases are missing", async () => {
     vi.stubEnv("N8N_WEBHOOK_SECRET", "expected-secret");
     const res = await POST(
-      jsonRequest({ name: "Pat" }, { "x-webhook-secret": "expected-secret" }),
+      jsonRequest(
+        { name: "Pat" },
+        {
+          "x-webhook-secret": "expected-secret",
+          "idempotency-key": "test-invalid-001",
+        },
+      ),
     );
     expect(res.status).toBe(400);
   });
@@ -58,7 +63,10 @@ describe("/api/inbound/lead", () => {
           name: "Pat",
           source: "n8n-test",
         },
-        { "x-webhook-secret": "expected-secret" },
+        {
+          "x-webhook-secret": "expected-secret",
+          "idempotency-key": "test-lead-001",
+        },
       ),
     );
     expect(res.status).toBe(200);
@@ -70,5 +78,67 @@ describe("/api/inbound/lead", () => {
     expect(body.ok).toBe(true);
     expect(body.dealId).toBeTruthy();
     expect(body.leadSourceLane).toBe("inbound");
+  });
+
+  it("requires an explicit replay key", async () => {
+    vi.stubEnv("N8N_WEBHOOK_SECRET", "expected-secret");
+    const res = await POST(
+      jsonRequest(
+        { company: "No Replay Key", email: "pat@noreplay.example" },
+        { "x-webhook-secret": "expected-secret" },
+      ),
+    );
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      code: "VALIDATION",
+      reason: expect.stringContaining("Idempotency-Key"),
+    });
+  });
+
+  it("returns the original deal for a replayed event", async () => {
+    vi.stubEnv("N8N_WEBHOOK_SECRET", "expected-secret");
+    const headers = {
+      "x-webhook-secret": "expected-secret",
+      "idempotency-key": "test-lead-replay-001",
+    };
+    const first = await POST(
+      jsonRequest({ company: "Replay Co", email: "pat@replay.example" }, headers),
+    );
+    const second = await POST(
+      jsonRequest({ company: "Replay Co", email: "pat@replay.example" }, headers),
+    );
+    const firstBody = (await first.json()) as { dealId: string };
+    const secondBody = (await second.json()) as {
+      dealId: string;
+      duplicate: boolean;
+    };
+    expect(secondBody.dealId).toBe(firstBody.dealId);
+    expect(secondBody.duplicate).toBe(true);
+  });
+
+  it("rejects reuse of an idempotency key for a different lead", async () => {
+    vi.stubEnv("N8N_WEBHOOK_SECRET", "expected-secret");
+    const headers = {
+      "x-webhook-secret": "expected-secret",
+      "idempotency-key": "test-lead-conflict-001",
+    };
+    expect(
+      (
+        await POST(
+          jsonRequest(
+            { company: "Original Co", email: "pat@original.example" },
+            headers,
+          ),
+        )
+      ).status,
+    ).toBe(200);
+    const conflict = await POST(
+      jsonRequest(
+        { company: "Different Co", email: "pat@different.example" },
+        headers,
+      ),
+    );
+    expect(conflict.status).toBe(409);
+    await expect(conflict.json()).resolves.toMatchObject({ code: "CONFLICT" });
   });
 });

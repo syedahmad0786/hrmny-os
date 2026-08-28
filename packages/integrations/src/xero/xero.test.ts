@@ -1,12 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { IntegrationMisconfiguredError } from "../types";
 import {
   createXeroAdapter,
+  createXeroLive,
   createXeroMock,
   isXeroWriteEnabled,
 } from "./index";
 
 describe("Xero adapter", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
   it("defaults to write-disabled (client lock)", () => {
     const prev = process.env.XERO_WRITE_ENABLED;
     delete process.env.XERO_WRITE_ENABLED;
@@ -66,5 +72,36 @@ describe("Xero adapter", () => {
     );
     if (prevId) process.env.XERO_CLIENT_ID = prevId;
     if (prevSecret) process.env.XERO_CLIENT_SECRET = prevSecret;
+  });
+
+  it("does not choose implicitly when OAuth returns multiple Xero tenants", async () => {
+    vi.stubEnv("XERO_TENANT_ID", "");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "access-token",
+            refresh_token: "refresh-token",
+            expires_in: 1800,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([{ tenantId: "tenant-a" }, { tenantId: "tenant-b" }]),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const xero = createXeroLive({
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      redirectUri: "http://localhost:3000/api/integrations/xero/callback",
+    });
+    await expect(xero.exchangeCode("auth-code")).rejects.toThrow(
+      /XERO_TENANT_ID/,
+    );
   });
 });

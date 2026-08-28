@@ -28,13 +28,21 @@ type OsRow = {
   invoice_id: string;
   client_id: string | null;
   client_name: string | null;
+  contact_name: string | null;
   invoice_type: string;
+  billing_kind: string | null;
   status: string;
   amount: string;
   vat_amount: string | null;
   currency: string;
   xero_invoice_id: string | null;
   period: string | null;
+  trn: string | null;
+  trn_status: string | null;
+  rule_cited: string | null;
+  source_attached: Record<string, unknown> | null;
+  proposed_by_employee_id: string | null;
+  approved_by_employee_id: string | null;
   created_at: Date | string;
 };
 
@@ -56,10 +64,12 @@ export async function listOsInvoices(): Promise<BillingInvoiceRow[]> {
   if (!db) return [];
   const rows = await db.execute<OsRow>(sql`
     select
-      i.invoice_id, i.client_id, c.name as client_name,
-      i.invoice_type, i.status,
+      i.invoice_id, i.client_id, c.name as client_name, i.contact_name,
+      i.invoice_type, i.billing_kind, i.status,
       i.amount::text as amount, i.vat_amount::text as vat_amount,
-      i.currency, i.xero_invoice_id, i.period, i.created_at
+      i.currency, i.xero_invoice_id, i.period,
+      i.trn, i.trn_status, i.rule_cited, i.source_attached,
+      i.proposed_by_employee_id, i.approved_by_employee_id, i.created_at
     from public.invoice i
     left join public.client c on c.client_id = i.client_id
     order by i.created_at desc
@@ -68,24 +78,25 @@ export async function listOsInvoices(): Promise<BillingInvoiceRow[]> {
   return rows.map((r) => ({
     invoiceId: r.invoice_id,
     status: r.status,
-    contactName: r.client_name?.trim() || "Client",
+    contactName: r.contact_name?.trim() || r.client_name?.trim() || "Client",
     amount: r.amount,
     vatAmount: r.vat_amount,
     currency: r.currency ?? "AED",
     invoiceType: r.invoice_type,
-    billingKind: r.invoice_type || "os",
+    billingKind: r.billing_kind || r.invoice_type || "os",
     clientId: r.client_id,
     period: r.period,
-    trn: null,
-    trnStatus: null,
-    ruleCited: null,
-    sourceAttached: {
-      source: "os",
-      invoiceType: r.invoice_type,
-    },
+    trn: r.trn,
+    trnStatus: r.trn_status,
+    ruleCited: r.rule_cited,
+    sourceAttached:
+      r.source_attached ?? {
+        source: "os",
+        invoiceType: r.invoice_type,
+      },
     xeroInvoiceId: r.xero_invoice_id,
-    proposedByEmployeeId: null,
-    approvedByEmployeeId: null,
+    proposedByEmployeeId: r.proposed_by_employee_id,
+    approvedByEmployeeId: r.approved_by_employee_id,
     createdAt: new Date(r.created_at).toISOString(),
     readOnly: false,
     source: "os" as const,

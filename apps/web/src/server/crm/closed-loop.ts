@@ -62,30 +62,23 @@ export async function runDemoClosedLoopCore(
   let companyId: string;
   let contactId: string;
   let dealId: string;
-  let companyName: string;
   let apolloMode: "mock" | "live" | null = null;
 
   if (input.viaApollo) {
     const { importApolloCompaniesToCrm } = await import("./apollo-import");
-    const { resolveIntegrationApiKey } = await import(
-      "../integrations/resolve-keys"
-    );
-    const { createApolloLive, createEmailVerificationAdapter } =
+    const {
+      resolveApolloRuntimeConfig,
+      resolveEmailVerificationRuntimeConfig,
+    } = await import("../integrations/runtime-adapters");
+    const { createApolloAdapter, createEmailVerificationAdapter } =
       await import("@hrmny/integrations");
-    const { getDemoStore } = await import("../demo-store");
     const query = input.companyName?.trim() || `Demo Retail UAE ${stamp}`;
-    const { apiKey } = await resolveIntegrationApiKey(
-      "apollo",
+    const apollo = await resolveApolloRuntimeConfig(input.actorEmployeeId);
+    const verifier = await resolveEmailVerificationRuntimeConfig(
       input.actorEmployeeId ?? undefined,
     );
-    const hunter = await resolveIntegrationApiKey(
-      "hunter",
-      input.actorEmployeeId ?? undefined,
-    );
-    const apolloClient = apiKey
-      ? createApolloLive({ mode: "live", apiKey })
-      : getDemoStore().apollo;
-    apolloMode = apiKey ? "live" : "mock";
+    const apolloClient = createApolloAdapter(apollo.config);
+    apolloMode = apollo.mode;
     const hits = await apolloClient.searchCompanies(query);
     const imported = await importApolloCompaniesToCrm({
       query,
@@ -93,11 +86,7 @@ export async function runDemoClosedLoopCore(
       mode: apolloMode,
       ownerEmployeeId: input.actorEmployeeId,
       limit: 1,
-      verifier: createEmailVerificationAdapter(
-        hunter.apiKey
-          ? { mode: "live", apiKey: hunter.apiKey }
-          : { mode: "mock" },
-      ),
+      verifier: createEmailVerificationAdapter(verifier.config),
     });
     const first = imported.deals[0];
     if (!first) {
@@ -110,7 +99,6 @@ export async function runDemoClosedLoopCore(
     companyId = first.companyId;
     contactId = first.contactId ?? "";
     dealId = first.dealId;
-    companyName = first.companyName;
     if (!contactId) {
       const contact = await createContact({
         companyId,
@@ -123,7 +111,7 @@ export async function runDemoClosedLoopCore(
       await updateDeal(dealId, { primaryContactId: contactId });
     }
   } else {
-    companyName = input.companyName?.trim() || `Demo Hunt ${stamp}`;
+    const companyName = input.companyName?.trim() || `Demo Hunt ${stamp}`;
     const company = await createCompany({
       name: companyName,
       market: "UAE",

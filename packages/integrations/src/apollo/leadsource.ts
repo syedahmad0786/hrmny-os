@@ -4,28 +4,21 @@ import type {
   LeadSearchCriteria,
   LeadSourceAdapter,
 } from "../contracts";
+import {
+  assertApolloPaidOperationAllowed,
+  resolveApolloMode,
+  type ApolloActivationConfig,
+} from "./policy";
 
 /**
  * M8 lead sourcing against the frozen `LeadSourceAdapter` contract (Apollo-shaped).
  * Mock by default; live REST fails loud without a key — same shape as
- * `./index.ts` ApolloAdapter. `searchLeads` → POST /v1/mixed_people/search,
- * `enrichLead` → POST /v1/people/match. Never writes the CRM (dedupe does that).
+ * `./index.ts` ApolloAdapter. `searchLeads` → POST
+ * /api/v1/mixed_people/api_search, `enrichLead` → POST
+ * /api/v1/people/match. Never writes the CRM (dedupe does that).
  */
 
-export type LeadSourceConfig = {
-  mode?: "mock" | "live";
-  apiKey?: string;
-};
-
-function resolveMode(config: LeadSourceConfig): "mock" | "live" {
-  if (config.mode === "mock") return "mock";
-  if (config.mode === "live") return "live";
-  const env = process.env.APOLLO_MODE?.toLowerCase();
-  if (env === "live") return "live";
-  if (env === "mock") return "mock";
-  if ((config.apiKey ?? process.env.APOLLO_API_KEY)?.trim()) return "live";
-  return "mock";
-}
+export type LeadSourceConfig = ApolloActivationConfig;
 
 /** Stable id from a string so re-running the same search dedupes cleanly. */
 function stableId(seed: string): string {
@@ -60,8 +53,7 @@ export function createLeadSourceMock(): LeadSourceAdapter {
     async searchLeads(criteria: LeadSearchCriteria) {
       const titles = criteria.titles?.length ? criteria.titles : ["CMO"];
       const domain =
-        criteria.query?.toLowerCase().replace(/[^a-z0-9]+/g, "") ||
-        "democo";
+        criteria.query?.toLowerCase().replace(/[^a-z0-9]+/g, "") || "democo";
       const perPage = criteria.perPage ?? titles.length;
       return titles.slice(0, perPage).map((title, i) => {
         const email = `lead${i}@${domain}.example`;
@@ -115,22 +107,28 @@ export function createLeadSourceLive(
   return {
     mode: "live",
     async searchLeads(criteria: LeadSearchCriteria) {
-      const res = await fetch("https://api.apollo.io/v1/mixed_people/search", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          q_keywords: criteria.query,
-          person_titles: criteria.titles,
-          organization_industries: criteria.industries,
-          person_locations: criteria.locations,
-          organization_num_employees_ranges:
-            criteria.employeeCountMin != null || criteria.employeeCountMax != null
-              ? [`${criteria.employeeCountMin ?? 1},${criteria.employeeCountMax ?? 100000}`]
-              : undefined,
-          page: criteria.page ?? 1,
-          per_page: criteria.perPage ?? 25,
-        }),
-      });
+      const res = await fetch(
+        "https://api.apollo.io/api/v1/mixed_people/api_search",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            q_keywords: criteria.query,
+            person_titles: criteria.titles,
+            organization_industries: criteria.industries,
+            person_locations: criteria.locations,
+            organization_num_employees_ranges:
+              criteria.employeeCountMin != null ||
+              criteria.employeeCountMax != null
+                ? [
+                    `${criteria.employeeCountMin ?? 1},${criteria.employeeCountMax ?? 100000}`,
+                  ]
+                : undefined,
+            page: criteria.page ?? 1,
+            per_page: criteria.perPage ?? 25,
+          }),
+        },
+      );
       if (!res.ok) {
         throw new IntegrationMisconfiguredError(
           "apollo",
@@ -143,7 +141,8 @@ export function createLeadSourceLive(
       return (data.people ?? []).map(mapPerson);
     },
     async enrichLead(email: string) {
-      const res = await fetch("https://api.apollo.io/v1/people/match", {
+      assertApolloPaidOperationAllowed(config, "People match");
+      const res = await fetch("https://api.apollo.io/api/v1/people/match", {
         method: "POST",
         headers,
         body: JSON.stringify({ email }),
@@ -163,7 +162,7 @@ export function createLeadSourceLive(
 export function createLeadSourceAdapter(
   config: LeadSourceConfig = {},
 ): LeadSourceAdapter {
-  return resolveMode(config) === "live"
+  return resolveApolloMode(config) === "live"
     ? createLeadSourceLive(config)
     : createLeadSourceMock();
 }

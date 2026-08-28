@@ -3,6 +3,7 @@ import { ensureClientOnboarding } from "../clients/onboarding";
 import { getDb } from "../db";
 import { persistMemoryChunk } from "../ai/memory-db";
 import { seedClientCreativeTask } from "../tasks/delivery-tasks";
+import { resolveTaxRegistration } from "../finance/tax-registration";
 import { buildHandoverNextLinks } from "./handover-next";
 import { getDeal, getContact, updateDeal, moveDealStage } from "./repository";
 import type { DealRow } from "./types";
@@ -33,7 +34,7 @@ export async function closeDurableDeal(input: {
     };
   }
 
-  let stage = existing.stage;
+  const stage = existing.stage;
   if (stage === "price_cost") {
     const moved = await moveDealStage({
       dealId: input.dealId,
@@ -41,7 +42,6 @@ export async function closeDurableDeal(input: {
       actorEmployeeId: input.actorEmployeeId,
     });
     if (!moved.ok) return { ok: false, reason: moved.reason };
-    stage = "close";
   } else if (stage !== "close" && stage !== "handover_pack") {
     return {
       ok: false,
@@ -227,7 +227,7 @@ async function memoryHandoverPack(input: {
   });
   fired.push("creative.task_seed");
 
-  let calendarId: string | null = null;
+  let calendarId: string | null;
   try {
     const month = new Date().toISOString().slice(0, 7);
     calendarId = crypto.randomUUID();
@@ -259,7 +259,7 @@ async function memoryHandoverPack(input: {
     calendarId = null;
   }
 
-  let campaignItemId: string | null = null;
+  let campaignItemId: string | null;
   try {
     const { createCampaignDraft } = await import("../campaigns/repository");
     const draft = await createCampaignDraft({
@@ -279,7 +279,7 @@ async function memoryHandoverPack(input: {
     campaignItemId = null;
   }
 
-  let invoiceId: string | null = null;
+  let invoiceId: string | null;
   try {
     const { vatOnAmount } = await import("../demo-store");
     const period = new Date().toISOString().slice(0, 7);
@@ -309,8 +309,7 @@ async function memoryHandoverPack(input: {
         billingKind: "first",
         clientId: demoClient.clientId,
         period,
-        trn: "100000000000003",
-        trnStatus: "known",
+        ...resolveTaxRegistration(),
         ruleCited: "Won deal → first invoice (UAE VAT 5%)",
         sourceAttached: {
           kind: "won_handover",
@@ -329,7 +328,7 @@ async function memoryHandoverPack(input: {
     invoiceId = null;
   }
 
-  let outreachId: string | null = null;
+  let outreachId: string | null;
   try {
     const { listOutreach } = await import("../leadgen/store");
     const existingOutreach = await listOutreach({ dealId: input.dealId });
@@ -644,8 +643,7 @@ export async function durableHandoverPack(input: {
         currency: "AED",
         period,
         contactName: client.name,
-        trn: "100000000000003",
-        trnStatus: "known",
+        ...resolveTaxRegistration(),
         ruleCited: "Won deal → first invoice (UAE VAT 5%)",
         sourceAttached: {
           kind: "won_handover",

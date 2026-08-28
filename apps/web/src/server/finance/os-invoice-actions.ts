@@ -13,6 +13,7 @@ import {
 import { isXeroWriteEnabled } from "@hrmny/integrations";
 import { getDemoStore, type DemoInvoice } from "../demo-store";
 import { getDb } from "../db";
+import { resolveTaxRegistration } from "./tax-registration";
 
 bootstrapGateRegistry();
 
@@ -47,6 +48,7 @@ async function loadInvoice(invoiceId: string): Promise<DemoInvoice | null> {
   const { getOsInvoice } = await import("./os-invoices");
   const row = await getOsInvoice(invoiceId);
   if (!row) return null;
+  const taxRegistration = resolveTaxRegistration();
   inv = {
     invoiceId: row.invoiceId,
     status: row.status,
@@ -58,8 +60,10 @@ async function loadInvoice(invoiceId: string): Promise<DemoInvoice | null> {
     billingKind: (row.billingKind as DemoInvoice["billingKind"]) ?? "retainer",
     clientId: row.clientId,
     period: row.period,
-    trn: row.trn ?? "100000000000003",
-    trnStatus: (row.trnStatus as DemoInvoice["trnStatus"]) ?? "known",
+    trn: row.trn ?? taxRegistration.trn,
+    trnStatus:
+      (row.trnStatus as DemoInvoice["trnStatus"]) ??
+      taxRegistration.trnStatus,
     ruleCited: row.ruleCited,
     sourceAttached: row.sourceAttached,
     xeroInvoiceId: row.xeroInvoiceId,

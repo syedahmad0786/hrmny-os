@@ -60,6 +60,7 @@ export function resolveN8nWebhookUrl(
 export type N8nConfig = {
   baseUrl: string;
   apiKey?: string;
+  outboundWebhookSecret?: string;
   mode: "mock" | "live";
   allowProductionTrigger: boolean;
 };
@@ -67,11 +68,15 @@ export type N8nConfig = {
 export function resolveN8nConfig(partial: {
   baseUrl?: string;
   apiKey?: string;
+  outboundWebhookSecret?: string;
   mode?: "mock" | "live";
   allowProductionTrigger?: boolean;
 } = {}): N8nConfig {
   const baseUrl = normalizeN8nBaseUrl(partial.baseUrl);
   const apiKey = getN8nApiKey(partial.apiKey);
+  const outboundWebhookSecret = (
+    partial.outboundWebhookSecret ?? process.env.N8N_OUTBOUND_WEBHOOK_SECRET
+  )?.trim();
   let mode: "mock" | "live" = partial.mode ?? "mock";
   if (!partial.mode) {
     const env = process.env.N8N_MODE?.toLowerCase();
@@ -79,13 +84,10 @@ export function resolveN8nConfig(partial: {
     else if (env === "mock") mode = "mock";
     else if (apiKey) mode = "live";
   }
-  // Live without key still constructs but health/list fail-loud or mock-fallback in client.
-  if (mode === "live" && !apiKey) {
-    mode = "mock";
-  }
   return {
     baseUrl,
     apiKey,
+    outboundWebhookSecret: outboundWebhookSecret || undefined,
     mode,
     allowProductionTrigger: n8nProductionTriggerAllowed(
       partial.allowProductionTrigger,

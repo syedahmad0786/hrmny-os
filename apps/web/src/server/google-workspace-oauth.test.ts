@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   googleWorkspaceClientConfigured,
   googleWorkspaceRedirectUri,
@@ -17,6 +17,8 @@ const ENV_KEYS = [
   "NEXT_PUBLIC_APP_URL",
   "VERCEL_ENV",
   "VERCEL_URL",
+  "GOOGLE_OAUTH_STATE_SECRET",
+  "CRON_SECRET",
   "client_id",
   "client_secret",
 ] as const;
@@ -37,6 +39,9 @@ function restoreEnv() {
 
 describe("google workspace oauth helpers", () => {
   rememberEnv();
+  beforeEach(() => {
+    process.env.GOOGLE_OAUTH_STATE_SECRET = "g".repeat(32);
+  });
   afterEach(() => restoreEnv());
 
   it("round-trips a signed employee state with the redirect URI", () => {
@@ -121,6 +126,16 @@ describe("google workspace oauth helpers", () => {
     expect(googleWorkspaceClientConfigured()).toBe(true);
   });
 
+  it("does not reuse an unrelated secret for OAuth state", () => {
+    delete process.env.GOOGLE_OAUTH_STATE_SECRET;
+    process.env.CRON_SECRET = "c".repeat(32);
+    expect(() =>
+      signGoogleWorkspaceOAuthState(
+        "c0000000-0000-4000-8000-000000000011",
+      ),
+    ).toThrow(/GOOGLE_OAUTH_STATE_SECRET/);
+  });
+
   it("builds an offline consent URL for @hrmny.co", async () => {
     process.env.GOOGLE_OAUTH_CLIENT_ID = "test-client.apps.googleusercontent.com";
     process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-secret";
@@ -143,6 +158,14 @@ describe("google workspace oauth helpers", () => {
       "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback",
     );
     expect(url.searchParams.get("scope") ?? "").toContain("gmail.send");
+    expect(url.searchParams.get("scope") ?? "").toContain("gmail.readonly");
+    expect(url.searchParams.get("scope") ?? "").not.toContain("gmail.modify");
+    expect(url.searchParams.get("scope") ?? "").toContain(
+      "calendar.events.readonly",
+    );
+    expect(url.searchParams.get("scope") ?? "").not.toContain(
+      "auth/spreadsheets",
+    );
     expect(() =>
       verifyGoogleWorkspaceOAuthState(url.searchParams.get("state") ?? ""),
     ).not.toThrow();

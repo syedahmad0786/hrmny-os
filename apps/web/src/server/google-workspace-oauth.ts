@@ -7,12 +7,11 @@ export const GOOGLE_WORKSPACE_OAUTH_SCOPES = [
   "openid",
   "email",
   "profile",
-  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.send",
-  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar.events.readonly",
   "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/drive.readonly",
-  "https://www.googleapis.com/auth/spreadsheets",
 ] as const;
 
 export const GoogleProfileSchema = z.object({
@@ -38,28 +37,21 @@ export const GoogleTokenResponseSchema = z.object({
 });
 
 function oauthSecret(): string {
-  return (
-    process.env.GOOGLE_OAUTH_STATE_SECRET?.trim() ||
-    process.env.XERO_OAUTH_STATE_SECRET?.trim() ||
-    process.env.SUPABASE_JWT_SECRET?.trim() ||
-    process.env.CRON_SECRET?.trim() ||
-    "hrmny-google-workspace-dev-state"
-  );
+  const secret = process.env.GOOGLE_OAUTH_STATE_SECRET?.trim();
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      "GOOGLE_OAUTH_STATE_SECRET (at least 32 characters) is required for Google Workspace OAuth",
+    );
+  }
+  return secret;
 }
 
 export function googleWorkspaceClientId(): string | null {
-  return (
-    (process.env.GOOGLE_OAUTH_CLIENT_ID ?? process.env.client_id)?.trim() ||
-    null
-  );
+  return process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || null;
 }
 
 export function googleWorkspaceClientSecret(): string | null {
-  return (
-    (
-      process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? process.env.client_secret
-    )?.trim() || null
-  );
+  return process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || null;
 }
 
 export function googleWorkspaceClientConfigured(): boolean {

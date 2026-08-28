@@ -1,5 +1,7 @@
 process.env.DATABASE_URL = "";
 process.env.LLM_PROVIDER = "mock";
+// Explicit legal-identifier fixture for invoice-issuance tests only.
+process.env.HRMNY_TAX_REGISTRATION_NUMBER = "100000000000003";
 
 import { describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "../auth/session";

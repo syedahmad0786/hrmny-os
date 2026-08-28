@@ -145,8 +145,7 @@ export async function runAgentTools(input: {
       allowed.includes(key.split(".")[0]!) ||
       allowed.some(
         (a) =>
-          a === "*" ||
-          (a.endsWith(".*") && key.startsWith(a.slice(0, -1))),
+          a === "*" || (a.endsWith(".*") && key.startsWith(a.slice(0, -1))),
       )
     );
   };
@@ -158,7 +157,7 @@ export async function runAgentTools(input: {
         clientId: input.scope.clientId,
         employeeId: input.scope.clientId
           ? undefined
-          : input.scope.employeeId ?? undefined,
+          : (input.scope.employeeId ?? undefined),
         dealId: input.scope.dealId,
         taskId: input.scope.taskId,
         limit: 5,
@@ -301,24 +300,24 @@ export async function runAgentTools(input: {
           data: { count: 0, items: [], sandbox: "client_unlinked" },
         });
       } else {
-      const rows = await listOutreach(
-        outreachDealId ? { dealId: outreachDealId } : undefined,
-      );
-      results.push({
-        tool: "outreach.read",
-        ok: true,
-        data: {
-          count: rows.length,
-          items: rows.slice(0, 8).map((r) => ({
-            id: r.id,
-            dealId: r.dealId,
-            channel: r.channel,
-            state: r.state,
-            recipient: r.recipient,
-            subject: r.subject,
-          })),
-        },
-      });
+        const rows = await listOutreach(
+          outreachDealId ? { dealId: outreachDealId } : undefined,
+        );
+        results.push({
+          tool: "outreach.read",
+          ok: true,
+          data: {
+            count: rows.length,
+            items: rows.slice(0, 8).map((r) => ({
+              id: r.id,
+              dealId: r.dealId,
+              channel: r.channel,
+              state: r.state,
+              recipient: r.recipient,
+              subject: r.subject,
+            })),
+          },
+        });
       }
     } catch (err) {
       results.push({
@@ -331,7 +330,9 @@ export async function runAgentTools(input: {
 
   if (
     input.scope.clientId &&
-    (want("onboarding.read") || want("onboarding") || want("clients.onboarding"))
+    (want("onboarding.read") ||
+      want("onboarding") ||
+      want("clients.onboarding"))
   ) {
     try {
       const phases = await getClientOnboarding(input.scope.clientId);
@@ -474,8 +475,7 @@ export async function runAgentTools(input: {
   ) {
     try {
       const { createCampaignDraft } = await import("../campaigns/repository");
-      const title =
-        input.prompt.trim().slice(0, 120) || "Agent campaign draft";
+      const title = input.prompt.trim().slice(0, 120) || "Agent campaign draft";
       const scheduledFor = new Date().toISOString().slice(0, 10);
       const row = await createCampaignDraft({
         title: `[agent] ${title}`,
@@ -514,16 +514,17 @@ export async function runAgentTools(input: {
   ) {
     try {
       const { validateDor } = await import("@hrmny/gate");
-      const { upsertDeliveryBriefForTask } = await import(
-        "../tasks/delivery-tasks"
-      );
+      const { upsertDeliveryBriefForTask } =
+        await import("../tasks/delivery-tasks");
       const snippet = input.prompt.trim().slice(0, 200) || "Agent brief";
       const body: Record<string, unknown> = {
         title: `[agent] ${snippet.slice(0, 80)}`,
         objective: snippet,
         audience: "Target audience (agent draft — refine before lock)",
         deliverables: "Creative deliverables (agent draft)",
-        deadline: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+        deadline: new Date(Date.now() + 14 * 86400000)
+          .toISOString()
+          .slice(0, 10),
         brandAssets: { logo: true, agentDraft: true },
         channels: ["linkedin"],
         successMetric: "Engagement (agent draft)",
@@ -751,11 +752,8 @@ export async function runAgentTools(input: {
     );
 
   if (wantsFinanceApprove || wantsFinanceIssue) {
-    const {
-      approveOsInvoice,
-      issueOsInvoice,
-      parseInvoiceIdFromPrompt,
-    } = await import("../finance/os-invoice-actions");
+    const { approveOsInvoice, issueOsInvoice, parseInvoiceIdFromPrompt } =
+      await import("../finance/os-invoice-actions");
     const invoiceId =
       parseInvoiceIdFromPrompt(input.prompt) ?? loopSeed.invoiceId ?? null;
     const employeeId =
@@ -858,9 +856,8 @@ export async function runAgentTools(input: {
     );
 
   if (wantsOutreachApprove) {
-    const { approveOsOutreach, parseOutreachIdFromPrompt } = await import(
-      "../leadgen/os-outreach-actions"
-    );
+    const { approveOsOutreach, parseOutreachIdFromPrompt } =
+      await import("../leadgen/os-outreach-actions");
     const outreachId =
       parseOutreachIdFromPrompt(input.prompt) ?? loopSeed.outreachId ?? null;
     const employeeId =
@@ -904,7 +901,6 @@ export async function runAgentTools(input: {
       }
     }
   }
-
 
   /**
    * Lock a DoR-ready brief and spawn creative_spawn. Prompt-gated.
@@ -979,17 +975,14 @@ export async function runAgentTools(input: {
    */
   const wantsCreativeQc =
     !input.scope.clientId &&
-    (want("creative.os_qc") ||
-      want("creative.qc") ||
-      want("tasks.qc")) &&
+    (want("creative.os_qc") || want("creative.qc") || want("tasks.qc")) &&
     /(?:pass\s+(?:qc|quality)|qc\s+pass|creative\s+qc|os[_\s-]?qc|waive\s+qc|fail\s+qc)/i.test(
       input.prompt,
     );
 
   if (wantsCreativeQc) {
-    const { runOsCreativeQc, parseTaskIdFromPrompt } = await import(
-      "../tasks/os-creative-qc"
-    );
+    const { runOsCreativeQc, parseTaskIdFromPrompt } =
+      await import("../tasks/os-creative-qc");
     const taskId =
       parseTaskIdFromPrompt(input.prompt) ??
       input.scope.taskId ??
@@ -1035,8 +1028,7 @@ export async function runAgentTools(input: {
         results.push({
           tool: "creative.os_qc",
           ok: false,
-          error:
-            err instanceof Error ? err.message : "creative_os_qc_failed",
+          error: err instanceof Error ? err.message : "creative_os_qc_failed",
         });
       }
     }
@@ -1065,11 +1057,8 @@ export async function runAgentTools(input: {
     );
 
   if (wantsCampaignApprove || wantsCampaignPublish) {
-    const {
-      approveOsCampaign,
-      publishOsCampaign,
-      parseCampaignIdFromPrompt,
-    } = await import("../campaigns/os-campaign-actions");
+    const { approveOsCampaign, publishOsCampaign, parseCampaignIdFromPrompt } =
+      await import("../campaigns/os-campaign-actions");
     const campaignItemId =
       parseCampaignIdFromPrompt(input.prompt) ??
       loopSeed.campaignItemId ??
@@ -1177,9 +1166,8 @@ export async function runAgentTools(input: {
     );
 
   if (wantsPortalApprove) {
-    const { runOsPortalApprove, parseApprovalIdFromPrompt } = await import(
-      "../portal/os-portal-approve"
-    );
+    const { runOsPortalApprove, parseApprovalIdFromPrompt } =
+      await import("../portal/os-portal-approve");
     const approvalId =
       parseApprovalIdFromPrompt(input.prompt) ??
       input.scope.taskId ??
@@ -1286,9 +1274,7 @@ export async function runAgentTools(input: {
           tool: "onboarding.os_signoff",
           ok: false,
           error:
-            err instanceof Error
-              ? err.message
-              : "onboarding_os_signoff_failed",
+            err instanceof Error ? err.message : "onboarding_os_signoff_failed",
         });
       }
     }
@@ -1352,7 +1338,7 @@ export async function runAgentTools(input: {
         results.push({
           tool: "clients.os_month1_advance",
           ok: out.ok,
-          error: out.ok ? undefined : out.reason ?? out.code,
+          error: out.ok ? undefined : (out.reason ?? out.code),
           data: {
             clientId: out.clientId,
             fromPhase: out.fromPhase,
@@ -1390,9 +1376,8 @@ export async function runAgentTools(input: {
     );
 
   if (wantsCalendarRefApprove) {
-    const { refApproveOsCalendar, parseCalendarIdFromPrompt } = await import(
-      "../tasks/os-calendar-ref-approve"
-    );
+    const { refApproveOsCalendar, parseCalendarIdFromPrompt } =
+      await import("../tasks/os-calendar-ref-approve");
     const calendarId =
       parseCalendarIdFromPrompt(input.prompt) ?? loopSeed.calendarId ?? null;
     const employeeId =
@@ -1451,28 +1436,21 @@ export async function runAgentTools(input: {
       want("crm.apollo"))
   ) {
     try {
-      const { resolveIntegrationApiKey } = await import(
-        "../integrations/resolve-keys"
-      );
-      const { createApolloLive, createEmailVerificationAdapter } =
+      const {
+        resolveApolloRuntimeConfig,
+        resolveEmailVerificationRuntimeConfig,
+      } = await import("../integrations/runtime-adapters");
+      const { createApolloAdapter, createEmailVerificationAdapter } =
         await import("@hrmny/integrations");
-      const { importApolloCompaniesToCrm } = await import(
-        "../crm/apollo-import"
-      );
-      const query =
-        input.prompt.trim().slice(0, 200) || "UAE retail brands";
-      const { apiKey } = await resolveIntegrationApiKey(
-        "apollo",
+      const { importApolloCompaniesToCrm } =
+        await import("../crm/apollo-import");
+      const query = input.prompt.trim().slice(0, 200) || "UAE retail brands";
+      const apollo = await resolveApolloRuntimeConfig(input.scope.employeeId);
+      const verifier = await resolveEmailVerificationRuntimeConfig(
         input.scope.employeeId,
       );
-      const hunter = await resolveIntegrationApiKey(
-        "hunter",
-        input.scope.employeeId,
-      );
-      const apolloClient = apiKey
-        ? createApolloLive({ mode: "live", apiKey })
-        : getDemoStore().apollo;
-      const mode = apiKey ? ("live" as const) : ("mock" as const);
+      const apolloClient = createApolloAdapter(apollo.config);
+      const mode = apollo.mode;
       const hits = await apolloClient.searchCompanies(query);
       const imported = await importApolloCompaniesToCrm({
         query,
@@ -1480,11 +1458,7 @@ export async function runAgentTools(input: {
         mode,
         ownerEmployeeId: input.scope.employeeId,
         limit: 3,
-        verifier: createEmailVerificationAdapter(
-          hunter.apiKey
-            ? { mode: "live", apiKey: hunter.apiKey }
-            : { mode: "mock" },
-        ),
+        verifier: createEmailVerificationAdapter(verifier.config),
       });
       results.push({
         tool: "crm.prospect",
@@ -1524,9 +1498,8 @@ export async function runAgentTools(input: {
       want("onboarding.invite"))
   ) {
     try {
-      const { sendPortalInviteMagicLink } = await import(
-        "../auth/portal-magic-link"
-      );
+      const { sendPortalInviteMagicLink } =
+        await import("../auth/portal-magic-link");
       const { createResendMock } = await import("@hrmny/integrations");
       const emailMatch = input.prompt.match(
         /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
@@ -1678,10 +1651,8 @@ export async function runAgentTools(input: {
           })(),
         });
       } else {
-        const {
-          seedClientCreativeTask,
-          updateDeliveryTaskStatus,
-        } = await import("../tasks/delivery-tasks");
+        const { seedClientCreativeTask, updateDeliveryTaskStatus } =
+          await import("../tasks/delivery-tasks");
         let taskId = input.scope.taskId ?? null;
         const seeded = await seedClientCreativeTask({
           clientId: input.scope.clientId,

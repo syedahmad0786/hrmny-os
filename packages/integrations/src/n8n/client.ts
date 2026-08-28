@@ -19,6 +19,7 @@ import { getN8nEventEntry, type N8nCrmEvent } from "./events";
 export type N8nAdapterConfig = {
   baseUrl?: string;
   apiKey?: string;
+  outboundWebhookSecret?: string;
   mode?: "mock" | "live";
   allowProductionTrigger?: boolean;
 };
@@ -98,7 +99,13 @@ export function createN8nStub(): N8nAdapter {
 /** Prefer live when mode=live and key present; otherwise mock (no-op). */
 export function createN8nAdapter(config: N8nAdapterConfig = {}): N8nAdapter {
   const resolved = resolveN8nConfig(config);
-  if (resolved.mode === "live" && resolved.apiKey) {
+  if (resolved.mode === "live") {
+    if (!resolved.apiKey) {
+      throw new IntegrationMisconfiguredError(
+        "n8n",
+        "N8N_MODE=live but N8N_API_KEY missing — fail loud",
+      );
+    }
     return createN8nClient(resolved, "live");
   }
   return createN8nClient({ ...resolved, mode: "mock" }, "mock");
@@ -297,9 +304,19 @@ function createN8nClient(
         };
       }
 
+      if (!config.outboundWebhookSecret) {
+        throw new IntegrationMisconfiguredError(
+          "n8n",
+          "N8N_OUTBOUND_WEBHOOK_SECRET is required before an OS-to-n8n webhook can fire",
+        );
+      }
+
       const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Hrmny-Os-Secret": config.outboundWebhookSecret,
+        },
         body: JSON.stringify(input.payload ?? {}),
       });
       if (!res.ok) {

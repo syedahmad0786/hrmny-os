@@ -8,10 +8,9 @@ import type { MorningDigest } from "../leadgen/digest";
 /**
  * Thin Inngest wrapper over `runDailyLeadGen`. The plain pipeline fn stays the
  * real entry point (tested in Vitest with mock providers); this only adds the
- * schedule metadata and env guard. No-op until `INNGEST_EVENT_KEY` /
- * `INNGEST_SIGNING_KEY` exist — and the `inngest` package is intentionally NOT
- * a dependency yet, so there's no client to import. When the keys land, register
- * `runLeadgenDaily` against the real Inngest client using `LEADGEN_DAILY`.
+ * schedule metadata and plain-function test seam. The registered durable
+ * function lives in functions.ts; provider activation is a separate key/sync
+ * gate and the existing cron runner remains the fallback until then.
  */
 
 export const LEADGEN_DAILY = {

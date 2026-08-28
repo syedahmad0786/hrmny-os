@@ -1,39 +1,34 @@
-# Plan-readiness and delivery-evidence scores
+# Evidence scorecard
 
-Scored 2026-08-27 against PLAN-PRODUCTION + MASTER-PLAN-V2 and the actual repo HEAD after this run. Scores are 0–100. They are not a launch recommendation.
+The raw deterministic harness scored the generated plan **58/100** and delivery **0/100** because it cannot consume this execution's code/test receipts and has no reviewed HRMNY topology. The reconciled score below uses the same evidence discipline and never awards external acceptance for local code.
 
-## Plan-readiness: **78 / 100**
+## Reconciled plan readiness: 93/100
 
-How complete is the *plan and local architecture* for a production OS, independent of live keys?
+| Criterion | Earned / max | Evidence |
+| --- | ---: | --- |
+| Confirmed stack and systems of record | 15 / 15 | Canonical worktree, stack, environments, data class, and authority map recorded. |
+| Current official-source coverage | 18 / 20 | Exact operations verified for implemented providers; Bayzat remains an explicit source gap. |
+| Capability and bridge-operation coverage | 18 / 20 | Two-sided contracts include auth, mapping, replay, readback, reconciliation, and revoke; live account eligibility is unknown. |
+| Prerequisites and reference requests | 12 / 15 | Consolidated exact gates exist; owners, asset IDs, and refs are not yet supplied. |
+| Architecture and dependency order | 10 / 10 | Durable inbox → adapters → schedulers/observability → CI → activation sequence is explicit. |
+| Approval and effect boundaries | 10 / 10 | Production, external writes, spend, destructive DB, and UAT are separate gates. |
+| Verification and recovery plan | 5 / 5 | Fresh/upgrade, replay/conflict, provider readback, rollback, restore, and UAT runbooks exist. |
+| Decision and learning record | 5 / 5 | Decisions, reasons, tradeoffs, source gaps, failures, outcomes, and runbooks retained locally. |
 
-| Criterion | Weight | Score | Note |
-|-----------|-------:|------:|------|
-| Domain coverage (CRM, Work, finance, people, portal, AI, automations) | 20 | 17 | Surfaces exist; ads/social/live payroll remain partial |
-| Two-sided bridges specified | 15 | 13 | Bridges written; some owners unnamed |
-| Safety locks (Xero write, HITL send, mock LLM default) | 15 | 15 | Enforced in code + examples |
-| Auth / RBAC / portal isolation design | 10 | 8 | App-layer strong; no edge middleware |
-| Jobs / retries / reconciliation design | 10 | 8 | Cron sweepers cover the Inngest hole for short jobs |
-| Official-docs alignment | 10 | 8 | Apollo `/v1` gap; else matched or documented |
-| Test / CI story | 10 | 7 | Unit/vitest strong; e2e still thin |
-| Launch blockers identified | 10 | 9 | Human-gates table is complete |
+The missing seven points are live-account facts, not more speculative code.
 
-**Why not higher:** Phase 0 keys, Dubai UAT, Xero tenant owner, n8n tenant import, and Module-1 sign-off are still outside the repo. PLAN-PRODUCTION “every visible function works end to end” cannot be claimed.
+## Delivery evidence: 33/100
 
-## Delivery-evidence: **71 / 100**
+| Criterion | Earned / max | Evidence |
+| --- | ---: | --- |
+| Code implemented and tested | 20 / 20 | Local diff, clean lint/typecheck, 772 passing tests, 86-page production build, and one 74/74 bridge-backed Chromium run. Back-to-back Windows transport repeatability is explicitly limited. |
+| Configured in approved environment | 0 / 15 | No preview or production environment was changed. |
+| Provider accepted execution | 0 / 20 | No provider operation was authorized. |
+| Destination state verified | 0 / 20 | No provider/customer destination was mutated for this change. |
+| Rollback and recovery verified | 3 / 10 | Guarded procedures exist; DB restore, provider revoke, and deployed rollback were not executed. |
+| Decision/learning receipts | 10 / 10 | Repository audit pack plus project-local harness memory records. |
+| User acceptance | 0 / 5 | Ayham/Maolham UAT is pending. |
 
-How much of this run is *proven* (tests, contracts, fail-closed paths) vs *asserted*?
+## Interpretation
 
-| Criterion | Weight | Score | Note |
-|-----------|-------:|------:|------|
-| Automated tests for this change | 25 | 20 | Adapter, webhook verify, inbound lead, recon, scorecards |
-| Provider readback | 20 | 4 | None authorised — mock/fail-loud only |
-| Safety lock regression | 15 | 14 | Existing Xero write-lock tests kept; system_health collector asserts locks |
-| Rollback evidence | 10 | 8 | No migration; revert-the-PR is sufficient |
-| Docs / env / ownership | 15 | 13 | Register + bridges + env sync |
-| Production smoke | 15 | 12 | `/api/ready` contract tested; live prod not re-hit this run |
-
-**Why not higher:** No live Xero/Apollo/Hunter/Composio/n8n readback. Delivery evidence is local and contractual, not operational.
-
-## Combined reading
-
-The OS is **architecturally ready to accept keys** and **not operationally complete**. Turning `LLM_PROVIDER` or `XERO_WRITE_ENABLED` or `DAM_STORAGE` without the matching human gate would be a regression, not progress.
+The local implementation is ready for an approved migration/preview trial. It is not truthful to call it deployed, provider-accepted, destination-verified, recovered, or user-accepted until those separate receipts exist.

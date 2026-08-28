@@ -1,126 +1,138 @@
-# Two-sided bridges
+# HRMNY two-sided bridge contracts
 
-Every connection is specified as source operation → destination operation. Secrets are referenced by env name only.
+Each contract names both interfaces, authority, exact operation, identity, idempotency, reconciliation, and stop boundary. Secret names are references only.
 
-## 1. Xero read / mirror
+## 1. Xero Accounting → HRMNY finance mirror
 
-| Side | Detail |
-|------|--------|
-| Account owner | hrmny finance owner (unnamed) authorises tenant; app owned under developer@hrmny.co Xero app |
-| Source | Xero Accounting API `GET /Invoices` + webhook `INVOICE/*` |
-| Destination | OS `xero_invoice_mirror` via `syncXeroInvoiceMirror()` |
-| OAuth callback | Prod `https://hrmny-os.vercel.app/api/integrations/xero/callback` · local `http://localhost:3000/api/integrations/xero/callback` |
-| Webhook URL | `https://hrmny-os.vercel.app/api/webhooks/xero` |
-| Scopes | `openid profile email accounting.transactions.read accounting.contacts.read offline_access` |
-| Secret refs | `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, `XERO_WEBHOOK_KEY` → Vercel + Vault (`connection_account`) |
-| Idempotency | `external_id` upsert; webhook ITR is signature-only |
-| Retries | Cron sweeper once/day; webhook triggers an extra sync |
-| Readback | `listInvoices` after OAuth; `/api/ready` `tools.xero` |
-| Reconciliation | Daily `xero_mirror_sync` health signal + row count |
-| Revocation | Disconnect in Connections UI; delete Xero app consent; rotate webhook key |
-| Verification | Intent to Receive status **OK** in Xero developer portal; OS health signal `xero_webhook` |
-| Constraint | `XERO_WRITE_ENABLED=false` — no invoice/journal POST, no disbursement |
+| Contract field | Evidence-backed design |
+| --- | --- |
+| Authority | Xero remains accounting/payment authority. Supabase PostgreSQL owns the HRMNY mirror and OS workflow state. |
+| Source interface | OAuth 2.0; `GET /connections`; `GET /api.xro/2.0/Invoices`; signed invoice webhooks. |
+| Destination interface | `POST /api/webhooks/xero` → `integration_inbox`; scheduled `syncXeroInvoiceMirror()` → `xero_invoice_mirror`; linked OS invoice status reconciliation. |
+| Callback/webhook | `/api/integrations/xero/callback`; `/api/webhooks/xero`. |
+| Identity/scopes | Explicit finance-owned tenant; `openid profile email accounting.transactions.read accounting.contacts.read offline_access`. Multiple connections require exact `XERO_TENANT_ID`; first-tenant guessing is forbidden. |
+| Auth refs | `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET`, dedicated `XERO_OAUTH_STATE_SECRET`, `XERO_WEBHOOK_KEY`, optional `XERO_TENANT_ID`. |
+| Event safety | Base64 HMAC-SHA256 over raw body. Intent-to-Receive is acknowledged independently of database availability. Non-empty envelopes must be durably recorded before 200; failure returns 503. |
+| Idempotency | Webhook envelope SHA-256; `xero_invoice_mirror.external_id`; OS invoice link by `xero_invoice_id`. |
+| Reconciliation | Scheduled canonical invoice read. An OS invoice moves `issued → paid` only when the linked Xero mirror says `PAID`; the prior simulated paid mutation was removed. |
+| Effects | Xero writes and disbursement remain disabled. `XERO_WRITE_ENABLED=false` is a product lock, not a missing key. |
+| Acceptance | Xero Intent-to-Receive OK; explicit tenant selected; mirror rows read back; linked payment state converges; audit receipt retained; no Xero object created by HRMNY. |
 
-## 2. Google Workspace (mail / calendar / drive)
+## 2. Google Workspace ↔ HRMNY staff connection
 
-| Side | Detail |
-|------|--------|
-| Account owner | Each `@hrmny.co` staff member; SSO client owned by developer@hrmny.co |
-| Source | Google OAuth authorization code |
-| Destination | Vault token + Connections `probeGoogleWorkspace` |
-| Callback | `https://hrmny-os.vercel.app/api/integrations/google-workspace/callback` |
-| Scopes | gmail / calendar / drive / sheets as requested by Connections |
-| Secret refs | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_STATE_SECRET` |
-| Idempotency | One `connection_account` per employee + toolkit |
-| Retries | Token refresh on probe |
-| Revocation | Connections disconnect; Google Account → third-party access |
-| Verification | Connections probe returns connected; first-login UAT |
+| Contract field | Evidence-backed design |
+| --- | --- |
+| Authority | Google owns Gmail, Calendar, Drive, and the connected identity. HRMNY owns per-employee connection metadata and encrypted token reference. |
+| Source interface | Google OAuth authorization code and refresh-token endpoints; Gmail/Calendar/Drive REST operations already represented by the connection layer. |
+| Destination interface | `/api/integrations/google-workspace/callback` → one employee/toolkit `connection_account`; Connections probe performs canonical read. |
+| Scopes | `openid email profile`, `gmail.readonly`, `gmail.send`, `calendar.events.readonly`, `drive.file`, `drive.readonly`. Broad Gmail modify, Calendar write, and Sheets scopes were removed. |
+| Auth refs | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, dedicated `GOOGLE_OAUTH_STATE_SECRET` of at least 32 characters. No fallback to JWT, cron, or Xero secrets. |
+| Identity | Verified `@hrmny.co` account bound to the initiating employee and signed 15-minute state containing the exact redirect URI. |
+| Idempotency/recovery | One connection per employee/toolkit; refresh on probe; reconnect after invalid grant; disconnect and revoke at Google. |
+| Acceptance | OAuth consent/review for restricted Gmail scopes; exact callback registered; connection probe succeeds; one read and approval-gated send exercised by the intended employee. |
 
-## 3. n8n → OS inbound lead
+## 3. n8n → HRMNY inbound events
 
-| Side | Detail |
-|------|--------|
-| Account owner | hrmny n8n Cloud (`hrmny.app.n8n.cloud`) — not a personal tenant |
-| Source | n8n workflow `lead-source-webhook-ingestion` POST |
-| Destination | `POST /api/inbound/lead` → `leads.inbound.create` |
-| Auth | `X-Webhook-Secret` or `X-Hrmny-N8n-Signature: sha256=<hex>` |
-| Secret refs | `N8N_WEBHOOK_SECRET` / `HRMNY_N8N_WEBHOOK_SECRET` |
-| Callback the other way | OS `automation.trigger` → n8n webhook path (HITL, `N8N_ALLOW_PRODUCTION_TRIGGER=false`) |
-| Idempotency | CRM create is insert; callers should send a stable email+company |
-| Retries | n8n workflow retry; OS returns 4xx/5xx for n8n error branch |
-| Verification | Pin-test in hrmny tenant; inbound deal appears in CRM |
+| Contract field | Evidence-backed design |
+| --- | --- |
+| Source | Inactive client-owned n8n workflow with a stable upstream event ID. |
+| Destination | `POST /api/inbound/lead` or `POST /api/webhooks/n8n`; durable CRM create or generic `integration_inbox` receipt. |
+| Auth | `N8N_WEBHOOK_SECRET` via `X-Webhook-Secret` or HMAC in `X-Hrmny-N8n-Signature` / `X-N8n-Signature`. There is no cron-secret fallback. |
+| Idempotency | `Idempotency-Key`, event ID, execution ID, or webhook ID is mandatory. Same ID/same payload replays; same ID/different payload returns 409. |
+| Mapping | `company + email` → CRM company/contact/deal with `leadSourceLane=inbound`; generic events are acknowledged as no-side-effect receipts. |
+| Failure | Invalid auth 401/503; invalid data 400; conflict 409; undurable receipt 503; n8n retry/error branch owns replay. |
+| Acceptance | Import inactive, attach an upstream Header Auth credential, pin-test success/invalid/replay/conflict paths, then verify CRM and receipt rows independently. |
 
-## 4. Composio triggers → OS
+## 4. HRMNY → n8n bounded trigger
 
-| Side | Detail |
-|------|--------|
-| Account owner | Composio workspace (unprovisioned) |
-| Source | Composio webhook subscription |
-| Destination | `POST /api/webhooks/composio` (ack + audit only) |
-| Headers | `webhook-id`, `webhook-timestamp`, `webhook-signature` |
-| Secret ref | `COMPOSIO_WEBHOOK_SECRET` |
-| Reverse | OS `createComposioLive` authorize / execute allowlisted read tools |
-| Idempotency | `webhook-id` |
-| Verification | Signed test delivery → health signal `composio_webhook` |
+| Contract field | Evidence-backed design |
+| --- | --- |
+| Source | HRMNY `N8N_EVENT_MAP` proposal and approved payload. |
+| Destination | Exact n8n webhook path or declared `N8N_WEBHOOK_*` URL. |
+| Auth | Dedicated `N8N_OUTBOUND_WEBHOOK_SECRET` sent as `X-Hrmny-Os-Secret`; the n8n Webhook node must use matching Header Auth. This is separate from inbound auth. |
+| Gates | A real POST requires `N8N_ALLOW_PRODUCTION_TRIGGER=true` or explicit per-call approval. Real mode requires `N8N_API_KEY`; missing key fails loudly. |
+| Readback | HTTP response/execution ID, then `GET /api/v1/executions/{id}` when available; downstream destination verification remains separate. |
+| Recovery | Disable the workflow/flag, revoke key, rotate Header Auth, replay only the retained idempotent event. |
 
-## 5. Asana → native Work
+## 5. Composio triggers → HRMNY integration inbox
 
-| Side | Detail |
-|------|--------|
-| Source | Asana REST + webhooks via Composio or PAT |
-| Destination | Work tables + `asana_sync` job + `/api/asana/webhooks/[token]` |
-| Reverse | Import/reconcile only during cutover; Work is source of record after |
-| Secret refs | `COMPOSIO_API_KEY` + connected Asana account |
-| Verification | `asana.sync` feature on + verified connection; webhook handshake |
+| Contract field | Evidence-backed design |
+| --- | --- |
+| Source | Current Composio webhook subscription using `webhook-id`, `webhook-timestamp`, `webhook-signature`. |
+| Destination | `POST /api/webhooks/composio` → durable `integration_inbox` receipt, then health/audit metadata. No tool is executed from the webhook. |
+| Verification | `v1,` + Base64 HMAC-SHA256 over `{id}.{timestamp}.{rawBody}`, with 300-second tolerance. |
+| Idempotency | `webhook-id` plus payload hash; replay is acknowledged, conflicting reuse returns 409, unavailable durability returns 503. |
+| Reverse path | Existing Composio connection/tool layer remains user-scoped and allowlisted; a connected account does not grant blanket execution. |
+| Acceptance | Exact project, environment, auth config, stable user binding, ACTIVE connection, subscription, signed test delivery, receipt readback, and reconciliation receipt. |
 
-## 6. Apollo / Hunter / NeverBounce → CRM
+## 6. Apollo → CRM sourcing
 
-| Side | Detail |
-|------|--------|
-| Source | Apollo people/company search; Hunter or NeverBounce verify |
-| Destination | Lead-gen pipeline + verified-email gate (payment trigger) |
-| Modes | `APOLLO_MODE`, `HUNTER_MODE`, `NEVERBOUNCE_MODE` independently |
-| Provider pick | `EMAIL_VERIFICATION_PROVIDER=hunter\|neverbounce` |
-| Secret refs | `APOLLO_API_KEY`, `HUNTER_API_KEY`, `NEVERBOUNCE_API_KEY` (or Vault) |
-| Never invents | Unknown / accept_all stays unverified |
-| Verification | One known-good and one known-bad address; audit row |
+| Contract field | Evidence-backed design |
+| --- | --- |
+| Source | Official REST base `https://api.apollo.io/api/v1`; people search, people match, and organization search as supported by the selected plan. |
+| Destination | Typed Apollo adapter → normalized lead candidate → CRM company/contact/deal with source metadata. |
+| Activation | `APOLLO_MODE=live` is explicit; merely storing `APOLLO_API_KEY` does not activate live mode. |
+| Billing | Credit-consuming enrichment/search is separately blocked unless `APOLLO_ALLOW_PAID_OPERATIONS=true`. Credential health uses the free `GET /api/v1/auth/health`. |
+| Acceptance | Owner, plan, monthly cap, exact operation eligibility, known synthetic record, CRM readback, credit receipt, and duplicate behavior. |
 
-## 7. OpenRouter / embeddings → agents + memory
+## 7. Hunter or NeverBounce → verified-email gate
 
-| Side | Detail |
-|------|--------|
-| Source | OpenRouter chat + embeddings (or local hash when `LLM_PROVIDER=mock`) |
-| Destination | Agent runs, chat, `memory_chunk.embedding` |
-| Secret refs | `OPENROUTER_API_KEY`, `OPENROUTER_PRIVILEGED_API_KEY`, optional `OPENAI_API_KEY` |
-| Cap | `LLM_MONTHLY_CAP_AED=1500` |
-| Backfill | Cron `memory_embed_backfill` uses local vectors while provider is mock |
-| Verification | `/api/ready` `llmProvider` + one agent run after Phase 0 approval |
+| Contract field | Hunter | NeverBounce |
+| --- | --- | --- |
+| Source operation | `GET https://api.hunter.io/v2/email-verifier` | `GET https://api.neverbounce.com/v4/single/check` |
+| Activation | `HUNTER_MODE=live` | `NEVERBOUNCE_MODE=live` and `EMAIL_VERIFICATION_PROVIDER=neverbounce` |
+| Billing gate | `HUNTER_ALLOW_PAID_OPERATIONS=true` | `NEVERBOUNCE_ALLOW_PAID_OPERATIONS=true` |
+| Destination | Canonical verification result; only explicit deliverable/valid state sets `emailVerified=true`. Unknown/accept-all never invents a positive result. |
+| Acceptance | Known deliverable and known invalid synthetic addresses, provider response receipt, credit delta, CRM gate readback. |
 
-## 8. Cron / GitHub Actions → jobs
+## 8. Resend → transactional email destination
 
-| Side | Detail |
-|------|--------|
-| Source | `.github/workflows/scheduler.yml` every 5 minutes + Vercel daily cron |
-| Destination | `GET /api/cron/jobs` Bearer `CRON_SECRET` |
-| Sweepers | work webhooks, AI cleanup, reports, CRM digest, lead-gen, Xero mirror, competitor scan, retainer drafts, memory embed |
-| Failure | `job_lag` + Google Chat when webhook configured |
-| Secret ref | `CRON_SECRET` / GitHub `HRMNY_CRON_SECRET` |
+| Contract field | Evidence-backed design |
+| --- | --- |
+| Source | HRMNY portal invite or scheduled report after its application gate. |
+| Destination | Resend `POST /emails` and recipient mailbox. |
+| Auth refs | `RESEND_API_KEY`, verified `RESEND_FROM`, explicit `RESEND_MODE=live`. |
+| Idempotency | Every live send requires `Idempotency-Key`; portal invites hash the token and reports use stable schedule/date keys. Same key with different payload is rejected in mock and must never be reused live. |
+| Acceptance | Domain/SPF/DKIM/DMARC verified, API accepted, email received in intended mailbox, link/session isolated, audit receipt retained. |
 
-## 9. Portal magic link
+## 9. Embedding provider → governed memory
 
-| Side | Detail |
-|------|--------|
-| Source | Staff invite → Resend / SMTP |
-| Destination | `/portal/login/verify` + `portal_session_grant` |
-| Allowlist | convention `portal.allowed_contacts` |
-| Isolation | `portalStaffBoundary` + StaffShell redirect |
-| Secret refs | Supabase Auth + `RESEND_API_KEY` / `RESEND_FROM` |
+| Contract field | Evidence-backed design |
+| --- | --- |
+| Source | OpenAI `POST /v1/embeddings` or OpenRouter `POST /api/v1/embeddings`, selected explicitly by `EMBEDDING_PROVIDER`. |
+| Destination | `memory_chunk.embedding` with source, audience, and entity scope preserved. |
+| Safety | `none` produces no embedding; `local` requires explicit development permission; live provider failure does not silently become a hash vector. Unscoped memory search throws `MEMORY_SCOPE_REQUIRED`. |
+| Auth refs | Provider-specific key and model; spend cap/retention approval. |
+| Acceptance | One synthetic scoped chunk embedded, scoped query returns it, cross-scope query does not, provider usage receipt and deletion/rebuild path verified. |
 
-## 10. Ads insights (read-only, mock)
+## 10. Inngest → HRMNY durable jobs
 
-| Side | Detail |
-|------|--------|
-| Source | Meta Insights / Google Ads (future) |
-| Destination | `analytics.adsInsights` |
-| Live | Fail-loud until M11 tokens approved |
-| Writes | None — no budget mutation method on the adapter |
+| Contract field | Evidence-backed design |
+| --- | --- |
+| Source | Inngest cron triggers for daily lead generation and report-scheduler ticks. |
+| Destination | Official Next.js handler at `/api/inngest`, registered functions, existing idempotent job bodies. |
+| Auth refs | `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY`. |
+| Fallback | Signed `/api/cron/jobs` continues those jobs until both keys exist; when both exist, the fallback skips them to prevent duplicate schedulers. |
+| Reliability | Two retries plus existing claims/idempotency keys; provider execution and final email/CRM state must be verified separately. |
+
+## 11. HRMNY → Sentry telemetry
+
+| Contract field | Evidence-backed design |
+| --- | --- |
+| Source | Next.js server instrumentation, browser instrumentation, and global error boundary. |
+| Destination | Exact Sentry SaaS project selected by HRMNY. |
+| Safety | SDK is inert without DSN; PII, traces, and replay are disabled by default in this slice. Runtime DSNs and release-upload credentials are separate. |
+| Auth refs | `SENTRY_DSN`, optional public DSN, and—only for deployment source maps—scoped `SENTRY_AUTH_TOKEN`, organization, and project references. |
+| Acceptance | Synthetic handled error appears with expected environment/release and no client payload/credential; source-map mapping separately verified if enabled. |
+
+## 12. Bayzat → payroll mirror source gap
+
+Current official Bayzat public material did not establish an employee-list API operation, authentication contract, or official GitHub implementation source. The bounded adapter therefore supports approved CSV input only. `BAYZAT_SOURCE=api` always fails with `UNVERIFIED_INTERFACE`; an API key alone cannot activate a guessed endpoint. To replace CSV, the tenant must supply an official contract or provider-confirmed operation, after which both schemas, pagination, identity, reconciliation, and revocation must be reviewed.
+
+## 13. Asana → native Work migration
+
+Asana remains an import/reconciliation source during cutover; native Work becomes the operational authority only after approved count/hash comparison and user sign-off. Existing REST/webhook interfaces require exact workspace/project/resource GIDs, user-scoped authorization, raw-body handshake/signature validation, deduplication, fresh provider reads, and bounded reconciliation. No Asana write or subscription was performed in this run.
+
+## 14. Ads platforms → read-only analytics
+
+Meta and Google Ads adapters expose read/report contracts only. Live mode fails loudly until exact account IDs, read scopes, plan eligibility, and test assets are approved. No budget, campaign, audience, or conversion write exists in this completion slice.

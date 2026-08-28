@@ -418,7 +418,7 @@ export default function WorkPage() {
     { sectionId: null, name: "No section" },
     ...sections,
   ];
-  const items = detail.data?.items ?? [];
+  const items = useMemo(() => detail.data?.items ?? [], [detail.data?.items]);
   const mentionOptions = useMemo<WorkMentionOption[]>(
     () => [
       ...(employees.data ?? []).map((employee) => ({

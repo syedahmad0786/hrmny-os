@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@hrmny/ui";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import {
   DIGITAL_CARD_PUBLIC_FIELDS,
@@ -122,7 +122,10 @@ export default function MyCardPage() {
   const [accentColor, setAccentColor] = useState("#C7702E");
 
   const card = me.data as unknown as MyCardRow | null | undefined;
-  const templates = (templatesQuery.data ?? []) as unknown as TemplateRow[];
+  const templates = useMemo(
+    () => (templatesQuery.data ?? []) as unknown as TemplateRow[],
+    [templatesQuery.data],
+  );
   const allTemplates = (adminTemplates.data ?? []) as unknown as TemplateRow[];
   const cards = (adminCards.data ?? []) as unknown as AdminCardRow[];
 

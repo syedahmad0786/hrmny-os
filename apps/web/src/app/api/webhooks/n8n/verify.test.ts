@@ -49,16 +49,17 @@ describe("verifyN8nSignature", () => {
     expect(verifyN8nSignature(BODY, null).ok).toBe(false);
   });
 
-  it("accepts an unsigned body only in non-production when the secret is unset", () => {
+  it("fails closed in non-production when the secret is unset", () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("N8N_WEBHOOK_SECRET", "");
-    expect(verifyN8nSignature(BODY, null).ok).toBe(true);
+    expect(verifyN8nSignature(BODY, null).ok).toBe(false);
   });
 
-  it("fails closed in non-production when N8N_WEBHOOK_REQUIRE_SECRET=true", () => {
+  it("does not reuse the cron credential for the n8n bridge", () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("N8N_WEBHOOK_SECRET", "");
-    vi.stubEnv("N8N_WEBHOOK_REQUIRE_SECRET", "true");
-    expect(verifyN8nSignature(BODY, null).ok).toBe(false);
+    vi.stubEnv("HRMNY_N8N_WEBHOOK_SECRET", "");
+    vi.stubEnv("CRON_SECRET", SECRET);
+    expect(verifyN8nSignature(BODY, SECRET).ok).toBe(false);
   });
 });

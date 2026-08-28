@@ -132,7 +132,9 @@ export const analyticsRouter = router({
     )
     .query(async ({ input }) => {
       const platform = input?.platform ?? "meta";
-      const adapter = createAdsInsightsAdapter({ platform, mode: "mock" });
+      // The adapter resolves ADS_INSIGHTS_MODE. A requested live mode must fail
+      // loud until the read-only provider bridge is implemented and approved.
+      const adapter = createAdsInsightsAdapter({ platform });
       const accounts = await adapter.listAccounts();
       const accountId = input?.accountId ?? accounts[0]?.accountId ?? "mock";
       const until = input?.until ?? new Date().toISOString().slice(0, 10);

@@ -1,33 +1,23 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { SECURITY_HEADERS } from "../security-headers";
 
 /**
- * Edge middleware — baseline security headers on every app/API response.
+ * Diagnostic Edge probe for the baseline security headers.
  *
- * Deliberately headers-only: auth stays enforced per-handler (tRPC context +
- * webhook signature checks), so this cannot fail-open or break the dev-role
- * header / Supabase bearer flows. Deferred: edge-level auth enforcement and a
- * tuned Content-Security-Policy (both need per-route calibration — a wrong CSP
- * silently breaks the app).
+ * The live policy is emitted by next.config.ts without a per-request Edge
+ * response bridge. Auth remains enforced per-handler (tRPC context + webhook
+ * signatures). A tuned Content-Security-Policy still needs route calibration.
  */
-const SECURITY_HEADERS: Record<string, string> = {
-  "X-Content-Type-Options": "nosniff",
-  "X-Frame-Options": "SAMEORIGIN",
-  "Referrer-Policy": "strict-origin-when-cross-origin",
-  "X-DNS-Prefetch-Control": "off",
-  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-  // Ignored by browsers over plain http (local dev), enforced on HTTPS prod.
-  "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
-};
-
 export function middleware(_request: NextRequest) {
   const response = NextResponse.next();
-  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+  for (const { key, value } of SECURITY_HEADERS) {
     response.headers.set(key, value);
   }
   return response;
 }
 
 export const config = {
-  // Everything except Next internals and static assets.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // The active header policy is emitted by next.config.ts without an Edge
+  // response bridge. Retain this bounded probe only for platform diagnostics.
+  matcher: ["/__edge-security-header-probe"],
 };

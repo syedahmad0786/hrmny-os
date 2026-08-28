@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createCaller } from "@/server/trpc/root";
-import { timingSafeEqual } from "node:crypto";
+import { createInboundLead } from "@/server/crm/inbound-leads";
+import { verifyN8nSignature } from "../../webhooks/n8n/verify";
 
 /**
  * POST /api/inbound/lead — n8n (and other automations) forward normalized leads.
@@ -20,48 +20,32 @@ const bodySchema = z
     sector: z.string().optional(),
     source: z.string().optional(),
     message: z.string().optional(),
+    eventId: z.string().min(1).max(300).optional(),
   })
   .passthrough();
 
-function configuredSecret(): string | null {
-  return (
-    process.env.N8N_WEBHOOK_SECRET?.trim() ||
-    process.env.HRMNY_N8N_WEBHOOK_SECRET?.trim() ||
-    process.env.CRON_SECRET?.trim() ||
-    null
-  );
-}
-
-function secretsMatch(provided: string | null, expected: string): boolean {
-  if (!provided) return false;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
-
 export async function POST(request: Request) {
-  const expected = configuredSecret();
-  if (!expected) {
-    return NextResponse.json(
-      { ok: false, code: "MISCONFIGURED", reason: "webhook secret not set" },
-      { status: 503 },
-    );
-  }
+  const rawBody = await request.text();
   const provided =
     request.headers.get("x-webhook-secret") ??
     request.headers.get("x-hrmny-n8n-signature") ??
     request.headers.get("x-n8n-signature");
-  if (!secretsMatch(provided, expected)) {
+  const verified = verifyN8nSignature(rawBody, provided);
+  if (!verified.ok) {
+    const misconfigured = verified.reason.includes("not configured");
     return NextResponse.json(
-      { ok: false, code: "UNAUTHORIZED" },
-      { status: 401 },
+      {
+        ok: false,
+        code: misconfigured ? "MISCONFIGURED" : "UNAUTHORIZED",
+        reason: verified.reason,
+      },
+      { status: misconfigured ? 503 : 401 },
     );
   }
 
   let raw: unknown;
   try {
-    raw = await request.json();
+    raw = rawBody ? JSON.parse(rawBody) : {};
   } catch {
     return NextResponse.json(
       { ok: false, code: "VALIDATION", reason: "invalid JSON" },
@@ -77,6 +61,21 @@ export async function POST(request: Request) {
     );
   }
   const data = parsed.data;
+  const idempotencyKey =
+    request.headers.get("idempotency-key")?.trim() ||
+    request.headers.get("x-event-id")?.trim() ||
+    request.headers.get("x-webhook-id")?.trim() ||
+    data.eventId?.trim();
+  if (!idempotencyKey) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "VALIDATION",
+        reason: "Idempotency-Key or eventId required",
+      },
+      { status: 400 },
+    );
+  }
   const companyName = (data.companyName ?? data.company ?? data.name ?? "").trim();
   const contactEmail = (data.contactEmail ?? data.email ?? "").trim().toLowerCase();
   if (!companyName || !contactEmail) {
@@ -96,19 +95,15 @@ export async function POST(request: Request) {
     data.source ? `Source: ${data.source}` : null,
   ].filter(Boolean);
 
-  const caller = createCaller({
-    user: null,
-    employeeId: null,
-    roles: [],
-    canViewMargin: false,
-  });
-
   try {
-    const created = await caller.leads.inbound.create({
+    const created = await createInboundLead({
+      provider: "n8n",
+      idempotencyKey,
       companyName,
       contactEmail,
       sector: data.sector,
       message: messageParts.length ? messageParts.join("\n") : undefined,
+      rawBody,
     });
     return NextResponse.json({
       ok: true,
@@ -116,16 +111,21 @@ export async function POST(request: Request) {
       companyName: created.companyName,
       contactEmail: created.contactEmail,
       leadSourceLane: created.leadSourceLane,
-      durable: "durable" in created ? created.durable : true,
+      durable: created.durable,
+      duplicate: created.duplicate,
+      receipt: idempotencyKey,
     });
   } catch (err) {
+    const reason =
+      err instanceof Error ? err.message.slice(0, 200) : "create_failed";
+    const conflict = reason === "IDEMPOTENCY_PAYLOAD_MISMATCH";
     return NextResponse.json(
       {
         ok: false,
-        code: "INTERNAL",
-        reason: err instanceof Error ? err.message.slice(0, 200) : "create_failed",
+        code: conflict ? "CONFLICT" : "INTERNAL",
+        reason,
       },
-      { status: 500 },
+      { status: conflict ? 409 : 500 },
     );
   }
 }
@@ -136,5 +136,6 @@ export async function GET() {
     endpoint: "/api/inbound/lead",
     methods: ["POST"],
     auth: "X-Webhook-Secret",
+    idempotency: "Idempotency-Key header (or eventId body field) is required",
   });
 }

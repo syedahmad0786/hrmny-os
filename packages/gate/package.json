@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "echo \"lint stub\""
+    "lint": "eslint src"
   },
   "dependencies": {
     "zod": "^3.24.1"

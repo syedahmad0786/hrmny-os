@@ -34,6 +34,18 @@ function download(result: {
 const inputClass =
   "w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm";
 const cardClass = "rounded-xl border border-sand bg-white/75 p-5";
+const WORK_ADMIN_TABS = [
+  ["organization", "Organization", "work.domain_controls"],
+  ["teams", "Teams", "work.teams"],
+  ["guests", "Guests", "work.guests"],
+  ["members", "Members", "work.view_only"],
+  ["roles", "Roles", "work.custom_rbac"],
+  ["identity", "SSO & SCIM", "work.sso_scim"],
+  ["sandboxes", "Sandbox", "work.sandboxes"],
+  ["api", "API & webhooks", "work.api_webhooks"],
+  ["ai", "AI governance", "work.ai.any"],
+  ["exports", "Exports", "work.data_export"],
+] as const;
 
 export default function WorkAdminPage() {
   const utils = trpc.useUtils();
@@ -73,32 +85,25 @@ export default function WorkAdminPage() {
     enabled: anyAiEnabled,
   });
 
-  const tabs = [
-    ["organization", "Organization", "work.domain_controls"],
-    ["teams", "Teams", "work.teams"],
-    ["guests", "Guests", "work.guests"],
-    ["members", "Members", "work.view_only"],
-    ["roles", "Roles", "work.custom_rbac"],
-    ["identity", "SSO & SCIM", "work.sso_scim"],
-    ["sandboxes", "Sandbox", "work.sandboxes"],
-    ["api", "API & webhooks", "work.api_webhooks"],
-    ["ai", "AI governance", "work.ai.any"],
-    ["exports", "Exports", "work.data_export"],
-  ] as const;
-  const visibleTabs = tabs.filter(([, , feature]) => {
-    if (feature === "work.data_export")
-      return (
-        enabled.has("work.data_export") || enabled.has("work.audit_export")
-      );
-    if (feature === "work.ai.any") return anyAiEnabled;
-    return enabled.has(feature);
-  });
+  const visibleTabs = useMemo(
+    () =>
+      WORK_ADMIN_TABS.filter(([, , feature]) => {
+        if (feature === "work.data_export")
+          return (
+            enabled.has("work.data_export") ||
+            enabled.has("work.audit_export")
+          );
+        if (feature === "work.ai.any") return anyAiEnabled;
+        return enabled.has(feature);
+      }),
+    [anyAiEnabled, enabled],
+  );
 
   useEffect(() => {
     if (!visibleTabs.some(([key]) => key === tab) && visibleTabs[0]) {
       setTab(visibleTabs[0][0]);
     }
-  }, [enabled, tab]);
+  }, [tab, visibleTabs]);
 
   return (
     <main className="flex flex-col gap-6">

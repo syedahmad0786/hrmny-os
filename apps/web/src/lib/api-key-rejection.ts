@@ -9,6 +9,7 @@ export function isHardApiKeyRejection(reason: string): boolean {
     t.includes("invalid api") ||
     t.includes("invalid key") ||
     t.includes("api key is invalid") ||
+    t.includes("unverified_interface") ||
     t.includes("forbidden")
   );
 }

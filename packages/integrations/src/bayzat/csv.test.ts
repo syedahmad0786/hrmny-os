@@ -35,4 +35,10 @@ describe("Bayzat CSV parse", () => {
       "Amina Updated",
     );
   });
+
+  it("fails loud when an unverified Bayzat API mode is requested", () => {
+    expect(() =>
+      createBayzatAdapter({ source: "api", apiKey: "test-key" }),
+    ).toThrow(/no official employee-list API contract/i);
+  });
 });

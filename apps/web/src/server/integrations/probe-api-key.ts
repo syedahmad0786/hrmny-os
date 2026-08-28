@@ -1,36 +1,53 @@
-import {
-  createApolloLive,
-  createHunterLive,
-} from "@hrmny/integrations";
+import { normalizeN8nBaseUrl } from "@hrmny/integrations";
 import type { ApiKeyToolkit } from "./resolve-keys";
 
 /**
- * Cheap live check after paste. Fail-loud so Connections never marks a dead
- * key as connected (Hunt /api/ready would otherwise look green).
+ * Free, read-only live check after paste. Never use a credit-consuming search
+ * or verifier merely to validate a credential.
  */
 export async function probeIntegrationApiKey(
   toolkit: ApiKeyToolkit,
   apiKey: string,
+  options: { allowConfiguredMock?: boolean } = {},
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const key = apiKey.trim();
   if (key.length < 6) {
     return { ok: false, reason: "API key too short" };
   }
+  const configuredMode = process.env[`${toolkit.toUpperCase()}_MODE`]
+    ?.trim()
+    .toLowerCase();
+  if (options.allowConfiguredMock && configuredMode === "mock") {
+    return { ok: true };
+  }
   try {
     if (toolkit === "apollo") {
-      await createApolloLive({ mode: "live", apiKey: key }).searchCompanies(
-        "hrmny-probe",
-      );
+      const response = await fetch("https://api.apollo.io/api/v1/auth/health", {
+        headers: { "x-api-key": key },
+      });
+      if (!response.ok) throw new Error(`Apollo auth health: HTTP ${response.status}`);
       return { ok: true };
     }
     if (toolkit === "hunter") {
-      await createHunterLive({ mode: "live", apiKey: key }).verifyEmail(
-        "probe@example.com",
-      );
+      const response = await fetch("https://api.hunter.io/v2/account", {
+        headers: { "X-API-KEY": key },
+      });
+      if (!response.ok) throw new Error(`Hunter account: HTTP ${response.status}`);
       return { ok: true };
     }
-    // bayzat / n8n: accept shape-only for now (no cheap public probe wired).
-    return { ok: true };
+    if (toolkit === "n8n") {
+      const response = await fetch(
+        `${normalizeN8nBaseUrl()}/api/v1/workflows?limit=1`,
+        { headers: { "X-N8N-API-KEY": key } },
+      );
+      if (!response.ok) throw new Error(`n8n workflows: HTTP ${response.status}`);
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      reason:
+        "UNVERIFIED_INTERFACE: Bayzat API keys cannot be accepted until the tenant supplies an official employee-list contract; use CSV.",
+    };
   } catch (err) {
     return {
       ok: false,

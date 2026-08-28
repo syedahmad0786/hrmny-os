@@ -144,11 +144,7 @@ export default function HrmnyChatPage() {
     // newer agent/sandbox choice that intentionally cleared threadId.
     setClientId(activeThread.clientId ?? "");
     setAgentSlug(activeThread.agentSlug ?? "");
-  }, [
-    activeThread?.chatThreadId,
-    activeThread?.clientId,
-    activeThread?.agentSlug,
-  ]);
+  }, [activeThread]);
 
   useEffect(() => {
     scroller.current?.scrollTo({

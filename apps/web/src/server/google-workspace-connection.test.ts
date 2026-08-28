@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   GoogleProfileSchema,
   getGoogleWorkspaceAccessToken,
@@ -10,6 +10,11 @@ import { buildGoogleWorkspaceAuthorizeUrl } from "./google-workspace-oauth";
 describe("Google Workspace connection", () => {
   beforeEach(() => {
     process.env.LLM_PROVIDER = "mock";
+    process.env.GOOGLE_OAUTH_STATE_SECRET = "g".repeat(32);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("accepts verified hrmny accounts and rejects personal accounts", () => {
@@ -34,6 +39,15 @@ describe("Google Workspace connection", () => {
     const prev = process.env.DATABASE_URL;
     process.env.DATABASE_URL = "";
     clearMemoryApiKeys();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
     try {
       const user = resolveDevUser("partner");
       const caller = createCaller({

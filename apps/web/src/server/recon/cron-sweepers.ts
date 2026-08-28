@@ -4,6 +4,7 @@ import { emitHealthSignal } from "../m1-persistence";
 import { getDemoStore, vatOnAmount } from "../demo-store";
 import { runCompetitorScan } from "../leadgen/competitor-scan";
 import { backfillMissingEmbeddings } from "../ai/memory-db";
+import { resolveTaxRegistration } from "../finance/tax-registration";
 
 export const XERO_MIRROR_SIGNAL = "xero_mirror_sync";
 export const COMPETITOR_SCAN_SIGNAL = "competitor_scan_daily";
@@ -57,7 +58,7 @@ export async function runXeroMirrorCron(now: Date = new Date()): Promise<{
   return { ran: true, ...synced };
 }
 
-/** Daily competitor research against LEADGEN_COMPETITORS (comma list). Mock-safe. */
+/** Daily competitor research against an explicit LEADGEN_COMPETITORS list. */
 export async function runCompetitorScanCron(now: Date = new Date()): Promise<{
   ran: boolean;
   skipped?: "already_ran" | "no_targets";
@@ -68,7 +69,7 @@ export async function runCompetitorScanCron(now: Date = new Date()): Promise<{
   if (await alreadySignaledToday(COMPETITOR_SCAN_SIGNAL, todayIso)) {
     return { ran: false, skipped: "already_ran" };
   }
-  const names = (process.env.LEADGEN_COMPETITORS ?? "default-agency")
+  const names = (process.env.LEADGEN_COMPETITORS ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
@@ -95,6 +96,7 @@ export async function runRetainerMonthStartCron(now: Date = new Date()): Promise
 }> {
   const period = now.toISOString().slice(0, 7);
   const todayIso = now.toISOString().slice(0, 10);
+  const taxRegistration = resolveTaxRegistration();
   if (await alreadySignaledToday(`${RETAINER_MONTH_SIGNAL}:${period}`, todayIso)) {
     return { ran: false, skipped: "already_ran", period, created: 0 };
   }
@@ -130,8 +132,7 @@ export async function runRetainerMonthStartCron(now: Date = new Date()): Promise
         billingKind: "retainer",
         clientId: client.clientId,
         period,
-        trn: "100000000000003",
-        trnStatus: "known",
+        ...taxRegistration,
         ruleCited: "UAE VAT 5% monthly retainer auto-draft",
         sourceAttached: {
           kind: "retainer_month_start",
@@ -167,8 +168,7 @@ export async function runRetainerMonthStartCron(now: Date = new Date()): Promise
       billingKind: "retainer",
       clientId: client.clientId,
       period,
-      trn: "100000000000003",
-      trnStatus: "known",
+      ...taxRegistration,
       ruleCited: "UAE VAT 5% monthly retainer auto-draft",
       sourceAttached: {
         kind: "retainer_month_start",
@@ -190,7 +190,7 @@ export async function runRetainerMonthStartCron(now: Date = new Date()): Promise
   return { ran: true, period, created };
 }
 
-/** Embed memory_chunk rows with null embeddings using the local (zero-spend) path. */
+/** Embed null memory rows only through the explicitly selected provider. */
 export async function runMemoryEmbedBackfillCron(): Promise<{
   updated: number;
   skipped?: string;

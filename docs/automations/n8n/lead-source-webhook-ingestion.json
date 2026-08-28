@@ -34,14 +34,15 @@
             { "id": "a2", "name": "email", "value": "={{ ($json.body?.email ?? $json.email ?? \"\").toString().trim().toLowerCase() }}", "type": "string" },
             { "id": "a3", "name": "company", "value": "={{ ($json.body?.company ?? $json.company ?? \"\").toString().trim() }}", "type": "string" },
             { "id": "a4", "name": "source", "value": "={{ ($json.body?.source ?? $json.source ?? \"unknown\").toString().trim() }}", "type": "string" },
-            { "id": "a5", "name": "receivedAt", "value": "={{ $now.toISO() }}", "type": "string" }
+            { "id": "a5", "name": "receivedAt", "value": "={{ $now.toISO() }}", "type": "string" },
+            { "id": "a6", "name": "eventId", "value": "={{ ($json.body?.eventId ?? $json.body?.id ?? $json.eventId ?? $json.id ?? \"\").toString().trim() }}", "type": "string" }
           ]
         }
       }
     },
     {
       "id": "2a07a8a4-6119-4e7c-b0ea-ebff7c118f51",
-      "name": "Has Email?",
+      "name": "Has Email + Event ID?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [448, 192],
@@ -49,7 +50,8 @@
         "conditions": {
           "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
           "conditions": [
-            { "leftValue": "={{ $json.email }}", "operator": { "type": "string", "operation": "notEmpty" }, "rightValue": "" }
+            { "leftValue": "={{ $json.email }}", "operator": { "type": "string", "operation": "notEmpty" }, "rightValue": "" },
+            { "leftValue": "={{ $json.eventId }}", "operator": { "type": "string", "operation": "notEmpty" }, "rightValue": "" }
           ],
           "combinator": "and"
         }
@@ -70,7 +72,8 @@
         "specifyHeaders": "keypair",
         "headerParameters": {
           "parameters": [
-            { "name": "X-Webhook-Secret", "value": "={{ $env.HRMNY_N8N_WEBHOOK_SECRET }}" }
+            { "name": "X-Webhook-Secret", "value": "={{ $env.HRMNY_N8N_WEBHOOK_SECRET }}" },
+            { "name": "Idempotency-Key", "value": "={{ $json.eventId }}" }
           ]
         },
         "sendBody": true,
@@ -123,13 +126,13 @@
     },
     {
       "id": "02f0f8b7-9464-4974-84c1-c273e8b00a5e",
-      "name": "Respond 400 Missing Email",
+      "name": "Respond 400 Missing Required Fields",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
       "position": [672, 288],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { \"status\": \"rejected\", \"reason\": \"email is required\" } }}",
+        "responseBody": "={{ { \"status\": \"rejected\", \"reason\": \"email and stable eventId are required\" } }}",
         "options": { "responseCode": 400 }
       }
     }
@@ -139,12 +142,12 @@
       "main": [[{ "node": "Normalize Lead", "type": "main", "index": 0 }]]
     },
     "Normalize Lead": {
-      "main": [[{ "node": "Has Email?", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Has Email + Event ID?", "type": "main", "index": 0 }]]
     },
-    "Has Email?": {
+    "Has Email + Event ID?": {
       "main": [
         [{ "node": "Forward to hrmny OS", "type": "main", "index": 0 }],
-        [{ "node": "Respond 400 Missing Email", "type": "main", "index": 0 }]
+        [{ "node": "Respond 400 Missing Required Fields", "type": "main", "index": 0 }]
       ]
     },
     "Forward to hrmny OS": {

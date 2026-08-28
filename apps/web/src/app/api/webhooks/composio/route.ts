@@ -1,4 +1,5 @@
 import { emitHealthSignal, writeAudit } from "@/server/m1-persistence";
+import { recordIntegrationReceipt } from "@/server/integrations/inbox";
 import { verifyComposioSignature } from "./verify";
 
 /**
@@ -43,6 +44,40 @@ export async function POST(request: Request) {
   }
 
   const webhookId = request.headers.get("webhook-id") ?? "unknown";
+  let receipt;
+  try {
+    receipt = await recordIntegrationReceipt({
+      provider: "composio",
+      externalEventId: webhookId,
+      operation: `trigger.${triggerSlug}`,
+      rawBody: raw,
+      payload: { triggerSlug },
+      completed: true,
+      result: { handled: "acknowledged", sideEffects: false },
+    });
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message.slice(0, 200) : "receipt_failed";
+    const conflict = reason === "INTEGRATION_RECEIPT_PAYLOAD_MISMATCH";
+    return Response.json(
+      {
+        ok: false,
+        code: conflict ? "EVENT_ID_CONFLICT" : "RECEIPT_UNAVAILABLE",
+        reason,
+      },
+      { status: conflict ? 409 : 503 },
+    );
+  }
+  if (receipt.duplicate) {
+    return Response.json({
+      ok: true,
+      received: true,
+      duplicate: true,
+      webhookId,
+      triggerSlug,
+      handled: "acknowledged",
+    });
+  }
   await emitHealthSignal("composio_webhook", "info", {
     webhookId,
     triggerSlug,
@@ -64,6 +99,7 @@ export async function POST(request: Request) {
     webhookId,
     triggerSlug,
     handled: "acknowledged",
+    duplicate: false,
   });
 }
 

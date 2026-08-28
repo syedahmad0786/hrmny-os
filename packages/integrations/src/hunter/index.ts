@@ -1,20 +1,20 @@
-import {
-  IntegrationMisconfiguredError,
-  type HunterAdapter,
-} from "../types";
+import { IntegrationMisconfiguredError, type HunterAdapter } from "../types";
+import { assertPaidVerificationAllowed } from "./policy";
 
 export type HunterAdapterConfig = {
   mode?: "mock" | "live";
   apiKey?: string;
+  /** Explicit owner approval for Hunter verification credits. */
+  allowPaidOperations?: boolean;
 };
 
-function resolveMode(config: HunterAdapterConfig): "mock" | "live" {
+export function resolveHunterMode(
+  config: HunterAdapterConfig = {},
+): "mock" | "live" {
   if (config.mode === "mock") return "mock";
   if (config.mode === "live") return "live";
   const env = process.env.HUNTER_MODE?.toLowerCase();
   if (env === "live") return "live";
-  if (env === "mock") return "mock";
-  if ((config.apiKey ?? process.env.HUNTER_API_KEY)?.trim()) return "live";
   return "mock";
 }
 
@@ -39,7 +39,9 @@ export function createHunterMock(): HunterAdapter {
   };
 }
 
-export function createHunterLive(config: HunterAdapterConfig = {}): HunterAdapter {
+export function createHunterLive(
+  config: HunterAdapterConfig = {},
+): HunterAdapter {
   const apiKey = config.apiKey ?? process.env.HUNTER_API_KEY;
   if (!apiKey) {
     throw new IntegrationMisconfiguredError(
@@ -49,6 +51,7 @@ export function createHunterLive(config: HunterAdapterConfig = {}): HunterAdapte
   }
   return {
     async verifyEmail(email: string) {
+      assertPaidVerificationAllowed("hunter", config);
       const url = new URL("https://api.hunter.io/v2/email-verifier");
       url.searchParams.set("email", email);
       url.searchParams.set("api_key", apiKey);
@@ -80,7 +83,7 @@ export function createHunterStub(): HunterAdapter {
 export function createHunterAdapter(
   config: HunterAdapterConfig = {},
 ): HunterAdapter {
-  return resolveMode(config) === "live"
+  return resolveHunterMode(config) === "live"
     ? createHunterLive(config)
     : createHunterMock();
 }

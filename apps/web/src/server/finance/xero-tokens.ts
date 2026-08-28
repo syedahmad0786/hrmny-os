@@ -11,12 +11,13 @@ export type XeroTokenSecret = {
 };
 
 function oauthSecret(): string {
-  return (
-    process.env.XERO_OAUTH_STATE_SECRET?.trim() ||
-    process.env.SUPABASE_JWT_SECRET?.trim() ||
-    process.env.CRON_SECRET?.trim() ||
-    "hrmny-xero-dev-state"
-  );
+  const secret = process.env.XERO_OAUTH_STATE_SECRET?.trim();
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      "XERO_OAUTH_STATE_SECRET (at least 32 characters) is required for Xero OAuth",
+    );
+  }
+  return secret;
 }
 
 export function xeroClientConfigured(): boolean {

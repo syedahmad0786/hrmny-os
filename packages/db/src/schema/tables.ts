@@ -564,13 +564,25 @@ export const bayzatEmployeeMirror = pgTable("bayzat_employee_mirror", {
 export const invoice = pgTable("invoice", {
   invoiceId: uuid("invoice_id").defaultRandom().primaryKey(),
   clientId: uuid("client_id").references(() => client.clientId),
+  contactName: text("contact_name"),
   invoiceType: text("invoice_type").notNull(),
+  billingKind: text("billing_kind"),
   status: invoiceStatusEnum("status").default("draft").notNull(),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   vatAmount: numeric("vat_amount", { precision: 12, scale: 2 }),
   currency: text("currency").default("AED").notNull(),
   xeroInvoiceId: text("xero_invoice_id"),
   period: text("period"),
+  trn: text("trn"),
+  trnStatus: text("trn_status"),
+  ruleCited: text("rule_cited"),
+  sourceAttached: jsonb("source_attached").$type<Record<string, unknown>>(),
+  proposedByEmployeeId: uuid("proposed_by_employee_id").references(
+    () => employee.employeeId,
+  ),
+  approvedByEmployeeId: uuid("approved_by_employee_id").references(
+    () => employee.employeeId,
+  ),
   ...timestamps,
 });
 
@@ -804,6 +816,43 @@ export const scheduledJob = pgTable(
     ...timestamps,
   },
   (table) => [index("scheduled_job_due_idx").on(table.status, table.runAt)],
+);
+
+/** Durable ingress ledger for replay-safe provider and automation callbacks. */
+export const integrationInbox = pgTable(
+  "integration_inbox",
+  {
+    integrationInboxId: uuid("integration_inbox_id")
+      .defaultRandom()
+      .primaryKey(),
+    provider: text("provider").notNull(),
+    externalEventId: text("external_event_id").notNull(),
+    operation: text("operation").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    payload: jsonb("payload")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    status: text("status").default("received").notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    lastError: text("last_error"),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("integration_inbox_provider_event_uniq").on(
+      table.provider,
+      table.externalEventId,
+    ),
+    index("integration_inbox_status_received_idx").on(
+      table.status,
+      table.receivedAt,
+    ),
+  ],
 );
 
 /** Optional link: Supabase auth.users.id → employee */

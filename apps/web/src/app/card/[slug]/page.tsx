@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Image from "next/image";
 import { getPublicDigitalCard } from "@/server/trpc/digital-cards-router";
 import { ShareActions } from "./share-actions";
 
@@ -22,7 +23,10 @@ export default async function PublicDigitalCardPage({
       >
         <header className="text-center">
           {card.logoUrl ? (
-            <img
+            <Image
+              unoptimized
+              width={192}
+              height={48}
               className="mx-auto mb-5 h-12 max-w-48 object-contain"
               src={card.logoUrl}
               alt={`${card.companyName} logo`}
@@ -36,7 +40,10 @@ export default async function PublicDigitalCardPage({
             </p>
           )}
           {card.photoUrl ? (
-            <img
+            <Image
+              unoptimized
+              width={96}
+              height={96}
               className="mx-auto mb-4 h-24 w-24 rounded-full object-cover"
               src={card.photoUrl}
               alt=""

@@ -27,11 +27,11 @@ export default function RetainerBillingPage() {
   const issue = trpc.invoices.issue.useMutation({
     onSuccess: () => void utils.invoices.invalidate(),
   });
-  const markPaid = trpc.invoices.markPaidFromWebhook.useMutation({
-    onSuccess: () => void utils.invoices.invalidate(),
-  });
   const syncXero = trpc.invoices.syncXeroMirror.useMutation({
-    onSuccess: (r) => setLast(r),
+    onSuccess: (r) => {
+      setLast(r);
+      void utils.invoices.invalidate();
+    },
   });
   const [last, setLast] = useState<unknown>(null);
   const period = new Date().toISOString().slice(0, 7);
@@ -45,7 +45,8 @@ export default function RetainerBillingPage() {
       <h1 className="font-display text-3xl font-semibold">Retainer billing</h1>
       <p className="text-muted">
         Monthly retainer draft (VAT 5%) → approve → mark issued in OS. Xero is
-        mirrored read-only — OS never posts invoices to Xero.
+        mirrored read-only; verified Xero `PAID` state is reconciled back into
+        issued OS invoices.
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -119,7 +120,9 @@ export default function RetainerBillingPage() {
                   <Button
                     type="button"
                     onClick={async () => {
-                      const r = await approve.mutateAsync({ id: inv.invoiceId });
+                      const r = await approve.mutateAsync({
+                        id: inv.invoiceId,
+                      });
                       setLast(r);
                     }}
                   >
@@ -136,20 +139,6 @@ export default function RetainerBillingPage() {
                     }}
                   >
                     3. Mark issued (OS only)
-                  </Button>
-                ) : null}
-                {inv.status === "issued" && inv.xeroInvoiceId ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={async () => {
-                      const r = await markPaid.mutateAsync({
-                        xeroInvoiceId: inv.xeroInvoiceId!,
-                      });
-                      setLast(r);
-                    }}
-                  >
-                    4. Webhook: paid
                   </Button>
                 ) : null}
               </div>

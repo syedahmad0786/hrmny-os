@@ -81,7 +81,9 @@ export {
   createApolloMock,
   createApolloLive,
   createApolloAdapter,
+  isApolloPaidOperationAllowed,
   normalizeApolloPerson,
+  resolveApolloMode,
   type ApolloAdapterConfig,
 } from "./apollo";
 export {
@@ -89,6 +91,7 @@ export {
   createHunterMock,
   createHunterLive,
   createHunterAdapter,
+  resolveHunterMode,
   type HunterAdapterConfig,
 } from "./hunter";
 export {

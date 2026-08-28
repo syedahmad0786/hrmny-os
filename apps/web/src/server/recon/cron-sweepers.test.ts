@@ -40,6 +40,20 @@ describe("recon cron sweepers", () => {
     }
   });
 
+  it("does not invent a competitor target when none is configured", async () => {
+    const previous = process.env.LEADGEN_COMPETITORS;
+    delete process.env.LEADGEN_COMPETITORS;
+    try {
+      const result = await runCompetitorScanCron(
+        new Date("2026-08-28T05:00:00.000Z"),
+      );
+      expect(result).toMatchObject({ ran: false, skipped: "no_targets" });
+    } finally {
+      if (previous === undefined) delete process.env.LEADGEN_COMPETITORS;
+      else process.env.LEADGEN_COMPETITORS = previous;
+    }
+  });
+
   it("drafts retainers for the current month without posting to Xero", async () => {
     const first = await runRetainerMonthStartCron(
       new Date("2026-08-27T10:00:00.000Z"),

@@ -1,11 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createApolloAdapter,
+  createApolloLive,
   createApolloMock,
   createHunterMock,
   normalizeApolloPerson,
 } from "../index";
 
 describe("Apollo + Hunter mock adapters", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
   it("Apollo mock enriches person", async () => {
     const apollo = createApolloMock();
     const person = await apollo.enrichPerson("alex@democo.example");
@@ -39,5 +46,28 @@ describe("Apollo + Hunter mock adapters", () => {
       emailStatus: "verified",
       source: "apollo",
     });
+  });
+
+  it("does not activate Apollo merely because a credential exists", async () => {
+    vi.stubEnv("APOLLO_API_KEY", "connected-not-activated");
+    vi.stubEnv("APOLLO_MODE", "");
+    const apollo = createApolloAdapter();
+    expect((await apollo.enrichPerson("alex@democo.example"))?.source).toBe(
+      "apollo_mock",
+    );
+  });
+
+  it("blocks credit-consuming Apollo calls until billing is approved", async () => {
+    const apollo = createApolloLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+    await expect(apollo.enrichPerson("alex@democo.example")).rejects.toThrow(
+      /APOLLO_ALLOW_PAID_OPERATIONS=true/,
+    );
+    await expect(apollo.searchCompanies("Demo")).rejects.toThrow(
+      /APOLLO_ALLOW_PAID_OPERATIONS=true/,
+    );
   });
 });

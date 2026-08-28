@@ -842,8 +842,17 @@ export const connectionsRouter = router({
       const { probeIntegrationApiKey } = await import(
         "../integrations/probe-api-key"
       );
-      const probed = await probeIntegrationApiKey(input.toolkit, input.apiKey);
-      let probeWarning: string | null = null;
+      const db = getDb();
+      const configuredMode = process.env[`${input.toolkit.toUpperCase()}_MODE`]
+        ?.trim()
+        .toLowerCase();
+      const localConfiguredMock = !db && configuredMode === "mock";
+      const probed = await probeIntegrationApiKey(input.toolkit, input.apiKey, {
+        allowConfiguredMock: localConfiguredMock,
+      });
+      let probeWarning: string | null = localConfiguredMock
+        ? "Local mock mode: stored in process memory; provider acceptance was not verified."
+        : null;
       if (!probed.ok) {
         if (isHardApiKeyRejection(probed.reason)) {
           throw new TRPCError({
@@ -854,7 +863,6 @@ export const connectionsRouter = router({
         probeWarning = probed.reason;
       }
 
-      const db = getDb();
       if (!db) {
         saveMemoryApiKey(input.toolkit, input.apiKey);
         const store = getDemoStore();
@@ -1881,7 +1889,7 @@ export const connectionsRouter = router({
         designId: string;
         exportId?: string;
         downloadUrl?: string;
-      } = { designId: input.designId };
+      };
 
       const stubPngBytes = () =>
         new Uint8Array(

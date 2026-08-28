@@ -14,11 +14,10 @@ import {
 /**
  * Scheduled reports runner. Same shape as leadgen-daily.ts: the plain
  * `runDueReports(now)` fn is the real entry point (tested in Vitest, mock
- * Resend), and this module only adds the Inngest schedule metadata + env guard.
- * The `inngest` package is intentionally NOT a dependency yet — when
- * INNGEST_EVENT_KEY / INNGEST_SIGNING_KEY land, register `runDueReports`
- * against the real Inngest client using REPORT_SCHEDULER. Until then the
- * existing `/api/cron/jobs` route drives it (see that route's GET handler).
+ * Resend), and this module adds the Inngest schedule metadata + env guard.
+ * functions.ts registers it against the provider; until both key references
+ * are configured and the endpoint is synced, `/api/cron/jobs` remains the
+ * runner.
  */
 
 export const REPORT_SCHEDULER = {
@@ -71,6 +70,9 @@ export async function runScheduleOnce(
       to: schedule.recipients,
       subject: artifact.title,
       markdown,
+      idempotencyKey: `scheduled-report/${schedule.reportScheduleId}/${at
+        .toISOString()
+        .slice(0, 10)}`,
     });
     const run = await recordRun({
       reportScheduleId: schedule.reportScheduleId,

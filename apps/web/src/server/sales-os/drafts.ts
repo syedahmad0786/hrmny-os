@@ -1,4 +1,4 @@
-import { getContact, getDeal } from "../crm/repository";
+import { getDeal } from "../crm/repository";
 import { createMockRunAgent, type RunAgent } from "../leadgen/agent-run";
 import { insertOutreach } from "../leadgen/store";
 import { buildComplianceFooter, ensureFooter } from "./compliance";
@@ -24,7 +24,6 @@ export async function draftChannelsForApprovedContact(
   const settings = await getSalesOsSettings();
   const deal = await getDeal(research.dealId);
   if (!deal) throw new Error("Deal missing for approved contact");
-  const contact = research.contactId ? await getContact(research.contactId) : null;
   const runAgent = deps.runAgent ?? createMockRunAgent();
   const suppressed = research.email
     ? await isSuppressed({ email: research.email })

@@ -89,6 +89,7 @@ describe("n8n mock adapter", () => {
       "N8N_WEBHOOK_DEAL_WON",
       "https://hrmny.app.n8n.cloud/webhook/hrmny-deal-won",
     );
+    vi.stubEnv("N8N_OUTBOUND_WEBHOOK_SECRET", "test-outbound-secret");
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({}),
@@ -108,9 +109,34 @@ describe("n8n mock adapter", () => {
       "https://hrmny.app.n8n.cloud/webhook/hrmny-deal-won",
       expect.objectContaining({ method: "POST" }),
     );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        "X-Hrmny-Os-Secret": "test-outbound-secret",
+      }),
+    });
 
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  it("explicit live mode fails loud without the REST API key", () => {
+    vi.stubEnv("N8N_API_KEY", "");
+    expect(() => createN8nAdapter({ mode: "live" })).toThrow(/N8N_API_KEY/);
+  });
+
+  it("refuses a real webhook trigger without its dedicated outbound secret", async () => {
+    vi.stubEnv(
+      "N8N_WEBHOOK_DEAL_WON",
+      "https://hrmny.app.n8n.cloud/webhook/hrmny-deal-won",
+    );
+    vi.stubEnv("N8N_OUTBOUND_WEBHOOK_SECRET", "");
+    const n8n = createN8nAdapter({ mode: "mock" });
+    await expect(
+      n8n.triggerWebhook({
+        webhookPath: "hrmny-deal-won",
+        allowProductionTrigger: true,
+      }),
+    ).rejects.toThrow(/N8N_OUTBOUND_WEBHOOK_SECRET/);
   });
 
   afterEach(() => {

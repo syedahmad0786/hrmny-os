@@ -61,6 +61,7 @@ function ApprovalsInner() {
 
   const [selectedId, setSelectedId] = useState<string | null>(focusIdFromQuery || null);
   const [feedback, setFeedback] = useState<Record<string, Feedback>>({});
+  const [latestFeedbackId, setLatestFeedbackId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -134,6 +135,14 @@ function ApprovalsInner() {
     null;
   const outreachCount = queue.filter((i) => i.kind === "outreach_send").length;
   const actedCount = Object.keys(feedback).length;
+  const latestFeedback = latestFeedbackId
+    ? feedback[latestFeedbackId]
+    : undefined;
+
+  function recordFeedback(id: string, next: Feedback) {
+    setFeedback((current) => ({ ...current, [id]: next }));
+    setLatestFeedbackId(id);
+  }
 
   function advanceFrom(id: string) {
     const next = queue.find((i) => i.id !== id);
@@ -146,16 +155,16 @@ function ApprovalsInner() {
       if (item.kind === "outreach_send") {
         const approved = await approveOutreach.mutateAsync({ id: item.id });
         if (!approved.ok) {
-          setFeedback((f) => ({
-            ...f,
-            [item.id]: { tone: "blocked", text: `Approve blocked (${approved.code})` },
-          }));
+          recordFeedback(item.id, {
+            tone: "blocked",
+            text: `Approve blocked (${approved.code})`,
+          });
           return;
         }
         const sent = await sendOutreach.mutateAsync({ id: item.id });
-        setFeedback((f) => ({
-          ...f,
-          [item.id]: sent.ok
+        recordFeedback(
+          item.id,
+          sent.ok
             ? {
                 tone: "ok",
                 text: sent.copyDraft
@@ -169,13 +178,13 @@ function ApprovalsInner() {
                 text: `Send blocked (${sent.code})`,
                 reconnect: true,
               },
-        }));
+        );
         await utils.leadgen.outreach.list.invalidate();
       } else if (item.kind === "campaign_publish") {
         const res = await moveCampaign.mutateAsync({ id: item.id, to: "published" });
-        setFeedback((f) => ({
-          ...f,
-          [item.id]: res.ok
+        recordFeedback(
+          item.id,
+          res.ok
             ? {
                 tone: "ok",
                 text:
@@ -194,23 +203,20 @@ function ApprovalsInner() {
                   res.reason,
                 ),
               },
-        }));
+        );
         await utils.campaigns.list.invalidate();
         await utils.campaigns.pendingApproval.invalidate();
       }
       advanceFrom(item.id);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed";
-      setFeedback((f) => ({
-        ...f,
-        [item.id]: {
-          tone: "blocked",
-          text: message,
-          reconnect: /connect|oauth|revoked|precondition|workspace|linkedin|gmail/i.test(
-            message,
-          ),
-        },
-      }));
+      recordFeedback(item.id, {
+        tone: "blocked",
+        text: message,
+        reconnect: /connect|oauth|revoked|precondition|workspace|linkedin|gmail/i.test(
+          message,
+        ),
+      });
     } finally {
       setBusyId(null);
     }
@@ -223,31 +229,31 @@ function ApprovalsInner() {
     try {
       if (item.kind === "outreach_send") {
         const res = await discardOutreach.mutateAsync({ id: item.id });
-        setFeedback((f) => ({
-          ...f,
-          [item.id]: res.ok
+        recordFeedback(
+          item.id,
+          res.ok
             ? { tone: "ok", text: "Discarded" }
             : { tone: "blocked", text: `Discard blocked (${res.code})` },
-        }));
+        );
         await utils.leadgen.outreach.list.invalidate();
         advanceFrom(item.id);
         return;
       }
       const res = await moveCampaign.mutateAsync({ id: item.id, to: "archived" });
-      setFeedback((f) => ({
-        ...f,
-        [item.id]: res.ok
+      recordFeedback(
+        item.id,
+        res.ok
           ? { tone: "ok", text: "Archived" }
           : { tone: "blocked", text: res.reason },
-      }));
+      );
       await utils.campaigns.list.invalidate();
       await utils.campaigns.pendingApproval.invalidate();
       advanceFrom(item.id);
     } catch (e) {
-      setFeedback((f) => ({
-        ...f,
-        [item.id]: { tone: "blocked", text: e instanceof Error ? e.message : "Failed" },
-      }));
+      recordFeedback(item.id, {
+        tone: "blocked",
+        text: e instanceof Error ? e.message : "Failed",
+      });
     } finally {
       setBusyId(null);
     }
@@ -295,6 +301,30 @@ function ApprovalsInner() {
           </div>
         ))}
       </section>
+
+      {latestFeedback ? (
+        <div
+          data-testid="approvals-feedback"
+          role="status"
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            latestFeedback.tone === "ok"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-red-200 bg-red-50 text-red-800"
+          }`}
+        >
+          <p>{latestFeedback.text}</p>
+          {latestFeedback.reconnect ? (
+            <p className="mt-1">
+              <Link
+                href="/settings/connections"
+                className="font-semibold underline"
+              >
+                Reconnect in Connections →
+              </Link>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {isLoading ? (
         <div className="rounded-xl border border-sand bg-white/60 p-10 text-center text-sm text-muted">
@@ -422,29 +452,6 @@ function ApprovalsInner() {
                 </p>
                 <DraftPreview proposal={selected} />
               </div>
-
-              {feedback[selected.id] ? (
-                <div
-                  data-testid="approvals-feedback"
-                  className={`text-sm ${
-                    feedback[selected.id]!.tone === "ok"
-                      ? "text-emerald-700"
-                      : "text-red-700"
-                  }`}
-                >
-                  <p>{feedback[selected.id]!.text}</p>
-                  {feedback[selected.id]!.reconnect ? (
-                    <p className="mt-1">
-                      <Link
-                        href="/settings/connections"
-                        className="font-semibold underline"
-                      >
-                        Reconnect in Connections →
-                      </Link>
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
 
               <div className="mt-auto flex flex-wrap gap-2">
                 {selected.kind === "portal_item" ? (
