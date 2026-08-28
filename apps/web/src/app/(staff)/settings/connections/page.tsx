@@ -114,9 +114,9 @@ function BackendStoreBanner() {
       </p>
       {vault ? (
         <p className="mt-1">
-          Keys and OAuth tokens save to Supabase Vault. Paste Apollo here — a
-          live probe runs first. Google Reconnect uses dedicated OAuth (not
-          Heal). Hunter is retired and is not required.
+          Keys and OAuth tokens save to Supabase Vault. Paste or replace Apollo
+          here — a live probe runs first. Google Reconnect uses dedicated OAuth
+          (not Heal). Hunter is retired and is not required.
         </p>
       ) : (
         <p className="mt-1">
@@ -320,8 +320,9 @@ export default function ConnectionsPage() {
           Direct business connections
         </p>
         <p className="mt-1 text-sm text-muted">
-          Hunt is open. Connect Google Workspace when you want live HITL Gmail.
-          Apollo and other keys are optional. Hunter is not used.
+          Sales Growth is available. Connect Google Workspace when you want
+          live HITL Gmail. Apollo is optional for provider-backed discovery;
+          Hunter is not used.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">

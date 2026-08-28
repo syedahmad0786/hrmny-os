@@ -1,0 +1,58 @@
+name: HRMNY production migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_ref:
+        description: Canonical Supabase project ref
+        required: true
+        type: string
+      backup_receipt:
+        description: Backup or PITR receipt reference verified before this run
+        required: true
+        type: string
+      confirmation:
+        description: Type the exact migration confirmation phrase from the runbook
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hrmny-production-database-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Guard, migrate, and read back
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      HRMNY_PRODUCTION_DATABASE_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
+      HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
+      HRMNY_PRODUCTION_BACKUP_RECEIPT: ${{ inputs.backup_receipt }}
+      HRMNY_PRODUCTION_MIGRATION_CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Read-only target and journal preflight
+        env:
+          PRODUCTION_MIGRATION_PHASE: preflight
+        run: pnpm --filter @hrmny/db exec tsx src/production-migration-guard.ts
+      - name: Apply reviewed migration journal
+        env:
+          DIRECT_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
+        run: pnpm --filter @hrmny/db migrate
+      - name: Read back migration and bridge contract
+        env:
+          PRODUCTION_MIGRATION_PHASE: verify
+        run: pnpm --filter @hrmny/db exec tsx src/production-migration-guard.ts

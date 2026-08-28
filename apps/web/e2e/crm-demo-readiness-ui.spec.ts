@@ -15,7 +15,7 @@ test.describe("CRM demo readiness panel", () => {
     await expect(panel).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("crm-demo-llm")).toBeVisible();
     await expect(page.getByTestId("crm-demo-blockers-count")).toBeVisible();
-    await expect(panel.getByRole("link", { name: /Hunt closed loop/i })).toBeVisible();
+    await expect(panel.getByRole("link", { name: /Sales Growth/i })).toBeVisible();
     await expect(page.getByTestId("crm-demo-connections")).toBeVisible();
   });
 });

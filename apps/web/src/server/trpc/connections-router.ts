@@ -62,7 +62,7 @@ export const CONNECTION_CATALOG = [
     label: "Apollo",
     authType: "api_key",
     ready: true,
-    note: "Optional until keys are pasted — prospecting stays mock. Paste later without a deployment.",
+    note: "When connected, Sales Growth uses this key for 0-credit discovery. One-person enrichment remains receipt- and confirmation-gated.",
   },
   {
     toolkit: "n8n",

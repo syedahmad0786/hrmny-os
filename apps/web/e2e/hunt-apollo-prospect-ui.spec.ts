@@ -57,4 +57,35 @@ test.describe("Hunt Apollo prospect UI", () => {
       page.getByTestId("hunt-apollo-enrich-one").first(),
     ).toBeVisible();
   });
+
+  test("Sales Growth remains navigable at a narrow client viewport", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+
+    await expect(
+      page.getByRole("heading", { name: "Find the next right client." }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole("navigation", { name: "CRM sections" })).toBeVisible();
+    await expect(page.getByTestId("hunt-apollo-search")).toBeVisible();
+
+    const widths = await page.evaluate(() => ({
+      client: document.documentElement.clientWidth,
+      scroll: document.documentElement.scrollWidth,
+    }));
+    expect(widths.scroll).toBeLessThanOrEqual(widths.client + 1);
+
+    await page.keyboard.press("Control+k");
+    await expect(page).toHaveURL(/\/work\/search$/);
+    await page.goBack({ waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: "Find the next right client." }),
+    ).toBeVisible();
+
+    await page.locator("summary").filter({ hasText: "More" }).click();
+    await expect(page.getByRole("link", { name: "Companies" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sales settings" })).toBeVisible();
+  });
 });

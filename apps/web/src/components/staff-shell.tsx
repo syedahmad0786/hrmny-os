@@ -177,6 +177,17 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const openSearch = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      router.push("/work/search");
+    };
+    window.addEventListener("keydown", openSearch);
+    return () => window.removeEventListener("keydown", openSearch);
+  }, [router]);
+
+  useEffect(() => {
     const root = document.documentElement;
     const preference = accessibilityEnabled ? accessibility.data : null;
     if (!preference) {
