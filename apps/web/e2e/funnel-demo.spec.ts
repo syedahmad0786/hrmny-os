@@ -13,15 +13,20 @@ test.describe("Demo funnel", () => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
 
     await page.goto("/crm", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
-      timeout: 60_000,
-    });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible(
+      {
+        timeout: 60_000,
+      },
+    );
     await expect(page.locator("body")).toContainText(/CRM|deal|pipeline/i);
 
     await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
-    await expect(page.locator("body")).toContainText(/hunt|apollo|closed loop/i);
+    await expect(page.locator("body")).toContainText(
+      /hunt|apollo|closed loop/i,
+    );
 
     // Memory-mode prospect → won → onboarding (no DATABASE_URL in CI).
+    await page.getByTestId("hunt-test-tools").click();
     const runLoop = page.getByRole("button", { name: /Run demo closed loop/i });
     await expect(runLoop).toBeVisible();
     await runLoop.click();
@@ -37,7 +42,9 @@ test.describe("Demo funnel", () => {
     ).toBeVisible({ timeout: 30_000 });
 
     await page.goto("/crm/deals", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Primary" }),
+    ).toBeVisible();
 
     await page.goto("/crm/inbound", { waitUntil: "domcontentloaded" });
     await expect(page.locator("body")).toContainText(/inbound|lead|prospect/i);
@@ -49,49 +56,69 @@ test.describe("Demo funnel", () => {
     await expect(page.locator("body")).toContainText(/client/i);
 
     await page.goto("/creative", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: /^Creative$/i })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /^Creative$/i }),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: /Pass QC/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Generate image/i })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Generate image/i }),
+    ).toBeVisible();
 
     await page.goto("/delivery", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /Delivery/i }),
+    ).toBeVisible();
     await expect(page.locator("body")).toContainText(/Run agent on task/i);
 
     await page.goto("/settings/ai", { waitUntil: "domcontentloaded" });
     await expect(page.locator("body")).toContainText(/AI|agent/i);
 
     await page.goto("/settings/connections", { waitUntil: "domcontentloaded" });
-    await expect(page.locator("body")).toContainText(/connection|composio|apollo/i);
+    await expect(page.locator("body")).toContainText(
+      /connection|composio|apollo/i,
+    );
 
     await page.goto("/settings/automations", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: /Automations/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Run n8n smoke/i })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /Automations/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Run n8n smoke/i }),
+    ).toBeVisible();
   });
 
   test("portal path: client workspace loads for portal_a", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "portal_a" });
 
     await page.goto("/portal", { waitUntil: "domcontentloaded" });
-    await expect(page.locator("body")).toContainText(/workspace|brief|approval/i);
+    await expect(page.locator("body")).toContainText(
+      /workspace|brief|approval/i,
+    );
     await expect(page.url()).not.toContain("/portal/login");
 
     await page.goto("/portal/approvals", { waitUntil: "domcontentloaded" });
     await expect(page.url()).not.toContain("/portal/login");
 
     await page.goto("/portal/onboarding", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: /Onboarding/i })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /Onboarding/i }),
+    ).toBeVisible();
   });
 
   test("deal detail exposes won + handover controls", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/deals", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
-      timeout: 60_000,
-    });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible(
+      {
+        timeout: 60_000,
+      },
+    );
     const firstDeal = page.locator('a[href^="/crm/deals/"]').first();
     if (await firstDeal.count()) {
       await firstDeal.click();
-      await expect(page.locator("body")).toContainText(/BUAF|Advance|Mark won|Handover|Commercial/i);
+      await expect(page.locator("body")).toContainText(
+        /BUAF|Advance|Mark won|Handover|Commercial/i,
+      );
     }
   });
 
@@ -100,9 +127,11 @@ test.describe("Demo funnel", () => {
     await page.goto("/crm/outreach?id=demo-focus", {
       waitUntil: "domcontentloaded",
     });
-    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
-      timeout: 60_000,
-    });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible(
+      {
+        timeout: 60_000,
+      },
+    );
     await expect(page.locator("body")).toContainText(/outreach|draft|queue/i);
 
     await page.goto("/approvals?id=demo-focus", {
@@ -114,17 +143,23 @@ test.describe("Demo funnel", () => {
   test("client onboarding shows continue OS links", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/clients", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
-      timeout: 60_000,
-    });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible(
+      {
+        timeout: 60_000,
+      },
+    );
     const firstClient = page.locator('a[href^="/clients/"]').first();
     if (await firstClient.count()) {
       await firstClient.click();
       await expect(
         page.getByRole("navigation", { name: "Continue OS after handover" }),
       ).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByRole("link", { name: /Account calendar/i })).toBeVisible();
-      await expect(page.getByRole("link", { name: /^Creative/i })).toBeVisible();
+      await expect(
+        page.getByRole("link", { name: /Account calendar/i }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("link", { name: /^Creative/i }),
+      ).toBeVisible();
       await expect(page.getByRole("link", { name: /^Finance/i })).toBeVisible();
     }
   });
@@ -134,9 +169,11 @@ test.describe("Demo funnel", () => {
     await page.goto("/finance?invoiceId=demo-inv", {
       waitUntil: "domcontentloaded",
     });
-    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
-      timeout: 60_000,
-    });
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible(
+      {
+        timeout: 60_000,
+      },
+    );
     await expect(page.locator("body")).toContainText(/finance|invoice|xero/i);
   });
 
@@ -170,8 +207,7 @@ test.describe("Demo funnel", () => {
       };
       expect(body.error, text).toBeFalsy();
       const data = body.result?.data as
-        | { json?: { portalPath?: string }; portalPath?: string }
-        | undefined;
+        { json?: { portalPath?: string }; portalPath?: string } | undefined;
       const portalPath = data?.json?.portalPath ?? data?.portalPath;
       expect(portalPath, text).toBeTruthy();
       return portalPath!;
@@ -186,9 +222,10 @@ test.describe("Demo funnel", () => {
     expect(onboardingHref).toContain(encodeURIComponent("/portal/onboarding"));
     expect(portalHref).not.toBe(onboardingHref);
 
-    const portalToken = new URL(portalHref, "http://localhost").searchParams.get(
-      "token",
-    );
+    const portalToken = new URL(
+      portalHref,
+      "http://localhost",
+    ).searchParams.get("token");
     const onboardingToken = new URL(
       onboardingHref,
       "http://localhost",
@@ -311,9 +348,13 @@ test.describe("Demo funnel", () => {
       .getByTestId("portal-approval-reject-reason")
       .fill("E2E: tighten the hook");
     await rejectRow.getByTestId("portal-approval-reject-send").click();
-    await expect(rejectRow).toHaveAttribute("data-approval-status", "rejected", {
-      timeout: 30_000,
-    });
+    await expect(rejectRow).toHaveAttribute(
+      "data-approval-status",
+      "rejected",
+      {
+        timeout: 30_000,
+      },
+    );
 
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/notifications", { waitUntil: "domcontentloaded" });
@@ -420,7 +461,11 @@ test.describe("Demo funnel", () => {
       result?: {
         data?: {
           json?: {
-            phases?: Array<{ phaseIndex: number; name: string; status: string }>;
+            phases?: Array<{
+              phaseIndex: number;
+              name: string;
+              status: string;
+            }>;
           };
         };
       };
@@ -464,9 +509,9 @@ test.describe("Demo funnel", () => {
     await expect(page).toHaveURL(
       new RegExp(`/clients/.+\\?phase=${active!.phaseIndex}`),
     );
-    await expect(
-      page.getByRole("heading", { level: 1 }),
-    ).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
+      timeout: 60_000,
+    });
     const focused = page.getByTestId("onboarding-phase-focus");
     await expect(focused).toBeVisible();
     await expect(focused).toHaveAttribute(
@@ -511,9 +556,7 @@ test.describe("Demo funnel", () => {
       }>) ??
       [];
     const pending = (Array.isArray(items) ? items : []).find(
-      (i) =>
-        i.state === "pending_client" &&
-        /Ramadan teaser/i.test(i.title),
+      (i) => i.state === "pending_client" && /Ramadan teaser/i.test(i.title),
     );
     expect(pending, listText).toBeTruthy();
 
@@ -609,8 +652,7 @@ test.describe("Demo funnel", () => {
       [];
     const pending = (Array.isArray(items) ? items : []).find(
       (i) =>
-        i.state === "pending_client" &&
-        /Product launch reel/i.test(i.title),
+        i.state === "pending_client" && /Product launch reel/i.test(i.title),
     );
     expect(pending, listText).toBeTruthy();
 
@@ -678,10 +720,7 @@ test.describe("Demo funnel", () => {
       };
       return {
         text,
-        data:
-          body.result?.data?.json ??
-          (body.result?.data as unknown) ??
-          null,
+        data: body.result?.data?.json ?? (body.result?.data as unknown) ?? null,
       };
     };
 
@@ -703,7 +742,9 @@ test.describe("Demo funnel", () => {
     expect(blob(aTasks.data)).toMatch(/Launch reel|Demo Co|Approve launch/i);
     expect(blob(aTasks.data)).not.toMatch(/Other Co/i);
     expect(blob(aAssets.data)).not.toMatch(/Other Co/i);
-    expect(blob(aApprovals.data)).toMatch(/Approve launch reel cut|Approve product stills/i);
+    expect(blob(aApprovals.data)).toMatch(
+      /Approve launch reel cut|Approve product stills/i,
+    );
     expect(blob(aApprovals.data)).not.toMatch(/Other Co/i);
 
     expect(blob(bTasks.data)).toMatch(/Other Co/i);
@@ -771,14 +812,8 @@ test.describe("Demo funnel", () => {
       return verified.sessionGrant!;
     }
 
-    const grantA = await mintAndVerify(
-      DEMO_CLIENT_ID,
-      "alex@democo.example",
-    );
-    const grantB = await mintAndVerify(
-      DEMO_CLIENT_B_ID,
-      "ops@otherco.example",
-    );
+    const grantA = await mintAndVerify(DEMO_CLIENT_ID, "alex@democo.example");
+    const grantB = await mintAndVerify(DEMO_CLIENT_B_ID, "ops@otherco.example");
     expect(grantA).not.toBe(grantB);
 
     async function listWithGrant(path: string, grant: string) {
@@ -798,26 +833,14 @@ test.describe("Demo funnel", () => {
       return body.result?.data?.json ?? body.result?.data ?? null;
     }
 
-    const aTasks = await listWithGrant(
-      "/api/trpc/portal.tasks.list",
-      grantA,
-    );
-    const aAssets = await listWithGrant(
-      "/api/trpc/portal.assets.list",
-      grantA,
-    );
+    const aTasks = await listWithGrant("/api/trpc/portal.tasks.list", grantA);
+    const aAssets = await listWithGrant("/api/trpc/portal.assets.list", grantA);
     const aApprovals = await listWithGrant(
       "/api/trpc/portal.approvals.list",
       grantA,
     );
-    const bTasks = await listWithGrant(
-      "/api/trpc/portal.tasks.list",
-      grantB,
-    );
-    const bAssets = await listWithGrant(
-      "/api/trpc/portal.assets.list",
-      grantB,
-    );
+    const bTasks = await listWithGrant("/api/trpc/portal.tasks.list", grantB);
+    const bAssets = await listWithGrant("/api/trpc/portal.assets.list", grantB);
     const bApprovals = await listWithGrant(
       "/api/trpc/portal.approvals.list",
       grantB,
@@ -904,7 +927,9 @@ test.describe("Demo funnel", () => {
     const createText = await create.text();
     expect(create.ok(), createText).toBeTruthy();
     const created = JSON.parse(createText) as {
-      result?: { data?: { json?: { chatThreadId?: string }; chatThreadId?: string } };
+      result?: {
+        data?: { json?: { chatThreadId?: string }; chatThreadId?: string };
+      };
     };
     const threadId =
       created.result?.data?.json?.chatThreadId ??
@@ -1034,11 +1059,12 @@ test.describe("Demo funnel", () => {
     await expect(work).toBeVisible({ timeout: 60_000 });
     await expect(page.getByTestId("chat-tool-funnel_act")).toBeVisible();
     const observation = page.getByTestId("chat-tool-observation");
-    await expect(observation).toContainText(/tasks\.create|creative\.sendToPortal/i);
+    await expect(observation).toContainText(
+      /tasks\.create|creative\.sendToPortal/i,
+    );
     await expect(observation).toContainText(/\/portal\/login\/verify\?token=/);
     await expect(page.getByTestId("chat-assistant-message")).toContainText(
       /funnel|portal/i,
     );
   });
-
 });
