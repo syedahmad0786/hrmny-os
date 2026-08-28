@@ -89,6 +89,7 @@ test.describe("Connections Google Workspace OAuth", () => {
     await expect(page.getByTestId("sales-os-settings")).toBeVisible({
       timeout: 30_000,
     });
+    await page.getByTestId("sales-os-connection-diagnostics").click();
     await expect(
       page.getByRole("link", { name: /Google Workspace/i }).first(),
     ).toHaveAttribute("href", "/settings/connections#conn-google_workspace");

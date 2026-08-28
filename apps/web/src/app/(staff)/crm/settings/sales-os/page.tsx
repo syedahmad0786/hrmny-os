@@ -135,7 +135,7 @@ export default function SalesOsSettingsPage() {
       </section>
 
       <details className="growth-settings-detail">
-        <summary>
+        <summary data-testid="sales-os-connection-diagnostics">
           Connection diagnostics
           <span>Open when a provider needs attention</span>
         </summary>
