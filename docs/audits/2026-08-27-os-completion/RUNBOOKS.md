@@ -13,7 +13,7 @@ pnpm build
 git diff --check
 ```
 
-Record command, exit code, test count, build route count, SHA, and timestamp. Live-only tests remain skipped unless their exact account/spend gates are approved. The final local receipt was lint 7/7, typecheck 7/7, tests 772 passed/3 skipped, build 2/2 with 86 main-app pages.
+Record command, exit code, test count, build route count, SHA, and timestamp. Live-only tests remain skipped unless their exact account/spend gates are approved. The final fresh-runner receipt was lint 7/7, typecheck 7/7, tests 788 passed/3 skipped across 155 files, build 2/2 with 86 main-app pages, and 76/76 Playwright scenarios on each of two runs.
 
 ### Windows browser acceptance
 
@@ -30,7 +30,7 @@ $env:PLAYWRIGHT_BASE_URL = 'http://127.0.0.1:3500'
 pnpm --filter @hrmny/web e2e
 ```
 
-The clean receipt is 74/74. Do not immediately loop the suite on this Windows session: the reliable forced-close transport can leave thousands of loopback sockets in `CLOSING` and cause false `EADDRINUSE` failures. Use a fresh CI/preview runner or wait for socket state to clear; changing TCP settings, rebooting, or terminating unrelated processes requires separate approval. Always retain a failed rerun as a separate receipt.
+The historical clean local-bridge receipt is 74/74; the final native fresh-runner receipt is 76/76 twice. Do not immediately loop the suite on this Windows session: the reliable forced-close transport can leave thousands of loopback sockets in `CLOSING` and cause false `EADDRINUSE` failures. Use a fresh CI/preview runner or wait for socket state to clear; changing TCP settings, rebooting, or terminating unrelated processes requires separate approval. Always retain a failed rerun as a separate receipt.
 
 ## 2. Migration 0074 fresh and upgrade verification
 
