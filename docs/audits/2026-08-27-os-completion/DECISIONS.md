@@ -69,6 +69,8 @@ Recorded during harness run `20260828T044131Z`. These are repository-local decis
 
 27. **Separate configured from provider-accepted.** The Sales Growth UI labels an Apollo secret reference as present but does not show the green acceptance state until a live People Search succeeds or a completed live canary receipt exists. Both Apollo operations have a 20-second timeout. This keeps availability, provider acceptance, and destination reconciliation from collapsing into one optimistic badge.
 
+28. **Use one credential resolver on both sides of the Sales Growth Apollo bridge.** Production accepted Apollo keys can live in an environment reference or the scoped staff/org Vault path. Free People Search and the fixed one-person People Match now resolve that same server-only contract, with the authenticated employee ID preferred and no key material returned through tRPC. This does not globally activate Apollo: the exception is limited to the explicitly authorized 0-credit discovery operation and the separately confirmed, durable one-shot canary.
+
 ## Failures encountered and resolved
 
 | Failure                                                                                 | Cause                                                                                               | Resolution                                                                                                                                                                                             |

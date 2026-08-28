@@ -156,7 +156,7 @@ For Apollo, Hunter, NeverBounce, and paid embeddings:
 This release has a narrower owner authorization than the generic paid-provider flow:
 
 1. Verify `/api/ready` reports the Apollo credential configured and verify the exact production deployment SHA.
-2. In Sales Growth, run People Search first. It is a 0-credit read and must return reviewable professional candidates without an email/phone unlock.
+2. In Sales Growth, run People Search first. It is a 0-credit read and must return reviewable professional candidates without an email/phone unlock. Treat a status containing `Apollo mock` as a failed provider-acceptance receipt even if `/api/ready` says the credential reference is configured.
 3. Select one candidate by the deterministic fit rule recorded with the acceptance receipt. Confirm the dialog that states one credit and the disabled phone/personal-email/waterfall fields.
 4. Execute only `salesOs.apollo.enrichOne`. Do not enable the global paid flag and do not invoke organization search, bulk match, waterfall, phone, Hunter, NeverBounce, sequence, or outbound actions.
 5. Read back the fixed `integration_inbox` receipt, one conservative `apollo_contact` ledger count, and the reconciled CRM company/contact/open deal. Confirm the CRM note carries the receipt ID and all four paid-field flags as false.

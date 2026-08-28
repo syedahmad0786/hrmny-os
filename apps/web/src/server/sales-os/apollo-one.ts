@@ -14,6 +14,7 @@ import {
   getIntegrationReceipt,
   recordIntegrationReceipt,
 } from "../integrations/inbox";
+import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
 import {
   addCredit,
   creditUsed,
@@ -47,10 +48,16 @@ export type ApolloOnePersonResult = {
 
 type ApolloOneDeps = {
   leadSource?: LeadSourceAdapter;
+  resolveApiKey?: typeof resolveIntegrationApiKey;
 };
 
-function configuredLiveSource(allowPaidOperations: boolean): LeadSourceAdapter {
-  const apiKey = process.env.APOLLO_API_KEY;
+async function configuredLiveSource(
+  allowPaidOperations: boolean,
+  actorEmployeeId: string | null | undefined,
+  deps: ApolloOneDeps,
+): Promise<LeadSourceAdapter> {
+  const resolver = deps.resolveApiKey ?? resolveIntegrationApiKey;
+  const { apiKey } = await resolver("apollo", actorEmployeeId);
   if (!apiKey) {
     throw new Error(
       "APOLLO_API_KEY is not configured for the HRMNY production runtime",
@@ -68,17 +75,25 @@ export async function searchApolloPeopleFree(
     query: string;
     titles?: string[];
     perPage?: number;
+    actorEmployeeId?: string | null;
   },
   deps: ApolloOneDeps = {},
 ): Promise<{
   mode: "mock" | "live";
   candidates: LeadCandidate[];
 }> {
-  const source =
-    deps.leadSource ??
-    (process.env.APOLLO_API_KEY
-      ? configuredLiveSource(false)
-      : createLeadSourceMock());
+  let source = deps.leadSource;
+  if (!source) {
+    const resolver = deps.resolveApiKey ?? resolveIntegrationApiKey;
+    const resolved = await resolver("apollo", input.actorEmployeeId);
+    source = resolved.apiKey
+      ? createLeadSourceLive({
+          mode: "live",
+          apiKey: resolved.apiKey,
+          allowPaidOperations: false,
+        })
+      : createLeadSourceMock();
+  }
   const candidates = await source.searchLeads({
     query: input.query.trim(),
     titles: input.titles,
@@ -187,7 +202,9 @@ export async function enrichOneApolloPerson(
   }
   // Resolve credentials before claiming the one-shot receipt. A missing
   // reference is safe to retry because no provider request has started.
-  const source = deps.leadSource ?? configuredLiveSource(true);
+  const source =
+    deps.leadSource ??
+    (await configuredLiveSource(true, input.actorEmployeeId, deps));
 
   const payload = {
     candidate,

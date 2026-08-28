@@ -1,13 +1,14 @@
 process.env.DATABASE_URL = "";
 
 import type { LeadSourceAdapter } from "@hrmny/integrations";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetCrmMemory } from "../crm/memory";
 import { listCompanies, listContacts, listDeals } from "../crm/repository";
 import { resetIntegrationReceiptMemory } from "../integrations/inbox";
 import {
   enrichOneApolloPerson,
   getApolloOnePersonCanaryStatus,
+  searchApolloPeopleFree,
 } from "./apollo-one";
 import { creditUsed, resetSalesOsStore } from "./store";
 
@@ -39,6 +40,124 @@ describe("Apollo one-person connection canary", () => {
     resetCrmMemory();
     resetSalesOsStore();
     resetIntegrationReceiptMemory();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the staff vault bridge for zero-credit live People Search", async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            people: [
+              {
+                id: "apollo-live-person-1",
+                name: "Live Person",
+                title: "Marketing Director",
+                organization: {
+                  name: "Live Company",
+                  primary_domain: "live.example",
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await searchApolloPeopleFree(
+      {
+        query: "UAE retail marketing director",
+        actorEmployeeId: "employee-1",
+      },
+      {
+        resolveApiKey: vi.fn(async (toolkit, employeeId) => {
+          expect(toolkit).toBe("apollo");
+          expect(employeeId).toBe("employee-1");
+          return { apiKey: "vault-test-key", source: "vault" as const };
+        }),
+      },
+    );
+
+    expect(result.mode).toBe("live");
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      externalId: "apollo-live-person-1",
+      companyName: "Live Company",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.apollo.io/api/v1/mixed_people/api_search",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      headers: expect.objectContaining({ "X-Api-Key": "vault-test-key" }),
+    });
+  });
+
+  it("uses the same staff vault bridge for the bounded People Match canary", async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            person: {
+              id: "apollo-live-person-2",
+              name: "Canary Person",
+              title: "Marketing Director",
+              email: "canary@live.example",
+              email_status: "verified",
+              organization: {
+                name: "Live Company",
+                primary_domain: "live.example",
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await enrichOneApolloPerson(
+      {
+        candidate: {
+          externalId: "apollo-live-person-2",
+          fullName: "Canary Person",
+          companyName: "Live Company",
+          companyDomain: "live.example",
+        },
+        confirmCreditUse: true,
+        actorEmployeeId: "employee-2",
+      },
+      {
+        resolveApiKey: vi.fn(async (toolkit, employeeId) => {
+          expect(toolkit).toBe("apollo");
+          expect(employeeId).toBe("employee-2");
+          return { apiKey: "vault-test-key", source: "vault" as const };
+        }),
+      },
+    );
+
+    expect(result).toMatchObject({
+      mode: "live",
+      matched: true,
+      imported: true,
+      creditsRecorded: 1,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.apollo.io/api/v1/people/match",
+    );
+    const request = fetchMock.mock.calls[0]?.[1];
+    expect(JSON.parse(String(request?.body))).toMatchObject({
+      id: "apollo-live-person-2",
+      reveal_personal_emails: false,
+      reveal_phone_number: false,
+      run_waterfall_email: false,
+      run_waterfall_phone: false,
+    });
   });
 
   it("uses one call, records one conservative credit, and reconciles CRM", async () => {

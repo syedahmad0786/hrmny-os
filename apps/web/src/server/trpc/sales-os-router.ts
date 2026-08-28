@@ -83,8 +83,11 @@ export const salesOsRouter = router({
           perPage: z.number().int().min(1).max(10).optional(),
         }),
       )
-      .mutation(async ({ input }) => {
-        const result = await searchApolloPeopleFree(input);
+      .mutation(async ({ input, ctx }) => {
+        const result = await searchApolloPeopleFree({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+        });
         return {
           mode: result.mode,
           candidates: result.candidates.map(
