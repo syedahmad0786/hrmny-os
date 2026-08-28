@@ -1297,6 +1297,15 @@ class MemoryDemoStore {
     title: string;
     ownerEmployeeId?: string | null;
   }): DemoTask {
+    const existing = [...this.tasks.values()].find(
+      (task) =>
+        task.clientId === input.clientId &&
+        task.taskType === "social_cutdowns" &&
+        task.title === input.title &&
+        Boolean(task.briefId),
+    );
+    if (existing) return existing;
+
     const month = new Date().toISOString().slice(0, 7);
     const taskId = randomUUID();
     const briefId = randomUUID();

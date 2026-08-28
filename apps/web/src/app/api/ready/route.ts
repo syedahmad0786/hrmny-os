@@ -13,14 +13,21 @@ export async function GET() {
   const db = getDb();
   let database: "up" | "down" = "down";
   let pgvector = false;
+  let integrationInbox = false;
   if (db) {
     try {
       await db.execute(sql`select 1`);
       database = "up";
-      const rows = await db.execute<{ ok: boolean }>(sql`
-        select exists(select 1 from pg_extension where extname = 'vector') as ok
+      const rows = await db.execute<{
+        pgvector: boolean;
+        integration_inbox: boolean;
+      }>(sql`
+        select
+          exists(select 1 from pg_extension where extname = 'vector') as pgvector,
+          to_regclass('public.integration_inbox') is not null as integration_inbox
       `);
-      pgvector = Boolean(rows[0]?.ok);
+      pgvector = Boolean(rows[0]?.pgvector);
+      integrationInbox = Boolean(rows[0]?.integration_inbox);
     } catch {
       database = "down";
     }
@@ -81,6 +88,7 @@ export async function GET() {
     database,
     keyStore: database === "up" ? "vault" : "memory",
     pgvector,
+    integrationInbox,
     portalMagicLink: portalMagicLink ? "enabled" : "disabled",
     connectedAppPolicy: orgHeal.policy.appPolicy,
     googleOAuthRedirectUri: googleWorkspaceRedirectUri(),

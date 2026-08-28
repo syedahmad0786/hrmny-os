@@ -3,11 +3,17 @@ import {
   createContact,
   createDeal,
   createNote,
+  listCompanies,
+  listContacts,
+  listDeals,
   updateContact,
   updateDeal,
 } from "./repository";
 import type { DealRow } from "./types";
-import type { EmailVerificationAdapter } from "@hrmny/integrations";
+import type {
+  EmailVerificationAdapter,
+  LeadCandidate,
+} from "@hrmny/integrations";
 
 export type ApolloCompanyHit = Record<string, unknown>;
 
@@ -34,6 +40,179 @@ function pickString(v: unknown): string | null {
   return t.length ? t : null;
 }
 
+function normalizeHost(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
+  try {
+    return new URL(
+      value.startsWith("http") ? value : `https://${value}`,
+    ).hostname
+      .replace(/^www\./, "")
+      .toLowerCase();
+  } catch {
+    return (
+      value
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "")
+        .split("/")[0] ?? null
+    );
+  }
+}
+
+function splitName(fullName: string | undefined): {
+  firstName: string;
+  lastName: string | null;
+} {
+  const parts = (fullName ?? "Apollo lead").trim().split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts[0] ?? "Apollo",
+    lastName: parts.length > 1 ? parts.slice(1).join(" ") : null,
+  };
+}
+
+function apolloEmailVerified(status: string | undefined): boolean {
+  return new Set(["verified", "valid"]).has(status?.trim().toLowerCase() ?? "");
+}
+
+export type ApolloPersonImportResult = {
+  companyId: string;
+  contactId: string;
+  dealId: string;
+  companyName: string;
+  fullName: string;
+  email: string | null;
+  emailVerified: boolean;
+  reused: { company: boolean; contact: boolean; deal: boolean };
+};
+
+/**
+ * Persist one explicitly enriched Apollo person into the canonical CRM.
+ * Company, contact, and open-deal dedupe are all performed before inserts.
+ * No guessed email is created, and Apollo's own verdict is the only email
+ * verification evidence used by this path.
+ */
+export async function importApolloPersonToCrm(input: {
+  person: LeadCandidate;
+  receiptId: string;
+  ownerEmployeeId?: string | null;
+}): Promise<ApolloPersonImportResult> {
+  const person = input.person;
+  const companyName = person.companyName?.trim() || "Unknown company";
+  const domain = normalizeHost(person.companyDomain);
+  const companies = await listCompanies();
+  let company = companies.find((row) => {
+    const rowDomain = normalizeHost(row.website);
+    return (
+      (domain && rowDomain === domain) ||
+      row.name.trim().toLowerCase() === companyName.toLowerCase()
+    );
+  });
+  const reusedCompany = Boolean(company);
+  if (!company) {
+    company = await createCompany({
+      name: companyName,
+      market: "UAE",
+      website: domain ? `https://${domain}` : null,
+      notes: "Created from one-person Apollo enrichment receipt.",
+    });
+  }
+
+  const name = splitName(person.fullName);
+  const email = person.email?.trim().toLowerCase() || null;
+  const linkedin = person.linkedinUrl?.trim() || null;
+  const contacts = await listContacts({ companyId: company.companyId });
+  let contact = contacts.find((row) => {
+    const sameEmail = email && row.email?.trim().toLowerCase() === email;
+    const sameLinkedIn =
+      linkedin &&
+      row.linkedinUrl?.trim().toLowerCase().replace(/\/$/, "") ===
+        linkedin.toLowerCase().replace(/\/$/, "");
+    const sameName =
+      `${row.firstName} ${row.lastName ?? ""}`.trim().toLowerCase() ===
+      `${name.firstName} ${name.lastName ?? ""}`.trim().toLowerCase();
+    return Boolean(sameEmail || sameLinkedIn || sameName);
+  });
+  const reusedContact = Boolean(contact);
+  const verified = apolloEmailVerified(person.emailStatus);
+  if (!contact) {
+    contact = await createContact({
+      companyId: company.companyId,
+      firstName: name.firstName,
+      lastName: name.lastName,
+      email,
+      title: person.title ?? null,
+      linkedinUrl: linkedin,
+      isPrimary: true,
+    });
+  }
+  const updatedContact = await updateContact(contact.contactId, {
+    companyId: company.companyId,
+    email: email ?? contact.email,
+    title: person.title ?? contact.title,
+    linkedinUrl: linkedin ?? contact.linkedinUrl,
+    emailVerified: contact.emailVerified || verified,
+    isPrimary: true,
+  });
+  contact = updatedContact ?? contact;
+
+  const deals = await listDeals({ companyId: company.companyId });
+  let deal = deals.find((row) => row.closeOutcome === null);
+  const reusedDeal = Boolean(deal);
+  if (!deal) {
+    deal = await createDeal({
+      companyName: company.name,
+      companyId: company.companyId,
+      primaryContactId: contact.contactId,
+      sector: company.sector,
+      leadSourceLane: "apollo_intent",
+      ownerEmployeeId: input.ownerEmployeeId ?? null,
+    });
+  } else if (!deal.primaryContactId) {
+    deal =
+      (await updateDeal(deal.dealId, {
+        primaryContactId: contact.contactId,
+      })) ?? deal;
+  }
+  if (verified && !deal.emailVerified) {
+    deal = (await updateDeal(deal.dealId, { emailVerified: true })) ?? deal;
+  }
+
+  await createNote({
+    dealId: deal.dealId,
+    companyId: company.companyId,
+    contactId: contact.contactId,
+    authorEmployeeId: input.ownerEmployeeId ?? null,
+    body: `Apollo one-person enrichment reconciled. ${JSON.stringify({
+      receiptId: input.receiptId,
+      externalId: person.externalId,
+      source: person.source,
+      emailStatus: person.emailStatus ?? null,
+      paidFields: {
+        personalEmail: false,
+        phone: false,
+        emailWaterfall: false,
+        phoneWaterfall: false,
+      },
+    })}`,
+  });
+
+  return {
+    companyId: company.companyId,
+    contactId: contact.contactId,
+    dealId: deal.dealId,
+    companyName: company.name,
+    fullName: `${contact.firstName} ${contact.lastName ?? ""}`.trim(),
+    email: contact.email,
+    emailVerified: contact.emailVerified,
+    reused: {
+      company: reusedCompany,
+      contact: reusedContact,
+      deal: reusedDeal,
+    },
+  };
+}
+
 function normalizeCompany(hit: ApolloCompanyHit, fallbackQuery: string) {
   const name =
     pickString(hit.name) ||
@@ -45,13 +224,9 @@ function normalizeCompany(hit: ApolloCompanyHit, fallbackQuery: string) {
     pickString(hit.primary_domain) ||
     pickString(hit.website_url);
   const industry =
-    pickString(hit.industry) ||
-    pickString(hit.primary_industry) ||
-    "Unknown";
+    pickString(hit.industry) || pickString(hit.primary_industry) || "Unknown";
   const website =
-    domain && !domain.startsWith("http")
-      ? `https://${domain}`
-      : domain;
+    domain && !domain.startsWith("http") ? `https://${domain}` : domain;
   return { name, website, industry };
 }
 
@@ -90,13 +265,8 @@ export async function importApolloCompaniesToCrm(input: {
     const contact = await createContact({
       companyId: company.companyId,
       firstName:
-        pickString(hit.first_name) ||
-        pickString(hit.firstName) ||
-        "Apollo",
-      lastName:
-        pickString(hit.last_name) ||
-        pickString(hit.lastName) ||
-        "Lead",
+        pickString(hit.first_name) || pickString(hit.firstName) || "Apollo",
+      lastName: pickString(hit.last_name) || pickString(hit.lastName) || "Lead",
       email: contactEmail,
       title: pickString(hit.title) || "Marketing Lead",
       isPrimary: true,

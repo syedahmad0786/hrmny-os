@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@9.15.9",
   "engines": {
-    "node": ">=22"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "turbo run dev",
@@ -12,8 +12,10 @@
     "test": "turbo run test --concurrency=1",
     "typecheck": "turbo run typecheck",
     "e2e": "pnpm --filter @hrmny/web e2e",
+    "e2e:bridge": "pnpm --dir apps/web exec tsx e2e/local-bridge-server.ts",
     "db:generate": "pnpm --filter @hrmny/db generate",
     "db:migrate": "pnpm --filter @hrmny/db migrate",
+    "db:verify": "pnpm --filter @hrmny/db verify:migrations",
     "db:studio": "pnpm --filter @hrmny/db studio"
   },
   "pnpm": {
@@ -23,13 +25,17 @@
     }
   },
   "devDependencies": {
-    "@typescript-eslint/eslint-plugin": "^8.19.0",
-    "@typescript-eslint/parser": "^8.19.0",
-    "eslint": "^9.17.0",
+    "@eslint/js": "^10.0.1",
+    "@next/eslint-plugin-next": "15.5.20",
+    "@typescript-eslint/eslint-plugin": "^8.68.0",
+    "@typescript-eslint/parser": "^8.68.0",
+    "eslint": "^10.9.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.4.2",
     "tsx": "^4.19.2",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.68.0",
     "vitest": "^2.1.8"
   }
 }

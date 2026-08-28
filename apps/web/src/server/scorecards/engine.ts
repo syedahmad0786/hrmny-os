@@ -217,10 +217,270 @@ export const DEAL_BUAF_V1: ScorecardDefinition = {
 // churn cadence is known.
 const FRESHNESS_WINDOW_DAYS = 30;
 
-function freshnessFrom(iso: string, now: number): number {
+function freshnessFrom(iso: string, now = Date.now()): number {
   const ageDays = (now - Date.parse(iso)) / 86_400_000;
   if (!Number.isFinite(ageDays)) return 0;
   return clamp01(1 - ageDays / FRESHNESS_WINDOW_DAYS);
+}
+
+export const LEAD_FIT_V1: ScorecardDefinition = {
+  scorecardDefinitionId: "b0af0000-0000-4000-8000-000000000002",
+  key: "lead-fit-v1",
+  entityKind: "lead",
+  version: 1,
+  weights: [
+    { key: "email_verified", label: "Email verified", weight: 0.4 },
+    { key: "has_company", label: "Company linked", weight: 0.3 },
+    { key: "temperature", label: "Temperature", weight: 0.3 },
+  ],
+  active: true,
+  createdAt: "2026-08-27T00:00:00.000Z",
+  updatedAt: "2026-08-27T00:00:00.000Z",
+};
+
+export const CLIENT_HEALTH_V1: ScorecardDefinition = {
+  scorecardDefinitionId: "b0af0000-0000-4000-8000-000000000003",
+  key: "client-health-v1",
+  entityKind: "client",
+  version: 1,
+  weights: [
+    { key: "active", label: "Active lifecycle", weight: 0.5 },
+    { key: "engagement", label: "Retainer engagement", weight: 0.3 },
+    { key: "contract", label: "Contracted fee", weight: 0.2 },
+  ],
+  active: true,
+  createdAt: "2026-08-27T00:00:00.000Z",
+  updatedAt: "2026-08-27T00:00:00.000Z",
+};
+
+export const CAMPAIGN_DELIVERY_V1: ScorecardDefinition = {
+  scorecardDefinitionId: "b0af0000-0000-4000-8000-000000000004",
+  key: "campaign-delivery-v1",
+  entityKind: "campaign",
+  version: 1,
+  weights: [
+    { key: "progress", label: "Status progress", weight: 0.5 },
+    { key: "scheduled", label: "Scheduled", weight: 0.25 },
+    { key: "client_linked", label: "Client linked", weight: 0.25 },
+  ],
+  active: true,
+  createdAt: "2026-08-27T00:00:00.000Z",
+  updatedAt: "2026-08-27T00:00:00.000Z",
+};
+
+export const VENDOR_PROFILE_V1: ScorecardDefinition = {
+  scorecardDefinitionId: "b0af0000-0000-4000-8000-000000000005",
+  key: "vendor-profile-v1",
+  entityKind: "vendor",
+  version: 1,
+  weights: [
+    { key: "identified", label: "Named vendor", weight: 0.4 },
+    { key: "web_presence", label: "Website", weight: 0.3 },
+    { key: "notes", label: "Notes on file", weight: 0.3 },
+  ],
+  active: true,
+  createdAt: "2026-08-27T00:00:00.000Z",
+  updatedAt: "2026-08-27T00:00:00.000Z",
+};
+
+export const SYSTEM_HEALTH_V1: ScorecardDefinition = {
+  scorecardDefinitionId: "b0af0000-0000-4000-8000-000000000006",
+  key: "system-health-v1",
+  entityKind: "system_health",
+  version: 1,
+  weights: [
+    { key: "xero_write_lock", label: "Xero write lock", weight: 0.4 },
+    { key: "llm_safe_default", label: "LLM default mock-safe", weight: 0.3 },
+    { key: "dam_safe_default", label: "DAM default memory-safe", weight: 0.3 },
+  ],
+  active: true,
+  createdAt: "2026-08-27T00:00:00.000Z",
+  updatedAt: "2026-08-27T00:00:00.000Z",
+};
+
+export const SEEDED_DEFINITIONS: ScorecardDefinition[] = [
+  DEAL_BUAF_V1,
+  LEAD_FIT_V1,
+  CLIENT_HEALTH_V1,
+  CAMPAIGN_DELIVERY_V1,
+  VENDOR_PROFILE_V1,
+  SYSTEM_HEALTH_V1,
+];
+
+function temperatureValue(temp: DealRow["buafTemperature"]): number {
+  if (temp === "hot") return 1;
+  if (temp === "warm") return 0.66;
+  if (temp === "cool") return 0.33;
+  return 0;
+}
+
+export function leadFitEvidence(deal: DealRow, now = Date.now()): Evidence[] {
+  const fresh = freshnessFrom(deal.updatedAt, now);
+  return [
+    {
+      factor: "email_verified",
+      value: deal.emailVerified ? 1 : 0,
+      ref: `deal:${deal.dealId}:emailVerified`,
+      freshness: fresh,
+      confidence: 1,
+    },
+    {
+      factor: "has_company",
+      value: deal.companyId ? 1 : 0,
+      ref: `deal:${deal.dealId}:companyId`,
+      freshness: fresh,
+      confidence: 1,
+    },
+    {
+      factor: "temperature",
+      value: temperatureValue(deal.buafTemperature),
+      ref: `deal:${deal.dealId}:buafTemperature`,
+      freshness: fresh,
+      confidence: deal.buafTemperature ? 1 : 0,
+    },
+  ];
+}
+
+export function clientHealthEvidence(input: {
+  clientId: string;
+  lifecycleStatus: string;
+  engagementType: string;
+  fee?: string | null;
+  contractValue?: string | null;
+  updatedAt?: string;
+}): Evidence[] {
+  const fresh = freshnessFrom(input.updatedAt ?? new Date().toISOString());
+  const fee = Number(input.fee || input.contractValue || 0);
+  return [
+    {
+      factor: "active",
+      value: input.lifecycleStatus === "active" ? 1 : 0,
+      ref: `client:${input.clientId}:lifecycleStatus`,
+      freshness: fresh,
+      confidence: 1,
+    },
+    {
+      factor: "engagement",
+      value:
+        input.lifecycleStatus === "churned"
+          ? 0
+          : input.engagementType === "retainer"
+            ? 1
+            : 0.5,
+      ref: `client:${input.clientId}:engagementType`,
+      freshness: fresh,
+      confidence: 1,
+    },
+    {
+      factor: "contract",
+      value: fee > 0 ? 1 : 0,
+      ref: `client:${input.clientId}:fee`,
+      freshness: fresh,
+      confidence: 1,
+    },
+  ];
+}
+
+export function campaignDeliveryEvidence(input: {
+  campaignItemId: string;
+  status: string;
+  scheduledFor: string | null;
+  clientId: string | null;
+  updatedAt?: string;
+}): Evidence[] {
+  const fresh = freshnessFrom(input.updatedAt ?? new Date().toISOString());
+  const progress =
+    input.status === "published"
+      ? 1
+      : input.status === "approved"
+        ? 0.75
+        : input.status === "draft"
+          ? 0.25
+          : 0.1;
+  return [
+    {
+      factor: "progress",
+      value: progress,
+      ref: `campaign:${input.campaignItemId}:status`,
+      freshness: fresh,
+      confidence: 1,
+    },
+    {
+      factor: "scheduled",
+      value: input.scheduledFor ? 1 : 0,
+      ref: `campaign:${input.campaignItemId}:scheduledFor`,
+      freshness: fresh,
+      confidence: 1,
+    },
+    {
+      factor: "client_linked",
+      value: input.clientId ? 1 : 0,
+      ref: `campaign:${input.campaignItemId}:clientId`,
+      freshness: fresh,
+      confidence: 1,
+    },
+  ];
+}
+
+export function vendorProfileEvidence(input: {
+  companyId: string;
+  name: string;
+  website: string | null;
+  notes: string | null;
+  updatedAt?: string;
+}): Evidence[] {
+  const fresh = freshnessFrom(input.updatedAt ?? new Date().toISOString());
+  return [
+    {
+      factor: "identified",
+      value: input.name.trim() ? 1 : 0,
+      ref: `company:${input.companyId}:name`,
+      freshness: fresh,
+      confidence: 1,
+    },
+    {
+      factor: "web_presence",
+      value: input.website ? 1 : 0,
+      ref: `company:${input.companyId}:website`,
+      freshness: fresh,
+      confidence: 1,
+    },
+    {
+      factor: "notes",
+      value: input.notes ? 1 : 0,
+      ref: `company:${input.companyId}:notes`,
+      freshness: fresh,
+      confidence: 1,
+    },
+  ];
+}
+
+export function systemHealthEvidence(now = Date.now()): Evidence[] {
+  const fresh = 1;
+  void now;
+  return [
+    {
+      factor: "xero_write_lock",
+      value: process.env.XERO_WRITE_ENABLED?.toLowerCase() === "true" ? 0 : 1,
+      ref: "env:XERO_WRITE_ENABLED",
+      freshness: fresh,
+      confidence: 1,
+    },
+    {
+      factor: "llm_safe_default",
+      value: (process.env.LLM_PROVIDER ?? "mock").toLowerCase() === "mock" ? 1 : 0.5,
+      ref: "env:LLM_PROVIDER",
+      freshness: fresh,
+      confidence: 1,
+    },
+    {
+      factor: "dam_safe_default",
+      value: (process.env.DAM_STORAGE ?? "memory").toLowerCase() === "memory" ? 1 : 0.5,
+      ref: "env:DAM_STORAGE",
+      freshness: fresh,
+      confidence: 1,
+    },
+  ];
 }
 
 /**

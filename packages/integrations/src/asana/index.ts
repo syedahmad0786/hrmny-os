@@ -826,7 +826,9 @@ function createAdapter(transport: AsanaTransport): AsanaAdapter {
         if (error instanceof AsanaApiError && error.status === 412) {
           const response = error.data as AsanaEventsResponse | null;
           if (!response?.sync)
-            throw new Error("Asana did not return a replacement sync token");
+            throw new Error("Asana did not return a replacement sync token", {
+              cause: error,
+            });
           return {
             events: [],
             sync: response.sync,

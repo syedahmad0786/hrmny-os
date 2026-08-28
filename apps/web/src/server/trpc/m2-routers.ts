@@ -11,6 +11,7 @@ import {
 import { isXeroWriteEnabled } from "@hrmny/integrations";
 import { DEMO_EMPLOYEE_ID, getDemoStore, vatOnAmount } from "../demo-store";
 import { getDb } from "../db";
+import { resolveTaxRegistration } from "../finance/tax-registration";
 import { protectedProcedure, router } from "./trpc";
 
 bootstrapGateRegistry();
@@ -255,13 +256,12 @@ export const invoicesRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
-      let clientName = "";
-      let amountNum = 0;
-      let currency = "AED";
+      let clientName: string;
+      let amountNum: number;
+      let currency: string;
       if (getDb()) {
-        const { getDurableClientForInvoice } = await import(
-          "../finance/os-invoices"
-        );
+        const { getDurableClientForInvoice } =
+          await import("../finance/os-invoices");
         const client = await getDurableClientForInvoice(input.clientId);
         if (!client) throw new Error("NOT_FOUND");
         clientName = client.name;
@@ -273,9 +273,7 @@ export const invoicesRouter = router({
         const client = store.clients.get(input.clientId);
         if (!client) throw new Error("NOT_FOUND");
         clientName = client.name;
-        amountNum = Number(
-          input.amount ?? client.fee ?? client.contractValue,
-        );
+        amountNum = Number(input.amount ?? client.fee ?? client.contractValue);
         currency = client.currency || "AED";
       }
       const invoiceId = randomUUID();
@@ -290,8 +288,7 @@ export const invoicesRouter = router({
         billingKind: input.type,
         clientId: input.clientId,
         period: input.period,
-        trn: "100000000000003",
-        trnStatus: "known" as const,
+        ...resolveTaxRegistration(),
         ruleCited: "UAE VAT 5% on retainer/progress draft",
         sourceAttached: {
           kind: "retainer_billing",
@@ -370,8 +367,7 @@ export const invoicesRouter = router({
             billingKind: "retainer" as const,
             clientId: client.clientId,
             period: input.period,
-            trn: "100000000000003",
-            trnStatus: "known" as const,
+            ...resolveTaxRegistration(),
             ruleCited: "UAE VAT 5% monthly retainer auto-draft",
             sourceAttached: {
               kind: "retainer_month_start",
@@ -397,9 +393,7 @@ export const invoicesRouter = router({
         );
         if (exists) continue;
         const amountNum = Number(
-          ("fee" in client ? client.fee : null) ||
-            client.contractValue ||
-            0,
+          ("fee" in client ? client.fee : null) || client.contractValue || 0,
         );
         const invoiceId = randomUUID();
         const invoice = {
@@ -413,8 +407,7 @@ export const invoicesRouter = router({
           billingKind: "retainer" as const,
           clientId: client.clientId,
           period: input.period,
-          trn: "100000000000003",
-          trnStatus: "known" as const,
+          ...resolveTaxRegistration(),
           ruleCited: "UAE VAT 5% monthly retainer auto-draft",
           sourceAttached: {
             kind: "retainer_month_start",
@@ -454,63 +447,6 @@ export const invoicesRouter = router({
       return { period: input.period, created };
     }),
 
-  /** Xero paid-status webhook read-back stub. */
-  markPaidFromWebhook: protectedProcedure
-    .input(
-      z.object({
-        xeroInvoiceId: z.string().min(1),
-        event: z.enum(["invoice.paid"]).optional(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const store = getDemoStore();
-      if (getDb()) {
-        const { findOsInvoiceByXeroId, updateOsInvoice } = await import(
-          "../finance/os-invoices"
-        );
-        const { writeAudit } = await import("../m1-persistence");
-        const inv = await findOsInvoiceByXeroId(input.xeroInvoiceId);
-        if (!inv) throw new Error("NOT_FOUND");
-        if (inv.status !== "issued" && inv.status !== "paid") {
-          throw new Error("INVALID_STATE");
-        }
-        const before = inv.status;
-        const updated = await updateOsInvoice({
-          invoiceId: inv.invoiceId,
-          status: "paid",
-        });
-        await writeAudit({
-          actorEmployeeId: ctx.employeeId!,
-          action: "invoices.markPaidFromWebhook",
-          entityType: "invoice",
-          entityId: inv.invoiceId,
-          before: { status: before },
-          after: { status: "paid", xeroInvoiceId: inv.xeroInvoiceId },
-          reason: input.event ?? "invoice.paid",
-        });
-        return updated ?? { ...inv, status: "paid" };
-      }
-      const inv = [...store.invoices.values()].find(
-        (i) => i.xeroInvoiceId === input.xeroInvoiceId,
-      );
-      if (!inv) throw new Error("NOT_FOUND");
-      if (inv.status !== "issued" && inv.status !== "paid") {
-        throw new Error("INVALID_STATE");
-      }
-      const before = inv.status;
-      inv.status = "paid";
-      store.appendAudit({
-        actorEmployeeId: ctx.employeeId!,
-        action: "invoices.markPaidFromWebhook",
-        entityType: "invoice",
-        entityId: inv.invoiceId,
-        before: { status: before },
-        after: { status: "paid", xeroInvoiceId: inv.xeroInvoiceId },
-        reason: input.event ?? "invoice.paid",
-      });
-      return inv;
-    }),
-
   approve: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
@@ -530,15 +466,15 @@ export const invoicesRouter = router({
             vatAmount: row.vatAmount ?? "0",
             currency: row.currency,
             invoiceType: row.invoiceType,
-            billingKind: (row.billingKind as
-              | "intake"
-              | "retainer"
-              | "progress"
-              | "first") ?? "retainer",
+            billingKind:
+              (row.billingKind as
+                "intake" | "retainer" | "progress" | "first") ?? "retainer",
             clientId: row.clientId,
             period: row.period,
-            trn: row.trn ?? "100000000000003",
-            trnStatus: (row.trnStatus as "known" | "unknown_held") ?? "known",
+            trn: row.trn ?? resolveTaxRegistration().trn,
+            trnStatus:
+              (row.trnStatus as "known" | "unknown_held") ??
+              resolveTaxRegistration().trnStatus,
             ruleCited: row.ruleCited,
             sourceAttached: row.sourceAttached,
             xeroInvoiceId: row.xeroInvoiceId,
@@ -590,15 +526,15 @@ export const invoicesRouter = router({
             vatAmount: row.vatAmount ?? "0",
             currency: row.currency,
             invoiceType: row.invoiceType,
-            billingKind: (row.billingKind as
-              | "intake"
-              | "retainer"
-              | "progress"
-              | "first") ?? "retainer",
+            billingKind:
+              (row.billingKind as
+                "intake" | "retainer" | "progress" | "first") ?? "retainer",
             clientId: row.clientId,
             period: row.period,
-            trn: row.trn ?? "100000000000003",
-            trnStatus: (row.trnStatus as "known" | "unknown_held") ?? "known",
+            trn: row.trn ?? resolveTaxRegistration().trn,
+            trnStatus:
+              (row.trnStatus as "known" | "unknown_held") ??
+              resolveTaxRegistration().trnStatus,
             ruleCited: row.ruleCited,
             sourceAttached: row.sourceAttached,
             xeroInvoiceId: row.xeroInvoiceId,
@@ -705,14 +641,12 @@ export const invoicesRouter = router({
 
   /** Mirror invoices from Xero (read-only) into Postgres + response. */
   mirrorFromXero: protectedProcedure.query(async () => {
-    const { syncXeroInvoiceMirror } = await import(
-      "../finance/xero-mirror-sync"
-    );
+    const { syncXeroInvoiceMirror } =
+      await import("../finance/xero-mirror-sync");
     const synced = await syncXeroInvoiceMirror();
     if (getDb()) {
-      const { listXeroMirrorInvoices } = await import(
-        "../finance/list-invoices"
-      );
+      const { listXeroMirrorInvoices } =
+        await import("../finance/list-invoices");
       const invoices = await listXeroMirrorInvoices();
       return {
         writeEnabled: isXeroWriteEnabled(),
@@ -760,9 +694,8 @@ export const invoicesRouter = router({
 
   /** Explicit sync mutation for connections / cron. */
   syncXeroMirror: protectedProcedure.mutation(async () => {
-    const { syncXeroInvoiceMirror } = await import(
-      "../finance/xero-mirror-sync"
-    );
+    const { syncXeroInvoiceMirror } =
+      await import("../finance/xero-mirror-sync");
     return syncXeroInvoiceMirror();
   }),
 
@@ -790,15 +723,15 @@ export const invoicesRouter = router({
             vatAmount: row.vatAmount ?? "0",
             currency: row.currency,
             invoiceType: row.invoiceType,
-            billingKind: (row.billingKind as
-              | "intake"
-              | "retainer"
-              | "progress"
-              | "first") ?? "first",
+            billingKind:
+              (row.billingKind as
+                "intake" | "retainer" | "progress" | "first") ?? "first",
             clientId: row.clientId,
             period: row.period,
-            trn: row.trn ?? "100000000000003",
-            trnStatus: (row.trnStatus as "known" | "unknown_held") ?? "known",
+            trn: row.trn ?? resolveTaxRegistration().trn,
+            trnStatus:
+              (row.trnStatus as "known" | "unknown_held") ??
+              resolveTaxRegistration().trnStatus,
             ruleCited: row.ruleCited,
             sourceAttached: row.sourceAttached,
             xeroInvoiceId: row.xeroInvoiceId,

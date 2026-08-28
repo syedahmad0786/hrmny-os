@@ -5,20 +5,6 @@ import "./hrmny-chat.css";
 
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { Montserrat, Syne } from "next/font/google";
-
-const montserrat = Montserrat({
-  subsets: ["latin"],
-  variable: "--font-montserrat",
-  display: "swap",
-});
-
-const syne = Syne({
-  subsets: ["latin"],
-  variable: "--font-syne",
-  display: "swap",
-  weight: ["500", "600", "700"],
-});
 
 export const metadata: Metadata = {
   title: "hrmny OS",
@@ -27,13 +13,15 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${montserrat.variable} ${syne.variable}`}>
+    <html lang="en">
       <body
         className="min-h-screen bg-paper font-body text-ink antialiased"
         style={
           {
-            ["--font-display" as string]: "var(--font-syne)",
-            ["--font-body" as string]: "var(--font-montserrat)",
+            ["--font-display" as string]:
+              '"Aptos Display", "Segoe UI Variable Display", "Arial Narrow", sans-serif',
+            ["--font-body" as string]:
+              'Montserrat, Aptos, "Segoe UI Variable Text", "Segoe UI", sans-serif',
           } as React.CSSProperties
         }
       >

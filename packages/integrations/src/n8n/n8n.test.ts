@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createN8nMock,
   createN8nAdapter,
+  createN8nLive,
+  N8N_FETCH_TIMEOUT_MS,
   normalizeN8nBaseUrl,
   resolveN8nWebhookUrl,
   getN8nWebhookUrlOverride,
@@ -89,6 +91,7 @@ describe("n8n mock adapter", () => {
       "N8N_WEBHOOK_DEAL_WON",
       "https://hrmny.app.n8n.cloud/webhook/hrmny-deal-won",
     );
+    vi.stubEnv("N8N_OUTBOUND_WEBHOOK_SECRET", "test-outbound-secret");
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({}),
@@ -108,9 +111,34 @@ describe("n8n mock adapter", () => {
       "https://hrmny.app.n8n.cloud/webhook/hrmny-deal-won",
       expect.objectContaining({ method: "POST" }),
     );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        "X-Hrmny-Os-Secret": "test-outbound-secret",
+      }),
+    });
 
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  it("explicit live mode fails loud without the REST API key", () => {
+    vi.stubEnv("N8N_API_KEY", "");
+    expect(() => createN8nAdapter({ mode: "live" })).toThrow(/N8N_API_KEY/);
+  });
+
+  it("refuses a real webhook trigger without its dedicated outbound secret", async () => {
+    vi.stubEnv(
+      "N8N_WEBHOOK_DEAL_WON",
+      "https://hrmny.app.n8n.cloud/webhook/hrmny-deal-won",
+    );
+    vi.stubEnv("N8N_OUTBOUND_WEBHOOK_SECRET", "");
+    const n8n = createN8nAdapter({ mode: "mock" });
+    await expect(
+      n8n.triggerWebhook({
+        webhookPath: "hrmny-deal-won",
+        allowProductionTrigger: true,
+      }),
+    ).rejects.toThrow(/N8N_OUTBOUND_WEBHOOK_SECRET/);
   });
 
   afterEach(() => {
@@ -123,5 +151,34 @@ describe("n8n mock adapter", () => {
     const status = await n8n.getExecutionStatus("exec-1");
     expect(status.finished).toBe(true);
     expect(status.status).toBe("success");
+  });
+
+  it("does not infer live from a key when mode is mock", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const n8n = createN8nAdapter({
+      apiKey: "n8n-e2e-backend-key",
+      mode: "mock",
+    });
+    const health = await n8n.health();
+    expect(health.mode).toBe("mock");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("live health fetch is bounded by N8N_FETCH_TIMEOUT_MS", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const n8n = createN8nLive({
+      apiKey: "live-key",
+      baseUrl: "https://hrmny.app.n8n.cloud",
+    });
+    await n8n.health();
+    expect(fetchMock).toHaveBeenCalled();
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(N8N_FETCH_TIMEOUT_MS).toBe(8_000);
   });
 });

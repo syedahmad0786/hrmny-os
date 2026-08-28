@@ -81,7 +81,9 @@ export {
   createApolloMock,
   createApolloLive,
   createApolloAdapter,
+  isApolloPaidOperationAllowed,
   normalizeApolloPerson,
+  resolveApolloMode,
   type ApolloAdapterConfig,
 } from "./apollo";
 export {
@@ -89,6 +91,7 @@ export {
   createHunterMock,
   createHunterLive,
   createHunterAdapter,
+  resolveHunterMode,
   type HunterAdapterConfig,
 } from "./hunter";
 export {
@@ -102,8 +105,16 @@ export {
   createHunterVerificationLive,
   createNeverBounceVerificationLive,
   createEmailVerificationAdapter,
+  resolveEmailVerificationProvider,
+  resolveEmailVerificationMode,
   type EmailVerificationConfig,
 } from "./hunter/verification";
+export {
+  createAdsInsightsMock,
+  createAdsInsightsLive,
+  createAdsInsightsAdapter,
+  type AdsInsightsConfig,
+} from "./ads/mock";
 export {
   createMemoryObjectStore,
   createSupabaseObjectStore,
@@ -128,6 +139,7 @@ export {
   createN8nMock,
   createN8nLive,
   createN8nAdapter,
+  N8N_FETCH_TIMEOUT_MS,
   type N8nConfig,
   type N8nCrmEvent,
   type N8nEventMapEntry,

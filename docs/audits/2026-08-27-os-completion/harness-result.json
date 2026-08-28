@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 2,
+  "harness": {
+    "name": "system_harness",
+    "runId": "20260828T044131Z",
+    "generatedStatus": "planning-complete-needs-user-actions",
+    "generatedPlanReadiness": 58,
+    "generatedDeliveryEvidence": 0,
+    "artifactsRead": 27,
+    "secretValuesRead": false
+  },
+  "repository": {
+    "url": "https://github.com/syedahmad0786/hrmny-os",
+    "baseSha": "b697fb0",
+    "branch": "ahmadbukhari097/codex/system-harness-hrmny-completion",
+    "remoteMutated": false
+  },
+  "reconciledScores": {
+    "planReadiness": 93,
+    "deliveryEvidence": 33
+  },
+  "verification": {
+    "lint": {
+      "state": "tested",
+      "errors": 0,
+      "warnings": 0
+    },
+    "typecheck": {
+      "state": "tested",
+      "packagesPassed": 7
+    },
+    "tests": {
+      "state": "tested",
+      "passed": 781,
+      "skipped": 3,
+      "failed": 0,
+      "testFilesPassed": 152,
+      "testFilesSkipped": 2
+    },
+    "build": {
+      "state": "tested-locally",
+      "tasksPassed": 2,
+      "mainAppPagesGenerated": 86
+    },
+    "e2e": {
+      "state": "tested-locally-with-host-limitation",
+      "cleanRunPassed": 74,
+      "cleanRunFailed": 0,
+      "transport": "local-handler bridge",
+      "nativeWindowsNextAdapter": "not-verified",
+      "immediateRerun": {
+        "passed": 38,
+        "failed": 36,
+        "cause": "Windows loopback exhaustion; Chromium EADDRINUSE after 29363 port-3500 socket rows accumulated"
+      }
+    },
+    "migration": {
+      "state": "documented-not-executed",
+      "head": "0074_integration_inbox_invoice_metadata",
+      "reason": "Verifier drops and recreates two disposable local databases and requires explicit permission."
+    },
+    "deployment": {
+      "state": "not-deployed",
+      "productionMutated": false,
+      "existingPublicRootObserved": 200,
+      "existingPublicReadyObserved": 200,
+      "observationContainsLocalBranch": false
+    },
+    "providerAcceptance": {
+      "state": "not-attempted"
+    },
+    "destinationVerification": {
+      "state": "not-attempted"
+    },
+    "recovery": {
+      "state": "documented-not-drilled"
+    },
+    "userAcceptance": {
+      "state": "pending",
+      "owners": ["Ayham", "Maolham"]
+    }
+  },
+  "safetyLocks": {
+    "xeroWrites": false,
+    "productionChanges": false,
+    "externalWrites": false,
+    "paidOperationsDefault": false,
+    "destructiveMigrationVerificationRun": false
+  },
+  "sourceGaps": [
+    "Bayzat public official material does not evidence an employee-list API contract.",
+    "Live provider plan eligibility, account assets, permissions, and acceptance require user-supplied references.",
+    "The shared harness catalog has no reviewed HRMNY-specific product topology."
+  ],
+  "continuation": {
+    "gateDocument": "docs/audits/2026-08-27-os-completion/HUMAN-GATES.md",
+    "runbookDocument": "docs/audits/2026-08-27-os-completion/RUNBOOKS.md"
+  }
+}

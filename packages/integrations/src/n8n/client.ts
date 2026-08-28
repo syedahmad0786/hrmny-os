@@ -19,6 +19,7 @@ import { getN8nEventEntry, type N8nCrmEvent } from "./events";
 export type N8nAdapterConfig = {
   baseUrl?: string;
   apiKey?: string;
+  outboundWebhookSecret?: string;
   mode?: "mock" | "live";
   allowProductionTrigger?: boolean;
 };
@@ -70,6 +71,17 @@ function apiHeaders(apiKey: string): HeadersInit {
   };
 }
 
+/** Live REST/webhook calls must not hang CI or the automations smoke button. */
+export const N8N_FETCH_TIMEOUT_MS = 8_000;
+
+function n8nFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const timeout = AbortSignal.timeout(N8N_FETCH_TIMEOUT_MS);
+  const signal = init.signal
+    ? AbortSignal.any([init.signal, timeout])
+    : timeout;
+  return fetch(url, { ...init, signal });
+}
+
 /** Mock n8n — no network; used when key absent or N8N_MODE=mock. */
 export function createN8nMock(config: N8nAdapterConfig = {}): N8nAdapter {
   const resolved = resolveN8nConfig({ ...config, mode: "mock" });
@@ -98,7 +110,13 @@ export function createN8nStub(): N8nAdapter {
 /** Prefer live when mode=live and key present; otherwise mock (no-op). */
 export function createN8nAdapter(config: N8nAdapterConfig = {}): N8nAdapter {
   const resolved = resolveN8nConfig(config);
-  if (resolved.mode === "live" && resolved.apiKey) {
+  if (resolved.mode === "live") {
+    if (!resolved.apiKey) {
+      throw new IntegrationMisconfiguredError(
+        "n8n",
+        "N8N_MODE=live but N8N_API_KEY missing — fail loud",
+      );
+    }
     return createN8nClient(resolved, "live");
   }
   return createN8nClient({ ...resolved, mode: "mock" }, "mock");
@@ -128,7 +146,7 @@ function createN8nClient(
       }
       const apiKey = config.apiKey!;
       try {
-        const res = await fetch(`${baseUrl}/api/v1/workflows?limit=1`, {
+        const res = await n8nFetch(`${baseUrl}/api/v1/workflows?limit=1`, {
           method: "GET",
           headers: apiHeaders(apiKey),
         });
@@ -167,7 +185,7 @@ function createN8nClient(
         return MOCK_WORKFLOWS.map((w) => ({ ...w }));
       }
       const apiKey = config.apiKey!;
-      const res = await fetch(`${baseUrl}/api/v1/workflows?limit=50`, {
+      const res = await n8nFetch(`${baseUrl}/api/v1/workflows?limit=50`, {
         method: "GET",
         headers: apiHeaders(apiKey),
       });
@@ -203,7 +221,7 @@ function createN8nClient(
         };
       }
       const apiKey = config.apiKey!;
-      const res = await fetch(
+      const res = await n8nFetch(
         `${baseUrl}/api/v1/executions/${encodeURIComponent(executionId)}`,
         {
           method: "GET",
@@ -297,9 +315,19 @@ function createN8nClient(
         };
       }
 
-      const res = await fetch(url, {
+      if (!config.outboundWebhookSecret) {
+        throw new IntegrationMisconfiguredError(
+          "n8n",
+          "N8N_OUTBOUND_WEBHOOK_SECRET is required before an OS-to-n8n webhook can fire",
+        );
+      }
+
+      const res = await n8nFetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Hrmny-Os-Secret": config.outboundWebhookSecret,
+        },
         body: JSON.stringify(input.payload ?? {}),
       });
       if (!res.ok) {

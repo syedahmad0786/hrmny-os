@@ -11,8 +11,31 @@ import { getDb } from "../db";
 
 type Row = MemoryChunk & { id: string };
 
-const EMBED_MODEL =
-  process.env.LLM_EMBED_MODEL?.trim() || "openai/text-embedding-3-small";
+type EmbeddingProvider = "none" | "local" | "openai" | "openrouter";
+
+function embeddingProvider(): EmbeddingProvider {
+  const explicit = process.env.EMBEDDING_PROVIDER?.trim().toLowerCase();
+  if (
+    explicit === "openai" ||
+    explicit === "openrouter" ||
+    explicit === "local"
+  ) {
+    return explicit;
+  }
+  if (process.env.LLM_PROVIDER?.trim().toLowerCase() === "openrouter") {
+    return "openrouter";
+  }
+  return "none";
+}
+
+function embeddingModel(provider: EmbeddingProvider): string {
+  const configured =
+    process.env.LLM_EMBED_MODEL?.trim() || process.env.EMBEDDING_MODEL?.trim();
+  if (configured) return configured;
+  return provider === "openrouter"
+    ? "openai/text-embedding-3-small"
+    : "text-embedding-3-small";
+}
 
 /** Deterministic 1536-d bag-of-tokens vector when OpenRouter embeddings unavailable. */
 function localEmbed(text: string): number[] {
@@ -37,36 +60,60 @@ function localEmbed(text: string): number[] {
   return out.map((v) => (v ?? 0) / norm);
 }
 
-/** Embed text via OpenRouter; falls back to local hash vectors for demo pgvector. */
-export async function embedText(text: string): Promise<number[]> {
-  const key = process.env.OPENROUTER_API_KEY?.trim();
-  if (key && process.env.LLM_PROVIDER !== "mock") {
-    try {
-      const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${key}`,
-          "content-type": "application/json",
-          "http-referer": "https://hrmny-os.vercel.app",
-          "x-title": "hrmny-os",
-        },
-        body: JSON.stringify({
-          model: EMBED_MODEL,
-          input: text.slice(0, 8000),
-        }),
-      });
-      if (res.ok) {
-        const json = (await res.json()) as {
-          data?: Array<{ embedding?: number[] }>;
-        };
-        const emb = json.data?.[0]?.embedding;
-        if (Array.isArray(emb) && emb.length === 1536) return emb;
-      }
-    } catch {
-      /* fall through to local */
-    }
+/**
+ * Produce a vector only through the explicitly selected bridge. Live provider
+ * errors fail loud; they never silently persist a local hash as semantic data.
+ */
+export async function embedText(text: string): Promise<number[] | null> {
+  const provider = embeddingProvider();
+  if (provider === "none") return null;
+  if (provider === "local") {
+    if (process.env.ALLOW_LOCAL_EMBEDDINGS !== "true") return null;
+    return localEmbed(text);
   }
-  return localEmbed(text);
+
+  const key =
+    provider === "openai"
+      ? process.env.OPENAI_API_KEY?.trim()
+      : process.env.OPENROUTER_API_KEY?.trim();
+  if (!key) {
+    throw new Error(
+      `EMBEDDING_CONFIG_MISSING:${provider === "openai" ? "OPENAI_API_KEY" : "OPENROUTER_API_KEY"}`,
+    );
+  }
+  const endpoint =
+    provider === "openai"
+      ? "https://api.openai.com/v1/embeddings"
+      : "https://openrouter.ai/api/v1/embeddings";
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${key}`,
+    "content-type": "application/json",
+  };
+  if (provider === "openrouter") {
+    headers["http-referer"] =
+      process.env.NEXT_PUBLIC_APP_URL?.trim() || "https://hrmny-os.vercel.app";
+    headers["x-title"] = "hrmny-os";
+  }
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: embeddingModel(provider),
+      input: text.slice(0, 8000),
+      dimensions: 1536,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`EMBEDDING_PROVIDER_ERROR:${provider}:${res.status}`);
+  }
+  const json = (await res.json()) as {
+    data?: Array<{ embedding?: number[] }>;
+  };
+  const embedding = json.data?.[0]?.embedding;
+  if (!Array.isArray(embedding) || embedding.length !== 1536) {
+    throw new Error(`EMBEDDING_RESPONSE_INVALID:${provider}`);
+  }
+  return embedding;
 }
 
 async function loadChunks(limit = 200): Promise<Row[]> {
@@ -93,7 +140,7 @@ async function loadChunks(limit = 200): Promise<Row[]> {
   }));
 }
 
-/** Persist into Postgres memory_chunk and embed when OpenRouter is live. */
+/** Persist the chunk; embedding remains null until an approved provider exists. */
 export async function persistMemoryChunk(
   chunk: MemoryChunk,
 ): Promise<{ id: string }> {
@@ -106,7 +153,7 @@ export async function persistMemoryChunk(
   const embedding = await embedText(chunk.content);
   return upsertMemoryChunk(chunk, {
     persist: async (c) => {
-      const vectorLiteral = `[${embedding.join(",")}]`;
+      const vectorLiteral = embedding ? `[${embedding.join(",")}]` : null;
       const rows = await db.execute<{ id: string }>(sql`
         insert into public.memory_chunk (source_type, source_id, content, metadata, embedding)
         values (
@@ -149,9 +196,7 @@ async function vectorSearch(
           ? sql`and metadata->>'clientId' = ${input.clientId}`
           : sql``
       }
-      ${
-        input.dealId ? sql`and metadata->>'dealId' = ${input.dealId}` : sql``
-      }
+      ${input.dealId ? sql`and metadata->>'dealId' = ${input.dealId}` : sql``}
       ${
         input.companyId
           ? sql`and metadata->>'companyId' = ${input.companyId}`
@@ -165,11 +210,7 @@ async function vectorSearch(
               and (metadata->>'clientId' is null or metadata->>'clientId' = '')`
           : sql``
       }
-      ${
-        input.taskId
-          ? sql`and metadata->>'taskId' = ${input.taskId}`
-          : sql``
-      }
+      ${input.taskId ? sql`and metadata->>'taskId' = ${input.taskId}` : sql``}
       ${
         input.sourceTypes?.length
           ? sql`and source_type = any(${input.sourceTypes}::text[])`
@@ -192,11 +233,63 @@ async function vectorSearch(
  * Retrieve with deal/client/user sandbox filters.
  * Prefers pgvector cosine when embeddings exist; falls back to keyword.
  */
+/**
+ * Fill null embeddings only when an explicit provider is configured. Mock or
+ * absent providers leave the rows null so a later live backfill can distinguish
+ * genuine semantic vectors from local demo hashes.
+ */
+export async function backfillMissingEmbeddings(
+  limit = 50,
+): Promise<{ updated: number; skipped?: string }> {
+  const db = getDb();
+  if (!db) return { updated: 0, skipped: "no_db" };
+  if (embeddingProvider() === "none") {
+    return { updated: 0, skipped: "no_embedding_provider" };
+  }
+  if (
+    embeddingProvider() === "local" &&
+    process.env.ALLOW_LOCAL_EMBEDDINGS !== "true"
+  ) {
+    return { updated: 0, skipped: "local_embeddings_not_approved" };
+  }
+  const rows = await db.execute<{ id: string; content: string }>(sql`
+    select id, content
+    from public.memory_chunk
+    where embedding is null
+    order by created_at asc
+    limit ${limit}
+  `);
+  let updated = 0;
+  for (const row of rows) {
+    const embedding = await embedText(row.content);
+    if (!embedding) return { updated, skipped: "embedding_unavailable" };
+    const vectorLiteral = `[${embedding.join(",")}]`;
+    await db.execute(sql`
+      update public.memory_chunk
+      set embedding = ${vectorLiteral}::vector
+      where id = ${row.id}::uuid
+    `);
+    updated += 1;
+  }
+  return { updated };
+}
+
 export async function searchMemory(
   input: RetrieveMemoryInput,
 ): Promise<RetrievedChunk[]> {
+  if (
+    !input.clientId &&
+    !input.employeeId &&
+    !input.dealId &&
+    !input.companyId &&
+    !input.taskId
+  ) {
+    throw new Error("MEMORY_SCOPE_REQUIRED");
+  }
   const queryEmbedding = await embedText(input.query);
-  const vectorHits = await vectorSearch(input, queryEmbedding);
+  const vectorHits = queryEmbedding
+    ? await vectorSearch(input, queryEmbedding)
+    : [];
   if (vectorHits.length) {
     return retrieveMemory(input, {
       search: async () => vectorHits,

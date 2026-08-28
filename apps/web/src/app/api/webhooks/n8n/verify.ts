@@ -11,7 +11,8 @@ function safeEqual(a: string, b: string): boolean {
  * Verify an n8n webhook against N8N_WEBHOOK_SECRET.
  * - `sha256=<hex>` → HMAC-SHA256 of the raw body (preferred).
  * - otherwise → the shared secret sent verbatim as a static header token.
- * Fails closed: no secret configured ⇒ reject in production.
+ * Fails closed in every environment. This bridge has its own credential;
+ * CRON_SECRET is intentionally not accepted across this trust boundary.
  */
 export function verifyN8nSignature(
   rawBody: string,
@@ -19,16 +20,9 @@ export function verifyN8nSignature(
 ): { ok: boolean; reason: string } {
   const secret =
     process.env.N8N_WEBHOOK_SECRET?.trim() ||
-    process.env.HRMNY_N8N_WEBHOOK_SECRET?.trim() ||
-    process.env.CRON_SECRET?.trim();
+    process.env.HRMNY_N8N_WEBHOOK_SECRET?.trim();
   if (!secret) {
-    if (process.env.NODE_ENV === "production") {
-      return { ok: false, reason: "N8N_WEBHOOK_SECRET not configured" };
-    }
-    return {
-      ok: true,
-      reason: "N8N_WEBHOOK_SECRET unset — accepted in non-production only",
-    };
+    return { ok: false, reason: "N8N_WEBHOOK_SECRET not configured" };
   }
   const signature = signatureHeader?.trim();
   if (!signature) {

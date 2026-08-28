@@ -5,7 +5,7 @@
 
 **Start here:** fill [BUILD-ACCESS-INVENTORY.md](./BUILD-ACCESS-INVENTORY.md) first. Client lock: `XERO_WRITE_ENABLED=false`, dual OpenRouter workspaces (general + privileged).
 
-Companion: `PRODUCTION-OWNERSHIP-ACCESS-REGISTER.md` (ownership + how each connection is accepted), `MASTER-PLAN-V2.md` (what each key unblocks).
+Companion: `PRODUCTION-OWNERSHIP-ACCESS-REGISTER.md` (ownership + how each connection is accepted), `MASTER-PLAN-V2.md` (what each key unblocks), `docs/audits/2026-08-27-os-completion/HUMAN-GATES.md` (consolidated request).
 
 ## Tier 1 — blocks everything AI (Phase 0 / M7)
 
@@ -21,7 +21,7 @@ Companion: `PRODUCTION-OWNERSHIP-ACCESS-REGISTER.md` (ownership + how each conne
 |---|---|---|---|---|
 | 4 | Apollo API key (scoped to hrmny OS, with a monthly credit limit) | `APOLLO_API_KEY`, `APOLLO_MODE=live` | app.apollo.io → Settings → API | Lead sourcing + enrichment |
 | 5 | Hunter team API key **with funded Email Verifier credits** (account currently dead — needs re-provisioning) | `HUNTER_API_KEY`, `HUNTER_MODE=live` | hunter.io → API | Verified-email gate — **an M3 payment trigger** |
-| 6 | NeverBounce API key + credits (currently 0) | `NEVERBOUNCE_API_KEY` | neverbounce.com → API | Verification fallback |
+| 6 | NeverBounce API key + credits (currently 0) | `NEVERBOUNCE_API_KEY`, `NEVERBOUNCE_MODE=live`, optional `EMAIL_VERIFICATION_PROVIDER=neverbounce` | neverbounce.com → API | Verification fallback (no longer requires `HUNTER_MODE=live`) |
 | 7 | Composio workspace + API key; then authorize **Gmail** connection in-app | `COMPOSIO_API_KEY`, `COMPOSIO_WEBHOOK_SECRET` | app.composio.dev → Settings → API keys | HITL outreach send (M8); LinkedIn publish (M9); code is already wired |
 | 8 | Inngest account keys | `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY` | app.inngest.com → project keys | Daily AI pipelines (5-min cron can't run them) |
 

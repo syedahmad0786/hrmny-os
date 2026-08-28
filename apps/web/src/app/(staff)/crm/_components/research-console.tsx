@@ -8,12 +8,19 @@ import { CrmBtn, CrmEmpty, CrmTag } from "@/components/crm/ui";
 export function ResearchConsole() {
   const utils = trpc.useUtils();
   const settings = trpc.salesOs.settings.get.useQuery();
-  const researched = trpc.salesOs.research.list.useQuery({ state: "researched" });
+  const researched = trpc.salesOs.research.list.useQuery({
+    state: "researched",
+  });
   const rework = trpc.salesOs.research.list.useQuery({ state: "rework" });
   const approved = trpc.salesOs.research.list.useQuery({ state: "approved" });
   const contactsFound = trpc.salesOs.contacts.list.useQuery({ state: "found" });
-  const contactsRework = trpc.salesOs.contacts.list.useQuery({ state: "rework" });
-  const contacts = [...(contactsFound.data ?? []), ...(contactsRework.data ?? [])];
+  const contactsRework = trpc.salesOs.contacts.list.useQuery({
+    state: "rework",
+  });
+  const contacts = [
+    ...(contactsFound.data ?? []),
+    ...(contactsRework.data ?? []),
+  ];
   const runDaily = trpc.salesOs.research.runDaily.useMutation({
     onSuccess: () => void utils.salesOs.invalidate(),
   });
@@ -32,10 +39,7 @@ export function ResearchConsole() {
   const [feedback, setFeedback] = useState("");
   const [note, setNote] = useState<string | null>(null);
 
-  const companies = [
-    ...(researched.data ?? []),
-    ...(rework.data ?? []),
-  ];
+  const companies = [...(researched.data ?? []), ...(rework.data ?? [])];
 
   return (
     <section className="mt-6" data-testid="sales-os-research-console">
@@ -43,8 +47,9 @@ export function ResearchConsole() {
         <div>
           <h2 className="text-lg font-semibold">Research gates</h2>
           <p className="text-sm text-[var(--muted)]">
-            Today’s sector: {settings.data?.sectorToday ?? "…"}. Gate 1 company →
-            enrich → Gate 2 contact → draft. Nothing sends itself.
+            Today’s sector: {settings.data?.sectorToday ?? "…"}. Gate 1 company
+            → free contact discovery → Gate 2 contact → draft. Nothing sends
+            itself.
           </p>
         </div>
         <CrmBtn
@@ -52,9 +57,13 @@ export function ResearchConsole() {
           data-testid="sales-os-run-research"
           disabled={runDaily.isPending}
           onClick={() =>
-            runDaily.mutateAsync({}).then((r) =>
-              setNote(`Researched ${r.created.length} · skipped ${r.skipped.length}`),
-            )
+            runDaily
+              .mutateAsync({})
+              .then((r) =>
+                setNote(
+                  `Researched ${r.created.length} · skipped ${r.skipped.length}`,
+                ),
+              )
           }
         >
           {runDaily.isPending ? "Researching…" : "Run daily research"}
@@ -80,7 +89,11 @@ export function ResearchConsole() {
               />
             ) : (
               companies.map((c) => (
-                <article key={c.id} className="crm-approval-mini" data-testid="sales-os-company">
+                <article
+                  key={c.id}
+                  className="crm-approval-mini"
+                  data-testid="sales-os-company"
+                >
                   <div className="flex items-center justify-between gap-2">
                     <strong>{c.name}</strong>
                     <CrmTag kind={c.temperature === "hot" ? "danger" : "info"}>
@@ -89,7 +102,9 @@ export function ResearchConsole() {
                   </div>
                   <p className="text-sm">{c.whyThis}</p>
                   {c.reworkFeedback ? (
-                    <p className="text-xs text-[var(--muted)]">Rework: {c.reworkFeedback}</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      Rework: {c.reworkFeedback}
+                    </p>
                   ) : null}
                   <div className="crm-approval-actions">
                     <CrmBtn
@@ -127,7 +142,7 @@ export function ResearchConsole() {
 
         <aside className="crm-panel">
           <div className="crm-panel-head">
-            <h3>Approved — enrich</h3>
+            <h3>Approved — find people</h3>
             <CrmTag kind="success">{(approved.data ?? []).length}</CrmTag>
           </div>
           <div className="crm-panel-body crm-approval-stack">
@@ -136,14 +151,22 @@ export function ResearchConsole() {
                 <strong>{c.name}</strong>
                 <CrmBtn
                   variant="primary"
-                  disabled={enrich.isPending || c.temperature === "cool" || c.temperature === "cold"}
+                  disabled={
+                    enrich.isPending ||
+                    c.temperature === "cool" ||
+                    c.temperature === "cold"
+                  }
                   onClick={() =>
-                    enrich.mutateAsync({ id: c.id }).then((r) =>
-                      setNote(`Enriched ${r.created.length} contacts · ${r.skipped.length} skipped`),
-                    )
+                    enrich
+                      .mutateAsync({ id: c.id })
+                      .then((r) =>
+                        setNote(
+                          `Found ${r.created.length} contacts · ${r.skipped.length} skipped · 0 credits`,
+                        ),
+                      )
                   }
                 >
-                  Fetch contacts
+                  Find contacts · 0 credits
                 </CrmBtn>
               </article>
             ))}
@@ -167,10 +190,17 @@ export function ResearchConsole() {
             />
           </div>
           {contacts.length === 0 ? (
-            <CrmEmpty title="No contacts waiting" hint="Approve a company and fetch contacts." />
+            <CrmEmpty
+              title="No contacts waiting"
+              hint="Approve a company and find contacts."
+            />
           ) : (
             contacts.map((c) => (
-              <article key={c.id} className="crm-approval-mini" data-testid="sales-os-contact">
+              <article
+                key={c.id}
+                className="crm-approval-mini"
+                data-testid="sales-os-contact"
+              >
                 <div className="flex justify-between gap-2">
                   <strong>{c.fullName}</strong>
                   <span className="text-xs text-[var(--muted)]">
@@ -179,7 +209,9 @@ export function ResearchConsole() {
                   </span>
                 </div>
                 {c.reworkFeedback ? (
-                  <p className="text-xs text-[var(--muted)]">Rework: {c.reworkFeedback}</p>
+                  <p className="text-xs text-[var(--muted)]">
+                    Rework: {c.reworkFeedback}
+                  </p>
                 ) : null}
                 <div className="crm-approval-actions">
                   <CrmBtn
@@ -190,7 +222,11 @@ export function ResearchConsole() {
                         .then((row) => {
                           if (row.id) return draft.mutateAsync({ id: row.id });
                         })
-                        .then(() => setNote("Contact approved · multi-channel drafts queued"))
+                        .then(() =>
+                          setNote(
+                            "Contact approved · multi-channel drafts queued",
+                          ),
+                        )
                     }
                   >
                     Approve + draft
@@ -214,7 +250,11 @@ export function ResearchConsole() {
                     Reject
                   </CrmBtn>
                   {c.linkedinUrl ? (
-                    <Link className="text-sm underline" href={c.linkedinUrl} target="_blank">
+                    <Link
+                      className="text-sm underline"
+                      href={c.linkedinUrl}
+                      target="_blank"
+                    >
                       Open LinkedIn
                     </Link>
                   ) : null}

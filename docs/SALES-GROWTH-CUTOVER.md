@@ -1,109 +1,77 @@
-# Sales & Growth → CRM cutover
+# Sales Growth operating contract
 
-**Replaces:** Claude Code CLI + Vercel `hrmny-sales-growth` (Ayham’s Sales & Growth loop)  
-**Lives in:** hrmny OS CRM (`/crm/hunt`, `/crm/research`, `/crm/outreach`, `/crm/settings/sales-os`)  
-**Rule:** AI proposes; the gate disposes. No autonomous send.
+**Canonical surface:** HRMNY OS (`/crm/hunt`, `/crm/research`, `/crm`, `/crm/outreach`)
+**System of record:** Supabase PostgreSQL
+**Rule:** AI and providers propose evidence; a person approves every paid lookup and outbound action.
 
-The Windows Claude project and Drive zip were not mounted at implementation time.
-SOP defaults are seeded from *hrmny Sales & Growth System — Complete Documentation*
-v3.0 (2026-02-27). Staff edit them in Sales OS; `/evolve` proposes diffs.
+This replaces the operator-facing Claude/Vercel prototype with a single CRM loop:
 
----
+`Signal → Research → Person → Outreach → Pipeline → Learn → next signal`
 
-## Parallel run (two weeks)
+The detailed company/contact/deal/admin objects remain available under the CRM **More** menu. Synthetic demo controls are collapsed and clearly labeled. Automated proof records are hidden from ordinary Chat views without being deleted.
 
-1. Keep Claude Code + `https://hrmny-sales-growth.vercel.app` **read-only for new
-   work** after the CRM module is used daily. Do not delete the Vercel project —
-   archive it after the parallel window.
-2. Run both for two weeks. New research, enrich, drafts, and sends happen only
-   in the CRM. Claude is a fallback if a gate is blocked.
-3. Import June `dashboard.db` / JSON via **CRM → Sales OS → June dashboard.db
-   import** (dry-run first). Lineage keeps re-imports idempotent
-   (`runSalesGrowthImport`).
-4. After two clean weeks: archive (not delete) Vercel `hrmny-sales-growth`.
-   Freeze the Claude project SOPs; the CRM settings row is the system of record.
+## Daily operating loop
 
-## What is not the deal system of record
+| Step     | HRMNY surface                 | Definition of done                                                                                                           |
+| -------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Signal   | Sales Growth / Inbound        | A real company moment, role, market, or warm introduction is captured with source evidence.                                  |
+| Research | Research gates                | Company fit and timing are reviewed at Gate 1. Reject/rework remains explicit.                                               |
+| Person   | Apollo free search / Contacts | People Search returns reviewable candidates at 0 credits. One decision-maker is chosen; enrichment is separately approved.   |
+| Outreach | Outreach                      | A company-specific email/LinkedIn draft is approved or returned for rework. Nothing auto-sends.                              |
+| Pipeline | Pipeline                      | The deal has one owner, current stage, and next action. Closed and automated synthetic deals do not inflate the Sales badge. |
+| Learn    | Sales Growth settings         | Weekly changes are proposed from outcomes and require a separate Apply action.                                               |
 
-- **Asana “Lead Pipeline 2026”** — stop using it for stages. Work/Asana stays
-  for delivery, not sales.
-- **Google Sheets outreach tracker** — replaced by `outreach_items`.
-- **Gmail Apps Script 30-min poller** — replaced by Workspace reply ingest on
-  `/crm/settings/sales-os` and `salesOs.replies.ingest`.
+## Apollo two-sided contract
 
-## Connections (Settings → Connections)
+### Free discovery
 
-Required before first live mailbox send:
+- Operation: `POST https://api.apollo.io/api/v1/mixed_people/api_search`.
+- Apollo documents People API Search as 0 credits and says it does not return email or phone data.
+- HRMNY sends an explicit role/market/company query, bounds results to 10, returns normalized fields to the browser, and does not write CRM state.
 
-| Connection | Purpose | Live status 2026-08-25 |
-|---|---|---|
-| Google Workspace | HITL Gmail send + reply ingest (`@hrmny.co` only) | **Blocked.** Production has 1 error row: token expired/revoked (400). Staff Connections UI needs `@hrmny.co` SSO. Cloud Chrome / Playwright had no Workspace session. |
-| Apollo.io | People search / org enrich / intent CSV | **Mock** on `hrmny-os`. Ayham shared access (Aug 21); key still not pasted in Connections. The Vercel Sales & Growth app shows “Apollo Connected” in **Demo Mode** — that is not the CRM vault. |
-| Hunter | Email verify | **Mock.** Paste key in Connections. |
-| NeverBounce | Verify fallback | No Connections card. Set `NEVERBOUNCE_API_KEY` (credits were 0 historically). |
-| OpenRouter | Research + draft + classify + reflect | **Configured**. Code default is now `stealth/ox-alpha` (free). Production `/api/ready` may still show `liquid/lfm-2.5-2.6b:free` until `LLM_DEFAULT_MODEL` is unset or set to `stealth/ox-alpha`. Paid models stay blocked. |
+### One approved connection proof
 
-Do **not** connect for outbound: LinkedIn unofficial MCP / Playwright /
-Phantombuster / Dripify, Resend/Mailgun/SES for cold mail, Apollo sequences,
-Outreach.io, Instantly.
+- Operation: `POST https://api.apollo.io/api/v1/people/match`.
+- The request uses the Apollo person ID and available identity fields.
+- `reveal_personal_emails=false`, `reveal_phone_number=false`, `run_waterfall_email=false`, and `run_waterfall_phone=false` are mandatory.
+- The owner authorized exactly one enrichment. A fixed `integration_inbox` receipt is claimed before the call, so another candidate or uncertain retry is blocked.
+- Apollo does not document a request idempotency key for this operation. A failed/uncertain receipt therefore requires provider-usage and CRM reconciliation, never automatic replay.
+- A successful match dedupes/reuses one company, contact, and open deal. It never invents `hello@domain` and never calls Hunter/NeverBounce.
+- One conservative `apollo_contact` credit is recorded after a provider attempt. The global Apollo paid-operation flag stays false.
 
-### How to finish connections (human, Harmony Chrome)
+## Outreach boundary
 
-Cursor’s Harmony/Browser MCP was down in this run. Composio cloud Chrome and
-Playwright/Chromium were used instead. Neither had an `@hrmny.co` Google
-session, so OAuth could not be completed from the agent VM.
+- Email remains two steps: **Approve draft** then an independently authorized Gmail send.
+- LinkedIn remains copy/open/mark-sent assistance. Do not connect browser automation, unofficial MCP senders, sequences, or autonomous outreach.
+- Suppression, unsubscribe, no-go sectors, and the global pause switch apply before any send.
+- This release does not authorize an email, LinkedIn message, campaign, invoice, publication, or ad spend.
 
-1. In Google Cloud Console, on the **same** OAuth client as
-   `GOOGLE_OAUTH_CLIENT_ID` / `SECRET` (the client used for token refresh), add
-   Authorized redirect URI:
-   `https://hrmny-os.vercel.app/api/integrations/google-workspace/callback`
-   (plus `http://localhost:3000/api/integrations/google-workspace/callback` for
-   local). Do **not** use the Supabase `/auth/v1/callback` for mailbox tokens.
-2. On your machine, open Harmony Chrome signed in as `@hrmny.co`.
-3. Go to [https://hrmny-os.vercel.app/settings/connections#conn-google_workspace](https://hrmny-os.vercel.app/settings/connections#conn-google_workspace).
-4. If the last error is “Token has been expired or revoked”, **Heal will stay
-   disabled** — that is correct. Click **Reconnect**. Dedicated Google consent
-   writes access + refresh tokens to Vault.
-5. Use Workspace only — not personal Gmail. After Google returns, you should
-   land on Connections with `?gw=connected`.
-6. Apollo and Hunter keys can wait. Get the Apollo passcode from Ayham when
-   ready to paste.
-7. Confirm OpenRouter stays on a free route (`stealth/ox-alpha`). Set
-   `NEVERBOUNCE_API_KEY` if verify-fallback credits are funded.
-8. `/crm/settings/sales-os` is on this PR — it 404s on production until merge.
+## Data clarity
 
-### Import sources found
+- Known `E2E`, `Live Proof`, `Closed Loop`, `Demo Funnel`, `Handover Smoke`, and similar automated records remain in the database for audit and regression testing.
+- Chat filters those records and generated proof agents by default, reports how many are hidden, and offers **Show test records** for operators.
+- No cleanup control in Sales Growth deletes production data. Any archive/delete action requires an exact inventory and separate approval.
 
-| Source | Where | Notes |
-|---|---|---|
-| Official spec v3.0 | [Drive doc](https://docs.google.com/document/d/1nn_zPF5srzhoVqVmhNE7VeAETs4UQzgDJq4WmJAiG8Y/edit) | Already seeded into Sales OS defaults |
-| `sales-growth.zip` (670 MB) | Drive `1uMxKjk_IHMli6mXuUrWbTZaXiREQUpf3`, owner `ay@hrmny.co` | June prototype + likely `dashboard.db`. Too large to pull in this VM. |
-| `hrmny_OS_Module1_Handover.zip` (54 MB) | Drive `1G9jJ-TlZpQGpod8gus2dP0bDfBFVBEEt` | Briefs + anonymized sample CSVs only — no `dashboard.db` |
-| Vercel `hrmny-sales-growth` | `prj_yZoAIb0VTohQVroTTxss6IFqEWJI` on Ahmad’s personal team | Live at `https://hrmny-sales-growth.vercel.app` in Demo Mode. Last production deploy is old. Keep archived after the parallel window. |
+## Legacy cutover
 
-## Compliance before go-live
+1. HRMNY OS is the only destination for new research, contact review, outreach drafts, and pipeline movement.
+2. Historical Sales Growth JSON/CSV imports run in dry-run mode first and preserve lineage for replay-safe application.
+3. Asana “Lead Pipeline 2026” and spreadsheet trackers are not deal systems of record. Asana can remain a bounded import/reconciliation source until signed off.
+4. Legacy Vercel/Claude assets are not deleted by this release. Archive decisions need exact asset IDs and separate destructive approval.
 
-- [ ] SPF / DKIM / DMARC live on `hrmny.co`
-- [ ] Owner sign-off on ICP no-go list, email footer, and 24-month unused-lead
-      retention (Sales OS settings)
-- [ ] Daily Gmail cap ≤ 15 / mailbox until reputation is proven
-- [ ] Weekly LinkedIn assist cap ≤ 20 / person
-- [ ] Global pause switch understood (`Sales OS → Pause all outreach`)
-- [ ] One-click unsubscribe (`/api/sales-os/unsubscribe`) tested
-- [ ] No tracking pixels
+## Production acceptance
 
-## Daily loop in the CRM
+Accept each state separately:
 
-| Old Claude command | CRM |
-|---|---|
-| `/daily-research` `/find-leads` | Hunt / Research → Run daily research |
-| Gate 1 / Gate 2 | Approve / Reject / Rework on the research console |
-| `/fetch-contacts` | Fetch contacts (Apollo credit budget) |
-| `/draft-outreach` | Approve + draft → `/crm/outreach` |
-| `/send-linkedin` | Copy + Open LinkedIn + Mark sent / accepted |
-| `/process-intent-leads` | Inbound or Sales OS → Apollo intent CSV |
-| `/dashboard` `/pipeline-review` | `/crm` digest strip + `/crm/deals` stall flags |
-| `/reflect` `/evolve` | Sales OS → Propose weekly changes (HITL apply) |
+1. **Code:** lint, typecheck, unit/contract tests, and production build pass at one SHA.
+2. **Migration:** additive receipt schema is present; journal/index/RLS/grants read back.
+3. **Deployment:** production resolves to the exact merged SHA and `/api/ready` is healthy.
+4. **Free provider read:** live Apollo search returns plausible UAE professional candidates and explicitly reports 0 credits.
+5. **One paid provider call:** exactly one People Match is accepted with all four paid-field flags false.
+6. **Destination:** one receipt, one conservative credit entry, and one reconciled CRM company/contact/deal read back.
+7. **Replay/reconciliation:** same candidate returns the prior result without another call; another candidate is blocked; uncertain state stops for review.
+8. **Recovery:** previous deployment is identified; receipt-based reconciliation and forward-fix paths are documented; no destructive rollback is assumed.
+9. **UX:** the Sales Growth loop, primary nav, compact settings, and default-hidden Chat test records pass authenticated desktop and narrow-viewport checks.
+10. **User acceptance:** Ayham/Maolham approval is recorded separately; a green deployment is not inferred as client acceptance.
 
-Email send remains two clicks: **Approve draft** then **Send via Gmail**.
-LinkedIn never auto-sends.
+Official evidence: [Apollo People API Search](https://docs.apollo.io/reference/people-api-search), [Apollo People Enrichment](https://docs.apollo.io/reference/people-enrichment), and the [Apollo REST OpenAPI](https://docs.apollo.io/openapi/apollo-rest-api.json).

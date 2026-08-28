@@ -1935,7 +1935,6 @@ export async function requireGoalAccess(
   goalId: string,
   manage = false,
 ): Promise<WorkGoal> {
-  const employeeId = actor(ctx);
   const db = getDb();
   let goal: WorkGoal | undefined;
   if (!db) goal = getDemoWork().goals.get(goalId);
@@ -6194,7 +6193,7 @@ export const workManagementRouter = router({
           employeeId === ctx.employeeId ? "viewer" : "editor",
         );
         const db = getDb();
-        let added = false;
+        let added: boolean;
         if (!db) {
           const followers =
             getDemoWork().followers.get(input.itemId) ?? new Set();
@@ -7827,7 +7826,7 @@ export const workManagementRouter = router({
         if (input.customTaskTypeId)
           await requireCustomTaskTypeAccess(ctx, input.customTaskTypeId);
         const db = getDb();
-        let completedAt: string | null = null;
+        let completedAt: string | null;
         if (!db) {
           const store = getDemoWork();
           const item = store.items.get(input.itemId)!;

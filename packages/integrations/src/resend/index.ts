@@ -16,6 +16,8 @@ export type EmailSendInput = {
   /** Rendered report body (markdown); sent as text/plain to the provider. */
   markdown: string;
   from?: string;
+  /** Stable operation key. Resend retains successful keys for 24 hours. */
+  idempotencyKey: string;
 };
 
 export type EmailSendResult = {
@@ -49,6 +51,10 @@ function assertRecipients(input: EmailSendInput): void {
   if (input.to.length === 0) {
     throw new Error("resend: refusing to send with no recipients");
   }
+  const key = input.idempotencyKey.trim();
+  if (!key || key.length > 256) {
+    throw new Error("resend: idempotencyKey must be 1-256 characters");
+  }
 }
 
 function resolveLiveFrom(config: ResendConfig): string {
@@ -65,10 +71,30 @@ function resolveLiveFrom(config: ResendConfig): string {
 /** Mock — never sends; records each call so tests/CI can assert delivery. */
 export function createResendMock(): EmailSendAdapter {
   const sends: EmailSendResult[] = [];
+  const receipts = new Map<
+    string,
+    { signature: string; result: EmailSendResult }
+  >();
   return {
     mode: "mock",
     async send(input) {
       assertRecipients(input);
+      const key = input.idempotencyKey.trim();
+      const signature = JSON.stringify({
+        from: input.from ?? null,
+        markdown: input.markdown,
+        subject: input.subject,
+        to: input.to,
+      });
+      const existing = receipts.get(key);
+      if (existing) {
+        if (existing.signature !== signature) {
+          throw new Error(
+            "resend: idempotencyKey was already used for a different payload",
+          );
+        }
+        return existing.result;
+      }
       const result: EmailSendResult = {
         mode: "mock",
         id: `mock-${sends.length + 1}`,
@@ -76,6 +102,7 @@ export function createResendMock(): EmailSendAdapter {
         subject: input.subject,
       };
       sends.push(result);
+      receipts.set(key, { signature, result });
       return result;
     },
     recorded() {
@@ -103,6 +130,7 @@ export function createResendLive(config: ResendConfig = {}): EmailSendAdapter {
         headers: {
           authorization: `Bearer ${apiKey}`,
           "content-type": "application/json",
+          "idempotency-key": input.idempotencyKey.trim(),
         },
         body: JSON.stringify({
           from: input.from ?? from,

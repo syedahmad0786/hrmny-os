@@ -48,7 +48,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     } else {
       setRole(current);
     }
-  }, [pathname]);
+  }, [isAuthPage]);
 
   useEffect(() => {
     if (!isAuthPage && session.isError) {

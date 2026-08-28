@@ -10,10 +10,7 @@ import {
 } from "@hrmny/gate";
 import { toCsv } from "../crm/csv";
 import { runDemoClosedLoopCore } from "../crm/closed-loop";
-import {
-  closeDurableDeal,
-  durableHandoverPack,
-} from "../crm/handover";
+import { closeDurableDeal, durableHandoverPack } from "../crm/handover";
 import {
   createActivity,
   createCompany,
@@ -135,9 +132,16 @@ export const crmCompaniesRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const row = await createCompany(input);
-      await auditMutation(ctx, "crm.companies.create", "company", row.companyId, null, {
-        ...row,
-      });
+      await auditMutation(
+        ctx,
+        "crm.companies.create",
+        "company",
+        row.companyId,
+        null,
+        {
+          ...row,
+        },
+      );
       return row;
     }),
   update: protectedProcedure
@@ -199,9 +203,16 @@ export const crmContactsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const row = await createContact(input);
-      await auditMutation(ctx, "crm.contacts.create", "contact", row.contactId, null, {
-        ...row,
-      });
+      await auditMutation(
+        ctx,
+        "crm.contacts.create",
+        "contact",
+        row.contactId,
+        null,
+        {
+          ...row,
+        },
+      );
       return row;
     }),
   update: protectedProcedure
@@ -372,7 +383,10 @@ export const crmDealsRouter = router({
               entityType: "deal",
               entityId: moved.deal.dealId,
               state: moved.deal.stage,
-              data: { ...moved.deal, voiceCheckPassed: moved.deal.emailVerified },
+              data: {
+                ...moved.deal,
+                voiceCheckPassed: moved.deal.emailVerified,
+              },
             };
           },
           audit: async (event) => {
@@ -557,9 +571,16 @@ export const crmNotesRouter = router({
         ...input,
         authorEmployeeId: ctx.employeeId,
       });
-      await auditMutation(ctx, "crm.notes.create", "crm_note", row.crmNoteId, null, {
-        ...row,
-      });
+      await auditMutation(
+        ctx,
+        "crm.notes.create",
+        "crm_note",
+        row.crmNoteId,
+        null,
+        {
+          ...row,
+        },
+      );
       return row;
     }),
 });
@@ -593,9 +614,16 @@ export const crmTasksRouter = router({
         ...input,
         ownerEmployeeId: input.ownerEmployeeId ?? ctx.employeeId,
       });
-      await auditMutation(ctx, "crm.tasks.create", "crm_task", row.crmTaskId, null, {
-        ...row,
-      });
+      await auditMutation(
+        ctx,
+        "crm.tasks.create",
+        "crm_task",
+        row.crmTaskId,
+        null,
+        {
+          ...row,
+        },
+      );
       return row;
     }),
   update: protectedProcedure
@@ -763,7 +791,10 @@ export const crmMergeRouter = router({
             duplicateId: input.duplicateId,
             duplicate: duplicate ? { ...duplicate } : null,
           },
-          { survivorId: input.survivorId, mergedDuplicateId: input.duplicateId },
+          {
+            survivorId: input.survivorId,
+            mergedDuplicateId: input.duplicateId,
+          },
         );
       }
       return result;
@@ -789,7 +820,10 @@ export const crmMergeRouter = router({
             duplicateId: input.duplicateId,
             duplicate: duplicate ? { ...duplicate } : null,
           },
-          { survivorId: input.survivorId, mergedDuplicateId: input.duplicateId },
+          {
+            survivorId: input.survivorId,
+            mergedDuplicateId: input.duplicateId,
+          },
         );
       }
       return result;
@@ -816,7 +850,16 @@ export const crmExportRouter = router({
   companies: staffProcedure.query(async () => {
     const rows = await listCompanies();
     return toCsv(
-      ["companyId", "name", "sector", "market", "website", "linkedinUrl", "notes", "createdAt"],
+      [
+        "companyId",
+        "name",
+        "sector",
+        "market",
+        "website",
+        "linkedinUrl",
+        "notes",
+        "createdAt",
+      ],
       rows as unknown as Record<string, unknown>[],
     );
   }),
@@ -1041,38 +1084,27 @@ export const crmRouter = router({
     apolloImport: staffProcedure
       .input(z.object({ query: z.string().min(1).max(200) }))
       .mutation(async ({ ctx, input }) => {
-        const { importApolloCompaniesToCrm } = await import(
-          "../crm/apollo-import"
-        );
-        const { resolveIntegrationApiKey } = await import(
-          "../integrations/resolve-keys"
-        );
-        const { createApolloLive, createEmailVerificationAdapter } =
+        const { importApolloCompaniesToCrm } =
+          await import("../crm/apollo-import");
+        const {
+          resolveApolloRuntimeConfig,
+          resolveEmailVerificationRuntimeConfig,
+        } = await import("../integrations/runtime-adapters");
+        const { createApolloAdapter, createEmailVerificationAdapter } =
           await import("@hrmny/integrations");
-        const { getDemoStore } = await import("../demo-store");
-        const { apiKey } = await resolveIntegrationApiKey(
-          "apollo",
+        const apollo = await resolveApolloRuntimeConfig(ctx.employeeId!);
+        const verifier = await resolveEmailVerificationRuntimeConfig(
           ctx.employeeId!,
         );
-        const hunter = await resolveIntegrationApiKey(
-          "hunter",
-          ctx.employeeId!,
-        );
-        const apolloClient = apiKey
-          ? createApolloLive({ mode: "live", apiKey })
-          : getDemoStore().apollo;
-        const mode = apiKey ? ("live" as const) : ("mock" as const);
+        const apolloClient = createApolloAdapter(apollo.config);
+        const mode = apollo.mode;
         const hits = await apolloClient.searchCompanies(input.query);
         const result = await importApolloCompaniesToCrm({
           query: input.query,
           companies: hits as Record<string, unknown>[],
           mode,
           ownerEmployeeId: ctx.employeeId,
-          verifier: createEmailVerificationAdapter(
-            hunter.apiKey
-              ? { mode: "live", apiKey: hunter.apiKey }
-              : { mode: "mock" },
-          ),
+          verifier: createEmailVerificationAdapter(verifier.config),
         });
         await auditMutation(
           ctx,

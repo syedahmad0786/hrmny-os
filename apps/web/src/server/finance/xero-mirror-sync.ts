@@ -1,4 +1,4 @@
-import { sql } from "@hrmny/db";
+import { auditEvent, sql } from "@hrmny/db";
 import { createXeroAdapter } from "@hrmny/integrations";
 import { getDb } from "../db";
 import { ensureFreshXeroTokens } from "./xero-tokens";
@@ -10,6 +10,8 @@ import { ensureFreshXeroTokens } from "./xero-tokens";
 export async function syncXeroInvoiceMirror(): Promise<{
   mode: string;
   upserted: number;
+  linked: number;
+  paidReconciled: number;
 }> {
   const vault = await ensureFreshXeroTokens();
   const adapter = createXeroAdapter(
@@ -26,31 +28,77 @@ export async function syncXeroInvoiceMirror(): Promise<{
   const invoices = await adapter.listInvoices();
   const db = getDb();
   if (!db) {
-    return { mode: adapter.mode, upserted: invoices.length };
+    return {
+      mode: adapter.mode,
+      upserted: invoices.length,
+      linked: 0,
+      paidReconciled: 0,
+    };
   }
 
   let upserted = 0;
+  let linked = 0;
+  let paidReconciled = 0;
   for (const inv of invoices) {
-    await db.execute(sql`
-      insert into public.xero_invoice_mirror (external_id, payload, synced_at)
-      values (
-        ${inv.externalId},
-        ${JSON.stringify({
-          ...inv.payload,
-          contactName: inv.contactName,
-          amount: inv.amount,
-          currency: inv.currency,
-          status: inv.status,
-          reference: inv.reference,
-        })}::jsonb,
-        now()
-      )
-      on conflict (external_id) do update set
-        payload = excluded.payload,
-        synced_at = now(),
-        updated_at = now()
-    `);
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`
+        insert into public.xero_invoice_mirror (external_id, payload, synced_at)
+        values (
+          ${inv.externalId},
+          ${JSON.stringify({
+            ...inv.payload,
+            contactName: inv.contactName,
+            amount: inv.amount,
+            currency: inv.currency,
+            status: inv.status,
+            reference: inv.reference,
+          })}::jsonb,
+          now()
+        )
+        on conflict (external_id) do update set
+          payload = excluded.payload,
+          synced_at = now(),
+          updated_at = now()
+      `);
+
+      const linkedRows = await tx.execute<{ invoice_id: string }>(sql`
+        update public.xero_invoice_mirror mirror
+        set invoice_id = os_invoice.invoice_id,
+            updated_at = now()
+        from public.invoice os_invoice
+        where mirror.external_id = ${inv.externalId}
+          and os_invoice.xero_invoice_id = mirror.external_id
+          and mirror.invoice_id is distinct from os_invoice.invoice_id
+        returning mirror.invoice_id
+      `);
+      linked += linkedRows.length;
+
+      if (inv.status.trim().toUpperCase() !== "PAID") return;
+      const changed = await tx.execute<{ invoice_id: string }>(sql`
+        update public.invoice
+        set status = 'paid', updated_at = now()
+        where xero_invoice_id = ${inv.externalId}
+          and status = 'issued'
+        returning invoice_id
+      `);
+      for (const row of changed) {
+        await tx.insert(auditEvent).values({
+          actorEmployeeId: null,
+          action: "invoice.reconcile.xero_paid",
+          entityType: "invoice",
+          entityId: row.invoice_id,
+          before: { status: "issued" },
+          after: {
+            status: "paid",
+            xeroInvoiceId: inv.externalId,
+            xeroStatus: inv.status,
+          },
+          reason: "Read-only Xero mirror reconciliation",
+        });
+      }
+      paidReconciled += changed.length;
+    });
     upserted += 1;
   }
-  return { mode: adapter.mode, upserted };
+  return { mode: adapter.mode, upserted, linked, paidReconciled };
 }

@@ -1,4 +1,6 @@
 process.env.DATABASE_URL = "";
+// Explicit legal-identifier fixture for invoice-issuance tests only.
+process.env.HRMNY_TAX_REGISTRATION_NUMBER = "100000000000003";
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDemoStore } from "../demo-store";

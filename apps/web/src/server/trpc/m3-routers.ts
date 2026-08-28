@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "@hrmny/db";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { createApolloLive, createHunterLive } from "@hrmny/integrations";
+import { createApolloAdapter, createHunterAdapter } from "@hrmny/integrations";
 import {
   bootstrapGateRegistry,
   computeQuoteMetrics,
@@ -34,27 +34,27 @@ import {
   staffProcedure,
 } from "./trpc";
 import { month1Router } from "./m4-routers";
-import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
+import {
+  resolveApolloRuntimeConfig,
+  resolveEmailVerificationRuntimeConfig,
+  resolveHunterRuntimeConfig,
+} from "../integrations/runtime-adapters";
 
 bootstrapGateRegistry();
 
 async function apolloFor(employeeId: string) {
-  const { apiKey } = await resolveIntegrationApiKey("apollo", employeeId);
+  const runtime = await resolveApolloRuntimeConfig(employeeId);
   return {
-    client: apiKey
-      ? createApolloLive({ mode: "live", apiKey })
-      : getDemoStore().apollo,
-    live: Boolean(apiKey),
+    client: createApolloAdapter(runtime.config),
+    live: runtime.mode === "live",
   };
 }
 
 async function hunterFor(employeeId: string) {
-  const { apiKey } = await resolveIntegrationApiKey("hunter", employeeId);
+  const runtime = await resolveHunterRuntimeConfig(employeeId);
   return {
-    client: apiKey
-      ? createHunterLive({ mode: "live", apiKey })
-      : getDemoStore().hunter,
-    live: Boolean(apiKey),
+    client: createHunterAdapter(runtime.config),
+    live: runtime.mode === "live",
   };
 }
 
@@ -1156,9 +1156,8 @@ export const clientsRouter = router({
           });
         }
 
-        const { sendPortalInviteMagicLink } = await import(
-          "../auth/portal-magic-link"
-        );
+        const { sendPortalInviteMagicLink } =
+          await import("../auth/portal-magic-link");
         const invite = await sendPortalInviteMagicLink({
           clientId: input.clientId,
           email,
@@ -1205,9 +1204,8 @@ export const clientsRouter = router({
           });
         }
         const email = input.email.toLowerCase();
-        const { sendPortalInviteMagicLink } = await import(
-          "../auth/portal-magic-link"
-        );
+        const { sendPortalInviteMagicLink } =
+          await import("../auth/portal-magic-link");
         const invite = await sendPortalInviteMagicLink({
           clientId: input.clientId,
           email,
@@ -1570,7 +1568,7 @@ export const outreachRouter = router({
 
 export const leadsRouter = router({
   inbound: router({
-    create: publicProcedure
+    create: protectedProcedure
       .input(
         z.object({
           companyName: z.string().min(1),
@@ -1580,98 +1578,12 @@ export const leadsRouter = router({
         }),
       )
       .mutation(async ({ input }) => {
-        if (getDb()) {
-          const { createCompany, createContact, createDeal, createNote } =
-            await import("../crm/repository");
-          const company = await createCompany({
-            name: input.companyName,
-            sector: input.sector ?? null,
-            market: "UAE",
-          });
-          const localPart = input.contactEmail.split("@")[0] ?? "Inbound";
-          const contact = await createContact({
-            companyId: company.companyId,
-            firstName: localPart,
-            email: input.contactEmail,
-            isPrimary: true,
-          });
-          const deal = await createDeal({
-            companyName: company.name,
-            companyId: company.companyId,
-            primaryContactId: contact.contactId,
-            sector: input.sector ?? null,
-            leadSourceLane: "inbound",
-          });
-          if (input.message?.trim()) {
-            await createNote({
-              dealId: deal.dealId,
-              companyId: company.companyId,
-              body: input.message.trim(),
-            });
-          }
-          return {
-            dealId: deal.dealId,
-            companyName: deal.companyName,
-            sector: deal.sector,
-            stage: deal.stage,
-            closeOutcome: deal.closeOutcome,
-            lostReason: deal.lostReason,
-            leadSourceLane: deal.leadSourceLane,
-            buafBudget: deal.buafBudget,
-            buafUrgency: deal.buafUrgency,
-            buafAccess: deal.buafAccess,
-            buafFit: deal.buafFit,
-            buafTemperature: deal.buafTemperature,
-            noGoFlags: [],
-            emailVerified: deal.emailVerified,
-            contactEmail: input.contactEmail,
-            voiceCheckPassed: false,
-            quoteValue: deal.quoteValue,
-            internalCost: deal.internalCost,
-            marginPct: deal.marginPct,
-            discountPct: deal.discountPct,
-            discountApprovalTier: deal.discountApprovalTier,
-            vendorHandlingFeePct: deal.vendorHandlingFeePct,
-            quoteLines: [],
-            ownerEmployeeId: deal.ownerEmployeeId,
-            enrichment: input.message ? { inboundMessage: input.message } : null,
-            commercialMode: "project" as const,
-            companyId: company.companyId,
-            contactId: contact.contactId,
-            durable: true as const,
-          };
-        }
-        const store = getDemoStore();
-        const deal: DemoDeal = {
-          dealId: randomUUID(),
-          companyName: input.companyName,
-          sector: input.sector ?? null,
-          stage: "discover",
-          closeOutcome: null,
-          lostReason: null,
-          leadSourceLane: "inbound",
-          buafBudget: false,
-          buafUrgency: false,
-          buafAccess: false,
-          buafFit: false,
-          buafTemperature: null,
-          noGoFlags: [],
-          emailVerified: false,
-          contactEmail: input.contactEmail,
-          voiceCheckPassed: false,
-          quoteValue: "0.00",
-          internalCost: "0.00",
-          marginPct: "0.00",
-          discountPct: "0.00",
-          discountApprovalTier: null,
-          vendorHandlingFeePct: "20.00",
-          quoteLines: [],
-          ownerEmployeeId: null,
-          enrichment: input.message ? { inboundMessage: input.message } : null,
-          commercialMode: "project",
-        };
-        store.deals.set(deal.dealId, deal);
-        return deal;
+        const { createInboundLead } = await import("../crm/inbound-leads");
+        return createInboundLead({
+          ...input,
+          provider: "staff-ui",
+          idempotencyKey: randomUUID(),
+        });
       }),
   }),
 
@@ -1680,18 +1592,12 @@ export const leadsRouter = router({
     import: protectedProcedure
       .input(z.object({ query: z.string().min(1) }))
       .mutation(async ({ input, ctx }) => {
-        const { importApolloCompaniesToCrm } = await import(
-          "../crm/apollo-import"
-        );
-        const { createEmailVerificationAdapter } = await import(
-          "@hrmny/integrations"
-        );
-        const { resolveIntegrationApiKey } = await import(
-          "../integrations/resolve-keys"
-        );
+        const { importApolloCompaniesToCrm } =
+          await import("../crm/apollo-import");
+        const { createEmailVerificationAdapter } =
+          await import("@hrmny/integrations");
         const apollo = await apolloFor(ctx.employeeId!);
-        const hunter = await resolveIntegrationApiKey(
-          "hunter",
+        const verifier = await resolveEmailVerificationRuntimeConfig(
           ctx.employeeId!,
         );
         const companies = await apollo.client.searchCompanies(input.query);
@@ -1700,11 +1606,7 @@ export const leadsRouter = router({
           companies: companies as Record<string, unknown>[],
           mode: apollo.live ? "live" : "mock",
           ownerEmployeeId: ctx.employeeId,
-          verifier: createEmailVerificationAdapter(
-            hunter.apiKey
-              ? { mode: "live", apiKey: hunter.apiKey }
-              : { mode: "mock" },
-          ),
+          verifier: createEmailVerificationAdapter(verifier.config),
         });
         return result.deals;
       }),

@@ -86,7 +86,7 @@ describe("Work governance", () => {
       true,
     );
     expect(rows.find((row) => row.toolkit === "apollo")?.allowed).toBe(true);
-    expect(rows.find((row) => row.toolkit === "hunter")).toBeUndefined();
+    expect(rows.map((row) => row.toolkit)).not.toContain("hunter");
     expect(await isWorkConnectedAppAllowed("hunter")).toBe(true);
     expect((await getWorkOrganizationPolicy()).appPolicy).toBe("approved_only");
     expect(await isWorkConnectedAppAllowed("slack")).toBe(true);

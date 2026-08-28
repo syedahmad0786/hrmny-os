@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { runAgentTools } from "./agent-tools";
 import { getDemoStore } from "../demo-store";
 
+// Explicit legal-identifier fixture for invoice-issuance tests only.
+process.env.HRMNY_TAX_REGISTRATION_NUMBER = "100000000000003";
+
 /** Matches demo-store seed client used by M4 fixtures. */
 const CLIENT_ID = "c1000000-0000-4000-8000-0000000000a4";
 

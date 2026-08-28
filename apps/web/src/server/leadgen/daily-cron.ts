@@ -5,14 +5,17 @@ import {
 } from "@hrmny/integrations";
 import { getDb } from "../db";
 import { emitHealthSignal } from "../m1-persistence";
-import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
+import {
+  resolveApolloRuntimeConfig,
+  resolveEmailVerificationRuntimeConfig,
+} from "../integrations/runtime-adapters";
 import { runDailyLeadGen } from "./pipeline";
 
 /**
  * Cron-driven daily lead-gen (replaces Inngest until keys exist).
  * Runs once per UTC day after 02:00 (~06:00 Asia/Dubai), HITL-only side
- * effects (digest sink → health_signal / Chat). Apollo/Hunter use env or
- * vault when present; otherwise adapters stay mock.
+ * effects (digest sink → health_signal / Chat). Credentials connect providers;
+ * explicit mode and billing flags activate live/paid operations separately.
  */
 export const LEADGEN_DAILY_SIGNAL = "leadgen_daily";
 /** First cron tick at/after this UTC hour (~06:00 Asia/Dubai). */
@@ -56,18 +59,14 @@ export async function runLeadgenDailyCron(
     return { ran: false, skipped: "already_ran" };
   }
 
-  const [apollo, hunter] = await Promise.all([
-    resolveIntegrationApiKey("apollo"),
-    resolveIntegrationApiKey("hunter"),
+  const [apollo, verifierRuntime] = await Promise.all([
+    resolveApolloRuntimeConfig(),
+    resolveEmailVerificationRuntimeConfig(),
   ]);
 
   const digest = await runDailyLeadGen({
-    leadSource: createLeadSourceAdapter(
-      apollo.apiKey ? { mode: "live", apiKey: apollo.apiKey } : undefined,
-    ),
-    verifier: createEmailVerificationAdapter(
-      hunter.apiKey ? { mode: "live", apiKey: hunter.apiKey } : undefined,
-    ),
+    leadSource: createLeadSourceAdapter(apollo.config),
+    verifier: createEmailVerificationAdapter(verifierRuntime.config),
   });
 
   const { runDailyResearch } = await import("../sales-os/research");
@@ -83,7 +82,7 @@ export async function runLeadgenDailyCron(
     verifiedCount: digest.verifiedCount,
     hotCount: digest.hotCount,
     apolloSource: apollo.source,
-    hunterSource: hunter.source,
+    hunterSource: verifierRuntime.source,
     researched: research?.created.length ?? 0,
     sector: research?.sector ?? null,
     staleEmails: stale,
@@ -99,6 +98,6 @@ export async function runLeadgenDailyCron(
     created: digest.count,
     scored: digest.leads.length,
     apolloSource: apollo.source,
-    hunterSource: hunter.source,
+    hunterSource: verifierRuntime.source,
   };
 }

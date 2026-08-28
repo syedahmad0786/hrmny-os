@@ -23,6 +23,7 @@ test.describe("Delivery won-client agent sandbox", () => {
     });
 
     await page.getByTestId("hunt-apollo-query").fill(query);
+    await page.getByTestId("hunt-test-tools").click();
     await page.getByTestId("hunt-closed-loop-apollo").click();
     await expect(page.getByTestId("hunt-closed-loop-status")).toContainText(
       /Closed loop ready/i,
@@ -41,16 +42,18 @@ test.describe("Delivery won-client agent sandbox", () => {
     expect(clientId).not.toBe(DEMO_CLIENT_ID);
     expect(taskId).not.toBe(DEMO_CREATIVE_TASK_ID);
 
-    await page.goto(
-      `/delivery?clientId=${clientId}&taskId=${taskId}`,
-      { waitUntil: "domcontentloaded" },
-    );
+    await page.goto(`/delivery?clientId=${clientId}&taskId=${taskId}`, {
+      waitUntil: "domcontentloaded",
+    });
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
     });
-    await expect(page.getByTestId("delivery-task-select")).toHaveValue(taskId!, {
-      timeout: 60_000,
-    });
+    await expect(page.getByTestId("delivery-task-select")).toHaveValue(
+      taskId!,
+      {
+        timeout: 60_000,
+      },
+    );
 
     const sandbox = page.getByTestId("delivery-sandbox-client");
     await expect(sandbox).toBeVisible();
@@ -67,7 +70,9 @@ test.describe("Delivery won-client agent sandbox", () => {
       hasText: /Delivery coach/i,
     });
     if ((await coach.count()) > 0) {
-      await agentSelect.selectOption(await coach.first().getAttribute("value")!);
+      await agentSelect.selectOption(
+        await coach.first().getAttribute("value")!,
+      );
     } else {
       await agentSelect.selectOption({ index: 1 });
     }

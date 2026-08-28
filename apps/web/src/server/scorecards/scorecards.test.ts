@@ -5,7 +5,6 @@ import {
   compute,
   dealBuafEvidence,
   DEAL_BUAF_V1,
-  validateWeights,
   type Evidence,
 } from "./engine";
 import {
@@ -19,9 +18,16 @@ import {
   overrideSnapshot,
   resetScorecardMemory,
   saveDefinition,
+  scoreCampaign,
+  scoreClient,
   scoreDealFromBuaf,
+  scoreEntity,
+  scoreLead,
+  scoreSystemHealth,
+  scoreVendor,
   setDefinitionActive,
 } from "./store";
+import { DEMO_CLIENT_ID } from "../demo-store";
 
 const EMAAR_DEAL = "e0000000-0000-4000-8000-000000000002"; // BUAF all true
 const ALBAIK_DEAL = "e0000000-0000-4000-8000-000000000003"; // budget/access/fit true, urgency false
@@ -226,6 +232,51 @@ describe("override requires justification", () => {
     const rows = await listOverrides(snap.scorecardSnapshotId);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.reason).toBe("Signed LOI not yet in CRM");
+  });
+});
+
+describe("entity collectors beyond deal BUAF", () => {
+  it("scores a planted lead/deal on email + company + temperature", async () => {
+    const snap = await scoreLead({ dealId: EMAAR_DEAL });
+    expect(snap.entityKind).toBe("lead");
+    expect(snap.definitionKey).toBe("lead-fit-v1");
+    expect(snap.score).toBeGreaterThan(0);
+  });
+
+  it("scores Demo Co client health", async () => {
+    const snap = await scoreClient({ clientId: DEMO_CLIENT_ID });
+    expect(snap.entityKind).toBe("client");
+    expect(snap.score).toBe(100);
+  });
+
+  it("scores a seeded campaign item", async () => {
+    const snap = await scoreCampaign({
+      campaignItemId: "c9000000-0000-4000-8000-000000000001",
+    });
+    expect(snap.entityKind).toBe("campaign");
+    expect(snap.score).toBeGreaterThan(0);
+  });
+
+  it("scores a planted vendor/company profile", async () => {
+    const snap = await scoreVendor({
+      companyId: "11000000-0000-4000-8000-000000000001",
+    });
+    expect(snap.entityKind).toBe("vendor");
+    expect(snap.score).toBeGreaterThan(0);
+  });
+
+  it("scores system health with write/LLM/DAM locks on", async () => {
+    const snap = await scoreSystemHealth();
+    expect(snap.entityKind).toBe("system_health");
+    expect(snap.score).toBe(100);
+  });
+
+  it("scoreEntity routes lead and refuses a missing client loudly", async () => {
+    const lead = await scoreEntity({ entityKind: "lead", entityId: EMAAR_DEAL });
+    expect(lead.entityKind).toBe("lead");
+    await expect(
+      scoreEntity({ entityKind: "client", entityId: "missing-client" }),
+    ).rejects.toThrow(/Client not found/);
   });
 });
 

@@ -1,10 +1,8 @@
 /**
- * Parallel-payroll reconciliation harness (NOT registered in appRouter).
- *
- * Reads the native payroll run (Postgres) and a Bayzat-source cycle (CSV import
- * shape) for the same period, reconciles them, and records payroll sign-off with
- * maker/checker separation. Wire into root.ts under e.g. `payrollRecon` when the
- * cutover programme is ready to expose it.
+ * Parallel-payroll reconciliation harness — registered on appRouter as
+ * `peopleRecon`. Reads the native payroll run (Postgres) and a Bayzat-source
+ * cycle (CSV import shape) for the same period, reconciles them, and records
+ * payroll sign-off with maker/checker separation.
  */
 import { TRPCError } from "@trpc/server";
 import { sql } from "@hrmny/db";

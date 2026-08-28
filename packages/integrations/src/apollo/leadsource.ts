@@ -1,31 +1,25 @@
 import { IntegrationMisconfiguredError } from "../types";
 import type {
   LeadCandidate,
+  LeadEnrichmentIdentity,
   LeadSearchCriteria,
   LeadSourceAdapter,
 } from "../contracts";
+import {
+  assertApolloPaidOperationAllowed,
+  resolveApolloMode,
+  type ApolloActivationConfig,
+} from "./policy";
 
 /**
  * M8 lead sourcing against the frozen `LeadSourceAdapter` contract (Apollo-shaped).
  * Mock by default; live REST fails loud without a key — same shape as
- * `./index.ts` ApolloAdapter. `searchLeads` → POST /v1/mixed_people/search,
- * `enrichLead` → POST /v1/people/match. Never writes the CRM (dedupe does that).
+ * `./index.ts` ApolloAdapter. `searchLeads` → POST
+ * /api/v1/mixed_people/api_search, `enrichLead` → POST
+ * /api/v1/people/match. Never writes the CRM (dedupe does that).
  */
 
-export type LeadSourceConfig = {
-  mode?: "mock" | "live";
-  apiKey?: string;
-};
-
-function resolveMode(config: LeadSourceConfig): "mock" | "live" {
-  if (config.mode === "mock") return "mock";
-  if (config.mode === "live") return "live";
-  const env = process.env.APOLLO_MODE?.toLowerCase();
-  if (env === "live") return "live";
-  if (env === "mock") return "mock";
-  if ((config.apiKey ?? process.env.APOLLO_API_KEY)?.trim()) return "live";
-  return "mock";
-}
+export type LeadSourceConfig = ApolloActivationConfig;
 
 /** Stable id from a string so re-running the same search dedupes cleanly. */
 function stableId(seed: string): string {
@@ -37,13 +31,32 @@ function stableId(seed: string): string {
 }
 
 /** Map an Apollo `person` record to the frozen LeadCandidate shape. */
-function mapPerson(person: Record<string, unknown>): LeadCandidate {
+function usableEmail(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const email = value.trim();
+  if (!email.includes("@")) return undefined;
+  const compact = email.toLowerCase().replace(/[\s\u00a0]+/g, "");
+  if (
+    compact.includes("[emailprotected]") ||
+    compact.includes("email_not_unlocked")
+  ) {
+    return undefined;
+  }
+  return email;
+}
+
+/** Map an Apollo `person` record to the frozen LeadCandidate shape. */
+export function mapApolloLeadPerson(
+  person: Record<string, unknown>,
+): LeadCandidate {
   const org = (person.organization ?? {}) as Record<string, unknown>;
   return {
-    externalId: String(person.id ?? person.email ?? crypto.randomUUID()),
+    externalId: String(
+      person.id ?? person.person_id ?? person.email ?? crypto.randomUUID(),
+    ),
     fullName: (person.name as string) ?? undefined,
     title: (person.title as string) ?? undefined,
-    email: (person.email as string) ?? undefined,
+    email: usableEmail(person.email),
     emailStatus: (person.email_status as string) ?? undefined,
     companyName: (org.name as string) ?? undefined,
     companyDomain: (org.primary_domain as string) ?? undefined,
@@ -53,6 +66,12 @@ function mapPerson(person: Record<string, unknown>): LeadCandidate {
   };
 }
 
+function enrichmentIdentity(
+  input: string | LeadEnrichmentIdentity,
+): LeadEnrichmentIdentity {
+  return typeof input === "string" ? { email: input } : input;
+}
+
 /** Deterministic mock — same criteria yield the same candidates (idempotent). */
 export function createLeadSourceMock(): LeadSourceAdapter {
   return {
@@ -60,8 +79,7 @@ export function createLeadSourceMock(): LeadSourceAdapter {
     async searchLeads(criteria: LeadSearchCriteria) {
       const titles = criteria.titles?.length ? criteria.titles : ["CMO"];
       const domain =
-        criteria.query?.toLowerCase().replace(/[^a-z0-9]+/g, "") ||
-        "democo";
+        criteria.query?.toLowerCase().replace(/[^a-z0-9]+/g, "") || "democo";
       const perPage = criteria.perPage ?? titles.length;
       return titles.slice(0, perPage).map((title, i) => {
         const email = `lead${i}@${domain}.example`;
@@ -79,19 +97,25 @@ export function createLeadSourceMock(): LeadSourceAdapter {
         } satisfies LeadCandidate;
       });
     },
-    async enrichLead(email: string) {
-      if (!email.includes("@")) return null;
-      const domain = email.split("@")[1] ?? "unknown.local";
+    async enrichLead(input: string | LeadEnrichmentIdentity) {
+      const identity = enrichmentIdentity(input);
+      const email = identity.email;
+      if (!email?.includes("@") && !identity.externalId) return null;
+      const domain =
+        identity.companyDomain ?? email?.split("@")[1] ?? "unknown.local";
+      const stableSeed =
+        identity.externalId ?? email ?? identity.fullName ?? domain;
       return {
-        externalId: stableId(email),
-        fullName: "Alex Prospect",
+        externalId: identity.externalId ?? stableId(stableSeed),
+        fullName: identity.fullName ?? "Alex Prospect",
         title: "CMO",
         email,
         emailStatus: "unverified",
-        companyName: domain.split(".")[0],
-        companyDomain: domain,
+        companyName: identity.companyName ?? domain.split(".")[0],
+        companyDomain: identity.companyDomain ?? domain,
+        linkedinUrl: identity.linkedinUrl,
         source: "apollo_mock",
-        raw: { email },
+        raw: { ...identity, email },
       } satisfies LeadCandidate;
     },
   };
@@ -115,22 +139,29 @@ export function createLeadSourceLive(
   return {
     mode: "live",
     async searchLeads(criteria: LeadSearchCriteria) {
-      const res = await fetch("https://api.apollo.io/v1/mixed_people/search", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          q_keywords: criteria.query,
-          person_titles: criteria.titles,
-          organization_industries: criteria.industries,
-          person_locations: criteria.locations,
-          organization_num_employees_ranges:
-            criteria.employeeCountMin != null || criteria.employeeCountMax != null
-              ? [`${criteria.employeeCountMin ?? 1},${criteria.employeeCountMax ?? 100000}`]
-              : undefined,
-          page: criteria.page ?? 1,
-          per_page: criteria.perPage ?? 25,
-        }),
-      });
+      const res = await fetch(
+        "https://api.apollo.io/api/v1/mixed_people/api_search",
+        {
+          method: "POST",
+          headers,
+          signal: AbortSignal.timeout(20_000),
+          body: JSON.stringify({
+            q_keywords: criteria.query,
+            person_titles: criteria.titles,
+            organization_industries: criteria.industries,
+            person_locations: criteria.locations,
+            organization_num_employees_ranges:
+              criteria.employeeCountMin != null ||
+              criteria.employeeCountMax != null
+                ? [
+                    `${criteria.employeeCountMin ?? 1},${criteria.employeeCountMax ?? 100000}`,
+                  ]
+                : undefined,
+            page: criteria.page ?? 1,
+            per_page: criteria.perPage ?? 25,
+          }),
+        },
+      );
       if (!res.ok) {
         throw new IntegrationMisconfiguredError(
           "apollo",
@@ -140,13 +171,30 @@ export function createLeadSourceLive(
       const data = (await res.json()) as {
         people?: Record<string, unknown>[];
       };
-      return (data.people ?? []).map(mapPerson);
+      return (data.people ?? []).map(mapApolloLeadPerson);
     },
-    async enrichLead(email: string) {
-      const res = await fetch("https://api.apollo.io/v1/people/match", {
+    async enrichLead(input: string | LeadEnrichmentIdentity) {
+      assertApolloPaidOperationAllowed(config, "People match");
+      const identity = enrichmentIdentity(input);
+      if (!identity.externalId && !identity.email && !identity.fullName) {
+        return null;
+      }
+      const res = await fetch("https://api.apollo.io/api/v1/people/match", {
         method: "POST",
         headers,
-        body: JSON.stringify({ email }),
+        signal: AbortSignal.timeout(20_000),
+        body: JSON.stringify({
+          id: identity.externalId,
+          email: identity.email,
+          name: identity.fullName,
+          organization_name: identity.companyName,
+          domain: identity.companyDomain,
+          linkedin_url: identity.linkedinUrl,
+          reveal_personal_emails: false,
+          reveal_phone_number: false,
+          run_waterfall_email: false,
+          run_waterfall_phone: false,
+        }),
       });
       if (!res.ok) {
         throw new IntegrationMisconfiguredError(
@@ -155,7 +203,7 @@ export function createLeadSourceLive(
         );
       }
       const data = (await res.json()) as { person?: Record<string, unknown> };
-      return data.person ? mapPerson(data.person) : null;
+      return data.person ? mapApolloLeadPerson(data.person) : null;
     },
   };
 }
@@ -163,7 +211,7 @@ export function createLeadSourceLive(
 export function createLeadSourceAdapter(
   config: LeadSourceConfig = {},
 ): LeadSourceAdapter {
-  return resolveMode(config) === "live"
+  return resolveApolloMode(config) === "live"
     ? createLeadSourceLive(config)
     : createLeadSourceMock();
 }

@@ -28,7 +28,10 @@ import {
   type OutreachItem,
 } from "../leadgen/store";
 import { applyReplyIntent } from "../leadgen/reply-intent";
-import { runCompetitorScan, listCompetitorFindings } from "../leadgen/competitor-scan";
+import {
+  runCompetitorScan,
+  listCompetitorFindings,
+} from "../leadgen/competitor-scan";
 import { runDailyLeadGen } from "../leadgen/pipeline";
 import { router, staffProcedure } from "./trpc";
 import { getVerifiedWorkAppConnection } from "./connections-router";
@@ -56,12 +59,10 @@ async function resolveComposioSend(
     }
   }
   try {
-    const { createGoogleWorkspaceGmailSend } = await import(
-      "../leadgen/google-workspace-send"
-    );
-    const { getGoogleWorkspaceAccessToken } = await import(
-      "./connections-router"
-    );
+    const { createGoogleWorkspaceGmailSend } =
+      await import("../leadgen/google-workspace-send");
+    const { getGoogleWorkspaceAccessToken } =
+      await import("./connections-router");
     const token = await getGoogleWorkspaceAccessToken(employeeId);
     if (token) return createGoogleWorkspaceGmailSend(employeeId);
   } catch (err) {
@@ -165,8 +166,12 @@ export async function draftOutreach(input: {
     ? await getContact(deal.primaryContactId)
     : null;
   const channel = input.channel ?? "gmail";
-  const { isEmailChannel, isLinkedInChannel, ensureFooter, buildComplianceFooter } =
-    await import("../sales-os/compliance");
+  const {
+    isEmailChannel,
+    isLinkedInChannel,
+    ensureFooter,
+    buildComplianceFooter,
+  } = await import("../sales-os/compliance");
   const { getSalesOsSettings } = await import("../sales-os/store");
   const settings = await getSalesOsSettings();
   const recipient = isLinkedInChannel(channel)
@@ -186,10 +191,9 @@ export async function draftOutreach(input: {
         channel,
       },
     });
-    const out = (typeof run.output === "object" && run.output ? run.output : {}) as Record<
-      string,
-      unknown
-    >;
+    const out = (
+      typeof run.output === "object" && run.output ? run.output : {}
+    ) as Record<string, unknown>;
     // Kill switch / policy refusals come back as typed output, not throws
     // (same semantics as crm-ai's assertNotRefused). Never queue a refusal
     // JSON blob as a draft — fail loud so every caller surfaces it.
@@ -299,8 +303,12 @@ export async function sendOutreach(input: {
 > {
   const item = await getOutreach(input.id);
   if (!item) throw new Error(`Outreach not found: ${input.id}`);
-  const { assertEmailSendAllowed, isEmailChannel, isLinkedInChannel, ensureFooter } =
-    await import("../sales-os/compliance");
+  const {
+    assertEmailSendAllowed,
+    isEmailChannel,
+    isLinkedInChannel,
+    ensureFooter,
+  } = await import("../sales-os/compliance");
   if (isLinkedInChannel(item.channel)) {
     return {
       ok: true,
@@ -480,7 +488,12 @@ export const leadgenRouter = router({
 
   competitor: router({
     scan: staffProcedure
-      .input(z.object({ competitor: z.string().min(1), scopeId: z.string().optional() }))
+      .input(
+        z.object({
+          competitor: z.string().min(1),
+          scopeId: z.string().optional(),
+        }),
+      )
       .mutation(({ input }) => runCompetitorScan(input)),
     list: staffProcedure
       .input(z.object({ scopeId: z.string().optional() }).optional())
@@ -489,18 +502,17 @@ export const leadgenRouter = router({
 
   /** Manual daily-pipeline trigger (Inngest runs the same fn on schedule). */
   runDailyPipeline: staffProcedure.mutation(async ({ ctx }) => {
-    const { resolveIntegrationApiKey } = await import(
-      "../integrations/resolve-keys"
-    );
-    const apollo = await resolveIntegrationApiKey("apollo", ctx.employeeId);
-    const hunter = await resolveIntegrationApiKey("hunter", ctx.employeeId);
+    const {
+      resolveApolloRuntimeConfig,
+      resolveEmailVerificationRuntimeConfig,
+    } = await import("../integrations/runtime-adapters");
+    const [apollo, verifier] = await Promise.all([
+      resolveApolloRuntimeConfig(ctx.employeeId),
+      resolveEmailVerificationRuntimeConfig(ctx.employeeId),
+    ]);
     return runDailyLeadGen({
-      leadSource: createLeadSourceAdapter(
-        apollo.apiKey ? { mode: "live", apiKey: apollo.apiKey } : undefined,
-      ),
-      verifier: createEmailVerificationAdapter(
-        hunter.apiKey ? { mode: "live", apiKey: hunter.apiKey } : undefined,
-      ),
+      leadSource: createLeadSourceAdapter(apollo.config),
+      verifier: createEmailVerificationAdapter(verifier.config),
     });
   }),
 });

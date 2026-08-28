@@ -174,27 +174,6 @@ export async function portalMagicLinkEnabled(): Promise<boolean> {
 
 export type RequestResult = { status: "sent"; stubToken?: string };
 
-async function ensurePortalMagicTokenTable(): Promise<boolean> {
-  const db = getDb();
-  if (!db) return false;
-  try {
-    await db.execute(sql`
-      create table if not exists public.portal_magic_token (
-        portal_magic_token_id uuid primary key default gen_random_uuid() not null,
-        token_hash text not null unique,
-        client_id uuid not null references public.client(client_id),
-        email text not null,
-        expires_at timestamptz not null,
-        consumed_at timestamptz,
-        created_at timestamptz not null default now()
-      )
-    `);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Issue a single-use portal token (Postgres when available, else memory). */
 export async function issuePortalMagicToken(input: {
   clientId: string;
@@ -204,24 +183,19 @@ export async function issuePortalMagicToken(input: {
   const token = `ml_${randomUUID().replace(/-/g, "")}`;
   const expiresAt = Date.now() + TOKEN_TTL_MS;
   const db = getDb();
-  if (db && (await ensurePortalMagicTokenTable())) {
-    try {
-      await db.execute(sql`
-        insert into public.portal_magic_token (
-          token_hash, client_id, email, expires_at
-        ) values (
-          ${hashToken(token)},
-          ${input.clientId}::uuid,
-          ${email},
-          ${new Date(expiresAt).toISOString()}::timestamptz
-        )
-      `);
-      return token;
-    } catch {
-      // Unknown client_id (unit fixtures) or transient DB — memory fallback.
-    }
+  if (db) {
+    await db.execute(sql`
+      insert into public.portal_magic_token (
+        token_hash, client_id, email, expires_at
+      ) values (
+        ${hashToken(token)},
+        ${input.clientId}::uuid,
+        ${email},
+        ${new Date(expiresAt).toISOString()}::timestamptz
+      )
+    `);
+    return token;
   }
-  const store = getDemoStore();
   getDemoStore().portalMagicTokens.set(token, {
     token,
     clientId: input.clientId,
@@ -302,6 +276,7 @@ export async function sendPortalInviteMagicLink(input: {
     to: [email],
     subject,
     markdown,
+    idempotencyKey: `portal-invite/${hashToken(token)}`,
   });
 
   if (process.env.NODE_ENV !== "production") {
@@ -388,26 +363,6 @@ export type VerifyResult =
     }
   | { ok: false; reason: string };
 
-async function ensurePortalSessionGrantTable(): Promise<boolean> {
-  const db = getDb();
-  if (!db) return false;
-  try {
-    await db.execute(sql`
-      create table if not exists public.portal_session_grant (
-        portal_session_grant_id uuid primary key default gen_random_uuid() not null,
-        token_hash text not null unique,
-        client_id uuid not null references public.client(client_id),
-        email text not null,
-        expires_at timestamptz not null,
-        created_at timestamptz not null default now()
-      )
-    `);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Multi-use portal session after magic-link verify (header: x-portal-grant). */
 export async function issuePortalSessionGrant(input: {
   clientId: string;
@@ -417,22 +372,18 @@ export async function issuePortalSessionGrant(input: {
   const token = `ps_${randomUUID().replace(/-/g, "")}`;
   const expiresAt = Date.now() + SESSION_GRANT_TTL_MS;
   const db = getDb();
-  if (db && (await ensurePortalSessionGrantTable())) {
-    try {
-      await db.execute(sql`
-        insert into public.portal_session_grant (
-          token_hash, client_id, email, expires_at
-        ) values (
-          ${hashToken(token)},
-          ${input.clientId}::uuid,
-          ${email},
-          ${new Date(expiresAt).toISOString()}::timestamptz
-        )
-      `);
-      return token;
-    } catch {
-      // fall through to memory
-    }
+  if (db) {
+    await db.execute(sql`
+      insert into public.portal_session_grant (
+        token_hash, client_id, email, expires_at
+      ) values (
+        ${hashToken(token)},
+        ${input.clientId}::uuid,
+        ${email},
+        ${new Date(expiresAt).toISOString()}::timestamptz
+      )
+    `);
+    return token;
   }
   getDemoStore().portalSessionGrants.set(token, {
     token,
@@ -448,7 +399,7 @@ export async function resolvePortalSessionGrant(
 ): Promise<SessionUser | null> {
   if (!token.startsWith("ps_")) return null;
   const db = getDb();
-  if (db && (await ensurePortalSessionGrantTable())) {
+  if (db) {
     const rows = await db.execute<{
       client_id: string;
       email: string;
@@ -466,6 +417,7 @@ export async function resolvePortalSessionGrant(
         email: row.email,
       });
     }
+    return null;
   }
   const mem = getDemoStore().portalSessionGrants.get(token);
   if (!mem || mem.expiresAt < Date.now()) {
@@ -485,12 +437,12 @@ async function withSessionGrant(
   return { ...result, sessionGrant };
 }
 
-/** Single-use token verification (Postgres, then memory fallback). */
+/** Single-use token verification (Postgres when configured, otherwise memory). */
 export async function verifyPortalMagicToken(
   token: string,
 ): Promise<VerifyResult> {
   const db = getDb();
-  if (db && (await ensurePortalMagicTokenTable())) {
+  if (db) {
     const durable = await db.transaction(async (tx) => {
       const rows = await tx.execute<{
         client_id: string;
@@ -524,10 +476,9 @@ export async function verifyPortalMagicToken(
         via: "magic_link" as const,
       };
     });
-    if (durable) {
-      if (!durable.ok) return durable;
-      return withSessionGrant(durable);
-    }
+    if (!durable) return { ok: false, reason: "Invalid or expired magic link" };
+    if (!durable.ok) return durable;
+    return withSessionGrant(durable);
   }
 
   const store = getDemoStore();

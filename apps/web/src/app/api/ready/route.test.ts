@@ -11,6 +11,7 @@ describe("/api/ready", () => {
     expect(body).toHaveProperty("llmFreeOnly");
     expect(body).toHaveProperty("database");
     expect(body).toHaveProperty("pgvector");
+    expect(body).toHaveProperty("integrationInbox");
     expect(body).toHaveProperty("tools");
     expect(body).toHaveProperty("blockers");
     expect(body).not.toHaveProperty("OPENROUTER_API_KEY");

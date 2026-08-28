@@ -21,8 +21,7 @@ function resolveSource(config: BayzatAdapterConfig): BayzatSource {
   const env = process.env.BAYZAT_SOURCE?.toLowerCase();
   if (env === "api") return "api";
   if (env === "csv") return "csv";
-  // CSV is the required fallback when client has no API keys
-  if (process.env.BAYZAT_API_KEY) return "api";
+  // No public, evidence-backed employee API contract has been verified.
   return "csv";
 }
 
@@ -34,13 +33,10 @@ export function createBayzatAdapter(
   let mirror: BayzatEmployeeRow[] = [...(config.seed ?? [])];
 
   if (source === "api") {
-    const apiKey = config.apiKey ?? process.env.BAYZAT_API_KEY;
-    if (!apiKey && !config.seed) {
-      throw new IntegrationMisconfiguredError(
-        "bayzat",
-        "BAYZAT_SOURCE=api but BAYZAT_API_KEY missing — use CSV import or set seed",
-      );
-    }
+    throw new IntegrationMisconfiguredError(
+      "bayzat",
+      "BAYZAT_SOURCE=api is not implemented: no official employee-list API contract is publicly verifiable. Use the bounded CSV mirror until Bayzat supplies tenant documentation.",
+    );
   }
 
   return {

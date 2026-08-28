@@ -18,7 +18,6 @@ export async function proposeEvolve(focus = "weekly"): Promise<{
     listCompanyResearch(),
     listWinLossNotes(),
   ]);
-  const rejected = researched.filter((r) => r.approvalState === "rejected").length;
   const approved = researched.filter((r) => r.approvalState === "approved").length;
   const approvalRate = researched.length ? approved / researched.length : 0;
   const proposed: Partial<SalesOsSettings> = {};

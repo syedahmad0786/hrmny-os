@@ -72,7 +72,7 @@ export function parseCsv(text: string): string[][] {
  * so optional zod fields on the server stay absent; blank lines are skipped.
  */
 export function csvToObjects(text: string): Record<string, string>[] {
-  const rows = parseCsv(text.replace(/^﻿/, ""));
+  const rows = parseCsv(text.replace(/^\uFEFF/, ""));
   const header = rows[0];
   if (!header) return [];
   const keys = header.map((h) => h.trim());

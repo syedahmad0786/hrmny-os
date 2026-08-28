@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   GoogleProfileSchema,
   getGoogleWorkspaceAccessToken,
@@ -10,6 +10,12 @@ import { buildGoogleWorkspaceAuthorizeUrl } from "./google-workspace-oauth";
 describe("Google Workspace connection", () => {
   beforeEach(() => {
     process.env.LLM_PROVIDER = "mock";
+    process.env.GOOGLE_OAUTH_STATE_SECRET = "g".repeat(32);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("accepts verified hrmny accounts and rejects personal accounts", () => {
@@ -34,6 +40,9 @@ describe("Google Workspace connection", () => {
     const prev = process.env.DATABASE_URL;
     process.env.DATABASE_URL = "";
     clearMemoryApiKeys();
+    vi.stubEnv("N8N_MODE", "");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
     try {
       const user = resolveDevUser("partner");
       const caller = createCaller({
@@ -48,6 +57,9 @@ describe("Google Workspace connection", () => {
       });
       expect(saved.store).toBe("memory");
       expect(saved.hasSecret).toBe(true);
+      expect(saved.probed).toBe(false);
+      expect(saved.probeWarning).toMatch(/provider acceptance was not verified/i);
+      expect(fetchMock).not.toHaveBeenCalled();
       expect(getMemoryApiKey("n8n")).toBe("n8n-memory-test-key");
       const rows = await caller.connections.list();
       expect(rows.find((row) => row.toolkit === "n8n")?.hasSecret).toBe(true);

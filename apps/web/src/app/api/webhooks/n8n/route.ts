@@ -11,7 +11,8 @@
  * Instance: https://hrmny.app.n8n.cloud (see 11-N8N-SETUP.md)
  */
 import { NextResponse } from "next/server";
-import { createCaller } from "@/server/trpc/root";
+import { createInboundLead } from "@/server/crm/inbound-leads";
+import { recordIntegrationReceipt } from "@/server/integrations/inbox";
 import { verifyN8nSignature } from "./verify";
 
 function pickString(v: unknown): string | null {
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: Record<string, unknown> = {};
+  let body: Record<string, unknown>;
   try {
     body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
   } catch {
@@ -47,6 +48,23 @@ export async function POST(request: Request) {
     pickString(body.workflowName) ??
     pickString(body.type) ??
     "unknown";
+  const idempotencyKey =
+    request.headers.get("idempotency-key")?.trim() ||
+    request.headers.get("x-event-id")?.trim() ||
+    request.headers.get("x-webhook-id")?.trim() ||
+    pickString(body.eventId) ||
+    pickString(body.executionId);
+  if (!idempotencyKey) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "VALIDATION",
+        reason: "Idempotency-Key or eventId required",
+        event,
+      },
+      { status: 400 },
+    );
+  }
 
   const looksLikeLead =
     /lead/i.test(event) ||
@@ -72,20 +90,17 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const caller = createCaller({
-      user: null,
-      employeeId: null,
-      roles: [],
-      canViewMargin: false,
-    });
     try {
-      const created = await caller.leads.inbound.create({
+      const created = await createInboundLead({
+        provider: "n8n",
+        idempotencyKey,
         companyName,
         contactEmail,
         sector: pickString(body.sector) ?? undefined,
         message:
           pickString(body.message) ??
           (pickString(body.source) ? `Source: ${pickString(body.source)}` : undefined),
+        rawBody: raw,
       });
       return NextResponse.json({
         ok: true,
@@ -94,18 +109,49 @@ export async function POST(request: Request) {
         verified: verify.reason,
         dealId: created.dealId,
         leadSourceLane: created.leadSourceLane,
+        duplicate: created.duplicate,
+        receipt: idempotencyKey,
       });
     } catch (err) {
+      const reason =
+        err instanceof Error ? err.message.slice(0, 200) : "create_failed";
+      const conflict = reason === "IDEMPOTENCY_PAYLOAD_MISMATCH";
       return NextResponse.json(
         {
           ok: false,
-          code: "INTERNAL",
+          code: conflict ? "CONFLICT" : "INTERNAL",
           event,
-          reason: err instanceof Error ? err.message.slice(0, 200) : "create_failed",
+          reason,
         },
-        { status: 500 },
+        { status: conflict ? 409 : 500 },
       );
     }
+  }
+
+  let receipt;
+  try {
+    receipt = await recordIntegrationReceipt({
+      provider: "n8n",
+      externalEventId: idempotencyKey,
+      operation: event,
+      rawBody: raw,
+      payload: { event },
+      completed: true,
+      result: { handled: false, sideEffects: false },
+    });
+  } catch (err) {
+    const reason =
+      err instanceof Error ? err.message.slice(0, 200) : "receipt_failed";
+    const conflict = reason === "INTEGRATION_RECEIPT_PAYLOAD_MISMATCH";
+    return NextResponse.json(
+      {
+        ok: false,
+        code: conflict ? "CONFLICT" : "RECEIPT_UNAVAILABLE",
+        event,
+        reason,
+      },
+      { status: conflict ? 409 : 503 },
+    );
   }
 
   return NextResponse.json({
@@ -114,6 +160,8 @@ export async function POST(request: Request) {
     event,
     verified: verify.reason,
     handled: false,
+    duplicate: receipt.duplicate,
+    receipt: idempotencyKey,
   });
 }
 
@@ -124,6 +172,7 @@ export async function GET() {
     methods: ["POST"],
     signature:
       "X-Hrmny-N8n-Signature or X-N8n-Signature (HMAC-SHA256 or shared secret)",
-    docs: "hrmny_OS_Execution/11-N8N-SETUP.md",
+    idempotency: "Idempotency-Key header (or eventId/executionId body field)",
+    docs: "docs/automations/n8n/README.md",
   });
 }

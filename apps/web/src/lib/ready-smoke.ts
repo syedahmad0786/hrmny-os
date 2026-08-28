@@ -9,6 +9,7 @@ export type ReadySmoke = {
   database?: "up" | "down";
   keyStore?: "vault" | "memory";
   pgvector?: boolean;
+  integrationInbox?: boolean;
   portalMagicLink?: string;
   connectedAppPolicy?: "allow_all" | "approved_only" | "disabled";
   googleOAuthRedirectUri?: string;
@@ -45,7 +46,8 @@ export function formatReadyDbLine(ready: ReadySmoke): string {
   const db = ready.database ?? "—";
   const vec = ready.pgvector ? "on" : "off";
   const portal = ready.portalMagicLink ?? "—";
-  const store = ready.keyStore ?? (ready.database === "up" ? "vault" : "memory");
+  const store =
+    ready.keyStore ?? (ready.database === "up" ? "vault" : "memory");
   return `database ${db} · key store ${store} · pgvector ${vec} · portal magic-link ${portal}`;
 }
 

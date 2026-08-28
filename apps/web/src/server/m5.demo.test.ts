@@ -3,6 +3,9 @@ import { createCaller } from "./trpc/root";
 import { DEMO_CLIENT_ID, getDemoStore } from "./demo-store";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 
+// Explicit legal-identifier fixture for invoice-issuance tests only.
+process.env.HRMNY_TAX_REGISTRATION_NUMBER = "100000000000003";
+
 function callerFor(
   role: "partner" | "am" | "finance" | "hr" | "director",
 ) {

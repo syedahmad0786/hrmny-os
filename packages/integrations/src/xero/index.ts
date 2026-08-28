@@ -203,11 +203,26 @@ export function createXeroLive(config: XeroAdapterConfig = {}): XeroAdapter {
       const connections = (await connRes.json()) as Array<{
         tenantId?: string;
       }>;
-      const tenantId = connections[0]?.tenantId;
+      const requestedTenantId = (
+        config.tenantId ?? process.env.XERO_TENANT_ID
+      )?.trim();
+      if (!requestedTenantId && connections.length > 1) {
+        throw new IntegrationMisconfiguredError(
+          "xero",
+          "Multiple Xero tenants are authorized. Set the approved XERO_TENANT_ID reference before continuing; the adapter will not choose an account implicitly.",
+        );
+      }
+      const tenantId = requestedTenantId
+        ? connections.find(
+            (connection) => connection.tenantId === requestedTenantId,
+          )?.tenantId
+        : connections[0]?.tenantId;
       if (!tenantId) {
         throw new IntegrationMisconfiguredError(
           "xero",
-          "No Xero tenant authorized for this app",
+          requestedTenantId
+            ? "The approved XERO_TENANT_ID is not among this OAuth grant's connections"
+            : "No Xero tenant authorized for this app",
         );
       }
       tokenCache.set(clientId, {

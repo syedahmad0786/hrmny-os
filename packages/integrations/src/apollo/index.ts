@@ -1,23 +1,12 @@
+import { IntegrationMisconfiguredError, type ApolloAdapter } from "../types";
 import {
-  IntegrationMisconfiguredError,
-  type ApolloAdapter,
-} from "../types";
+  assertApolloPaidOperationAllowed,
+  resolveApolloMode,
+  type ApolloActivationConfig,
+} from "./policy";
 
-export type ApolloAdapterConfig = {
-  mode?: "mock" | "live";
-  apiKey?: string;
-};
-
-function resolveMode(config: ApolloAdapterConfig): "mock" | "live" {
-  if (config.mode === "mock") return "mock";
-  if (config.mode === "live") return "live";
-  const env = process.env.APOLLO_MODE?.toLowerCase();
-  if (env === "live") return "live";
-  if (env === "mock") return "mock";
-  // Auto-live when a key is present — flip APOLLO_MODE=mock to force stub.
-  if ((config.apiKey ?? process.env.APOLLO_API_KEY)?.trim()) return "live";
-  return "mock";
-}
+export type ApolloAdapterConfig = ApolloActivationConfig;
+export { isApolloPaidOperationAllowed, resolveApolloMode } from "./policy";
 
 /** Mock Apollo — deterministic enrich for demo emails. */
 export function createApolloMock(): ApolloAdapter {
@@ -90,7 +79,9 @@ export function normalizeApolloPerson(
 }
 
 /** Live Apollo REST — fail-loud without API key. */
-export function createApolloLive(config: ApolloAdapterConfig = {}): ApolloAdapter {
+export function createApolloLive(
+  config: ApolloAdapterConfig = {},
+): ApolloAdapter {
   const apiKey = config.apiKey ?? process.env.APOLLO_API_KEY;
   if (!apiKey) {
     throw new IntegrationMisconfiguredError(
@@ -100,7 +91,8 @@ export function createApolloLive(config: ApolloAdapterConfig = {}): ApolloAdapte
   }
   return {
     async enrichPerson(email: string) {
-      const res = await fetch("https://api.apollo.io/v1/people/match", {
+      assertApolloPaidOperationAllowed(config, "People match");
+      const res = await fetch("https://api.apollo.io/api/v1/people/match", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -118,14 +110,18 @@ export function createApolloLive(config: ApolloAdapterConfig = {}): ApolloAdapte
       return normalizeApolloPerson(email, data.person ?? null);
     },
     async searchCompanies(query: string) {
-      const res = await fetch("https://api.apollo.io/v1/mixed_companies/search", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Api-Key": apiKey,
+      assertApolloPaidOperationAllowed(config, "Company search");
+      const res = await fetch(
+        "https://api.apollo.io/api/v1/mixed_companies/search",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Api-Key": apiKey,
+          },
+          body: JSON.stringify({ q_organization_name: query, page: 1 }),
         },
-        body: JSON.stringify({ q_organization_name: query, page: 1 }),
-      });
+      );
       if (!res.ok) {
         throw new IntegrationMisconfiguredError(
           "apollo",
@@ -147,7 +143,7 @@ export function createApolloStub(): ApolloAdapter {
 export function createApolloAdapter(
   config: ApolloAdapterConfig = {},
 ): ApolloAdapter {
-  return resolveMode(config) === "live"
+  return resolveApolloMode(config) === "live"
     ? createApolloLive(config)
     : createApolloMock();
 }
