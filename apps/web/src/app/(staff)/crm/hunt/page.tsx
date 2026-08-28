@@ -50,7 +50,8 @@ type SearchCandidate = {
 export default function HuntClientsPage() {
   const [result, setResult] = useState<string | null>(null);
   const [searchNote, setSearchNote] = useState<string | null>(null);
-  const [query, setQuery] = useState("UAE retail marketing director");
+  const [title, setTitle] = useState("Marketing Director");
+  const [query, setQuery] = useState("");
   const [lastApolloDealId, setLastApolloDealId] = useState<string | null>(null);
   const [ready, setReady] = useState<ReadySmoke | null>(null);
   const utils = trpc.useUtils();
@@ -242,23 +243,44 @@ export default function HuntClientsPage() {
             onSubmit={(event) => {
               event.preventDefault();
               setSearchNote(null);
-              freeSearch.mutate({ query: query.trim(), perPage: 8 });
+              freeSearch.mutate({
+                titles: [title.trim()],
+                query: query.trim() || undefined,
+                perPage: 8,
+              });
             }}
           >
-            <label htmlFor="apollo-query">Role, market, or company</label>
-            <div>
-              <input
-                id="apollo-query"
-                data-testid="hunt-apollo-query"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="e.g. UAE hospitality marketing director"
-                minLength={2}
-              />
+            <div className="growth-search-fields">
+              <label htmlFor="apollo-title">
+                Job title
+                <input
+                  id="apollo-title"
+                  data-testid="hunt-apollo-title"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="e.g. Marketing Director"
+                  minLength={2}
+                />
+              </label>
+              <label htmlFor="apollo-query">
+                Company or industry keyword <span>optional</span>
+                <input
+                  id="apollo-query"
+                  data-testid="hunt-apollo-query"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="e.g. hospitality"
+                />
+              </label>
+            </div>
+            <div className="growth-search-actions">
+              <p>
+                Market <strong>United Arab Emirates</strong>
+              </p>
               <button
                 type="submit"
                 data-testid="hunt-apollo-search"
-                disabled={freeSearch.isPending || query.trim().length < 2}
+                disabled={freeSearch.isPending || title.trim().length < 2}
               >
                 {freeSearch.isPending
                   ? "Searching…"
@@ -427,10 +449,13 @@ export default function HuntClientsPage() {
               <button
                 type="button"
                 data-testid="hunt-apollo-prospect"
-                disabled={apolloImport.isPending || query.trim().length < 2}
+                disabled={
+                  apolloImport.isPending ||
+                  (query.trim() || title.trim()).length < 2
+                }
                 onClick={() => {
                   setResult(null);
-                  apolloImport.mutate({ query: query.trim() });
+                  apolloImport.mutate({ query: query.trim() || title.trim() });
                 }}
               >
                 {apolloImport.isPending
@@ -455,7 +480,7 @@ export default function HuntClientsPage() {
                   setResult(null);
                   demo.mutate({
                     viaApollo: true,
-                    companyName: query.trim() || undefined,
+                    companyName: query.trim() || title.trim() || undefined,
                   });
                 }}
               >

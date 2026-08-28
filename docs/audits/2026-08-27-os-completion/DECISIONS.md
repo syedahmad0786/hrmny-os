@@ -75,6 +75,8 @@ Recorded during harness run `20260828T044131Z`. These are repository-local decis
 
 30. **Render only Apollo's documented search identity.** Live People Search proved that the discovery response carries `first_name` and `last_name_obfuscated`, not the enrichment-only `name` field. The adapter now prefers a complete `name` when Apollo supplies one and otherwise joins only those documented search fields. Tradeoff: reviewers see an intentionally obfuscated surname until the separately approved People Match; HRMNY never guesses or de-obfuscates it.
 
+31. **Use Apollo's structured title and location filters instead of guessing natural-language intent.** Authenticated production acceptance proved that sending `UAE retail marketing director` or `UAE hospitality marketing director` as `q_keywords` while also forcing UAE location produced zero people. The official tutorial models role and geography as `person_titles` and `person_locations`, so Sales Growth now exposes Job title, a fixed UAE market, and an optional company/industry keyword. The adapter explicitly enables similar titles and refuses the undocumented `organization_industries` field. Tradeoff: the form has one extra field, but its provider contract is visible, predictable, and live-proven rather than dependent on an undocumented text parser.
+
 ## Failures encountered and resolved
 
 | Failure                                                                                 | Cause                                                                                               | Resolution                                                                                                                                                                                             |

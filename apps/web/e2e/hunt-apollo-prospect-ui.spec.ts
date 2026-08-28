@@ -44,9 +44,8 @@ test.describe("Hunt Apollo prospect UI", () => {
   }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
-    await page
-      .getByTestId("hunt-apollo-query")
-      .fill("UAE retail marketing director");
+    await page.getByTestId("hunt-apollo-title").fill("Marketing Director");
+    await page.getByTestId("hunt-apollo-query").fill("retail");
     await page.getByTestId("hunt-apollo-search").click();
     await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
       /0 credits/i,
@@ -68,7 +67,9 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect(
       page.getByRole("heading", { name: "Find the next right client." }),
     ).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByRole("navigation", { name: "CRM sections" })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "CRM sections" }),
+    ).toBeVisible();
     await expect(page.getByTestId("hunt-apollo-search")).toBeVisible();
 
     const widths = await page.evaluate(() => ({
@@ -86,6 +87,8 @@ test.describe("Hunt Apollo prospect UI", () => {
 
     await page.locator("summary").filter({ hasText: "More" }).click();
     await expect(page.getByRole("link", { name: "Companies" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Sales settings" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Sales settings" }),
+    ).toBeVisible();
   });
 });

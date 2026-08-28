@@ -70,7 +70,7 @@ describe("Apollo one-person connection canary", () => {
 
     const result = await searchApolloPeopleFree(
       {
-        query: "UAE retail marketing director",
+        titles: ["Marketing Director"],
         actorEmployeeId: "employee-1",
       },
       {
@@ -95,6 +95,12 @@ describe("Apollo one-person connection canary", () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: "POST",
       headers: expect.objectContaining({ "X-Api-Key": "vault-test-key" }),
+    });
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      person_titles: ["Marketing Director"],
+      include_similar_titles: true,
+      person_locations: ["United Arab Emirates"],
     });
   });
 

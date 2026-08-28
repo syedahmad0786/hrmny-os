@@ -105,6 +105,12 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "https://api.apollo.io/api/v1/mixed_people/api_search",
     );
+    const searchRequest = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(searchRequest.body))).toEqual({
+      q_keywords: "UAE creative",
+      page: 1,
+      per_page: 25,
+    });
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
       "https://api.apollo.io/api/v1/people/match",
     );
@@ -120,6 +126,51 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       run_waterfall_email: false,
       run_waterfall_phone: false,
     });
+  });
+
+  it("maps explicit title and location fields to Apollo's documented filters", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ people: [] }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const source = createLeadSourceLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+
+    await source.searchLeads({
+      titles: ["Marketing Director"],
+      locations: ["United Arab Emirates"],
+      page: 1,
+      perPage: 8,
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toEqual({
+      person_titles: ["Marketing Director"],
+      include_similar_titles: true,
+      person_locations: ["United Arab Emirates"],
+      page: 1,
+      per_page: 8,
+    });
+  });
+
+  it("fails loud instead of inventing an undocumented Apollo industry field", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const source = createLeadSourceLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+
+    await expect(
+      source.searchLeads({ industries: ["hospitality"] }),
+    ).rejects.toThrow(/does not document a direct industry parameter/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("allows zero-credit people search but gates paid enrichment", async () => {
