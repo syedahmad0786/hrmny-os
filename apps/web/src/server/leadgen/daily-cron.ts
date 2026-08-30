@@ -1,21 +1,19 @@
 import { sql } from "@hrmny/db";
 import {
-  createEmailVerificationAdapter,
-  createLeadSourceAdapter,
-} from "@hrmny/integrations";
+  assertScheduledAllowed,
+  PolicyViolationError,
+  type AutonomyPolicy,
+} from "@hrmny/ai";
+import { readAiAutonomyPolicy } from "../ai/autonomy-policy";
 import { getDb } from "../db";
-import { emitHealthSignal } from "../m1-persistence";
-import {
-  resolveApolloRuntimeConfig,
-  resolveEmailVerificationRuntimeConfig,
-} from "../integrations/runtime-adapters";
-import { runDailyLeadGen } from "./pipeline";
+import { recordHealthSignal } from "../m1-persistence";
 
 /**
- * Cron-driven daily lead-gen (replaces Inngest until keys exist).
- * Runs once per UTC day after 02:00 (~06:00 Asia/Dubai), HITL-only side
- * effects (digest sink → health_signal / Chat). Credentials connect providers;
- * explicit mode and billing flags activate live/paid operations separately.
+ * Cron-driven Sales research gate. The previous implementation resolved live
+ * Apollo/email-verification credentials and created CRM records before reading
+ * the audited autonomy policy. Until a proposal-only research runtime exists,
+ * this entry point records one explicit refusal and performs no provider, AI,
+ * enrichment, outreach, or CRM operation.
  */
 export const LEADGEN_DAILY_SIGNAL = "leadgen_daily";
 /** First cron tick at/after this UTC hour (~06:00 Asia/Dubai). */
@@ -41,15 +39,42 @@ async function alreadyRanToday(todayIso: string): Promise<boolean> {
 
 export type LeadgenDailyCronResult = {
   ran: boolean;
-  skipped?: "before_window" | "already_ran";
+  skipped?:
+    | "before_window"
+    | "already_ran"
+    | "policy_denied"
+    | "proposal_runtime_unavailable";
+  policyViolation?:
+    "forbidden_action" | "mode_not_scheduled" | "agent_not_allowlisted";
   created?: number;
   scored?: number;
   apolloSource?: string;
   hunterSource?: string;
 };
 
+export type LeadgenDailyCronDeps = {
+  readPolicy?: () => Promise<AutonomyPolicy>;
+  recordSignal?: typeof recordHealthSignal;
+};
+
+async function recordRefusal(
+  todayIso: string,
+  result: LeadgenDailyCronResult,
+  recordSignal: typeof recordHealthSignal,
+): Promise<LeadgenDailyCronResult> {
+  await recordSignal(LEADGEN_DAILY_SIGNAL, "warn", {
+    date: todayIso,
+    outcome: "refused",
+    reason: result.skipped,
+    policyViolation: result.policyViolation ?? null,
+  });
+  memoryLastRunDay = todayIso;
+  return result;
+}
+
 export async function runLeadgenDailyCron(
   now: Date = new Date(),
+  deps: LeadgenDailyCronDeps = {},
 ): Promise<LeadgenDailyCronResult> {
   if (now.getUTCHours() < LEADGEN_UTC_HOUR) {
     return { ran: false, skipped: "before_window" };
@@ -59,45 +84,26 @@ export async function runLeadgenDailyCron(
     return { ran: false, skipped: "already_ran" };
   }
 
-  const [apollo, verifierRuntime] = await Promise.all([
-    resolveApolloRuntimeConfig(),
-    resolveEmailVerificationRuntimeConfig(),
-  ]);
+  const recordSignal = deps.recordSignal ?? recordHealthSignal;
+  const policy = await (deps.readPolicy ?? readAiAutonomyPolicy)();
+  try {
+    assertScheduledAllowed(policy, "research", "research");
+  } catch (error) {
+    if (!(error instanceof PolicyViolationError)) throw error;
+    return recordRefusal(
+      todayIso,
+      {
+        ran: false,
+        skipped: "policy_denied",
+        policyViolation: error.violation,
+      },
+      recordSignal,
+    );
+  }
 
-  const digest = await runDailyLeadGen({
-    leadSource: createLeadSourceAdapter(apollo.config),
-    verifier: createEmailVerificationAdapter(verifierRuntime.config),
-  });
-
-  const { runDailyResearch } = await import("../sales-os/research");
-  const { flagStaleEmails } = await import("../sales-os/stale");
-  const { buildSalesOsDigest } = await import("../sales-os/digest");
-  const research = await runDailyResearch({ date: now }).catch(() => null);
-  const stale = await flagStaleEmails(now).catch(() => 0);
-  const salesDigest = await buildSalesOsDigest(now).catch(() => null);
-
-  await emitHealthSignal(LEADGEN_DAILY_SIGNAL, "info", {
-    date: todayIso,
-    count: digest.count,
-    verifiedCount: digest.verifiedCount,
-    hotCount: digest.hotCount,
-    apolloSource: apollo.source,
-    hunterSource: verifierRuntime.source,
-    researched: research?.created.length ?? 0,
-    sector: research?.sector ?? null,
-    staleEmails: stale,
-    approvalQueue:
-      (salesDigest?.researchedWaiting ?? 0) +
-      (salesDigest?.contactsWaiting ?? 0) +
-      (salesDigest?.outreachDrafts ?? 0),
-  }).catch(() => undefined);
-
-  memoryLastRunDay = todayIso;
-  return {
-    ran: true,
-    created: digest.count,
-    scored: digest.leads.length,
-    apolloSource: apollo.source,
-    hunterSource: verifierRuntime.source,
-  };
+  return recordRefusal(
+    todayIso,
+    { ran: false, skipped: "proposal_runtime_unavailable" },
+    recordSignal,
+  );
 }

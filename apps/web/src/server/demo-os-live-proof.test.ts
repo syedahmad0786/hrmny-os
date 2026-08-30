@@ -1,401 +1,92 @@
 /**
- * Live Postgres proof for demo closed loop (requires DATABASE_URL).
- * Usage: only through `pnpm test:live:postgres` after the separate target guard.
- * CI: manual workflow_dispatch with a dedicated disposable database secret,
- *      allowlisted project ref, bounded approval receipt, and exact confirmation.
+ * Separately authorized disposable-Postgres proof.
+ *
+ * The former test executed a monolithic prospect → provider import → won →
+ * onboarding → portal → finance demo. That path conflicts with the accepted
+ * Sales approval contract. The retained live-target test now proves those
+ * compatibility mutations remain disabled even when a PostgreSQL target is
+ * available. It performs no provider request or operational mutation.
  */
-import { describe, expect, it } from "vitest";
-import { createCaller } from "./trpc/root";
+import { describe, expect, it, vi } from "vitest";
+import { runAgentTools } from "./ai/agent-tools";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
-import { getDeal } from "./crm/repository";
+import { LEGACY_SALES_EFFECT_SKIPPED } from "./sales-os/legacy-effect-policy";
+import { createCaller } from "./trpc/root";
 
 const hasDb = Boolean(process.env.DATABASE_URL?.trim());
 
-describe.runIf(hasDb)("demo OS live Postgres proof", () => {
-  it(
-    "closed loop + apollo durable CRM + creative portal + custom agent + portal onboarding",
-    async () => {
-      process.env.LLM_PROVIDER = process.env.LLM_PROVIDER || "mock";
-      const user = resolveDevUser("partner");
-      const caller = createCaller({
-        user,
-        employeeId: user.employeeId,
-        roles: user.roles,
-        canViewMargin: sessionCanViewMargin(user),
-      });
+describe.runIf(hasDb)("legacy Sales live-target containment", () => {
+  it("refuses every monolithic provider/CRM compatibility pathway", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("network must remain unreachable"));
+    const user = resolveDevUser("partner");
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: sessionCanViewMargin(user),
+    });
 
-      const imported = await caller.crm.prospect.apolloImport({
-        query: `Demo Retail UAE ${Date.now()}`,
-      });
-      expect(imported.deals.length).toBeGreaterThan(0);
-      expect(imported.mode === "mock" || imported.mode === "live").toBe(true);
-      expect(
-        imported.verifyMode === "mock" || imported.verifyMode === "live",
-      ).toBe(true);
-      const apolloDeal = imported.deals[0]!;
-      const durable = await getDeal(apolloDeal.dealId);
-      expect(durable?.dealId).toBe(apolloDeal.dealId);
-      expect(durable?.leadSourceLane).toBe("apollo_intent");
-      expect(durable?.stage).toBe("discover");
-      expect(durable?.emailVerified).toBe(apolloDeal.emailVerified);
+    await expect(
+      caller.crm.runDemoClosedLoop({ viaApollo: true }),
+    ).resolves.toMatchObject({
+      ok: false,
+      skipped: LEGACY_SALES_EFFECT_SKIPPED,
+    });
+    await expect(
+      caller.crm.prospect.apolloImport({ query: "containment proof" }),
+    ).resolves.toMatchObject({
+      ok: false,
+      skipped: LEGACY_SALES_EFFECT_SKIPPED,
+      deals: [],
+    });
+    await expect(
+      caller.leads.apollo.import({ query: "containment proof" }),
+    ).resolves.toMatchObject({
+      ok: false,
+      skipped: LEGACY_SALES_EFFECT_SKIPPED,
+      deals: [],
+    });
+    await expect(
+      caller.deals.verifyEmail({
+        id: "e0000000-0000-4000-8000-000000000001",
+        email: "containment@example.com",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      skipped: LEGACY_SALES_EFFECT_SKIPPED,
+      operation: "deals.verifyEmail",
+    });
 
-      const loop = await caller.crm.runDemoClosedLoop({
-        companyName: `Live Proof ${Date.now()}`,
-        viaApollo: true,
-      });
-      expect(loop.ok).toBe(true);
-      if (!loop.ok) return;
-
-      expect(loop.clientId).toBeTruthy();
-      expect(loop.viaApollo).toBe(true);
-      expect(loop.onboardingPhases).toBeGreaterThanOrEqual(1);
-      expect(loop.calendarId).toBeTruthy();
-      expect(loop.portalInvite?.email).toBeTruthy();
-      expect(
-        loop.portalInvite?.delivery?.mode === "mock" ||
-          loop.portalInvite?.delivery?.mode === "live",
-      ).toBe(true);
-      expect(loop.next.account).toContain("clientId=");
-      expect(loop.next.creative).toContain("clientId=");
-      expect(loop.taskId).toBeTruthy();
-      expect(loop.next.creative).toContain(
-        `taskId=${encodeURIComponent(loop.taskId!)}`,
-      );
-      expect(loop.next.approvals).toContain(
-        `id=${encodeURIComponent(loop.outreachId!)}`,
-      );
-      expect(loop.portalInvite?.portalPath).toBeTruthy();
-      expect(loop.portalInvite?.onboardingPath).toBeTruthy();
-      expect(loop.next.portal).toBe(loop.portalInvite!.portalPath);
-      expect(loop.next.onboarding).toBe(loop.portalInvite!.onboardingPath);
-      expect(loop.next.portal).toContain(
-        encodeURIComponent("/portal/approvals"),
-      );
-      expect(loop.next.onboarding).toContain(
-        encodeURIComponent("/portal/onboarding"),
-      );
-      expect(loop.next.portal).not.toBe(loop.next.onboarding);
-      // Distinct single-use tokens (token=…) so CTAs do not race.
-      const portalTok = new URL(
-        loop.next.portal,
-        "https://hrmny.invalid",
-      ).searchParams.get("token");
-      const onboardTok = new URL(
-        loop.next.onboarding,
-        "https://hrmny.invalid",
-      ).searchParams.get("token");
-      expect(portalTok).toBeTruthy();
-      expect(onboardTok).toBeTruthy();
-      expect(portalTok).not.toBe(onboardTok);
-      expect(loop.outreachId).toBeTruthy();
-      expect(loop.next.outreach).toContain(
-        `id=${encodeURIComponent(loop.outreachId!)}`,
-      );
-      expect(loop.next.finance).toContain(
-        `clientId=${encodeURIComponent(loop.clientId)}`,
-      );
-      if (loop.invoiceId) {
-        expect(loop.next.finance).toContain(
-          `invoiceId=${encodeURIComponent(loop.invoiceId)}`,
-        );
-      }
-      expect(loop.next.approvals).toContain(
-        `clientId=${encodeURIComponent(loop.clientId)}`,
-      );
-      expect(loop.next.outreach).toContain(
-        `clientId=${encodeURIComponent(loop.clientId)}`,
-      );
-      expect(loop.fired.some((f) => f.startsWith("outreach."))).toBe(true);
-      const outreachList = await caller.leadgen.outreach.list();
-      expect(
-        outreachList.some((o) => o.id === loop.outreachId && o.state === "draft"),
-      ).toBe(true);
-      const seededCals = await caller.calendars.listByClient({
-        clientId: loop.clientId,
-      });
-      expect(
-        seededCals.some((c) => c.calendarId === loop.calendarId),
-      ).toBe(true);
-
-      const seeds = await caller.m4.seedIds();
-      expect(seeds.clientId).toBe(loop.clientId);
-      expect(seeds.calendarId).toBe(loop.calendarId);
-      expect(seeds.source).toBe("durable_calendar");
-
-      if (loop.taskId && user.employeeId) {
-        const assigned = await caller.tasks.assign({
-          id: loop.taskId,
-          ownerEmployeeId: user.employeeId,
-        });
-        expect(assigned.ok).toBe(true);
-      }
-      const gen = await caller.creativeGen.generate({
-        prompt: "Ochre editorial still life for demo portal delivery",
-        clientId: loop.clientId,
-      });
-      expect(gen.status).toBe("ready");
-
-      const sent = await caller.creativeGen.sendToPortal({
-        creativeGenerationId: gen.creativeGenerationId,
-        clientId: loop.clientId,
-      });
-      expect(sent.ok).toBe(true);
-      expect(sent.assetId).toBeTruthy();
-      expect(sent.taskId).toBeTruthy();
-
-      const deliveryTask = await caller.tasks.create({
-        clientId: loop.clientId,
-        taskType: "social_cutdowns",
-        title: `Durable board ${Date.now()}`,
-      });
-      expect(deliveryTask.taskId).toBeTruthy();
-      const listed = await caller.tasks.list({ clientId: loop.clientId });
-      expect(listed.some((t) => t.taskId === deliveryTask.taskId)).toBe(true);
-
-      const brief = await caller.briefs.createForTask({
-        taskId: deliveryTask.taskId,
-        body: {
-          title: "Demo brief",
-          objective: "Launch",
-          audience: "UAE retail",
-          deliverables: "3 reels",
-          deadline: "2026-12-31",
-          brandAssets: { logo: true },
-        },
-      });
-      expect(brief.taskId).toBe(deliveryTask.taskId);
-      const briefGet = await caller.briefs.get({ id: brief.briefId });
-      expect(briefGet?.briefId).toBe(brief.briefId);
-
-      const locked = await caller.briefs.lock({ id: brief.briefId });
-      expect(locked.ok).toBe(true);
-      if (locked.ok) {
-        expect(locked.taskStatus).toBe("brief_ready");
-        expect(locked.brief.lockedAt).toBeTruthy();
-        expect(locked.spawnedTaskId).toBeTruthy();
-        expect(locked.seam?.event?.result?.durable).toBe(true);
-      }
-      const lockedAgain = await caller.briefs.lock({ id: brief.briefId });
-      expect(lockedAgain.ok).toBe(true);
-      if (locked.ok && lockedAgain.ok) {
-        expect(lockedAgain.spawnedTaskId).toBe(locked.spawnedTaskId);
-      }
-
-      const agent = await caller.aiAdmin.customAgents.create({
-        slug: `proof-agent-${Date.now()}`,
-        displayName: "Proof Agent",
-        systemPrompt: "You are a concise onboarding coach for Creative Harmony.",
-      });
-      const run = await caller.aiAdmin.customAgents.run({
-        id: agent.customAgentId,
-        prompt: "List 2 next onboarding actions for this client.",
-        clientId: loop.clientId,
-        taskId: deliveryTask.taskId,
-        dealId: loop.dealId,
-      });
-      expect(run.slug).toBe(agent.slug);
-      expect(run.output).toBeTruthy();
-      expect(run.sandbox?.clientId).toBe(loop.clientId);
-      expect(run.sandbox?.taskId).toBe(deliveryTask.taskId);
-      expect(run.sandbox?.dealId).toBe(loop.dealId);
-      expect(Array.isArray(run.toolResults)).toBe(true);
-      expect(run.toolResults!.some((t) => t.tool === "crm.read" && t.ok)).toBe(
-        true,
-      );
-      expect(
-        run.toolResults!.some((t) => t.tool === "outreach.read" && t.ok),
-      ).toBe(true);
-      expect(
-        run.toolResults!.some((t) => t.tool === "onboarding.read" && t.ok),
-      ).toBe(true);
-      expect(
-        run.toolResults!.some((t) => t.tool === "tasks.create" && t.ok),
-      ).toBe(true);
-      expect(
-        run.toolResults!.some((t) => t.tool === "outreach.draft" && t.ok),
-      ).toBe(true);
-      expect(
-        run.toolResults!.some((t) => t.tool === "crm.note" && t.ok),
-      ).toBe(true);
-      expect(
-        run.toolResults!.some((t) => t.tool === "campaigns.draft" && t.ok),
-      ).toBe(true);
-      expect(
-        run.toolResults!.some((t) => t.tool === "briefs.draft" && t.ok),
-      ).toBe(true);
-      expect(
-        run.toolResults!.some((t) => t.tool === "portal.invite" && t.ok),
-      ).toBe(true);
-      expect(
-        run.toolResults!.some((t) => t.tool === "creative.sendToPortal" && t.ok),
-      ).toBe(true);
-      const createdTask = run.toolResults!.find(
-        (t) => t.tool === "tasks.create" && t.ok,
-      );
-      expect(
-        createdTask &&
-          typeof createdTask.data === "object" &&
-          createdTask.data !== null &&
-          "taskId" in createdTask.data,
-      ).toBe(true);
-
-      const month1 = await caller.clients.month1.get({
-        clientId: loop.clientId,
-      });
-      expect(month1.length).toBeGreaterThanOrEqual(1);
-      expect(month1.some((p) => p.status === "active")).toBe(true);
-
-      const synced = await caller.invoices.syncXeroMirror();
-      expect(synced.upserted).toBeGreaterThanOrEqual(0);
-      const billed = await caller.invoices.list();
-      expect(Array.isArray(billed)).toBe(true);
-      expect(loop.invoiceId).toBeTruthy();
-      expect(
-        billed.some(
-          (i) =>
-            i.invoiceId === loop.invoiceId &&
-            i.clientId === loop.clientId &&
-            (i.invoiceType === "first" || i.billingKind === "first"),
-        ),
-      ).toBe(true);
-      if (loop.invoiceId) {
-        const approved = await caller.invoices.approve({ id: loop.invoiceId });
-        expect(approved.result.ok).toBe(true);
-        expect(approved.invoice.status).toBe("approved");
-        const transitioned = await caller.invoices.transition({
-          id: loop.invoiceId,
-          to: "issued",
-          from: "approved",
-        });
-        expect(transitioned.ok).toBe(true);
-        const after = await caller.invoices.list();
-        expect(
-          after.some(
-            (i) => i.invoiceId === loop.invoiceId && i.status === "issued",
-          ),
-        ).toBe(true);
-      }
-      if (synced.upserted > 0) {
-        expect(
-          billed.some(
-            (i) =>
-              ("source" in i && i.source === "xero_mirror") ||
-              i.billingKind === "xero_mirror",
-          ),
-        ).toBe(true);
-      }
-
-      const userScoped = await caller.aiAdmin.customAgents.run({
-        id: agent.customAgentId,
-        prompt: `User-only note ${Date.now()} for partner sandbox isolation.`,
-      });
-      expect(userScoped.sandbox?.employeeId).toBe(user.employeeId);
-      expect(userScoped.sandbox?.clientId).toBeUndefined();
-
-      const smoke = await caller.automation.smoke();
-      expect(smoke.health).toBeTruthy();
-      expect(
-        smoke.health.apiKeyConfigured === true ||
-          smoke.health.apiKeyConfigured === false,
-      ).toBe(true);
-
-      const portalUser = {
-        ...resolveDevUser("portal_a"),
-        clientId: loop.clientId,
-      };
-      const portalCaller = createCaller({
-        user: portalUser,
-        employeeId: portalUser.employeeId,
-        roles: portalUser.roles,
-        canViewMargin: false,
-        clientId: loop.clientId,
-      });
-      const onboarding = await portalCaller.portal.onboarding.get();
-      expect(onboarding.phases.length).toBeGreaterThanOrEqual(1);
-      const deliveries = await portalCaller.portal.deliveries.list();
-      expect(deliveries[0]?.deliverables.some((d) => d.kind === "asset")).toBe(
-        true,
-      );
-
-      const approvals = await portalCaller.portal.approvals.list();
-      expect(
-        approvals.some((a) => a.approvalId === sent.taskId),
-      ).toBe(true);
-      const approved = await portalCaller.portal.approvals.act({
-        id: sent.taskId!,
-        action: "approve",
-      });
-      expect(approved.ok).toBe(true);
-      expect(approved.status).toBe("approved");
-
-      const inbound = await caller.leads.inbound.create({
-        companyName: `Inbound Proof ${Date.now()}`,
-        contactEmail: `inbound-${Date.now()}@example.com`,
-        sector: "Retail",
-        message: "Website form — need creative retainer",
-      });
-      expect(inbound.leadSourceLane).toBe("inbound");
-      expect(
-        "durable" in inbound ? inbound.durable : true,
-      ).toBeTruthy();
-      const inboundDeal = await getDeal(inbound.dealId);
-      expect(inboundDeal?.dealId).toBe(inbound.dealId);
-      expect(inboundDeal?.leadSourceLane).toBe("inbound");
-
-      const month = new Date().toISOString().slice(0, 7);
-      const calendar = await caller.calendars.create({
-        clientId: loop.clientId,
-        month,
-        focusPoints: ["Launch reel", "Product stills"],
-      });
-      expect(calendar.calendarId).toBeTruthy();
-      const slot = await caller.calendars.addSlot({
-        calendarId: calendar.calendarId,
-        slotDate: `${month}-15`,
-        slotLabel: "Studio shoot",
-        taskId: deliveryTask.taskId,
-        position: 1,
-      });
-      expect(slot.calendarId).toBe(calendar.calendarId);
-      const approvedCal = await caller.calendars.refApprove({
-        id: calendar.calendarId,
-      });
-      expect(approvedCal.refApprovalState).toBe("approved");
-      const listedCals = await caller.calendars.listByClient({
-        clientId: loop.clientId,
-        month,
-      });
-      expect(
-        listedCals.some((c) => c.calendarId === calendar.calendarId),
-      ).toBe(true);
-
-      if (loop.portalInvite?.email) {
-        const demoToken = await caller.clients.portalUsers.issueDemoToken({
-          clientId: loop.clientId,
-          email: loop.portalInvite.email,
-        });
-        expect(demoToken.token.startsWith("ml_")).toBe(true);
-        const anonVerify = createCaller({
-          user: null,
-          employeeId: null,
-          roles: [],
-          canViewMargin: false,
-          clientId: null,
-        });
-        const verified = await anonVerify.portal.auth.verify({
-          token: demoToken.token,
-        });
-        expect(verified.ok).toBe(true);
-        if (verified.ok) {
-          expect(verified.clientId).toBe(loop.clientId);
-          expect(
-            "sessionGrant" in verified &&
-              typeof verified.sessionGrant === "string" &&
-              verified.sessionGrant.startsWith("ps_"),
-          ).toBe(true);
-        }
-      }
-    },
-    180_000,
-  );
+    const toolResults = await runAgentTools({
+      allowedTools: ["crm.closed_loop"],
+      prompt: "Run closed loop via Apollo for company: Containment Proof",
+      scope: { employeeId: user.employeeId },
+    });
+    expect(toolResults).toContainEqual(
+      expect.objectContaining({
+        tool: "crm.closed_loop",
+        ok: false,
+        data: expect.objectContaining({
+          skipped: LEGACY_SALES_EFFECT_SKIPPED,
+        }),
+      }),
+    );
+    const prospectResults = await runAgentTools({
+      allowedTools: ["crm.prospect"],
+      prompt: "Find and import UAE retail brands with Apollo",
+      scope: { employeeId: user.employeeId },
+    });
+    expect(prospectResults).toContainEqual(
+      expect.objectContaining({
+        tool: "crm.prospect",
+        ok: false,
+        data: expect.objectContaining({
+          skipped: LEGACY_SALES_EFFECT_SKIPPED,
+        }),
+      }),
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

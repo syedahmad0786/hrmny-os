@@ -3,6 +3,11 @@
 **Date:** 2026-08-21  
 **Production:** https://hrmny-os.vercel.app · main includes PR [#63](https://github.com/syedahmad0786/hrmny-os/pull/63) + [#64](https://github.com/syedahmad0786/hrmny-os/pull/64)
 
+> Historical receipt. Provider, deployment, and acceptance claims below reflect
+> the dated observation only. They are not current operational acceptance. The
+> legacy demo Sales effects described later were superseded on 2026-08-30 by
+> the fail-closed synthetic-fixture boundary in `docs/DEMO-FUNNEL.md`.
+
 ## Checklist audit (non-LLM)
 
 Full Excel checklist re-audited against live prod (**2296 rows**). LLM/RAG/image-gen deep tests **skipped** by request.
@@ -46,25 +51,31 @@ Anon users hit SSO / “Checking access…”. Full UI needs `@hrmny.co` Google 
 
 ## Tracking sheets
 
-| Sheet | URL |
-|-------|-----|
-| Original checklist | https://docs.google.com/spreadsheets/d/118yT7_g0hG57zCkG62PACQIVuhocNkJNbq3fCwiKFf0 |
+| Sheet                        | URL                                                                                 |
+| ---------------------------- | ----------------------------------------------------------------------------------- |
+| Original checklist           | https://docs.google.com/spreadsheets/d/118yT7_g0hG57zCkG62PACQIVuhocNkJNbq3fCwiKFf0 |
 | Audit index (full checklist) | https://docs.google.com/spreadsheets/d/1x44fq-qKTTh3PIuj9d3JCsZS4oelHm8-m0WdWAHTya8 |
-| Audit dashboard | https://docs.google.com/spreadsheets/d/19CDN7iPY9RPPJZznHBtJau2NKZIoRRFFHfSjGwWqZbk |
-| Owner actions | https://docs.google.com/spreadsheets/d/10y6gYcZYQQ9omC-dJi21hWaMtjjb5GXj437kYQHiuUA |
-| Live test 2026-08-21 | https://docs.google.com/spreadsheets/d/107TARos-8OZ9r_PZNy6AzVZwDWWpQq93mksjHxphWoc |
-| Checklist update note | https://docs.google.com/document/d/15IKlcFGMK30nKH8b8CXYfTvl07yWz5uObhrfenporfw |
+| Audit dashboard              | https://docs.google.com/spreadsheets/d/19CDN7iPY9RPPJZznHBtJau2NKZIoRRFFHfSjGwWqZbk |
+| Owner actions                | https://docs.google.com/spreadsheets/d/10y6gYcZYQQ9omC-dJi21hWaMtjjb5GXj437kYQHiuUA |
+| Live test 2026-08-21         | https://docs.google.com/spreadsheets/d/107TARos-8OZ9r_PZNy6AzVZwDWWpQq93mksjHxphWoc |
+| Checklist update note        | https://docs.google.com/document/d/15IKlcFGMK30nKH8b8CXYfTvl07yWz5uObhrfenporfw     |
 
-## Demo closed loop (staff)
+## Historical demo closed loop (superseded)
 
-`/crm/hunt` → **Run demo closed loop** or **Closed loop via Apollo** seeds prospect → won → onboarding + creative task (Postgres).  
-Apollo **Prospect with Apollo** writes durable CRM discover deals (same pipeline store).  
+The one-click prospect-to-client demo and bulk Apollo import were demonstrated
+in the dated environment. They are now synthetic-only compatibility fixtures
+and refuse before provider or PostgreSQL effects. The reviewed operating path
+is `Signal → Research → Person → Outreach → Pipeline → Learn`; see
+`docs/DEMO-FUNNEL.md`.
+
 `/creative` → generate → **Attach & send to portal** lands an asset in `/portal/deliveries`.  
 `/portal/onboarding` lets the client acknowledge the active phase; `/portal` approvals act on `client_review` tasks.  
 `/traffic` DoR **lock** writes Postgres `locked_at` and spawns `creative_spawn`.  
 `/settings/ai` → custom agents **Run** on client/user/task memory sandbox (mock LLM if no OpenRouter credits).  
 `/approvals` → outreach HITL: after approve, Gmail send uses live Composio→Gmail when connected (else stub); LinkedIn copy-draft.
 
-## Still mock until keys
+## Dated provider state
 
-Apollo · Hunter · Xero · n8n — paste via Connections / Vercel env. Xero writes stay off.
+At the time of this receipt, Apollo, Hunter, Xero, and n8n were mock. Do not
+infer current configuration or authorization from this historical record. Xero
+writes remain disabled unless separately authorized.

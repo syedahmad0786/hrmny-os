@@ -7,6 +7,7 @@ import type {
 import { dedupeIntoCrm } from "./dedupe";
 import { buildDigest, type MorningDigest, type ScoredLead } from "./digest";
 import { defaultRunAgent, type RunAgent } from "./agent-run";
+import { assertLegacySalesSyntheticRuntime } from "../sales-os/legacy-effect-policy";
 
 /**
  * Daily lead-gen pipeline (M8): search → dedupe into CRM → verify each new
@@ -35,8 +36,14 @@ function num(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function extractScore(output: unknown): { buafScore: number; temperature: string } {
-  const o = (typeof output === "object" && output ? output : {}) as Record<string, unknown>;
+function extractScore(output: unknown): {
+  buafScore: number;
+  temperature: string;
+} {
+  const o = (typeof output === "object" && output ? output : {}) as Record<
+    string,
+    unknown
+  >;
   const buafScore = num(o.buafScore, 0);
   const temperature =
     typeof o.temperature === "string"
@@ -55,6 +62,7 @@ export async function runDailyLeadGen(
   deps: LeadGenDeps,
   criteria: LeadSearchCriteria = DEFAULT_ICP,
 ): Promise<MorningDigest> {
+  assertLegacySalesSyntheticRuntime("leadgen.runDailyLeadGen");
   const runAgent = deps.runAgent ?? defaultRunAgent;
 
   const candidates = await deps.leadSource.searchLeads(criteria);
@@ -71,7 +79,10 @@ export async function runDailyLeadGen(
       ? await deps.verifier.verify(rec.email)
       : null;
 
-    const run = await runAgent({ agent: "research", input: { lead: cand ?? rec } });
+    const run = await runAgent({
+      agent: "research",
+      input: { lead: cand ?? rec },
+    });
     const { buafScore, temperature } = extractScore(run.output);
 
     scored.push({

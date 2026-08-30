@@ -3,12 +3,14 @@ import { and, auditEvent, convention, desc, eq } from "@hrmny/db";
 import {
   AgentIdSchema,
   AutonomyModeSchema,
-  defaultAutonomyPolicy,
-  parseAutonomyPolicy,
   type AutonomyPolicy,
 } from "@hrmny/ai";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
+import {
+  AI_AUTONOMY_RULE_KEY,
+  readAiAutonomyPolicy,
+} from "../ai/autonomy-policy";
 import { requirePermission, router, staffProcedure } from "./trpc";
 
 /**
@@ -19,27 +21,12 @@ import { requirePermission, router, staffProcedure } from "./trpc";
  * Module only — the orchestrator registers this on appRouter (see PR notes).
  */
 
-const RULE_KEY = "ai.autonomy_policy";
 const AUDIT_ENTITY = "ai_policy";
 const AUDIT_ACTION = "ai.policy.updated";
 
-async function readPolicy(): Promise<AutonomyPolicy> {
-  const db = getDb();
-  if (!db) {
-    const row = getDemoStore().conventions.get(RULE_KEY);
-    return row ? parseAutonomyPolicy(row.payload) : defaultAutonomyPolicy();
-  }
-  const [row] = await db
-    .select({ payload: convention.payload })
-    .from(convention)
-    .where(and(eq(convention.ruleKey, RULE_KEY), eq(convention.isActive, true)))
-    .limit(1);
-  return row ? parseAutonomyPolicy(row.payload) : defaultAutonomyPolicy();
-}
-
 export const aiPolicyRouter = router({
   /** Current effective autonomy policy (manual default if never set). */
-  get: staffProcedure.query(() => readPolicy()),
+  get: staffProcedure.query(() => readAiAutonomyPolicy()),
 
   /** Replace the policy. New convention version + audited before/after. */
   set: staffProcedure
@@ -60,9 +47,9 @@ export const aiPolicyRouter = router({
       const db = getDb();
       if (!db) {
         const store = getDemoStore();
-        const prev = store.conventions.get(RULE_KEY);
-        store.conventions.set(RULE_KEY, {
-          ruleKey: RULE_KEY,
+        const prev = store.conventions.get(AI_AUTONOMY_RULE_KEY);
+        store.conventions.set(AI_AUTONOMY_RULE_KEY, {
+          ruleKey: AI_AUTONOMY_RULE_KEY,
           version: (prev?.version ?? 0) + 1,
           payload: policy,
           updatedAt: policy.updatedAt,
@@ -83,19 +70,22 @@ export const aiPolicyRouter = router({
         const [previous] = await tx
           .select()
           .from(convention)
-          .where(eq(convention.ruleKey, RULE_KEY))
+          .where(eq(convention.ruleKey, AI_AUTONOMY_RULE_KEY))
           .orderBy(desc(convention.version))
           .limit(1);
         await tx
           .update(convention)
           .set({ isActive: false, updatedAt: new Date() })
           .where(
-            and(eq(convention.ruleKey, RULE_KEY), eq(convention.isActive, true)),
+            and(
+              eq(convention.ruleKey, AI_AUTONOMY_RULE_KEY),
+              eq(convention.isActive, true),
+            ),
           );
         const [next] = await tx
           .insert(convention)
           .values({
-            ruleKey: RULE_KEY,
+            ruleKey: AI_AUTONOMY_RULE_KEY,
             version: String(Number(previous?.version ?? 0) + 1),
             payload: policy,
           })

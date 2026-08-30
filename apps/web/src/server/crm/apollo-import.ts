@@ -14,6 +14,7 @@ import type {
   EmailVerificationAdapter,
   LeadCandidate,
 } from "@hrmny/integrations";
+import { assertLegacySalesSyntheticRuntime } from "../sales-os/legacy-effect-policy";
 
 export type ApolloCompanyHit = Record<string, unknown>;
 
@@ -242,6 +243,7 @@ export async function importApolloCompaniesToCrm(input: {
   limit?: number;
   verifier?: EmailVerificationAdapter | null;
 }): Promise<DurableApolloImportResult> {
+  assertLegacySalesSyntheticRuntime("crm.importApolloCompaniesToCrm");
   const limit = input.limit ?? 5;
   const deals: DurableApolloImportResult["deals"] = [];
   let verifyMode: DurableApolloImportResult["verifyMode"] = "skipped";

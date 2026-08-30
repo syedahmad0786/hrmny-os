@@ -43,6 +43,25 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      DATABASE_MODE: memory
+      DATABASE_URL: ""
+      AUTH_MODE: dev
+      ALLOW_DEV_AUTH: "true"
+      WORK_ENVIRONMENT_KIND: sandbox
+      LLM_PROVIDER: mock
+      EMBEDDING_PROVIDER: none
+      APOLLO_MODE: mock
+      APOLLO_ALLOW_PAID_OPERATIONS: "false"
+      HUNTER_MODE: mock
+      HUNTER_ALLOW_PAID_OPERATIONS: "false"
+      NEVERBOUNCE_MODE: mock
+      NEVERBOUNCE_ALLOW_PAID_OPERATIONS: "false"
+      RESEND_MODE: mock
+      XERO_MODE: mock
+      XERO_WRITE_ENABLED: "false"
+      COMPOSIO_API_KEY: ""
+      GOOGLE_CHAT_WEBHOOK_URL: ""
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

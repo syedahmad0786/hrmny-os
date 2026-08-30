@@ -16,7 +16,7 @@ const forbiddenFetch: typeof globalThis.fetch = async (input) => {
 
 function applyDeterministicEnvironment() {
   const values: Record<string, string> = {
-    DATABASE_MODE: "auto",
+    DATABASE_MODE: "memory",
     DATABASE_URL: "",
     DIRECT_URL: "",
     HRMNY_PRODUCTION_DATABASE_URL: "",
@@ -26,10 +26,14 @@ function applyDeterministicEnvironment() {
     OPENROUTER_LIVE_SMOKE: "0",
     EMBEDDING_PROVIDER: "none",
     APOLLO_MODE: "mock",
+    APOLLO_ALLOW_PAID_OPERATIONS: "false",
     HUNTER_MODE: "mock",
+    HUNTER_ALLOW_PAID_OPERATIONS: "false",
     NEVERBOUNCE_MODE: "mock",
+    NEVERBOUNCE_ALLOW_PAID_OPERATIONS: "false",
     RESEND_MODE: "mock",
     N8N_MODE: "mock",
+    N8N_ALLOW_PRODUCTION_TRIGGER: "false",
     XERO_MODE: "mock",
     XERO_WRITE_ENABLED: "false",
     WORK_ENVIRONMENT_KIND: "sandbox",
@@ -40,6 +44,10 @@ function applyDeterministicEnvironment() {
     HUNTER_API_KEY: "",
     NEVERBOUNCE_API_KEY: "",
     RESEND_API_KEY: "",
+    COMPOSIO_API_KEY: "",
+    GOOGLE_CHAT_WEBHOOK_URL: "",
+    INNGEST_EVENT_KEY: "",
+    INNGEST_SIGNING_KEY: "",
   };
   for (const [key, value] of Object.entries(values)) vi.stubEnv(key, value);
   vi.stubGlobal("fetch", forbiddenFetch);

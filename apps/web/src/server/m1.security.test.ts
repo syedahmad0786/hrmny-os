@@ -111,6 +111,8 @@ describe("M1 security insurance", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("AUTH_MODE", "dev");
     vi.stubEnv("ALLOW_DEV_AUTH", "");
+    vi.stubEnv("DATABASE_MODE", "auto");
+    vi.stubEnv("DATABASE_URL", "");
     expect(getAuthMode()).toBe("supabase");
 
     const req = new Request("https://hrmny.example/api/trpc", {

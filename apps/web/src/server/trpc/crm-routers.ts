@@ -47,6 +47,10 @@ import {
 import { redactDealMargin, redactQuoteMargin } from "../crm/types";
 import { emitHealthSignal, writeAudit } from "../m1-persistence";
 import {
+  legacySalesEffectRefusal,
+  legacySalesSyntheticRuntimeEnabled,
+} from "../sales-os/legacy-effect-policy";
+import {
   protectedProcedure,
   publicProcedure,
   router,
@@ -1048,6 +1052,9 @@ export const crmRouter = router({
         .optional(),
     )
     .mutation(async ({ ctx, input }) => {
+      if (!legacySalesSyntheticRuntimeEnabled()) {
+        return legacySalesEffectRefusal("crm.runDemoClosedLoop");
+      }
       const result = await runDemoClosedLoopCore({
         companyName: input?.companyName,
         viaApollo: input?.viaApollo,
@@ -1084,6 +1091,14 @@ export const crmRouter = router({
     apolloImport: staffProcedure
       .input(z.object({ query: z.string().min(1).max(200) }))
       .mutation(async ({ ctx, input }) => {
+        if (!legacySalesSyntheticRuntimeEnabled()) {
+          return {
+            ...legacySalesEffectRefusal("crm.prospect.apolloImport"),
+            deals: [],
+            mode: "disabled" as const,
+            verifyMode: "skipped" as const,
+          };
+        }
         const { importApolloCompaniesToCrm } =
           await import("../crm/apollo-import");
         const {
