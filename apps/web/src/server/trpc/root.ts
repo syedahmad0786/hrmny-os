@@ -17,7 +17,12 @@ import { bootstrapGateRegistry } from "@hrmny/gate";
 import { getDemoStore } from "../demo-store";
 import { getDb } from "../db";
 import { getObjectStore } from "../storage/object-store";
-import { DEV_USERS, getAuthMode } from "../auth/session";
+import {
+  DEV_USERS,
+  getAuthMode,
+  rolesCanPreviewClient,
+  sessionHas,
+} from "../auth/session";
 import {
   emitHealthSignal,
   listAudit,
@@ -124,6 +129,17 @@ export const authRouter = router({
       actorType: ctx.user?.actorType ?? null,
       clientId: ctx.user?.clientId ?? null,
       authMode: getAuthMode(),
+      canPreviewClient:
+        ctx.user?.actorType === "staff" && rolesCanPreviewClient(ctx.roles),
+      canAdminFeatures:
+        ctx.user?.actorType === "staff" &&
+        sessionHas(ctx.user, "admin", "features"),
+      canAdminWork:
+        ctx.user?.actorType === "staff" &&
+        sessionHas(ctx.user, "admin", "work"),
+      canViewAudit:
+        ctx.user?.actorType === "staff" &&
+        sessionHas(ctx.user, "audit", "view"),
       enabledFeatureKeys: resolved
         .filter((item) => item.enabled)
         .map((item) => item.key),

@@ -205,6 +205,10 @@ export function sessionCanViewMargin(user: SessionUser): boolean {
   return hasPermission(user.permissions, "margin", "view");
 }
 
+export function rolesCanPreviewClient(roles: readonly string[]): boolean {
+  return roles.some((role) => role === "partner" || role === "director");
+}
+
 export function sessionHas(
   user: SessionUser,
   resource: string,

@@ -5,10 +5,11 @@ import {
   readPortalWorkspace,
 } from "../portal-data";
 import { CLIENT_PORTAL_ACTOR_REQUIRED } from "../portal/approval-boundary";
+import { rolesCanPreviewClient } from "../auth/session";
 import { router, staffProcedure } from "./trpc";
 
 function requirePresenter(roles: string[]) {
-  if (!roles.some((role) => role === "partner" || role === "director")) {
+  if (!rolesCanPreviewClient(roles)) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Partner or director access required",

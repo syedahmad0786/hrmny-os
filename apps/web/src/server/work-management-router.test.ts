@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 import { clearDemoFeatureOverrides, setFeatureOverride } from "./features";
+import { DEMO_CLIENT_ID } from "./demo-store";
 import { createCaller } from "./trpc/root";
 import {
   customFieldAccessLevel,
@@ -186,6 +187,68 @@ describe("work management", () => {
       code: "FORBIDDEN",
       message: "FEATURE_DISABLED:work.my_tasks.focus",
     });
+  });
+
+  it("reports unresolved task dependencies as scoped My Tasks blockers", async () => {
+    const user = resolveDevUser("partner");
+    const caller = partnerCaller();
+    const project = await caller.work.projects.create({
+      name: `Blocked My Tasks ${Date.now()}`,
+      description: "",
+      privacy: "private",
+      color: "#C7702E",
+      clientId: DEMO_CLIENT_ID,
+    });
+    const detail = await caller.work.projects.get({
+      projectId: project.projectId,
+    });
+    const prerequisite = await caller.work.tasks.create({
+      projectId: project.projectId,
+      sectionId: detail.sections[0]!.sectionId,
+      title: "Finish prerequisite",
+      description: "",
+      assigneeEmployeeId: user.employeeId,
+    });
+    const blocked = await caller.work.tasks.create({
+      projectId: project.projectId,
+      sectionId: detail.sections[0]!.sectionId,
+      title: "Start dependent work",
+      description: "",
+      assigneeEmployeeId: user.employeeId,
+    });
+    await caller.work.dependencies.add({
+      itemId: blocked.itemId,
+      dependsOnItemId: prerequisite.itemId,
+    });
+
+    expect(
+      (await caller.work.personal.myTasks({ includeCompleted: false })).find(
+        (item) => item.itemId === blocked.itemId,
+      )?.blockedByCount,
+    ).toBe(1);
+
+    await caller.work.tasks.complete({
+      itemId: prerequisite.itemId,
+      completed: true,
+    });
+    expect(
+      (await caller.work.personal.myTasks({ includeCompleted: false })).find(
+        (item) => item.itemId === blocked.itemId,
+      )?.blockedByCount,
+    ).toBe(0);
+
+    await setFeatureOverride({
+      featureKey: "work.dependencies",
+      scopeType: "client",
+      scopeKey: DEMO_CLIENT_ID,
+      enabled: false,
+      updatedByEmployeeId: user.employeeId,
+    });
+    expect(
+      (await caller.work.personal.myTasks({ includeCompleted: false })).find(
+        (item) => item.itemId === blocked.itemId,
+      )?.blockedByCount,
+    ).toBeNull();
   });
 
   it("creates governed private tasks directly from My Tasks", async () => {

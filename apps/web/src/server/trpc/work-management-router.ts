@@ -9352,33 +9352,69 @@ export const workManagementRouter = router({
       )
       .query(async ({ input, ctx }) => {
         const employeeId = actor(ctx);
+        const featureOverrides = await listFeatureOverrides();
+        const dependenciesEnabledFor = (clientId: string | null) =>
+          resolveFeatureCatalog(featureOverrides, {
+            userId: ctx.employeeId,
+            clientId,
+            roles: ctx.roles,
+          }).some(
+            (feature) =>
+              feature.key === "work.dependencies" && feature.enabled,
+          );
         const db = getDb();
         if (!db) {
           const store = getDemoWork();
-          return [...store.items.values()]
-            .filter(
-              (item) =>
-                item.assigneeEmployeeId === employeeId &&
-                (input?.includeCompleted || !item.completedAt) &&
-                (!input?.query ||
-                  item.title.toLowerCase().includes(input.query.toLowerCase())),
-            )
-            .map((item) => {
-              const membership = store.myTasksMemberships.get(
-                myTasksMembershipKey(employeeId, item.itemId),
-              );
-              const project = store.projects.get(item.projectId);
-              return {
-                ...item,
-                projectName:
-                  project?.projectKind === "personal"
-                    ? "Private task"
-                    : (project?.name ?? "Work"),
-                projectKind: project?.projectKind ?? "standard",
-                personalSectionId: membership?.sectionId ?? null,
-                personalPosition: membership?.position ?? 0,
-              };
-            });
+          const candidates = [...store.items.values()].filter(
+            (item) =>
+              item.assigneeEmployeeId === employeeId &&
+              (input?.includeCompleted || !item.completedAt) &&
+              (!input?.query ||
+                item.title.toLowerCase().includes(input.query.toLowerCase())),
+          );
+          const clients = [
+            ...new Set(
+              candidates.map(
+                (item) => store.projects.get(item.projectId)?.clientId ?? null,
+              ),
+            ),
+          ];
+          const dependencyVisibility = new Map(
+            clients.map(
+              (clientId) =>
+                [
+                  clientId ?? "organization",
+                  dependenciesEnabledFor(clientId),
+                ] as const,
+            ),
+          );
+          return candidates.map((item) => {
+            const membership = store.myTasksMemberships.get(
+              myTasksMembershipKey(employeeId, item.itemId),
+            );
+            const project = store.projects.get(item.projectId);
+            const dependenciesVisible = dependencyVisibility.get(
+              project?.clientId ?? "organization",
+            );
+            return {
+              ...item,
+              projectName:
+                project?.projectKind === "personal"
+                  ? "Private task"
+                  : (project?.name ?? "Work"),
+              projectKind: project?.projectKind ?? "standard",
+              personalSectionId: membership?.sectionId ?? null,
+              personalPosition: membership?.position ?? 0,
+              blockedByCount: dependenciesVisible
+                ? [...(store.dependencies.get(item.itemId) ?? [])].filter(
+                    (dependencyId) => {
+                      const dependency = store.items.get(dependencyId);
+                      return Boolean(dependency && !dependency.completedAt);
+                    },
+                  ).length
+                : null,
+            };
+          });
         }
         const pattern = `%${input?.query ?? ""}%`;
         const rows = await db.execute<
@@ -9387,6 +9423,8 @@ export const workManagementRouter = router({
             projectKind: "standard" | "personal";
             personalSectionId: string | null;
             personalPosition: number;
+            blockedByCount: number;
+            projectClientId: string | null;
           }
         >(sql`
           select item.work_item_id as "itemId",
@@ -9400,8 +9438,18 @@ export const workManagementRouter = router({
             case when chosen."projectKind" = 'personal'
               then 'Private task' else chosen."projectName" end as "projectName",
             chosen."projectKind",
+            chosen."projectClientId",
             personal.work_my_tasks_section_id as "personalSectionId",
             coalesce(personal.position, 0) as "personalPosition",
+            (
+              select count(*)::int
+              from public.work_item_dependency dependency
+              join public.work_item prerequisite
+                on prerequisite.work_item_id = dependency.depends_on_work_item_id
+              where dependency.work_item_id = item.work_item_id
+                and prerequisite.completed_at is null
+                and prerequisite.archived_at is null
+            ) as "blockedByCount",
             item.recurrence
           from public.work_item item
           join lateral (
@@ -9409,7 +9457,8 @@ export const workManagementRouter = router({
               project_item.position,
               project.work_project_id as "projectId",
               project.name as "projectName",
-              project.project_kind as "projectKind"
+              project.project_kind as "projectKind",
+              project.client_id as "projectClientId"
             from public.work_project_item project_item
             join public.work_project project
               on project.work_project_id = project_item.work_project_id
@@ -9448,11 +9497,26 @@ export const workManagementRouter = router({
           order by item.completed_at nulls first, personal.position,
             item.due_at nulls last, lower(item.title)
         `);
-        return rows.map((item) => ({
+        const clients = [...new Set(rows.map((item) => item.projectClientId))];
+        const dependencyVisibility = new Map(
+          clients.map(
+            (clientId) =>
+              [
+                clientId ?? "organization",
+                dependenciesEnabledFor(clientId),
+              ] as const,
+          ),
+        );
+        return rows.map(({ projectClientId, ...item }) => ({
           ...item,
           startDate: item.startDate ? String(item.startDate) : null,
           dueAt: iso(item.dueAt),
           completedAt: iso(item.completedAt),
+          blockedByCount: dependencyVisibility.get(
+            projectClientId ?? "organization",
+          )
+            ? Number(item.blockedByCount)
+            : null,
         }));
       }),
     inbox: staffProcedure
