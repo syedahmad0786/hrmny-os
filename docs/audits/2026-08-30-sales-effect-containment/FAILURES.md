@@ -99,3 +99,41 @@ part of the permanent learning record.
 - Supersedes/superseded-by: none.
 - Rollback/correction: reproduce on Linux CI; if CI fails, diagnose the API
   handler before merge. Preserve captured evidence locally.
+
+## `FAIL-HRMNY-20260830-SALES-007` — raw URL was not a valid harness receipt
+
+- Decision/finding: the first Inngest completion transition rejected a raw URL
+  in the receipt field because the harness requires an explicit reference
+  scheme; no task state changed.
+- Reason: a URL is source evidence, while the transition receipt must be a
+  stable typed reference.
+- Alternatives considered: weaken receipt validation; use a receipt reference
+  and retain URLs in the message.
+- Trade-offs: one corrected transition was required.
+- Evidence: harness validation error and
+  `receipt:inngest-official-docs-20260830`.
+- Confidence/freshness: high.
+- Affected components: local execution-state metadata only.
+- Status: corrected; Inngest source task succeeded.
+- Supersedes/superseded-by: none.
+- Rollback/correction: use explicit `receipt:`, `config:`, or other allowed
+  reference schemes; never place credentials in the field.
+
+## `FAIL-HRMNY-20260830-SALES-008` — cluster-only removed graph metadata
+
+- Decision/finding: Graphify 0.9.5 preserved 213 nodes and 626 edges but rewrote
+  the run graph's metadata object empty and removed the top-level project commit
+  stamp during `cluster-only`.
+- Reason: the generic serializer does not retain the custom harness projection
+  metadata.
+- Alternatives considered: omit clustering; accept an unbound graph; reattach
+  only the evidence boundary and exact project/harness commits.
+- Trade-offs: a deterministic post-cluster metadata correction is required.
+- Evidence: before/after graph inspection and the zero-defect graph diagnostic.
+- Confidence/freshness: high for the observed 0.9.5 behavior.
+- Affected components: local Graphify provenance metadata only; relationships
+  were unchanged.
+- Status: corrected locally.
+- Supersedes/superseded-by: none.
+- Rollback/correction: rerun the projection, cluster, then restore the projection
+  metadata until the serializer preserves it natively.

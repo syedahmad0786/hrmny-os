@@ -121,3 +121,25 @@ production acceptance.
 - Status: failed locally; CI pending.
 - Supersedes/superseded-by: none.
 - Rollback/correction: if Linux CI fails, block the PR and fix the server path.
+
+## `EVID-HRMNY-20260830-SALES-009` — current official provider contracts
+
+- Decision/finding: official Apollo documentation currently identifies People
+  API Search as zero-credit and one-person enrichment as credit-bearing; official
+  Inngest v4 documentation confirms Next App Router `GET`/`POST`/`PUT` serving
+  and independently retried `step.run` boundaries.
+- Reason: bind the containment and scheduling decisions to current primary
+  sources.
+- Alternatives considered: rely on remembered provider behavior or old plans.
+- Trade-offs: provider pricing and limits must still be revalidated at action
+  time.
+- Evidence: <https://docs.apollo.io/reference/people-api-search>,
+  <https://docs.apollo.io/reference/people-enrichment>,
+  <https://www.inngest.com/docs/getting-started/nextjs-quick-start>, and
+  <https://www.inngest.com/docs/reference/typescript/v4/functions/step-run>.
+- Confidence/freshness: high; official pages revalidated 2026-08-30.
+- Affected components: Apollo discovery/enrichment and Inngest scheduling.
+- Status: official-source verified read-only; no provider action performed.
+- Supersedes/superseded-by: supersedes memory-only provider assumptions; none.
+- Rollback/correction: retain a source gap if a provider contract changes; never
+  infer authorization from documentation.
