@@ -147,6 +147,13 @@ export default function HuntClientsPage() {
   });
   const apolloImport = trpc.crm.prospect.apolloImport.useMutation({
     onSuccess: (payload) => {
+      if ("skipped" in payload) {
+        setLastApolloDealId(null);
+        setResult(
+          "Legacy bulk import is disabled. Use the reviewed free search and exact-person confirmation above.",
+        );
+        return;
+      }
       const count = payload.deals.length;
       const first = payload.deals[0];
       setLastApolloDealId(first?.dealId ?? null);
@@ -435,7 +442,7 @@ export default function HuntClientsPage() {
 
       <ResearchConsole />
 
-      {ready?.authMode === "dev" ? (
+      {ready?.syntheticSalesFixtures ? (
         <details className="growth-test-tools">
           <summary data-testid="hunt-test-tools">
             Test tools <span>Creates clearly labeled synthetic records</span>

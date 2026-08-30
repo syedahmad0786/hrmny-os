@@ -6,6 +6,10 @@ import { listOutreach } from "../leadgen/store";
 import { getClientOnboarding } from "../clients/onboarding";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
+import {
+  legacySalesEffectRefusal,
+  legacySalesSyntheticRuntimeEnabled,
+} from "../sales-os/legacy-effect-policy";
 import { searchMemory } from "./memory-db";
 
 export type AgentToolScope = {
@@ -661,7 +665,15 @@ export async function runAgentTools(input: {
     calendarId?: string;
   } = {};
 
-  if (wantsClosedLoop) {
+  if (wantsClosedLoop && !legacySalesSyntheticRuntimeEnabled()) {
+    const refusal = legacySalesEffectRefusal("crm.closed_loop");
+    results.push({
+      tool: "crm.closed_loop",
+      ok: false,
+      error: `${refusal.step}: ${refusal.reason}`,
+      data: refusal,
+    });
+  } else if (wantsClosedLoop) {
     try {
       const { runDemoClosedLoopCore } = await import("../crm/closed-loop");
       const viaApollo =
@@ -1429,59 +1441,69 @@ export async function runAgentTools(input: {
       want("prospect.apollo") ||
       want("crm.apollo"))
   ) {
-    try {
-      const {
-        resolveApolloRuntimeConfig,
-        resolveEmailVerificationRuntimeConfig,
-      } = await import("../integrations/runtime-adapters");
-      const { createApolloAdapter, createEmailVerificationAdapter } =
-        await import("@hrmny/integrations");
-      const { importApolloCompaniesToCrm } =
-        await import("../crm/apollo-import");
-      const query = input.prompt.trim().slice(0, 200) || "UAE retail brands";
-      const apollo = await resolveApolloRuntimeConfig(input.scope.employeeId);
-      const verifier = await resolveEmailVerificationRuntimeConfig(
-        input.scope.employeeId,
-      );
-      const apolloClient = createApolloAdapter(apollo.config);
-      const mode = apollo.mode;
-      const hits = await apolloClient.searchCompanies(query);
-      const imported = await importApolloCompaniesToCrm({
-        query,
-        companies: hits as Record<string, unknown>[],
-        mode,
-        ownerEmployeeId: input.scope.employeeId,
-        limit: 3,
-        verifier: createEmailVerificationAdapter(verifier.config),
-      });
-      results.push({
-        tool: "crm.prospect",
-        ok: true,
-        data: {
-          mode: imported.mode,
-          verifyMode: imported.verifyMode,
-          query: imported.query,
-          dealCount: imported.deals.length,
-          deals: imported.deals.slice(0, 3).map((d) => ({
-            dealId: d.dealId,
-            companyName: d.companyName,
-            stage: d.stage,
-            emailVerified: d.emailVerified,
-          })),
-          next: imported.deals[0]
-            ? {
-                deal: `/crm/deals/${encodeURIComponent(imported.deals[0].dealId)}`,
-                hunt: "/crm/hunt",
-              }
-            : { hunt: "/crm/hunt" },
-        },
-      });
-    } catch (err) {
+    if (!legacySalesSyntheticRuntimeEnabled()) {
+      const refusal = legacySalesEffectRefusal("crm.prospect");
       results.push({
         tool: "crm.prospect",
         ok: false,
-        error: err instanceof Error ? err.message : "crm_prospect_failed",
+        error: `${refusal.step}: ${refusal.reason}`,
+        data: refusal,
       });
+    } else {
+      try {
+        const {
+          resolveApolloRuntimeConfig,
+          resolveEmailVerificationRuntimeConfig,
+        } = await import("../integrations/runtime-adapters");
+        const { createApolloAdapter, createEmailVerificationAdapter } =
+          await import("@hrmny/integrations");
+        const { importApolloCompaniesToCrm } =
+          await import("../crm/apollo-import");
+        const query = input.prompt.trim().slice(0, 200) || "UAE retail brands";
+        const apollo = await resolveApolloRuntimeConfig(input.scope.employeeId);
+        const verifier = await resolveEmailVerificationRuntimeConfig(
+          input.scope.employeeId,
+        );
+        const apolloClient = createApolloAdapter(apollo.config);
+        const mode = apollo.mode;
+        const hits = await apolloClient.searchCompanies(query);
+        const imported = await importApolloCompaniesToCrm({
+          query,
+          companies: hits as Record<string, unknown>[],
+          mode,
+          ownerEmployeeId: input.scope.employeeId,
+          limit: 3,
+          verifier: createEmailVerificationAdapter(verifier.config),
+        });
+        results.push({
+          tool: "crm.prospect",
+          ok: true,
+          data: {
+            mode: imported.mode,
+            verifyMode: imported.verifyMode,
+            query: imported.query,
+            dealCount: imported.deals.length,
+            deals: imported.deals.slice(0, 3).map((d) => ({
+              dealId: d.dealId,
+              companyName: d.companyName,
+              stage: d.stage,
+              emailVerified: d.emailVerified,
+            })),
+            next: imported.deals[0]
+              ? {
+                  deal: `/crm/deals/${encodeURIComponent(imported.deals[0].dealId)}`,
+                  hunt: "/crm/hunt",
+                }
+              : { hunt: "/crm/hunt" },
+          },
+        });
+      } catch (err) {
+        results.push({
+          tool: "crm.prospect",
+          ok: false,
+          error: err instanceof Error ? err.message : "crm_prospect_failed",
+        });
+      }
     }
   }
 

@@ -4,7 +4,7 @@ import { LEADGEN_DAILY } from "./leadgen-daily";
 import { REPORT_SCHEDULER, runDueReports } from "./report-scheduler";
 import { inngest } from "./client";
 
-/** Durable provider runner for the existing once-per-day lead-gen operation. */
+/** Durable policy gate for the contained once-per-day Sales research proposal. */
 export const leadgenDailyFunction = inngest.createFunction(
   {
     id: LEADGEN_DAILY.id,
@@ -12,7 +12,7 @@ export const leadgenDailyFunction = inngest.createFunction(
     retries: 2,
   },
   async ({ step }) =>
-    step.run("leadgen-daily-claim-and-run", () => runLeadgenDailyCron()),
+    step.run("leadgen-daily-policy-gate", () => runLeadgenDailyCron()),
 );
 
 /**

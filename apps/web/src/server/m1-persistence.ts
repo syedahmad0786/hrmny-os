@@ -1,6 +1,6 @@
 import { auditEvent, desc, eq, healthSignal } from "@hrmny/db";
 import { getDb } from "./db";
-import { getDemoStore } from "./demo-store";
+import { getDemoStore, type HealthSignal } from "./demo-store";
 
 const SYSTEM_EMPLOYEE_ID = "00000000-0000-4000-8000-000000000000";
 
@@ -39,6 +39,36 @@ export async function listAudit(limit: number) {
     ...row,
     createdAt: row.createdAt.toISOString(),
   }));
+}
+
+/** Persist a health receipt without invoking any external notification path. */
+export async function recordHealthSignal(
+  signalKey: string,
+  severity: "info" | "warn" | "critical",
+  payload: Record<string, unknown>,
+) {
+  const db = getDb();
+  if (!db) {
+    const row: HealthSignal = {
+      signalKey,
+      severity,
+      payload,
+      notifiedAt: null,
+      createdAt: new Date().toISOString(),
+    };
+    getDemoStore().healthSignals.unshift(row);
+    return row;
+  }
+
+  const [created] = await db
+    .insert(healthSignal)
+    .values({ signalKey, severity, payload })
+    .returning();
+  return {
+    ...created!,
+    notifiedAt: null,
+    createdAt: created!.createdAt.toISOString(),
+  };
 }
 
 export async function emitHealthSignal(

@@ -5,6 +5,7 @@ import { getDb } from "@/server/db";
 import { featureEnabled } from "@/server/features";
 import { toolConfiguredStatus } from "@/server/integrations/resolve-keys";
 import { buildDemoBlockers, connectionSmoke } from "@/server/ready/smoke";
+import { legacySalesSyntheticRuntimeEnabled } from "@/server/sales-os/legacy-effect-policy";
 import { googleWorkspaceRedirectUri } from "@/server/google-workspace-oauth";
 import { getWorkOrganizationPolicy } from "@/server/work-governance";
 
@@ -84,6 +85,7 @@ export async function GET() {
     llmProvider: llm.provider,
     llmDefaultModel: llm.defaultModel,
     llmFreeOnly: llm.freeOnly,
+    syntheticSalesFixtures: legacySalesSyntheticRuntimeEnabled(),
     xeroWriteEnabled: process.env.XERO_WRITE_ENABLED === "true",
     database,
     keyStore: database === "up" ? "vault" : "memory",

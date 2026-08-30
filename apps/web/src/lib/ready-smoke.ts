@@ -5,6 +5,7 @@ export type ReadySmoke = {
   llmProvider?: string;
   llmDefaultModel?: string;
   llmFreeOnly?: boolean;
+  syntheticSalesFixtures?: boolean;
   xeroWriteEnabled?: boolean;
   database?: "up" | "down";
   keyStore?: "vault" | "memory";

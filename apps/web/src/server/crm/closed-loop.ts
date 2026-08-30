@@ -10,6 +10,7 @@ import {
   moveDealStage,
   updateDeal,
 } from "./repository";
+import { assertLegacySalesSyntheticRuntime } from "../sales-os/legacy-effect-policy";
 
 export type ClosedLoopInput = {
   companyName?: string;
@@ -58,6 +59,7 @@ export type ClosedLoopResult =
 export async function runDemoClosedLoopCore(
   input: ClosedLoopInput = {},
 ): Promise<ClosedLoopResult> {
+  assertLegacySalesSyntheticRuntime("crm.runDemoClosedLoopCore");
   const stamp = Date.now();
   let companyId: string;
   let contactId: string;

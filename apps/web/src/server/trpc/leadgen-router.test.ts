@@ -1,7 +1,7 @@
 process.env.DATABASE_URL = "";
 process.env.COMPOSIO_API_KEY = "";
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActorContext, AuditWriter, EmitHook } from "@hrmny/gate";
 import type { ComposioSendAdapter } from "@hrmny/integrations";
 import { createComposioStub } from "@hrmny/integrations";
@@ -9,15 +9,25 @@ import type { RunAgent } from "../leadgen/agent-run";
 import { resetCrmMemory } from "../crm/memory";
 import { createCompany, createContact, createDeal } from "../crm/repository";
 import { getOutreach, listOutreach, resetLeadgenStore } from "../leadgen/store";
+import { resolveDevUser, sessionCanViewMargin } from "../auth/session";
 import {
   approveOutreach,
   discardOutreach,
   draftOutreach,
   sendOutreach,
 } from "./leadgen-router";
+import { createCaller } from "./root";
 
-const staff: ActorContext = { employeeId: "emp-1", roles: ["partner"], permissions: [] };
-const portal: ActorContext = { employeeId: "cli-1", roles: ["portal_client"], permissions: [] };
+const staff: ActorContext = {
+  employeeId: "emp-1",
+  roles: ["partner"],
+  permissions: [],
+};
+const portal: ActorContext = {
+  employeeId: "cli-1",
+  roles: ["portal_client"],
+  permissions: [],
+};
 
 const audit: AuditWriter = async () => ({ auditId: "audit-test" });
 const emit: EmitHook = async () => {};
@@ -75,7 +85,10 @@ describe("outreach HITL gate flow", () => {
 
   it("drafts from a deal, resolving the recipient email", async () => {
     const deal = await seedDeal();
-    const item = await draftOutreach({ dealId: deal.dealId, body: "Hello there" });
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      body: "Hello there",
+    });
     expect(item.state).toBe("draft");
     expect(item.recipient).toBe("sara@acme.example");
     expect(item.body).toContain("Hello there");
@@ -108,7 +121,13 @@ describe("outreach HITL gate flow", () => {
     const item = await draftOutreach({ dealId: deal.dealId, body: "Hello" });
     const composio = countingLiveComposio();
 
-    const res = await sendOutreach({ id: item.id, actor: staff, composio, audit, emit });
+    const res = await sendOutreach({
+      id: item.id,
+      actor: staff,
+      composio,
+      audit,
+      emit,
+    });
 
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("GATE_BLOCKED");
@@ -121,12 +140,23 @@ describe("outreach HITL gate flow", () => {
     const item = await draftOutreach({ dealId: deal.dealId, body: "Hello" });
     const composio = countingLiveComposio();
 
-    const approved = await approveOutreach({ id: item.id, actor: staff, audit, emit });
+    const approved = await approveOutreach({
+      id: item.id,
+      actor: staff,
+      audit,
+      emit,
+    });
     expect(approved.ok).toBe(true);
     expect((await getOutreach(item.id))!.state).toBe("approved");
     expect((await getOutreach(item.id))!.approvedBy).toBe("emp-1");
 
-    const sent = await sendOutreach({ id: item.id, actor: staff, composio, audit, emit });
+    const sent = await sendOutreach({
+      id: item.id,
+      actor: staff,
+      composio,
+      audit,
+      emit,
+    });
     expect(sent.ok).toBe(true);
     expect(sent.sendMode).toBe("live");
     expect(composio.sends).toBe(1);
@@ -160,7 +190,13 @@ describe("outreach HITL gate flow", () => {
     await approveOutreach({ id: item.id, actor: staff, audit, emit });
     const composio = countingLiveComposio();
 
-    const res = await sendOutreach({ id: item.id, actor: staff, composio, audit, emit });
+    const res = await sendOutreach({
+      id: item.id,
+      actor: staff,
+      composio,
+      audit,
+      emit,
+    });
     expect(res.ok).toBe(true);
     expect(res.copyDraft).toBe(true);
     expect(res.sendMode).toBe("copy_draft");
@@ -173,7 +209,13 @@ describe("outreach HITL gate flow", () => {
     const composio = countingLiveComposio();
     await approveOutreach({ id: item.id, actor: staff, audit, emit });
 
-    const res = await sendOutreach({ id: item.id, actor: portal, composio, audit, emit });
+    const res = await sendOutreach({
+      id: item.id,
+      actor: portal,
+      composio,
+      audit,
+      emit,
+    });
     expect(res.ok).toBe(false);
     expect(composio.sends).toBe(0);
     expect((await getOutreach(item.id))!.state).toBe("approved");
@@ -182,7 +224,12 @@ describe("outreach HITL gate flow", () => {
   it("discards a draft — and a sent item can never be discarded", async () => {
     const deal = await seedDeal();
     const item = await draftOutreach({ dealId: deal.dealId, body: "Bye" });
-    const res = await discardOutreach({ id: item.id, actor: staff, audit, emit });
+    const res = await discardOutreach({
+      id: item.id,
+      actor: staff,
+      audit,
+      emit,
+    });
     expect(res.ok).toBe(true);
     expect((await getOutreach(item.id))?.state).toBe("discarded");
 
@@ -195,8 +242,49 @@ describe("outreach HITL gate flow", () => {
       audit,
       emit,
     });
-    const blocked = await discardOutreach({ id: item2.id, actor: staff, audit, emit });
+    const blocked = await discardOutreach({
+      id: item2.id,
+      actor: staff,
+      audit,
+      emit,
+    });
     expect(blocked.ok).toBe(false);
     expect((await getOutreach(item2.id))?.state).toBe("sent");
+  });
+});
+
+describe("legacy daily pipeline containment", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("keeps the compatibility route inert even under hostile live-provider flags", async () => {
+    vi.stubEnv("APOLLO_MODE", "live");
+    vi.stubEnv("APOLLO_API_KEY", "must-not-be-used");
+    vi.stubEnv("HUNTER_MODE", "live");
+    vi.stubEnv("HUNTER_ALLOW_PAID_OPERATIONS", "true");
+    vi.stubEnv("LLM_PROVIDER", "openrouter");
+    vi.stubEnv("OPENROUTER_API_KEY", "must-not-be-used");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("network must remain unreachable"));
+    resetCrmMemory();
+    resetLeadgenStore();
+    const user = resolveDevUser("partner");
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: sessionCanViewMargin(user),
+    });
+
+    await expect(caller.leadgen.runDailyPipeline()).resolves.toEqual({
+      ran: false,
+      skipped: "legacy_pipeline_disabled",
+      next: "/crm/hunt",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await listOutreach()).toHaveLength(0);
   });
 });

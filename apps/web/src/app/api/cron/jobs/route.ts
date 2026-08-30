@@ -212,39 +212,46 @@ export async function GET(request: Request) {
       delayedJobs: Number(lag!.count),
     });
   }
-  const [workWebhooks, expiredAiRuns, dueReports, crmTaskDigest, leadgenDaily, recon] =
-    await Promise.all([
-      deliverPendingWorkWebhooks(),
-      cleanupExpiredWorkAiRuns(),
-      // Scheduled reports: interval-based due-check filters to what should send
-      // this tick (mock Resend until RESEND_MODE=live). Never fatal to the job run.
-      inngestCloudConfigured()
-        ? Promise.resolve({ skipped: "inngest_configured" as const })
-        : runDueReports().catch((error) => ({
-            error: String(error).slice(0, 500),
-          })),
-      // CRM task digest: once/day owner nudge via Google Chat. Self-gates on
-      // webhook env + hour window + today's health_signal row. Never fatal.
-      runCrmTaskDigest().catch((error) => ({
-        posted: false,
-        error: String(error).slice(0, 500),
-      })),
-      // Daily lead-gen pipeline (Apollo/Hunter live when keyed). Never fatal.
-      inngestCloudConfigured()
-        ? Promise.resolve({
-            ran: false,
-            skipped: "inngest_configured" as const,
-          })
-        : runLeadgenDailyCron().catch((error) => ({
-            ran: false,
-            error: String(error).slice(0, 500),
-          })),
-      // Xero mirror, competitor scan, retainer drafts, memory embed backfill.
-      // Mock-safe; never fatal to the job run.
-      runReconSweepers().catch((error) => ({
-        error: String(error).slice(0, 500),
-      })),
-    ]);
+  const [
+    workWebhooks,
+    expiredAiRuns,
+    dueReports,
+    crmTaskDigest,
+    leadgenDaily,
+    recon,
+  ] = await Promise.all([
+    deliverPendingWorkWebhooks(),
+    cleanupExpiredWorkAiRuns(),
+    // Scheduled reports: interval-based due-check filters to what should send
+    // this tick (mock Resend until RESEND_MODE=live). Never fatal to the job run.
+    inngestCloudConfigured()
+      ? Promise.resolve({ skipped: "inngest_configured" as const })
+      : runDueReports().catch((error) => ({
+          error: String(error).slice(0, 500),
+        })),
+    // CRM task digest: once/day owner nudge via Google Chat. Self-gates on
+    // webhook env + hour window + today's health_signal row. Never fatal.
+    runCrmTaskDigest().catch((error) => ({
+      posted: false,
+      error: String(error).slice(0, 500),
+    })),
+    // Daily Sales research gate. It fails closed before provider/CRM work
+    // until the audited policy and proposal-only runtime are both present.
+    inngestCloudConfigured()
+      ? Promise.resolve({
+          ran: false,
+          skipped: "inngest_configured" as const,
+        })
+      : runLeadgenDailyCron().catch((error) => ({
+          ran: false,
+          error: String(error).slice(0, 500),
+        })),
+    // Xero mirror, competitor scan, retainer drafts, memory embed backfill.
+    // Mock-safe; never fatal to the job run.
+    runReconSweepers().catch((error) => ({
+      error: String(error).slice(0, 500),
+    })),
+  ]);
   return Response.json({
     claimed: claimed.length,
     completed,

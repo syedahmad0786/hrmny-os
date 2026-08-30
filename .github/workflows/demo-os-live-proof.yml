@@ -1,6 +1,7 @@
-# Explicit synthetic mutation proof against one allowlisted disposable Supabase
-# target. This workflow is manual-only and hard-refuses the HRMNY production ref.
-name: HRMNY disposable Postgres proof
+# Explicit legacy-effect containment proof against one allowlisted disposable
+# Supabase target. The test performs no provider request or operational
+# mutation. It is manual-only and hard-refuses the HRMNY production ref.
+name: HRMNY disposable Postgres containment proof
 
 on:
   workflow_dispatch:
@@ -18,7 +19,7 @@ on:
         required: true
         type: string
       confirmation:
-        description: Type RUN SYNTHETIC MUTATION PROOF ON DISPOSABLE HRMNY TARGET
+        description: Type RUN LEGACY EFFECT CONTAINMENT PROOF ON DISPOSABLE HRMNY TARGET
         required: true
         type: string
 
@@ -44,7 +45,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Verify bounded target, then run synthetic proof
+      - name: Verify bounded target, then prove legacy effects remain disabled
         env:
           HRMNY_PROOF_TARGET_PROJECT_REF: ${{ inputs.target_project_ref }}
           HRMNY_PROOF_EXPECTED_PROJECT_REF: ${{ vars.HRMNY_DISPOSABLE_PROOF_PROJECT_REF }}
@@ -61,11 +62,16 @@ jobs:
           OPENROUTER_LIVE_SMOKE: "0"
           EMBEDDING_PROVIDER: none
           APOLLO_MODE: mock
+          APOLLO_ALLOW_PAID_OPERATIONS: "false"
           HUNTER_MODE: mock
+          HUNTER_ALLOW_PAID_OPERATIONS: "false"
           NEVERBOUNCE_MODE: mock
+          NEVERBOUNCE_ALLOW_PAID_OPERATIONS: "false"
           RESEND_MODE: mock
           N8N_MODE: mock
           XERO_MODE: mock
           XERO_WRITE_ENABLED: "false"
+          COMPOSIO_API_KEY: ""
+          GOOGLE_CHAT_WEBHOOK_URL: ""
         run: |
           pnpm --filter @hrmny/web test:live:postgres
