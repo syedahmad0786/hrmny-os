@@ -15,16 +15,19 @@ import { observationLooksFailed, toolVerb } from "./tool-meta";
 type Effort = "low" | "medium" | "high" | "xhigh";
 type HarnessMode = "react" | "direct";
 
+const CLIENT_FUNNEL_REVIEW_STARTER =
+  "Review this client's funnel status, blockers, and next handoff";
+
 const STARTERS = [
   "Summarize open pipeline deals that need a next action",
   "What delivery tasks are blocked on QC?",
   "Draft a warm outreach opener for a Dubai hospitality lead",
-  "Advance this client’s funnel drafts (brief, campaign, portal invite)",
+  CLIENT_FUNNEL_REVIEW_STARTER,
   "List my unread notifications and tickets",
 ] as const;
 
-const OS_SETTLE_STARTER =
-  "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, lock the brief then creative QC pass then advance to client review, approve campaign and publish campaign, sign off onboarding phase, advance month1, ref-approve calendar.";
+const OS_SETTLE_REVIEW_STARTER =
+  "Review OS settle readiness, missing approvals, blockers, and the next safe command.";
 
 function StepFold({
   steps,
@@ -369,11 +372,12 @@ export default function HrmnyChatPage() {
           </label>
           {agentSlug ? (
             <p className="hrmny-chat-bind-hint" data-testid="chat-agent-hint">
-              Bound to this agent&apos;s prompt + allowlisted CRM/OS tools
+              Bound to this agent&apos;s instructions and reviewed tool catalog
               {selectedAgent?.model
                 ? ` · ${selectedAgent.model}`
                 : " · free OpenRouter model"}
-              . New chat or send binds the session.
+              . Chat does not automatically execute configured custom-agent
+              actions. New chat or send binds the session.
               {toolsPreview.length ? (
                 <>
                   <br />
@@ -502,13 +506,15 @@ export default function HrmnyChatPage() {
               {toolCount > 0 ? (
                 <span className="hrmny-chat-context-count">
                   {" "}
-                  · {toolCount} tools
+                  · {toolCount} catalog entries
                 </span>
               ) : null}
             </p>
             <p className="hrmny-chat-context-sub">
-              Sandbox: {sandboxLabel}. Agents call CRM, delivery, portal, and
-              finance tools inside this scope.
+              Sandbox: {sandboxLabel}.{" "}
+              {clientId
+                ? "Client-scoped Chat is read-only; actions require a reviewed command surface."
+                : "Portal decisions stay unavailable; configured custom-agent actions require a reviewed command surface."}
             </p>
           </div>
           {toolsPreview.length ? (
@@ -531,31 +537,31 @@ export default function HrmnyChatPage() {
             <div className="hrmny-chat-welcome">
               <h2>What should {bindingLabel} work on?</h2>
               <p>
-                Hrmny plans, calls allowlisted CRM/OS tools, observes results,
-                then answers — scoped to {sandboxLabel}
-                {toolCount > 0 ? ` · ${toolCount} tools bound` : ""}.
+                {clientId
+                  ? "Hrmny reads scoped context and recommends the next handoff"
+                  : "Hrmny plans and answers from the reviewed org context"}{" "}
+                — scoped to {sandboxLabel}
+                {toolCount > 0 ? ` · ${toolCount} catalog entries` : ""}.
               </p>
               <div className="hrmny-chat-starters">
                 {!clientId ? (
                   <button
                     type="button"
                     data-testid="chat-starter-os-settle"
-                    // Direct harness always runs agent_act for the bound
-                    // allowlist (mock ReAct can pick sibling org tools first).
-                    onClick={() => submit(OS_SETTLE_STARTER, "direct")}
+                    onClick={() => submit(OS_SETTLE_REVIEW_STARTER, "direct")}
                     disabled={send.isPending || create.isPending}
                   >
-                    {OS_SETTLE_STARTER.slice(0, 72)}…
+                    {OS_SETTLE_REVIEW_STARTER}
                   </button>
                 ) : null}
                 {STARTERS.filter((s) =>
-                  s.includes("funnel drafts") ? Boolean(clientId) : true,
+                  s === CLIENT_FUNNEL_REVIEW_STARTER ? Boolean(clientId) : true,
                 ).map((s) => (
                   <button
                     key={s}
                     type="button"
                     data-testid={
-                      s.includes("funnel drafts")
+                      s === CLIENT_FUNNEL_REVIEW_STARTER
                         ? "chat-starter-funnel"
                         : "chat-starter"
                     }
@@ -609,7 +615,9 @@ export default function HrmnyChatPage() {
                   <div className="hrmny-chat-msg-body">
                     <div className="hrmny-chat-live-dock">
                       <span className="hrmny-chat-working-dot" />
-                      Working · calling CRM/OS tools…
+                      {clientId
+                        ? "Working · reading scoped context…"
+                        : "Working · applying reviewed org policy…"}
                     </div>
                   </div>
                 </article>
