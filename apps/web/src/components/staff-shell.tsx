@@ -469,6 +469,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
       <Link
         key={item.id}
         href={item.href}
+        aria-label={item.label}
         className={`desk-nav-btn${active ? " active" : ""}`}
       >
         <span className="desk-nav-index">{item.index}</span>
