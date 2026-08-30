@@ -12,10 +12,11 @@ import {
 import { z } from "zod";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
-import { router, staffProcedure } from "./trpc";
+import { requirePermission, router, staffProcedure } from "./trpc";
 import { randomUUID } from "node:crypto";
 import {
   FIRST_PARTY_CRM_APPS,
+  getWorkOrganizationPolicy,
   healDisabledConnectedAppPolicy,
   isWorkConnectedAppAllowed,
 } from "../work-governance";
@@ -36,8 +37,13 @@ import {
   hasMemoryApiKey,
   saveMemoryApiKey,
 } from "../integrations/memory-keys";
+import { sessionHas } from "../auth/session";
 
 export { GoogleProfileSchema };
+
+const connectionPolicyAdminProcedure = staffProcedure.use(
+  requirePermission("admin", "features"),
+);
 
 const composioStub = createComposioStub();
 const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat", "n8n"]);
@@ -730,20 +736,19 @@ export async function getGoogleWorkspaceAccessToken(
 
 export const connectionsRouter = router({
   organizationPolicy: staffProcedure.query(async ({ ctx }) => {
-    const { healed, policy } = await healDisabledConnectedAppPolicy(
-      ctx.employeeId,
-    );
+    const policy = await getWorkOrganizationPolicy();
     return {
       appPolicy: policy.appPolicy,
-      healed,
+      healed: false,
+      canReopen: Boolean(ctx.user && sessionHas(ctx.user, "admin", "features")),
       firstPartyAlwaysAllowed: true as const,
       firstPartyCrmApps: [...FIRST_PARTY_CRM_APPS],
     };
   }),
 
-  reopenApprovedAppPolicy: staffProcedure.mutation(async ({ ctx }) => {
-    return healDisabledConnectedAppPolicy(ctx.employeeId);
-  }),
+  reopenApprovedAppPolicy: connectionPolicyAdminProcedure.mutation(
+    async ({ ctx }) => healDisabledConnectedAppPolicy(ctx.employeeId),
+  ),
 
   list: staffProcedure
     .input(
@@ -751,7 +756,6 @@ export const connectionsRouter = router({
     )
     .query(async ({ ctx }) => {
       const employeeId = requireEmployeeId(ctx.employeeId);
-      await healDisabledConnectedAppPolicy(employeeId);
       const allowed = new Map(
         await Promise.all(
           CONNECTION_CATALOG.map(

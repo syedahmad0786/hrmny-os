@@ -1,5 +1,6 @@
 import { sql } from "@hrmny/db";
 import { getDb } from "./db";
+import { getDemoStore } from "./demo-store";
 
 export type WorkAppPolicy = "allow_all" | "approved_only" | "disabled";
 
@@ -36,6 +37,8 @@ const defaultPolicy = (): WorkOrganizationPolicy => ({
   sessionTimeoutMinutes: 720,
   updatedAt: new Date(0).toISOString(),
 });
+
+const SYSTEM_EMPLOYEE_ID = "00000000-0000-4000-8000-000000000000";
 
 let demoPolicy = defaultPolicy();
 const demoLicenses = new Map<string, "full" | "view_only">();
@@ -198,9 +201,8 @@ export async function isWorkConnectedAppAllowed(toolkit: string) {
 }
 
 /**
- * Production left `app_policy = disabled`, which greys out Work / Composio
- * Connect. Migration 0073 does not auto-run on Vercel. Loading Connections or
- * `/api/ready` flips the default org row back to the curated allowlist.
+ * Explicit administrator repair for a disabled Work / Composio policy.
+ * Readiness and connection-list queries must never call this mutation helper.
  */
 export async function healDisabledConnectedAppPolicy(
   employeeId?: string | null,
@@ -209,15 +211,6 @@ export async function healDisabledConnectedAppPolicy(
   if (normalizeAppPolicy(current.appPolicy) !== "disabled") {
     return { healed: false, policy: current };
   }
-  const db = getDb();
-  if (!db) {
-    demoPolicy = {
-      ...current,
-      appPolicy: "approved_only",
-      updatedAt: new Date().toISOString(),
-    };
-    return { healed: true, policy: demoPolicy };
-  }
   const actor =
     employeeId &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -225,23 +218,50 @@ export async function healDisabledConnectedAppPolicy(
     )
       ? employeeId
       : null;
-  if (actor) {
-    await db.execute(sql`
-      update public.work_organization_policy
-      set app_policy = 'approved_only',
-          updated_by_employee_id = ${actor}::uuid,
-          updated_at = now()
-      where organization_key = 'default' and app_policy = 'disabled'
-    `);
-  } else {
-    await db.execute(sql`
-      update public.work_organization_policy
-      set app_policy = 'approved_only',
-          updated_at = now()
-      where organization_key = 'default' and app_policy = 'disabled'
-    `);
+  const db = getDb();
+  if (!db) {
+    const nextPolicy: WorkOrganizationPolicy = {
+      ...current,
+      appPolicy: "approved_only",
+      updatedAt: new Date().toISOString(),
+    };
+    getDemoStore().appendAudit({
+      actorEmployeeId: actor ?? SYSTEM_EMPLOYEE_ID,
+      action: "connections.reopenApprovedAppPolicy",
+      entityType: "work_organization_policy",
+      entityId: SYSTEM_EMPLOYEE_ID,
+      before: { appPolicy: "disabled" },
+      after: { appPolicy: "approved_only" },
+      reason: "Explicit administrator action",
+    });
+    demoPolicy = nextPolicy;
+    return { healed: true, policy: demoPolicy };
   }
-  return { healed: true, policy: await getWorkOrganizationPolicy() };
+  const healed = await db.transaction(async (tx) => {
+    const updated = await tx.execute<{ updatedAt: Date | string }>(sql`
+      update public.work_organization_policy
+      set app_policy = 'approved_only',
+          updated_by_employee_id = coalesce(${actor}::uuid, updated_by_employee_id),
+          updated_at = now()
+      where organization_key = 'default' and app_policy = 'disabled'
+      returning updated_at as "updatedAt"
+    `);
+    if (!updated[0]) return false;
+    await tx.execute(sql`
+      insert into public.audit_event (
+        actor_employee_id, action, entity_type, before, after, reason
+      ) values (
+        ${actor}::uuid,
+        'connections.reopenApprovedAppPolicy',
+        'work_organization_policy',
+        jsonb_build_object('appPolicy', 'disabled'),
+        jsonb_build_object('appPolicy', 'approved_only'),
+        'Explicit administrator action'
+      )
+    `);
+    return true;
+  });
+  return { healed, policy: await getWorkOrganizationPolicy() };
 }
 
 export async function isWorkViewOnlyMember(employeeId: string | null) {

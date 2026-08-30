@@ -1,0 +1,54 @@
+import { afterEach, beforeEach, vi } from "vitest";
+
+const forbiddenFetch: typeof globalThis.fetch = async (input) => {
+  const raw =
+    typeof input === "string" || input instanceof URL
+      ? String(input)
+      : input.url;
+  let host = "external";
+  try {
+    host = new URL(raw).hostname || host;
+  } catch {
+    // Keep errors secret-safe: never echo the complete URL or request body.
+  }
+  throw new Error(`LIVE_NETWORK_FORBIDDEN_IN_ORDINARY_TEST:${host}`);
+};
+
+function applyDeterministicEnvironment() {
+  const values: Record<string, string> = {
+    DATABASE_MODE: "auto",
+    DATABASE_URL: "",
+    DIRECT_URL: "",
+    HRMNY_PRODUCTION_DATABASE_URL: "",
+    AUTH_MODE: "dev",
+    ALLOW_DEV_AUTH: "true",
+    LLM_PROVIDER: "mock",
+    OPENROUTER_LIVE_SMOKE: "0",
+    EMBEDDING_PROVIDER: "none",
+    APOLLO_MODE: "mock",
+    HUNTER_MODE: "mock",
+    NEVERBOUNCE_MODE: "mock",
+    RESEND_MODE: "mock",
+    N8N_MODE: "mock",
+    XERO_MODE: "mock",
+    XERO_WRITE_ENABLED: "false",
+    WORK_ENVIRONMENT_KIND: "sandbox",
+    OPENROUTER_API_KEY: "",
+    OPENROUTER_PRIVILEGED_API_KEY: "",
+    ANTHROPIC_API_KEY: "",
+    APOLLO_API_KEY: "",
+    HUNTER_API_KEY: "",
+    NEVERBOUNCE_API_KEY: "",
+    RESEND_API_KEY: "",
+  };
+  for (const [key, value] of Object.entries(values)) vi.stubEnv(key, value);
+  vi.stubGlobal("fetch", forbiddenFetch);
+}
+
+applyDeterministicEnvironment();
+beforeEach(applyDeterministicEnvironment);
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});

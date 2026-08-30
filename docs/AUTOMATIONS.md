@@ -8,7 +8,9 @@ Rule (MASTER-PLAN-V2 cross-cutting): every operational automation is built and *
 |---|---|---|---|---|
 | `ci.yml` | push/PR | typecheck → test → build (merge arbiter) | every PR | ✅ live |
 | `scheduler.yml` | cron */5 min + dispatch | curls `/api/cron/jobs` with `HRMNY_CRON_SECRET` (durable jobs) | dispatch + prod alert evidence | ✅ live |
-| `nightly-eval.yml` | cron 01:30 UTC + dispatch | agent eval harness (`@hrmny/ai` golden cases); mock provider now, flips to live automatically when `OPENROUTER_API_KEY` secret is set | workflow_dispatch run | ✅ tested (mock) |
+| `nightly-eval.yml` | cron 01:30 UTC + dispatch | deterministic agent eval harness (`@hrmny/ai` golden cases); always mock and live-network denied | workflow_dispatch run | ✅ tested (mock) |
+| `openrouter-live-smoke.yml` | manual dispatch only | separately approved one-call free-route provider canary | provider readback + workflow receipt | ⛔ human gate |
+| `demo-os-live-proof.yml` | manual dispatch only | synthetic closed loop on one allowlisted disposable Supabase target; production ref hard-denied | guard + destination/cleanup receipt | ⛔ human gate |
 
 ## Inngest (long-running AI pipelines — code-owned)
 

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 import { clearDemoFeatureOverrides, setFeatureOverride } from "./features";
+import { getDemoStore } from "./demo-store";
 import { createCaller } from "./trpc/root";
 import {
   getVerifiedWorkAppConnection,
@@ -88,15 +89,39 @@ describe("Work governance", () => {
     expect(rows.find((row) => row.toolkit === "apollo")?.allowed).toBe(true);
     expect(rows.map((row) => row.toolkit)).not.toContain("hunter");
     expect(await isWorkConnectedAppAllowed("hunter")).toBe(true);
-    expect((await getWorkOrganizationPolicy()).appPolicy).toBe("approved_only");
-    expect(await isWorkConnectedAppAllowed("slack")).toBe(true);
-    expect(await isWorkConnectedAppAllowed("composio")).toBe(true);
+    expect((await getWorkOrganizationPolicy()).appPolicy).toBe("disabled");
+    expect(await isWorkConnectedAppAllowed("slack")).toBe(false);
+    expect(await isWorkConnectedAppAllowed("composio")).toBe(false);
     const policy = await caller("partner").connections.organizationPolicy();
     expect(policy).toMatchObject({
-      appPolicy: "approved_only",
+      appPolicy: "disabled",
       healed: false,
+      canReopen: true,
       firstPartyAlwaysAllowed: true,
     });
+    expect(await caller("am").connections.organizationPolicy()).toMatchObject({
+      appPolicy: "disabled",
+      canReopen: false,
+    });
+    await expect(
+      caller("am").connections.reopenApprovedAppPolicy(),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect((await getWorkOrganizationPolicy()).appPolicy).toBe("disabled");
+    const auditCountBeforeReopen = getDemoStore().audits.length;
+    const reopened =
+      await caller("partner").connections.reopenApprovedAppPolicy();
+    expect(reopened).toMatchObject({
+      healed: true,
+      policy: { appPolicy: "approved_only" },
+    });
+    expect(getDemoStore().audits).toHaveLength(auditCountBeforeReopen + 1);
+    expect(getDemoStore().audits[0]).toMatchObject({
+      action: "connections.reopenApprovedAppPolicy",
+      entityType: "work_organization_policy",
+      before: { appPolicy: "disabled" },
+      after: { appPolicy: "approved_only" },
+    });
+    expect((await getWorkOrganizationPolicy()).appPolicy).toBe("approved_only");
     expect((await healDisabledConnectedAppPolicy()).healed).toBe(false);
   });
 

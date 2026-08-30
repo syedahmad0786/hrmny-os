@@ -16,14 +16,12 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Run agent eval harness
-        # Mock provider by default; flips to live automatically once the
-        # OPENROUTER_API_KEY secret is set (Phase 0 activation).
+      - name: Run deterministic agent eval harness
         env:
-          LLM_PROVIDER: ${{ secrets.OPENROUTER_API_KEY != '' && 'openrouter' || 'mock' }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LLM_PROVIDER: mock
+          OPENROUTER_LIVE_SMOKE: "0"
           LLM_MONTHLY_CAP_AED: "1500"
         run: pnpm --filter @hrmny/ai test

@@ -1,23 +1,39 @@
-# Optional Postgres closed-loop proof against a real database.
-# Requires repository secret DATABASE_URL (prod or staging pooler).
-# Enable scheduled runs by setting repository variable DEMO_OS_LIVE_PROOF=true.
-name: Demo OS live proof
+# Explicit synthetic mutation proof against one allowlisted disposable Supabase
+# target. This workflow is manual-only and hard-refuses the HRMNY production ref.
+name: HRMNY disposable Postgres proof
 
 on:
   workflow_dispatch:
-  schedule:
-  # Weekly Sunday 04:00 UTC when DEMO_OS_LIVE_PROOF is enabled (see job if).
-    - cron: "0 4 * * 0"
+    inputs:
+      target_project_ref:
+        description: Exact disposable Supabase project ref
+        required: true
+        type: string
+      authorization_receipt:
+        description: Time-bounded synthetic-proof approval receipt
+        required: true
+        type: string
+      expires_at:
+        description: Approval expiry in ISO-8601 UTC, no more than 24 hours away
+        required: true
+        type: string
+      confirmation:
+        description: Type RUN SYNTHETIC MUTATION PROOF ON DISPOSABLE HRMNY TARGET
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 concurrency:
-  group: demo-os-live-proof
-  cancel-in-progress: true
+  group: hrmny-disposable-postgres-proof
+  cancel-in-progress: false
 
 jobs:
   live-proof:
-    if: github.event_name == 'workflow_dispatch' || vars.DEMO_OS_LIVE_PROOF == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: Synthetic Acceptance
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -25,18 +41,31 @@ jobs:
           version: 9.15.9
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Live Postgres closed-loop proof
+      - name: Verify bounded target, then run synthetic proof
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          HRMNY_PROOF_TARGET_PROJECT_REF: ${{ inputs.target_project_ref }}
+          HRMNY_PROOF_EXPECTED_PROJECT_REF: ${{ vars.HRMNY_DISPOSABLE_PROOF_PROJECT_REF }}
+          HRMNY_PROOF_TARGET_KIND: disposable
+          HRMNY_PROOF_AUTHORIZATION_RECEIPT: ${{ inputs.authorization_receipt }}
+          HRMNY_PROOF_EXPIRES_AT: ${{ inputs.expires_at }}
+          HRMNY_PROOF_CONFIRMATION: ${{ inputs.confirmation }}
+          DATABASE_URL: ${{ secrets.HRMNY_DISPOSABLE_PROOF_DATABASE_URL }}
+          DATABASE_MODE: postgres
           AUTH_MODE: dev
           ALLOW_DEV_AUTH: "true"
+          WORK_ENVIRONMENT_KIND: sandbox
           LLM_PROVIDER: mock
+          OPENROUTER_LIVE_SMOKE: "0"
+          EMBEDDING_PROVIDER: none
+          APOLLO_MODE: mock
+          HUNTER_MODE: mock
+          NEVERBOUNCE_MODE: mock
+          RESEND_MODE: mock
+          N8N_MODE: mock
+          XERO_MODE: mock
+          XERO_WRITE_ENABLED: "false"
         run: |
-          if [ -z "${DATABASE_URL:-}" ]; then
-            echo "DATABASE_URL secret missing — add it to run live proof."
-            exit 1
-          fi
-          pnpm --filter @hrmny/web exec vitest run src/server/demo-os-live-proof.test.ts
+          pnpm --filter @hrmny/web test:live:postgres
