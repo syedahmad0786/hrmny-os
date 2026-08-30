@@ -157,3 +157,28 @@ production acceptance.
 - Supersedes/superseded-by: supersedes intermediate failing designs recorded in
   `FAIL-HRMNY-20260830-PORTAL-005`; none.
 - Rollback/correction: block the slice if any adversarial case regresses.
+
+## `EVID-HRMNY-20260830-PORTAL-010` — first hosted run and browser-contract correction
+
+- Decision/finding: both initial stacked-PR verify and database-migration jobs
+  passed, both Vercel preview checks passed, and the browser job passed 73 of 77
+  journeys. Its four failures all asserted the generic client effects removed
+  by this containment slice; no failing assertion requested the new staff
+  preview behavior, and `client-preview-readonly-ui.spec.ts` passed.
+- Reason: preserve negative evidence and distinguish an inherited test-contract
+  mismatch from product, provider, deployment, or user acceptance.
+- Alternatives considered: omit the failed run; classify the preview as
+  accepted; restore the effect paths.
+- Trade-offs: the slice remains unaccepted until the corrected head completes
+  hosted Linux browser and security review.
+- Evidence: Actions runs `33303233430` and `33303244947`; E2E jobs
+  `99235091588` and `99235124529`; correction commit
+  `3d4213a293e6f088018086c08f9f6d2d6c1ff264`; local unit 645/645, lint,
+  typecheck, and production build gates passed after correction.
+- Confidence/freshness: high for the captured runs and local correction.
+- Affected components: stacked PR #239, browser contracts, Chat, AI settings.
+- Status: negative receipt preserved; hosted correction rerun pending.
+- Supersedes/superseded-by: expected to be superseded by a terminal hosted
+  receipt for the corrected head.
+- Rollback/correction: block merge and deployment until every required hosted
+  check reaches a successful terminal result.

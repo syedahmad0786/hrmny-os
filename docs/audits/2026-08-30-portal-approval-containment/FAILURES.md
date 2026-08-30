@@ -127,3 +127,29 @@ commit `b2fea0bc9ae94e38595841783e177065a9a378d7`.
 - Supersedes/superseded-by: none.
 - Rollback/correction: keep exact object-scoped assertions and rerun focused
   gates before repository-wide verification.
+
+## `FAIL-HRMNY-20260830-PORTAL-007` — hosted browser contracts expected removed effects
+
+- Decision/finding: the first push and pull-request browser jobs
+  (`33303233430` and `33303244947`) passed 73 of 77 journeys but failed four
+  inherited specifications that expected client custom-agent or Chat execution
+  to mint portal links, call `funnel_act`, or call `agent_act`.
+- Reason: the containment implementation intentionally removed those generic
+  client effect paths, while the old starter copy and positive browser
+  assertions still described the pre-containment behavior.
+- Alternatives considered: restore the unsafe behavior to make the old tests
+  pass; delete the browser coverage; weaken the assertions to any response.
+- Trade-offs: the UI now describes the client-bound surface as read-only and
+  the four tests assert both a useful answer and absence of work/effect output.
+- Evidence: hosted E2E job `99235124529`, its parallel push job
+  `99235091588`, and correction commit
+  `3d4213a293e6f088018086c08f9f6d2d6c1ff264`.
+- Confidence/freshness: high for diagnosis and local correction; hosted rerun
+  pending.
+- Affected components: Chat starters/copy, AI settings copy, and four
+  Playwright specifications.
+- Status: corrected locally; hosted acceptance pending.
+- Supersedes/superseded-by: none.
+- Rollback/correction: never restore automatic client effects; if the rerun
+  fails, preserve the denial boundary and correct the browser contract or
+  implementation forward.

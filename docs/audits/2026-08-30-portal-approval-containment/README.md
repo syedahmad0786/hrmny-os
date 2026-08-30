@@ -5,6 +5,7 @@
 - Branch: `ahmadbukhari097/codex/phase-2-portal-approval-boundary-20260830`
 - Phase 1 dependency: `06d5df9826434dbed83d214103fc7eb6e7950f13` / PR #238
 - Implementation commit: `b2fea0bc9ae94e38595841783e177065a9a378d7`
+- Browser-contract correction: `3d4213a293e6f088018086c08f9f6d2d6c1ff264`
 
 ## Outcome
 
@@ -20,6 +21,12 @@ commands. Campaign decisions persist explicit client attribution, an audit ID,
 and a durable projection intent in the same locked transaction. Exact retries
 reconcile rather than duplicate effects, while conflicting decisions fail
 closed.
+
+The first stacked-PR browser run passed 73 of 77 journeys and correctly exposed
+four inherited specifications that still expected the removed Chat/custom-agent
+effect path. Commit `3d4213a293e6f088018086c08f9f6d2d6c1ff264`
+aligns the visible language and those tests with the enforced read-only
+boundary. Hosted rerun acceptance remains pending and is tracked separately.
 
 This is a containment slice, not completion or operational acceptance of the
 client portal. Canonical session binding and revocation are locally proven with
