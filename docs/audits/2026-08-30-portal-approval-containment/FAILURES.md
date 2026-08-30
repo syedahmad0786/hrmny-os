@@ -58,7 +58,7 @@ commit `b2fea0bc9ae94e38595841783e177065a9a378d7`.
 - Confidence/freshness: medium-high; current code was not reclassified as a
   browser pass.
 - Affected components: local browser evidence only.
-- Status: open tooling/runtime gap; hosted CI pending.
+- Status: open local tooling/runtime gap; hosted Linux CI passed 77/77.
 - Supersedes/superseded-by: inherited from `EVID-HRMNY-20260830-SALES-008`.
 - Rollback/correction: block the PR if hosted Linux fails; investigate local
   server streaming separately.
@@ -144,11 +144,11 @@ commit `b2fea0bc9ae94e38595841783e177065a9a378d7`.
 - Evidence: hosted E2E job `99235124529`, its parallel push job
   `99235091588`, and correction commit
   `3d4213a293e6f088018086c08f9f6d2d6c1ff264`.
-- Confidence/freshness: high for diagnosis and local correction; hosted rerun
-  pending.
+- Confidence/freshness: high; diagnosis, correction, and terminal hosted rerun
+  are complete.
 - Affected components: Chat starters/copy, AI settings copy, and four
   Playwright specifications.
-- Status: corrected locally; hosted acceptance pending.
+- Status: corrected; terminal hosted browser acceptance passed.
 - Supersedes/superseded-by: none.
 - Rollback/correction: never restore automatic client effects; if the rerun
   fails, preserve the denial boundary and correct the browser contract or
@@ -171,11 +171,11 @@ commit `b2fea0bc9ae94e38595841783e177065a9a378d7`.
 - Evidence: E2E jobs `99238381198` and `99238386186`, each with 76 passing and
   one failing journey; 22/22 agent-tool unit tests; Playwright compile receipt;
   correction commit `3376752a5b1cc8f423940894163a5c2016bfa4e0`.
-- Confidence/freshness: high for diagnosis and local contract correction;
-  hosted rerun pending.
+- Confidence/freshness: high; diagnosis, correction, and terminal hosted rerun
+  are complete.
 - Affected components: one Playwright specification only; runtime policy was
   not weakened.
-- Status: corrected locally; hosted acceptance pending.
+- Status: corrected; terminal hosted browser acceptance passed 77/77.
 - Supersedes/superseded-by: refines `FAIL-HRMNY-20260830-PORTAL-007`; none.
 - Rollback/correction: preserve the read-only allowlist and exact write-denial
   assertions; investigate any future unexpected tool by capability, not count.

@@ -88,18 +88,21 @@ commit `b2fea0bc9ae94e38595841783e177065a9a378d7`.
 - Supersedes/superseded-by: none.
 - Rollback/correction: implement and accept each journey separately.
 
-## `GAP-HRMNY-20260830-PORTAL-006` — browser, performance, recovery, and UAT
+## `GAP-HRMNY-20260830-PORTAL-006` — performance, recovery, and UAT
 
-- Decision/finding: Linux browser, mobile/accessibility/performance,
-  deployment, recovery, named-user, and client acceptance are not yet proven.
-- Reason: local unit/build proof is not operational acceptance.
+- Decision/finding: synthetic Linux browser acceptance passed 77/77 on both
+  final-head runs; mobile accessibility/performance targets, live deployment,
+  recovery, named-user, and client acceptance are not yet proven.
+- Reason: hosted preview browser proof closes the code-path gate but is not
+  operational acceptance.
 - Alternatives considered: infer acceptance from compilation.
 - Trade-offs: release remains staged.
-- Evidence: acceptance-state table and `EVID-HRMNY-20260830-PORTAL-008`.
+- Evidence: acceptance-state table, `EVID-HRMNY-20260830-PORTAL-008`, and
+  `EVID-HRMNY-20260830-PORTAL-012`.
 - Confidence/freshness: high.
 - Affected components: release and external client experience.
-- Status: open; Linux CI is the next proof, all live states require separate
-  checkpoints.
+- Status: narrowed; synthetic Linux browser gate is closed, while performance,
+  recovery, live-provider, named-user, and production states remain open.
 - Supersedes/superseded-by: none.
 - Rollback/correction: stop at the first failed acceptance state and preserve
   the receipt.

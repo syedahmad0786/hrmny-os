@@ -7,6 +7,7 @@
 - Implementation commit: `b2fea0bc9ae94e38595841783e177065a9a378d7`
 - Browser-contract correction: `3d4213a293e6f088018086c08f9f6d2d6c1ff264`
 - Read-only result assertion: `3376752a5b1cc8f423940894163a5c2016bfa4e0`
+- Hosted acceptance head: `a11549ffabea2bd0064ec3aa0ffc5f8d61348cae`
 
 ## Outcome
 
@@ -34,13 +35,19 @@ read-only as “no tool output,” although the runtime correctly returned scope
 read results and no draft/effect results. Commit
 `3376752a5b1cc8f423940894163a5c2016bfa4e0` now asserts useful scoped reads
 while denying every catalogued write and any minted portal link. A new hosted
-rerun is still required.
+rerun was then completed successfully: both push and pull-request CI runs
+passed verify, database migration, and all 77 Linux browser journeys. Both
+Vercel preview artifacts, the approval reviewer, and the security reviewer also
+passed. These receipts accept the reviewed preview slice only; they do not
+authorize merge or production promotion.
 
 This is a containment slice, not completion or operational acceptance of the
 client portal. Canonical session binding and revocation are locally proven with
 synthetic principals; the hosted Supabase/cookie path and PostgreSQL transaction
-still require isolated integration proof. No provider, production database,
-deployment, migration, external message, or live user was used.
+still require isolated integration proof. No live business provider,
+production database, production deployment/promotion, migration, external
+message, or live user was used. Automatic PR preview artifacts were built and
+are recorded as preview evidence only.
 
 ## Acceptance state
 
@@ -50,8 +57,8 @@ deployment, migration, external message, or live user was used.
 | documented           | yes                                                       |
 | authorized           | local code/test work only                                 |
 | configured           | synthetic memory environment only                         |
-| tested               | unit/contract/security regression, lint, typecheck, build |
-| deployed             | no                                                        |
+| tested               | local gates + hosted Linux CI/E2E 77/77                   |
+| deployed             | PR preview only; no production promotion                  |
 | provider accepted    | not applicable/no                                         |
 | destination verified | no                                                        |
 | recovery verified    | no                                                        |

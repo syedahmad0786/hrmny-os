@@ -123,17 +123,20 @@ production acceptance.
 ## `EVID-HRMNY-20260830-PORTAL-008` — browser acceptance state
 
 - Decision/finding: a Playwright specification proves the staff preview is
-  visibly read-only and lacks Approve/Request Changes controls, but its Linux
-  execution receipt is pending the stacked PR.
-- Reason: the inherited local Windows body stall cannot be converted into a
-  browser pass.
+  visibly read-only and lacks Approve/Request Changes controls; it passed in
+  both final-head Linux E2E jobs as part of the 77/77 suites.
+- Reason: obtain runtime proof despite the separately preserved local Windows
+  body stall.
 - Alternatives considered: omit UI proof; claim from source inspection.
-- Trade-offs: browser acceptance remains pending until hosted CI is green.
-- Evidence: `client-preview-readonly-ui.spec.ts`; hosted result pending.
-- Confidence/freshness: high for source, pending for runtime.
+- Trade-offs: hosted synthetic browser proof does not establish a live
+  Supabase/cookie session or named-client UAT.
+- Evidence: `client-preview-readonly-ui.spec.ts`; jobs `99239188471` and
+  `99239192175`.
+- Confidence/freshness: high for the tested preview runtime.
 - Affected components: staff preview UI.
-- Status: pending Linux CI.
-- Supersedes/superseded-by: none.
+- Status: passed in hosted Linux CI; production/user acceptance remains open.
+- Supersedes/superseded-by: finalized by
+  `EVID-HRMNY-20260830-PORTAL-012`.
 - Rollback/correction: block the PR and fix if the hosted browser gate fails.
 
 ## `EVID-HRMNY-20260830-PORTAL-009` — atomic campaign receipt proof
@@ -177,9 +180,9 @@ production acceptance.
   typecheck, and production build gates passed after correction.
 - Confidence/freshness: high for the captured runs and local correction.
 - Affected components: stacked PR #239, browser contracts, Chat, AI settings.
-- Status: negative receipt preserved; hosted correction rerun pending.
-- Supersedes/superseded-by: expected to be superseded by a terminal hosted
-  receipt for the corrected head.
+- Status: negative receipt preserved; correction later passed.
+- Supersedes/superseded-by: superseded by
+  `EVID-HRMNY-20260830-PORTAL-012`.
 - Rollback/correction: block merge and deployment until every required hosted
   check reaches a successful terminal result.
 
@@ -203,8 +206,36 @@ production acceptance.
   Playwright specification compilation passed.
 - Confidence/freshness: high.
 - Affected components: PR #239 browser acceptance and one contract assertion.
-- Status: negative receipt preserved; final hosted rerun pending.
+- Status: negative receipt preserved; final hosted rerun passed.
 - Supersedes/superseded-by: supersedes the four-failure diagnosis as the latest
-  hosted state; expected to be superseded by a terminal green receipt.
+  intermediate hosted state; superseded by `EVID-HRMNY-20260830-PORTAL-012`.
 - Rollback/correction: block merge/deployment until the complete corrected head
   is green.
+
+## `EVID-HRMNY-20260830-PORTAL-012` — terminal hosted preview gates
+
+- Decision/finding: on head `a11549ffabea2bd0064ec3aa0ffc5f8d61348cae`,
+  push run `33304750432` and pull-request run `33304751661` both passed verify,
+  fresh/upgrade database migration, and Linux E2E. Each browser job passed all
+  77 journeys in 1.4 minutes. Both Vercel preview artifacts, the approval
+  reviewer, and the security reviewer reached successful terminal states.
+- Reason: close the code/preview test state with immutable provider receipts
+  while keeping operational acceptance states separate.
+- Alternatives considered: rely on one duplicate run; call preview deployment
+  production accepted; omit the earlier negative receipts.
+- Trade-offs: duplicate push/PR execution costs CI time; the result still does
+  not prove live Supabase sessions, recovery, named-user UAT, or production.
+- Evidence: verify jobs `99239188445` and `99239192016`; database jobs
+  `99239188347` and `99239192174`; E2E jobs `99239188471` and `99239192175`;
+  Vercel checks `hrmny-os` and `hrmny-os-web`; approval reviewer
+  `bc-781c9104-8fa5-4bcb-9c6e-586acc1da0db`; security reviewer
+  `bc-ac7e87b2-635e-4e6a-a34f-875d3a327bc8`.
+- Confidence/freshness: high; terminal checks read on 2026-08-30.
+- Affected components: PR #239 reviewed preview slice.
+- Status: code, database-migration CI, preview deployment, and synthetic hosted
+  browser acceptance passed; merge and all live operational acceptance remain
+  unapproved.
+- Supersedes/superseded-by: supersedes the pending states in `-008`, `-010`,
+  and `-011`; none.
+- Rollback/correction: do not merge or promote automatically; rerun all gates
+  after any implementation change and preserve separate live canary/UAT gates.

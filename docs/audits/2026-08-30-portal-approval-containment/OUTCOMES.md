@@ -19,7 +19,8 @@ commit `b2fea0bc9ae94e38595841783e177065a9a378d7`.
 - Evidence: `EVID-HRMNY-20260830-PORTAL-001` through `-008`.
 - Confidence/freshness: high for local code/test containment.
 - Affected components: portal approvals, staff preview, AI/Chat, audit.
-- Status: implemented and locally verified; CI/merge/deployment pending.
+- Status: implemented and verified locally plus hosted preview CI; merge and
+  production deployment remain unapproved.
 - Supersedes/superseded-by: supersedes the unsafe approval reachability portion
   of the Phase 0 gap; none.
 - Rollback/correction: retain an equivalent client-only authority boundary in

@@ -15,10 +15,11 @@ commit `b2fea0bc9ae94e38595841783e177065a9a378d7`.
   visible UI gates.
 - Alternatives considered: accept from one unit test.
 - Trade-offs: additional execution time and staged evidence.
-- Evidence: `EVID-HRMNY-20260830-PORTAL-002` through `-008`.
-- Confidence/freshness: high for local gates; CI pending.
+- Evidence: `EVID-HRMNY-20260830-PORTAL-002` through `-012`.
+- Confidence/freshness: high for local and hosted preview gates.
 - Affected components: entire slice.
-- Status: local portion executed; hosted Linux pending.
+- Status: executed locally and in hosted Linux CI; live integration, recovery,
+  user, and production acceptance remain separate.
 - Supersedes/superseded-by: none.
 - Rollback/correction: stop the release on any failure and record the exact
   receipt.
