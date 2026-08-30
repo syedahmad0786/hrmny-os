@@ -9,20 +9,35 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { featureForPathname } from "@/features/catalog";
 import { PwaRegister } from "@/components/pwa-register";
 import { isSyntheticRecordName } from "@/lib/synthetic-records";
+import { rankStaffNavigation, type StaffNavId } from "@/lib/staff-workspace";
 
-const PRIMARY_NAV = [
+type StaffCapability = "canAdminFeatures" | "canAdminWork" | "canViewAudit";
+
+type StaffNavDefinition = {
+  id: StaffNavId;
+  label: string;
+  index: string;
+  destinations: readonly {
+    href: string;
+    feature: string;
+    capability?: StaffCapability;
+  }[];
+  match: (pathname: string) => boolean;
+};
+
+const PRIMARY_NAV: readonly StaffNavDefinition[] = [
   {
-    href: "/",
+    id: "home",
     label: "Home",
     index: "01",
-    features: ["core.home"],
+    destinations: [{ href: "/", feature: "core.home" }],
     match: (p: string) => p === "/",
   },
   {
-    href: "/crm/hunt",
+    id: "sales",
     label: "Sales",
     index: "02",
-    features: ["crm.workspace"],
+    destinations: [{ href: "/crm/hunt", feature: "crm.workspace" }],
     match: (p: string) =>
       p === "/crm" ||
       p.startsWith("/crm/") ||
@@ -30,75 +45,84 @@ const PRIMARY_NAV = [
       p.startsWith("/clients"),
   },
   {
-    href: "/tasks",
+    id: "work",
     label: "Work",
     index: "03",
-    features: ["work.my_tasks"],
+    destinations: [
+      { href: "/tasks", feature: "work.my_tasks" },
+      { href: "/work", feature: "work.projects" },
+    ],
     match: (p: string) =>
       p === "/work" ||
-      p.startsWith("/work/") ||
+      (p.startsWith("/work/") && !p.startsWith("/work/inbox")) ||
       p === "/tasks" ||
       p.startsWith("/tasks/"),
   },
   {
-    href: "/delivery",
+    id: "delivery",
     label: "Delivery",
     index: "04",
-    features: ["delivery.workspace"],
+    destinations: [{ href: "/delivery", feature: "delivery.workspace" }],
     match: (p: string) =>
       ["/delivery", "/traffic", "/creative", "/account", "/assets"].some(
         (h) => p === h || p.startsWith(`${h}/`),
       ),
   },
   {
-    href: "/chat",
+    id: "chat",
     label: "Chat",
     index: "05",
-    features: ["ai.os_chat"],
+    destinations: [{ href: "/chat", feature: "ai.os_chat" }],
     match: (p: string) => p === "/chat" || p.startsWith("/chat/"),
   },
   {
-    href: "/tickets",
+    id: "support",
     label: "Support",
     index: "06",
-    features: ["support.tickets"],
+    destinations: [
+      { href: "/tickets", feature: "support.tickets" },
+      { href: "/notifications", feature: "os.notifications" },
+      { href: "/work/inbox", feature: "work.inbox" },
+    ],
     match: (p: string) =>
       p === "/tickets" ||
       p.startsWith("/tickets/") ||
       p === "/notifications" ||
       p.startsWith("/notifications/") ||
       p === "/approvals" ||
-      p.startsWith("/approvals/"),
+      p.startsWith("/approvals/") ||
+      p === "/work/inbox" ||
+      p.startsWith("/work/inbox/"),
   },
   {
-    href: "/finance",
+    id: "finance",
     label: "Finance",
     index: "07",
-    features: ["finance.workspace"],
+    destinations: [{ href: "/finance", feature: "finance.workspace" }],
     match: (p: string) =>
       ["/finance", "/billing", "/margin", "/payroll"].some(
         (h) => p === h || p.startsWith(`${h}/`),
       ),
   },
   {
-    href: "/dashboards",
+    id: "insights",
     label: "Insights",
     index: "08",
-    features: ["analytics.dashboards", "finance.workspace", "core.home"],
+    destinations: [{ href: "/dashboards", feature: "analytics.dashboards" }],
     match: (p: string) => p === "/dashboards" || p.startsWith("/dashboards/"),
   },
   {
-    href: "/people",
+    id: "people",
     label: "People",
     index: "09",
-    features: [
-      "people.core_hr",
-      "people.leave_attendance",
-      "people.talent",
-      "people.payroll",
-      "people.shifts_timesheets",
-      "people.workplace",
-      "people.benefits",
+    destinations: [
+      { href: "/people", feature: "people.core_hr" },
+      { href: "/time", feature: "people.leave_attendance" },
+      { href: "/talent", feature: "people.talent" },
+      { href: "/workforce-payroll", feature: "people.payroll" },
+      { href: "/work-schedule", feature: "people.shifts_timesheets" },
+      { href: "/workplace", feature: "people.workplace" },
+      { href: "/benefits", feature: "people.benefits" },
     ],
     match: (p: string) =>
       [
@@ -110,25 +134,41 @@ const PRIMARY_NAV = [
         "/workplace",
         "/workforce-payroll",
         "/hr",
-        "/roles",
       ].some((h) => p === h || p.startsWith(`${h}/`)),
   },
   {
-    href: "/admin/features",
+    id: "settings",
     label: "Settings",
     index: "10",
-    features: [
-      "admin.feature_lab",
-      "work.admin_console",
-      "integrations.connections",
+    destinations: [
+      {
+        href: "/admin/features",
+        feature: "admin.feature_lab",
+        capability: "canAdminFeatures",
+      },
+      {
+        href: "/admin/work",
+        feature: "work.admin_console",
+        capability: "canAdminWork",
+      },
+      { href: "/settings/connections", feature: "integrations.connections" },
     ],
     match: (p: string) =>
       p.startsWith("/settings") ||
       p.startsWith("/admin") ||
       p.startsWith("/gate") ||
-      p.startsWith("/conventions"),
+      p.startsWith("/conventions") ||
+      p.startsWith("/roles"),
   },
-] as const;
+];
+
+type ResolvedNavItem = {
+  id: StaffNavId;
+  href: string;
+  label: string;
+  index: string;
+  match: (pathname: string) => boolean;
+};
 
 export function StaffShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -141,8 +181,11 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   const completingGoogle = useRef(false);
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
-  const accessibilityEnabled =
-    session.data?.enabledFeatureKeys.includes("work.accessibility") ?? false;
+  const enabledFeatures = useMemo(
+    () => new Set(session.data?.enabledFeatureKeys ?? []),
+    [session.data?.enabledFeatureKeys],
+  );
+  const accessibilityEnabled = enabledFeatures.has("work.accessibility");
   const accessibility = trpc.work.accessibility.get.useQuery(undefined, {
     enabled: accessibilityEnabled,
     retry: false,
@@ -164,7 +207,8 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     },
   });
   const deals = trpc.crm.deals.list.useQuery(undefined, {
-    enabled: Boolean(session.data?.employeeId),
+    enabled:
+      Boolean(session.data?.employeeId) && enabledFeatures.has("crm.workspace"),
     staleTime: 30_000,
   });
   const waitingForAccess =
@@ -394,9 +438,49 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   );
 
   const avatar = initials(session.data?.displayName ?? "Partner");
-  const enabledFeatures = new Set(session.data?.enabledFeatureKeys ?? []);
   const requiredFeature = featureForPathname(pathname);
   const pageEnabled = !requiredFeature || enabledFeatures.has(requiredFeature);
+  const availableNavigation: ResolvedNavItem[] = PRIMARY_NAV.flatMap((item) => {
+    const destination = item.destinations.find(
+      ({ feature, capability }) =>
+        enabledFeatures.has(feature) &&
+        (!capability || Boolean(session.data?.[capability])),
+    );
+    return destination
+      ? [
+          {
+            id: item.id,
+            href: destination.href,
+            label: item.label,
+            index: item.index,
+            match: item.match,
+          },
+        ]
+      : [];
+  });
+  const navigation = rankStaffNavigation(
+    session.data?.roles ?? [],
+    availableNavigation,
+  );
+  const moreActive = navigation.more.some((item) => item.match(pathname));
+  const renderNavItem = (item: ResolvedNavItem) => {
+    const active = item.match(pathname);
+    return (
+      <Link
+        key={item.id}
+        href={item.href}
+        className={`desk-nav-btn${active ? " active" : ""}`}
+      >
+        <span className="desk-nav-index">{item.index}</span>
+        <span>{item.label}</span>
+        {item.id === "sales" && dealCount ? (
+          <span className="desk-nav-count">{dealCount}</span>
+        ) : (
+          <span />
+        )}
+      </Link>
+    );
+  };
 
   if (session.isError) {
     return (
@@ -494,26 +578,22 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         </div>
         <p className="desk-nav-label">Operate</p>
         <nav className="desk-nav" aria-label="Primary">
-          {PRIMARY_NAV.filter((item) =>
-            item.features.some((featureKey) => enabledFeatures.has(featureKey)),
-          ).map((item) => {
-            const active = item.match(pathname);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`desk-nav-btn${active ? " active" : ""}`}
+          {navigation.primary.map(renderNavItem)}
+          {navigation.more.length ? (
+            <details className="desk-nav-more" open={moreActive || undefined}>
+              <summary
+                className={`desk-nav-btn desk-nav-more-toggle${moreActive ? " active" : ""}`}
+                data-testid="staff-more-toggle"
               >
-                <span className="desk-nav-index">{item.index}</span>
-                <span>{item.label}</span>
-                {item.href === "/crm/hunt" && dealCount ? (
-                  <span className="desk-nav-count">{dealCount}</span>
-                ) : (
-                  <span />
-                )}
-              </Link>
-            );
-          })}
+                <span className="desk-nav-index">+</span>
+                <span>More</span>
+                <span aria-hidden>⌄</span>
+              </summary>
+              <div className="desk-nav-more-list">
+                {navigation.more.map(renderNavItem)}
+              </div>
+            </details>
+          ) : null}
         </nav>
         <div className="desk-sidebar-foot">
           <div className="desk-side-meta">
@@ -552,26 +632,32 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
                 </select>
               </div>
             ) : null}
-            <Link
-              href={
-                pathname.startsWith("/client-preview")
-                  ? "/clients"
-                  : "/client-preview"
-              }
-              className="desk-topbar-primary"
-            >
-              {pathname.startsWith("/client-preview")
-                ? "← Staff admin"
-                : "Client view"}
-            </Link>
-            <Link
-              href="/admin/audit"
-              className="desk-icon-btn"
-              aria-label="Open audit activity"
-              title="Audit activity"
-            >
-              A°
-            </Link>
+            {session.data?.canPreviewClient &&
+            enabledFeatures.has("portal.client") ? (
+              <Link
+                href={
+                  pathname.startsWith("/client-preview")
+                    ? "/clients"
+                    : "/client-preview"
+                }
+                className="desk-topbar-primary"
+              >
+                {pathname.startsWith("/client-preview")
+                  ? "← Staff admin"
+                  : "Client view"}
+              </Link>
+            ) : null}
+            {session.data?.canViewAudit &&
+            enabledFeatures.has("admin.audit") ? (
+              <Link
+                href="/admin/audit"
+                className="desk-icon-btn"
+                aria-label="Open audit activity"
+                title="Audit activity"
+              >
+                A°
+              </Link>
+            ) : null}
             {session.data?.authMode === "supabase" &&
             session.data.employeeId ? (
               <button
