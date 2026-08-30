@@ -40,8 +40,22 @@ test.describe("Settings AI tool results", () => {
     const output = page.getByTestId("ai-agent-run-output");
     await expect(output).toBeVisible({ timeout: 60_000 });
 
-    await expect(page.getByTestId("ai-agent-tool-results")).toHaveCount(0);
-    await expect(page.getByTestId("ai-agent-tool-result-data")).toHaveCount(0);
+    const tools = page.getByTestId("ai-agent-tool-results");
+    await expect(tools).toBeVisible();
+    await expect(page.getByTestId("ai-agent-tool-crm.read")).toBeVisible();
+    for (const tool of [
+      "tasks.create",
+      "outreach.draft",
+      "crm.note",
+      "campaigns.draft",
+      "briefs.draft",
+      "crm.prospect",
+      "portal.invite",
+      "creative.sendToPortal",
+    ]) {
+      await expect(page.getByTestId(`ai-agent-tool-${tool}`)).toHaveCount(0);
+    }
+    await expect(tools).not.toContainText(/\/portal\/login\/verify\?token=/);
     await expect(output).not.toContainText(/\/portal\/login\/verify\?token=/);
   });
 });
