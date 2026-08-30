@@ -1,11 +1,12 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Settings/AI on-command run surfaces funnel tool payloads (portal verify href).
- * Separate from funnel-demo.spec.ts so create→run and tool-payload proofs don't collide.
+ * A client-bound custom-agent run is structurally read-only even when its
+ * stored catalog contains draft tools. Typed draft command surfaces are tested
+ * separately; this UI must not mint portal links or expose effect receipts.
  */
 test.describe("Settings AI tool results", () => {
-  test("Demo Co sandbox run shows portal verify href in tool payloads", async ({
+  test("Demo Co sandbox run does not execute catalogued draft tools", async ({
     page,
   }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
@@ -40,19 +41,21 @@ test.describe("Settings AI tool results", () => {
     await expect(output).toBeVisible({ timeout: 60_000 });
 
     const tools = page.getByTestId("ai-agent-tool-results");
-    await expect(tools).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("ai-agent-tool-portal.invite")).toContainText(
-      /ok/i,
-    );
-    await expect(
-      page.getByTestId("ai-agent-tool-creative.sendToPortal"),
-    ).toContainText(/ok/i);
-
-    const payloads = page.getByTestId("ai-agent-tool-result-data");
-    await expect
-      .poll(async () => payloads.count(), { timeout: 15_000 })
-      .toBeGreaterThan(0);
-    await expect(payloads.first()).toBeVisible();
-    await expect(tools).toContainText(/\/portal\/login\/verify\?token=/);
+    await expect(tools).toBeVisible();
+    await expect(page.getByTestId("ai-agent-tool-crm.read")).toBeVisible();
+    for (const tool of [
+      "tasks.create",
+      "outreach.draft",
+      "crm.note",
+      "campaigns.draft",
+      "briefs.draft",
+      "crm.prospect",
+      "portal.invite",
+      "creative.sendToPortal",
+    ]) {
+      await expect(page.getByTestId(`ai-agent-tool-${tool}`)).toHaveCount(0);
+    }
+    await expect(tools).not.toContainText(/\/portal\/login\/verify\?token=/);
+    await expect(output).not.toContainText(/\/portal\/login\/verify\?token=/);
   });
 });

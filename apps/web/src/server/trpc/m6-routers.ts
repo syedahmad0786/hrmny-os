@@ -24,6 +24,10 @@ import {
   readPortalWorkspace,
 } from "../portal-data";
 import {
+  CLIENT_PORTAL_ACTOR_REQUIRED,
+  PORTAL_IDENTITY_NOT_BOUND,
+} from "../portal/approval-boundary";
+import {
   ensureClientOnboarding,
   getClientOnboarding,
   signoffOnboardingPhase,
@@ -36,6 +40,7 @@ import {
   portalProcedure,
   protectedProcedure,
   publicProcedure,
+  requirePermission,
   router,
   staffProcedure,
 } from "./trpc";
@@ -650,6 +655,7 @@ export const portalRouter = router({
       (await readPortalWorkspace(requireClientId(ctx))).approvals,
     ),
     act: portalProcedure
+      .use(requirePermission("portal", "approve"))
       .input(
         z.object({
           id: z.string().uuid(),
@@ -657,15 +663,26 @@ export const portalRouter = router({
           feedback: z.string().optional(),
         }),
       )
-      .mutation(({ input, ctx }) =>
-        actOnPortalApproval({
-          clientId: requireClientId(ctx),
-          approvalId: input.id,
-          action: input.action,
-          feedback: input.feedback,
-          actorPortalUserId: ctx.employeeId,
-        }),
-      ),
+      .mutation(async ({ input, ctx }) => {
+        try {
+          return await actOnPortalApproval({
+            clientId: requireClientId(ctx),
+            approvalId: input.id,
+            action: input.action,
+            feedback: input.feedback,
+            actor: ctx.user!,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          if (
+            message === CLIENT_PORTAL_ACTOR_REQUIRED ||
+            message === PORTAL_IDENTITY_NOT_BOUND
+          ) {
+            throw new TRPCError({ code: "FORBIDDEN", message });
+          }
+          throw error;
+        }
+      }),
   }),
 
   reports: router({

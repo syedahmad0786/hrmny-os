@@ -1097,12 +1097,22 @@ export const clientsRouter = router({
           isActive: boolean;
         };
         if (!db) {
+          const store = getDemoStore();
+          const existing = [...store.portalUsers.values()].find(
+            (candidate) =>
+              candidate.clientId === input.clientId &&
+              candidate.email.toLowerCase() === email,
+          );
           user = {
-            portalUserId: randomUUID(),
+            portalUserId: existing?.portalUserId ?? randomUUID(),
             email,
             displayName: input.displayName,
             isActive: true,
           };
+          store.portalUsers.set(user.portalUserId, {
+            ...user,
+            clientId: input.clientId,
+          });
         } else {
           user = await db.transaction(async (tx) => {
             await tx.execute(sql`

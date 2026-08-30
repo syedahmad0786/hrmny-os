@@ -13,6 +13,12 @@ import {
 } from "@hrmny/db";
 import { getDb } from "../db";
 import {
+  DEMO_CLIENT_B_ID,
+  DEMO_CLIENT_B_PORTAL_USER_ID,
+  DEMO_CLIENT_ID,
+  DEMO_PORTAL_USER_ID,
+} from "../demo-store";
+import {
   getWorkSsoConfiguration,
   ssoAccessAllowed,
 } from "../enterprise-identity";
@@ -145,7 +151,7 @@ export const DEV_USERS: Record<string, SessionUser> = {
   },
   /** Portal persona bound to Demo Co (DEMO_CLIENT_ID). */
   portal_a: {
-    employeeId: "c0000000-0000-4000-8000-0000000000a1",
+    employeeId: DEMO_PORTAL_USER_ID,
     email: "alex@democo.example",
     displayName: "Portal · Demo Co",
     roles: ["portal_client"],
@@ -157,11 +163,11 @@ export const DEV_USERS: Record<string, SessionUser> = {
       "deny:payroll:*",
     ],
     actorType: "portal",
-    clientId: "c1000000-0000-4000-8000-0000000000a4",
+    clientId: DEMO_CLIENT_ID,
   },
   /** Portal persona bound to Other Co (must not see Demo Co data). */
   portal_b: {
-    employeeId: "c0000000-0000-4000-8000-0000000000b1",
+    employeeId: DEMO_CLIENT_B_PORTAL_USER_ID,
     email: "ops@otherco.example",
     displayName: "Portal · Other Co",
     roles: ["portal_client"],
@@ -173,7 +179,7 @@ export const DEV_USERS: Record<string, SessionUser> = {
       "deny:payroll:*",
     ],
     actorType: "portal",
-    clientId: "c1000000-0000-4000-8000-0000000000b4",
+    clientId: DEMO_CLIENT_B_ID,
   },
 };
 
@@ -318,8 +324,7 @@ export async function resolveSupabaseUser(
   if (
     await featureEnabled(PORTAL_MAGIC_LINK_FEATURE, { roles: ["portal_client"] })
   ) {
-    const viaAllowlist = await resolvePortalSessionForEmail(email);
-    if (viaAllowlist) return viaAllowlist;
+    return resolvePortalSessionForEmail(email);
   }
 
   const portalUsers = await db

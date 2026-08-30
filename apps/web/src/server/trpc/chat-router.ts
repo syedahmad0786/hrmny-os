@@ -10,6 +10,7 @@ import { z } from "zod";
 import { nextLinksFromToolResults } from "../../lib/agent-next-links";
 import { getDb } from "../db";
 import { searchMemory } from "../ai/memory-db";
+import { isPortalDecisionIntent } from "../ai/agent-tools";
 import { staffProcedure, router } from "./trpc";
 
 type ThreadRow = {
@@ -44,8 +45,9 @@ function nowIso() {
 export function buildChatDefaultTools(scope: {
   employeeId: string;
   clientId?: string | null;
+  immutableUserPrompt?: string;
 }): HarnessTool[] {
-  return [
+  const tools: HarnessTool[] = [
     {
       name: "search_memory",
       description:
@@ -387,36 +389,6 @@ export function buildChatDefaultTools(scope: {
             },
           } satisfies HarnessTool,
           {
-            name: "portal_os_approve",
-            description:
-              "Org-only: approve/reject a client_review portal item. Prompt must mention portal approve + taskId/approvalId UUID.",
-            run: async (args: Record<string, unknown>) => {
-              const { runAgentTools } = await import("../ai/agent-tools");
-              const id =
-                typeof args.approvalId === "string"
-                  ? args.approvalId
-                  : typeof args.taskId === "string"
-                    ? args.taskId
-                    : "";
-              const base = String(
-                args.prompt ?? args.query ?? "Approve OS portal",
-              );
-              const prompt = id ? `${base} taskId: ${id}` : base;
-              const results = await runAgentTools({
-                allowedTools: ["portal.os_approve"],
-                prompt,
-                scope: {
-                  employeeId: scope.employeeId,
-                  taskId: id || undefined,
-                },
-              });
-              return {
-          nextLinks: nextLinksFromToolResults(results),
-          tools: results,
-        };
-            },
-          } satisfies HarnessTool,
-          {
             name: "onboarding_os_signoff",
             description:
               "Org-only: sign off an active onboarding phase. Prompt must mention sign off + optional clientId/phaseIndex.",
@@ -469,11 +441,30 @@ export function buildChatDefaultTools(scope: {
       run: async () => ({ utc: nowIso() }),
     },
   ];
+  // Client-bound free-form Chat is read-only. Effectful client work must enter
+  // through a typed command/effect broker, never a model-selected generic tool.
+  // Recognizable portal-decision wording remains a second fail-closed guard for
+  // org Chat, but it is not the authorization boundary.
+  if (
+    scope.clientId ||
+    isPortalDecisionIntent(scope.immutableUserPrompt ?? "")
+  ) {
+    const readOnly = new Set([
+      "search_memory",
+      "crm_read",
+      "delivery_read",
+      "outreach_read",
+      "now",
+    ]);
+    return tools.filter((tool) => readOnly.has(tool.name));
+  }
+  return tools;
 }
 
 function defaultTools(scope: {
   employeeId: string;
   clientId?: string | null;
+  immutableUserPrompt?: string;
 }): HarnessTool[] {
   return buildChatDefaultTools(scope);
 }
@@ -746,7 +737,7 @@ export const chatRouter = router({
           ? `Client sandbox id: ${thread.clientId}.`
           : "Org / staff scope (no client sandbox).",
         agentTools.length
-          ? "When the user asks you to act, call agent_act with their prompt so allowlisted OS/CRM tools can run."
+          ? "Custom-agent tools are descriptive in Chat; effectful execution requires a typed server command."
           : "",
       ]
         .filter(Boolean)
@@ -756,82 +747,13 @@ export const chatRouter = router({
         ...defaultTools({
           employeeId,
           clientId: thread.clientId,
+          immutableUserPrompt: input.content,
         }),
       ];
-      if (agentTools.length) {
-        harnessTools.unshift({
-          name: "agent_act",
-          description:
-            "Run this custom agent's allowlisted tools (CRM/OS/funnel) inside the current sandbox. Pass the user intent as prompt.",
-          run: async (args: Record<string, unknown>) => {
-            const { runAgentTools } = await import("../ai/agent-tools");
-            const prompt = String(
-              args.prompt ?? args.query ?? input.content,
-            ).slice(0, 4000);
-            const results = await runAgentTools({
-              allowedTools: agentTools,
-              prompt,
-              scope: {
-                clientId: thread.clientId ?? undefined,
-                employeeId,
-              },
-            });
-            // nextLinks first so 4k observation truncation keeps CTAs.
-            return {
-              nextLinks: nextLinksFromToolResults(results),
-              agentSlug: thread.agentSlug,
-              tools: results,
-            };
-          },
-        } satisfies HarnessTool);
-      }
-
       const steps: Array<Record<string, unknown>> = [];
       const harnessResult =
         input.harness === "direct"
           ? await (async () => {
-              // Direct mode still executes allowlisted agent tools once so
-              // selecting an agent is never a no-op.
-              if (agentTools.length) {
-                const { runAgentTools } = await import("../ai/agent-tools");
-                const toolResults = await runAgentTools({
-                  allowedTools: agentTools,
-                  prompt: input.content,
-                  scope: {
-                    clientId: thread.clientId ?? undefined,
-                    employeeId,
-                  },
-                });
-                const nextLinks = nextLinksFromToolResults(toolResults);
-                steps.push({
-                  iteration: 0,
-                  toolName: "agent_act",
-                  nextLinks,
-                  // nextLinks first so truncation keeps closed-loop CTAs.
-                  observation: JSON.stringify({
-                    nextLinks,
-                    tools: toolResults,
-                  }).slice(0, 4000),
-                });
-                const res = await generateSafe({
-                  messages: [
-                    { role: "system", content: system },
-                    {
-                      role: "user",
-                      content: `${input.content}\n\ntoolResults: ${JSON.stringify(toolResults).slice(0, 6000)}`,
-                    },
-                  ],
-                  temperature,
-                  task: "generic",
-                });
-                return {
-                  answer: res.text,
-                  steps: [
-                    ...steps,
-                    { iteration: 1, answer: res.text },
-                  ],
-                };
-              }
               const res = await generateSafe({
                 messages: [
                   { role: "system", content: system },

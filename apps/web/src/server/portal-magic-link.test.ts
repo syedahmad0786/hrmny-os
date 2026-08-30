@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createResendMock } from "@hrmny/integrations";
 import { createCaller } from "./trpc/root";
-import { DEMO_CLIENT_B_ID, DEMO_CLIENT_ID, getDemoStore } from "./demo-store";
+import {
+  DEMO_CLIENT_B_ID,
+  DEMO_CLIENT_B_PORTAL_USER_ID,
+  DEMO_CLIENT_ID,
+  getDemoStore,
+} from "./demo-store";
 import { clearDemoFeatureOverrides, setFeatureOverride } from "./features";
 import {
   getPortalAllowlist,
@@ -101,6 +106,7 @@ describe("portal magic-link", () => {
   it("binds a session to exactly the allowlisted client, denies un-invited emails", async () => {
     const session = await resolvePortalSessionForEmail("ops@otherco.example");
     expect(session).toMatchObject({
+      employeeId: DEMO_CLIENT_B_PORTAL_USER_ID,
       actorType: "portal",
       clientId: DEMO_CLIENT_B_ID,
       roles: ["portal_client"],
@@ -109,6 +115,25 @@ describe("portal magic-link", () => {
     expect(session?.permissions).toContain("deny:payroll:*");
 
     expect(await resolvePortalSessionForEmail("stranger@evil.example")).toBeNull();
+  });
+
+  it("fails closed for inactive or ambiguous canonical portal users", async () => {
+    const store = getDemoStore();
+    const canonical = store.portalUsers.get(DEMO_CLIENT_B_PORTAL_USER_ID)!;
+    canonical.isActive = false;
+    expect(
+      await resolvePortalSessionForEmail("ops@otherco.example"),
+    ).toBeNull();
+
+    canonical.isActive = true;
+    const duplicateId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    store.portalUsers.set(duplicateId, {
+      ...canonical,
+      portalUserId: duplicateId,
+    });
+    expect(
+      await resolvePortalSessionForEmail("ops@otherco.example"),
+    ).toBeNull();
   });
 
   it("flag off: request keeps the existing dev-stub behavior", async () => {

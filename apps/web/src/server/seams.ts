@@ -7,6 +7,7 @@ import { getDb } from "./db";
 export type SeamName =
   | "deal.won"
   | "brief.lock"
+  | "creative.qc_passed"
   | "creative.approved"
   | "hire.packet_complete";
 
@@ -122,6 +123,32 @@ async function applyCreativeApprovedDurable(
   };
 }
 
+async function applyCreativeQcPassedDurable(
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const db = getDb();
+  if (!db) return { deliveryStatus: null, reason: "no_db" };
+  const taskId = String(payload.taskId ?? "");
+  const assetId = payload.assetId ? String(payload.assetId) : null;
+  const clientId = payload.clientId ? String(payload.clientId) : null;
+
+  if (assetId) {
+    await db.execute(sql`
+      update public.asset
+      set status = 'client_review', updated_at = now()
+      where asset_id = ${assetId}::uuid
+        and status in ('draft', 'qc', 'qc_passed', 'internal_review')
+    `);
+  }
+  return {
+    deliveryStatus: "awaiting_client",
+    taskId: taskId || null,
+    clientId,
+    assetId,
+    durable: true,
+  };
+}
+
 /**
  * Apply seam side-effects into the demo store.
  * Idempotent: same `idempotencyKey` returns the prior event without re-applying.
@@ -157,6 +184,8 @@ export function driveSeam(
 
   if (name === "brief.lock") {
     result = applyBriefLock(payload);
+  } else if (name === "creative.qc_passed") {
+    result = applyCreativeQcPassed(payload);
   } else if (name === "creative.approved") {
     result = applyCreativeApproved(payload);
   } else if (name === "deal.won") {
@@ -168,10 +197,16 @@ export function driveSeam(
   event.applied = true;
   event.result = result;
   store.seamOutbox.unshift(event);
+  const actorPortalUserId =
+    typeof payload.actorPortalUserId === "string"
+      ? payload.actorPortalUserId
+      : null;
   store.appendAudit({
-    actorEmployeeId:
-      (payload.actorEmployeeId as string) ??
-      "00000000-0000-4000-8000-000000000000",
+    actorEmployeeId: actorPortalUserId
+      ? null
+      : (payload.actorEmployeeId as string) ??
+        "00000000-0000-4000-8000-000000000000",
+    actorPortalUserId,
     action: `seams.${name}`,
     entityType: "seam_event",
     entityId: event.eventId,
@@ -205,7 +240,7 @@ export async function driveSeamAsync(
     where idempotency_key = ${idempotencyKey}
     limit 1
   `);
-  if (existing[0]) {
+  if (existing[0]?.applied) {
     return {
       ok: true,
       duplicate: true,
@@ -228,6 +263,8 @@ export async function driveSeamAsync(
       const demo = applyBriefLock(payload);
       result = { ...demo, durable: false };
     }
+  } else if (name === "creative.qc_passed") {
+    result = await applyCreativeQcPassedDurable(payload);
   } else if (name === "creative.approved") {
     result = await applyCreativeApprovedDurable(payload);
   } else if (name === "deal.won") {
@@ -240,22 +277,32 @@ export async function driveSeamAsync(
     };
   }
 
-  const eventId = randomUUID();
-  const createdAt = new Date().toISOString();
-  await db.execute(sql`
-    insert into public.seam_outbox (
-      event_id, name, idempotency_key, payload, result, applied, created_at
-    ) values (
-      ${eventId}::uuid,
-      ${name},
-      ${idempotencyKey},
-      ${JSON.stringify(payload)}::jsonb,
-      ${JSON.stringify(result)}::jsonb,
-      true,
-      ${createdAt}::timestamptz
-    )
-    on conflict (idempotency_key) do nothing
-  `);
+  const eventId = existing[0]?.event_id ?? randomUUID();
+  const createdAt = existing[0]
+    ? mapSeamRow(existing[0]).createdAt
+    : new Date().toISOString();
+  if (existing[0]) {
+    await db.execute(sql`
+      update public.seam_outbox
+      set result = ${JSON.stringify(result)}::jsonb, applied = true
+      where event_id = ${eventId}::uuid and applied = false
+    `);
+  } else {
+    await db.execute(sql`
+      insert into public.seam_outbox (
+        event_id, name, idempotency_key, payload, result, applied, created_at
+      ) values (
+        ${eventId}::uuid,
+        ${name},
+        ${idempotencyKey},
+        ${JSON.stringify(payload)}::jsonb,
+        ${JSON.stringify(result)}::jsonb,
+        true,
+        ${createdAt}::timestamptz
+      )
+      on conflict (idempotency_key) do nothing
+    `);
+  }
 
   const event: SeamEvent = {
     eventId,
@@ -372,6 +419,38 @@ function applyCreativeApproved(
     status: "in_delivery" as const,
     updatedAt: new Date().toISOString(),
     lastSeam: "creative.approved" as const,
+    taskId: task.taskId,
+    assetId,
+  };
+  store.clientDeliveryStatus.set(task.clientId, delivery);
+  return {
+    deliveryStatus: delivery.status,
+    taskId: task.taskId,
+    taskStatus: task.status,
+    assetId,
+  };
+}
+
+function applyCreativeQcPassed(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const store = getDemoStore();
+  const taskId = String(payload.taskId ?? "");
+  const assetId = payload.assetId ? String(payload.assetId) : null;
+  const task = store.tasks.get(taskId);
+  if (!task) return { deliveryStatus: null, reason: "task_missing" };
+
+  if (assetId) {
+    const asset = store.assets.get(assetId);
+    if (asset && (asset.qcPassed || task.qcPassed)) {
+      asset.status = "client_review";
+    }
+  }
+  const delivery = {
+    clientId: task.clientId,
+    status: "awaiting_client" as const,
+    updatedAt: new Date().toISOString(),
+    lastSeam: "creative.qc_passed" as const,
     taskId: task.taskId,
     assetId,
   };

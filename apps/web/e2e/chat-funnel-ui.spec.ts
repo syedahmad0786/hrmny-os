@@ -1,12 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Chat Demo Co funnel_act starter closed loop (mock-safe).
- * Dedicated file so chat→funnel agents-on-command stays first-class
- * outside funnel-demo.
+ * Client-bound Chat remains a useful read/recommendation surface, but it must
+ * not execute the former funnel action or mint portal effects.
  */
-test.describe("Chat funnel_act starter UI", () => {
-  test("Demo Co sandbox runs funnel_act via starter", async ({ page }) => {
+test.describe("Chat client review starter UI", () => {
+  test("Demo Co sandbox starter stays read-only", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
 
@@ -31,30 +30,14 @@ test.describe("Chat funnel_act starter UI", () => {
     });
     await page.getByTestId("chat-starter-funnel").click();
 
-    const work = page.getByTestId("chat-work-steps");
-    await expect(work).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByTestId("chat-tool-funnel_act")).toBeVisible();
-    const observation = page.getByTestId("chat-tool-observation");
-    await expect(observation).toContainText(
-      /tasks\.create|creative\.sendToPortal/i,
-    );
-    await expect(observation).toContainText(/\/portal\/login\/verify\?token=/);
-    // Funnel tool payloads expose portal magic links as clickable next chips.
-    const funnel = page.getByTestId("chat-tool-funnel_act");
-    await expect(funnel.getByTestId("chat-tool-next")).toBeVisible({
-      timeout: 30_000,
+    await expect(page.getByTestId("chat-assistant-message")).toBeVisible({
+      timeout: 60_000,
     });
-    // Funnel_act often mints dual portal links (approvals + onboarding) —
-    // assert at least one next chip without strict-mode collisions.
-    await expect(
-      funnel
-        .getByTestId("chat-next-portal")
-        .or(funnel.getByTestId("chat-next-onboarding"))
-        .or(funnel.getByTestId("chat-next-creative"))
-        .first(),
-    ).toBeVisible();
-    await expect(page.getByTestId("chat-assistant-message")).toContainText(
-      /funnel|portal/i,
+    await expect(page.getByTestId("chat-work-steps")).toHaveCount(0);
+    await expect(page.getByTestId("chat-tool-funnel_act")).toHaveCount(0);
+    await expect(page.getByTestId("chat-tool-observation")).toHaveCount(0);
+    await expect(page.getByTestId("chat-user-message")).toContainText(
+      /review this client's funnel status/i,
     );
   });
 });

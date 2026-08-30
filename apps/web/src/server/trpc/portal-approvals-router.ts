@@ -1,13 +1,18 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import type { ActorContext } from "@hrmny/gate";
 import {
   decidePortalItem,
   getCampaign,
   listApprovalViews,
 } from "../campaigns/repository";
 import { addFeedback, listFeedbackByItem } from "../campaigns/feedback";
-import { portalProcedure, router } from "./trpc";
+import {
+  CLIENT_PORTAL_ACTOR_REQUIRED,
+  PORTAL_IDENTITY_NOT_BOUND,
+  requireBoundPortalApprovalActor,
+  type PortalApprovalActor,
+} from "../portal/approval-boundary";
+import { portalProcedure, requirePermission, router } from "./trpc";
 
 /**
  * M9 portal approvals — client-facing surface over the campaign items awaiting
@@ -18,18 +23,6 @@ import { portalProcedure, router } from "./trpc";
  * portal_client role. Finance/margin never enter this tree.
  */
 
-function actorFromCtx(ctx: {
-  employeeId: string | null;
-  roles: string[];
-  user: { permissions: string[] } | null;
-}): ActorContext {
-  return {
-    employeeId: ctx.employeeId!,
-    roles: ctx.roles,
-    permissions: ctx.user?.permissions ?? [],
-  };
-}
-
 function requireClientId(ctx: { clientId?: string | null }): string {
   if (!ctx.clientId) {
     throw new TRPCError({
@@ -38,6 +31,29 @@ function requireClientId(ctx: { clientId?: string | null }): string {
     });
   }
   return ctx.clientId;
+}
+
+async function requireDecisionPrincipal(ctx: {
+  clientId?: string | null;
+  user: PortalApprovalActor | null;
+}): Promise<{ actor: PortalApprovalActor; clientId: string }> {
+  const clientId = requireClientId(ctx);
+  try {
+    const actor = await requireBoundPortalApprovalActor({
+      actor: ctx.user,
+      clientId,
+    });
+    return { actor, clientId };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (
+      message === CLIENT_PORTAL_ACTOR_REQUIRED ||
+      message === PORTAL_IDENTITY_NOT_BOUND
+    ) {
+      throw new TRPCError({ code: "FORBIDDEN", message });
+    }
+    throw error;
+  }
 }
 
 /** Client trust boundary: a portal actor may only touch a thread whose item
@@ -65,34 +81,46 @@ export const portalApprovalsRouter = router({
     ),
 
   approve: portalProcedure
+    .use(requirePermission("portal", "approve"))
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input, ctx }) =>
-      decidePortalItem({
-        actor: actorFromCtx(ctx),
-        clientId: requireClientId(ctx),
+    .mutation(async ({ input, ctx }) => {
+      const { actor, clientId } = await requireDecisionPrincipal(ctx);
+      const result = await decidePortalItem({
+        actor,
+        clientId,
         id: input.id,
         to: "approved",
-      }),
-    ),
+      });
+      if (!result.ok && result.code === "CONFLICT") {
+        throw new TRPCError({ code: "CONFLICT", message: result.reason });
+      }
+      return result;
+    }),
 
   /** Request changes: a rejection must carry a feedback body (recorded as the
    *  first client comment on the thread, alongside the gate transition). */
   reject: portalProcedure
+    .use(requirePermission("portal", "approve"))
     .input(
       z.object({
         id: z.string().uuid(),
         feedback: z.string().min(1).max(2000),
       }),
     )
-    .mutation(({ input, ctx }) =>
-      decidePortalItem({
-        actor: actorFromCtx(ctx),
-        clientId: requireClientId(ctx),
+    .mutation(async ({ input, ctx }) => {
+      const { actor, clientId } = await requireDecisionPrincipal(ctx);
+      const result = await decidePortalItem({
+        actor,
+        clientId,
         id: input.id,
         to: "rejected",
         feedback: input.feedback,
-      }),
-    ),
+      });
+      if (!result.ok && result.code === "CONFLICT") {
+        throw new TRPCError({ code: "CONFLICT", message: result.reason });
+      }
+      return result;
+    }),
 
   /** Consolidated proofing thread for one of the caller's items. */
   feedback: router({
@@ -112,12 +140,12 @@ export const portalApprovalsRouter = router({
         }),
       )
       .mutation(async ({ input, ctx }) => {
-        const clientId = requireClientId(ctx);
+        const { actor, clientId } = await requireDecisionPrincipal(ctx);
         await requireOwnedItem(input.campaignItemId, clientId);
         return addFeedback({
           campaignItemId: input.campaignItemId,
           authorKind: "client",
-          authorId: ctx.employeeId,
+          authorId: actor.employeeId,
           clientId,
           body: input.body,
           anchor: input.anchor ?? null,

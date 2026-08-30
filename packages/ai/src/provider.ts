@@ -606,45 +606,6 @@ export function createMockProvider(
         };
       }
 
-      const catalogHasPortalApprove =
-        /(?:^|\n)-\s*(?:portal\.os_approve|portal_os_approve)\s*:/i.test(blob);
-      const sawPortalApproveObs =
-        /Observation from (?:portal\.os_approve|portal_os_approve)/i.test(blob);
-      const wantsPortalApprove =
-        /(?:os[_\s-]?approve|approve\s+(?:the\s+)?(?:os\s+)?portal|portal[^\n]{0,40}approv|client[_\s-]?approv|reject\s+(?:the\s+)?portal)/i.test(
-          userText,
-        );
-      if (
-        catalogHasPortalApprove &&
-        wantsPortalApprove &&
-        !sawPortalApproveObs
-      ) {
-        const prompt =
-          userText.trim().slice(0, 400) || "Approve OS portal";
-        const toolName = /(?:^|\n)-\s*portal_os_approve\s*:/i.test(blob)
-          ? "portal_os_approve"
-          : "portal.os_approve";
-        return {
-          text: [
-            "```tool",
-            JSON.stringify({
-              name: toolName,
-              arguments: { prompt },
-            }),
-            "```",
-          ].join("\n"),
-          provider: "mock",
-          model: options.model ?? defaultModel,
-        };
-      }
-      if (sawPortalApproveObs) {
-        return {
-          text: "Recorded the portal client approval decision.",
-          provider: "mock",
-          model: options.model ?? defaultModel,
-        };
-      }
-
       return {
         text: `[mock:${options.model ?? defaultModel}] stub response`,
         provider: "mock",

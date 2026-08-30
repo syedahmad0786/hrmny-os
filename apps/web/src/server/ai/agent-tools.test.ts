@@ -1,5 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { runAgentTools } from "./agent-tools";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  resolveAgentAllowedTools,
+  runAgentTools,
+  runClientFunnelDraftTools,
+  runExplicitClientAgentTool,
+} from "./agent-tools";
 import { getDemoStore } from "../demo-store";
 
 // Explicit legal-identifier fixture for invoice-issuance tests only.
@@ -14,7 +19,7 @@ describe("runAgentTools funnel writes", () => {
   });
 
   it("creates campaign draft and brief inside client sandbox", async () => {
-    const results = await runAgentTools({
+    const results = await runClientFunnelDraftTools({
       allowedTools: [
         "tasks.create",
         "campaigns.draft",
@@ -23,7 +28,8 @@ describe("runAgentTools funnel writes", () => {
         "portal.invite",
         "creative.sendToPortal",
       ],
-      prompt: "Prepare LinkedIn launch cutdowns for UAE retail",
+      prompt:
+        "Prepare LinkedIn launch cutdowns for UAE retail for alex@democo.example",
       scope: {
         clientId: CLIENT_ID,
         employeeId: "c0000000-0000-4000-8000-000000000001",
@@ -116,6 +122,31 @@ describe("runAgentTools funnel writes", () => {
       expect(store.assets.get(portalAsset.assetId!)?.taskId).toBe(
         portalAsset.taskId,
       );
+    }
+  });
+
+  it("forces a mock invite for synthetic creative-to-portal even when Resend is live", async () => {
+    vi.stubEnv("RESEND_MODE", "live");
+    vi.stubEnv("RESEND_API_KEY", "synthetic-test-key");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const beforeTokens = getDemoStore().portalMagicTokens.size;
+    try {
+      const results = await runExplicitClientAgentTool({
+        tool: "creative.sendToPortal",
+        prompt: "Prepare a synthetic creative review package",
+        scope: {
+          clientId: CLIENT_ID,
+          employeeId: "c0000000-0000-4000-8000-000000000001",
+        },
+      });
+      expect(
+        results.find((row) => row.tool === "creative.sendToPortal")?.ok,
+      ).toBe(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(getDemoStore().portalMagicTokens.size).toBe(beforeTokens + 1);
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
     }
   });
 
@@ -395,8 +426,8 @@ describe("runAgentTools funnel writes", () => {
     });
     expect(blocked.find((r) => r.tool === "briefs.os_lock")).toBeUndefined();
 
-    const locked = await runAgentTools({
-      allowedTools: ["briefs.os_lock"],
+    const locked = await runExplicitClientAgentTool({
+      tool: "briefs.os_lock",
       prompt: `Lock the brief briefId: ${DEMO_BRIEF_ID}`,
       scope: {
         clientId: CLIENT_ID,
@@ -463,7 +494,7 @@ describe("runAgentTools funnel writes", () => {
     expect(data?.publishMode).toBe("stub");
   });
 
-  it("portal.os_approve after creative.os_qc client_review", async () => {
+  it("keeps portal client decisions unavailable to agents and stale aliases", async () => {
     const { resetCrmMemory } = await import("../crm/memory");
     resetCrmMemory();
     const loopResults = await runAgentTools({
@@ -493,17 +524,82 @@ describe("runAgentTools funnel writes", () => {
         ?.status,
     ).toBe("client_review");
 
-    const portal = await runAgentTools({
-      allowedTools: ["portal.os_approve"],
-      prompt: `Approve OS portal taskId: ${taskId}`,
+    const store = getDemoStore();
+    const { listCampaigns } = await import("../campaigns/repository");
+    const { listOutreach } = await import("../leadgen/store");
+    const snapshot = async () => ({
+      tasks: [...store.tasks.values()].map(({ taskId: id, status }) => [
+        id,
+        status,
+      ]),
+      briefs: [...store.briefs.keys()],
+      approvals: [...store.portalApprovals.entries()],
+      assets: [...store.assets.entries()],
+      audits: store.audits.length,
+      health: store.healthSignals.length,
+      seams: [...store.seamOutbox],
+      magicTokens: [...store.portalMagicTokens.keys()],
+      sessionGrants: [...store.portalSessionGrants.keys()],
+      campaigns: (await listCampaigns()).map((row) => [
+        row.campaignItemId,
+        row.status,
+      ]),
+      outreach: (await listOutreach()).map((row) => row.id),
+    });
+    const before = await snapshot();
+    const allowlists: unknown[] = [
+      ...[
+        "portal.os_approve",
+        "portal_os_approve",
+        "portal.approve",
+        "portal.approvals",
+        "portal.approvals.act",
+        "portal.*",
+        "*",
+      ].map((tool) => [tool]),
+      [],
+      undefined,
+    ];
+    for (const allowedTools of allowlists) {
+      const portal = await runAgentTools({
+        allowedTools,
+        prompt: `Approve OS portal taskId: ${taskId} for alex@democo.example`,
+        scope: {
+          clientId: CLIENT_ID,
+          employeeId: "c0000000-0000-4000-8000-000000000001",
+        },
+      });
+      expect(portal).toEqual([]);
+      expect(await snapshot()).toEqual(before);
+    }
+    const paraphrase = await runAgentTools({
+      allowedTools: ["*"],
+      prompt: "Mark the client-review deliverable approved",
       scope: {
+        clientId: CLIENT_ID,
         employeeId: "c0000000-0000-4000-8000-000000000001",
       },
     });
-    const row = portal.find((r) => r.tool === "portal.os_approve");
-    expect(row?.ok).toBe(true);
-    expect((row?.data as { status?: string })?.status).toBe("approved");
-    expect(getDemoStore().tasks.get(taskId!)?.status).toBe("approved");
+    expect(
+      paraphrase.every((row) =>
+        [
+          "memory.search",
+          "crm.read",
+          "crm.deals",
+          "crm.companies",
+          "delivery.read",
+          "outreach.read",
+          "onboarding.read",
+          "n8n.health",
+        ].includes(row.tool),
+      ),
+    ).toBe(true);
+    expect(await snapshot()).toEqual(before);
+    expect(resolveAgentAllowedTools(["portal.os_approve"])).toEqual([]);
+    expect(resolveAgentAllowedTools(["portal_os_approve"])).toEqual([]);
+    expect(resolveAgentAllowedTools(["portal.approve"])).toEqual([]);
+    expect(resolveAgentAllowedTools(["portal.approvals"])).toEqual([]);
+    expect(resolveAgentAllowedTools(["portal.approvals.act"])).toEqual([]);
   });
 
   it("one-shot OS settle chains closed_loop IDs into settle tools", async () => {
@@ -513,7 +609,7 @@ describe("runAgentTools funnel writes", () => {
     const results = await runAgentTools({
       allowedTools: [...DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS],
       prompt:
-        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, lock the brief, creative QC pass then advance, approve portal, approve campaign and publish campaign, sign off onboarding phase, advance month1, ref-approve calendar. company: OneShot Settle Co",
+        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, lock the brief, creative QC pass then advance to client review, approve campaign and publish campaign, sign off onboarding phase, advance month1, ref-approve calendar. company: OneShot Settle Co",
       scope: {
         employeeId: "c0000000-0000-4000-8000-000000000001",
       },
@@ -536,10 +632,13 @@ describe("runAgentTools funnel writes", () => {
     expect(
       (byTool("creative.os_qc")?.data as { status?: string })?.status,
     ).toBe("client_review");
-    expect(byTool("portal.os_approve")?.ok).toBe(true);
-    expect(
-      (byTool("portal.os_approve")?.data as { status?: string })?.status,
-    ).toBe("approved");
+    expect(byTool("portal.os_approve")).toBeUndefined();
+    const settledTaskId = (byTool("crm.closed_loop")?.data as {
+      taskId?: string;
+    })?.taskId;
+    expect(getDemoStore().tasks.get(settledTaskId!)?.status).toBe(
+      "client_review",
+    );
     expect(byTool("campaigns.os_approve")?.ok).toBe(true);
     expect(byTool("campaigns.os_publish")?.ok).toBe(true);
     expect(
@@ -590,7 +689,7 @@ describe("runAgentTools funnel writes", () => {
     if (crm) expect(crm.ok).toBe(true);
   });
 
-  it("falls back to funnel tools when allowlist is empty", async () => {
+  it("falls back to read-only tools for an empty client-scoped allowlist", async () => {
     const results = await runAgentTools({
       allowedTools: [],
       prompt: "Create a note about sandbox fallback",
@@ -599,7 +698,8 @@ describe("runAgentTools funnel writes", () => {
         employeeId: "c0000000-0000-4000-8000-000000000001",
       },
     });
-    expect(results.some((r) => r.tool === "crm.note" && r.ok)).toBe(true);
+    expect(results.some((r) => r.tool === "crm.read" && r.ok)).toBe(true);
+    expect(results.find((r) => r.tool === "crm.note")).toBeUndefined();
     expect(results.find((r) => r.tool === "crm.prospect")).toBeUndefined();
   });
 
@@ -716,17 +816,19 @@ describe("runAgentTools funnel writes", () => {
       "creative.sendToPortal",
     ] as const;
 
-    const a = await runAgentTools({
+    const a = await runClientFunnelDraftTools({
       allowedTools: [...writes],
-      prompt: "Demo Co LinkedIn launch cutdowns for UAE retail",
+      prompt:
+        "Demo Co LinkedIn launch cutdowns for UAE retail for alex@democo.example",
       scope: {
         clientId: DEMO_CLIENT_ID,
         employeeId: "c0000000-0000-4000-8000-000000000001",
       },
     });
-    const b = await runAgentTools({
+    const b = await runClientFunnelDraftTools({
       allowedTools: [...writes],
-      prompt: "Other Co confidential LinkedIn cutdowns — keep private",
+      prompt:
+        "Other Co confidential LinkedIn cutdowns for ops@otherco.example — keep private",
       scope: {
         clientId: DEMO_CLIENT_B_ID,
         employeeId: "c0000000-0000-4000-8000-000000000001",

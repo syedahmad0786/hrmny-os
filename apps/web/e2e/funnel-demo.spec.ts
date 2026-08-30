@@ -1032,7 +1032,7 @@ test.describe("Demo funnel", () => {
     ).toBeVisible({ timeout: 60_000 });
   });
 
-  test("chat Demo Co sandbox runs funnel_act via starter (mock-safe)", async ({
+  test("chat Demo Co sandbox starter remains read-only (mock-safe)", async ({
     page,
   }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
@@ -1055,16 +1055,13 @@ test.describe("Demo funnel", () => {
     });
     await page.getByTestId("chat-starter-funnel").click();
 
-    const work = page.getByTestId("chat-work-steps");
-    await expect(work).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByTestId("chat-tool-funnel_act")).toBeVisible();
-    const observation = page.getByTestId("chat-tool-observation");
-    await expect(observation).toContainText(
-      /tasks\.create|creative\.sendToPortal/i,
-    );
-    await expect(observation).toContainText(/\/portal\/login\/verify\?token=/);
-    await expect(page.getByTestId("chat-assistant-message")).toContainText(
-      /funnel|portal/i,
+    await expect(page.getByTestId("chat-assistant-message")).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(page.getByTestId("chat-work-steps")).toHaveCount(0);
+    await expect(page.getByTestId("chat-tool-funnel_act")).toHaveCount(0);
+    await expect(page.getByTestId("chat-user-message")).toContainText(
+      /review this client's funnel status/i,
     );
   });
 });

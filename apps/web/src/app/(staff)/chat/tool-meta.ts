@@ -43,10 +43,6 @@ const TOOL_VERBS: Record<string, ToolVerb> = {
   },
   "finance.os_issue": { active: "Issuing invoice…", done: "Issued invoice" },
   "creative.os_qc": { active: "Running creative QC…", done: "Creative QC done" },
-  "portal.os_approve": {
-    active: "Recording portal approval…",
-    done: "Portal approved",
-  },
   "portal.invite": { active: "Inviting portal…", done: "Portal invite ready" },
   "creative.sendToPortal": {
     active: "Sending to portal…",

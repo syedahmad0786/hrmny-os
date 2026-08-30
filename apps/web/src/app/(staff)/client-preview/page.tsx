@@ -8,7 +8,6 @@ import { trpc } from "@/lib/trpc";
 const readable = (value: string) => value.replaceAll("_", " ");
 
 export default function ClientPreviewPage() {
-  const utils = trpc.useUtils();
   const clients = trpc.clients.list.useQuery();
   const [clientId, setClientId] = useState<string | undefined>();
   useEffect(() => {
@@ -19,10 +18,6 @@ export default function ClientPreviewPage() {
   const workspace = trpc.clientPreview.workspace.useQuery(
     clientId ? { clientId } : undefined,
   );
-  const act = trpc.clientPreview.act.useMutation({
-    onSuccess: () => void utils.clientPreview.workspace.invalidate(),
-  });
-
   if (workspace.isLoading) {
     return (
       <main className="py-12 text-center text-muted">
@@ -47,11 +42,11 @@ export default function ClientPreviewPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ochre/30 bg-ochre/10 px-4 py-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
-            Secure partner preview
+            Read-only partner preview
           </p>
           <p className="text-sm text-ink">
-            This is exactly what the client can review. Finance fields are
-            excluded.
+            Inspect the current client projection without acting as the client.
+            Finance fields are excluded.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -131,36 +126,9 @@ export default function ClientPreviewPage() {
                     {approval.slaHours}h
                   </p>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    disabled={act.isPending}
-                    onClick={() =>
-                      act.mutate({
-                        id: approval.approvalId,
-                        clientId: data.clientId,
-                        action: "approve",
-                      })
-                    }
-                  >
-                    Approve
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    disabled={act.isPending}
-                    onClick={() =>
-                      act.mutate({
-                        id: approval.approvalId,
-                        clientId: data.clientId,
-                        action: "reject",
-                        feedback: "Needs revision",
-                      })
-                    }
-                  >
-                    Request changes
-                  </Button>
-                </div>
+                <p className="text-sm font-medium text-ochre">
+                  Client action required in the portal
+                </p>
               </div>
             </Card>
           ))}
@@ -169,9 +137,6 @@ export default function ClientPreviewPage() {
               Nothing is waiting for approval. The current decision is reflected
               in the delivery status below.
             </Card>
-          ) : null}
-          {act.error ? (
-            <p className="text-sm text-red-700">{act.error.message}</p>
           ) : null}
         </div>
       </section>

@@ -6,6 +6,7 @@ const SYSTEM_EMPLOYEE_ID = "00000000-0000-4000-8000-000000000000";
 
 export type AuditInput = {
   actorEmployeeId: string | null;
+  actorPortalUserId?: string | null;
   action: string;
   entityType: string;
   entityId: string | null;
@@ -19,7 +20,8 @@ export async function writeAudit(input: AuditInput) {
   if (!db) {
     return getDemoStore().appendAudit({
       ...input,
-      actorEmployeeId: input.actorEmployeeId ?? SYSTEM_EMPLOYEE_ID,
+      actorEmployeeId:
+        input.actorPortalUserId ? null : input.actorEmployeeId ?? SYSTEM_EMPLOYEE_ID,
       entityId: input.entityId ?? SYSTEM_EMPLOYEE_ID,
     });
   }

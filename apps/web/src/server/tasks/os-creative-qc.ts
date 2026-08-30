@@ -139,10 +139,10 @@ async function advanceToClientReview(input: {
   // Gate apply mutates task.status; re-read as string so TS doesn't keep "qc".
   const advancedStatus = String(task.status);
   if (advancedStatus === "client_review" && !durable) {
-    const { ensureMemoryPortalApproval } = await import(
+    const { ensureSyntheticPortalApprovalRequest } = await import(
       "../portal/os-portal-approve"
     );
-    ensureMemoryPortalApproval({
+    ensureSyntheticPortalApprovalRequest({
       taskId: task.taskId,
       clientId: task.clientId,
       title: task.title,
@@ -227,8 +227,8 @@ export async function runOsCreativeQc(input: {
       try {
         const { driveSeamAsync } = await import("../seams");
         const seam = await driveSeamAsync(
-          "creative.approved",
-          `creative.approved:${task.taskId}`,
+          "creative.qc_passed",
+          `creative.qc_passed:${task.taskId}`,
           {
             taskId: task.taskId,
             assetId: null,
@@ -304,8 +304,8 @@ export async function runOsCreativeQc(input: {
         (a) => a.taskId === task.taskId,
       );
       const seam = driveSeam(
-        "creative.approved",
-        `creative.approved:${task.taskId}`,
+        "creative.qc_passed",
+        `creative.qc_passed:${task.taskId}`,
         {
           taskId: task.taskId,
           assetId: asset?.assetId ?? null,

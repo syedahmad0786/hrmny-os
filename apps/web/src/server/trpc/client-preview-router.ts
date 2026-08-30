@@ -1,10 +1,10 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
-  actOnPortalApproval,
   demoPortalClientId,
   readPortalWorkspace,
 } from "../portal-data";
+import { CLIENT_PORTAL_ACTOR_REQUIRED } from "../portal/approval-boundary";
 import { router, staffProcedure } from "./trpc";
 
 function requirePresenter(roles: string[]) {
@@ -34,15 +34,11 @@ export const clientPreviewRouter = router({
         feedback: z.string().trim().max(2_000).optional(),
       }),
     )
-    .mutation(async ({ input, ctx }) => {
+    .mutation(({ ctx }) => {
       requirePresenter(ctx.roles);
-      const clientId = input.clientId ?? (await demoPortalClientId());
-      return actOnPortalApproval({
-        clientId,
-        approvalId: input.id,
-        action: input.action,
-        feedback: input.feedback,
-        actorEmployeeId: ctx.employeeId,
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: CLIENT_PORTAL_ACTOR_REQUIRED,
       });
     }),
 });
