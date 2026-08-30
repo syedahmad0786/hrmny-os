@@ -153,3 +153,29 @@ commit `b2fea0bc9ae94e38595841783e177065a9a378d7`.
 - Rollback/correction: never restore automatic client effects; if the rerun
   fails, preserve the denial boundary and correct the browser contract or
   implementation forward.
+
+## `FAIL-HRMNY-20260830-PORTAL-008` — read-only assertion rejected safe reads
+
+- Decision/finding: the second push and pull-request browser jobs
+  (`33304452266` and `33304454078`) passed 76 of 77 journeys. The sole test
+  failure expected the entire tool-results container to be absent, while the
+  client-bound runtime correctly returned scoped `crm.read` evidence and no
+  draft/effect result.
+- Reason: the first correction conflated “no client writes” with “no tools,”
+  contradicting the intended useful read/recommendation surface and existing
+  unit contract.
+- Alternatives considered: suppress all safe read evidence; remove the UI
+  test; accept any tool result without checking its capability.
+- Trade-offs: the browser test now explicitly denies each catalogued write and
+  minted portal link while requiring a scoped read result.
+- Evidence: E2E jobs `99238381198` and `99238386186`, each with 76 passing and
+  one failing journey; 22/22 agent-tool unit tests; Playwright compile receipt;
+  correction commit `3376752a5b1cc8f423940894163a5c2016bfa4e0`.
+- Confidence/freshness: high for diagnosis and local contract correction;
+  hosted rerun pending.
+- Affected components: one Playwright specification only; runtime policy was
+  not weakened.
+- Status: corrected locally; hosted acceptance pending.
+- Supersedes/superseded-by: refines `FAIL-HRMNY-20260830-PORTAL-007`; none.
+- Rollback/correction: preserve the read-only allowlist and exact write-denial
+  assertions; investigate any future unexpected tool by capability, not count.

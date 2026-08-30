@@ -182,3 +182,29 @@ production acceptance.
   receipt for the corrected head.
 - Rollback/correction: block merge and deployment until every required hosted
   check reaches a successful terminal result.
+
+## `EVID-HRMNY-20260830-PORTAL-011` — second hosted run and read-only assertion correction
+
+- Decision/finding: corrected-head Actions runs `33304452266` and
+  `33304454078` each passed verify and fresh/upgrade database migration jobs.
+  Each E2E job passed 76 of 77 journeys; Chat read-only, OS-settle read-only,
+  staff preview denial, portal isolation, campaign approvals, and the remaining
+  route/security journeys passed. The only failure was the over-broad
+  zero-tool assertion in `ai-agent-tool-results.spec.ts`.
+- Reason: retain exact hosted evidence while distinguishing safe scoped reads
+  from forbidden client writes.
+- Alternatives considered: describe the near-pass as green; omit the repeated
+  failure; change runtime behavior to satisfy the test.
+- Trade-offs: another complete hosted rerun is required even though no runtime
+  source changed in the final assertion correction.
+- Evidence: verify jobs `99238381099` and `99238385985`; database jobs
+  `99238381199` and `99238386075`; E2E jobs `99238381198` and `99238386186`;
+  commit `3376752a5b1cc8f423940894163a5c2016bfa4e0`; local 22/22 policy tests and
+  Playwright specification compilation passed.
+- Confidence/freshness: high.
+- Affected components: PR #239 browser acceptance and one contract assertion.
+- Status: negative receipt preserved; final hosted rerun pending.
+- Supersedes/superseded-by: supersedes the four-failure diagnosis as the latest
+  hosted state; expected to be superseded by a terminal green receipt.
+- Rollback/correction: block merge/deployment until the complete corrected head
+  is green.

@@ -6,6 +6,7 @@
 - Phase 1 dependency: `06d5df9826434dbed83d214103fc7eb6e7950f13` / PR #238
 - Implementation commit: `b2fea0bc9ae94e38595841783e177065a9a378d7`
 - Browser-contract correction: `3d4213a293e6f088018086c08f9f6d2d6c1ff264`
+- Read-only result assertion: `3376752a5b1cc8f423940894163a5c2016bfa4e0`
 
 ## Outcome
 
@@ -27,6 +28,13 @@ four inherited specifications that still expected the removed Chat/custom-agent
 effect path. Commit `3d4213a293e6f088018086c08f9f6d2d6c1ff264`
 aligns the visible language and those tests with the enforced read-only
 boundary. Hosted rerun acceptance remains pending and is tracked separately.
+
+The next hosted run passed 76 of 77 journeys. Its sole failure treated
+read-only as “no tool output,” although the runtime correctly returned scoped
+read results and no draft/effect results. Commit
+`3376752a5b1cc8f423940894163a5c2016bfa4e0` now asserts useful scoped reads
+while denying every catalogued write and any minted portal link. A new hosted
+rerun is still required.
 
 This is a containment slice, not completion or operational acceptance of the
 client portal. Canonical session binding and revocation are locally proven with
