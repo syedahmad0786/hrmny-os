@@ -1,6 +1,6 @@
 # Decisions
 
-Common scope/date/actor for every record unless superseded: 2026-08-29; `client-uae-creative-01/hrmny-os`; host `Bukhari-Laptop`; `Codex /root`; branch `ahmadbukhari097/codex/phase-0-baseline-20260829`; baseline `c9b420d9ad3852ea5aef042b3ad21c0399f2f72a`.
+Common scope/date/actor for every record unless superseded: 2026-08-29; `client-uae-creative-01/hrmny-os`; host `Bukhari-Laptop`; `Codex /root`; branch `ahmadbukhari097/codex/phase-0-baseline-20260829`; baseline `c9b420d9ad3852ea5aef042b3ad21c0399f2f72a`; implementation commit `1d0920cb49a8142c3141288a80fb7d028fe6a96c`.
 
 ## `ADR-HRMNY-20260829-001` — authority order
 

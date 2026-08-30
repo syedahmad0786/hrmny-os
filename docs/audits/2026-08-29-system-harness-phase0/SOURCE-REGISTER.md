@@ -2,7 +2,7 @@
 
 Register ID: `SRCREG-HRMNY-20260829-001`
 Date/scope: 2026-08-29; `client-uae-creative-01/hrmny-os`
-Actor: host `Bukhari-Laptop`; `Codex /root`; branch `ahmadbukhari097/codex/phase-0-baseline-20260829`; baseline `c9b420d9ad3852ea5aef042b3ad21c0399f2f72a`.
+Actor: host `Bukhari-Laptop`; `Codex /root`; branch `ahmadbukhari097/codex/phase-0-baseline-20260829`; baseline `c9b420d9ad3852ea5aef042b3ad21c0399f2f72a`; implementation commit `1d0920cb49a8142c3141288a80fb7d028fe6a96c`.
 
 The location column identifies an authority class without committing workstation-specific paths or client documents.
 
