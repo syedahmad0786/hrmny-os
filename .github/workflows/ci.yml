@@ -12,6 +12,19 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      DATABASE_MODE: memory
+      DATABASE_URL: ""
+      LLM_PROVIDER: mock
+      OPENROUTER_LIVE_SMOKE: "0"
+      EMBEDDING_PROVIDER: none
+      APOLLO_MODE: mock
+      HUNTER_MODE: mock
+      NEVERBOUNCE_MODE: mock
+      RESEND_MODE: mock
+      N8N_MODE: mock
+      XERO_MODE: mock
+      XERO_WRITE_ENABLED: "false"
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

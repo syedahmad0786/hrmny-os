@@ -12,6 +12,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:live:openrouter": "vitest run --config vitest.live.config.ts",
     "lint": "eslint src"
   },
   "dependencies": {

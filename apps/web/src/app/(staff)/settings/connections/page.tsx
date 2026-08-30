@@ -49,7 +49,7 @@ function AppPolicyBanner() {
           </>
         )}
       </p>
-      {disabled ? (
+      {disabled && policy.data.canReopen ? (
         <button
           type="button"
           data-testid="connections-reopen-app-policy"
@@ -59,6 +59,11 @@ function AppPolicyBanner() {
         >
           {reopen.isPending ? "Reopening…" : "Reopen approved apps now"}
         </button>
+      ) : null}
+      {disabled && !policy.data.canReopen ? (
+        <p className="mt-2 text-xs font-medium">
+          An HRMNY administrator must reopen the approved-app policy.
+        </p>
       ) : null}
       {reopen.error ? (
         <p className="mt-2 text-sm text-red-700">{reopen.error.message}</p>

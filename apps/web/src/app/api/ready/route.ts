@@ -6,9 +6,9 @@ import { featureEnabled } from "@/server/features";
 import { toolConfiguredStatus } from "@/server/integrations/resolve-keys";
 import { buildDemoBlockers, connectionSmoke } from "@/server/ready/smoke";
 import { googleWorkspaceRedirectUri } from "@/server/google-workspace-oauth";
-import { healDisabledConnectedAppPolicy } from "@/server/work-governance";
+import { getWorkOrganizationPolicy } from "@/server/work-governance";
 
-/** Lightweight deploy smoke — no secrets, no business data. */
+/** Lightweight deploy smoke — no secrets, no business data, no writes. */
 export async function GET() {
   const db = getDb();
   let database: "up" | "down" = "down";
@@ -33,7 +33,7 @@ export async function GET() {
     }
   }
   const has = (k: string) => Boolean(process.env[k]?.trim());
-  const [apollo, hunter, xero, n8n, connections, portalMagicLink, orgHeal] =
+  const [apollo, hunter, xero, n8n, connections, portalMagicLink, orgPolicy] =
     await Promise.all([
       toolConfiguredStatus("apollo"),
       toolConfiguredStatus("hunter"),
@@ -41,7 +41,7 @@ export async function GET() {
       toolConfiguredStatus("n8n"),
       connectionSmoke(),
       featureEnabled("portal.magic_link", {}),
-      healDisabledConnectedAppPolicy(),
+      getWorkOrganizationPolicy(),
     ]);
 
   const resendMode =
@@ -90,7 +90,7 @@ export async function GET() {
     pgvector,
     integrationInbox,
     portalMagicLink: portalMagicLink ? "enabled" : "disabled",
-    connectedAppPolicy: orgHeal.policy.appPolicy,
+    connectedAppPolicy: orgPolicy.appPolicy,
     googleOAuthRedirectUri: googleWorkspaceRedirectUri(),
     tools,
     /** Connected staff accounts (counts + lastError snippets — no secrets). */
