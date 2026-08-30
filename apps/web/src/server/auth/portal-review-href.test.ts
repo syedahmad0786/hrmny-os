@@ -4,7 +4,8 @@ vi.mock("../db", () => ({
   getDb: () => null,
 }));
 
-vi.mock("@hrmny/integrations", () => ({
+vi.mock("@hrmny/integrations", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@hrmny/integrations")>()),
   createResendMock: () => ({ mode: "mock", send: vi.fn() }),
 }));
 

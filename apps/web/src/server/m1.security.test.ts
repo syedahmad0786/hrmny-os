@@ -85,7 +85,7 @@ describe("M1 security insurance", () => {
   it("magic-link token verify is single-use", async () => {
     const token = await issuePortalMagicToken({
       clientId: DEMO_CLIENT_ID,
-      email: "client@demo.local",
+      email: "alex@democo.example",
     });
     expect(token.startsWith("ml_")).toBe(true);
     const anon = createCaller({

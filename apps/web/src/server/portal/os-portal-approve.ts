@@ -1,72 +1,46 @@
 /**
- * Shared portal approve/reject for agent `portal.os_approve`.
- * Completes client_review → approved (or reject → revisions) without
- * magic-link / Resend — staff/demo actor path for closed-loop demos.
+ * Synthetic pending-request fixture plus a fail-closed compatibility shim.
+ * Employees and agents can prepare work for client review, but cannot record
+ * the client's approve/reject decision.
  */
-import { actOnPortalApproval } from "../portal-data";
 import { getDemoStore } from "../demo-store";
-import { getDb } from "../db";
+import {
+  CLIENT_PORTAL_ACTOR_REQUIRED,
+  portalApprovalSyntheticRuntimeEnabled,
+} from "./approval-boundary";
 
 export type OsPortalApproveResult = {
-  ok: boolean;
-  reason?: string;
-  approvalId?: string;
-  clientId?: string;
-  status?: string;
-  action?: "approve" | "reject";
+  ok: false;
+  reason: string;
+  approvalId: string;
 };
 
-export function parseApprovalIdFromPrompt(prompt: string): string | null {
-  const labeled = prompt.match(
-    /(?:approval(?:Id)?|task(?:Id)?|portal)\s*[:=]\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
-  );
-  if (labeled?.[1]) return labeled[1].toLowerCase();
-  const bare = prompt.match(
-    /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i,
-  );
-  return bare?.[1]?.toLowerCase() ?? null;
-}
-
-function parseAction(prompt: string): "approve" | "reject" {
-  if (/\breject\b|\bdeny\b|\brevisions?\b/i.test(prompt)) return "reject";
-  return "approve";
-}
-
-async function resolveClientId(
-  approvalId: string,
-): Promise<string | null> {
-  const store = getDemoStore();
-  const pending = store.portalApprovals.get(approvalId);
-  if (pending) return pending.clientId;
-  const task = store.tasks.get(approvalId);
-  if (task) return task.clientId;
-
-  if (!getDb()) return null;
-  const { getDeliveryTask } = await import("../tasks/delivery-tasks");
-  const durable = await getDeliveryTask(approvalId);
-  return durable?.clientId ?? null;
-}
-
 /**
- * Ensure memory-mode portalApprovals has a pending row for a client_review
- * task (keyed by taskId) so actOnPortalApproval can find it.
+ * Create a pending synthetic review request after QC. This helper is not
+ * routable and is available only in the exact dev + memory + sandbox runtime.
  */
-export function ensureMemoryPortalApproval(input: {
+export function ensureSyntheticPortalApprovalRequest(input: {
   taskId: string;
   clientId: string;
   title: string;
 }): string {
+  if (!portalApprovalSyntheticRuntimeEnabled()) {
+    throw new Error("PORTAL_SYNTHETIC_FIXTURE_DISABLED");
+  }
+
   const store = getDemoStore();
   const existing = [...store.portalApprovals.values()].find(
-    (a) =>
-      a.clientId === input.clientId &&
-      a.status === "pending" &&
-      (a.approvalId === input.taskId ||
-        store.assets.get(a.entityId)?.taskId === input.taskId),
+    (approval) =>
+      approval.clientId === input.clientId &&
+      approval.status === "pending" &&
+      (approval.approvalId === input.taskId ||
+        store.assets.get(approval.entityId)?.taskId === input.taskId),
   );
   if (existing) return existing.approvalId;
 
-  let asset = [...store.assets.values()].find((a) => a.taskId === input.taskId);
+  let asset = [...store.assets.values()].find(
+    (candidate) => candidate.taskId === input.taskId,
+  );
   if (!asset) {
     asset = store.createAsset(input.title, input.clientId, input.taskId);
   }
@@ -84,49 +58,20 @@ export function ensureMemoryPortalApproval(input: {
   return input.taskId;
 }
 
+/**
+ * Compatibility shim for stale direct imports. It deliberately performs no
+ * lookup, fixture creation, mutation, notification, seam, or provider call.
+ */
 export async function runOsPortalApprove(input: {
   approvalId: string;
   prompt: string;
   actorEmployeeId: string;
 }): Promise<OsPortalApproveResult> {
-  const action = parseAction(input.prompt);
-  const clientId = await resolveClientId(input.approvalId);
-  if (!clientId) {
-    return { ok: false, reason: "NOT_FOUND" };
-  }
-
-  if (!getDb()) {
-    ensureMemoryPortalApproval({
-      taskId: input.approvalId,
-      clientId,
-      title:
-        getDemoStore().tasks.get(input.approvalId)?.title ??
-        "Portal creative approval",
-    });
-  }
-
-  try {
-    const result = await actOnPortalApproval({
-      clientId,
-      approvalId: input.approvalId,
-      action,
-      feedback: input.prompt.trim().slice(0, 400) || undefined,
-      actorEmployeeId: input.actorEmployeeId,
-    });
-    return {
-      ok: true,
-      approvalId: input.approvalId,
-      clientId,
-      status: result.status,
-      action,
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      reason: err instanceof Error ? err.message : "portal_approve_failed",
-      approvalId: input.approvalId,
-      clientId,
-      action,
-    };
-  }
+  void input.prompt;
+  void input.actorEmployeeId;
+  return {
+    ok: false,
+    reason: CLIENT_PORTAL_ACTOR_REQUIRED,
+    approvalId: input.approvalId,
+  };
 }

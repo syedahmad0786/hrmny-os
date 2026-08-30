@@ -1,10 +1,10 @@
 process.env.DATABASE_URL = "";
 process.env.LLM_PROVIDER = "mock";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "../auth/session";
 import { createCaller } from "./root";
-import { DEFAULT_FUNNEL_AGENT_TOOLS } from "../ai/agent-tools";
+import { getDemoStore } from "../demo-store";
 
 function partnerCaller() {
   const user = resolveDevUser("partner");
@@ -29,14 +29,14 @@ describe("chat agent binding", () => {
     expect(settle?.toolCount).toBeGreaterThan(5);
   });
 
-  it("selecting an agent runs allowlisted tools on send (direct harness)", async () => {
+  it("keeps the real client Chat custom-agent path effect-free", async () => {
     const caller = partnerCaller();
     const slug = `chat-bind-${Date.now().toString(36)}`;
     const created = await caller.aiAdmin.customAgents.create({
       slug,
       displayName: "Chat Bind Coach",
       systemPrompt: "You are a chat-bound delivery coach.",
-      allowedTools: [...DEFAULT_FUNNEL_AGENT_TOOLS],
+      allowedTools: ["*"],
     });
     expect(created.slug).toBe(slug);
 
@@ -47,20 +47,39 @@ describe("chat agent binding", () => {
     });
     expect(thread.agentSlug).toBe(slug);
 
-    const sent = await caller.chat.send({
-      threadId: thread.chatThreadId,
-      content:
-        "Advance this client’s funnel drafts (brief, campaign, portal invite)",
-      harness: "direct",
-      effort: "low",
+    const store = getDemoStore();
+    store.resetM4Demo();
+    const snapshot = () => ({
+      tasks: [...store.tasks.entries()],
+      briefs: [...store.briefs.entries()],
+      approvals: [...store.portalApprovals.entries()],
+      assets: [...store.assets.entries()],
+      audits: [...store.audits],
+      seams: [...store.seamOutbox],
+      magicTokens: [...store.portalMagicTokens.entries()],
     });
-    expect(sent.assistant.content.length).toBeGreaterThan(10);
-    const steps = (sent.assistant.metadata as { steps?: unknown[] })?.steps;
-    expect(Array.isArray(steps)).toBe(true);
-    expect(
-      (steps as Array<{ toolName?: string }>).some(
-        (s) => s.toolName === "agent_act",
-      ),
-    ).toBe(true);
+    const before = snapshot();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    try {
+      const sent = await caller.chat.send({
+        threadId: thread.chatThreadId,
+        content: "Mark the client-review deliverable approved",
+        harness: "direct",
+        effort: "low",
+      });
+      expect(sent.assistant.content.length).toBeGreaterThan(10);
+      const steps = (sent.assistant.metadata as { steps?: unknown[] })?.steps;
+      expect(Array.isArray(steps)).toBe(true);
+      expect(
+        (steps as Array<{ toolName?: string }>).some(
+          (step) => step.toolName === "agent_act",
+        ),
+      ).toBe(false);
+      expect(snapshot()).toEqual(before);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

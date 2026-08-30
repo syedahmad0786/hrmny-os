@@ -374,6 +374,20 @@ async function memoryHandoverPack(input: {
     const inviteEmail =
       contactEmail || `portal+${demoClient.clientId.slice(0, 8)}@example.com`;
     const displayName = `${demoClient.name} Portal`;
+    const existingPortalUser = [...store.portalUsers.values()].find(
+      (candidate) =>
+        candidate.clientId === demoClient.clientId &&
+        candidate.email.toLowerCase() === inviteEmail.toLowerCase(),
+    );
+    const portalUserId =
+      existingPortalUser?.portalUserId ?? crypto.randomUUID();
+    store.portalUsers.set(portalUserId, {
+      portalUserId,
+      clientId: demoClient.clientId,
+      email: inviteEmail.toLowerCase(),
+      displayName,
+      isActive: true,
+    });
     const { sendPortalInviteMagicLink } = await import(
       "../auth/portal-magic-link"
     );
@@ -394,7 +408,7 @@ async function memoryHandoverPack(input: {
       emailer,
     });
     portalInvite = {
-      portalUserId: crypto.randomUUID(),
+      portalUserId,
       email: inviteEmail,
       portalPath: sentPortal.portalPath,
       onboardingPath: sentOnboarding.portalPath,

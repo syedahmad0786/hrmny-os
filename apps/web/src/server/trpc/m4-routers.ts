@@ -1211,8 +1211,8 @@ export const tasksRouter = router({
         let seam = null as Awaited<ReturnType<typeof driveSeamAsync>> | null;
         if (task.qcPassed) {
           seam = await driveSeamAsync(
-            "creative.approved",
-            `creative.approved:${task.taskId}`,
+            "creative.qc_passed",
+            `creative.qc_passed:${task.taskId}`,
             {
               taskId: task.taskId,
               assetId: null,
@@ -1251,8 +1251,8 @@ export const tasksRouter = router({
           (a) => a.taskId === task.taskId,
         );
         seam = driveSeam(
-          "creative.approved",
-          `creative.approved:${task.taskId}`,
+          "creative.qc_passed",
+          `creative.qc_passed:${task.taskId}`,
           {
             taskId: task.taskId,
             assetId: asset?.assetId ?? null,

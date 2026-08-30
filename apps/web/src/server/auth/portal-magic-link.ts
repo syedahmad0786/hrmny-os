@@ -32,26 +32,62 @@ function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-/** Stable uuid-shaped id from an email — no client_portal_user row required. */
-function deterministicPortalUserId(email: string): string {
-  const h = createHash("sha256").update(`portal:${email}`).digest("hex");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
-}
-
-function portalSessionUser(input: {
-  email: string;
+type CanonicalPortalUser = {
+  portalUserId: string;
   clientId: string;
-}): SessionUser {
-  const email = normalizeEmail(input.email);
+  email: string;
+  displayName: string;
+  isActive: boolean;
+};
+
+function portalSessionUser(input: CanonicalPortalUser): SessionUser {
   return {
-    employeeId: deterministicPortalUserId(email || input.clientId),
-    email: email || `portal@${input.clientId.slice(0, 8)}.local`,
-    displayName: email || "Portal contact",
+    employeeId: input.portalUserId,
+    email: normalizeEmail(input.email),
+    displayName: input.displayName,
     roles: ["portal_client"],
     permissions: [...PORTAL_PERMISSIONS],
     actorType: "portal",
     clientId: input.clientId,
   };
+}
+
+/**
+ * Resolve one active canonical portal principal for the exact client+email.
+ * Zero or multiple matches fail closed; every grant is re-resolved so
+ * deactivation/offboarding revokes the next request without trusting a stale
+ * pseudo identity embedded in the grant.
+ */
+async function resolveCanonicalPortalSession(input: {
+  email: string;
+  clientId: string;
+}): Promise<SessionUser | null> {
+  const email = normalizeEmail(input.email);
+  const db = getDb();
+  let matches: CanonicalPortalUser[];
+  if (db) {
+    matches = await db.execute<CanonicalPortalUser>(sql`
+      select
+        client_portal_user_id as "portalUserId",
+        client_id as "clientId",
+        email,
+        display_name as "displayName",
+        is_active as "isActive"
+      from public.client_portal_user
+      where client_id = ${input.clientId}::uuid
+        and lower(email) = ${email}
+        and is_active = true
+      limit 2
+    `);
+  } else {
+    matches = [...getDemoStore().portalUsers.values()].filter(
+      (candidate) =>
+        candidate.isActive &&
+        candidate.clientId === input.clientId &&
+        normalizeEmail(candidate.email) === email,
+    );
+  }
+  return matches.length === 1 ? portalSessionUser(matches[0]!) : null;
 }
 
 /**
@@ -243,6 +279,13 @@ export async function sendPortalInviteMagicLink(input: {
   emailer?: import("@hrmny/integrations").EmailSendAdapter;
 }): Promise<SendPortalInviteResult> {
   const email = normalizeEmail(input.email);
+  const principal = await resolveCanonicalPortalSession({
+    email,
+    clientId: input.clientId,
+  });
+  if (!principal) {
+    throw new Error("PORTAL_IDENTITY_NOT_BOUND");
+  }
   await upsertPortalAllowlistContact({
     email,
     clientId: input.clientId,
@@ -315,42 +358,41 @@ export async function requestPortalMagicLink(
 ): Promise<RequestResult> {
   const normalized = normalizeEmail(email);
   const clientId = (await getPortalAllowlist()).get(normalized);
+  const principal = clientId
+    ? await resolveCanonicalPortalSession({ email: normalized, clientId })
+    : null;
+  if (!clientId || !principal) return { status: "sent" };
   const config = getSupabasePublicConfig();
 
   if (config) {
-    if (clientId) {
-      const supabase = createClient(config.url, config.key, {
-        auth: {
-          autoRefreshToken: false,
-          detectSessionInUrl: false,
-          persistSession: false,
+    const supabase = createClient(config.url, config.key, {
+      auth: {
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: false,
+      },
+    });
+    // Live delivery needs Supabase SMTP; without it this is a safe no-op.
+    // Swallow errors so response shape/timing never reveals allowlist state.
+    await supabase.auth
+      .signInWithOtp({
+        email: normalized,
+        options: {
+          shouldCreateUser: true,
+          emailRedirectTo: opts?.redirectTo,
         },
-      });
-      // Live delivery needs Supabase SMTP; without it this is a safe no-op.
-      // Swallow errors so response shape/timing never reveals allowlist state.
-      await supabase.auth
-        .signInWithOtp({
-          email: normalized,
-          options: {
-            shouldCreateUser: true,
-            emailRedirectTo: opts?.redirectTo,
-          },
-        })
-        .catch(() => undefined);
-    }
+      })
+      .catch(() => undefined);
     return { status: "sent" };
   }
 
   // No Supabase public config: durable single-use token + Resend delivery.
-  if (clientId) {
-    const invite = await sendPortalInviteMagicLink({
-      clientId,
-      email: normalized,
-      emailer: opts?.emailer,
-    });
-    return { status: "sent", stubToken: invite.token };
-  }
-  return { status: "sent" };
+  const invite = await sendPortalInviteMagicLink({
+    clientId,
+    email: normalized,
+    emailer: opts?.emailer,
+  });
+  return { status: "sent", stubToken: invite.token };
 }
 
 export type VerifyResult =
@@ -412,7 +454,7 @@ export async function resolvePortalSessionGrant(
     `);
     const row = rows[0];
     if (row && new Date(row.expires_at).getTime() >= Date.now()) {
-      return portalSessionUser({
+      return resolveCanonicalPortalSession({
         clientId: row.client_id,
         email: row.email,
       });
@@ -424,12 +466,22 @@ export async function resolvePortalSessionGrant(
     getDemoStore().portalSessionGrants.delete(token);
     return null;
   }
-  return portalSessionUser({ clientId: mem.clientId, email: mem.email });
+  return resolveCanonicalPortalSession({
+    clientId: mem.clientId,
+    email: mem.email,
+  });
 }
 
 async function withSessionGrant(
   result: { ok: true; clientId: string; email: string; via: "magic_link" },
 ): Promise<VerifyResult> {
+  const principal = await resolveCanonicalPortalSession({
+    clientId: result.clientId,
+    email: result.email,
+  });
+  if (!principal) {
+    return { ok: false, reason: "Invalid or inactive portal account" };
+  }
   const sessionGrant = await issuePortalSessionGrant({
     clientId: result.clientId,
     email: result.email,
@@ -507,5 +559,5 @@ export async function resolvePortalSessionForEmail(
   const normalized = normalizeEmail(email);
   const clientId = (await getPortalAllowlist()).get(normalized);
   if (!clientId) return null;
-  return portalSessionUser({ email: normalized, clientId });
+  return resolveCanonicalPortalSession({ email: normalized, clientId });
 }

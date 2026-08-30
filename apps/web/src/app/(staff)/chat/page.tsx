@@ -24,7 +24,7 @@ const STARTERS = [
 ] as const;
 
 const OS_SETTLE_STARTER =
-  "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, lock the brief then creative QC pass then advance, approve portal, approve campaign and publish campaign, sign off onboarding phase, advance month1, ref-approve calendar.";
+  "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, lock the brief then creative QC pass then advance to client review, approve campaign and publish campaign, sign off onboarding phase, advance month1, ref-approve calendar.";
 
 function StepFold({
   steps,

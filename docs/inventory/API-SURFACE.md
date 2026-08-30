@@ -255,7 +255,7 @@ Every procedure from the sweep, grouped by namespace. `kind` (query/mutation) an
 | Procedure | Status | Note |
 |-----------|--------|------|
 | `clientPreview.workspace` | partial | query; DB+mem fallback via portal-data |
-| `clientPreview.act` | partial | mutation; DB+mem fallback; audit via helper (portal-data) |
+| `clientPreview.act` | partial | compatibility mutation; always denies with `CLIENT_PORTAL_ACTOR_REQUIRED`; no decision effect |
 
 ### `clients` — 11 procedures · `m3-routers.ts`
 

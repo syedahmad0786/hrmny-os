@@ -1,6 +1,13 @@
 import { sql } from "@hrmny/db";
 import { DEMO_CLIENT_ID, getDemoStore } from "./demo-store";
 import { getDb } from "./db";
+import {
+  PORTAL_IDENTITY_NOT_BOUND,
+  portalApprovalPrincipalMatches,
+  requirePortalApprovalActor,
+  requireSyntheticPortalApprovalPrincipal,
+  type PortalApprovalActor,
+} from "./portal/approval-boundary";
 
 const FINANCE_KEYS = new Set([
   "contractvalue",
@@ -286,6 +293,8 @@ export async function readPortalWorkspace(clientId: string): Promise<PortalWorks
       lastSeam = seam.name;
       if (seam.name === "creative.approved") {
         deliveryStatusLabel = "in_delivery";
+      } else if (seam.name === "creative.qc_passed") {
+        deliveryStatusLabel = "awaiting approval";
       } else if (seam.name === "brief.lock") {
         deliveryStatusLabel = "brief_locked";
       }
@@ -497,16 +506,49 @@ export async function actOnPortalApproval(input: {
   approvalId: string;
   action: "approve" | "reject";
   feedback?: string;
-  actorEmployeeId?: string | null;
-  actorPortalUserId?: string | null;
+  actor: PortalApprovalActor;
 }) {
+  requirePortalApprovalActor({ actor: input.actor, clientId: input.clientId });
   const db = getDb();
   if (!db) {
+    requireSyntheticPortalApprovalPrincipal({
+      portalUserId: input.actor.employeeId,
+      clientId: input.clientId,
+    });
     const store = getDemoStore();
     const item = store.portalApprovals.get(input.approvalId);
     if (!item || item.clientId !== input.clientId) throw new Error("NOT_FOUND");
+    const targetApprovalStatus =
+      input.action === "approve" ? "approved" : "rejected";
+    const targetTaskStatus =
+      input.action === "approve" ? "approved" : "revisions";
+    if (item.status !== "pending") {
+      if (item.status === targetApprovalStatus) {
+        if (input.action === "approve") {
+          try {
+            const asset = store.assets.get(item.entityId);
+            const taskId = asset?.taskId ?? input.approvalId;
+            const { driveSeamAsync } = await import("./seams");
+            await driveSeamAsync(
+              "creative.approved",
+              `creative.approved:${taskId}`,
+              {
+                clientId: input.clientId,
+                taskId,
+                assetId: item.entityId,
+                actorPortalUserId: input.actor.employeeId,
+              },
+            );
+          } catch {
+            /* a later same-action retry may reconcile the missing receipt */
+          }
+        }
+        return { ok: true as const, status: targetTaskStatus, changed: false };
+      }
+      throw new Error("CONFLICT: approval is no longer pending");
+    }
     const before = item.status;
-    item.status = input.action === "approve" ? "approved" : "rejected";
+    item.status = targetApprovalStatus;
     const asset = store.assets.get(item.entityId);
     if (asset) {
       asset.status =
@@ -527,9 +569,8 @@ export async function actOnPortalApproval(input: {
       }
     }
     store.appendAudit({
-      actorEmployeeId:
-        input.actorEmployeeId ?? input.actorPortalUserId ??
-        "00000000-0000-4000-8000-000000000000",
+      actorEmployeeId: null,
+      actorPortalUserId: input.actor.employeeId,
       action: "portal.approvals.act",
       entityType: item.kind,
       entityId: item.entityId,
@@ -537,6 +578,23 @@ export async function actOnPortalApproval(input: {
       after: { status: item.status },
       reason: input.feedback ?? null,
     });
+    if (input.action === "approve") {
+      try {
+        const { driveSeamAsync } = await import("./seams");
+        await driveSeamAsync(
+          "creative.approved",
+          `creative.approved:${taskIdForNotify}`,
+          {
+            clientId: input.clientId,
+            taskId: taskIdForNotify,
+            assetId: item.entityId,
+            actorPortalUserId: input.actor.employeeId,
+          },
+        );
+      } catch {
+        /* a later same-action retry may reconcile the missing receipt */
+      }
+    }
     await notifyStaffOfPortalDecision({
       clientId: input.clientId,
       approvalId: taskIdForNotify,
@@ -546,12 +604,39 @@ export async function actOnPortalApproval(input: {
     });
     return {
       ok: true as const,
-      status: input.action === "approve" ? "approved" : "revisions",
+      status: targetTaskStatus,
+      changed: true,
     };
   }
 
   const nextStatus = input.action === "approve" ? "approved" : "revisions";
   return db.transaction(async (tx) => {
+    const portalUsers = await tx.execute<{
+      portalUserId: string;
+      clientId: string;
+      isActive: boolean;
+    }>(sql`
+      select
+        client_portal_user_id as "portalUserId",
+        client_id as "clientId",
+        is_active as "isActive"
+      from public.client_portal_user
+      where client_portal_user_id = ${input.actor.employeeId}::uuid
+      limit 1
+      for share
+    `);
+    if (
+      !portalApprovalPrincipalMatches(
+        {
+          portalUserId: input.actor.employeeId,
+          clientId: input.clientId,
+        },
+        portalUsers[0],
+      )
+    ) {
+      throw new Error(PORTAL_IDENTITY_NOT_BOUND);
+    }
+
     const existing = await tx.execute<{ status: string }>(sql`
       select status from public.task
       where task_id = ${input.approvalId}::uuid
@@ -561,7 +646,7 @@ export async function actOnPortalApproval(input: {
     if (!existing[0]) throw new Error("NOT_FOUND");
     if (existing[0].status !== "client_review") {
       if (existing[0].status === nextStatus) {
-        return { ok: true as const, status: nextStatus };
+        return { ok: true as const, status: nextStatus, changed: false };
       }
       throw new Error("CONFLICT: approval is no longer pending");
     }
@@ -586,33 +671,13 @@ export async function actOnPortalApproval(input: {
       `);
     }
 
-    let portalActorId: string | null = null;
-    if (input.actorPortalUserId) {
-      const portalUser = await tx.execute<{ ok: number }>(sql`
-        select 1 as ok from public.client_portal_user
-        where client_portal_user_id = ${input.actorPortalUserId}::uuid
-        limit 1
-      `);
-      if (portalUser[0]) portalActorId = input.actorPortalUserId;
-    }
-
-    let employeeActorId = input.actorEmployeeId ?? null;
-    if (employeeActorId) {
-      const emp = await tx.execute<{ ok: number }>(sql`
-        select 1 as ok from public.employee
-        where employee_id = ${employeeActorId}::uuid
-        limit 1
-      `);
-      if (!emp[0]) employeeActorId = null;
-    }
-
     await tx.execute(sql`
       insert into public.audit_event (
         actor_employee_id, actor_portal_user_id, action, entity_type,
         entity_id, before, after, reason
       ) values (
-        ${employeeActorId}::uuid,
-        ${portalActorId}::uuid,
+        null,
+        ${input.actor.employeeId}::uuid,
         'portal.approvals.act', 'task', ${input.approvalId}::uuid,
         ${JSON.stringify({ status: existing[0].status })}::jsonb,
         ${JSON.stringify({ status: nextStatus })}::jsonb,
@@ -630,7 +695,26 @@ export async function actOnPortalApproval(input: {
         and status = 'client_review'
     `);
 
-    return { ok: true as const, status: nextStatus };
+    if (input.action === "approve") {
+      await tx.execute(sql`
+        insert into public.seam_outbox (
+          name, idempotency_key, payload, result, applied
+        ) values (
+          'creative.approved',
+          ${`creative.approved:${input.approvalId}`},
+          ${JSON.stringify({
+            clientId: input.clientId,
+            taskId: input.approvalId,
+            actorPortalUserId: input.actor.employeeId,
+          })}::jsonb,
+          null,
+          false
+        )
+        on conflict (idempotency_key) do nothing
+      `);
+    }
+
+    return { ok: true as const, status: nextStatus, changed: true };
   }).then(async (result) => {
     if (input.action === "approve") {
       try {
@@ -641,13 +725,14 @@ export async function actOnPortalApproval(input: {
           {
             clientId: input.clientId,
             taskId: input.approvalId,
-            actorEmployeeId: input.actorEmployeeId ?? null,
+            actorPortalUserId: input.actor.employeeId,
           },
         );
       } catch {
-        /* seam best-effort after commit */
+        /* transaction left a durable pending outbox row for retry */
       }
     }
+    if (!result.changed) return result;
     let title: string | undefined;
     try {
       const rows = await db.execute<{ title: string | null }>(sql`

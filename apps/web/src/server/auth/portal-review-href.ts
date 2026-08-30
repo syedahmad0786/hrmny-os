@@ -1,5 +1,6 @@
 import { sql } from "@hrmny/db";
 import { getDb } from "../db";
+import { getDemoStore } from "../demo-store";
 import { sendPortalInviteMagicLink } from "./portal-magic-link";
 
 /**
@@ -12,7 +13,10 @@ import { sendPortalInviteMagicLink } from "./portal-magic-link";
  */
 export async function portalReviewHref(
   clientId: string,
-  options?: { next?: string | null },
+  options?: {
+    next?: string | null;
+    emailer?: import("@hrmny/integrations").EmailSendAdapter;
+  },
 ): Promise<string> {
   const id = clientId.trim();
   if (!id) return "/portal/login";
@@ -41,6 +45,14 @@ export async function portalReviewHref(
     } catch {
       /* memory / missing table — use placeholder */
     }
+  } else {
+    const row = [...getDemoStore().portalUsers.values()].find(
+      (candidate) => candidate.clientId === id && candidate.isActive,
+    );
+    if (row) {
+      email = row.email.trim().toLowerCase();
+      displayName = row.displayName.trim() || email;
+    }
   }
 
   try {
@@ -51,7 +63,7 @@ export async function portalReviewHref(
       email,
       displayName,
       next: options?.next ?? "/portal/approvals",
-      emailer: placeholder ? createResendMock() : undefined,
+      emailer: options?.emailer ?? (placeholder ? createResendMock() : undefined),
     });
     return sent.portalPath;
   } catch {

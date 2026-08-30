@@ -24,28 +24,15 @@ describe("chat harness funnel_act", () => {
     expect(result.error).toBe("client_sandbox_required");
   });
 
-  it("runs sandboxed funnel writes when clientId is bound", async () => {
+  it("keeps client-bound free-form Chat read-only", () => {
     const tools = buildChatDefaultTools({
       employeeId: EMPLOYEE_ID,
       clientId: CLIENT_ID,
     });
-    const funnel = tools.find((t) => t.name === "funnel_act");
-    const result = (await funnel!.run({
-      prompt: "Seed brief and portal creative for UAE retail",
-    })) as {
-      tools?: Array<{ tool: string; ok: boolean; data?: { portalHref?: string } }>;
-    };
-    expect(Array.isArray(result.tools)).toBe(true);
-    const byTool = Object.fromEntries(
-      (result.tools ?? []).map((r) => [r.tool, r]),
+    expect(tools.map((tool) => tool.name).sort()).toEqual(
+      ["search_memory", "crm_read", "delivery_read", "outreach_read", "now"].sort(),
     );
-    expect(byTool["tasks.create"]?.ok).toBe(true);
-    expect(byTool["crm.note"]?.ok).toBe(true);
-    expect(byTool["creative.sendToPortal"]?.ok).toBe(true);
-    expect(byTool["creative.sendToPortal"]?.data?.portalHref).toMatch(
-      /\/portal\/login\/verify\?token=/,
-    );
-    expect(byTool["crm.prospect"]).toBeUndefined();
+    expect(tools.some((tool) => tool.name === "funnel_act")).toBe(false);
   });
 
   it("exposes crm_closed_loop only for org chat (no client sandbox)", async () => {
@@ -329,34 +316,23 @@ describe("chat harness funnel_act", () => {
     expect(published?.data?.publishMode).toBe("stub");
   });
 
-  it("portal_os_approve after creative_os_qc", async () => {
-    const { resetCrmMemory } = await import("../crm/memory");
-    resetCrmMemory();
+  it("does not expose a staff Chat tool for client approval", () => {
     const tools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
-    expect(tools.some((t) => t.name === "portal_os_approve")).toBe(true);
+    expect(tools.some((tool) => tool.name === "portal_os_approve")).toBe(false);
+  });
 
-    const closed = tools.find((t) => t.name === "crm_closed_loop");
-    const loopResult = (await closed!.run({
-      prompt: "Run demo closed loop for company: Chat Portal Co",
-    })) as {
-      tools?: Array<{ tool: string; data?: { taskId?: string } }>;
-    };
-    const taskId = loopResult.tools?.find((r) => r.tool === "crm.closed_loop")
-      ?.data?.taskId;
-    expect(taskId).toBeTruthy();
-
-    const qcTool = tools.find((t) => t.name === "creative_os_qc");
-    await qcTool!.run({ prompt: "Pass QC", taskId });
-
-    const portalTool = tools.find((t) => t.name === "portal_os_approve");
-    const portalResult = (await portalTool!.run({
-      prompt: "Approve OS portal",
-      taskId,
-    })) as {
-      tools?: Array<{ tool: string; ok: boolean; data?: { status?: string } }>;
-    };
-    const row = portalResult.tools?.find((r) => r.tool === "portal.os_approve");
-    expect(row?.ok).toBe(true);
-    expect(row?.data?.status).toBe("approved");
+  it("uses a structural client boundary for adversarial decision paraphrases", () => {
+    const tools = buildChatDefaultTools({
+      employeeId: EMPLOYEE_ID,
+      clientId: CLIENT_ID,
+      immutableUserPrompt: "Mark the client-review deliverable approved",
+    });
+    expect(tools.map((tool) => tool.name).sort()).toEqual(
+      ["search_memory", "crm_read", "delivery_read", "outreach_read", "now"].sort(),
+    );
+    // A model-proposed benign/effectful rewrite has no runnable funnel or
+    // custom-agent tool because tool exposure was decided from the user turn.
+    expect(tools.some((tool) => tool.name === "funnel_act")).toBe(false);
+    expect(tools.some((tool) => tool.name === "agent_act")).toBe(false);
   });
 });
