@@ -126,4 +126,10 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
           MIGRATION_TEST_ALLOW_DROP: "true"
+          MIGRATION_TEST_RETAIN_FRESH_FOR_PROOF: "true"
         run: pnpm db:verify
+      - name: Prove Apollo receipt and queue concurrency
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/hrmny_migration_fresh
+          CI_POSTGRES_PROOF: "true"
+        run: pnpm --filter @hrmny/web test:ci:postgres

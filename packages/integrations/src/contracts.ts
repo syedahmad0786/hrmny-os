@@ -43,6 +43,37 @@ export type LeadCandidate = {
   raw: Record<string, unknown>;
 };
 
+export type ProviderRateLimitSnapshot = {
+  minuteLimit?: number;
+  hourlyLimit?: number;
+  dailyLimit?: number;
+  minuteUsed?: number;
+  hourlyUsed?: number;
+  dailyUsed?: number;
+  minuteRemaining?: number;
+  hourlyRemaining?: number;
+  dailyRemaining?: number;
+  retryAfterSeconds?: number;
+};
+
+/**
+ * Provider acknowledgement retained without copying a raw response body.
+ * `responseHash` binds the normalized result to the exact provider payload.
+ */
+export type LeadSearchProviderReceipt = {
+  provider: string;
+  operation: string;
+  httpStatus: number;
+  responseHash: string;
+  receivedAt: string;
+  rateLimit: ProviderRateLimitSnapshot;
+};
+
+export type LeadSearchExecution = {
+  candidates: LeadCandidate[];
+  providerReceipt: LeadSearchProviderReceipt;
+};
+
 export type LeadEnrichmentIdentity = {
   /** Apollo person id returned by zero-credit People Search when available. */
   externalId?: string;
@@ -57,6 +88,13 @@ export interface LeadSourceAdapter {
   readonly mode: "mock" | "live";
   /** ICP search → candidates for CRM dedupe. Never writes the CRM itself. */
   searchLeads(criteria: LeadSearchCriteria): Promise<LeadCandidate[]>;
+  /**
+   * Optional receipt-bearing form used by durable bridges. Implementations
+   * must not place credentials or complete raw provider payloads in receipts.
+   */
+  searchLeadsWithReceipt?(
+    criteria: LeadSearchCriteria,
+  ): Promise<LeadSearchExecution>;
   /** Enrich one explicitly approved contact. The caller owns cost policy. */
   enrichLead(
     identity: string | LeadEnrichmentIdentity,

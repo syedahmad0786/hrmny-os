@@ -622,7 +622,10 @@ describe("Sales research authorization", () => {
   it("denies non-Sales staff from free and paid Apollo operations", async () => {
     const hr = salesCaller(resolveDevUser("hr"));
     await expect(
-      hr.salesOs.apollo.search({ titles: ["Marketing Director"] }),
+      hr.salesOs.apollo.search({
+        idempotencyKey: "40000000-0000-4000-8000-000000000001",
+        titles: ["Marketing Director"],
+      }),
     ).rejects.toThrow(/Sales operator role required/i);
     await expect(
       hr.salesOs.apollo.enrichOne({
@@ -630,6 +633,17 @@ describe("Sales research authorization", () => {
         confirmCreditUse: true,
       }),
     ).rejects.toThrow(/Sales operator role required/i);
+    expect(await creditUsed("apollo_contact")).toBe(0);
+  });
+
+  it("keeps paid Apollo disabled without an exact server approval receipt", async () => {
+    const partner = salesCaller(resolveDevUser("partner"));
+    await expect(
+      partner.salesOs.apollo.enrichOne({
+        candidate: { externalId: "apollo-visible-but-unapproved" },
+        confirmCreditUse: true,
+      }),
+    ).rejects.toThrow(/EXACT_APPROVAL_RECEIPT/);
     expect(await creditUsed("apollo_contact")).toBe(0);
   });
 

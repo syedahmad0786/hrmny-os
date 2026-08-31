@@ -1,0 +1,291 @@
+import type { Sql } from "postgres";
+import type {
+  Apollo0075SchemaState,
+  Production0075Phase,
+} from "./production-migration-0075-contract";
+
+/** Shared exact schema readback used by disposable proof and production guard. */
+export async function readApollo0075SchemaState(
+  db: Sql,
+  phase: Production0075Phase,
+): Promise<Apollo0075SchemaState> {
+  const [schema] = await db<Apollo0075SchemaState[]>`
+    with expected_columns(
+      table_name, column_name, udt_name, nullable, default_zero
+    ) as (
+      values
+        ('integration_inbox', 'owner_employee_id', 'uuid', true, false),
+        ('integration_inbox', 'credential_connection_account_id', 'uuid', true, false),
+        ('integration_inbox', 'state_version', 'int4', false, true),
+        ('integration_inbox', 'attempt_token', 'uuid', true, false),
+        ('integration_inbox', 'attempt_lease_expires_at', 'timestamptz', true, false),
+        ('scheduled_job', 'integration_inbox_id', 'uuid', true, false),
+        ('scheduled_job', 'state_version', 'int4', false, true),
+        ('scheduled_job', 'attempt_token', 'uuid', true, false),
+        ('scheduled_job', 'lease_expires_at', 'timestamptz', true, false)
+    ),
+    expected_constraints(
+      constraint_name, table_name, column_name, foreign_table, foreign_column
+    ) as (
+      values
+        (
+          'integration_inbox_owner_employee_id_employee_fk',
+          'integration_inbox', 'owner_employee_id', 'employee', 'employee_id'
+        ),
+        (
+          'integration_inbox_credential_connection_account_fk',
+          'integration_inbox', 'credential_connection_account_id',
+          'connection_account', 'connection_account_id'
+        ),
+        (
+          'scheduled_job_integration_inbox_fk',
+          'scheduled_job', 'integration_inbox_id',
+          'integration_inbox', 'integration_inbox_id'
+        )
+    ),
+    expected_indexes(index_name) as (
+      values
+        ('scheduled_job_apollo_inbox_uniq'),
+        ('integration_inbox_owner_operation_idx')
+    ),
+    expected_secure(table_name) as (
+      values ('integration_inbox'), ('scheduled_job')
+    ),
+    prior_secure(table_name) as (
+      values
+        ('os_notification'), ('custom_agent'), ('chat_thread'),
+        ('chat_message'), ('creative_generation'), ('seam_outbox'),
+        ('portal_magic_token'), ('portal_session_grant'),
+        ('sales_os_settings'), ('sales_os_evolve_proposal'),
+        ('company_research'), ('contact_research'), ('suppression_entry'),
+        ('email_event'), ('intel_signal'), ('sales_os_credit_ledger'),
+        ('integration_inbox')
+    )
+    select
+      (
+        to_regclass('public.crm_quote') is not null
+        and to_regclass('public.client_onboarding') is not null
+        and exists (
+          select 1 from pg_enum value
+          join pg_type type on type.oid = value.enumtypid
+          where type.typname = 'lead_source_lane_enum'
+            and value.enumlabel = 'inbound'
+        )
+        and exists (
+          select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = 'asset'
+            and column_name = 'work_item_id'
+        )
+        and exists (
+          select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = 'health_signal'
+            and column_name = 'delivery_status'
+        )
+        and exists (
+          select 1 from pg_indexes
+          where schemaname = 'public'
+            and indexname = 'employee_role_employee_role_uniq'
+        )
+        and (
+          select count(*) from prior_secure expected
+          join pg_class relation
+            on relation.oid = to_regclass('public.' || expected.table_name)
+          where relation.relrowsecurity
+            and not (
+              (exists(select 1 from pg_roles where rolname = 'anon')
+                and has_table_privilege(
+                  'anon', 'public.' || expected.table_name,
+                  'SELECT,INSERT,UPDATE,DELETE'
+                ))
+              or
+              (exists(select 1 from pg_roles where rolname = 'authenticated')
+                and has_table_privilege(
+                  'authenticated', 'public.' || expected.table_name,
+                  'SELECT,INSERT,UPDATE,DELETE'
+                ))
+            )
+        ) = 17
+        and exists (
+          select 1 from public.work_organization_policy
+          where organization_key = 'default' and app_policy <> 'disabled'
+        )
+        and (
+          select count(*) from information_schema.columns
+          where table_schema = 'public' and table_name = 'outreach_items'
+            and column_name in (
+              'contact_id', 'rework_feedback', 'linkedin_url',
+              'cadence_touch', 'accepted_at'
+            )
+        ) = 5
+        and exists (
+          select 1 from pg_indexes
+          where schemaname = 'public'
+            and indexname = 'integration_inbox_provider_event_uniq'
+        )
+        and (
+          select count(*) from information_schema.columns
+          where table_schema = 'public' and table_name = 'invoice'
+            and column_name in (
+              'contact_name', 'billing_kind', 'trn', 'trn_status',
+              'rule_cited', 'source_attached',
+              'proposed_by_employee_id', 'approved_by_employee_id'
+            )
+        ) = 8
+      ) as "priorContractReady",
+      (
+        select count(*)::int from expected_columns expected
+        join information_schema.columns column_info
+          on column_info.table_schema = 'public'
+          and column_info.table_name = expected.table_name
+          and column_info.column_name = expected.column_name
+      ) as "namedColumnsPresent",
+      (
+        select count(*)::int from expected_columns expected
+        join information_schema.columns column_info
+          on column_info.table_schema = 'public'
+          and column_info.table_name = expected.table_name
+          and column_info.column_name = expected.column_name
+          and column_info.udt_name = expected.udt_name
+          and (column_info.is_nullable = 'YES') = expected.nullable
+          and (
+            (expected.default_zero and column_info.column_default = '0')
+            or (not expected.default_zero and column_info.column_default is null)
+          )
+      ) as "correctColumns",
+      (
+        select count(*)::int from expected_constraints expected
+        join pg_constraint constraint_info
+          on constraint_info.conname = expected.constraint_name
+        join pg_class local_table
+          on local_table.oid = constraint_info.conrelid
+          and local_table.relname = expected.table_name
+          and local_table.relnamespace = 'public'::regnamespace
+      ) as "namedConstraintsPresent",
+      (
+        select count(*)::int from expected_constraints expected
+        join pg_constraint constraint_info
+          on constraint_info.conname = expected.constraint_name
+          and constraint_info.contype = 'f'
+          and constraint_info.confdeltype = 'n'
+          and array_length(constraint_info.conkey, 1) = 1
+          and array_length(constraint_info.confkey, 1) = 1
+        join pg_class local_table
+          on local_table.oid = constraint_info.conrelid
+          and local_table.relname = expected.table_name
+          and local_table.relnamespace = 'public'::regnamespace
+        join pg_class foreign_table
+          on foreign_table.oid = constraint_info.confrelid
+          and foreign_table.relname = expected.foreign_table
+          and foreign_table.relnamespace = 'public'::regnamespace
+        where pg_catalog.get_attname(
+                constraint_info.conrelid, constraint_info.conkey[1], false
+              ) = expected.column_name
+          and pg_catalog.get_attname(
+                constraint_info.confrelid, constraint_info.confkey[1], false
+              ) = expected.foreign_column
+      ) as "correctConstraints",
+      (
+        select count(*)::int from expected_indexes expected
+        join pg_indexes index_info
+          on index_info.schemaname = 'public'
+          and index_info.indexname = expected.index_name
+      ) as "namedIndexesPresent",
+      (
+        select count(*)::int from pg_indexes index_info
+        where index_info.schemaname = 'public'
+          and (
+            (
+              index_info.indexname = 'scheduled_job_apollo_inbox_uniq'
+              and lower(index_info.indexdef) like
+                'create unique index scheduled_job_apollo_inbox_uniq on public.scheduled_job using btree (integration_inbox_id)%'
+              and lower(index_info.indexdef) like '%where%'
+              and lower(index_info.indexdef) like
+                '%kind = ''apollo_people_search''%'
+              and lower(index_info.indexdef) like
+                '%integration_inbox_id is not null%'
+            )
+            or (
+              index_info.indexname = 'integration_inbox_owner_operation_idx'
+              and lower(index_info.indexdef) like
+                'create index integration_inbox_owner_operation_idx on public.integration_inbox using btree (owner_employee_id, operation, received_at desc)%'
+            )
+          )
+      ) as "correctIndexes",
+      (
+        select count(*)::int from expected_secure expected
+        join pg_class relation
+          on relation.oid = to_regclass('public.' || expected.table_name)
+        where relation.relrowsecurity
+          and not exists (
+            select 1
+            from aclexplode(
+              coalesce(relation.relacl, acldefault('r', relation.relowner))
+            ) acl
+            where acl.grantee = 0
+              and acl.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+          )
+          and not (
+            (exists(select 1 from pg_roles where rolname = 'anon')
+              and has_table_privilege(
+                'anon', 'public.' || expected.table_name,
+                'SELECT,INSERT,UPDATE,DELETE'
+              ))
+            or
+            (exists(select 1 from pg_roles where rolname = 'authenticated')
+              and has_table_privilege(
+                'authenticated', 'public.' || expected.table_name,
+                'SELECT,INSERT,UPDATE,DELETE'
+              ))
+          )
+      ) as "securedTables",
+      0::int as "backfillViolations"
+  `;
+  if (!schema) throw new Error("0075 schema discovery returned no row.");
+  return {
+    ...schema,
+    backfillViolations: await readApollo0075BackfillViolations(db, phase),
+  };
+}
+
+/**
+ * The 0074 preflight must not name 0075-only columns. It instead proves that
+ * every legacy Apollo job can be linked by its old deterministic job key to
+ * an exact zero-credit Apollo receipt before any schema write occurs.
+ */
+export async function readApollo0075BackfillViolations(
+  db: Sql,
+  phase: Production0075Phase,
+): Promise<number> {
+  if (phase === "preflight") {
+    const [backfill] = await db<Array<{ count: number }>>`
+      select count(*)::int as count
+      from public.scheduled_job job
+      where job.kind = 'apollo_people_search'
+        and not exists (
+          select 1
+          from public.integration_inbox inbox
+          where job.job_key =
+              'apollo-people-search:' || inbox.integration_inbox_id::text
+            and inbox.provider = 'apollo'
+            and inbox.operation = 'people.search.zero-credit'
+        )
+    `;
+    return backfill?.count ?? -1;
+  }
+  const [backfill] = await db<Array<{ count: number }>>`
+    select count(*)::int as count
+    from public.scheduled_job job
+    left join public.integration_inbox inbox
+      on inbox.integration_inbox_id = job.integration_inbox_id
+    where job.kind = 'apollo_people_search'
+      and (
+        job.integration_inbox_id is null
+        or inbox.integration_inbox_id is null
+        or job.job_key <>
+          'apollo-people-search:' || job.integration_inbox_id::text
+        or inbox.provider <> 'apollo'
+        or inbox.operation <> 'people.search.zero-credit'
+      )
+  `;
+  return backfill?.count ?? -1;
+}

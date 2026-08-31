@@ -95,9 +95,12 @@ export {
   type HunterAdapterConfig,
 } from "./hunter";
 export {
+  ApolloProviderRequestError,
+  apolloRateLimitSnapshot,
   createLeadSourceMock,
   createLeadSourceLive,
   createLeadSourceAdapter,
+  isRetryableApolloProviderError,
   type LeadSourceConfig,
 } from "./apollo/leadsource";
 export {

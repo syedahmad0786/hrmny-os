@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ApolloProviderRequestError,
   createLeadSourceAdapter,
   createLeadSourceLive,
   createLeadSourceMock,
-  mapApolloLeadPerson,
+  mapApolloSearchPerson,
 } from "./leadsource";
 
 describe("LeadSourceAdapter (Apollo-shaped)", () => {
@@ -45,12 +46,22 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
 
   it("maps Apollo's documented search identity without de-obfuscating it", () => {
     expect(
-      mapApolloLeadPerson({
+      mapApolloSearchPerson({
         id: "person-1",
         first_name: "Elena",
         last_name_obfuscated: "Mo***s",
+        last_name: "Morris",
+        name: "Elena Morris",
         title: "Marketing Director",
-        organization: { name: "Northwind Systems" },
+        email: "must-not-cross-search-boundary@example.com",
+        email_status: "verified",
+        linkedin_url: "https://linkedin.example/in/elena",
+        phone_numbers: [{ raw_number: "+971000000000" }],
+        organization: {
+          name: "Northwind Systems",
+          primary_domain: "northwind.example",
+          confidential: "must-not-persist",
+        },
       }),
     ).toMatchObject({
       externalId: "person-1",
@@ -58,7 +69,18 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       title: "Marketing Director",
       companyName: "Northwind Systems",
       source: "apollo",
+      raw: {},
     });
+    const mapped = mapApolloSearchPerson({
+      id: "person-1",
+      first_name: "Elena",
+      last_name_obfuscated: "Mo***s",
+      email: "must-not-persist@example.com",
+      linkedin_url: "https://linkedin.example/in/elena",
+    });
+    expect(mapped).not.toHaveProperty("email");
+    expect(mapped).not.toHaveProperty("emailStatus");
+    expect(mapped).not.toHaveProperty("linkedinUrl");
   });
 
   it("a connected key does not activate live mode", () => {
@@ -190,5 +212,156 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       /APOLLO_ALLOW_PAID_OPERATIONS=true/,
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("captures Apollo's documented rate-limit headers without raw payloads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ people: [{ id: "person-2" }] }), {
+        status: 200,
+        headers: {
+          "x-rate-limit-minute": "50",
+          "x-minute-usage": "1",
+          "x-minute-requests-left": "49",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const source = createLeadSourceLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+
+    const result = await source.searchLeadsWithReceipt!({ query: "UAE" });
+
+    expect(result).toMatchObject({
+      candidates: [{ externalId: "person-2" }],
+      providerReceipt: {
+        provider: "apollo",
+        operation: "people.search",
+        httpStatus: 200,
+        rateLimit: {
+          minuteLimit: 50,
+          minuteUsed: 1,
+          minuteRemaining: 49,
+        },
+      },
+    });
+    expect(result.providerReceipt.responseHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.providerReceipt).not.toHaveProperty("rawBody");
+  });
+
+  it("never returns more identities than the requested page bound", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            people: [{ id: "person-allowed" }, { id: "person-excess" }],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const source = createLeadSourceLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+
+    await expect(
+      source.searchLeadsWithReceipt!({ query: "UAE", perPage: 1 }),
+    ).resolves.toMatchObject({
+      candidates: [{ externalId: "person-allowed" }],
+    });
+  });
+
+  it("classifies 429 with Retry-After for bounded durable retry", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("rate limited", {
+          status: 429,
+          headers: { "retry-after": "23" },
+        }),
+      ),
+    );
+    const source = createLeadSourceLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+
+    const error = await source.searchLeadsWithReceipt!({ query: "UAE" }).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ApolloProviderRequestError);
+    if (!(error instanceof ApolloProviderRequestError)) {
+      throw new Error("expected ApolloProviderRequestError");
+    }
+    expect(error).toMatchObject({
+      httpStatus: 429,
+      retryable: true,
+      retryAfterSeconds: 23,
+      providerReceipt: {
+        provider: "apollo",
+        httpStatus: 429,
+        rateLimit: { retryAfterSeconds: 23 },
+      },
+    });
+    expect(error.providerReceipt?.responseHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(String(error)).not.toContain("rate limited");
+  });
+
+  it("dead-letters a malformed successful people collection", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ people: { id: "not-an-array" } }), {
+          status: 200,
+        }),
+      ),
+    );
+    const source = createLeadSourceLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+
+    const error = await source.searchLeadsWithReceipt!({ query: "UAE" }).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toMatchObject({
+      httpStatus: 200,
+      retryable: false,
+      providerReceipt: { provider: "apollo", httpStatus: 200 },
+    });
+    expect(String(error)).not.toContain("not-an-array");
+  });
+
+  it("dead-letters a successful response with no people collection", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ pagination: { total_entries: 0 } }), {
+          status: 200,
+        }),
+      ),
+    );
+    const source = createLeadSourceLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+
+    const error = await source.searchLeadsWithReceipt!({ query: "UAE" }).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toMatchObject({
+      httpStatus: 200,
+      retryable: false,
+      providerReceipt: { provider: "apollo", httpStatus: 200 },
+    });
+    expect(String(error)).not.toContain("pagination");
   });
 });

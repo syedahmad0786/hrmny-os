@@ -9,6 +9,7 @@
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:ci:postgres": "vitest run --config vitest.ci-postgres.config.ts",
     "test:live:postgres": "tsx src/server/demo-os-live-proof-guard.ts && vitest run --config vitest.live.config.ts",
     "e2e": "playwright test",
     "e2e:install": "playwright install chromium"

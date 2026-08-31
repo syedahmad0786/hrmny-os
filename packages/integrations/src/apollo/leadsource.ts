@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
 import { IntegrationMisconfiguredError } from "../types";
 import type {
   LeadCandidate,
   LeadEnrichmentIdentity,
+  LeadSearchExecution,
   LeadSearchCriteria,
   LeadSourceAdapter,
+  ProviderRateLimitSnapshot,
 } from "../contracts";
 import {
   assertApolloPaidOperationAllowed,
@@ -20,6 +23,64 @@ import {
  */
 
 export type LeadSourceConfig = ApolloActivationConfig;
+
+export class ApolloProviderRequestError extends IntegrationMisconfiguredError {
+  readonly providerCode = "APOLLO_PROVIDER_REQUEST_FAILED" as const;
+
+  constructor(
+    message: string,
+    readonly httpStatus: number | null,
+    readonly retryable: boolean,
+    readonly retryAfterSeconds?: number,
+    readonly providerReceipt?: LeadSearchExecution["providerReceipt"],
+  ) {
+    super("apollo", message);
+    this.name = "ApolloProviderRequestError";
+  }
+}
+
+function positiveHeaderInteger(
+  headers: Headers,
+  name: string,
+): number | undefined {
+  const value = headers.get(name)?.trim();
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+export function apolloRateLimitSnapshot(
+  headers: Headers,
+): ProviderRateLimitSnapshot {
+  return {
+    minuteLimit: positiveHeaderInteger(headers, "x-rate-limit-minute"),
+    hourlyLimit: positiveHeaderInteger(headers, "x-rate-limit-hourly"),
+    dailyLimit: positiveHeaderInteger(headers, "x-rate-limit-24-hour"),
+    minuteUsed: positiveHeaderInteger(headers, "x-minute-usage"),
+    hourlyUsed: positiveHeaderInteger(headers, "x-hourly-usage"),
+    dailyUsed: positiveHeaderInteger(headers, "x-24-hour-usage"),
+    minuteRemaining: positiveHeaderInteger(headers, "x-minute-requests-left"),
+    hourlyRemaining: positiveHeaderInteger(headers, "x-hourly-requests-left"),
+    dailyRemaining: positiveHeaderInteger(headers, "x-24-hour-requests-left"),
+    retryAfterSeconds: positiveHeaderInteger(headers, "retry-after"),
+  };
+}
+
+export function isRetryableApolloProviderError(error: unknown): boolean {
+  return error instanceof ApolloProviderRequestError && error.retryable;
+}
+
+/** Fetch-only failures are normalized before they leave the adapter. */
+function isApolloFetchTransportError(error: unknown): boolean {
+  if (error instanceof DOMException) {
+    return error.name === "AbortError" || error.name === "TimeoutError";
+  }
+  return error instanceof TypeError;
+}
+
+function responseHash(rawBody: string): string {
+  return createHash("sha256").update(rawBody).digest("hex");
+}
 
 /** Stable id from a string so re-running the same search dedupes cleanly. */
 function stableId(seed: string): string {
@@ -51,6 +112,10 @@ function usableText(value: unknown): string | undefined {
   return text || undefined;
 }
 
+function boundedText(value: unknown, maxLength: number): string | undefined {
+  return usableText(value)?.slice(0, maxLength);
+}
+
 /**
  * People Search intentionally returns a first name plus an obfuscated last
  * name, while People Match returns `name`. Preserve that provider boundary and
@@ -72,10 +137,13 @@ export function mapApolloLeadPerson(
   person: Record<string, unknown>,
 ): LeadCandidate {
   const org = (person.organization ?? {}) as Record<string, unknown>;
+  const providerIdentity =
+    person.id ?? person.person_id ?? usableEmail(person.email);
+  const externalId = providerIdentity
+    ? String(providerIdentity)
+    : `apollo_response_${responseHash(JSON.stringify(person)).slice(0, 32)}`;
   return {
-    externalId: String(
-      person.id ?? person.person_id ?? person.email ?? crypto.randomUUID(),
-    ),
+    externalId,
     fullName: apolloDisplayName(person),
     title: (person.title as string) ?? undefined,
     email: usableEmail(person.email),
@@ -88,6 +156,46 @@ export function mapApolloLeadPerson(
   };
 }
 
+/**
+ * People Search is a zero-credit discovery surface, not enrichment. Keep an
+ * explicit allowlist so a provider response expansion cannot silently persist
+ * email, phone, a complete last name, profile URLs, or arbitrary raw fields.
+ */
+export function mapApolloSearchPerson(
+  person: Record<string, unknown>,
+): LeadCandidate {
+  const organization =
+    person.organization &&
+    typeof person.organization === "object" &&
+    !Array.isArray(person.organization)
+      ? (person.organization as Record<string, unknown>)
+      : {};
+  const firstName = boundedText(person.first_name, 120);
+  const obscuredLastName = boundedText(person.last_name_obfuscated, 120);
+  const fullName = [firstName, obscuredLastName].filter(Boolean).join(" ");
+  const externalId =
+    boundedText(person.id ?? person.person_id, 180) ??
+    `apollo_search_${responseHash(
+      JSON.stringify({
+        firstName,
+        obscuredLastName,
+        title: boundedText(person.title, 180),
+        companyName: boundedText(organization.name, 180),
+        companyDomain: boundedText(organization.primary_domain, 255),
+      }),
+    ).slice(0, 32)}`;
+
+  return {
+    externalId,
+    fullName: fullName || undefined,
+    title: boundedText(person.title, 180),
+    companyName: boundedText(organization.name, 180),
+    companyDomain: boundedText(organization.primary_domain, 255),
+    source: "apollo",
+    raw: {},
+  };
+}
+
 function enrichmentIdentity(
   input: string | LeadEnrichmentIdentity,
 ): LeadEnrichmentIdentity {
@@ -96,29 +204,48 @@ function enrichmentIdentity(
 
 /** Deterministic mock — same criteria yield the same candidates (idempotent). */
 export function createLeadSourceMock(): LeadSourceAdapter {
+  async function executeSearch(
+    criteria: LeadSearchCriteria,
+  ): Promise<LeadSearchExecution> {
+    const titles = criteria.titles?.length ? criteria.titles : ["CMO"];
+    const domain =
+      criteria.query?.toLowerCase().replace(/[^a-z0-9]+/g, "") || "democo";
+    const perPage = criteria.perPage ?? titles.length;
+    const candidates = titles.slice(0, perPage).map((title, i) => {
+      const email = `lead${i}@${domain}.example`;
+      return {
+        externalId: stableId(email),
+        fullName: `Lead ${i} ${title}`,
+        title,
+        email,
+        emailStatus: "unverified",
+        companyName: `${domain} LLC`,
+        companyDomain: `${domain}.example`,
+        linkedinUrl: `https://linkedin.example/in/lead${i}`,
+        source: "apollo_mock",
+        raw: { criteria, title },
+      } satisfies LeadCandidate;
+    });
+    const rawBody = JSON.stringify({ people: candidates });
+    return {
+      candidates,
+      providerReceipt: {
+        provider: "apollo_mock",
+        operation: "people.search.synthetic",
+        httpStatus: 200,
+        responseHash: responseHash(rawBody),
+        receivedAt: new Date().toISOString(),
+        rateLimit: {},
+      },
+    };
+  }
+
   return {
     mode: "mock",
     async searchLeads(criteria: LeadSearchCriteria) {
-      const titles = criteria.titles?.length ? criteria.titles : ["CMO"];
-      const domain =
-        criteria.query?.toLowerCase().replace(/[^a-z0-9]+/g, "") || "democo";
-      const perPage = criteria.perPage ?? titles.length;
-      return titles.slice(0, perPage).map((title, i) => {
-        const email = `lead${i}@${domain}.example`;
-        return {
-          externalId: stableId(email),
-          fullName: `Lead ${i} ${title}`,
-          title,
-          email,
-          emailStatus: "unverified",
-          companyName: `${domain} LLC`,
-          companyDomain: `${domain}.example`,
-          linkedinUrl: `https://linkedin.example/in/lead${i}`,
-          source: "apollo_mock",
-          raw: { criteria, title },
-        } satisfies LeadCandidate;
-      });
+      return (await executeSearch(criteria)).candidates;
     },
+    searchLeadsWithReceipt: executeSearch,
     async enrichLead(input: string | LeadEnrichmentIdentity) {
       const identity = enrichmentIdentity(input);
       const email = identity.email;
@@ -158,16 +285,26 @@ export function createLeadSourceLive(
     "Content-Type": "application/json",
     "X-Api-Key": apiKey,
   };
-  return {
-    mode: "live",
-    async searchLeads(criteria: LeadSearchCriteria) {
-      if (criteria.industries?.length) {
-        throw new IntegrationMisconfiguredError(
-          "apollo",
-          "Apollo People Search does not document a direct industry parameter; use documented titles, locations, or q_keywords in this adapter",
-        );
-      }
-      const res = await fetch(
+
+  async function executePeopleSearch(
+    criteria: LeadSearchCriteria,
+  ): Promise<LeadSearchExecution> {
+    if (criteria.industries?.length) {
+      throw new IntegrationMisconfiguredError(
+        "apollo",
+        "Apollo People Search does not document a direct industry parameter; use documented titles, locations, or q_keywords in this adapter",
+      );
+    }
+    const perPage = criteria.perPage ?? 25;
+    if (!Number.isSafeInteger(perPage) || perPage < 1 || perPage > 100) {
+      throw new IntegrationMisconfiguredError(
+        "apollo",
+        "Apollo People Search perPage must be an integer between 1 and 100",
+      );
+    }
+    let res: Response;
+    try {
+      res = await fetch(
         "https://api.apollo.io/api/v1/mixed_people/api_search",
         {
           method: "POST",
@@ -186,21 +323,104 @@ export function createLeadSourceLive(
                   ]
                 : undefined,
             page: criteria.page ?? 1,
-            per_page: criteria.perPage ?? 25,
+            per_page: perPage,
           }),
         },
       );
-      if (!res.ok) {
-        throw new IntegrationMisconfiguredError(
-          "apollo",
-          `People search failed: HTTP ${res.status}`,
+    } catch (error) {
+      if (isApolloFetchTransportError(error)) {
+        throw new ApolloProviderRequestError(
+          "People search transport failed",
+          null,
+          true,
         );
       }
-      const data = (await res.json()) as {
-        people?: Record<string, unknown>[];
-      };
-      return (data.people ?? []).map(mapApolloLeadPerson);
+      throw error;
+    }
+    const rawBody = await res.text();
+    const rateLimit = apolloRateLimitSnapshot(res.headers);
+    const providerReceipt = {
+      provider: "apollo",
+      operation: "people.search",
+      httpStatus: res.status,
+      responseHash: responseHash(rawBody),
+      receivedAt: new Date().toISOString(),
+      rateLimit,
+    } satisfies LeadSearchExecution["providerReceipt"];
+    if (!res.ok) {
+      const retryable =
+        res.status === 408 ||
+        res.status === 425 ||
+        res.status === 429 ||
+        res.status >= 500;
+      throw new ApolloProviderRequestError(
+        `People search failed: HTTP ${res.status}`,
+        res.status,
+        retryable,
+        rateLimit.retryAfterSeconds,
+        providerReceipt,
+      );
+    }
+    let data: unknown;
+    try {
+      data = JSON.parse(rawBody) as unknown;
+    } catch {
+      throw new ApolloProviderRequestError(
+        "People search returned invalid JSON",
+        res.status,
+        false,
+        undefined,
+        providerReceipt,
+      );
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new ApolloProviderRequestError(
+        "People search returned an invalid object",
+        res.status,
+        false,
+        undefined,
+        providerReceipt,
+      );
+    }
+    const people = (data as { people?: unknown }).people;
+    if (!Array.isArray(people)) {
+      throw new ApolloProviderRequestError(
+        "People search returned an invalid people collection",
+        res.status,
+        false,
+        undefined,
+        providerReceipt,
+      );
+    }
+    if (
+      people.some(
+        (person) =>
+          !person || typeof person !== "object" || Array.isArray(person),
+      )
+    ) {
+      throw new ApolloProviderRequestError(
+        "People search returned an invalid person record",
+        res.status,
+        false,
+        undefined,
+        providerReceipt,
+      );
+    }
+    const candidates = people.slice(0, perPage).map((person) =>
+      mapApolloSearchPerson(person as Record<string, unknown>),
+    );
+    return {
+      candidates,
+      providerReceipt,
+    };
+  }
+
+  return {
+    mode: "live",
+    async searchLeads(criteria: LeadSearchCriteria) {
+      return (await executePeopleSearch(criteria)).candidates;
     },
+    searchLeadsWithReceipt: executePeopleSearch,
     async enrichLead(input: string | LeadEnrichmentIdentity) {
       assertApolloPaidOperationAllowed(config, "People match");
       const identity = enrichmentIdentity(input);
