@@ -112,3 +112,23 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
   none.
 - Rollback/correction: append a new correction record; never rewrite or remove
   the historical receipt.
+
+## `SOURCE-HRMNY-20260831-APOLLO-006` — PostgreSQL foreign-key catalog mapping
+
+- Decision/finding: PostgreSQL 17's documented `pg_constraint` relation OIDs and
+  attribute-number arrays map to documented `pg_attribute.attrelid`/`attnum`;
+  official information-schema source uses the same catalog relationship.
+- Reason: exact constraint-column readback must use a supported, reviewable
+  contract rather than an assumed internal helper overload.
+- Alternatives considered: third-party catalog examples; dynamic function
+  discovery; constraint-name-only verification.
+- Trade-offs: direct catalog joins are explicit and version-reviewable.
+- Evidence: [pg_constraint](https://www.postgresql.org/docs/17/catalog-pg-constraint.html),
+  [pg_attribute](https://www.postgresql.org/docs/17/catalog-pg-attribute.html),
+  and the [PostgreSQL 17 information-schema source](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/catalog/information_schema.sql).
+- Confidence/freshness: high; official version-17 sources revalidated 2026-08-31.
+- Affected components: 0075 discovery and protected production guard.
+- Status: official source bound; corrected hosted execution pending.
+- Supersedes/superseded-by: supersedes the undocumented helper assumption; none.
+- Rollback/correction: revalidate official catalog changes before a PostgreSQL
+  major-version upgrade and keep the hosted runtime proof mandatory.

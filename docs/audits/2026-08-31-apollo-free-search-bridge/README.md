@@ -9,7 +9,7 @@
   (bridge), `d66be9d` (credentialed-redirect rejection), `a343a51`
   (Phase 4c dependency merge), `a6ed4e3` (CI setup isolation), and `8a94ef6`
   (edge coverage and public-fixture hardening), plus `bb75712` (first hosted
-  runtime/catalog repair)
+  runtime/catalog repair) and `e033206` (documented catalog joins)
 - Review: pending stacked pull request; do not merge automatically
 
 ## Outcome

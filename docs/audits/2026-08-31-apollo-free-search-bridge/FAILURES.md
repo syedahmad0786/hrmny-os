@@ -177,19 +177,43 @@ production migration, deployment, account change, or Xero write.
 
 - Decision/finding: both initial hosted database jobs reached the disposable
   Supabase PostgreSQL service, applied migrations, and then failed discovery
-  because `pg_constraint.conkey[1]`/`confkey[1]` are `smallint` while
-  `pg_catalog.get_attname` requires an integer attribute number.
+  because the query assumed an undocumented three-argument
+  `pg_catalog.get_attname` overload.
 - Reason: static/unit checks did not execute the catalog query and local Docker
-  was unavailable; the hosted runtime exposed the exact type boundary.
+  was unavailable; the hosted runtime exposed the exact function boundary.
 - Alternatives considered: cast the function result or compare only constraint
   names; remove exact column readback.
-- Trade-offs: explicit integer casts preserve the stronger foreign-key column
-  verification and remain compatible with the reviewed PostgreSQL runtime.
+- Trade-offs: the first bounded repair cast the attribute number to integer, but
+  the second hosted run proved that no three-argument overload exists.
 - Evidence: failed database jobs in GitHub Actions runs `33412756597` and
-  `33412781344`; database lint/typecheck and 30/30 unit tests after correction.
-- Confidence/freshness: high for diagnosis; corrected hosted execution pending.
+  `33412781344`, followed by the same function-resolution failure with an
+  integer argument in run `33413605732`.
+- Confidence/freshness: high for the failure; the first correction was incomplete.
 - Affected components: migration 0075 schema discovery and hosted verifier.
-- Status: corrected locally before the next push.
-- Supersedes/superseded-by: none.
-- Rollback/correction: preserve explicit catalog argument types and require the
-  disposable PostgreSQL job for every discovery-query change.
+- Status: first repair superseded; no production or provider effect occurred.
+- Supersedes/superseded-by: superseded by
+  `FAIL-HRMNY-20260831-APOLLO-010` and `ADR-HRMNY-20260831-APOLLO-010`.
+- Rollback/correction: use documented catalog joins and require the disposable
+  PostgreSQL job for every discovery-query change.
+
+## `FAIL-HRMNY-20260831-APOLLO-010` — undocumented catalog helper had no compatible overload
+
+- Decision/finding: the second hosted database run rejected
+  `get_attname(oid, integer, boolean)`, proving the helper itself—not only the
+  integer width—was the wrong portability boundary.
+- Reason: an internal/undocumented helper was used where documented
+  `pg_attribute` and `pg_constraint` catalogs provide the exact relationship.
+- Alternatives considered: try a two-argument overload; dynamically probe
+  function signatures; compare only constraint names.
+- Trade-offs: explicit catalog joins are longer but directly verify local and
+  foreign column names without depending on an undocumented helper.
+- Evidence: GitHub Actions run `33413605732`, official PostgreSQL 17 catalog
+  documentation/source, and zero remaining `get_attname` uses in both discovery
+  and the production guard.
+- Confidence/freshness: high locally; corrected hosted execution pending.
+- Affected components: migration verifier and protected production readback.
+- Status: corrected locally; exact-head hosted proof pending.
+- Supersedes/superseded-by: supersedes the repair claim in
+  `FAIL-HRMNY-20260831-APOLLO-009`; none.
+- Rollback/correction: retain documented joins and validate the same query in
+  the disposable Supabase PostgreSQL image before production consideration.

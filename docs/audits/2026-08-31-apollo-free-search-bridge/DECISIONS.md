@@ -201,3 +201,24 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
   audit package; none.
 - Rollback/correction: rebase the review dependency only through a reviewed
   stacked change; never weaken the host/database/write gates.
+
+## `ADR-HRMNY-20260831-APOLLO-010` — verify foreign-key columns through documented catalogs
+
+- Decision/finding: both migration discovery and the protected production guard
+  join `pg_constraint` to `pg_attribute` by relation OID and attribute number,
+  reject dropped attributes, and compare exact local/foreign column names.
+- Reason: PostgreSQL 17 hosted proof rejected the assumed undocumented
+  three-argument `get_attname` helper; documented catalogs expose the same facts
+  portably and transparently.
+- Alternatives considered: probe helper overloads; verify names only; remove
+  exact foreign-key column readback.
+- Trade-offs: the SQL is more explicit while retaining the stronger schema
+  contract in both synthetic and protected paths.
+- Evidence: hosted failures in runs `33412756597`, `33412781344`, and
+  `33413605732`; official PostgreSQL 17 `pg_attribute`/`pg_constraint` sources.
+- Confidence/freshness: high for source design; corrected hosted receipt pending.
+- Affected components: 0075 discovery, production guard, schema acceptance.
+- Status: implemented locally; operational production status unchanged.
+- Supersedes/superseded-by: supersedes the cast-only repair in `bb75712`; none.
+- Rollback/correction: keep the documented joins aligned in both query copies and
+  fail closed on any hosted schema mismatch.

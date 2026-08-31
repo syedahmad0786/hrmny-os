@@ -213,3 +213,24 @@ destination, recovery, user, or production acceptance.
 - Supersedes/superseded-by: none.
 - Rollback/correction: push only the minimal repairs, then bind acceptance to the
   new exact head after both event runs reach terminal green.
+
+## `EVID-HRMNY-20260831-APOLLO-011` — second hosted database run corrected the diagnosis
+
+- Decision/finding: exact head `86115f5` closed the verify failure, but its first
+  database repair still failed because PostgreSQL 17 exposes no compatible
+  three-argument `get_attname` overload. The failure occurred during disposable
+  schema discovery after migration apply and before the Sales/Apollo proofs.
+- Reason: distinguish an incomplete repair from a flaky rerun and update the
+  permanent diagnosis.
+- Alternatives considered: retry the same cast; weaken constraint readback.
+- Trade-offs: the head advances again and the full hosted matrix must restart.
+- Evidence: GitHub Actions run `33413605732`, job `99558879774`, and
+  `FAIL-HRMNY-20260831-APOLLO-010`; replacement commit `e033206`.
+- Confidence/freshness: high for failure diagnosis; replacement query locally
+  linted, typed, and covered by database 30/30.
+- Affected components: hosted database job, discovery query, acceptance ledger.
+- Status: failure retained; corrected hosted execution pending.
+- Supersedes/superseded-by: refines the database portion of
+  `EVID-HRMNY-20260831-APOLLO-010`; none.
+- Rollback/correction: require terminal hosted proof of the documented catalog
+  joins before closing the database gap.
