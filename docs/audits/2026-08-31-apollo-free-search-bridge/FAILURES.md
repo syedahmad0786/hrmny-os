@@ -279,3 +279,38 @@ not exposed)`; branch
 - Supersedes/superseded-by: follows `FAIL-HRMNY-20260831-APOLLO-011`; none.
 - Rollback/correction: keep the fixture on an allowed 0074 state and require the
   hosted upgrade path to reach the later database proofs.
+
+## `FAIL-HRMNY-20260831-APOLLO-013` — raw PostgreSQL timestamps bypassed schema encoding
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; failing head
+  `11a33efd93a472ab7e1e4841ed38b5a17a538e73`; repair commit
+  `1aac6aa57165e4af1311c059747b71c3e8276204`.
+- Decision/finding: both fifth-run database jobs passed migration verification,
+  disposable migration apply, and the 3/3 Sales PostgreSQL proof, then all 14
+  Apollo PostgreSQL scenarios stopped at raw SQL timestamp binding.
+- Reason: bare JavaScript `Date` values interpolated into raw Drizzle SQL bypassed
+  the timestamp column encoder; the Postgres.js binding path therefore received
+  a `Date` where its configured `timestamptz` serializer required text.
+- Alternatives considered: change the public `now: () => Date` contract; weaken
+  three visible assertions; override the database driver globally; repair only
+  the first connection query.
+- Trade-offs: every raw timestamp in the Apollo enqueue, receipt-attempt, worker,
+  retention, and synthetic lease-fixture paths is now an explicit UTC ISO value
+  cast to `timestamptz`; typed Drizzle writes remain unchanged.
+- Evidence: push run `33417297082` / database job `99570912450`; PR run
+  `33417302188` / database job `99570929647`; identical
+  `ERR_INVALID_ARG_TYPE` receipts; three independent read-only reviews; web
+  lint/typecheck and 22/22 focused deterministic tests on the repair commit.
+- Confidence/freshness: high for the reproduced first cause and bounded repair;
+  exact-repair-head PostgreSQL execution is pending.
+- Affected components: Apollo owned-connection lookup, receipt attempt lease,
+  scheduled-job claim/lease, retention redaction, and PostgreSQL fixtures.
+- Status: corrected locally; hosted repair receipt pending; no provider,
+  production, deployment, credit, message, account, or Xero effect occurred.
+- Supersedes/superseded-by: follows
+  `FAIL-HRMNY-20260831-APOLLO-012`; none.
+- Rollback/correction: preserve the timestamp encodings and require both hosted
+  event matrices to pass all 14 Apollo PostgreSQL scenarios on the exact head.

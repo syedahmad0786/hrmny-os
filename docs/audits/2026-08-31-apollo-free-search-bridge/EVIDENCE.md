@@ -290,3 +290,35 @@ not exposed)`; branch
 - Supersedes/superseded-by: extends `EVID-HRMNY-20260831-APOLLO-012`; none.
 - Rollback/correction: rerun both event matrices on the repair head and preserve
   this receipt.
+
+## `EVID-HRMNY-20260831-APOLLO-014` — fifth hosted matrix reached the Apollo PostgreSQL proof
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `11a33efd93a472ab7e1e4841ed38b5a17a538e73`; repair commit
+  `1aac6aa57165e4af1311c059747b71c3e8276204`.
+- Decision/finding: both event matrices independently passed the full migration
+  verifier, disposable runtime migration, and Sales PostgreSQL proof. The next
+  and only database failure was the Apollo suite's shared raw-timestamp binding;
+  14/14 scenario failures and one unhandled rejection had the same first cause.
+- Reason: preserve the newly accepted upstream boundaries and distinguish a
+  driver-adapter defect from migration, Sales, provider, or assertion failures.
+- Alternatives considered: summarize the workflows as generically red; count
+  the spy failure as a separate concurrency defect; rerun unchanged.
+- Trade-offs: hosted acceptance remains open, but the next rerun starts from a
+  substantially narrower and independently reviewed boundary.
+- Evidence: runs `33417297082` and `33417302188`; database jobs
+  `99570912450` and `99570929647`; `FAIL-HRMNY-20260831-APOLLO-013`; repair
+  gates of web lint, web typecheck, Apollo 17/17, inbox 5/5, and public-diff
+  redaction with zero high findings.
+- Confidence/freshness: high; push and PR receipts agree on the exact SHA and
+  three agents independently traced the same source boundary.
+- Affected components: hosted database acceptance, Apollo PostgreSQL adapter,
+  and permanent evidence ledger.
+- Status: negative diagnostic receipt accepted; repair-hosted proof pending.
+- Supersedes/superseded-by: extends
+  `EVID-HRMNY-20260831-APOLLO-013`; none.
+- Rollback/correction: bind any positive claim to the repair SHA, require 14/14
+  without unhandled rejection, and retain both failed jobs permanently.
