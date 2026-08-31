@@ -128,6 +128,7 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       "https://api.apollo.io/api/v1/mixed_people/api_search",
     );
     const searchRequest = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(searchRequest.redirect).toBe("error");
     expect(JSON.parse(String(searchRequest.body))).toEqual({
       q_keywords: "UAE creative",
       page: 1,
@@ -137,6 +138,7 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       "https://api.apollo.io/api/v1/people/match",
     );
     const request = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(request.redirect).toBe("error");
     expect(JSON.parse(String(request.body))).toEqual({
       id: "person-1",
       name: "Mina Lead",

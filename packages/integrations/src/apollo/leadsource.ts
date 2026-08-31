@@ -308,6 +308,7 @@ export function createLeadSourceLive(
         "https://api.apollo.io/api/v1/mixed_people/api_search",
         {
           method: "POST",
+          redirect: "error",
           headers,
           signal: AbortSignal.timeout(20_000),
           body: JSON.stringify({
@@ -429,6 +430,7 @@ export function createLeadSourceLive(
       }
       const res = await fetch("https://api.apollo.io/api/v1/people/match", {
         method: "POST",
+        redirect: "error",
         headers,
         signal: AbortSignal.timeout(20_000),
         body: JSON.stringify({
