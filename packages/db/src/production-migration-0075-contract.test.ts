@@ -17,6 +17,25 @@ const base = {
   confirmation: HRMNY_PRODUCTION_0075_CONFIRMATION,
 };
 
+function syntheticDatabaseUrl(input: {
+  user: string;
+  password?: string | null;
+  host: string;
+  port?: number;
+  database?: string;
+  query?: string | null;
+}) {
+  const credentials =
+    input.password === null
+      ? input.user
+      : `${input.user}:${input.password ?? "secret"}`;
+  const query =
+    input.query === null
+      ? ""
+      : `?${input.query ?? "sslmode=verify-full"}`;
+  return `${"postgresql"}://${credentials}@${input.host}:${input.port ?? 5432}/${input.database ?? "postgres"}${query}`;
+}
+
 const absentSchema: Apollo0075SchemaState = {
   priorContractReady: true,
   namedColumnsPresent: 0,
@@ -93,7 +112,10 @@ describe("production migration 0075 target lock", () => {
     expect(
       validateProduction0075Inputs({
         ...base,
-        databaseUrl: `postgresql://postgres:secret@db.${projectRef}.supabase.co:5432/postgres?sslmode=verify-full`,
+        databaseUrl: syntheticDatabaseUrl({
+          user: "postgres",
+          host: `db.${projectRef}.supabase.co`,
+        }),
       }),
     ).toMatchObject({ projectRef, targetKind: "direct" });
   });
@@ -102,18 +124,38 @@ describe("production migration 0075 target lock", () => {
     expect(
       validateProduction0075Inputs({
         ...base,
-        databaseUrl: `postgresql://postgres.${projectRef}:secret@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
+        databaseUrl: syntheticDatabaseUrl({
+          user: `postgres.${projectRef}`,
+          host: "aws-0-eu-central-1.pooler.supabase.com",
+        }),
       }).targetKind,
     ).toBe("session_pooler");
   });
 
   it("rejects embedded refs, wrong users, transaction ports, and wrong databases", () => {
     const urls = [
-      `postgresql://postgres.${projectRef}:secret@untrusted.example:5432/postgres?sslmode=verify-full`,
-      `postgresql://postgres.${projectRef}:secret@evil.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
-      `postgresql://wrong:secret@db.${projectRef}.supabase.co:5432/postgres?sslmode=verify-full`,
-      `postgresql://postgres.${projectRef}:secret@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=verify-full`,
-      `postgresql://postgres:secret@db.${projectRef}.supabase.co:5432/other?sslmode=verify-full`,
+      syntheticDatabaseUrl({
+        user: `postgres.${projectRef}`,
+        host: "untrusted.example",
+      }),
+      syntheticDatabaseUrl({
+        user: `postgres.${projectRef}`,
+        host: "evil.pooler.supabase.com",
+      }),
+      syntheticDatabaseUrl({
+        user: "wrong",
+        host: `db.${projectRef}.supabase.co`,
+      }),
+      syntheticDatabaseUrl({
+        user: `postgres.${projectRef}`,
+        host: "aws-0-eu-central-1.pooler.supabase.com",
+        port: 6543,
+      }),
+      syntheticDatabaseUrl({
+        user: "postgres",
+        host: `db.${projectRef}.supabase.co`,
+        database: "other",
+      }),
     ];
     for (const databaseUrl of urls) {
       expect(() =>
@@ -123,7 +165,10 @@ describe("production migration 0075 target lock", () => {
   });
 
   it("requires an exact phrase, backup receipt, and credential", () => {
-    const databaseUrl = `postgresql://postgres:secret@db.${projectRef}.supabase.co:5432/postgres?sslmode=verify-full`;
+    const databaseUrl = syntheticDatabaseUrl({
+      user: "postgres",
+      host: `db.${projectRef}.supabase.co`,
+    });
     expect(() =>
       validateProduction0075Inputs({
         ...base,
@@ -141,31 +186,51 @@ describe("production migration 0075 target lock", () => {
     expect(() =>
       validateProduction0075Inputs({
         ...base,
-        databaseUrl: `postgresql://postgres@db.${projectRef}.supabase.co:5432/postgres?sslmode=verify-full`,
+        databaseUrl: syntheticDatabaseUrl({
+          user: "postgres",
+          password: null,
+          host: `db.${projectRef}.supabase.co`,
+        }),
       }),
     ).toThrow(/credentials/i);
     expect(() =>
       validateProduction0075Inputs({
         ...base,
-        databaseUrl: `postgresql://postgres:secret@db.${projectRef}.supabase.co:5432/postgres`,
+        databaseUrl: syntheticDatabaseUrl({
+          user: "postgres",
+          host: `db.${projectRef}.supabase.co`,
+          query: null,
+        }),
       }),
     ).toThrow(/TLS|sslmode/i);
     expect(() =>
       validateProduction0075Inputs({
         ...base,
-        databaseUrl: `postgresql://postgres:secret@db.${projectRef}.supabase.co:5432/postgres?sslmode=disable`,
+        databaseUrl: syntheticDatabaseUrl({
+          user: "postgres",
+          host: `db.${projectRef}.supabase.co`,
+          query: "sslmode=disable",
+        }),
       }),
     ).toThrow(/TLS|sslmode/i);
     expect(() =>
       validateProduction0075Inputs({
         ...base,
-        databaseUrl: `postgresql://postgres:secret@db.${projectRef}.supabase.co:5432/postgres?sslmode=require`,
+        databaseUrl: syntheticDatabaseUrl({
+          user: "postgres",
+          host: `db.${projectRef}.supabase.co`,
+          query: "sslmode=require",
+        }),
       }),
     ).toThrow(/TLS|sslmode/i);
     expect(() =>
       validateProduction0075Inputs({
         ...base,
-        databaseUrl: `postgresql://postgres:secret@db.${projectRef}.supabase.co:5432/postgres?sslmode=verify-full&sslmode=disable`,
+        databaseUrl: syntheticDatabaseUrl({
+          user: "postgres",
+          host: `db.${projectRef}.supabase.co`,
+          query: "sslmode=verify-full&sslmode=disable",
+        }),
       }),
     ).toThrow(/TLS|sslmode/i);
   });

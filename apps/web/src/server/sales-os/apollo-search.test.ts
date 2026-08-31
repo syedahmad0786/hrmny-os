@@ -63,6 +63,7 @@ async function queueSearch(input: {
   idempotencyKey: string;
   query?: string;
   titles?: string[];
+  perPage?: number;
   source: LeadSourceAdapter;
 }) {
   let queued: ApolloPeopleSearchRetryPayload | undefined;
@@ -72,6 +73,7 @@ async function queueSearch(input: {
       actorEmployeeId: ACTOR,
       query: input.query,
       titles: input.titles,
+      perPage: input.perPage,
     },
     {
       leadSource: input.source,
@@ -158,6 +160,83 @@ describe("durable Apollo zero-credit search bridge", () => {
       ),
     ).rejects.toThrow(/PAYLOAD_MISMATCH/);
     expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+  });
+
+  it("trims criteria and deterministically deduplicates and sorts titles", async () => {
+    const source = sourceWith(async () => execution());
+    const { queued } = await queueSearch({
+      idempotencyKey: "30000000-0000-4000-8000-000000000015",
+      query: "  creative UAE  ",
+      titles: [
+        " Marketing Director ",
+        "Founder",
+        "Founder ",
+        "  ",
+        "Marketing Director",
+      ],
+      perPage: 5,
+      source,
+    });
+
+    await runScheduledApolloPeopleSearch(queued, workerDeps(source));
+
+    expect(source.searchLeadsWithReceipt).toHaveBeenCalledWith({
+      query: "creative UAE",
+      titles: ["Founder", "Marketing Director"],
+      locations: ["United Arab Emirates"],
+      page: 1,
+      perPage: 5,
+    });
+  });
+
+  it("removes empty query and title values before provider execution", async () => {
+    const source = sourceWith(async () => execution());
+    const { queued } = await queueSearch({
+      idempotencyKey: "30000000-0000-4000-8000-000000000016",
+      query: " \t ",
+      titles: ["", " ", "\n"],
+      source,
+    });
+
+    await runScheduledApolloPeopleSearch(queued, workerDeps(source));
+
+    expect(source.searchLeadsWithReceipt).toHaveBeenCalledWith({
+      locations: ["United Arab Emirates"],
+      page: 1,
+      perPage: 8,
+    });
+  });
+
+  it("fixes searches to page one and clamps page size to supported bounds", async () => {
+    const source = sourceWith(async () => execution());
+    const cases = [
+      {
+        idempotencyKey: "30000000-0000-4000-8000-000000000017",
+        perPage: 0,
+        expectedPerPage: 1,
+      },
+      {
+        idempotencyKey: "30000000-0000-4000-8000-000000000018",
+        perPage: 99,
+        expectedPerPage: 10,
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const { queued } = await queueSearch({
+        idempotencyKey: testCase.idempotencyKey,
+        perPage: testCase.perPage,
+        source,
+      });
+      await runScheduledApolloPeopleSearch(queued, workerDeps(source));
+      expect(source.searchLeadsWithReceipt).toHaveBeenNthCalledWith(
+        index + 1,
+        expect.objectContaining({
+          page: 1,
+          perPage: testCase.expectedPerPage,
+        }),
+      );
+    }
   });
 
   it("honors Retry-After and retains the provider failure receipt", async () => {

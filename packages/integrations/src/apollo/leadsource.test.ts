@@ -315,6 +315,173 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
     expect(String(error)).not.toContain("rate limited");
   });
 
+  it.each([
+    { status: 408, retryable: true },
+    { status: 425, retryable: true },
+    { status: 503, retryable: true },
+    { status: 400, retryable: false },
+  ])(
+    "classifies non-429 HTTP $status responses without exposing the body",
+    async ({ status, retryable }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response("synthetic provider detail must stay private", {
+            status,
+          }),
+        ),
+      );
+      const source = createLeadSourceLive({
+        mode: "live",
+        apiKey: "test-key",
+        allowPaidOperations: false,
+      });
+
+      const error = await source
+        .searchLeadsWithReceipt!({ query: "UAE" })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ApolloProviderRequestError);
+      expect(error).toMatchObject({
+        httpStatus: status,
+        retryable,
+        providerReceipt: {
+          provider: "apollo",
+          httpStatus: status,
+        },
+      });
+      expect(String(error)).not.toContain("synthetic provider detail");
+    },
+  );
+
+  it("normalizes a credentialed fetch rejection as a retryable transport failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockRejectedValue(
+          new TypeError("synthetic redirect or network detail must stay private"),
+        ),
+    );
+    const source = createLeadSourceLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+
+    const error = await source
+      .searchLeadsWithReceipt!({ query: "UAE" })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApolloProviderRequestError);
+    expect(error).toMatchObject({
+      httpStatus: null,
+      retryable: true,
+    });
+    expect(error).toHaveProperty("providerReceipt", undefined);
+    expect(String(error)).not.toContain("synthetic redirect or network detail");
+  });
+
+  it.each([0, 1.5, 101])(
+    "rejects invalid perPage value %s before provider transport",
+    async (perPage) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const source = createLeadSourceLive({
+        mode: "live",
+        apiKey: "test-key",
+        allowPaidOperations: false,
+      });
+
+      await expect(
+        source.searchLeadsWithReceipt!({ query: "UAE", perPage }),
+      ).rejects.toThrow(/perPage must be an integer between 1 and 100/i);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("dead-letters invalid JSON without exposing the provider body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("{synthetic-invalid-json", {
+          status: 200,
+        }),
+      ),
+    );
+    const source = createLeadSourceLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+
+    const error = await source
+      .searchLeadsWithReceipt!({ query: "UAE" })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      httpStatus: 200,
+      retryable: false,
+      providerReceipt: { provider: "apollo", httpStatus: 200 },
+    });
+    expect(String(error)).not.toContain("synthetic-invalid-json");
+  });
+
+  it("dead-letters a successful response that is not an object", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(["not-an-object"]), { status: 200 }),
+        ),
+    );
+    const source = createLeadSourceLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+
+    const error = await source
+      .searchLeadsWithReceipt!({ query: "UAE" })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      httpStatus: 200,
+      retryable: false,
+      providerReceipt: { provider: "apollo", httpStatus: 200 },
+    });
+    expect(String(error)).not.toContain("not-an-object");
+  });
+
+  it("dead-letters a malformed person record before mapping candidates", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ people: [{ id: "valid-shape" }, null] }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const source = createLeadSourceLive({
+      mode: "live",
+      apiKey: "test-key",
+      allowPaidOperations: false,
+    });
+
+    const error = await source
+      .searchLeadsWithReceipt!({ query: "UAE" })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      httpStatus: 200,
+      retryable: false,
+      providerReceipt: { provider: "apollo", httpStatus: 200 },
+    });
+    expect(String(error)).not.toContain("valid-shape");
+  });
+
   it("dead-letters a malformed successful people collection", async () => {
     vi.stubGlobal(
       "fetch",
