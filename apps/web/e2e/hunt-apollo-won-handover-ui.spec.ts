@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * Continuous sales path (mock-safe, no live Apollo key):
- * Hunt Apollo prospect → BUAF + email verify → advance to price_cost →
+ * Explicit synthetic acceptance path (no live Apollo key):
+ * synthetic Apollo fixture → BUAF + email verify → advance to price_cost →
  * Mark won → Handover pack → Creative.
  *
  * Also covers Hunt "Closed loop via Apollo" next-link continuity.
@@ -40,8 +40,8 @@ async function ensureApolloDealHandoverNext(page: Page, query: string) {
     timeout: 60_000,
   });
 
-  await page.getByTestId("hunt-apollo-query").fill(query);
   await page.getByTestId("hunt-test-tools").click();
+  await page.getByTestId("hunt-synthetic-company").fill(query);
   await page.getByTestId("hunt-apollo-prospect").click();
 
   const status = page.getByTestId("hunt-closed-loop-status");
@@ -167,8 +167,8 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
       timeout: 60_000,
     });
 
-    await page.getByTestId("hunt-apollo-query").fill(query);
     await page.getByTestId("hunt-test-tools").click();
+    await page.getByTestId("hunt-synthetic-company").fill(query);
     await page.getByTestId("hunt-closed-loop-apollo").click();
 
     const status = page.getByTestId("hunt-closed-loop-status");
@@ -222,8 +222,8 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
       timeout: 60_000,
     });
 
-    await page.getByTestId("hunt-apollo-query").fill(query);
     await page.getByTestId("hunt-test-tools").click();
+    await page.getByTestId("hunt-synthetic-company").fill(query);
     await page.getByTestId("hunt-closed-loop-apollo").click();
 
     const status = page.getByTestId("hunt-closed-loop-status");

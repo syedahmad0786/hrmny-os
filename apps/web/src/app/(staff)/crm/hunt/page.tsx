@@ -52,6 +52,7 @@ export default function HuntClientsPage() {
   const [searchNote, setSearchNote] = useState<string | null>(null);
   const [title, setTitle] = useState("Marketing Director");
   const [query, setQuery] = useState("");
+  const [syntheticCompany, setSyntheticCompany] = useState("");
   const [lastApolloDealId, setLastApolloDealId] = useState<string | null>(null);
   const [ready, setReady] = useState<ReadySmoke | null>(null);
   const utils = trpc.useUtils();
@@ -69,6 +70,7 @@ export default function HuntClientsPage() {
     };
   }, []);
 
+  const salesAccess = trpc.salesOs.access.useQuery();
   const apolloStatus = trpc.salesOs.apollo.status.useQuery();
   const freeSearch = trpc.salesOs.apollo.search.useMutation({
     onSuccess: (payload) => {
@@ -242,9 +244,16 @@ export default function HuntClientsPage() {
             <span className="growth-cost-badge">0 credits</span>
           </div>
           <p className="growth-panel-copy">
-            Apollo People Search is read-only and free. Review the people first;
-            the separate one-person button is the only paid action enabled.
+            Connected Apollo People Search is read-only and free. Synthetic
+            people stay hidden. The separate one-person button is the only paid
+            action enabled.
           </p>
+          {salesAccess.data && !salesAccess.data.canOperate ? (
+            <p className="growth-status" role="status">
+              View only. A Sales operator must run provider searches or paid
+              enrichment.
+            </p>
+          ) : null}
           <form
             className="growth-search-form"
             onSubmit={(event) => {
@@ -263,6 +272,7 @@ export default function HuntClientsPage() {
                 <input
                   id="apollo-title"
                   data-testid="hunt-apollo-title"
+                  disabled={!salesAccess.data?.canOperate || !apolloConnected}
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="e.g. Marketing Director"
@@ -274,6 +284,7 @@ export default function HuntClientsPage() {
                 <input
                   id="apollo-query"
                   data-testid="hunt-apollo-query"
+                  disabled={!salesAccess.data?.canOperate || !apolloConnected}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="e.g. hospitality"
@@ -287,11 +298,18 @@ export default function HuntClientsPage() {
               <button
                 type="submit"
                 data-testid="hunt-apollo-search"
-                disabled={freeSearch.isPending || title.trim().length < 2}
+                disabled={
+                  !salesAccess.data?.canOperate ||
+                  !apolloConnected ||
+                  freeSearch.isPending ||
+                  title.trim().length < 2
+                }
               >
                 {freeSearch.isPending
                   ? "Searching…"
-                  : "Search Apollo · 0 credits"}
+                  : !apolloConnected
+                    ? "Connect Apollo to search"
+                    : "Search Apollo · 0 credits"}
               </button>
             </div>
           </form>
@@ -344,7 +362,9 @@ export default function HuntClientsPage() {
                       type="button"
                       data-testid="hunt-apollo-enrich-one"
                       disabled={
-                        enrichOne.isPending || !apolloStatus.data?.available
+                        !salesAccess.data?.canOperate ||
+                        enrichOne.isPending ||
+                        !apolloStatus.data?.available
                       }
                       onClick={() => approveOne(candidate)}
                     >
@@ -452,22 +472,32 @@ export default function HuntClientsPage() {
               These controls support local/acceptance testing. They are
               collapsed so the client workflow stays focused.
             </p>
+            <label className="growth-test-input" htmlFor="synthetic-company">
+              Synthetic company label
+              <input
+                id="synthetic-company"
+                data-testid="hunt-synthetic-company"
+                value={syntheticCompany}
+                onChange={(event) => setSyntheticCompany(event.target.value)}
+                placeholder="e.g. E2E Northstar 001"
+                minLength={2}
+              />
+            </label>
             <div className="growth-test-actions">
               <button
                 type="button"
                 data-testid="hunt-apollo-prospect"
                 disabled={
-                  apolloImport.isPending ||
-                  (query.trim() || title.trim()).length < 2
+                  apolloImport.isPending || syntheticCompany.trim().length < 2
                 }
                 onClick={() => {
                   setResult(null);
-                  apolloImport.mutate({ query: query.trim() || title.trim() });
+                  apolloImport.mutate({ query: syntheticCompany.trim() });
                 }}
               >
                 {apolloImport.isPending
                   ? "Importing…"
-                  : "Create mock Apollo deal"}
+                  : "Create synthetic Apollo fixture"}
               </button>
               <button
                 type="button"
@@ -482,12 +512,12 @@ export default function HuntClientsPage() {
               <button
                 type="button"
                 data-testid="hunt-closed-loop-apollo"
-                disabled={demo.isPending}
+                disabled={demo.isPending || syntheticCompany.trim().length < 2}
                 onClick={() => {
                   setResult(null);
                   demo.mutate({
                     viaApollo: true,
-                    companyName: query.trim() || title.trim() || undefined,
+                    companyName: syntheticCompany.trim(),
                   });
                 }}
               >

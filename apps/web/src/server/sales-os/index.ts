@@ -4,6 +4,7 @@ export * from "./types";
 export * from "./store";
 export * from "./compliance";
 export * from "./research";
+export * from "./research-evidence";
 export * from "./enrich";
 export * from "./apollo-one";
 export * from "./gates";

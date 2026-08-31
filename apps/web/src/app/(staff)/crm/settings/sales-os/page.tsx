@@ -9,6 +9,7 @@ import { trpc } from "@/lib/trpc";
 export default function SalesOsSettingsPage() {
   const utils = trpc.useUtils();
   const settings = trpc.salesOs.settings.get.useQuery();
+  const salesAccess = trpc.salesOs.access.useQuery();
   const digest = trpc.salesOs.digest.useQuery();
   const suppression = trpc.salesOs.suppression.list.useQuery();
   const proposals = trpc.salesOs.evolve.list.useQuery();
@@ -31,7 +32,9 @@ export default function SalesOsSettingsPage() {
     onSuccess: () => void utils.salesOs.evolve.invalidate(),
   });
   const importSalesGrowth = trpc.salesOs.importSalesGrowth.useMutation();
-  const importIntent = trpc.salesOs.intentCsv.useMutation();
+  const importIntent = trpc.salesOs.intentCsv.useMutation({
+    onError: (error) => setNote(error.message),
+  });
   const [dnc, setDnc] = useState("");
   const [csv, setCsv] = useState("");
   const [json, setJson] = useState("");
@@ -251,24 +254,36 @@ export default function SalesOsSettingsPage() {
                 <textarea
                   className="crm-textarea"
                   data-testid="sales-os-intent-csv"
+                  disabled={!salesAccess.data?.canOperate}
                   value={csv}
                   onChange={(event) => setCsv(event.target.value)}
-                  placeholder="company,domain,intent,employees"
+                  placeholder="company,domain,intent,evidence,employees"
                 />
                 <CrmBtn
                   className="mt-2"
+                  disabled={
+                    !salesAccess.data?.canOperate ||
+                    importIntent.isPending ||
+                    csv.trim().length < 3
+                  }
                   onClick={() =>
                     importIntent
                       .mutateAsync({ csv })
                       .then((response) =>
                         setNote(
-                          `Intent: ${response.created.length} created, ${response.skipped.length} skipped`,
+                          `Intent: ${response.created.length} proposed for Gate 1, ${response.skipped.length} skipped; no CRM company created`,
                         ),
                       )
+                      .catch(() => undefined)
                   }
                 >
-                  Import intent leads
+                  Create intent proposals
                 </CrmBtn>
+                {salesAccess.data && !salesAccess.data.canOperate ? (
+                  <p className="crm-note mt-2">
+                    View only. A Sales operator must import intent proposals.
+                  </p>
+                ) : null}
               </div>
             </div>
             <aside className="crm-panel">

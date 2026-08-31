@@ -3,10 +3,7 @@ import type {
   LeadEnrichmentIdentity,
   LeadSourceAdapter,
 } from "@hrmny/integrations";
-import {
-  createLeadSourceLive,
-  createLeadSourceMock,
-} from "@hrmny/integrations";
+import { createLeadSourceLive } from "@hrmny/integrations";
 import { importApolloPersonToCrm } from "../crm/apollo-import";
 import {
   completeIntegrationReceipt,
@@ -49,6 +46,7 @@ export type ApolloOnePersonResult = {
 type ApolloOneDeps = {
   leadSource?: LeadSourceAdapter;
   resolveApiKey?: typeof resolveIntegrationApiKey;
+  allowSynthetic?: boolean;
 };
 
 async function configuredLiveSource(
@@ -86,13 +84,17 @@ export async function searchApolloPeopleFree(
   if (!source) {
     const resolver = deps.resolveApiKey ?? resolveIntegrationApiKey;
     const resolved = await resolver("apollo", input.actorEmployeeId);
-    source = resolved.apiKey
-      ? createLeadSourceLive({
-          mode: "live",
-          apiKey: resolved.apiKey,
-          allowPaidOperations: false,
-        })
-      : createLeadSourceMock();
+    if (!resolved.apiKey) {
+      throw new Error("APOLLO_FREE_SEARCH_CONNECTION_REQUIRED");
+    }
+    source = createLeadSourceLive({
+      mode: "live",
+      apiKey: resolved.apiKey,
+      allowPaidOperations: false,
+    });
+  }
+  if (source.mode !== "live" && deps.allowSynthetic !== true) {
+    throw new Error("SYNTHETIC_APOLLO_SEARCH_FORBIDDEN");
   }
   const query = input.query?.trim();
   const titles = input.titles

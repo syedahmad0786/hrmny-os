@@ -1,11 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-/**
- * Sales Growth → advanced mock import → Open deal (mock-safe).
- * Does not require a live Apollo key — demo store mock returns companies.
- */
+/** Explicit synthetic acceptance fixtures; the normal Apollo surface remains
+ * disconnected and fail-closed without a live, scoped provider credential. */
 test.describe("Hunt Apollo prospect UI", () => {
-  test("Prospect with Apollo imports discover deal and opens detail", async ({
+  test("synthetic Apollo fixture imports discover deal and opens detail", async ({
     page,
   }) => {
     const query = `E2E Apollo Retail ${Date.now()}`;
@@ -15,9 +13,12 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
       timeout: 60_000,
     });
+    await expect(page.getByTestId("hunt-apollo-query")).toBeDisabled();
 
-    await page.getByTestId("hunt-apollo-query").fill(query);
     await page.getByTestId("hunt-test-tools").click();
+    await expect(page.getByTestId("hunt-apollo-prospect")).toBeDisabled();
+    await page.getByTestId("hunt-synthetic-company").fill(query);
+    await expect(page.getByTestId("hunt-apollo-prospect")).toBeEnabled();
     await page.getByTestId("hunt-apollo-prospect").click();
 
     const status = page.getByTestId("hunt-closed-loop-status");
@@ -39,22 +40,15 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect(page.locator("body")).toContainText(/apollo/i);
   });
 
-  test("free people search returns reviewable candidates without enriching", async ({
+  test("free people search fails closed when Apollo is not connected", async ({
     page,
   }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
-    await page.getByTestId("hunt-apollo-title").fill("Marketing Director");
-    await page.getByTestId("hunt-apollo-query").fill("retail");
-    await page.getByTestId("hunt-apollo-search").click();
-    await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
-      /0 credits/i,
-      { timeout: 30_000 },
-    );
-    await expect(page.getByTestId("hunt-apollo-results")).toBeVisible();
-    await expect(
-      page.getByTestId("hunt-apollo-enrich-one").first(),
-    ).toBeVisible();
+    const search = page.getByTestId("hunt-apollo-search");
+    await expect(search).toBeDisabled({ timeout: 60_000 });
+    await expect(search).toHaveText(/Connect Apollo to search/i);
+    await expect(page.getByTestId("hunt-apollo-results")).toHaveCount(0);
   });
 
   test("Sales Growth remains navigable at a narrow client viewport", async ({
