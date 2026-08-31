@@ -177,16 +177,16 @@ export async function readApollo0075SchemaState(
           on foreign_table.oid = constraint_info.confrelid
           and foreign_table.relname = expected.foreign_table
           and foreign_table.relnamespace = 'public'::regnamespace
-        where pg_catalog.get_attname(
-                constraint_info.conrelid,
-                constraint_info.conkey[1]::integer,
-                false
-              ) = expected.column_name
-          and pg_catalog.get_attname(
-                constraint_info.confrelid,
-                constraint_info.confkey[1]::integer,
-                false
-              ) = expected.foreign_column
+        join pg_attribute local_attribute
+          on local_attribute.attrelid = constraint_info.conrelid
+          and local_attribute.attnum = constraint_info.conkey[1]
+          and not local_attribute.attisdropped
+          and local_attribute.attname::text = expected.column_name
+        join pg_attribute foreign_attribute
+          on foreign_attribute.attrelid = constraint_info.confrelid
+          and foreign_attribute.attnum = constraint_info.confkey[1]
+          and not foreign_attribute.attisdropped
+          and foreign_attribute.attname::text = expected.foreign_column
       ) as "correctConstraints",
       (
         select count(*)::int from expected_indexes expected
