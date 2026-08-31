@@ -53,8 +53,9 @@ not exposed)`; branch
   `ahmadbukhari097/codex/phase-4c-sales-postgres-proof-20260831`; commit
   `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`.
 - Decision/finding: run only in CI with `CI=true`, the explicit write gate, and
-  a database hostname in the local allowlist; apply migrations before the
-  separate-process concurrency tests.
+  a database hostname in the local allowlist; `HRMNY_DATABASE_SSL_MODE=disable`
+  is accepted only under that complete tuple. Apply migrations before the
+  separate-process concurrency tests; every other DB connection requires TLS.
 - Reason: prove database behavior without risking an external or production
   resource.
 - Alternatives considered: use a shared database; omit migrations; simulate

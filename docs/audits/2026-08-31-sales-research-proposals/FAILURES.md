@@ -102,3 +102,24 @@ not exposed)`; branch
 - Supersedes/superseded-by: superseded by #241 head `5f79ea0...`.
 - Rollback/correction: preserve atomic API/consumer changes and never restore a
   synthetic visible pathway solely to make an intermediate branch compile.
+
+## `FAIL-HRMNY-20260831-RESEARCH-006` — disposable database TLS mismatch
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; PR #243
+  initial head `c56603b650856c2b43a95b4b4f6ce5515534cd66`.
+- Decision/finding: the application DB client correctly defaulted to required
+  TLS, but the loopback CI container did not offer TLS, so both proof jobs
+  failed in setup and skipped all three tests.
+- Reason: retain the difference between migration success and application
+  runtime connectivity.
+- Alternatives considered: disable TLS for all connections; use production;
+  mark migration success as runtime proof.
+- Trade-offs: correction adds an explicit local disposable-CI-only exception.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-008`.
+- Confidence/freshness: high.
+- Affected components: DB client policy and PostgreSQL proof setup.
+- Status: corrected in `53122fc...`; hosted confirmation pending.
+- Supersedes/superseded-by: pending corrected execution receipt.
+- Rollback/correction: fail closed unless hostname, `CI=true`, explicit write
+  gate, and disable mode all match; TLS remains required otherwise.

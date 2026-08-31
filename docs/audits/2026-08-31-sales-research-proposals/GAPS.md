@@ -66,11 +66,13 @@ not exposed)`; branch
 - Alternatives considered: infer from unit tests; exercise production.
 - Trade-offs: a separate safe CI proof slice is required.
 - Evidence: guarded proof commit
-  `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`; hosted execution pending.
+  `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`, first TLS failure
+  `EVID-HRMNY-20260831-RESEARCH-008`, and correction `53122fc...`;
+  corrected hosted execution pending.
 - Confidence/freshness: high.
 - Affected components: Sales store, migrations, CI database runtime.
-- Status: proof implemented; hosted execution and deployed-schema readback
-  remain open.
+- Status: proof and guarded TLS correction implemented; corrected hosted
+  execution and deployed-schema readback remain open.
 - Supersedes/superseded-by: none.
 - Rollback/correction: use disposable CI Postgres first; production migration
   remains a separate human checkpoint.

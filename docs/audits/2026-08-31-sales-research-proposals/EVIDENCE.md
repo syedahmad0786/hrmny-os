@@ -147,3 +147,30 @@ stated otherwise; none is provider, recovery, user, or production acceptance.
   pending terminal corrected receipt.
 - Rollback/correction: do not restore `runDaily`; keep #243 proof-only and do
   not merge #241/#243 into `main` automatically.
+
+## `EVID-HRMNY-20260831-RESEARCH-008` — first PostgreSQL execution and TLS correction
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; PR #243;
+  correction `53122fceb0fee4f0f53c03202d2d8c5fec56b625`.
+- Decision/finding: database jobs `99405492450` and `99405501137` both
+  provisioned the pinned Supabase/PostgreSQL image and applied migrations, then
+  failed before tests with “Client network socket disconnected before secure
+  TLS connection was established”; three tests were skipped in each job.
+- Reason: preserve the reproducible execution failure and bind its least-
+  privilege correction.
+- Alternatives considered: remove TLS globally; enable an unguarded environment
+  switch; point CI at a remote database.
+- Trade-offs: shared DB code gains a small policy resolver, while TLS downgrade
+  is allowed only for an explicit local disposable-CI tuple.
+- Evidence: runs `33365589634` and `33365592869`; 20 DB unit tests, DB/web
+  typecheck, DB/web lint, 32 focused Sales tests, diff check, and secret scan
+  passed after correction.
+- Confidence/freshness: high for cause and local correction gates; corrected
+  hosted execution pending.
+- Affected components: DB connection policy and #243 database job.
+- Status: negative receipt preserved; correction committed, hosted rerun open.
+- Supersedes/superseded-by: supersedes the unexecuted proof claim; pending
+  terminal corrected receipt.
+- Rollback/correction: revert the override and proof together on any remote-host
+  or missing-gate acceptance; never relax default TLS.

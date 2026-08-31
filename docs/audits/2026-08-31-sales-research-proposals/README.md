@@ -53,7 +53,12 @@ The final dependent slice provisions only an ephemeral Supabase/PostgreSQL CI
 service, applies the repository migrations, blocks non-local database targets
 and network calls, and uses separate Node processes to challenge exact replay,
 payload mismatch, and concurrent Gate 1 promotion. Its execution receipt is
-pending hosted CI.
+pending hosted CI. The first duplicated execution applied migrations but the
+application client required TLS while the loopback service exposed plaintext;
+all three tests therefore skipped at setup. Correction
+`53122fceb0fee4f0f53c03202d2d8c5fec56b625` permits plaintext only when the
+hostname is local and both CI/write gates are exact. Default and every remote
+connection still require TLS.
 
 ## Review-stack correction
 
