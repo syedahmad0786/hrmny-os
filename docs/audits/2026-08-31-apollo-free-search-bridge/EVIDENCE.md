@@ -264,3 +264,29 @@ not exposed)`; branch
 - Supersedes/superseded-by: extends `EVID-HRMNY-20260831-APOLLO-011`; none.
 - Rollback/correction: bind any success claim to the repaired exact SHA and keep
   these failed receipts immutable.
+
+## `EVID-HRMNY-20260831-APOLLO-013` — fourth hosted matrix reached exact-0074 preflight
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `07d9917008d8eb16f5abdf07c153abe852fadb0e`.
+- Decision/finding: both verify jobs and both 90-test browser jobs passed again.
+  Both database jobs moved past fresh 0075 readback into the upgrade database,
+  proving the repository/production identity separation behaved as intended;
+  they then agreed on the invalid synthetic `pending` receipt state.
+- Reason: record proof progression and the next first cause independently from
+  the overall failed workflow conclusion.
+- Alternatives considered: discard the run as another generic database failure;
+  claim the fresh migration path fully accepted.
+- Trade-offs: downstream Sales/Apollo PostgreSQL proof remains unaccepted until
+  a later exact head reaches it.
+- Evidence: runs `33416638313`/`33416642940`; database jobs
+  `99568753091`/`99568768913`; `FAIL-HRMNY-20260831-APOLLO-012`.
+- Confidence/freshness: high.
+- Affected components: hosted migration proof and acceptance ledger.
+- Status: negative diagnostic receipt accepted; corrected execution pending.
+- Supersedes/superseded-by: extends `EVID-HRMNY-20260831-APOLLO-012`; none.
+- Rollback/correction: rerun both event matrices on the repair head and preserve
+  this receipt.

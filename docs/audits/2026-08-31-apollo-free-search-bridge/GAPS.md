@@ -8,14 +8,15 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 
 ## `GAP-HRMNY-20260831-APOLLO-001` — hosted exact-SHA verification
 
-- Decision/finding: exact head `6828a1a` passed both hosted verify jobs and both
-  90-test browser jobs, but both disposable PostgreSQL jobs stopped on a
-  production-only legacy-identity assertion before the Sales/Apollo database
-  proofs. Repair commit `2b62db1` is not yet hosted-verified.
+- Decision/finding: exact head `07d9917` passed both hosted verify jobs and both
+  90-test browser jobs. Both disposable PostgreSQL jobs advanced through the
+  repaired fresh-schema boundary, then stopped on an invalid exact-0074
+  synthetic receipt state before the Sales/Apollo database proofs. Repair
+  commit `8a6ed2c` is not yet hosted-verified.
 - Reason: local worktree proof is not a hosted receipt.
 - Alternatives considered: infer acceptance from local output.
 - Trade-offs: review remains pending until terminal checks arrive.
-- Evidence: `EVID-HRMNY-20260831-APOLLO-001/002/004/010/011/012`.
+- Evidence: `EVID-HRMNY-20260831-APOLLO-001/002/004/010/011/012/013`.
 - Confidence/freshness: high.
 - Affected components: entire slice.
 - Status: open; exact repair-head database/verify/browser receipts are the next

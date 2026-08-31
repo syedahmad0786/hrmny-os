@@ -251,3 +251,31 @@ not exposed)`; branch
   `FAIL-HRMNY-20260831-APOLLO-010`; none.
 - Rollback/correction: preserve production validation unchanged, require the
   canonical disposable assertion, and rerun both GitHub event matrices.
+
+## `FAIL-HRMNY-20260831-APOLLO-012` — 0074 preflight fixture used an invalid receipt state
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; failing head
+  `07d9917008d8eb16f5abdf07c153abe852fadb0e`; repair commit
+  `8a6ed2cbdbbd3727b7940cf0c3d23d66021fdc11`.
+- Decision/finding: both fourth-run database jobs advanced through the repaired
+  fresh-schema assertion, then the exact-0074 upgrade preflight rejected its
+  synthetic receipt because the fixture requested status `pending`.
+- Reason: migration 0074's enforced receipt states are `received`, `processing`,
+  `completed`, and `failed`; the durable bridge begins a receipt at `received`.
+- Alternatives considered: weaken the check constraint; omit status and rely on
+  the same default implicitly; skip the safe-backfill fixture.
+- Trade-offs: the explicit fixture now documents the real pre-migration state
+  without changing schema or runtime behavior.
+- Evidence: push run `33416638313` / database job `99568753091`; PR run
+  `33416642940` / database job `99568768913`; PostgreSQL error `23514` named
+  `integration_inbox_status_check` in both.
+- Confidence/freshness: high; both event receipts and checked-in 0074 SQL agree.
+- Affected components: exact-0074 disposable preflight fixture only.
+- Status: corrected locally; hosted repair receipt pending; no production or
+  provider effect occurred.
+- Supersedes/superseded-by: follows `FAIL-HRMNY-20260831-APOLLO-011`; none.
+- Rollback/correction: keep the fixture on an allowed 0074 state and require the
+  hosted upgrade path to reach the later database proofs.
