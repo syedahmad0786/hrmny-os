@@ -178,10 +178,14 @@ export async function readApollo0075SchemaState(
           and foreign_table.relname = expected.foreign_table
           and foreign_table.relnamespace = 'public'::regnamespace
         where pg_catalog.get_attname(
-                constraint_info.conrelid, constraint_info.conkey[1], false
+                constraint_info.conrelid,
+                constraint_info.conkey[1]::integer,
+                false
               ) = expected.column_name
           and pg_catalog.get_attname(
-                constraint_info.confrelid, constraint_info.confkey[1], false
+                constraint_info.confrelid,
+                constraint_info.confkey[1]::integer,
+                false
               ) = expected.foreign_column
       ) as "correctConstraints",
       (
