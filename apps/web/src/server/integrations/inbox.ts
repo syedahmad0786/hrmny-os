@@ -511,7 +511,7 @@ export async function beginIntegrationReceiptAttempt(
     set attempts = attempts + 1,
         state_version = state_version + 1,
         attempt_token = ${attemptToken}::uuid,
-        attempt_lease_expires_at = ${leaseExpiresAt},
+        attempt_lease_expires_at = ${leaseExpiresAt.toISOString()}::timestamptz,
         result = coalesce(result, '{}'::jsonb)
           || jsonb_build_object(
             'bridgeStatus', 'processing'

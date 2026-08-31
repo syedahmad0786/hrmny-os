@@ -213,7 +213,9 @@ function providerObservedAt(
   receipt: LeadSearchProviderReceipt | undefined,
   fallback: Date,
 ): Date {
-  const parsed = receipt?.receivedAt ? Date.parse(receipt.receivedAt) : Number.NaN;
+  const parsed = receipt?.receivedAt
+    ? Date.parse(receipt.receivedAt)
+    : Number.NaN;
   return Number.isFinite(parsed)
     ? new Date(Math.max(parsed, fallback.getTime()))
     : fallback;
@@ -468,7 +470,7 @@ async function enqueueApolloSearchDefault(input: {
           eq(connectionAccount.toolkit, "apollo"),
           eq(connectionAccount.scope, "staff"),
           eq(connectionAccount.status, "connected"),
-          sql`(${connectionAccount.expiresAt} is null or ${connectionAccount.expiresAt} > ${input.now})`,
+          sql`(${connectionAccount.expiresAt} is null or ${connectionAccount.expiresAt} > ${input.now.toISOString()}::timestamptz)`,
         ),
       )
       .limit(1);
@@ -1475,6 +1477,7 @@ export async function runApolloPeopleSearchQueuedJob(
   if (!db) throw new Error("DATABASE_URL is required for Apollo search jobs");
   const durableDb = db;
   const now = (deps.now ?? (() => new Date()))();
+  const nowIso = now.toISOString();
   const jobAttemptToken = crypto.randomUUID();
 
   async function readCurrent(): Promise<ApolloPeopleSearchQueueOutcome> {
@@ -1541,12 +1544,12 @@ export async function runApolloPeopleSearchQueuedJob(
     integration_inbox_id: string | null;
   }>(sql`
     update public.scheduled_job
-    set status = 'running', locked_at = ${now}, attempts = attempts + 1,
+    set status = 'running', locked_at = ${nowIso}::timestamptz, attempts = attempts + 1,
         state_version = state_version + 1,
         attempt_token = ${jobAttemptToken}::uuid,
-        lease_expires_at = ${new Date(now.getTime() + 10 * 60_000)},
+        lease_expires_at = ${new Date(now.getTime() + 10 * 60_000).toISOString()}::timestamptz,
         result = jsonb_build_object('status', 'processing', 'attempts', attempts + 1),
-        updated_at = ${now}
+        updated_at = ${nowIso}::timestamptz
     where scheduled_job_id = ${jobId}::uuid
       and kind = ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
       and (
@@ -1555,11 +1558,11 @@ export async function runApolloPeopleSearchQueuedJob(
           status = 'running'
           and (
             lease_expires_at is null
-            or lease_expires_at <= ${now}
+            or lease_expires_at <= ${nowIso}::timestamptz
           )
         )
       )
-      and run_at <= ${now}
+      and run_at <= ${nowIso}::timestamptz
     returning payload, attempts, integration_inbox_id
   `);
   const job = claimed[0];
@@ -1800,21 +1803,29 @@ export async function runApolloPeopleSearchQueuedJob(
  * while preserving terminal status, provider hash, reconciliation counts, and
  * the immutable operational receipt.
  */
-export async function redactExpiredApolloPeopleSearchCandidates(input: {
-  now?: Date;
-  retentionMonths?: number;
-  limit?: number;
-} = {}): Promise<number> {
+export async function redactExpiredApolloPeopleSearchCandidates(
+  input: {
+    now?: Date;
+    retentionMonths?: number;
+    limit?: number;
+  } = {},
+): Promise<number> {
   const db = getDb();
   if (!db) return 0;
   const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
   const retentionMonths = z
     .number()
     .int()
     .min(1)
     .max(120)
     .parse(input.retentionMonths ?? 24);
-  const limit = z.number().int().min(1).max(500).parse(input.limit ?? 100);
+  const limit = z
+    .number()
+    .int()
+    .min(1)
+    .max(500)
+    .parse(input.limit ?? 100);
   const redacted = await db.execute<{ integration_inbox_id: string }>(sql`
     with targets as (
       select integration_inbox_id
@@ -1823,7 +1834,7 @@ export async function redactExpiredApolloPeopleSearchCandidates(input: {
         and operation = ${APOLLO_PEOPLE_SEARCH_OPERATION}
         and status in ('completed', 'failed')
         and processed_at is not null
-        and processed_at < ${now} - make_interval(months => ${retentionMonths})
+        and processed_at < ${nowIso}::timestamptz - make_interval(months => ${retentionMonths})
         and result ? 'candidates'
       order by processed_at, integration_inbox_id
       for update skip locked
@@ -1836,7 +1847,7 @@ export async function redactExpiredApolloPeopleSearchCandidates(input: {
             'candidatesRedactedAt', ${now.toISOString()}
           ),
         state_version = state_version + 1,
-        updated_at = ${now}
+        updated_at = ${nowIso}::timestamptz
     from targets
     where inbox.integration_inbox_id = targets.integration_inbox_id
     returning inbox.integration_inbox_id

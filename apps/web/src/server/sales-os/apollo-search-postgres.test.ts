@@ -496,13 +496,10 @@ describe("Apollo queue PostgreSQL proof", () => {
     await expect(
       searchApolloPeopleFree(input, { leadSource: source }),
     ).resolves.toMatchObject({ status: "retry_scheduled" });
-    const replacement = runApolloPeopleSearchQueuedJob(
-      job!.scheduled_job_id,
-      {
-        leadSource: source,
-        authorizeActor: async () => true,
-      },
-    );
+    const replacement = runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+      leadSource: source,
+      authorizeActor: async () => true,
+    });
     await vi.waitFor(() =>
       expect(source.searchLeadsWithReceipt).toHaveBeenCalledOnce(),
     );
@@ -743,7 +740,9 @@ describe("Apollo queue PostgreSQL proof", () => {
       receipt_bridge_status: "processing",
     });
 
-    const recovered = sourceWith(async () => execution("apollo-runtime-recovered"));
+    const recovered = sourceWith(async () =>
+      execution("apollo-runtime-recovered"),
+    );
     await expect(
       runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
         leadSource: recovered,
@@ -756,7 +755,9 @@ describe("Apollo queue PostgreSQL proof", () => {
   });
 
   it("dead-letters a malformed claimed job and its linked receipt atomically", async () => {
-    const source = sourceWith(async () => execution("must-not-run-invalid-job"));
+    const source = sourceWith(async () =>
+      execution("must-not-run-invalid-job"),
+    );
     const idempotencyKey = "41000000-0000-4000-8000-000000000017";
     const pending = await searchApolloPeopleFree(
       {
@@ -983,16 +984,16 @@ describe("Apollo queue PostgreSQL proof", () => {
       set status = 'processing', attempts = 1,
           result = jsonb_build_object('bridgeStatus', 'processing'),
           attempt_token = ${staleToken}::uuid,
-          attempt_lease_expires_at = ${new Date(now.getTime() - 1_000)},
+          attempt_lease_expires_at = ${new Date(now.getTime() - 1_000).toISOString()}::timestamptz,
           state_version = state_version + 1
       where integration_inbox_id = ${pending.receiptId}::uuid
     `);
     await db.execute(sql`
       update public.scheduled_job
-      set status = 'running', attempts = 1, locked_at = ${new Date(
-        now.getTime() - 11 * 60_000,
-      )}, attempt_token = ${staleToken}::uuid,
-          lease_expires_at = ${new Date(now.getTime() - 1_000)},
+      set status = 'running', attempts = 1,
+          locked_at = ${new Date(now.getTime() - 11 * 60_000).toISOString()}::timestamptz,
+          attempt_token = ${staleToken}::uuid,
+          lease_expires_at = ${new Date(now.getTime() - 1_000).toISOString()}::timestamptz,
           state_version = state_version + 1
       where scheduled_job_id = ${job!.scheduled_job_id}::uuid
     `);
