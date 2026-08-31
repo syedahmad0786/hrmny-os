@@ -142,8 +142,9 @@ not exposed)`; branch
 - Evidence: `EVID-HRMNY-20260831-RESEARCH-009`.
 - Confidence/freshness: high.
 - Affected components: PostgreSQL proof harness; no product runtime path.
-- Status: corrected locally; hosted confirmation pending.
-- Supersedes/superseded-by: correction supersedes destructive cleanup; pending
-  a terminal passing hosted receipt.
+- Status: corrected and confirmed by both hosted PostgreSQL jobs in
+  `EVID-HRMNY-20260831-RESEARCH-010`.
+- Supersedes/superseded-by: destructive cleanup is superseded by correction
+  `289721d...` and passing receipt `EVID-HRMNY-20260831-RESEARCH-010`.
 - Rollback/correction: preserve append-only enforcement and correct proof data
   isolation instead of changing the operational invariant.

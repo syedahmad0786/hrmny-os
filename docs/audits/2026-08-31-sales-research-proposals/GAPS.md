@@ -57,24 +57,26 @@ not exposed)`; branch
 - Rollback/correction: bind candidate hash, approver, expiry, request ID, and
   provider readback server-side before enabling.
 
-## `GAP-HRMNY-20260831-RESEARCH-004` — PostgreSQL and schema readback
+## `GAP-HRMNY-20260831-RESEARCH-004` — deployed schema readback
 
-- Decision/finding: memory behavior is proven, while disposable PostgreSQL
-  concurrency, migrations, indexes, RLS, grants, and deployed schema readback
-  are not yet accepted for this slice.
-- Reason: process-local locks and memory fixtures cannot prove database races.
+- Decision/finding: disposable PostgreSQL migrations and three concurrency
+  cases passed twice. Deployed-environment indexes, RLS, grants, migration
+  journal, and schema readback are not yet accepted for this slice.
+- Reason: isolated CI proves database behavior but not the identity or state of
+  a deployed destination.
 - Alternatives considered: infer from unit tests; exercise production.
-- Trade-offs: a separate safe CI proof slice is required.
+- Trade-offs: deployed readback requires destination identity and a later
+  separately authorized production checkpoint.
 - Evidence: guarded proof commit
   `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`, first TLS failure
   `EVID-HRMNY-20260831-RESEARCH-008`, guarded TLS correction `53122fc...`,
-  runtime/cleanup receipt `EVID-HRMNY-20260831-RESEARCH-009`, and
-  non-destructive correction `289721d...`; corrected hosted execution pending.
+  runtime/cleanup receipt `EVID-HRMNY-20260831-RESEARCH-009`, non-destructive
+  correction `289721d...`, and duplicate passing runtime receipt
+  `EVID-HRMNY-20260831-RESEARCH-010`.
 - Confidence/freshness: high.
 - Affected components: Sales store, migrations, CI database runtime.
-- Status: proof, guarded TLS correction, and immutable-fixture correction
-  implemented; corrected hosted execution and deployed-schema readback remain
-  open.
+- Status: disposable runtime closed; deployed-schema readback remains open and
+  production migration remains a separate human checkpoint.
 - Supersedes/superseded-by: none.
 - Rollback/correction: use disposable CI Postgres first; production migration
   remains a separate human checkpoint.

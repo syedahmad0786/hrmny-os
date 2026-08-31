@@ -13,7 +13,7 @@ not exposed)`; branch
   is a later explicit decision and must stop on receipt, lineage, or identity
   conflict.
 - Reason: preserve `command → evidence → decision → approved action → verified
-  result → next owner`.
+result → next owner`.
 - Alternatives considered: auto-promote; repair missing records during approval.
 - Trade-offs: manual review is required before person discovery.
 - Evidence/tests: exact replay, mismatch, semantic reuse, receipt absence,
@@ -65,9 +65,10 @@ not exposed)`; branch
   all provider modes mock/off; network fetch forbidden; Xero writes false.
 - Prerequisites/permissions: ephemeral CI service only; no production, provider,
   billing, or human credential required.
-- Confidence/freshness: high for the committed procedure; first success pending.
+- Confidence/freshness: high; duplicate hosted success on 2026-08-31.
 - Affected components: GitHub Actions database job and Sales store.
-- Status: active procedural record; not yet successfully executed.
+- Status: active procedural record; last successful hosted executions are jobs
+  `99408940527` and `99408959731`.
 - Supersedes/superseded-by: none.
 - Rollback/correction: fail closed on any guard mismatch and remove the service
   with the CI job lifecycle.

@@ -204,3 +204,33 @@ stated otherwise; none is provider, recovery, user, or production acceptance.
   successful runtime receipt.
 - Rollback/correction: revert the proof correction only if exact-scoped
   assertions fail; never add mutation of `audit_event` to test cleanup.
+
+## `EVID-HRMNY-20260831-RESEARCH-010` — disposable PostgreSQL runtime passed twice
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; PR #243;
+  head `a31cf23fbbfdcfe99903df38fe3d455c9ec4373e`.
+- Decision/finding: push job `99408940527` in run `33366754463` and PR job
+  `99408959731` in run `33366758431` both applied the repository migrations
+  and passed all three separate-process PostgreSQL cases. Exact replay produced
+  one proposal/signal/receipt, payload mismatch left no partial duplicate, and
+  concurrent Gate 1 produced one canonical company with linked lineage.
+- Reason: establish repeatable database transaction, uniqueness, idempotency,
+  and serialization behavior without touching a shared or production system.
+- Alternatives considered: accept one run only; infer runtime behavior from
+  unit tests; use a remote database.
+- Trade-offs: this is synthetic runtime acceptance for a disposable schema,
+  not deployed-schema readback, recovery, user, provider, or production
+  acceptance.
+- Evidence: both job APIs returned `completed/success`; logs show one test file
+  and three tests passed in 3.444s and 3.870s respectively, including each
+  named concurrency case.
+- Confidence/freshness: high; read directly from GitHub on 2026-08-31.
+- Affected components: Sales proposal persistence, Gate 1 transaction, inbox,
+  signal lineage, audit append path, and CI database policy.
+- Status: synthetic disposable-PostgreSQL runtime accepted; broader acceptance
+  remains explicitly open.
+- Supersedes/superseded-by: supersedes pending execution states in
+  `EVID-HRMNY-20260831-RESEARCH-008/009`; none.
+- Rollback/correction: preserve the jobs and logs; fix forward on regression
+  without weakening TLS guards or append-only audit enforcement.

@@ -16,7 +16,7 @@
   `ahmadbukhari097/codex/phase-4c-sales-postgres-proof-20260831`
 - PostgreSQL proof implementation:
   `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`
-- PostgreSQL proof review: pending
+- PostgreSQL proof review: PR #243
 
 ## Outcome
 
@@ -52,13 +52,16 @@ kept as dependent review slices so this does not become one unreviewable
 The final dependent slice provisions only an ephemeral Supabase/PostgreSQL CI
 service, applies the repository migrations, blocks non-local database targets
 and network calls, and uses separate Node processes to challenge exact replay,
-payload mismatch, and concurrent Gate 1 promotion. Its execution receipt is
-pending hosted CI. The first duplicated execution applied migrations but the
-application client required TLS while the loopback service exposed plaintext;
-all three tests therefore skipped at setup. Correction
+payload mismatch, and concurrent Gate 1 promotion. The first duplicated
+execution applied migrations but the application client required TLS while the
+loopback service exposed plaintext; all three tests therefore skipped at
+setup. Correction
 `53122fceb0fee4f0f53c03202d2d8c5fec56b625` permits plaintext only when the
 hostname is local and both CI/write gates are exact. Default and every remote
-connection still require TLS.
+connection still require TLS. The next run reached the tests and exposed
+destructive cleanup against append-only audit history; correction `289721d...`
+replaced cleanup with unique, request-scoped fixtures. Push and PR database
+jobs `99408940527` and `99408959731` then each passed all three tests.
 
 ## Review-stack correction
 
@@ -72,19 +75,19 @@ feature-branch-only incorporation are retained in the failure/evidence ledger.
 
 ## Acceptance state
 
-| State                | Result |
-| -------------------- | ------ |
-| planned              | yes |
-| documented           | yes |
-| authorized           | local code/test and review preview only |
-| configured           | synthetic memory runtime plus guarded disposable-PostgreSQL proof |
-| tested               | local gates passed; first hosted split failed as recorded; corrected exact-SHA pending |
-| deployed             | no; review preview pending |
-| provider accepted    | no |
-| destination verified | no |
-| recovery verified    | no |
-| user accepted        | no |
-| production accepted  | no |
+| State                | Result                                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| planned              | yes                                                                                               |
+| documented           | yes                                                                                               |
+| authorized           | local code/test and review preview only                                                           |
+| configured           | synthetic memory runtime plus guarded disposable-PostgreSQL proof                                 |
+| tested               | local gates and duplicate hosted PostgreSQL runtime passed; hosted browser terminal state pending |
+| deployed             | corrected #241 review previews passed; no production deployment                                   |
+| provider accepted    | no                                                                                                |
+| destination verified | no                                                                                                |
+| recovery verified    | no                                                                                                |
+| user accepted        | no                                                                                                |
+| production accepted  | no                                                                                                |
 
 ## Package
 
