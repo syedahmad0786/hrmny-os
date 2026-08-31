@@ -8,13 +8,14 @@ not exposed)`; branch
 
 ## `GAP-HRMNY-20260831-RESEARCH-001` — exact-SHA hosted gates
 
-- Decision/finding: local tests/static/build gates passed, but the immutable
-  review SHA has not yet completed hosted CI, browser, database, or preview
-  checks.
+- Decision/finding: local tests/static/build gates passed. The first immutable
+  core-only SHA failed because the server/UI split was not independently
+  buildable; corrected product head `5f79ea0...` and proof head `2f204e0...`
+  have not yet completed all hosted CI, browser, database, or preview checks.
 - Reason: worktree proof is not a hosted receipt.
 - Alternatives considered: mark the commit accepted from local output.
 - Trade-offs: review remains open until terminal checks arrive.
-- Evidence: `EVID-HRMNY-20260831-RESEARCH-001/002`.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-001/002/007`.
 - Confidence/freshness: high.
 - Affected components: entire slice.
 - Status: open.

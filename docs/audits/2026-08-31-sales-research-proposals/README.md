@@ -8,7 +8,10 @@
 - Core review: PR #241
 - UI branch: `ahmadbukhari097/codex/phase-4b-sales-research-ui-20260831`
 - UI implementation: `21774d858b66676dc4f9cfd48d039abf7b079472`
-- UI review: PR #242
+- UI review: PR #242; its head was incorporated into the #241 feature branch
+  after the first hosted build proved the server/UI split was not deployable
+  independently. GitHub consequently marked #242 merged into the feature
+  branch; neither `main` nor production changed.
 - PostgreSQL proof branch:
   `ahmadbukhari097/codex/phase-4c-sales-postgres-proof-20260831`
 - PostgreSQL proof implementation:
@@ -52,6 +55,16 @@ and network calls, and uses separate Node processes to challenge exact replay,
 payload mismatch, and concurrent Gate 1 promotion. Its execution receipt is
 pending hosted CI.
 
+## Review-stack correction
+
+The first #241 head intentionally excluded the UI. Both hosted runs passed the
+database job but failed typecheck and browser-build before execution because
+the retained console referenced the removed `runDaily` contract; both Vercel
+previews also failed. The UI commit was then fast-forwarded into the #241
+feature branch, making the product change one buildable vertical slice. The
+PostgreSQL proof remains isolated in #243. The negative runs and the
+feature-branch-only incorporation are retained in the failure/evidence ledger.
+
 ## Acceptance state
 
 | State                | Result |
@@ -60,7 +73,7 @@ pending hosted CI.
 | documented           | yes |
 | authorized           | local code/test and review preview only |
 | configured           | synthetic memory runtime plus guarded disposable-PostgreSQL proof |
-| tested               | local unit/static/build gates; browser contracts added; hosted exact-SHA pending |
+| tested               | local gates passed; first hosted split failed as recorded; corrected exact-SHA pending |
 | deployed             | no; review preview pending |
 | provider accepted    | no |
 | destination verified | no |

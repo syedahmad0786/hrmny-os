@@ -119,3 +119,31 @@ stated otherwise; none is provider, recovery, user, or production acceptance.
 - Supersedes/superseded-by: none.
 - Rollback/correction: revert this proof-only commit without changing product
   behavior; fix any hosted failure and preserve its receipt.
+
+## `EVID-HRMNY-20260831-RESEARCH-007` — first hosted split and consolidation
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; branch
+  stack PRs #241–#243.
+- Decision/finding: #241 push run `33365024980` and PR run `33365048046`
+  both passed their database jobs, then failed verify and browser build because
+  the old console referenced the removed `research.runDaily` contract. Both
+  preview deployments failed. The UI head
+  `5f79ea0a601691618dfa18f589db76c1269e2ed8` was fast-forwarded into #241;
+  GitHub marked #242 merged into that feature branch at 06:45:03Z. `main` and
+  production were untouched.
+- Reason: preserve the negative hosted receipt and the exact review-state
+  correction rather than obscuring it.
+- Alternatives considered: restore the obsolete runtime API; leave a known
+  broken core review; combine the PostgreSQL proof too.
+- Trade-offs: product server/UI review is larger, while database proof remains
+  independently reviewable in #243.
+- Evidence: jobs `99403777507`, `99403777746`, `99403846780`, and
+  `99403846742`; PR #242 merge metadata identifies the feature base and actor.
+- Confidence/freshness: high; read directly from GitHub on 2026-08-31.
+- Affected components: #241 review boundary, #242 review state, #243 base.
+- Status: negative split receipt preserved; corrected-head hosted gates pending.
+- Supersedes/superseded-by: supersedes the original three-PR product split;
+  pending terminal corrected receipt.
+- Rollback/correction: do not restore `runDaily`; keep #243 proof-only and do
+  not merge #241/#243 into `main` automatically.

@@ -80,3 +80,25 @@ not exposed)`; branch
 - Supersedes/superseded-by: none.
 - Rollback/correction: use the isolated CI service; never weaken the local-target
   and explicit-write gates.
+
+## `FAIL-HRMNY-20260831-RESEARCH-005` — server/UI split was not buildable
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; PR #241
+  initial head `b10aeb010ecaf71ce06f36c59ff774b9ad2c02bf`.
+- Decision/finding: removing the server `runDaily` procedure while its UI
+  consumer lived only in the next stacked PR made #241 fail typecheck, browser
+  build, and preview deployment in two identical hosted runs.
+- Reason: record that an API and its only consumer replacement form one
+  deployable vertical slice.
+- Alternatives considered: reintroduce a deprecated synthetic procedure; keep
+  a permanently red base PR; ignore duplicated failures.
+- Trade-offs: core and UI are consolidated in #241; the database race proof
+  remains separate in #243.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-007`.
+- Confidence/freshness: high.
+- Affected components: Sales research router and console; PR stack.
+- Status: corrected on the feature branch; corrective hosted reruns pending.
+- Supersedes/superseded-by: superseded by #241 head `5f79ea0...`.
+- Rollback/correction: preserve atomic API/consumer changes and never restore a
+  synthetic visible pathway solely to make an intermediate branch compile.
