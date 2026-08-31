@@ -14,6 +14,7 @@ if (
 
 Object.assign(process.env, {
   DATABASE_MODE: "postgres",
+  HRMNY_DATABASE_SSL_MODE: "disable",
   AUTH_MODE: "dev",
   ALLOW_DEV_AUTH: "true",
   WORK_ENVIRONMENT_KIND: "sandbox",

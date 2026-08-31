@@ -18,6 +18,7 @@ function finish(code: number, payload: Record<string, unknown>) {
 async function main() {
   Object.assign(process.env, {
     DATABASE_MODE: "postgres",
+    HRMNY_DATABASE_SSL_MODE: "disable",
     LLM_PROVIDER: "mock",
     APOLLO_MODE: "mock",
     APOLLO_ALLOW_PAID_OPERATIONS: "false",
