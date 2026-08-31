@@ -59,3 +59,24 @@ not exposed)`; branch
 - Supersedes/superseded-by: none.
 - Rollback/correction: preserve artifacts, use bounded diagnostics, and never
   weaken assertions or extend unbounded waits.
+
+## `FAIL-HRMNY-20260831-RESEARCH-004` — local PostgreSQL runtime unavailable
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; branch
+  `ahmadbukhari097/codex/phase-4c-sales-postgres-proof-20260831`; commit
+  `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`.
+- Decision/finding: Docker was unavailable locally, so the disposable
+  PostgreSQL proof could not be executed on this host.
+- Reason: record the missing execution rather than infer database behavior from
+  source inspection.
+- Alternatives considered: point the test at production or an unknown remote
+  database; skip the proof entirely.
+- Trade-offs: hosted CI is the first allowed execution environment.
+- Evidence: local runtime discovery and the proof's non-local target guard.
+- Confidence/freshness: high.
+- Affected components: local database test harness only.
+- Status: local execution unavailable; hosted proof pending.
+- Supersedes/superseded-by: none.
+- Rollback/correction: use the isolated CI service; never weaken the local-target
+  and explicit-write gates.

@@ -64,10 +64,12 @@ not exposed)`; branch
 - Reason: process-local locks and memory fixtures cannot prove database races.
 - Alternatives considered: infer from unit tests; exercise production.
 - Trade-offs: a separate safe CI proof slice is required.
-- Evidence: pending dependent PostgreSQL proof branch.
+- Evidence: guarded proof commit
+  `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`; hosted execution pending.
 - Confidence/freshness: high.
 - Affected components: Sales store, migrations, CI database runtime.
-- Status: open.
+- Status: proof implemented; hosted execution and deployed-schema readback
+  remain open.
 - Supersedes/superseded-by: none.
 - Rollback/correction: use disposable CI Postgres first; production migration
   remains a separate human checkpoint.

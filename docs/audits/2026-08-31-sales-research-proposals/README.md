@@ -8,7 +8,12 @@
 - Core review: PR #241
 - UI branch: `ahmadbukhari097/codex/phase-4b-sales-research-ui-20260831`
 - UI implementation: `21774d858b66676dc4f9cfd48d039abf7b079472`
-- UI review: pending
+- UI review: PR #242
+- PostgreSQL proof branch:
+  `ahmadbukhari097/codex/phase-4c-sales-postgres-proof-20260831`
+- PostgreSQL proof implementation:
+  `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`
+- PostgreSQL proof review: pending
 
 ## Outcome
 
@@ -41,6 +46,12 @@ This package covers the core boundary. UI and disposable-PostgreSQL proofs are
 kept as dependent review slices so this does not become one unreviewable
 "complete HRMNY" change.
 
+The final dependent slice provisions only an ephemeral Supabase/PostgreSQL CI
+service, applies the repository migrations, blocks non-local database targets
+and network calls, and uses separate Node processes to challenge exact replay,
+payload mismatch, and concurrent Gate 1 promotion. Its execution receipt is
+pending hosted CI.
+
 ## Acceptance state
 
 | State                | Result |
@@ -48,7 +59,7 @@ kept as dependent review slices so this does not become one unreviewable
 | planned              | yes |
 | documented           | yes |
 | authorized           | local code/test and review preview only |
-| configured           | synthetic memory runtime only |
+| configured           | synthetic memory runtime plus guarded disposable-PostgreSQL proof |
 | tested               | local unit/static/build gates; browser contracts added; hosted exact-SHA pending |
 | deployed             | no; review preview pending |
 | provider accepted    | no |

@@ -95,3 +95,27 @@ stated otherwise; none is provider, recovery, user, or production acceptance.
 - Supersedes/superseded-by: none.
 - Rollback/correction: revert only this dependent commit while preserving the
   server boundary; rerun all browser contracts after correction.
+
+## `EVID-HRMNY-20260831-RESEARCH-006` — immutable PostgreSQL proof slice
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; branch
+  `ahmadbukhari097/codex/phase-4c-sales-postgres-proof-20260831`; commit
+  `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`.
+- Decision/finding: the dependent commit adds a guarded, disposable-PostgreSQL
+  CI proof for separate-process proposal and Gate 1 races.
+- Reason: memory tests cannot establish real database uniqueness, transaction,
+  or concurrency behavior.
+- Alternatives considered: exercise production; rely on process-local locks;
+  run a database test without destination guards.
+- Trade-offs: the proof adds CI time and remains an unexecuted contract until a
+  hosted job passes.
+- Evidence: six-file commit, staged secret/diff checks, explicit local-host and
+  write gates, disabled provider modes, blocked fetch, and independent reviewer
+  approval of the structure.
+- Confidence/freshness: high for source/guard design; execution pending.
+- Affected components: CI database job, Sales store, migration runtime.
+- Status: documented and committed; hosted PostgreSQL acceptance open.
+- Supersedes/superseded-by: none.
+- Rollback/correction: revert this proof-only commit without changing product
+  behavior; fix any hosted failure and preserve its receipt.

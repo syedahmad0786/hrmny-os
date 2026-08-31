@@ -45,3 +45,28 @@ not exposed)`; branch
 - Supersedes/superseded-by: none.
 - Rollback/correction: preserve `authorize → validate → apply → audit → emit`
   and never unlink or delete legacy data automatically.
+
+## `RUN-HRMNY-20260831-RESEARCH-003` — execute the disposable PostgreSQL proof
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; branch
+  `ahmadbukhari097/codex/phase-4c-sales-postgres-proof-20260831`; commit
+  `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`.
+- Decision/finding: run only in CI with `CI=true`, the explicit write gate, and
+  a database hostname in the local allowlist; apply migrations before the
+  separate-process concurrency tests.
+- Reason: prove database behavior without risking an external or production
+  resource.
+- Alternatives considered: use a shared database; omit migrations; simulate
+  concurrency in one process.
+- Trade-offs: the proof is CI-specific and costs an additional database job.
+- Evidence/tests: exact replay, payload mismatch, and concurrent Gate 1 tests;
+  all provider modes mock/off; network fetch forbidden; Xero writes false.
+- Prerequisites/permissions: ephemeral CI service only; no production, provider,
+  billing, or human credential required.
+- Confidence/freshness: high for the committed procedure; first success pending.
+- Affected components: GitHub Actions database job and Sales store.
+- Status: active procedural record; not yet successfully executed.
+- Supersedes/superseded-by: none.
+- Rollback/correction: fail closed on any guard mismatch and remove the service
+  with the CI job lifecycle.
