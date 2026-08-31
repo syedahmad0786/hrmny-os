@@ -47,7 +47,7 @@ describe("M6 portal + seams", () => {
     const deliveries = await portal.portal.deliveries.list();
     expect(deliveries).toHaveLength(1);
     expect(deliveries[0]!.clientId).toBe(DEMO_CLIENT_ID);
-    expect(JSON.stringify(deliveries)).not.toMatch(/margin|payroll|fee|gross/i);
+    expect(() => assertPortalSafe(deliveries)).not.toThrow();
   });
 
   it("portal cannot call staff finance/margin/payroll", async () => {
