@@ -110,3 +110,26 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 - Supersedes/superseded-by: none.
 - Rollback/correction: preserve both fail-closed setup modules and commands if
   the stack is reordered.
+
+## `REASON-HRMNY-20260831-APOLLO-007` — database identity is not schema compatibility
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; commit
+  `2b62db13ea29b32f6a3a9eba850c285a596f6f3c`.
+- Decision/finding: canonical migration compatibility and the reconciled
+  production legacy identity are asserted separately.
+- Reason: matching 0075 objects proves the change can apply safely to the
+  repository chain; it does not prove that a database is Harmony production or
+  owns its immutable legacy journal.
+- Alternatives considered: use one boolean as both identity and compatibility;
+  accept multiple production identities.
+- Trade-offs: production preflight remains an additional checkpoint.
+- Evidence: `ADR-HRMNY-20260831-APOLLO-011` and hosted failure receipts.
+- Confidence/freshness: high.
+- Affected components: migration verification and release authority.
+- Status: active.
+- Supersedes/superseded-by: none.
+- Rollback/correction: reunify the assertions only after a reviewed production
+  baseline migration and new recovery receipt.

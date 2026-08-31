@@ -234,3 +234,33 @@ destination, recovery, user, or production acceptance.
   `EVID-HRMNY-20260831-APOLLO-010`; none.
 - Rollback/correction: require terminal hosted proof of the documented catalog
   joins before closing the database gap.
+
+## `EVID-HRMNY-20260831-APOLLO-012` — third hosted matrix isolated the legacy-identity boundary
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `6828a1a16c6c38592f81200419645dddf85e2279`.
+- Decision/finding: push and PR verify jobs passed all lint, type, test, and
+  build tasks; both browser jobs passed 90/90; both database jobs agreed that
+  the documented catalog joins work and every surfaced 0075 invariant matches.
+  The only mismatch was `priorContractReady=false` on the fresh database.
+- Reason: retain the partial green receipts and the first causal database
+  failure rather than collapsing the overall workflow conclusion into one
+  status.
+- Alternatives considered: report the matrix as wholly failed; rerun unchanged;
+  describe the identity aggregate as a 0075 schema failure.
+- Trade-offs: hosted acceptance remains open until the repair head passes the
+  complete database sequence, including the skipped Sales/Apollo PostgreSQL
+  proofs.
+- Evidence: runs `33414276233` and `33414282467`; verify jobs `99561088409` and
+  `99561108136`; browser jobs `99561088100` and `99561107844`; database jobs
+  `99561088496` and `99561108215`.
+- Confidence/freshness: high; both GitHub event receipts agree.
+- Affected components: CI acceptance ledger, migration verifier, downstream
+  PostgreSQL proofs.
+- Status: negative diagnostic receipt accepted; repair hosted proof pending.
+- Supersedes/superseded-by: extends `EVID-HRMNY-20260831-APOLLO-011`; none.
+- Rollback/correction: bind any success claim to the repaired exact SHA and keep
+  these failed receipts immutable.

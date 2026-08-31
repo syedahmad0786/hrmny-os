@@ -222,3 +222,36 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 - Supersedes/superseded-by: supersedes the cast-only repair in `bb75712`; none.
 - Rollback/correction: keep the documented joins aligned in both query copies and
   fail closed on any hosted schema mismatch.
+
+## `ADR-HRMNY-20260831-APOLLO-011` — separate repository proof from production identity
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; repair commit
+  `2b62db13ea29b32f6a3a9eba850c285a596f6f3c`.
+- Decision/finding: disposable PostgreSQL proof explicitly requires the
+  production-only legacy identity aggregate to remain false while it verifies
+  every canonical 0074/0075 schema, security, and backfill invariant. The
+  protected production guard continues to require that aggregate to be true.
+- Reason: Harmony production has an accepted immutable 70-row legacy prefix and
+  reconciled M1 artifacts; a fresh repository chain must neither counterfeit
+  that identity nor weaken the guard to make CI green.
+- Alternatives considered: accept either historical object name in production;
+  rewrite migration 0000; add production-only artifacts to the fresh chain;
+  remove the aggregate from production preflight.
+- Trade-offs: disposable CI cannot by itself accept the production legacy
+  identity; that remains a separate read-only preflight at the exact authorized
+  production checkpoint.
+- Evidence: hosted runs `33414276233`/`33414282467`, canonical migrations,
+  `docs/audits/2026-08-27-os-completion/BRIDGES.md`, and DB lint/typecheck/tests
+  30/30 after the repair.
+- Confidence/freshness: high as of 2026-08-31.
+- Affected components: migration verifier, production 0075 guard, hosted
+  database acceptance.
+- Status: implemented locally; corrected exact-head hosted proof pending;
+  production behavior unchanged.
+- Supersedes/superseded-by: none.
+- Rollback/correction: revert only the disposable assertion if the repository
+  and production baselines are deliberately reconciled through a separately
+  reviewed migration; never relax the production guard implicitly.

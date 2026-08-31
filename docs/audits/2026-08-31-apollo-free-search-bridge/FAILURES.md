@@ -217,3 +217,37 @@ production migration, deployment, account change, or Xero write.
   `FAIL-HRMNY-20260831-APOLLO-009`; none.
 - Rollback/correction: retain documented joins and validate the same query in
   the disposable Supabase PostgreSQL image before production consideration.
+
+## `FAIL-HRMNY-20260831-APOLLO-011` — disposable proof required a production-only identity
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; failing head
+  `6828a1a16c6c38592f81200419645dddf85e2279`; repair commit
+  `2b62db13ea29b32f6a3a9eba850c285a596f6f3c`.
+- Decision/finding: both third-run database jobs proved all nine 0075 columns,
+  three foreign keys, two indexes, two secured tables, and zero backfill
+  violations, then failed only because the fresh repository database did not
+  claim the reconciled production legacy identity.
+- Reason: `priorContractReady` includes historical production-only
+  `health_signal.delivery_status` and `employee_role_employee_role_uniq`, while
+  canonical migrations define `health_signal.notified_at` and
+  `employee_role_uniq`.
+- Alternatives considered: weaken or rename production objects; rewrite the
+  immutable bootstrap; treat the failure as migration-0075 schema drift.
+- Trade-offs: the disposable verifier now proves canonical migration behavior
+  separately; production identity remains fail-closed and unexecuted.
+- Evidence: push run `33414276233` / database job `99561088496`; PR run
+  `33414282467` / database job `99561108215`; both verify and both 90-test
+  browser jobs passed on the same failing head.
+- Confidence/freshness: high; independently reproduced by three read-only
+  reviews.
+- Affected components: `packages/db/src/verify-migrations.ts` and hosted
+  migration proof.
+- Status: corrected locally; exact-head hosted execution pending; no production
+  or provider effect occurred.
+- Supersedes/superseded-by: refines the next failure boundary after
+  `FAIL-HRMNY-20260831-APOLLO-010`; none.
+- Rollback/correction: preserve production validation unchanged, require the
+  canonical disposable assertion, and rerun both GitHub event matrices.

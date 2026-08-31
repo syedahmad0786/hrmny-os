@@ -107,3 +107,27 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 - Supersedes/superseded-by: none.
 - Rollback/correction: retarget only after the dependency lands or an equivalent
   reviewed commit becomes the base.
+
+## `TRADE-HRMNY-20260831-APOLLO-007` — two explicit database proof axes
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; commit
+  `2b62db13ea29b32f6a3a9eba850c285a596f6f3c`.
+- Decision/finding: disposable CI proves repository migration behavior without
+  pretending to be the legacy production database; production preflight proves
+  identity and retained historical invariants separately.
+- Reason: one permissive predicate would make CI convenient by weakening the
+  release boundary.
+- Alternatives considered: mutate fresh fixtures to mimic production; permit
+  either historical/canonical object names in the production guard.
+- Trade-offs: hosted CI cannot close production preflight, and the acceptance
+  ledger must show both states independently.
+- Evidence: third hosted matrix and the protected 0075 workflow contract.
+- Confidence/freshness: high.
+- Affected components: CI database proof, production migration checkpoint.
+- Status: accepted; hosted repair receipt pending.
+- Supersedes/superseded-by: none.
+- Rollback/correction: retain the stricter production identity check until an
+  explicit migration reconciles it.

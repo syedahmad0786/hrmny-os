@@ -78,7 +78,10 @@ lineage `6b82f165b3c552a2daa95c88d4010156aafbbcc1`, `d66be9d`,
   verifies fresh and 0074-to-0075 migration paths, retains only the disposable
   fresh database, runs the Phase 4c Sales proposal persistence proof, and then
   runs the distinct Apollo queue/concurrency/privacy proof against localhost
-  `hrmny_migration_fresh` with network fetch disabled.
+  `hrmny_migration_fresh` with network fetch disabled. The disposable verifier
+  must prove the canonical schema while explicitly remaining distinct from the
+  production-only reconciled legacy identity; only the protected production
+  preflight may require that identity aggregate.
 - Reason: prove database races, indexes, RLS, grants, and migration compatibility
   without touching production.
 - Alternatives considered: local memory proof; production smoke.

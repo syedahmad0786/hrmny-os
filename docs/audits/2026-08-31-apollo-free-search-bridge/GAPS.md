@@ -8,16 +8,18 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 
 ## `GAP-HRMNY-20260831-APOLLO-001` — hosted exact-SHA verification
 
-- Decision/finding: local gates passed, but the immutable review SHA has not
-  completed hosted lint, type, test, build, browser, security, preview, and
-  disposable PostgreSQL jobs.
+- Decision/finding: exact head `6828a1a` passed both hosted verify jobs and both
+  90-test browser jobs, but both disposable PostgreSQL jobs stopped on a
+  production-only legacy-identity assertion before the Sales/Apollo database
+  proofs. Repair commit `2b62db1` is not yet hosted-verified.
 - Reason: local worktree proof is not a hosted receipt.
 - Alternatives considered: infer acceptance from local output.
 - Trade-offs: review remains pending until terminal checks arrive.
-- Evidence: `EVID-HRMNY-20260831-APOLLO-001/002/004`.
+- Evidence: `EVID-HRMNY-20260831-APOLLO-001/002/004/010/011/012`.
 - Confidence/freshness: high.
 - Affected components: entire slice.
-- Status: open; next immediate dependency.
+- Status: open; exact repair-head database/verify/browser receipts are the next
+  immediate dependency.
 - Supersedes/superseded-by: supersedes
   `GAP-HRMNY-20260831-RESEARCH-002/004` only after hosted proof passes; none.
 - Rollback/correction: preserve failed jobs, correct forward, and rerun on the
