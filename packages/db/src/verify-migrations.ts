@@ -184,10 +184,21 @@ async function assertCurrentHead(connection: Sql): Promise<void> {
     "Browser Data API roles cannot access scheduled jobs.",
   );
 
+  // The accepted production database has an immutable legacy journal prefix
+  // plus reconciled M1 artifacts that a canonical fresh migration chain does
+  // not reproduce. Keep that identity distinction explicit: disposable proof
+  // validates 0075 itself, while the production guard alone requires the
+  // separately reviewed legacy contract.
+  const { priorContractReady, ...apollo0075Schema } =
+    await readApollo0075SchemaState(connection, "verify");
+  assert.equal(
+    priorContractReady,
+    false,
+    "Disposable migrations must not masquerade as the reconciled production legacy baseline.",
+  );
   assert.deepEqual(
-    await readApollo0075SchemaState(connection, "verify"),
+    apollo0075Schema,
     {
-      priorContractReady: true,
       namedColumnsPresent: 9,
       correctColumns: 9,
       namedConstraintsPresent: 3,
@@ -197,7 +208,7 @@ async function assertCurrentHead(connection: Sql): Promise<void> {
       securedTables: 2,
       backfillViolations: 0,
     },
-    "Shared production 0075 schema readback failed on the disposable database.",
+    "0075 schema readback failed on the disposable database.",
   );
 
   const [legacyBackfill] = await connection<Array<{ ok: boolean }>>`
@@ -340,10 +351,16 @@ async function assertExact0074Preflight(connection: Sql): Promise<void> {
       'apollo_people_search', now(), '{}'::jsonb
     )
   `;
+  const { priorContractReady, ...apollo0075Schema } =
+    await readApollo0075SchemaState(connection, "preflight");
+  assert.equal(
+    priorContractReady,
+    false,
+    "Canonical 0074 must remain distinct from the reconciled production legacy baseline.",
+  );
   assert.deepEqual(
-    await readApollo0075SchemaState(connection, "preflight"),
+    apollo0075Schema,
     {
-      priorContractReady: true,
       namedColumnsPresent: 0,
       correctColumns: 0,
       namedConstraintsPresent: 0,
@@ -353,7 +370,7 @@ async function assertExact0074Preflight(connection: Sql): Promise<void> {
       securedTables: 2,
       backfillViolations: 0,
     },
-    "Exact 0074 preflight schema or safe legacy backfill contract drifted.",
+    "Canonical 0074 preflight schema or safe legacy backfill contract drifted.",
   );
 }
 
