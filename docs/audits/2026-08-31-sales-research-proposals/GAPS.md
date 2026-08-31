@@ -6,20 +6,26 @@ not exposed)`; branch
 `ahmadbukhari097/codex/phase-4-sales-research-proposals-20260830`; commit
 `41145c85e799f6b906dfca23a37aea0894cc9582`.
 
-## `GAP-HRMNY-20260831-RESEARCH-001` — exact-SHA hosted gates
+## `GAP-HRMNY-20260831-RESEARCH-001` — external review completion
 
-- Decision/finding: local tests/static/build gates passed, but the immutable
-  review SHA has not yet completed hosted CI, browser, database, or preview
-  checks.
-- Reason: worktree proof is not a hosted receipt.
-- Alternatives considered: mark the commit accepted from local output.
-- Trade-offs: review remains open until terminal checks arrive.
-- Evidence: `EVID-HRMNY-20260831-RESEARCH-001/002`.
+- Decision/finding: duplicate hosted database, verification, 88-journey
+  browser, and Vercel review-preview gates passed at product head `dd732f3...`
+  and proof head `90fc72f...`. The separate Cursor security and approval
+  reviewers also passed both review heads.
+- Reason: terminal hosted execution and an external reviewer are distinct
+  acceptance states.
+- Alternatives considered: keep automated execution marked open; treat green
+  CI as external security approval; merge automatically.
+- Trade-offs: both review branches remain unmerged by release policy even
+  though this bounded synthetic review state is terminal.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-007/011/012/013/014`.
 - Confidence/freshness: high.
 - Affected components: entire slice.
-- Status: open.
+- Status: closed for synthetic implementation review; merge and every
+  operational acceptance state remain separate.
 - Supersedes/superseded-by: none.
-- Rollback/correction: fix failures on the branch and preserve negative runs.
+- Rollback/correction: preserve all negative and passing runs; correct forward
+  on regression and never infer merge or operational acceptance.
 
 ## `GAP-HRMNY-20260831-RESEARCH-002` — durable free-Apollo receipt
 
@@ -56,18 +62,26 @@ not exposed)`; branch
 - Rollback/correction: bind candidate hash, approver, expiry, request ID, and
   provider readback server-side before enabling.
 
-## `GAP-HRMNY-20260831-RESEARCH-004` — PostgreSQL and schema readback
+## `GAP-HRMNY-20260831-RESEARCH-004` — deployed schema readback
 
-- Decision/finding: memory behavior is proven, while disposable PostgreSQL
-  concurrency, migrations, indexes, RLS, grants, and deployed schema readback
-  are not yet accepted for this slice.
-- Reason: process-local locks and memory fixtures cannot prove database races.
+- Decision/finding: disposable PostgreSQL migrations and three concurrency
+  cases passed twice. Deployed-environment indexes, RLS, grants, migration
+  journal, and schema readback are not yet accepted for this slice.
+- Reason: isolated CI proves database behavior but not the identity or state of
+  a deployed destination.
 - Alternatives considered: infer from unit tests; exercise production.
-- Trade-offs: a separate safe CI proof slice is required.
-- Evidence: pending dependent PostgreSQL proof branch.
+- Trade-offs: deployed readback requires destination identity and a later
+  separately authorized production checkpoint.
+- Evidence: guarded proof commit
+  `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`, first TLS failure
+  `EVID-HRMNY-20260831-RESEARCH-008`, guarded TLS correction `53122fc...`,
+  runtime/cleanup receipt `EVID-HRMNY-20260831-RESEARCH-009`, non-destructive
+  correction `289721d...`, and duplicate passing runtime receipt
+  `EVID-HRMNY-20260831-RESEARCH-010`.
 - Confidence/freshness: high.
 - Affected components: Sales store, migrations, CI database runtime.
-- Status: open.
+- Status: disposable runtime closed; deployed-schema readback remains open and
+  production migration remains a separate human checkpoint.
 - Supersedes/superseded-by: none.
 - Rollback/correction: use disposable CI Postgres first; production migration
   remains a separate human checkpoint.

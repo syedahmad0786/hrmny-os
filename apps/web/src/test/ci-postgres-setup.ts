@@ -1,5 +1,11 @@
 const databaseUrl = process.env.DATABASE_URL?.trim();
-if (process.env.CI_POSTGRES_PROOF !== "true" || !databaseUrl) {
+if (
+  process.env.CI !== "true" ||
+  process.env.CI_POSTGRES_PROOF !== "true" ||
+  process.env.HRMNY_CI_POSTGRES_WRITE !== "true" ||
+  process.env.HRMNY_DATABASE_SSL_MODE !== "disable" ||
+  !databaseUrl
+) {
   throw new Error("CI_POSTGRES_PROOF_NOT_AUTHORIZED");
 }
 
