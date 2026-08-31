@@ -8,7 +8,8 @@
 - Implementation lineage: `6b82f165b3c552a2daa95c88d4010156aafbbcc1`
   (bridge), `d66be9d` (credentialed-redirect rejection), `a343a51`
   (Phase 4c dependency merge), `a6ed4e3` (CI setup isolation), and `8a94ef6`
-  (edge coverage and public-fixture hardening)
+  (edge coverage and public-fixture hardening), plus `bb75712` (first hosted
+  runtime/catalog repair)
 - Review: pending stacked pull request; do not merge automatically
 
 ## Outcome

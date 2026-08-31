@@ -5,7 +5,7 @@ Common record metadata: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
 not exposed)`; branch
 `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; implementation
 lineage `6b82f165b3c552a2daa95c88d4010156aafbbcc1`, `d66be9d`,
-`a343a51`, `a6ed4e3`, and `8a94ef6`; stacked base
+`a343a51`, `a6ed4e3`, `8a94ef6`, and `bb75712`; stacked base
 `ff80e3ac8befbd2075b537ce23018072b3790203`.
 
 ## `PROC-HRMNY-20260831-APOLLO-001` — safe synthetic verification

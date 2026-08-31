@@ -151,3 +151,45 @@ production migration, deployment, account change, or Xero write.
 - Supersedes/superseded-by: none.
 - Rollback/correction: keep test credentials synthetic and constructed; never
   waive a high finding without target-by-target proof.
+
+## `FAIL-HRMNY-20260831-APOLLO-008` — runtime contract treated a fail-fast stub as a Node workflow
+
+- Decision/finding: both initial hosted verify jobs failed because the Node 24
+  contract still expected the retired, dependency-free migration refusal stub
+  to configure Node, while omitting the new executable 0075 workflow.
+- Reason: the workflow inventory was not reconciled when the old runner became
+  a bash-only refusal path and the reviewed replacement was added.
+- Alternatives considered: add an unnecessary setup-node step or a matching
+  comment to the refusal stub; weaken the repository runtime contract.
+- Trade-offs: the test now enumerates the real Node workflow and separately
+  proves the old runner exits without Node, package, database, or secret access.
+- Evidence: failed verify jobs in GitHub Actions runs `33412756597` and
+  `33412781344`; corrected AI tests 56/56.
+- Confidence/freshness: high locally; corrected hosted receipt pending.
+- Affected components: runtime contract and production migration workflow
+  inventory.
+- Status: corrected locally before the next push.
+- Supersedes/superseded-by: none.
+- Rollback/correction: keep executable and refusal workflows in separate test
+  lists; never satisfy the contract with a comment-only pin.
+
+## `FAIL-HRMNY-20260831-APOLLO-009` — PostgreSQL rejected a smallint catalog argument
+
+- Decision/finding: both initial hosted database jobs reached the disposable
+  Supabase PostgreSQL service, applied migrations, and then failed discovery
+  because `pg_constraint.conkey[1]`/`confkey[1]` are `smallint` while
+  `pg_catalog.get_attname` requires an integer attribute number.
+- Reason: static/unit checks did not execute the catalog query and local Docker
+  was unavailable; the hosted runtime exposed the exact type boundary.
+- Alternatives considered: cast the function result or compare only constraint
+  names; remove exact column readback.
+- Trade-offs: explicit integer casts preserve the stronger foreign-key column
+  verification and remain compatible with the reviewed PostgreSQL runtime.
+- Evidence: failed database jobs in GitHub Actions runs `33412756597` and
+  `33412781344`; database lint/typecheck and 30/30 unit tests after correction.
+- Confidence/freshness: high for diagnosis; corrected hosted execution pending.
+- Affected components: migration 0075 schema discovery and hosted verifier.
+- Status: corrected locally before the next push.
+- Supersedes/superseded-by: none.
+- Rollback/correction: preserve explicit catalog argument types and require the
+  disposable PostgreSQL job for every discovery-query change.

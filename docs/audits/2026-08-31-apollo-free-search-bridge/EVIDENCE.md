@@ -191,3 +191,25 @@ destination, recovery, user, or production acceptance.
   `EVID-HRMNY-20260831-APOLLO-007`; none.
 - Rollback/correction: rerun after every source or PR-body change and block on
   any unresolved high finding.
+
+## `EVID-HRMNY-20260831-APOLLO-010` — first hosted run produced bounded repair evidence
+
+- Decision/finding: PR #244 triggered independent push and pull-request runs.
+  Both reproduced the same two failures: stale Node-workflow inventory in the
+  verify job and an exact PostgreSQL catalog argument-type mismatch in the
+  migration verifier. Neither failure reached Apollo, production, or a secret.
+- Reason: retain failures as useful runtime evidence instead of rerunning until
+  green without diagnosis.
+- Alternatives considered: rerun unchanged; weaken exact schema readback;
+  configure Node in the retired workflow.
+- Trade-offs: the review head must advance and all exact-head checks rerun.
+- Evidence: GitHub Actions runs `33412756597` and `33412781344`; repair commit
+  `bb75712`; AI 56/56, database 30/30, and a forced uncached root test run with
+  7/7 tasks, integrations 111/111, and web 712/712.
+- Confidence/freshness: high for reproduced failure and local repair; hosted
+  correction pending.
+- Affected components: CI verify, disposable PostgreSQL proof, evidence ledger.
+- Status: diagnostic evidence accepted; hosted acceptance remains open.
+- Supersedes/superseded-by: none.
+- Rollback/correction: push only the minimal repairs, then bind acceptance to the
+  new exact head after both event runs reach terminal green.
