@@ -339,7 +339,7 @@ async function assertExact0074Preflight(connection: Sql): Promise<void> {
       provider, external_event_id, operation, payload_hash, status
     ) values (
       'apollo', 'migration-0075-backfill-proof',
-      'people.search.zero-credit', repeat('b', 64), 'pending'
+      'people.search.zero-credit', repeat('b', 64), 'received'
     )
     returning integration_inbox_id
   `;
