@@ -68,7 +68,7 @@ result → next owner`.
 - Confidence/freshness: high; duplicate hosted success on 2026-08-31.
 - Affected components: GitHub Actions database job and Sales store.
 - Status: active procedural record; last successful hosted executions are jobs
-  `99408940527` and `99408959731`.
+  `99414196449` and `99414206335`.
 - Supersedes/superseded-by: none.
 - Rollback/correction: fail closed on any guard mismatch and remove the service
   with the CI job lifecycle.

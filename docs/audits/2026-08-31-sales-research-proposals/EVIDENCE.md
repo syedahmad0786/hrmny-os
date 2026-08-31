@@ -234,3 +234,114 @@ stated otherwise; none is provider, recovery, user, or production acceptance.
   `EVID-HRMNY-20260831-RESEARCH-008/009`; none.
 - Rollback/correction: preserve the jobs and logs; fix forward on regression
   without weakening TLS guards or append-only audit enforcement.
+
+## `EVID-HRMNY-20260831-RESEARCH-011` — provider/synthetic browser mismatch
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; product
+  head `5f79ea0a601691618dfa18f589db76c1269e2ed8`.
+- Decision/finding: push job `99405049509` and PR job `99405060099` each
+  started 88 Chromium tests, passed the first 27, then consumed their timeout
+  budget in legacy tests that attempted to fill the now-disabled Apollo query
+  field. Both jobs were cancelled at the 25-minute workflow limit.
+- Reason: retain the negative receipt and the source-level cause instead of
+  increasing timeouts or re-enabling provider mocks.
+- Alternatives considered: restore writable mock-provider fields; delete the
+  affected continuity tests; accept direct HTTP preview as browser proof.
+- Trade-offs: a separate synthetic input and updated tests were required.
+- Evidence: runs `33365456016` and `33365459564`; source inspection identified
+  the first blocking action as `fill` on `hunt-apollo-query`, which is
+  intentionally disabled when Apollo is disconnected.
+- Confidence/freshness: high for the logs; high-confidence source inference for
+  the blocking action because cancellation prevented Playwright's final error
+  summary.
+- Affected components: four synthetic Sales/delivery browser journeys.
+- Status: negative receipt preserved; corrected by `762ffec...`.
+- Supersedes/superseded-by: superseded by
+  `EVID-HRMNY-20260831-RESEARCH-012/014`.
+- Rollback/correction: retain fail-closed provider fields and route fixtures
+  through the explicit synthetic control only.
+
+## `EVID-HRMNY-20260831-RESEARCH-012` — corrected product browser head passed twice
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; product
+  head `762ffec1ca78137ed0d86778965abae7bb699010`.
+- Decision/finding: push E2E job `99412056704` and PR E2E job `99412067764`
+  each passed all 88 Chromium journeys in 1.5 and 1.6 minutes. The corrected
+  synthetic Apollo fixture, disconnected free search, Gate 1 desktop/mobile,
+  won handover, portal links, and client sandbox cases all passed.
+- Reason: establish Linux browser execution after the local Windows asset stall
+  and the provider/synthetic test mismatch.
+- Alternatives considered: rely on local source/build proof; accept one run;
+  weaken provider disconnection assertions.
+- Trade-offs: this proves deterministic synthetic/UI behavior, not provider,
+  named-user, recovery, or production acceptance.
+- Evidence: runs `33367816049` and `33367819821`; paired verify/database jobs
+  and both Vercel review previews also passed.
+- Confidence/freshness: high; read directly from GitHub on 2026-08-31.
+- Affected components: full browser suite and product review head.
+- Status: hosted synthetic browser accepted at the exact head.
+- Supersedes/superseded-by: supersedes `EVID-HRMNY-20260831-RESEARCH-004/011`;
+  reaffirmed by `EVID-HRMNY-20260831-RESEARCH-014`.
+- Rollback/correction: keep the browser boundary and block review on any future
+  provider-field or role-isolation regression.
+
+## `EVID-HRMNY-20260831-RESEARCH-013` — random-value privacy assertion flake
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; proof head
+  `cbc623ba7078782137891c7f7165e287bfaa4918`.
+- Decision/finding: push verify job `99412377647` failed one of 679 tests when
+  a random asset UUID contained `afee`; the portal test incorrectly searched
+  every serialized value for `fee`. Paired PR verify job `99412387184` passed
+  with a different UUID, confirming the probabilistic assertion.
+- Reason: preserve a deterministic explanation of the one-sided CI result and
+  strengthen the actual privacy check.
+- Alternatives considered: rerun until green; pin UUIDs; remove the portal
+  finance denial test.
+- Trade-offs: correction `dd732f3...` calls the same recursive forbidden-key
+  guard as the portal projection and retains separate leak-injection coverage.
+- Evidence: run `33367901444` failed only `m6.demo.test.ts`; paired run
+  `33367904814` passed. Ten repeated local file executions produced 120 passing
+  tests, followed by typecheck and lint success.
+- Confidence/freshness: high.
+- Affected components: portal payload security test; no runtime payload change.
+- Status: negative receipt preserved and correction confirmed by current runs.
+- Supersedes/superseded-by: superseded by
+  `EVID-HRMNY-20260831-RESEARCH-014`.
+- Rollback/correction: inspect keys/schema, never unconstrained random values,
+  when testing forbidden payload fields.
+
+## `EVID-HRMNY-20260831-RESEARCH-014` — terminal current-head synthetic gates
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; product
+  head `dd732f3ad76a71f208ba9e7c6e8de6899bcb2887`; proof head
+  `90fc72fbc2c02fbd8380aba6659efbd4b5dbb303`.
+- Decision/finding: product runs `33368491587/33368494829` and proof runs
+  `33368523215/33368526480` each passed database, verify, and E2E. All four E2E
+  jobs passed 88 tests in 1.3–1.5 minutes; proof database jobs `99414196449`
+  and `99414206335` each passed all three PostgreSQL concurrency cases.
+- Reason: bind the final reviewed source stack to duplicate hosted execution
+  after both browser and privacy-test corrections.
+- Alternatives considered: rely on earlier pre-rebase runs; accept only the PR
+  event; infer the proof from unchanged patches.
+- Trade-offs: external security review remained a separate status and passed
+  both heads; none of these receipts authorizes merge, production, provider,
+  recovery, or UAT.
+- Evidence: verify jobs `99414099715`, `99414109530`, `99414196542`, and
+  `99414206600`; E2E jobs `99414099819`, `99414109840`, `99414196237`, and
+  `99414206658`; four passing database jobs; both Vercel review deployments
+  passed for each PR; Cursor security reviewers
+  `bc-47acb3bb-8b87-4e31-adb6-5697d9236a4c` and
+  `bc-16f3c348-0a7e-48b4-ace4-8a62aa47c725` passed.
+- Confidence/freshness: high; read directly from GitHub on 2026-08-31.
+- Affected components: complete Phase 4 product/proof review stack.
+- Status: synthetic code, database, browser, preview, approval, and security
+  review gates accepted; merge and all operational acceptance remain
+  separate.
+- Supersedes/superseded-by: supersedes pending exact-head hosted gate claims;
+  none.
+- Rollback/correction: do not merge automatically; retain the run/job receipts
+  and correct forward on any later gate regression.

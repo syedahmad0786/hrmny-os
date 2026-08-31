@@ -6,21 +6,26 @@ not exposed)`; branch
 `ahmadbukhari097/codex/phase-4-sales-research-proposals-20260830`; commit
 `41145c85e799f6b906dfca23a37aea0894cc9582`.
 
-## `GAP-HRMNY-20260831-RESEARCH-001` — exact-SHA hosted gates
+## `GAP-HRMNY-20260831-RESEARCH-001` — external review completion
 
-- Decision/finding: local tests/static/build gates passed. The first immutable
-  core-only SHA failed because the server/UI split was not independently
-  buildable; corrected product head `5f79ea0...` and proof head `2f204e0...`
-  have not yet completed all hosted CI, browser, database, or preview checks.
-- Reason: worktree proof is not a hosted receipt.
-- Alternatives considered: mark the commit accepted from local output.
-- Trade-offs: review remains open until terminal checks arrive.
-- Evidence: `EVID-HRMNY-20260831-RESEARCH-001/002/007`.
+- Decision/finding: duplicate hosted database, verification, 88-journey
+  browser, and Vercel review-preview gates passed at product head `dd732f3...`
+  and proof head `90fc72f...`. The separate Cursor security and approval
+  reviewers also passed both review heads.
+- Reason: terminal hosted execution and an external reviewer are distinct
+  acceptance states.
+- Alternatives considered: keep automated execution marked open; treat green
+  CI as external security approval; merge automatically.
+- Trade-offs: both review branches remain unmerged by release policy even
+  though this bounded synthetic review state is terminal.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-007/011/012/013/014`.
 - Confidence/freshness: high.
 - Affected components: entire slice.
-- Status: open.
+- Status: closed for synthetic implementation review; merge and every
+  operational acceptance state remain separate.
 - Supersedes/superseded-by: none.
-- Rollback/correction: fix failures on the branch and preserve negative runs.
+- Rollback/correction: preserve all negative and passing runs; correct forward
+  on regression and never infer merge or operational acceptance.
 
 ## `GAP-HRMNY-20260831-RESEARCH-002` — durable free-Apollo receipt
 

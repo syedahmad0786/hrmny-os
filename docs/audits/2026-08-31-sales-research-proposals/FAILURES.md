@@ -148,3 +148,48 @@ not exposed)`; branch
   `289721d...` and passing receipt `EVID-HRMNY-20260831-RESEARCH-010`.
 - Rollback/correction: preserve append-only enforcement and correct proof data
   isolation instead of changing the operational invariant.
+
+## `FAIL-HRMNY-20260831-RESEARCH-008` — synthetic tests reused a disabled provider field
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; product
+  head `5f79ea0a601691618dfa18f589db76c1269e2ed8`.
+- Decision/finding: legacy synthetic browser journeys tried to type fixture
+  company names into the real Apollo query input after the product correctly
+  made it read-only while disconnected.
+- Reason: provider and fixture controls had shared client state before the
+  fail-closed boundary was introduced.
+- Alternatives considered: enable the provider form in mock mode; increase
+  Playwright timeouts; drop downstream continuity tests.
+- Trade-offs: correction adds a separate synthetic input in collapsed test
+  tools and preserves both provider truth and continuity coverage.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-011/012`.
+- Confidence/freshness: high.
+- Affected components: Hunt and four browser journeys.
+- Status: corrected in `762ffec...`; duplicate hosted browser proof passed.
+- Supersedes/superseded-by: superseded by `ADR-HRMNY-20260831-RESEARCH-005`.
+- Rollback/correction: never couple fixture data entry to a disabled provider
+  control.
+
+## `FAIL-HRMNY-20260831-RESEARCH-009` — portal regex matched a random UUID
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; proof run
+  `33367901444`.
+- Decision/finding: an assertion looking for `fee` anywhere in serialized
+  portal data failed when a random UUID contained those letters; the paired
+  run passed with another UUID.
+- Reason: value-wide substring matching did not represent the actual forbidden
+  field boundary.
+- Alternatives considered: retry until green; seed fixed UUIDs; remove the
+  portal privacy assertion.
+- Trade-offs: the corrected test delegates recursive key validation to the
+  production portal guard and retains explicit forbidden-key failure coverage.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-013/014`.
+- Confidence/freshness: high.
+- Affected components: one M6 portal test; no runtime data path.
+- Status: corrected in `dd732f3...`; duplicate current verify runs passed.
+- Supersedes/superseded-by: superseded by
+  `RSN-HRMNY-20260831-RESEARCH-003`.
+- Rollback/correction: assert payload keys/schema, not arbitrary generated
+  values.

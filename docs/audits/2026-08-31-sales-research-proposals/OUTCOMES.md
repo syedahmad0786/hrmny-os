@@ -83,3 +83,26 @@ not exposed)`; branch
   `GAP-HRMNY-20260831-RESEARCH-004`; none.
 - Rollback/correction: retain exact tests and fail the review gate on any
   regression.
+
+## `OUT-HRMNY-20260831-RESEARCH-005` — Phase 4 synthetic review gates accepted
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; PRs
+  #241/#243; heads `dd732f3...`/`90fc72f...`.
+- Decision/finding: duplicate current-head unit/build, disposable PostgreSQL,
+  88-journey Chromium, and Vercel review-preview gates passed; the separate
+  approval and security reviewers passed both review heads.
+- Reason: close the bounded synthetic implementation phase before advancing to
+  durable provider bridge work.
+- Alternatives considered: merge immediately; call provider/live/recovery/UAT
+  states accepted; continue without preserving negative receipts.
+- Trade-offs: PRs remain unmerged and operational acceptance states remain
+  open by design.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-014`.
+- Confidence/freshness: high.
+- Affected components: Sales research, Gate 1, role/UI boundaries, synthetic
+  continuity, portal denial assertion, PostgreSQL proof.
+- Status: synthetic review accepted; no production or live-provider claim.
+- Supersedes/superseded-by: supersedes the hosted-gate portion of
+  `GAP-HRMNY-20260831-RESEARCH-001`; none.
+- Rollback/correction: retain PR separation and receipts; no automatic merge.

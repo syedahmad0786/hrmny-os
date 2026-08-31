@@ -14,8 +14,9 @@
   branch; neither `main` nor production changed.
 - PostgreSQL proof branch:
   `ahmadbukhari097/codex/phase-4c-sales-postgres-proof-20260831`
-- PostgreSQL proof implementation:
-  `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`
+- PostgreSQL proof implementation: original execution lineage
+  `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`; current rebased equivalent
+  `fd5bc4443b9b0016becf2d04cb89f978f9f8c31d`
 - PostgreSQL proof review: PR #243
 
 ## Outcome
@@ -62,6 +63,10 @@ connection still require TLS. The next run reached the tests and exposed
 destructive cleanup against append-only audit history; correction `289721d...`
 replaced cleanup with unique, request-scoped fixtures. Push and PR database
 jobs `99408940527` and `99408959731` then each passed all three tests.
+Current-head jobs `99414196449` and `99414206335` repeated the same three-test
+success after the review stack was rebased.
+The separate Cursor approval and security reviewers also passed the current
+product and proof heads. The PRs remain unmerged by release policy.
 
 ## Review-stack correction
 
@@ -75,19 +80,19 @@ feature-branch-only incorporation are retained in the failure/evidence ledger.
 
 ## Acceptance state
 
-| State                | Result                                                                                            |
-| -------------------- | ------------------------------------------------------------------------------------------------- |
-| planned              | yes                                                                                               |
-| documented           | yes                                                                                               |
-| authorized           | local code/test and review preview only                                                           |
-| configured           | synthetic memory runtime plus guarded disposable-PostgreSQL proof                                 |
-| tested               | local gates and duplicate hosted PostgreSQL runtime passed; hosted browser terminal state pending |
-| deployed             | corrected #241 review previews passed; no production deployment                                   |
-| provider accepted    | no                                                                                                |
-| destination verified | no                                                                                                |
-| recovery verified    | no                                                                                                |
-| user accepted        | no                                                                                                |
-| production accepted  | no                                                                                                |
+| State                | Result                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------- |
+| planned              | yes                                                                                |
+| documented           | yes                                                                                |
+| authorized           | local code/test and review preview only                                            |
+| configured           | synthetic memory runtime plus guarded disposable-PostgreSQL proof                  |
+| tested               | duplicate current-head unit/build, PostgreSQL, and 88-journey browser gates passed |
+| deployed             | current #241 and #243 review previews passed; no production deployment             |
+| provider accepted    | no                                                                                 |
+| destination verified | no                                                                                 |
+| recovery verified    | no                                                                                 |
+| user accepted        | no                                                                                 |
+| production accepted  | no                                                                                 |
 
 ## Package
 
