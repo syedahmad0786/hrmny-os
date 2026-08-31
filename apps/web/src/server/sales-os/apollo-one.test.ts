@@ -104,6 +104,24 @@ describe("Apollo one-person connection canary", () => {
     });
   });
 
+  it("fails closed instead of returning synthetic people when Apollo is absent", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      searchApolloPeopleFree(
+        { titles: ["Marketing Director"], actorEmployeeId: "employee-1" },
+        {
+          resolveApiKey: vi.fn(async () => ({
+            apiKey: null,
+            source: "none" as const,
+          })),
+        },
+      ),
+    ).rejects.toThrow(/APOLLO_FREE_SEARCH_CONNECTION_REQUIRED/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("uses the same staff vault bridge for the bounded People Match canary", async () => {
     const fetchMock = vi.fn(
       async (_input: string | URL | Request, _init?: RequestInit) =>
