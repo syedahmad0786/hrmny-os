@@ -83,3 +83,28 @@ commit `41145c85e799f6b906dfca23a37aea0894cc9582`.
 - Supersedes/superseded-by: removes unsupported role assumptions; none.
 - Rollback/correction: update identity provisioning and server policy together,
   with denial regression tests.
+
+## `ADR-HRMNY-20260831-RESEARCH-005` — separate provider and synthetic inputs
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; branch
+  `ahmadbukhari097/codex/phase-4-sales-research-proposals-20260830`; commit
+  `762ffec1ca78137ed0d86778965abae7bb699010`.
+- Decision/finding: disconnected Apollo fields remain disabled; the collapsed
+  acceptance tools use a separate, clearly labeled synthetic-company input
+  available only when the complete inert synthetic-runtime policy passes.
+- Reason: test fixtures must not require, enable, or visually impersonate the
+  real provider surface.
+- Alternatives considered: re-enable mock Apollo on the normal field; delete
+  downstream browser coverage; silently seed a fixed company.
+- Trade-offs: acceptance tests perform one extra explicit input step, while
+  provider truth and synthetic lineage stay unambiguous.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-011/012`.
+- Confidence/freshness: high.
+- Affected components: Hunt provider form, synthetic tools, downstream Sales
+  and delivery browser journeys.
+- Status: implemented and duplicate hosted browser accepted.
+- Supersedes/superseded-by: refines the synthetic containment portion of
+  `ADR-HRMNY-20260831-RESEARCH-001`; none.
+- Rollback/correction: preserve separate state and labels; never make a real
+  provider field writable merely to support fixtures.

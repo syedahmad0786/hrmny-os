@@ -61,3 +61,48 @@ not exposed)`; branch
 - Supersedes/superseded-by: replaces the obsolete visible mock-research action;
   none.
 - Rollback/correction: preserve read-only and fail-closed states in any revert.
+
+## `OUT-HRMNY-20260831-RESEARCH-004` — synthetic PostgreSQL runtime accepted
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; PR #243;
+  head `a31cf23fbbfdcfe99903df38fe3d455c9ec4373e`.
+- Decision/finding: two independent hosted jobs passed the complete disposable
+  PostgreSQL proposal/Gate 1 concurrency proof.
+- Reason: close the process-local-behavior uncertainty before implementing the
+  next provider bridge.
+- Alternatives considered: retain the gap after passing jobs; exercise a
+  deployed database before review.
+- Trade-offs: synthetic database acceptance is closed while deployed schema,
+  browser, provider, recovery, user, and production states remain separate.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-010`.
+- Confidence/freshness: high.
+- Affected components: Sales persistence and Gate 1 transaction boundary.
+- Status: accepted for the disposable PostgreSQL runtime.
+- Supersedes/superseded-by: supersedes the runtime portion of
+  `GAP-HRMNY-20260831-RESEARCH-004`; none.
+- Rollback/correction: retain exact tests and fail the review gate on any
+  regression.
+
+## `OUT-HRMNY-20260831-RESEARCH-005` — Phase 4 synthetic review gates accepted
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; PRs
+  #241/#243; heads `dd732f3...`/`90fc72f...`.
+- Decision/finding: duplicate current-head unit/build, disposable PostgreSQL,
+  88-journey Chromium, and Vercel review-preview gates passed; the separate
+  approval and security reviewers passed both review heads.
+- Reason: close the bounded synthetic implementation phase before advancing to
+  durable provider bridge work.
+- Alternatives considered: merge immediately; call provider/live/recovery/UAT
+  states accepted; continue without preserving negative receipts.
+- Trade-offs: PRs remain unmerged and operational acceptance states remain
+  open by design.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-014`.
+- Confidence/freshness: high.
+- Affected components: Sales research, Gate 1, role/UI boundaries, synthetic
+  continuity, portal denial assertion, PostgreSQL proof.
+- Status: synthetic review accepted; no production or live-provider claim.
+- Supersedes/superseded-by: supersedes the hosted-gate portion of
+  `GAP-HRMNY-20260831-RESEARCH-001`; none.
+- Rollback/correction: retain PR separation and receipts; no automatic merge.

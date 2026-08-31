@@ -11,10 +11,39 @@ export { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
 
 export type Db = ReturnType<typeof createDb>;
 
+type DatabaseSslEnvironment = Record<string, string | undefined>;
+
+const localDatabaseHosts = new Set(["127.0.0.1", "localhost", "postgres"]);
+
+export function resolveDatabaseSsl(
+  connectionString: string,
+  environment: DatabaseSslEnvironment = process.env,
+): "require" | false {
+  const mode = (
+    environment.HRMNY_DATABASE_SSL_MODE ?? "require"
+  ).trim().toLowerCase();
+  if (mode === "require") return "require";
+  if (mode !== "disable") {
+    throw new Error(
+      "HRMNY_DATABASE_SSL_MODE must be require or disable",
+    );
+  }
+
+  const target = new URL(connectionString);
+  const disposableCi =
+    environment.CI === "true" &&
+    environment.HRMNY_CI_POSTGRES_WRITE === "true" &&
+    localDatabaseHosts.has(target.hostname);
+  if (!disposableCi) {
+    throw new Error("DATABASE_SSL_DISABLE_FORBIDDEN");
+  }
+  return false;
+}
+
 export function createDb(connectionString: string) {
   const client = postgres(connectionString, {
     prepare: false,
-    ssl: "require",
+    ssl: resolveDatabaseSsl(connectionString),
     max: 1,
     // Fail fast when the DB is unreachable (e.g. IPv6-only direct host from a
     // serverless function) — a bounded error reaches the UI's retry screen;
@@ -34,7 +63,11 @@ export async function pingDatabase(connectionString: string | undefined) {
   const url = connectionString?.trim();
   if (!url) return { ok: false as const, error: "DATABASE_URL not set" };
 
-  const sql = postgres(url, { ssl: "require", max: 1, connect_timeout: 10 });
+  const sql = postgres(url, {
+    ssl: resolveDatabaseSsl(url),
+    max: 1,
+    connect_timeout: 10,
+  });
   try {
     await sql`select 1`;
     const tables = await sql`
