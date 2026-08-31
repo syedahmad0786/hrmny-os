@@ -39,22 +39,15 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect(page.locator("body")).toContainText(/apollo/i);
   });
 
-  test("free people search returns reviewable candidates without enriching", async ({
+  test("free people search fails closed when Apollo is not connected", async ({
     page,
   }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
-    await page.getByTestId("hunt-apollo-title").fill("Marketing Director");
-    await page.getByTestId("hunt-apollo-query").fill("retail");
-    await page.getByTestId("hunt-apollo-search").click();
-    await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
-      /0 credits/i,
-      { timeout: 30_000 },
-    );
-    await expect(page.getByTestId("hunt-apollo-results")).toBeVisible();
-    await expect(
-      page.getByTestId("hunt-apollo-enrich-one").first(),
-    ).toBeVisible();
+    const search = page.getByTestId("hunt-apollo-search");
+    await expect(search).toBeDisabled({ timeout: 60_000 });
+    await expect(search).toHaveText(/Connect Apollo to search/i);
+    await expect(page.getByTestId("hunt-apollo-results")).toHaveCount(0);
   });
 
   test("Sales Growth remains navigable at a narrow client viewport", async ({

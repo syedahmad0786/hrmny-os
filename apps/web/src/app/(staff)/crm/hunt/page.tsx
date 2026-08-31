@@ -69,6 +69,7 @@ export default function HuntClientsPage() {
     };
   }, []);
 
+  const salesAccess = trpc.salesOs.access.useQuery();
   const apolloStatus = trpc.salesOs.apollo.status.useQuery();
   const freeSearch = trpc.salesOs.apollo.search.useMutation({
     onSuccess: (payload) => {
@@ -242,9 +243,16 @@ export default function HuntClientsPage() {
             <span className="growth-cost-badge">0 credits</span>
           </div>
           <p className="growth-panel-copy">
-            Apollo People Search is read-only and free. Review the people first;
-            the separate one-person button is the only paid action enabled.
+            Connected Apollo People Search is read-only and free. Synthetic
+            people stay hidden. The separate one-person button is the only paid
+            action enabled.
           </p>
+          {salesAccess.data && !salesAccess.data.canOperate ? (
+            <p className="growth-status" role="status">
+              View only. A Sales operator must run provider searches or paid
+              enrichment.
+            </p>
+          ) : null}
           <form
             className="growth-search-form"
             onSubmit={(event) => {
@@ -263,6 +271,7 @@ export default function HuntClientsPage() {
                 <input
                   id="apollo-title"
                   data-testid="hunt-apollo-title"
+                  disabled={!salesAccess.data?.canOperate || !apolloConnected}
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="e.g. Marketing Director"
@@ -274,6 +283,7 @@ export default function HuntClientsPage() {
                 <input
                   id="apollo-query"
                   data-testid="hunt-apollo-query"
+                  disabled={!salesAccess.data?.canOperate || !apolloConnected}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="e.g. hospitality"
@@ -287,11 +297,18 @@ export default function HuntClientsPage() {
               <button
                 type="submit"
                 data-testid="hunt-apollo-search"
-                disabled={freeSearch.isPending || title.trim().length < 2}
+                disabled={
+                  !salesAccess.data?.canOperate ||
+                  !apolloConnected ||
+                  freeSearch.isPending ||
+                  title.trim().length < 2
+                }
               >
                 {freeSearch.isPending
                   ? "Searching…"
-                  : "Search Apollo · 0 credits"}
+                  : !apolloConnected
+                    ? "Connect Apollo to search"
+                    : "Search Apollo · 0 credits"}
               </button>
             </div>
           </form>
@@ -344,7 +361,9 @@ export default function HuntClientsPage() {
                       type="button"
                       data-testid="hunt-apollo-enrich-one"
                       disabled={
-                        enrichOne.isPending || !apolloStatus.data?.available
+                        !salesAccess.data?.canOperate ||
+                        enrichOne.isPending ||
+                        !apolloStatus.data?.available
                       }
                       onClick={() => approveOne(candidate)}
                     >
