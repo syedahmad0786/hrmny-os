@@ -2401,6 +2401,34 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
   line-height: 1.55;
 }
 
+.growth-test-input {
+  display: block;
+  max-width: 520px;
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.growth-test-input input {
+  display: block;
+  width: 100%;
+  min-height: 43px;
+  min-width: 0;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0 13px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .growth-test-actions button {
   border-color: var(--line);
   background: #fff;

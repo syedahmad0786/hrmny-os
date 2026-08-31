@@ -52,6 +52,7 @@ export default function HuntClientsPage() {
   const [searchNote, setSearchNote] = useState<string | null>(null);
   const [title, setTitle] = useState("Marketing Director");
   const [query, setQuery] = useState("");
+  const [syntheticCompany, setSyntheticCompany] = useState("");
   const [lastApolloDealId, setLastApolloDealId] = useState<string | null>(null);
   const [ready, setReady] = useState<ReadySmoke | null>(null);
   const utils = trpc.useUtils();
@@ -471,22 +472,32 @@ export default function HuntClientsPage() {
               These controls support local/acceptance testing. They are
               collapsed so the client workflow stays focused.
             </p>
+            <label className="growth-test-input" htmlFor="synthetic-company">
+              Synthetic company label
+              <input
+                id="synthetic-company"
+                data-testid="hunt-synthetic-company"
+                value={syntheticCompany}
+                onChange={(event) => setSyntheticCompany(event.target.value)}
+                placeholder="e.g. E2E Northstar 001"
+                minLength={2}
+              />
+            </label>
             <div className="growth-test-actions">
               <button
                 type="button"
                 data-testid="hunt-apollo-prospect"
                 disabled={
-                  apolloImport.isPending ||
-                  (query.trim() || title.trim()).length < 2
+                  apolloImport.isPending || syntheticCompany.trim().length < 2
                 }
                 onClick={() => {
                   setResult(null);
-                  apolloImport.mutate({ query: query.trim() || title.trim() });
+                  apolloImport.mutate({ query: syntheticCompany.trim() });
                 }}
               >
                 {apolloImport.isPending
                   ? "Importing…"
-                  : "Create mock Apollo deal"}
+                  : "Create synthetic Apollo fixture"}
               </button>
               <button
                 type="button"
@@ -501,12 +512,12 @@ export default function HuntClientsPage() {
               <button
                 type="button"
                 data-testid="hunt-closed-loop-apollo"
-                disabled={demo.isPending}
+                disabled={demo.isPending || syntheticCompany.trim().length < 2}
                 onClick={() => {
                   setResult(null);
                   demo.mutate({
                     viaApollo: true,
-                    companyName: query.trim() || title.trim() || undefined,
+                    companyName: syntheticCompany.trim(),
                   });
                 }}
               >
