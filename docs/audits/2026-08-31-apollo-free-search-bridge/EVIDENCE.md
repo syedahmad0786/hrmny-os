@@ -119,3 +119,75 @@ destination, recovery, user, or production acceptance.
 - Supersedes/superseded-by: supersedes remediated findings in
   `FAIL-HRMNY-20260831-APOLLO-004`; none.
 - Rollback/correction: repeat bounded review after material fixes.
+
+## `EVID-HRMNY-20260831-APOLLO-007` — corrected stacked head verification
+
+- Decision/finding: Phase 4c head
+  `ff80e3ac8befbd2075b537ce23018072b3790203` is now the exact review base.
+  The Apollo redirect repair is `d66be9d`; the dependency merge is `a343a51`;
+  the setup-module repair is `a6ed4e3`. On that source state, root lint passed
+  7/7, typecheck 7/7, test 7/7, database 30/30, integrations 100/100, web
+  702/702, and build 2/2. YAML/JSON parse, conflict scan, diff check, and a
+  high-confidence secret scan passed.
+- Reason: bind local acceptance to the actual stacked dependency and corrected
+  transport, not the earlier sibling source state.
+- Alternatives considered: preserve the old dependency receipt; wait for CI
+  before recording local failures and corrections.
+- Trade-offs: hosted disposable PostgreSQL and full Linux browser execution are
+  still required for exact-SHA hosted acceptance.
+- Evidence: local terminal receipts and three independent read-only audits.
+- Confidence/freshness: high locally at commit `a6ed4e3`.
+- Affected components: full review slice, CI, database proof, Apollo transport.
+- Status: local synthetic/static/build accepted; hosted and every operational
+  state remain open.
+- Supersedes/superseded-by: supersedes the dependency/head scope of
+  `EVID-HRMNY-20260831-APOLLO-001/002/006`; none.
+- Rollback/correction: rerun all gates after any further source change and bind
+  the hosted receipt to the final pushed SHA.
+
+## `EVID-HRMNY-20260831-APOLLO-008` — path coverage reaches the review target
+
+- Decision/finding: an independent GStack-style coverage map initially found
+  21/30 path groups (70%). Three bounded offline test additions cover provider
+  transport/parse/error taxonomy, criteria normalization/clamping, and Inngest
+  terminal/dispatch branches, raising the static map to 24/30 (80%).
+- Reason: meet the review target before publication without widening the
+  provider or production scope.
+- Alternatives considered: publish at the 60% minimum; add broad UI or database
+  changes during ship preparation.
+- Trade-offs: six lower-priority coverage groups remain in the explicit backlog;
+  no production source changed for this improvement.
+- Evidence: 26/26 focused Apollo adapter tests, 111/111 full integrations tests,
+  17/17 focused durable-search tests, 11/11 focused Inngest tests, and the final
+  full local gates: lint 7/7, typecheck 7/7, test 7/7 including web 712/712 and
+  database 30/30, plus build 2/2.
+- Confidence/freshness: high locally for the source and tests represented by
+  this record; exact-SHA hosted execution remains pending.
+- Affected components: Apollo adapter, durable search contract, Inngest bridge,
+  review acceptance.
+- Status: local review target met; hosted/operational acceptance absent.
+- Supersedes/superseded-by: extends
+  `EVID-HRMNY-20260831-APOLLO-007`; none.
+- Rollback/correction: preserve the deterministic tests and rerun the coverage
+  map after material control-flow changes.
+
+## `EVID-HRMNY-20260831-APOLLO-009` — public-diff redaction gate
+
+- Decision/finding: the final added-line scan reports zero high-severity secret
+  findings. Medium matches resolve to deterministic UUID/timestamp fixtures and
+  one explicitly synthetic phone fixture in an adapter test; no real identity
+  or customer data was found.
+- Reason: the canonical repository is public and every candidate secret/PII
+  signal must be resolved before push.
+- Alternatives considered: rely only on an earlier regex scan; treat synthetic
+  database URLs as acceptable high findings.
+- Trade-offs: fixture construction is slightly more verbose and safer to review.
+- Evidence: GStack public-repository added-line scan, exact-location masked
+  classification, and `FAIL-HRMNY-20260831-APOLLO-007` correction.
+- Confidence/freshness: high on the final local review candidate.
+- Affected components: full Phase 4d diff and PR publication boundary.
+- Status: local redaction gate passed; hosted security checks pending.
+- Supersedes/superseded-by: extends the high-confidence secret scan in
+  `EVID-HRMNY-20260831-APOLLO-007`; none.
+- Rollback/correction: rerun after every source or PR-body change and block on
+  any unresolved high finding.

@@ -4,7 +4,9 @@ Common record metadata: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
 `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
 not exposed)`; branch
 `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; implementation
-commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
+lineage `6b82f165b3c552a2daa95c88d4010156aafbbcc1`, `d66be9d`,
+`a343a51`, `a6ed4e3`, and `8a94ef6`; stacked base
+`ff80e3ac8befbd2075b537ce23018072b3790203`.
 
 ## `PROC-HRMNY-20260831-APOLLO-001` — safe synthetic verification
 
@@ -74,13 +76,15 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 
 - Decision/finding: hosted CI starts the pinned Supabase PostgreSQL service,
   verifies fresh and 0074-to-0075 migration paths, retains only the disposable
-  fresh database for the next step, then runs exact Apollo concurrency/privacy
-  tests against localhost `hrmny_migration_fresh` with network fetch disabled.
+  fresh database, runs the Phase 4c Sales proposal persistence proof, and then
+  runs the distinct Apollo queue/concurrency/privacy proof against localhost
+  `hrmny_migration_fresh` with network fetch disabled.
 - Reason: prove database races, indexes, RLS, grants, and migration compatibility
   without touching production.
 - Alternatives considered: local memory proof; production smoke.
 - Trade-offs: proof depends on hosted runner availability.
-- Evidence: CI database job and setup fail-closed guards.
+- Evidence: CI database job; distinct `test:ci:postgres` and
+  `test:ci:apollo-postgres` commands; both setup modules' fail-closed guards.
 - Confidence/freshness: high for design; execution pending.
 - Affected components: CI, PostgreSQL, migration 0075, bridge concurrency.
 - Status: pending exact-SHA hosted receipt.
@@ -88,9 +92,12 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
   `GAP-HRMNY-20260831-RESEARCH-004` after success.
 - Rollback/correction: allow teardown of the disposable CI service only; never
   permit non-local host or another database name.
-- Prerequisites/permissions: review branch; GitHub-hosted ephemeral service; no
-  production secret.
-- Tests: migration verifier plus `apollo-search-postgres.test.ts`.
+- Prerequisites/permissions: review branch stacked on Phase 4c; GitHub-hosted
+  ephemeral service; `CI=true`; explicit CI write/proof gates; loopback host;
+  exact disposable database; no production secret. Plaintext TLS is permitted
+  only for this fully gated loopback tuple; every other target defaults to TLS.
+- Tests: migration verifier, Sales proposal PostgreSQL proof, and
+  `apollo-search-postgres.test.ts` through separate configurations.
 
 ## `PROC-HRMNY-20260831-APOLLO-005` — production migration 0075 checkpoint
 

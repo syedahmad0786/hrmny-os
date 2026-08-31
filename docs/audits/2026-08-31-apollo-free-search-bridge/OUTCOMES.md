@@ -76,3 +76,23 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 - Supersedes/superseded-by: none.
 - Rollback/correction: stop on any unexpected external receipt and investigate
   before further work.
+
+## `OUTCOME-HRMNY-20260831-APOLLO-005` — review stack and credential boundary repaired
+
+- Decision/finding: the branch now stacks on the proven Phase 4c PostgreSQL
+  boundary, preserves both distinct database proofs, and rejects every
+  credentialed Apollo redirect. Independent re-review found no remaining P0/P1.
+- Reason: source review must close security and hosted-execution blockers before
+  publication.
+- Alternatives considered: publish with expected CI failure; defer the redirect
+  leak; overwrite the prior proof path.
+- Trade-offs: two P2 gaps remain explicit and block later live/UAT acceptance.
+- Evidence: `FAIL-HRMNY-20260831-APOLLO-005/006`,
+  `EVID-HRMNY-20260831-APOLLO-007`, and commits `d66be9d/a343a51/a6ed4e3`.
+- Confidence/freshness: high locally.
+- Affected components: Apollo adapter, CI, PostgreSQL proof, acceptance ledger.
+- Status: source/local gates complete; hosted and operational states open.
+- Supersedes/superseded-by: supersedes the earlier sibling-base readiness claim;
+  none.
+- Rollback/correction: preserve the stacked dependency and fail-closed redirect
+  contract; update the ledger with the exact final hosted SHA.

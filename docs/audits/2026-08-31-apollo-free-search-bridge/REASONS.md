@@ -75,3 +75,38 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 - Supersedes/superseded-by: corrects the scope of older acceptance claims; none.
 - Rollback/correction: retain revision-bound receipt identity in every future
   acceptance record.
+
+## `REASON-HRMNY-20260831-APOLLO-005` — redirects are an authentication boundary
+
+- Decision/finding: a credentialed provider call treats every redirect as an
+  error before a second network request can be made.
+- Reason: redirect following changes the destination after authorization and
+  can expose an employee's provider key outside the reviewed origin.
+- Alternatives considered: rely on provider reputation; inspect only the final
+  URL; allow redirects in paid code because that path is currently locked.
+- Trade-offs: fail-closed behavior may surface a provider routing change, which
+  is preferable to silent credential disclosure.
+- Evidence: `ADR-HRMNY-20260831-APOLLO-008` and commit `d66be9d`.
+- Confidence/freshness: high.
+- Affected components: Apollo transport and employee connection isolation.
+- Status: implemented.
+- Supersedes/superseded-by: none.
+- Rollback/correction: review a new destination and authorization model before
+  permitting any redirect.
+
+## `REASON-HRMNY-20260831-APOLLO-006` — reuse the proven CI database boundary
+
+- Decision/finding: Phase 4c's loopback-only plaintext exception is inherited
+  instead of recreated, and Apollo retains a separate proof command/database.
+- Reason: one shared, narrowly gated transport policy prevents drift while
+  distinct commands keep each acceptance receipt attributable.
+- Alternatives considered: separate SSL implementations; one combined opaque
+  database test; production database proof.
+- Trade-offs: this slice cannot publish independently of Phase 4c.
+- Evidence: `ADR-HRMNY-20260831-APOLLO-009` and the merged CI job.
+- Confidence/freshness: high locally.
+- Affected components: CI, PostgreSQL connection policy, proof attribution.
+- Status: implemented; hosted execution pending.
+- Supersedes/superseded-by: none.
+- Rollback/correction: preserve both fail-closed setup modules and commands if
+  the stack is reordered.

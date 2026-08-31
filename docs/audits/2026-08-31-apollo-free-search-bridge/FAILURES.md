@@ -84,3 +84,70 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 
 No failed path called a live provider, consumed a credit, sent a message,
 migrated production, deployed a revision, changed an account, or wrote Xero.
+
+## `FAIL-HRMNY-20260831-APOLLO-005` — credentialed redirects could expose a key
+
+- Decision/finding: pre-landing review reproduced Node forwarding `X-Api-Key`
+  across a cross-origin 302 because both Apollo fetches used the default redirect
+  policy.
+- Reason: the transport attached an employee-scoped credential without
+  constraining redirect behavior.
+- Alternatives considered: accept the risk because Apollo is trusted; repair
+  only the currently callable free-search path.
+- Trade-offs: both free and locked paid paths now fail closed on every redirect.
+- Evidence: reproduction, commit `d66be9d`, 15/15 adapter tests, lint,
+  typecheck, and independent closure review.
+- Confidence/freshness: high as of 2026-08-31.
+- Affected components: Apollo adapter and personal provider credential.
+- Status: corrected before push; no live credential or provider was used.
+- Supersedes/superseded-by: superseded by
+  `ADR-HRMNY-20260831-APOLLO-008`; none.
+- Rollback/correction: preserve `redirect: "error"` and its regression
+  assertions in every forward transport change.
+
+## `FAIL-HRMNY-20260831-APOLLO-006` — sibling CI proofs conflicted
+
+- Decision/finding: the Apollo and Phase 4c sibling branches both edited the
+  database job and claimed `test:ci:postgres`; without Phase 4c, Apollo's hosted
+  proof would also require TLS against a plaintext loopback service and fail
+  before its tests.
+- Reason: the branch started from their common product base instead of the
+  already proven PostgreSQL proof branch.
+- Alternatives considered: publish an expected-red branch; replace the older
+  proof; copy its TLS exception into a sibling.
+- Trade-offs: Phase 4d now stacks on Phase 4c, retains both proof commands, and
+  inherits one fail-closed connection policy.
+- Evidence: Phase 4c failure/correction receipts, merge `a343a51`, distinct CI
+  commands, and setup-module fix `a6ed4e3`.
+- Confidence/freshness: high locally; hosted execution pending.
+- Affected components: CI database job, web test setup, database TLS policy.
+- Status: source conflict corrected; exact-SHA hosted proof remains open.
+- Supersedes/superseded-by: superseded by
+  `ADR-HRMNY-20260831-APOLLO-009`; none.
+- Rollback/correction: preserve the Phase 4c dependency or an equivalent landed
+  policy and keep Apollo's database/name/write gates distinct.
+
+The additional failures above also caused no live provider call, credit, send,
+production migration, deployment, account change, or Xero write.
+
+## `FAIL-HRMNY-20260831-APOLLO-007` — public diff contained credential-shaped fixtures
+
+- Decision/finding: the public-repository redaction gate classified synthetic
+  embedded-password PostgreSQL URLs as high-severity findings even though every
+  value was a loopback CI or contract-test fixture.
+- Reason: a literal credential-shaped URL is indistinguishable from a real
+  secret to a safe static scanner and creates avoidable review ambiguity.
+- Alternatives considered: waive the high findings; disclose literal values in
+  review evidence; remove the database tests.
+- Trade-offs: CI now assembles the loopback URL from named synthetic fields and
+  contract tests use a helper, preserving behavior while eliminating literal
+  embedded-password patterns.
+- Evidence: public-diff redaction scan changed from 13 high findings on added
+  lines to zero; database 30/30, lint, typecheck, YAML parse, and diff check pass.
+- Confidence/freshness: high locally as of 2026-08-31.
+- Affected components: CI Apollo proof, production-migration contract tests,
+  public review hygiene.
+- Status: corrected before push.
+- Supersedes/superseded-by: none.
+- Rollback/correction: keep test credentials synthetic and constructed; never
+  waive a high finding without target-by-target proof.

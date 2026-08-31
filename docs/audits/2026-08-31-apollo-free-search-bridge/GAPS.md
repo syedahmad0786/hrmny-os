@@ -142,3 +142,69 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 - Supersedes/superseded-by: none.
 - Rollback/correction: bind a reviewed exact action only when the catalog gains
   one; do not fabricate an edge.
+
+## `GAP-HRMNY-20260831-APOLLO-009` — pending browser state is not principal-scoped
+
+- Decision/finding: the Hunt page session-storage key is shared by the browser
+  tab rather than namespaced to the authenticated principal.
+- Reason: switching accounts in one tab can reveal the prior operator's search
+  terms or temporarily lock the new operator's form, although server-side
+  receipt reads remain owner-authorized.
+- Alternatives considered: ignore browser account switching; store no pending
+  state; add an unreviewed client identity source during ship repair.
+- Trade-offs: reload recovery remains available, but this privacy/UX edge must be
+  fixed before named-user rollout.
+- Evidence: `apps/web/src/app/(staff)/crm/hunt/page.tsx` and independent review.
+- Confidence/freshness: high for client state; no server authorization bypass
+  demonstrated.
+- Affected components: Sales Hunt browser session and account switching.
+- Status: open P2; blocks named-user/production acceptance, not hosted synthetic
+  database proof.
+- Supersedes/superseded-by: none.
+- Rollback/correction: namespace or clear the pending state using a verified
+  server-provided principal identifier and add an account-switch browser test.
+
+## `GAP-HRMNY-20260831-APOLLO-010` — no cross-scheduler provider-wide limiter
+
+- Decision/finding: Inngest concurrency one does not coordinate globally with
+  the cron fallback, so the two entry points can claim two different Apollo jobs
+  concurrently. The shared database fence still prevents duplicate execution of
+  the same receipt.
+- Reason: the lease and attempt token are request-scoped, not provider-scoped.
+- Alternatives considered: overstate the existing fence; disable a scheduler
+  during this source-only phase; add an unreviewed global mutex.
+- Trade-offs: managed/live rollout remains blocked until scheduler ownership or
+  a durable provider-wide limiter is proven; synthetic hosted proof can proceed.
+- Evidence: Inngest function, cron route, shared worker, and independent review.
+- Confidence/freshness: high for code; no live overlap receipt.
+- Affected components: scheduling, Apollo rate limits, backlog operations.
+- Status: open P2; required before live provider canary.
+- Supersedes/superseded-by: corrects the throughput claim in
+  `ADR-HRMNY-20260831-APOLLO-005`; none.
+- Rollback/correction: select one live dispatch owner or add a durable
+  provider-wide claim/limit, then failure-inject both entry points.
+
+## `GAP-HRMNY-20260831-APOLLO-011` — residual synthetic coverage backlog
+
+- Decision/finding: the 80% path-group target is met, while six groups remain
+  uncovered: tRPC caller contracts; legacy enrichment/admin redaction routes;
+  cron maximum-backlog counters; PostgreSQL missing/not-due/terminal readback;
+  connected browser lifecycle states; and cross-principal/two-tab browser edges.
+- Reason: the bounded ship repair prioritized the three highest-yield offline
+  groups without introducing production changes or hiding remaining risk.
+- Alternatives considered: claim full coverage; expand this vertical slice into
+  every browser and router edge before hosted proof.
+- Trade-offs: hosted synthetic review can proceed at 24/30 groups, but later
+  rollout phases must close the security- and user-bound browser items.
+- Evidence: independent coverage map and
+  `EVID-HRMNY-20260831-APOLLO-008`.
+- Confidence/freshness: medium-high; static path grouping is review evidence,
+  not a runtime coverage percentage.
+- Affected components: router, cron operations, PostgreSQL worker readback, Hunt
+  browser lifecycle, test strategy.
+- Status: open P2 backlog; cross-principal coverage remains tied to gap 009 and
+  named-user acceptance.
+- Supersedes/superseded-by: three of the initial nine coverage findings were
+  closed by `EVID-HRMNY-20260831-APOLLO-008`; none.
+- Rollback/correction: add deterministic tests by layer, bind each to the exact
+  contract, and never use live provider credentials for coverage.

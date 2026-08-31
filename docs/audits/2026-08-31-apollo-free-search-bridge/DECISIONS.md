@@ -105,8 +105,10 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
   `EVID-HRMNY-20260831-APOLLO-002/004`.
 - Confidence/freshness: high locally; managed Inngest execution unproven.
 - Affected components: Inngest function, cron route, integration inbox/jobs.
-- Status: implemented; cloud configuration pending.
-- Supersedes/superseded-by: none.
+- Status: corrected: the fence prevents duplicate execution of one request, but
+  does not impose one provider-wide concurrency ceiling across cron and Inngest.
+- Supersedes/superseded-by: superseded in its throughput claim by
+  `ADR-HRMNY-20260831-APOLLO-007`; the per-request fence remains valid.
 - Rollback/correction: disable the failing scheduler while preserving the shared
   database state machine; never introduce a second provider caller.
 
@@ -133,3 +135,69 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 - Rollback/correction: stop before apply on any mismatch; after apply use an
   approved forward correction or verified restore plan, never rewrite journal
   history.
+
+## `ADR-HRMNY-20260831-APOLLO-007` — separate duplicate fencing from rate concurrency
+
+- Decision/finding: the shared attempt token and lease remain the authority for
+  one request, while provider-wide coordination across cron and Inngest is an
+  explicit open gap. Inngest concurrency one is not described as a global
+  cross-scheduler ceiling.
+- Reason: per-request compare-and-set stops duplicate effects for the same
+  receipt but two different jobs can still be claimed by different schedulers.
+- Alternatives considered: preserve the stronger claim; disable cron in source;
+  add a new unreviewed global lock during the merge.
+- Trade-offs: the slice stays honest and safe for hosted synthetic proof, while
+  live rollout remains blocked until one scheduler owns dispatch or a durable
+  provider-wide limiter is proven.
+- Evidence: `apps/web/src/server/inngest/functions.ts`,
+  `apps/web/src/app/api/cron/jobs/route.ts`, shared-worker tests, and independent
+  review finding `GAP-HRMNY-20260831-APOLLO-010`.
+- Confidence/freshness: high on commit `a6ed4e3`; no live concurrency receipt.
+- Affected components: Inngest, cron fallback, Apollo worker, rate strategy.
+- Status: corrected decision; production/provider acceptance remains blocked.
+- Supersedes/superseded-by: partially supersedes
+  `ADR-HRMNY-20260831-APOLLO-005`; none.
+- Rollback/correction: keep provider mode closed until the gap is resolved and
+  failure-injected across both scheduler entry points.
+
+## `ADR-HRMNY-20260831-APOLLO-008` — credentialed Apollo requests reject redirects
+
+- Decision/finding: both free People Search and locked paid People Match use
+  `redirect: "error"` whenever the employee-scoped `X-Api-Key` is attached.
+- Reason: Node can forward a custom credential header to a cross-origin redirect.
+- Alternatives considered: follow same-origin only with manual redirect logic;
+  trust provider redirect behavior; strip the header after the first response.
+- Trade-offs: an unexpected Apollo redirect becomes a typed transport failure
+  instead of being followed, protecting the credential at the cost of no
+  redirect compatibility.
+- Evidence: commit `d66be9d`, deterministic adapter assertions, and independent
+  reproduction/re-review with no remaining P0/P1.
+- Confidence/freshness: high as of 2026-08-31.
+- Affected components: Apollo live adapter and provider credential boundary.
+- Status: implemented and locally verified; live provider acceptance absent.
+- Supersedes/superseded-by: none.
+- Rollback/correction: never restore automatic redirects on a credentialed
+  request; introduce a reviewed allowlisted redirect flow only with new tests.
+
+## `ADR-HRMNY-20260831-APOLLO-009` — stack hosted proof on Phase 4c
+
+- Decision/finding: this pull request depends on Phase 4c commit
+  `ff80e3ac8befbd2075b537ce23018072b3790203`, preserves its local-CI-only TLS
+  policy, and gives the Apollo database proof the distinct command
+  `test:ci:apollo-postgres`.
+- Reason: the sibling Phase 4c branch already proved and repaired the exact
+  loopback PostgreSQL TLS failure; both sibling branches had claimed the same
+  generic script name.
+- Alternatives considered: duplicate the TLS policy; target the product base;
+  overwrite the existing Sales proposal proof.
+- Trade-offs: the branch gains a stacked dependency and merge commit, while both
+  database proofs remain reviewable and can run in one disposable CI service.
+- Evidence: Phase 4c PR #243, merge commit `a343a51`, setup-scope fix `a6ed4e3`,
+  and fresh local gates.
+- Confidence/freshness: high locally; final hosted receipt pending.
+- Affected components: CI database job, database SSL policy, both proof configs.
+- Status: implemented; exact-SHA hosted verification open.
+- Supersedes/superseded-by: changes the dependency recorded by the initial
+  audit package; none.
+- Rollback/correction: rebase the review dependency only through a reviewed
+  stacked change; never weaken the host/database/write gates.

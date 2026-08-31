@@ -35,8 +35,10 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 - Evidence: Inngest handler and lease tests; open managed-runtime gap.
 - Confidence/freshness: high for code, low for real throughput until canary.
 - Affected components: scheduler, worker, provider rate strategy.
-- Status: accepted for pilot; revisit from receipts only.
-- Supersedes/superseded-by: none.
+- Status: corrected: accepted for Inngest execution only; cron can overlap a
+  different job and remains blocked from live rollout by gap 010.
+- Supersedes/superseded-by: corrected by
+  `ADR-HRMNY-20260831-APOLLO-007`; none.
 - Rollback/correction: pause intake or worker; increase concurrency only through
   a reviewed ADR backed by provider receipts.
 
@@ -72,3 +74,36 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 - Supersedes/superseded-by: none.
 - Rollback/correction: cancel before apply on any ambiguity; require a new exact
   review for changed inputs.
+
+## `TRADE-HRMNY-20260831-APOLLO-005` — fail closed on provider redirects
+
+- Decision/finding: reject redirects on every credentialed Apollo request.
+- Reason: credential containment outweighs transparent redirect compatibility.
+- Alternatives considered: automatic redirect following; destination allowlist
+  implemented inside this slice.
+- Trade-offs: a provider infrastructure redirect produces an operator-visible
+  failure and reconciliation work, but cannot silently carry the employee key.
+- Evidence: commit `d66be9d` and adapter tests.
+- Confidence/freshness: high locally.
+- Affected components: Apollo adapter and retry classification.
+- Status: accepted.
+- Supersedes/superseded-by: none.
+- Rollback/correction: add reviewed same-origin/manual redirect support only if
+  official behavior requires it.
+
+## `TRADE-HRMNY-20260831-APOLLO-006` — stacked CI proof dependency
+
+- Decision/finding: inherit Phase 4c before the Apollo hosted proof.
+- Reason: it owns the proven disposable-database SSL boundary and existing
+  Sales proposal runtime proof.
+- Alternatives considered: parallel sibling PRs with conflicting CI scripts;
+  replace Phase 4c's proof.
+- Trade-offs: landing order matters, while duplicated security policy and
+  ambiguous hosted receipts are avoided.
+- Evidence: PR #243, merge commit `a343a51`, and `ADR-HRMNY-20260831-APOLLO-009`.
+- Confidence/freshness: high; hosted head not yet published.
+- Affected components: review stack and CI database job.
+- Status: accepted for this review slice.
+- Supersedes/superseded-by: none.
+- Rollback/correction: retarget only after the dependency lands or an equivalent
+  reviewed commit becomes the base.
