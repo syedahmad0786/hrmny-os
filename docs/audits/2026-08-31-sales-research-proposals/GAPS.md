@@ -67,12 +67,14 @@ not exposed)`; branch
 - Trade-offs: a separate safe CI proof slice is required.
 - Evidence: guarded proof commit
   `8e4b8ba118e9bf5f33dc6f28c49edec38d7cc4f7`, first TLS failure
-  `EVID-HRMNY-20260831-RESEARCH-008`, and correction `53122fc...`;
-  corrected hosted execution pending.
+  `EVID-HRMNY-20260831-RESEARCH-008`, guarded TLS correction `53122fc...`,
+  runtime/cleanup receipt `EVID-HRMNY-20260831-RESEARCH-009`, and
+  non-destructive correction `289721d...`; corrected hosted execution pending.
 - Confidence/freshness: high.
 - Affected components: Sales store, migrations, CI database runtime.
-- Status: proof and guarded TLS correction implemented; corrected hosted
-  execution and deployed-schema readback remain open.
+- Status: proof, guarded TLS correction, and immutable-fixture correction
+  implemented; corrected hosted execution and deployed-schema readback remain
+  open.
 - Supersedes/superseded-by: none.
 - Rollback/correction: use disposable CI Postgres first; production migration
   remains a separate human checkpoint.

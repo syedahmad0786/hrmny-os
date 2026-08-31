@@ -174,3 +174,33 @@ stated otherwise; none is provider, recovery, user, or production acceptance.
   terminal corrected receipt.
 - Rollback/correction: revert the override and proof together on any remote-host
   or missing-gate acceptance; never relax default TLS.
+
+## `EVID-HRMNY-20260831-RESEARCH-009` — runtime reached and immutable-audit correction
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; PR #243;
+  correction `289721dfde1a85aedd2df0c83bcb9ac1c5142393`.
+- Decision/finding: database jobs `99407221603` and `99407234027` both
+  connected through the guarded loopback TLS exception, applied migrations,
+  and passed the concurrent exact-replay case. The remaining two cases failed
+  before execution because the proof cleanup attempted to delete from the
+  append-only `audit_event` table.
+- Reason: retain proof that application/database concurrency executed while
+  distinguishing a destructive test-harness defect from a product defect.
+- Alternatives considered: weaken the append-only trigger; truncate audit
+  history; hide the failed cases.
+- Trade-offs: every proof invocation now uses unique request-scoped fixtures
+  and exact receipt/signal assertions, leaving immutable records untouched
+  until the disposable CI database is destroyed with its job.
+- Evidence: runs `33366173142` and `33366176032`; local web typecheck/lint,
+  DB 20-test suite/typecheck, formatting, diff, and staged secret checks passed
+  for the correction.
+- Confidence/freshness: high for cause and correction; corrected hosted
+  execution pending.
+- Affected components: Sales PostgreSQL proof harness only.
+- Status: negative receipt preserved; non-destructive correction committed;
+  terminal hosted rerun open.
+- Supersedes/superseded-by: follows `EVID-HRMNY-20260831-RESEARCH-008`; pending
+  successful runtime receipt.
+- Rollback/correction: revert the proof correction only if exact-scoped
+  assertions fail; never add mutation of `audit_event` to test cleanup.

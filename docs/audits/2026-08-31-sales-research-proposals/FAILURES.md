@@ -123,3 +123,27 @@ not exposed)`; branch
 - Supersedes/superseded-by: pending corrected execution receipt.
 - Rollback/correction: fail closed unless hostname, `CI=true`, explicit write
   gate, and disable mode all match; TLS remains required otherwise.
+
+## `FAIL-HRMNY-20260831-RESEARCH-007` — proof cleanup violated audit immutability
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; PR #243
+  head `436b1c76edc97b8d819ba3ebafa740ea2ba71129`.
+- Decision/finding: both hosted database jobs passed the first concurrency test
+  and then failed when between-test cleanup issued `delete` against the
+  append-only `audit_event` table.
+- Reason: preserve the invariant-enforcement receipt and the test-design lesson
+  rather than weakening production schema policy for disposable fixtures.
+- Alternatives considered: disable the trigger in CI; truncate broad tables;
+  delete immutable history in setup/teardown.
+- Trade-offs: correction `289721dfde1a85aedd2df0c83bcb9ac1c5142393`
+  uses unique per-run identities and exact request-scoped queries; records live
+  only for the isolated job lifetime.
+- Evidence: `EVID-HRMNY-20260831-RESEARCH-009`.
+- Confidence/freshness: high.
+- Affected components: PostgreSQL proof harness; no product runtime path.
+- Status: corrected locally; hosted confirmation pending.
+- Supersedes/superseded-by: correction supersedes destructive cleanup; pending
+  a terminal passing hosted receipt.
+- Rollback/correction: preserve append-only enforcement and correct proof data
+  isolation instead of changing the operational invariant.
