@@ -5,7 +5,10 @@
 - Branch: `ahmadbukhari097/codex/phase-4-sales-research-proposals-20260830`
 - Phase 3 dependency: `9b0a2133103de5e29ff3571693147ebd4a1f6a44` / PR #240
 - Core implementation: `41145c85e799f6b906dfca23a37aea0894cc9582`
-- Review: pending
+- Core review: PR #241
+- UI branch: `ahmadbukhari097/codex/phase-4b-sales-research-ui-20260831`
+- UI implementation: `21774d858b66676dc4f9cfd48d039abf7b079472`
+- UI review: pending
 
 ## Outcome
 
@@ -28,6 +31,12 @@ Free Apollo search fails closed without a scoped live credential; explicitly
 synthetic adapters remain test-only. Paid People Match, external messages,
 production writes, and Xero writes remain closed.
 
+The dependent UI slice presents source evidence, receipt-backed Gate 1
+decisions, pending/error states, and a truthful read-only view for non-Sales
+staff. Hunt and inbound surfaces use the same server-derived operator policy.
+Desktop and 390-pixel browser contracts cover proposal creation, approval,
+view-only denial, fail-closed Apollo discovery, and overflow.
+
 This package covers the core boundary. UI and disposable-PostgreSQL proofs are
 kept as dependent review slices so this does not become one unreviewable
 "complete HRMNY" change.
@@ -40,7 +49,7 @@ kept as dependent review slices so this does not become one unreviewable
 | documented           | yes |
 | authorized           | local code/test and review preview only |
 | configured           | synthetic memory runtime only |
-| tested               | local unit/static/build gates; hosted exact-SHA pending |
+| tested               | local unit/static/build gates; browser contracts added; hosted exact-SHA pending |
 | deployed             | no; review preview pending |
 | provider accepted    | no |
 | destination verified | no |

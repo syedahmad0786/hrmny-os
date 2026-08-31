@@ -39,3 +39,25 @@ not exposed)`; branch
 - Supersedes/superseded-by: none.
 - Rollback/correction: keep provider flags fail-closed and require separate
   authorization for every live effect.
+
+## `OUT-HRMNY-20260831-RESEARCH-003` — truthful operator surface
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; branch
+  `ahmadbukhari097/codex/phase-4b-sales-research-ui-20260831`; commit
+  `21774d858b66676dc4f9cfd48d039abf7b079472`.
+- Decision/finding: Sales operators can submit and review sourced proposals;
+  non-Sales staff receive a visible read-only state; mock Apollo is not shown
+  as connected discovery.
+- Reason: the UI must express the server boundary and never imply an effect or
+  permission that does not exist.
+- Alternatives considered: leave dead controls; hide errors; retain mock
+  results on the normal surface.
+- Trade-offs: disconnected providers show a blocker instead of demo results.
+- Evidence: UI commit, focused tests, E2E contracts, and independent UI review.
+- Confidence/freshness: high for source/contract; hosted execution pending.
+- Affected components: Sales research, Hunt, inbound, settings.
+- Status: implemented; hosted, user, and production acceptance open.
+- Supersedes/superseded-by: replaces the obsolete visible mock-research action;
+  none.
+- Rollback/correction: preserve read-only and fail-closed states in any revert.

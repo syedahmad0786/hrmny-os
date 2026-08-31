@@ -72,3 +72,26 @@ stated otherwise; none is provider, recovery, user, or production acceptance.
 - Status: failed locally; hosted browser gate pending.
 - Supersedes/superseded-by: none.
 - Rollback/correction: keep the tests unchanged and use hosted terminal results.
+
+## `EVID-HRMNY-20260831-RESEARCH-005` — immutable UI review slice
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; exact model ID not exposed; branch
+  `ahmadbukhari097/codex/phase-4b-sales-research-ui-20260831`; commit
+  `21774d858b66676dc4f9cfd48d039abf7b079472`.
+- Decision/finding: the dependent commit contains six UI/E2E files and no
+  database-CI proof or harness state.
+- Reason: keep the operator surface reviewable separately from the core and
+  disposable-PostgreSQL proof.
+- Alternatives considered: add UI to the 1,805-line core change; combine all
+  Phase 4 work in one pull request.
+- Trade-offs: the review stack must land in order.
+- Evidence: Git commit, staged diff check, staged secret scan, and independent
+  UI reviewer approval with no remaining P0/P1.
+- Confidence/freshness: high for source integrity; hosted execution pending.
+- Affected components: research console, Hunt, inbound, Sales settings, and two
+  browser specifications.
+- Status: locally reviewed; hosted browser/preview acceptance open.
+- Supersedes/superseded-by: none.
+- Rollback/correction: revert only this dependent commit while preserving the
+  server boundary; rerun all browser contracts after correction.
