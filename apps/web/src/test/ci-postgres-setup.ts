@@ -1,3 +1,5 @@
+export {};
+
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (
   process.env.CI !== "true" ||
