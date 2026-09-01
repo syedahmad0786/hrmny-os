@@ -35,23 +35,28 @@ does not hide or claim to close it.
 
 ## Acceptance state
 
-| State                | Result                                                                                       |
-| -------------------- | -------------------------------------------------------------------------------------------- |
-| planned              | yes                                                                                          |
-| documented           | yes                                                                                          |
-| authorized           | source and synthetic local testing only                                                      |
-| configured           | local memory/mock runtime only                                                               |
-| tested               | local: 946 deterministic tests, 8/8 focused browser journeys, lint, typecheck, and web build |
-| deployed             | no                                                                                           |
-| provider accepted    | no                                                                                           |
-| destination verified | no                                                                                           |
-| recovery verified    | no                                                                                           |
-| user accepted        | no                                                                                           |
-| production accepted  | no                                                                                           |
+| State                | Result                                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| planned              | yes                                                                                                         |
+| documented           | yes                                                                                                         |
+| authorized           | source and synthetic local testing only                                                                     |
+| configured           | local memory/mock runtime only                                                                              |
+| tested               | local proof plus both hosted CI matrices accepted at source head `3015690e66d3a4e3247df66d5aeab2700e7ce87d` |
+| deployed             | two Vercel preview artifacts ready; no production deployment                                                |
+| provider accepted    | no                                                                                                          |
+| destination verified | no                                                                                                          |
+| recovery verified    | no                                                                                                          |
+| user accepted        | no                                                                                                          |
+| production accepted  | no                                                                                                          |
 
-Hosted exact-head CI and external review remain separate receipts. Nothing in
-this package authorizes a live Apollo call, credit use, production migration,
-deployment, merge, external message, or named-user UAT.
+Hosted push and pull-request matrices, both Vercel preview builds, and the
+Cursor security review passed for source head
+`3015690e66d3a4e3247df66d5aeab2700e7ce87d` in PR #245. Cursor's approval
+router classified the identity change as high risk and correctly left human
+review and merge open. These are source and preview receipts, not production,
+provider, recovery, or user acceptance. Nothing in this package authorizes a
+live Apollo call, credit use, production migration, production deployment,
+merge, external message, or named-user UAT.
 
 ## Package
 

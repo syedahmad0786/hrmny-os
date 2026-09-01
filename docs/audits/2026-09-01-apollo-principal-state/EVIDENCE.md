@@ -54,3 +54,34 @@ commit `5a166dd935ba1d9ec5fadbf94de8e101a2fc1dc5`; base
 - Supersedes/superseded-by: none.
 - Rollback/correction: reopen the exact finding on any future failing case and
   preserve `GAP-010/012` as explicit boundaries.
+
+## `EVID-HRMNY-20260901-APOLLO-020` — hosted source and preview acceptance
+
+- Decision/finding: exact source head
+  `3015690e66d3a4e3247df66d5aeab2700e7ce87d` passed both GitHub push and
+  pull-request matrices. Each matrix passed verify, browser, and disposable
+  PostgreSQL jobs. The PR matrix passed lint/typecheck across seven tasks, 946
+  deterministic tests, the 86-route build, 93 browser journeys, migration
+  verification, three Sales PostgreSQL cases, and 14 Apollo PostgreSQL cases.
+  Both Vercel preview builds and Cursor's security review also passed.
+- Reason: close the same-tab principal-isolation gap only after the exact source
+  tree passed every hosted application, browser, database, and external review
+  gate.
+- Alternatives considered: accept one event matrix; rely on local proof; treat
+  a healthy preview as production acceptance; auto-approve the identity change.
+- Trade-offs: Cursor's approval router classified the change as high risk and
+  deliberately did not approve it. Human code review, merge, production
+  deployment, provider acceptance, recovery, and named-user UAT remain open.
+- Evidence: push run `33533640666`; pull-request run `33533762309`; jobs
+  `99942562163/99942562342/99942562460` and
+  `99942939890/99942940060/99942940296`; PR #245; two ready Vercel previews;
+  terminal Cursor approval-router and security-review checks.
+- Confidence/freshness: high as of 2026-09-01 for the exact source head.
+- Affected components: Sales Hunt browser state, staff session contract, Sales
+  access and Apollo connection responses, tests, CI, and preview artifacts.
+- Status: hosted synthetic source accepted; human review and all operational
+  acceptance states remain open.
+- Supersedes/superseded-by: supersedes the hosted-open part of
+  `EVID-HRMNY-20260901-APOLLO-018`; none.
+- Rollback/correction: leave PR #245 open and unmerged; correct forward on a new
+  exact head and rerun both matrices before changing this state.

@@ -162,11 +162,19 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 - Confidence/freshness: high for client state; no server authorization bypass
   demonstrated.
 - Affected components: Sales Hunt browser session and account switching.
-- Status: open P2; blocks named-user/production acceptance, not hosted synthetic
-  database proof.
-- Supersedes/superseded-by: none.
+- Status: closed at source and hosted synthetic scope on 2026-09-01; broader
+  named-user/production acceptance remains gated by the separate open
+  cross-tab/app-wide and provider-concurrency gaps.
+- Supersedes/superseded-by: superseded by
+  `OUTCOME-HRMNY-20260901-APOLLO-008` and
+  `EVID-HRMNY-20260901-APOLLO-020` in the Phase 4e audit package.
 - Rollback/correction: namespace or clear the pending state using a verified
   server-provided principal identifier and add an account-switch browser test.
+- Closure evidence: PR #245 source head
+  `3015690e66d3a4e3247df66d5aeab2700e7ce87d`; two green GitHub CI matrices;
+  8/8 focused local and 93/93 hosted browser journeys; the v2
+  principal-bound shared envelope is cleared on mismatch. This is not a
+  per-principal storage namespace or a confidentiality store.
 
 ## `GAP-HRMNY-20260831-APOLLO-010` — no cross-scheduler provider-wide limiter
 

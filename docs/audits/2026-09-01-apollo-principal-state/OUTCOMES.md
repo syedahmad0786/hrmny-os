@@ -27,3 +27,26 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
   `GAP-HRMNY-20260831-APOLLO-009` after hosted exact-head proof.
 - Rollback/correction: revert the commit and disable the provider control; keep
   immutable server receipts and the v1 rejection behavior.
+
+## `OUTCOME-HRMNY-20260901-APOLLO-008` — Hunt principal isolation hosted-synthetic accepted
+
+- Decision/finding: PR #245's exact source head
+  `3015690e66d3a4e3247df66d5aeab2700e7ce87d` passed both hosted CI event
+  matrices, both preview builds, and the independent security check. The exact
+  same-tab browser disclosure/form-lock finding is closed at source and hosted
+  synthetic scope.
+- Reason: advance to the provider-concurrency dependency without overstating a
+  preview, CI run, or security check as operational acceptance.
+- Alternatives considered: keep the repaired gap open; merge automatically;
+  combine provider serialization into the same PR.
+- Trade-offs: review remains small and reversible; cross-tab/app-wide isolation
+  and provider-wide concurrency remain open.
+- Evidence: `EVID-HRMNY-20260901-APOLLO-018/019/020` and PR #245.
+- Confidence/freshness: high as of 2026-09-01.
+- Affected components: Phase 4e package and the Phase 4f dependency edge.
+- Status: hosted synthetic source accepted; review pending; no merge or
+  operational authority implied.
+- Supersedes/superseded-by: supersedes the hosted-open state of
+  `OUTCOME-HRMNY-20260901-APOLLO-007`; none.
+- Rollback/correction: leave the PR unmerged until human review; revert or
+  correct forward and rerun exact-head gates if the source changes.

@@ -42,8 +42,10 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 - Confidence/freshness: high for observed failure; root cause medium.
 - Affected components: local Windows build harness, not a demonstrated product
   route defect.
-- Status: locally recovered; hosted exact-head build pending.
-- Supersedes/superseded-by: none.
+- Status: locally recovered; a later clean aggregate build and both hosted
+  exact-source builds passed.
+- Supersedes/superseded-by: superseded for acceptance by
+  `EVID-HRMNY-20260901-APOLLO-020`; retained as local harness evidence.
 - Rollback/correction: rerun from a settled build directory and rely on hosted
   CI before acceptance; investigate only if it recurs there.
 
