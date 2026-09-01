@@ -519,6 +519,13 @@
       "when": 1787947200000,
       "tag": "0074_integration_inbox_invoice_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1788168448556,
+      "tag": "0075_apollo_search_fencing",
+      "breakpoints": true
     }
   ]
 }

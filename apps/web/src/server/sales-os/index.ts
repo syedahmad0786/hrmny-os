@@ -7,6 +7,7 @@ export * from "./research";
 export * from "./research-evidence";
 export * from "./enrich";
 export * from "./apollo-one";
+export * from "./apollo-search";
 export * from "./gates";
 export * from "./drafts";
 export * from "./digest";

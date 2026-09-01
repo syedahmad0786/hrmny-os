@@ -12,9 +12,8 @@ import {
   decideContact,
   DEFAULT_SALES_OS_SETTINGS,
   draftChannelsForApprovedContact,
-  enrichOneApolloPerson,
-  enrichApprovedCompany,
   getApolloOnePersonCanaryStatus,
+  getApolloPeopleSearchStatus,
   getResearchReceiptSignalIdsByProposal,
   getSalesOsSettings,
   honorUnsubscribe,
@@ -31,6 +30,7 @@ import {
   proposeEvolve,
   rejectEvolve,
   RESEARCH_GUIDELINES,
+  revokeApolloPeopleSearch,
   searchApolloPeopleFree,
   SALES_OS_SOP_SOURCE,
   saveSalesOsSettings,
@@ -40,6 +40,7 @@ import {
   type SalesOsSettings,
 } from "../sales-os";
 import { getOutreach, listOutreach, patchOutreach } from "../leadgen/store";
+import { ownedIntegrationConnectionStatus } from "../integrations/resolve-keys";
 import { middleware, router, staffProcedure } from "./trpc";
 
 const SALES_OPERATOR_ROLES = new Set([
@@ -64,6 +65,10 @@ function salesRoleProcedure(allowed: ReadonlySet<string>, message: string) {
 const salesOperatorProcedure = salesRoleProcedure(
   SALES_OPERATOR_ROLES,
   "Sales operator role required",
+);
+const salesAdminProcedure = salesRoleProcedure(
+  SALES_ADMIN_ROLES,
+  "Sales administrator role required",
 );
 
 const settingsPatch = z.object({
@@ -104,10 +109,14 @@ export const salesOsRouter = router({
   })),
   apollo: router({
     status: staffProcedure.query(() => getApolloOnePersonCanaryStatus()),
+    connection: staffProcedure.query(({ ctx }) =>
+      ownedIntegrationConnectionStatus("apollo", ctx.employeeId),
+    ),
     search: salesOperatorProcedure
       .input(
         z
           .object({
+            idempotencyKey: z.string().uuid(),
             query: z.string().trim().min(2).max(160).optional(),
             titles: z
               .array(z.string().trim().min(2).max(120))
@@ -126,13 +135,33 @@ export const salesOsRouter = router({
           ...input,
           actorEmployeeId: ctx.employeeId,
         });
-        return {
-          mode: result.mode,
-          candidates: result.candidates.map(
-            ({ raw: _raw, ...candidate }) => candidate,
-          ),
-        };
+        return result;
       }),
+    searchStatus: salesOperatorProcedure
+      .input(z.object({ idempotencyKey: z.string().uuid() }))
+      .query(({ input, ctx }) =>
+        getApolloPeopleSearchStatus({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+        }),
+      ),
+    cancelSearch: salesOperatorProcedure
+      .input(z.object({ idempotencyKey: z.string().uuid() }))
+      .mutation(({ input, ctx }) =>
+        revokeApolloPeopleSearch({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+        }),
+      ),
+    revokeSearch: salesAdminProcedure
+      .input(z.object({ idempotencyKey: z.string().uuid() }))
+      .mutation(({ input, ctx }) =>
+        revokeApolloPeopleSearch({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+          administratorOverride: true,
+        }),
+      ),
     enrichOne: salesOperatorProcedure
       .input(
         z.object({
@@ -147,12 +176,13 @@ export const salesOsRouter = router({
           confirmCreditUse: z.literal(true),
         }),
       )
-      .mutation(({ input, ctx }) =>
-        enrichOneApolloPerson({
-          ...input,
-          actorEmployeeId: ctx.employeeId,
-        }),
-      ),
+      .mutation(() => {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "APOLLO_PAID_ENRICHMENT_REQUIRES_EXACT_APPROVAL_RECEIPT",
+        });
+      }),
   }),
 
   settings: router({
@@ -247,9 +277,12 @@ export const salesOsRouter = router({
       ),
     enrich: salesOperatorProcedure
       .input(z.object({ id: z.string() }))
-      .mutation(({ input, ctx }) =>
-        enrichApprovedCompany(input.id, { actorEmployeeId: ctx.employeeId }),
-      ),
+      .mutation(() => {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "APOLLO_DURABLE_SEARCH_RECEIPT_REQUIRED",
+        });
+      }),
   }),
 
   contacts: router({

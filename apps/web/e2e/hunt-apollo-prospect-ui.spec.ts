@@ -51,6 +51,91 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect(page.getByTestId("hunt-apollo-results")).toHaveCount(0);
   });
 
+  test("ignores a global Apollo key when this employee has no connection", async ({
+    page,
+  }) => {
+    await page.route("**/api/ready", async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as {
+        tools: Record<string, unknown>;
+      };
+      await route.fulfill({
+        response,
+        json: { ...body, tools: { ...body.tools, apollo: "configured" } },
+      });
+    });
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+
+    await expect(page.getByTestId("hunt-ready-banner")).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(page.getByTestId("hunt-apollo-credential")).toHaveText(
+      "Not configured",
+    );
+    await expect(page.getByTestId("hunt-apollo-search")).toBeDisabled();
+    await expect(page.getByTestId("hunt-apollo-search")).toHaveText(
+      /Connect Apollo to search/i,
+    );
+  });
+
+  test("restores the same pending request identity after a reload", async ({
+    page,
+  }) => {
+    const idempotencyKey = "51000000-0000-4000-8000-000000000001";
+    await page.addInitScript(
+      ({ key, value }) => window.sessionStorage.setItem(key, value),
+      {
+        key: "hrmny.apollo-search.pending.v1",
+        value: JSON.stringify({
+          idempotencyKey,
+          titles: ["Marketing Director"],
+          perPage: 8,
+        }),
+      },
+    );
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+
+    await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
+      /same request ID/i,
+      { timeout: 60_000 },
+    );
+    await expect(page.getByTestId("hunt-apollo-title")).toHaveValue(
+      "Marketing Director",
+    );
+    await expect(page.getByTestId("hunt-apollo-search")).toBeDisabled();
+    await expect(
+      page.getByTestId("hunt-apollo-retry-same-search"),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("hunt-apollo-retry-same-search"),
+    ).toHaveAttribute("data-request-id", idempotencyKey);
+    await expect(page.getByTestId("hunt-apollo-cancel-search")).toHaveCount(0);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
+      /same request ID/i,
+      { timeout: 60_000 },
+    );
+    await expect(page.getByTestId("hunt-apollo-title")).toHaveValue(
+      "Marketing Director",
+    );
+    await expect(page.getByTestId("hunt-apollo-search")).toBeDisabled();
+    await expect(
+      page.getByTestId("hunt-apollo-retry-same-search"),
+    ).toHaveAttribute("data-request-id", idempotencyKey);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (key) =>
+            JSON.parse(window.sessionStorage.getItem(key) ?? "{}")
+              .idempotencyKey,
+          "hrmny.apollo-search.pending.v1",
+        ),
+      )
+      .toBe(idempotencyKey);
+  });
+
   test("Sales Growth remains navigable at a narrow client viewport", async ({
     page,
   }) => {

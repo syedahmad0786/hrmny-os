@@ -12,6 +12,7 @@ import {
   uuid,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /** pgvector column — requires `CREATE EXTENSION vector` (see migrations/0003). */
 const vector1536 = customType<{ data: number[]; driverData: string }>({
@@ -800,6 +801,10 @@ export const scheduledJob = pgTable(
   "scheduled_job",
   {
     scheduledJobId: uuid("scheduled_job_id").defaultRandom().primaryKey(),
+    integrationInboxId: uuid("integration_inbox_id").references(
+      () => integrationInbox.integrationInboxId,
+      { onDelete: "set null" },
+    ),
     jobKey: text("job_key").notNull().unique(),
     kind: text("kind").notNull(),
     runAt: timestamp("run_at", { withTimezone: true }).notNull(),
@@ -809,13 +814,23 @@ export const scheduledJob = pgTable(
       .notNull(),
     status: text("status").default("pending").notNull(),
     attempts: integer("attempts").default(0).notNull(),
+    stateVersion: integer("state_version").default(0).notNull(),
+    attemptToken: uuid("attempt_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
     lockedAt: timestamp("locked_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     result: jsonb("result").$type<Record<string, unknown>>(),
     lastError: text("last_error"),
     ...timestamps,
   },
-  (table) => [index("scheduled_job_due_idx").on(table.status, table.runAt)],
+  (table) => [
+    index("scheduled_job_due_idx").on(table.status, table.runAt),
+    uniqueIndex("scheduled_job_apollo_inbox_uniq")
+      .on(table.integrationInboxId)
+      .where(
+        sql`${table.kind} = 'apollo_people_search' and ${table.integrationInboxId} is not null`,
+      ),
+  ],
 );
 
 /** Durable ingress ledger for replay-safe provider and automation callbacks. */
@@ -825,6 +840,15 @@ export const integrationInbox = pgTable(
     integrationInboxId: uuid("integration_inbox_id")
       .defaultRandom()
       .primaryKey(),
+    ownerEmployeeId: uuid("owner_employee_id").references(
+      () => employee.employeeId,
+      { onDelete: "set null" },
+    ),
+    credentialConnectionAccountId: uuid(
+      "credential_connection_account_id",
+    ).references(() => connectionAccount.connectionAccountId, {
+      onDelete: "set null",
+    }),
     provider: text("provider").notNull(),
     externalEventId: text("external_event_id").notNull(),
     operation: text("operation").notNull(),
@@ -835,6 +859,11 @@ export const integrationInbox = pgTable(
       .notNull(),
     status: text("status").default("received").notNull(),
     attempts: integer("attempts").default(0).notNull(),
+    stateVersion: integer("state_version").default(0).notNull(),
+    attemptToken: uuid("attempt_token"),
+    attemptLeaseExpiresAt: timestamp("attempt_lease_expires_at", {
+      withTimezone: true,
+    }),
     result: jsonb("result").$type<Record<string, unknown>>(),
     lastError: text("last_error"),
     processedAt: timestamp("processed_at", { withTimezone: true }),
@@ -851,6 +880,11 @@ export const integrationInbox = pgTable(
     index("integration_inbox_status_received_idx").on(
       table.status,
       table.receivedAt,
+    ),
+    index("integration_inbox_owner_operation_idx").on(
+      table.ownerEmployeeId,
+      table.operation,
+      table.receivedAt.desc(),
     ),
   ],
 );

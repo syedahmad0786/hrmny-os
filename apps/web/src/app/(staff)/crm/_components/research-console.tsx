@@ -46,10 +46,6 @@ export function ResearchConsole() {
     },
     onError: (error) => setNote(`Company decision failed · ${error.message}`),
   });
-  const enrich = trpc.salesOs.research.enrich.useMutation({
-    onSuccess: () => void utils.salesOs.invalidate(),
-    onError: (error) => setNote(`Contact discovery blocked · ${error.message}`),
-  });
   const decideContact = trpc.salesOs.contacts.decide.useMutation({
     onSuccess: () => void utils.salesOs.invalidate(),
     onError: (error) => setNote(`Contact decision failed · ${error.message}`),
@@ -339,27 +335,17 @@ export function ResearchConsole() {
             {(approved.data ?? []).map((c) => (
               <article key={c.id} className="crm-approval-mini">
                 <strong>{c.name}</strong>
-                <CrmBtn
-                  variant="primary"
-                  disabled={
-                    !access.data?.canOperate ||
-                    enrich.isPending ||
-                    c.temperature === "cool" ||
-                    c.temperature === "cold"
-                  }
-                  onClick={() =>
-                    enrich
-                      .mutateAsync({ id: c.id })
-                      .then((r) =>
-                        setNote(
-                          `Found ${r.created.length} contacts · ${r.skipped.length} skipped · 0 credits`,
-                        ),
-                      )
-                      .catch(() => undefined)
-                  }
-                >
-                  Find contacts · 0 credits
-                </CrmBtn>
+                {access.data?.canOperate &&
+                c.temperature !== "cool" &&
+                c.temperature !== "cold" ? (
+                  <Link className="crm-btn primary" href="/crm/hunt#apollo-people-search">
+                    Open governed People Search
+                  </Link>
+                ) : (
+                  <span className="text-xs text-[var(--muted)]">
+                    Discovery unavailable for this company state
+                  </span>
+                )}
               </article>
             ))}
           </div>

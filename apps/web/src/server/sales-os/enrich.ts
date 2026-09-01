@@ -1,9 +1,5 @@
-import {
-  createLeadSourceLive,
-  type LeadSourceAdapter,
-} from "@hrmny/integrations";
+import type { LeadSourceAdapter } from "@hrmny/integrations";
 import { listCompanies, listContacts } from "../crm/repository";
-import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
 import { contactsForTemperature } from "./sops";
 import { isSuppressed } from "./store";
 import {
@@ -18,8 +14,6 @@ import type { ContactResearchRow } from "./types";
 export type EnrichDeps = {
   leadSource?: LeadSourceAdapter;
   allowSynthetic?: boolean;
-  actorEmployeeId?: string | null;
-  resolveApiKey?: typeof resolveIntegrationApiKey;
 };
 
 export function strongerDedupeKey(input: {
@@ -100,18 +94,11 @@ export async function enrichApprovedCompany(
       creditsUsed: 0,
     };
   }
-  let leadSource = deps.leadSource;
-  if (!leadSource) {
-    const resolver = deps.resolveApiKey ?? resolveIntegrationApiKey;
-    const { apiKey } = await resolver("apollo", deps.actorEmployeeId);
-    if (!apiKey) throw new Error("APOLLO_FREE_SEARCH_CONNECTION_REQUIRED");
-    leadSource = createLeadSourceLive({
-      mode: "live",
-      apiKey,
-      allowPaidOperations: false,
-    });
+  const leadSource = deps.leadSource;
+  if (!leadSource || leadSource.mode === "live") {
+    throw new Error("APOLLO_DURABLE_SEARCH_RECEIPT_REQUIRED");
   }
-  if (leadSource.mode !== "live" && deps.allowSynthetic !== true) {
+  if (deps.allowSynthetic !== true) {
     throw new Error("SYNTHETIC_CONTACT_DISCOVERY_FORBIDDEN");
   }
   const candidates = await leadSource.searchLeads({

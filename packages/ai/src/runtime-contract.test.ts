@@ -6,7 +6,7 @@ const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const read = (path: string) => readFileSync(`${repoRoot}/${path}`, "utf8");
 
 describe("repository runtime contract", () => {
-  it("pins Node 24 for local and every executable workflow", () => {
+  it("pins Node 24 for local and every workflow that executes Node", () => {
     expect(JSON.parse(read("package.json")).engines.node).toBe("24.x");
     expect(read(".nvmrc").trim()).toBe("24");
 
@@ -15,11 +15,20 @@ describe("repository runtime contract", () => {
       ".github/workflows/nightly-eval.yml",
       ".github/workflows/demo-os-live-proof.yml",
       ".github/workflows/openrouter-live-smoke.yml",
-      ".github/workflows/production-migrate.yml",
+      ".github/workflows/production-migrate-0075.yml",
     ]) {
       const source = read(workflow);
       expect(source, workflow).toMatch(/node-version:\s*24/);
       expect(source, workflow).not.toMatch(/node-version:\s*22/);
     }
+  });
+
+  it("keeps the retired production migration runner dependency- and secret-free", () => {
+    const workflow = read(".github/workflows/production-migrate.yml");
+
+    expect(workflow).toMatch(/exit 1/);
+    expect(workflow).not.toMatch(
+      /actions\/setup-node|pnpm|DATABASE_URL|DIRECT_URL|secrets\./,
+    );
   });
 });

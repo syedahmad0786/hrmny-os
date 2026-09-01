@@ -1,3 +1,5 @@
+export {};
+
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl) throw new Error("CI_POSTGRES_DATABASE_URL_REQUIRED");
 

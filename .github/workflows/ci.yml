@@ -126,6 +126,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
           MIGRATION_TEST_ALLOW_DROP: "true"
+          MIGRATION_TEST_RETAIN_FRESH_FOR_PROOF: "true"
         run: pnpm db:verify
       - name: Apply migrations to disposable runtime database
         env:
@@ -151,3 +152,32 @@ jobs:
           XERO_MODE: mock
           XERO_WRITE_ENABLED: "false"
         run: pnpm --filter @hrmny/web test:ci:postgres
+      - name: Prove Apollo receipt and queue concurrency
+        env:
+          CI: "true"
+          DATABASE_MODE: postgres
+          HRMNY_CI_DATABASE_SCHEME: postgresql
+          HRMNY_CI_DATABASE_USER: postgres
+          HRMNY_CI_DATABASE_PASSWORD: postgres
+          HRMNY_CI_DATABASE_HOST: 127.0.0.1
+          HRMNY_CI_DATABASE_PORT: "5432"
+          HRMNY_CI_DATABASE_NAME: hrmny_migration_fresh
+          CI_POSTGRES_PROOF: "true"
+          HRMNY_CI_POSTGRES_WRITE: "true"
+          HRMNY_DATABASE_SSL_MODE: disable
+          LLM_PROVIDER: mock
+          OPENROUTER_LIVE_SMOKE: "0"
+          EMBEDDING_PROVIDER: none
+          APOLLO_MODE: mock
+          APOLLO_ALLOW_PAID_OPERATIONS: "false"
+          HUNTER_MODE: mock
+          HUNTER_ALLOW_PAID_OPERATIONS: "false"
+          NEVERBOUNCE_MODE: mock
+          NEVERBOUNCE_ALLOW_PAID_OPERATIONS: "false"
+          RESEND_MODE: mock
+          N8N_MODE: mock
+          XERO_MODE: mock
+          XERO_WRITE_ENABLED: "false"
+        run: |
+          export DATABASE_URL="${HRMNY_CI_DATABASE_SCHEME}://${HRMNY_CI_DATABASE_USER}:${HRMNY_CI_DATABASE_PASSWORD}@${HRMNY_CI_DATABASE_HOST}:${HRMNY_CI_DATABASE_PORT}/${HRMNY_CI_DATABASE_NAME}"
+          pnpm --filter @hrmny/web test:ci:apollo-postgres

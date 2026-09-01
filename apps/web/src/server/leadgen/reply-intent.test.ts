@@ -2,6 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { pipelineStages } from "../crm/repository";
 import { applyReplyIntent, intentToTransition, type MoveDealStage } from "./reply-intent";
 
+const replies = vi.hoisted(() => ({
+  honorUnsubscribe: vi.fn(async () => undefined),
+}));
+
+vi.mock("../sales-os/replies", () => ({
+  honorUnsubscribe: replies.honorUnsubscribe,
+}));
+
 describe("reply-intent → deal-stage mapping", () => {
   it("maps positive intents to advance, passive intents to no move", () => {
     expect(intentToTransition).toEqual({
@@ -53,6 +61,10 @@ describe("reply-intent → deal-stage mapping", () => {
     expect(res.toStage).toBeNull();
     expect(res.moved).toBe(false);
     expect(res.reason).toBe("suppressed_and_closed");
+    expect(replies.honorUnsubscribe).toHaveBeenCalledWith({
+      dealId: "d1",
+      source: "reply-intent",
+    });
   });
 
   it("surfaces a failed move reason", async () => {
