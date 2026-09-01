@@ -16,6 +16,7 @@ describe("repository runtime contract", () => {
       ".github/workflows/demo-os-live-proof.yml",
       ".github/workflows/openrouter-live-smoke.yml",
       ".github/workflows/production-migrate-0075.yml",
+      ".github/workflows/production-migrate-0076.yml",
     ]) {
       const source = read(workflow);
       expect(source, workflow).toMatch(/node-version:\s*24/);

@@ -19,6 +19,7 @@ import { runLeadgenDailyCron } from "@/server/leadgen/daily-cron";
 import { runReconSweepers } from "@/server/recon/cron-sweepers";
 import {
   APOLLO_PEOPLE_SEARCH_JOB_KIND,
+  APOLLO_PROVIDER_CONCURRENCY_KEY,
   redactExpiredApolloPeopleSearchCandidates,
   runApolloPeopleSearchQueuedJob,
 } from "@/server/sales-os/apollo-search";
@@ -104,18 +105,39 @@ export async function GET(request: Request) {
   // Inngest enter through the same claimant; the generic worker must not claim
   // or reset those rows independently.
   const apolloDue = await db.execute<{ scheduled_job_id: string }>(sql`
-    select scheduled_job_id
-    from scheduled_job
-    where kind = ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
+    select candidate.scheduled_job_id
+    from public.scheduled_job candidate
+    where candidate.kind = ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
+      and candidate.concurrency_key = ${APOLLO_PROVIDER_CONCURRENCY_KEY}
       and (
-        (status = 'pending' and run_at <= now())
+        (
+          candidate.status = 'running'
+          and (
+            candidate.lease_expires_at is null
+            or candidate.lease_expires_at <= now()
+          )
+        )
         or (
-          status = 'running'
-          and (lease_expires_at is null or lease_expires_at <= now())
+          candidate.status = 'pending'
+          and candidate.run_at <= now()
+          and not exists (
+            select 1
+            from public.scheduled_job active
+            where active.concurrency_key = candidate.concurrency_key
+              and active.status = 'running'
+          )
         )
       )
-    order by run_at
-    limit 20
+    order by
+      case when candidate.status = 'running' then 0 else 1 end,
+      coalesce(
+        candidate.lease_expires_at,
+        candidate.locked_at,
+        candidate.run_at
+      ),
+      candidate.run_at,
+      candidate.scheduled_job_id
+    limit 1
   `);
   let apolloCompleted = 0;
   let apolloFailed = 0;

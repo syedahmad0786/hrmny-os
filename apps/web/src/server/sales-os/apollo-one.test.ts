@@ -13,10 +13,12 @@ import {
   type ApolloExactApprovalClaim,
 } from "./apollo-one";
 import {
-  runScheduledApolloPeopleSearch,
+  runScheduledApolloPeopleSearchForTest,
   searchApolloPeopleFree,
   type ApolloPeopleSearchRetryPayload,
 } from "./apollo-search";
+
+const runScheduledApolloPeopleSearch = runScheduledApolloPeopleSearchForTest;
 import { creditUsed, resetSalesOsStore } from "./store";
 
 function liveStub(): LeadSourceAdapter {
@@ -47,15 +49,17 @@ const PAID_APPROVAL = "43000000-0000-4000-8000-000000000001";
 const PAID_NOW = new Date("2026-08-31T12:00:00.000Z");
 
 function exactApproval() {
-  return vi.fn(async (
-    claim: ApolloExactApprovalClaim,
-  ): Promise<ApolloConsumedApprovalReceipt> => ({
-    ...claim,
-    action: APOLLO_PAID_APPROVAL_ACTION,
-    approvedAt: new Date(PAID_NOW.getTime() - 1_000).toISOString(),
-    expiresAt: new Date(PAID_NOW.getTime() + 60_000).toISOString(),
-    status: "consumed" as const,
-  }));
+  return vi.fn(
+    async (
+      claim: ApolloExactApprovalClaim,
+    ): Promise<ApolloConsumedApprovalReceipt> => ({
+      ...claim,
+      action: APOLLO_PAID_APPROVAL_ACTION,
+      approvedAt: new Date(PAID_NOW.getTime() - 1_000).toISOString(),
+      expiresAt: new Date(PAID_NOW.getTime() + 60_000).toISOString(),
+      status: "consumed" as const,
+    }),
+  );
 }
 
 describe("Apollo one-person connection canary", () => {
@@ -359,7 +363,9 @@ describe("Apollo one-person connection canary", () => {
           consumeExactApproval: async (claim) => ({
             ...claim,
             candidateHash: "wrong-candidate",
-            approvedAt: new Date(PAID_NOW.getTime() - 10 * 60_000).toISOString(),
+            approvedAt: new Date(
+              PAID_NOW.getTime() - 10 * 60_000,
+            ).toISOString(),
             expiresAt: new Date(PAID_NOW.getTime() + 60_000).toISOString(),
             status: "consumed",
           }),
