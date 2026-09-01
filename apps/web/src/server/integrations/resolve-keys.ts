@@ -12,7 +12,7 @@ export type ResolvedApiKey = {
   secretId?: string;
   /** PostgreSQL connection-row version used to fence delayed dispatch. */
   credentialVersion?: string;
-  /** PostgreSQL Vault-row version; changes when the secret rotates in place. */
+  /** Vault updated-at revision; changes when the secret rotates in place. */
   secretVersion?: string;
 };
 
@@ -127,11 +127,10 @@ export async function resolveOwnedIntegrationApiKey(
 
   const secrets = await db.execute(
     sql<{ decrypted_secret: string; secret_version: string }>`
-      select decrypted.decrypted_secret,
-             secret.xmin::text as secret_version
-      from vault.decrypted_secrets decrypted
-      join vault.secrets secret on secret.id = decrypted.id
-      where decrypted.id = ${row.secret_id}::uuid
+      select decrypted_secret,
+             updated_at::text as secret_version
+      from vault.decrypted_secrets
+      where id = ${row.secret_id}::uuid
       limit 1
     `,
   );
@@ -197,9 +196,9 @@ export async function markOwnedIntegrationConnectionAuthError(input: {
     // errored, including direct Vault rotation that preserves the secret ID.
     const [secret] = await tx.execute<{ exact: boolean }>(sql`
       select true as exact
-      from vault.secrets
+      from vault.decrypted_secrets
       where id = ${input.secretId}::uuid
-        and xmin::text = ${input.secretVersion}
+        and updated_at = ${input.secretVersion}::timestamptz
       for share
     `);
     if (secret?.exact !== true) return false;
