@@ -36,4 +36,3 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 - Rollback/correction: revert the implementation commit, disable Hunt provider
   controls, retain server receipts, and restore only after principal-switch
   denial tests pass. Never weaken server authorization to preserve browser UX.
-

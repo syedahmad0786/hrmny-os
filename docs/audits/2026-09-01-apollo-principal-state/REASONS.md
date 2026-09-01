@@ -26,4 +26,3 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 - Supersedes/superseded-by: none.
 - Rollback/correction: hide/disable the provider surface if authoritative query
   ownership cannot be proven; do not infer identity from unverified text.
-

@@ -46,4 +46,3 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
   `GAP-HRMNY-20260831-APOLLO-010`.
 - Rollback/correction: keep live Apollo closed until a database-backed global
   claimant and recovery tests are accepted.
-

@@ -37,4 +37,3 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 - Tests: helper exceptions and identity mismatch; canonical session tags; access
   and connection tags; reload; no-reload switch; delayed status/mutation;
   readiness gate; Research draft; mobile layout.
-

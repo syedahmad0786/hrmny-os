@@ -49,4 +49,3 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 
 No failed path called a provider, used a credit, sent a message, deployed,
 migrated production, changed an account, or wrote Xero.
-

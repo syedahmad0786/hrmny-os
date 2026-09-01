@@ -35,19 +35,19 @@ does not hide or claim to close it.
 
 ## Acceptance state
 
-| State | Result |
-| --- | --- |
-| planned | yes |
-| documented | yes |
-| authorized | source and synthetic local testing only |
-| configured | local memory/mock runtime only |
-| tested | local: 946 deterministic tests, 8/8 focused browser journeys, lint, typecheck, and web build |
-| deployed | no |
-| provider accepted | no |
-| destination verified | no |
-| recovery verified | no |
-| user accepted | no |
-| production accepted | no |
+| State                | Result                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------- |
+| planned              | yes                                                                                          |
+| documented           | yes                                                                                          |
+| authorized           | source and synthetic local testing only                                                      |
+| configured           | local memory/mock runtime only                                                               |
+| tested               | local: 946 deterministic tests, 8/8 focused browser journeys, lint, typecheck, and web build |
+| deployed             | no                                                                                           |
+| provider accepted    | no                                                                                           |
+| destination verified | no                                                                                           |
+| recovery verified    | no                                                                                           |
+| user accepted        | no                                                                                           |
+| production accepted  | no                                                                                           |
 
 Hosted exact-head CI and external review remain separate receipts. Nothing in
 this package authorizes a live Apollo call, credit use, production migration,
@@ -63,4 +63,3 @@ deployment, merge, external message, or named-user UAT.
 - [Outcomes](./OUTCOMES.md)
 - [Evidence](./EVIDENCE.md)
 - [Runbooks](./RUNBOOKS.md)
-

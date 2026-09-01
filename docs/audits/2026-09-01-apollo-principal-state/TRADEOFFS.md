@@ -26,4 +26,3 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 - Supersedes/superseded-by: supersedes unsafe v1 restore behavior; none.
 - Rollback/correction: delete the v2 pointer and disable new submission rather
   than run a provider action without durable recovery identity.
-

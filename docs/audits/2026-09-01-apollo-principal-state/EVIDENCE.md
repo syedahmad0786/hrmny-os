@@ -54,4 +54,3 @@ commit `5a166dd935ba1d9ec5fadbf94de8e101a2fc1dc5`; base
 - Supersedes/superseded-by: none.
 - Rollback/correction: reopen the exact finding on any future failing case and
   preserve `GAP-010/012` as explicit boundaries.
-

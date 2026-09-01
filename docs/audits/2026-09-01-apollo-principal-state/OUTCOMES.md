@@ -27,4 +27,3 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
   `GAP-HRMNY-20260831-APOLLO-009` after hosted exact-head proof.
 - Rollback/correction: revert the commit and disable the provider control; keep
   immutable server receipts and the v1 rejection behavior.
-
