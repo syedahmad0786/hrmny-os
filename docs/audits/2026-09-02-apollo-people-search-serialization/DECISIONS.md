@@ -4,7 +4,8 @@ Common metadata for every record: 2026-09-02;
 `client-uae-creative-01/hrmny-os`; host `Bukhari-Laptop`; actor `Codex /root`;
 tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
-commit `fc2d288074bc44624abbb9e701b5c5ffa7adb775`; base
+commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
+`900bc0e548061b5b6872c3552b18ff8d1c309a6b`; base
 `8b672fd4e1ee2671d6919011e29b91886d706278`.
 
 ## `ADR-HRMNY-20260902-APOLLO-013` — serialize free People Search in PostgreSQL
@@ -40,15 +41,17 @@ commit `fc2d288074bc44624abbb9e701b5c5ffa7adb775`; base
 - Decision/finding: after credential resolution and immediately before the
   provider request, revalidate the receipt owner, payload actor, active
   employee, allowed Sales role, exact staff Apollo connection, secret ID,
-  expiry, and `connection_account.xmin`. A stale 401/403 may disable only the
-  exact connection version that dispatched it.
+  expiry, `connection_account.xmin`, and `vault.secrets.xmin`. A stale 401/403
+  may disable only the exact connection and Vault row versions that dispatched
+  it.
 - Reason: enqueue-time approval and an ACTIVE connection do not authorize a
   delayed external operation after role removal, revocation, or key rotation.
 - Alternatives considered: trust the queued actor ID; compare display email;
   validate only connection status; disable any connection after a stale 401.
-- Trade-offs: `xmin` is a short-lived fail-closed version fence rather than a
-  business identifier; direct Vault administration must also touch the
-  connection row; a tiny database-to-provider TOCTOU remains unavoidable.
+- Trade-offs: both `xmin` values are short-lived fail-closed version fences
+  rather than business identifiers. Direct Vault-only rotation is detected,
+  but the governed connection workflow remains required for audit and status
+  reconciliation. A tiny database-to-provider TOCTOU remains unavoidable.
 - Evidence: `EVID-HRMNY-20260902-APOLLO-021/022` and the forced rotation,
   revocation, and stale-401 cases.
 - Confidence/freshness: high for code and deterministic tests; production

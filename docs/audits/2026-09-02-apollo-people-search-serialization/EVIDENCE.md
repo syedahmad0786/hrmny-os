@@ -4,7 +4,8 @@ Common metadata for every record: 2026-09-02;
 `client-uae-creative-01/hrmny-os`; host `Bukhari-Laptop`; actor `Codex /root`;
 tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
-commit `fc2d288074bc44624abbb9e701b5c5ffa7adb775`; base
+commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
+`900bc0e548061b5b6872c3552b18ff8d1c309a6b`; base
 `8b672fd4e1ee2671d6919011e29b91886d706278`.
 
 ## `EVID-HRMNY-20260902-APOLLO-021` — deterministic local source gate
@@ -17,14 +18,16 @@ commit `fc2d288074bc44624abbb9e701b5c5ffa7adb775`; base
   repository gate, not only focused happy paths.
 - Alternatives considered: focused tests only; live Apollo; skip production
   build.
-- Trade-offs: the default web suite excludes the 27-case PostgreSQL runtime
+- Trade-offs: the default web suite excludes the 29-case PostgreSQL runtime
   file, so this is not database-runtime acceptance.
 - Evidence: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, formatter
   check, `git diff --check`, exact migration-hash comparison, and a secret
-  pattern scan over 24 implementation files. The only credential-shaped string
-  was the existing localhost disposable-database fixture.
+  pattern scan. The focused changed-file scan found no credential-shaped
+  assignment; the broader initial scan found only the existing localhost
+  disposable-database fixture.
 - Confidence/freshness: high on 2026-09-02.
-- Affected components: all implementation files in commit `fc2d288`.
+- Affected components: all implementation files in commits `fc2d288` and
+  `900bc0e`.
 - Status: local source gate accepted; hosted database gate pending.
 - Supersedes/superseded-by: will be supplemented, not replaced, by hosted
   evidence.
@@ -36,8 +39,10 @@ commit `fc2d288074bc44624abbb9e701b5c5ffa7adb775`; base
 - Decision/finding: independent read-only reviewers challenged provider-wide
   scope, revoke ordering, stale completion, actor/role loss, credential
   rotation, stale 401 handling, migration exactness, paid-operation leakage,
-  and UI ambiguity. Final accepted diff had no remaining P0/P1/P2 code finding
-  in the free-People-Search slice.
+  and UI ambiguity. They found an in-place Vault-rotation fence gap and two
+  terminal paths that could drop prior ambiguity. Commit `900bc0e` added the
+  Vault-row version fence and preserved ambiguity. Final re-audit found no
+  remaining P0/P1/P2 code defect in the corrected free-People-Search slice.
 - Reason: concurrency and external-effect boundaries require adversarial races,
   not only line coverage.
 - Alternatives considered: self-review only; allow reviewers to provision a
@@ -45,9 +50,10 @@ commit `fc2d288074bc44624abbb9e701b5c5ffa7adb775`; base
 - Trade-offs: review cannot replace the excluded PostgreSQL execution suite,
   provider readback, recovery drill, or UAT.
 - Evidence: forced `pg_terminate_backend` test, concurrent independent-client
-  claim tests, in-flight revoke case, exact actor/connection loss cases,
-  Search-to-Match migration transition proof, and final SQL/hash/security
-  re-review.
+  claim tests, in-flight revoke case, exact actor/connection/Vault loss cases,
+  stale 401 after Vault-only rotation, role-loss and attempt-limit ambiguity
+  preservation, Search-to-Match migration transition proof, and final
+  SQL/hash/security re-review.
 - Confidence/freshness: high for current source; hosted runtime pending.
 - Affected components: runtime claimant, receipts, migration, connection fence,
   and operator copy.
@@ -56,20 +62,33 @@ commit `fc2d288074bc44624abbb9e701b5c5ffa7adb775`; base
 - Rollback/correction: reopen the exact finding and preserve failure history if
   hosted proof disagrees.
 
-## `EVID-HRMNY-20260902-APOLLO-023` — hosted exact-head acceptance placeholder
+## `EVID-HRMNY-20260902-APOLLO-023` — initial hosted matrices failed honestly
 
-- Decision/finding: no hosted receipt exists yet for this documentation head.
-- Reason: the branch has not been pushed and no pull request exists at the time
-  of this record.
-- Alternatives considered: reuse a prior phase's CI; claim local proof as
-  hosted.
-- Trade-offs: `GAP-HRMNY-20260902-APOLLO-014` remains open.
-- Evidence: none; pending push and both GitHub event matrices, disposable
-  migration verification, 27-case PostgreSQL runtime suite, preview builds, and
-  security review.
-- Confidence/freshness: high that acceptance is absent on 2026-09-02.
-- Affected components: source/CI/preview acceptance only.
-- Status: planned, not tested.
-- Supersedes/superseded-by: when populated, may narrowly supersede the local-open
-  portion of prior free-search concurrency gaps; none now.
-- Rollback/correction: do not change status without exact run/job/commit receipts.
+- Decision/finding: both hosted matrices for initial head
+  `afc708a078eb72de98200195e8faed03fb51ca90` failed and are not accepted. The
+  verify jobs, migration verification/application, Sales PostgreSQL proof,
+  previews, and security review passed. Apollo PostgreSQL proof and one browser
+  assertion failed.
+- Reason: the first concurrency test expected the obsolete ten-minute lease
+  retry rather than the bounded five-second busy retry. Its assertion exited
+  before releasing the first provider promise, so the open advisory transaction
+  caused 24 cascading busy results. The browser test still expected the old
+  `reconciled from receipt` wording after status copy changed to identify the
+  current attempt and receipt explicitly.
+- Alternatives considered: rerun the same head; hide cascade failures; reuse
+  successful verify/preview checks as whole-matrix acceptance.
+- Trade-offs: the failed evidence remains permanent, while corrected head
+  `900bc0e548061b5b6872c3552b18ff8d1c309a6b` requires fresh hosted matrices.
+- Evidence: push run `33549333254`, database job `99994613400`, e2e job
+  `99994613933`, verify job `99994613796`; pull-request run `33549371235`,
+  database job `99994746031`, e2e job `99994746036`, verify job
+  `99994745678`; PR <https://github.com/syedahmad0786/hrmny-os/pull/246>.
+- Confidence/freshness: high on 2026-09-02.
+- Affected components: hosted PostgreSQL proof, browser acceptance, and source
+  acceptance state; no provider or production resource.
+- Status: initial head tested and failed; corrections locally verified and not
+  yet hosted.
+- Supersedes/superseded-by: does not supersede an acceptance receipt; a later
+  exact-head hosted receipt must supplement it.
+- Rollback/correction: keep the PR unmerged and production unchanged; require
+  both corrected push and pull-request matrices before source acceptance.
