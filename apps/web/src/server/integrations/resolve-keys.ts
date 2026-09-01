@@ -10,8 +10,10 @@ export type ResolvedApiKey = {
   connectionAccountId?: string;
   /** Non-secret Vault identity used to fence delayed dispatch after rotation. */
   secretId?: string;
-  /** PostgreSQL row version; changes even when Vault rotates in place. */
+  /** PostgreSQL connection-row version used to fence delayed dispatch. */
   credentialVersion?: string;
+  /** PostgreSQL Vault-row version; changes when the secret rotates in place. */
+  secretVersion?: string;
 };
 
 const ENV_KEY: Record<ApiKeyToolkit, string> = {
@@ -124,13 +126,23 @@ export async function resolveOwnedIntegrationApiKey(
   if (!row?.secret_id) return { apiKey: null, source: "none" };
 
   const secrets = await db.execute(
-    sql<{ decrypted_secret: string }>`
-      select decrypted_secret from vault.decrypted_secrets
-      where id = ${row.secret_id}::uuid limit 1
+    sql<{ decrypted_secret: string; secret_version: string }>`
+      select decrypted.decrypted_secret,
+             secret.xmin::text as secret_version
+      from vault.decrypted_secrets decrypted
+      join vault.secrets secret on secret.id = decrypted.id
+      where decrypted.id = ${row.secret_id}::uuid
+      limit 1
     `,
   );
   const decrypted = secrets[0]?.decrypted_secret;
-  if (typeof decrypted !== "string" || !decrypted.trim()) {
+  const secretVersion = secrets[0]?.secret_version;
+  if (
+    typeof decrypted !== "string" ||
+    !decrypted.trim() ||
+    typeof secretVersion !== "string" ||
+    !secretVersion
+  ) {
     return { apiKey: null, source: "none" };
   }
   return {
@@ -139,6 +151,7 @@ export async function resolveOwnedIntegrationApiKey(
     connectionAccountId: row.connection_account_id,
     secretId: row.secret_id,
     credentialVersion: row.credential_version,
+    secretVersion,
   };
 }
 
@@ -173,24 +186,41 @@ export async function markOwnedIntegrationConnectionAuthError(input: {
   employeeId: string;
   connectionAccountId: string;
   credentialVersion: string;
+  secretId: string;
+  secretVersion: string;
 }): Promise<boolean> {
   const db = getDb();
   if (!db) return false;
-  const updated = await db.execute<{ id: string }>(sql`
-    update public.connection_account
-    set status = 'error',
-        last_error = 'PROVIDER_AUTHENTICATION_REVOKED',
-        last_tested_at = now(),
-        updated_at = now()
-    where connection_account_id = ${input.connectionAccountId}::uuid
-      and owner_employee_id = ${input.employeeId}::uuid
-      and toolkit = ${input.toolkit}
-      and scope = 'staff'
-      and status = 'connected'
-      and xmin::text = ${input.credentialVersion}
-    returning connection_account_id::text as id
-  `);
-  return updated.length === 1;
+  return db.transaction(async (tx) => {
+    // Rotation updates Vault before connection_account. Lock in the same order
+    // so a stale provider response can never mark a newer in-place secret as
+    // errored, including direct Vault rotation that preserves the secret ID.
+    const [secret] = await tx.execute<{ exact: boolean }>(sql`
+      select true as exact
+      from vault.secrets
+      where id = ${input.secretId}::uuid
+        and xmin::text = ${input.secretVersion}
+      for share
+    `);
+    if (secret?.exact !== true) return false;
+
+    const updated = await tx.execute<{ id: string }>(sql`
+      update public.connection_account
+      set status = 'error',
+          last_error = 'PROVIDER_AUTHENTICATION_REVOKED',
+          last_tested_at = now(),
+          updated_at = now()
+      where connection_account_id = ${input.connectionAccountId}::uuid
+        and owner_employee_id = ${input.employeeId}::uuid
+        and toolkit = ${input.toolkit}
+        and scope = 'staff'
+        and status = 'connected'
+        and secret_id = ${input.secretId}::uuid
+        and xmin::text = ${input.credentialVersion}
+      returning connection_account_id::text as id
+    `);
+    return updated.length === 1;
+  });
 }
 
 export async function toolConfiguredStatus(

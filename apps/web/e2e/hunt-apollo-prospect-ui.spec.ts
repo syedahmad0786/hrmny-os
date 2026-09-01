@@ -204,7 +204,10 @@ test.describe("Hunt Apollo prospect UI", () => {
       timeout: 60_000,
     });
     await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
-      /reconciled from receipt/i,
+      /current Apollo mock attempt/i,
+    );
+    await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
+      /receipt c3c3c3c3/i,
     );
     await expect
       .poll(() =>

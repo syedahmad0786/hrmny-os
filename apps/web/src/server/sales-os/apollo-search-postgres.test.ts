@@ -20,6 +20,7 @@ import {
   hashIntegrationPayload,
 } from "../integrations/inbox";
 import {
+  APOLLO_PEOPLE_SEARCH_MAX_ATTEMPTS,
   APOLLO_PEOPLE_SEARCH_OPERATION,
   getApolloPeopleSearchStatus,
   redactExpiredApolloPeopleSearchCandidates,
@@ -477,7 +478,7 @@ describe("Apollo queue PostgreSQL proof", () => {
   it("serializes different Apollo jobs across independent database clients", async () => {
     const now = new Date("2026-09-01T10:00:00.000Z");
     const firstStarted = vi.fn();
-    let releaseFirst!: () => void;
+    let releaseFirst: () => void = () => undefined;
     const firstSource = sourceWith(
       () =>
         new Promise<LeadSearchExecution>((resolve) => {
@@ -532,27 +533,28 @@ describe("Apollo queue PostgreSQL proof", () => {
       database: firstDatabase,
       now: () => now,
     });
-    await vi.waitFor(() => expect(firstStarted).toHaveBeenCalledOnce());
+    try {
+      await vi.waitFor(() => expect(firstStarted).toHaveBeenCalledOnce());
 
-    await expect(
-      runApolloPeopleSearchQueuedJob(secondJob.scheduled_job_id, {
-        leadSource: secondSource,
-        authorizeActor: async () => true,
-        database: secondDatabase,
-        now: () => now,
-      }),
-    ).resolves.toEqual({
-      status: "busy",
-      nextAttemptAt: "2026-09-01T10:10:00.000Z",
-    });
-    expect(secondSource.searchLeadsWithReceipt).not.toHaveBeenCalled();
+      await expect(
+        runApolloPeopleSearchQueuedJob(secondJob.scheduled_job_id, {
+          leadSource: secondSource,
+          authorizeActor: async () => true,
+          database: secondDatabase,
+          now: () => now,
+        }),
+      ).resolves.toEqual({
+        status: "busy",
+        nextAttemptAt: "2026-09-01T10:00:05.000Z",
+      });
+      expect(secondSource.searchLeadsWithReceipt).not.toHaveBeenCalled();
 
-    const stateWhileBusy = await db.execute<{
-      external_event_id: string;
-      status: string;
-      attempts: number;
-      concurrency_key: string | null;
-    }>(sql`
+      const stateWhileBusy = await db.execute<{
+        external_event_id: string;
+        status: string;
+        attempts: number;
+        concurrency_key: string | null;
+      }>(sql`
       select inbox.external_event_id, job.status, job.attempts,
              job.concurrency_key
       from public.integration_inbox inbox
@@ -564,33 +566,37 @@ describe("Apollo queue PostgreSQL proof", () => {
       )
       order by inbox.external_event_id
     `);
-    expect(stateWhileBusy).toEqual([
-      {
-        external_event_id: firstJob.external_event_id,
-        status: "running",
-        attempts: 1,
-        concurrency_key: "provider:apollo",
-      },
-      {
-        external_event_id: secondJob.external_event_id,
-        status: "pending",
-        attempts: 0,
-        concurrency_key: "provider:apollo",
-      },
-    ]);
+      expect(stateWhileBusy).toEqual([
+        {
+          external_event_id: firstJob.external_event_id,
+          status: "running",
+          attempts: 1,
+          concurrency_key: "provider:apollo",
+        },
+        {
+          external_event_id: secondJob.external_event_id,
+          status: "pending",
+          attempts: 0,
+          concurrency_key: "provider:apollo",
+        },
+      ]);
 
-    releaseFirst();
-    await expect(firstRun).resolves.toMatchObject({ status: "completed" });
-    await expect(
-      runApolloPeopleSearchQueuedJob(secondJob.scheduled_job_id, {
-        leadSource: secondSource,
-        authorizeActor: async () => true,
-        database: secondDatabase,
-        now: () => new Date(now.getTime() + 1),
-      }),
-    ).resolves.toMatchObject({ status: "completed" });
-    expect(firstSource.searchLeadsWithReceipt).toHaveBeenCalledOnce();
-    expect(secondSource.searchLeadsWithReceipt).toHaveBeenCalledOnce();
+      releaseFirst();
+      await expect(firstRun).resolves.toMatchObject({ status: "completed" });
+      await expect(
+        runApolloPeopleSearchQueuedJob(secondJob.scheduled_job_id, {
+          leadSource: secondSource,
+          authorizeActor: async () => true,
+          database: secondDatabase,
+          now: () => new Date(now.getTime() + 1),
+        }),
+      ).resolves.toMatchObject({ status: "completed" });
+      expect(firstSource.searchLeadsWithReceipt).toHaveBeenCalledOnce();
+      expect(secondSource.searchLeadsWithReceipt).toHaveBeenCalledOnce();
+    } finally {
+      releaseFirst();
+      await Promise.allSettled([firstRun]);
+    }
   });
 
   it("does not let a stale terminal-job repair clear a replacement worker lease", async () => {
@@ -777,20 +783,12 @@ describe("Apollo queue PostgreSQL proof", () => {
       expect(source.searchLeadsWithReceipt).toHaveBeenCalledOnce(),
     );
 
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`
-        select vault.update_secret(
-          ${actorSecretId}::uuid,
-          'synthetic-apollo-proof-key-a-newer'
-        )
-      `);
-      await tx.execute(sql`
-        update public.connection_account
-        set status = 'connected', last_error = null, updated_at = now()
-        where connection_account_id = ${ACTOR_CONNECTION}::uuid
-          and secret_id = ${actorSecretId}::uuid
-      `);
-    });
+    await db.execute(sql`
+      select vault.update_secret(
+        ${actorSecretId}::uuid,
+        'synthetic-apollo-proof-key-a-newer'
+      )
+    `);
     rejectProvider(
       new ApolloProviderRequestError(
         "stale credential rejected",
@@ -1456,20 +1454,12 @@ describe("Apollo queue PostgreSQL proof", () => {
     });
     await vi.waitFor(() => expect(authorizationPaused).toHaveBeenCalledOnce());
 
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`
-        select vault.update_secret(
-          ${actorSecretId}::uuid,
-          'synthetic-apollo-proof-key-a-rotated'
-        )
-      `);
-      await tx.execute(sql`
-        update public.connection_account
-        set updated_at = now()
-        where connection_account_id = ${ACTOR_CONNECTION}::uuid
-          and secret_id = ${actorSecretId}::uuid
-      `);
-    });
+    await db.execute(sql`
+      select vault.update_secret(
+        ${actorSecretId}::uuid,
+        'synthetic-apollo-proof-key-a-rotated'
+      )
+    `);
     releaseAuthorization();
 
     await expect(run).resolves.toMatchObject({
@@ -1805,6 +1795,122 @@ describe("Apollo queue PostgreSQL proof", () => {
       }),
     ).resolves.toMatchObject({
       status: "revoked",
+      providerAttemptedPreviously: true,
+      providerMaySettle: true,
+    });
+  });
+
+  it("preserves prior provider ambiguity when the actor loses authorization", async () => {
+    const now = new Date("2026-09-01T15:30:00.000Z");
+    const source = sourceWith(async () =>
+      execution("must-not-run-after-role-loss"),
+    );
+    const pending = await searchApolloPeopleFree(
+      {
+        idempotencyKey: "41000000-0000-4000-8000-000000000038",
+        actorEmployeeId: ACTOR,
+        query: "ambiguous attempt before role loss",
+      },
+      { leadSource: source, now: () => now },
+    );
+    const db = getDb()!;
+    const [job] = await db.execute<{ scheduled_job_id: string }>(sql`
+      select scheduled_job_id from public.scheduled_job
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+    await db.execute(sql`
+      update public.integration_inbox
+      set status = 'processing', attempts = 1,
+          result = jsonb_build_object(
+            'bridgeStatus', 'retry_scheduled',
+            'nextAttemptAt', ${now.toISOString()}::text,
+            'providerDispatchState', 'ambiguous',
+            'providerDispatchEverAuthorized', true,
+            'providerOutcomeAmbiguous', true
+          ),
+          attempt_token = null,
+          attempt_lease_expires_at = null,
+          state_version = state_version + 1,
+          updated_at = ${now.toISOString()}::timestamptz
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+
+    await expect(
+      runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+        leadSource: source,
+        authorizeActor: async () => false,
+        now: () => now,
+      }),
+    ).resolves.toMatchObject({
+      status: "revoked",
+      reason: "APOLLO_SEARCH_AUTHORIZATION_REVOKED",
+    });
+    expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+    await expect(
+      getApolloPeopleSearchStatus({
+        idempotencyKey: pending.idempotencyKey,
+        actorEmployeeId: ACTOR,
+      }),
+    ).resolves.toMatchObject({
+      status: "revoked",
+      providerAttemptedPreviously: true,
+      providerMaySettle: true,
+    });
+  });
+
+  it("preserves prior provider ambiguity at the attempt-limit dead letter", async () => {
+    const now = new Date("2026-09-01T15:45:00.000Z");
+    const source = sourceWith(async () =>
+      execution("must-not-run-at-attempt-limit"),
+    );
+    const pending = await searchApolloPeopleFree(
+      {
+        idempotencyKey: "41000000-0000-4000-8000-000000000039",
+        actorEmployeeId: ACTOR,
+        query: "ambiguous attempt limit",
+      },
+      { leadSource: source, now: () => now },
+    );
+    const db = getDb()!;
+    const [job] = await db.execute<{ scheduled_job_id: string }>(sql`
+      select scheduled_job_id from public.scheduled_job
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+    await db.execute(sql`
+      update public.integration_inbox
+      set status = 'processing', attempts = ${APOLLO_PEOPLE_SEARCH_MAX_ATTEMPTS},
+          result = jsonb_build_object(
+            'bridgeStatus', 'retry_scheduled',
+            'nextAttemptAt', ${now.toISOString()}::text,
+            'providerDispatchState', 'ambiguous',
+            'providerDispatchEverAuthorized', true,
+            'providerOutcomeAmbiguous', true
+          ),
+          attempt_token = null,
+          attempt_lease_expires_at = null,
+          state_version = state_version + 1,
+          updated_at = ${now.toISOString()}::timestamptz
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+
+    await expect(
+      runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+        leadSource: source,
+        authorizeActor: async () => true,
+        now: () => now,
+      }),
+    ).resolves.toMatchObject({
+      status: "dead_letter",
+      reason: "APOLLO_SEARCH_ATTEMPT_LIMIT_REACHED",
+    });
+    expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+    await expect(
+      getApolloPeopleSearchStatus({
+        idempotencyKey: pending.idempotencyKey,
+        actorEmployeeId: ACTOR,
+      }),
+    ).resolves.toMatchObject({
+      status: "dead_letter",
       providerAttemptedPreviously: true,
       providerMaySettle: true,
     });
