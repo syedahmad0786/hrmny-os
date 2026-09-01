@@ -106,12 +106,14 @@ export const salesOsRouter = router({
   access: staffProcedure.query(({ ctx }) => ({
     canOperate: ctx.roles.some((role) => SALES_OPERATOR_ROLES.has(role)),
     canAdmin: ctx.roles.some((role) => SALES_ADMIN_ROLES.has(role)),
+    principalId: ctx.employeeId,
   })),
   apollo: router({
     status: staffProcedure.query(() => getApolloOnePersonCanaryStatus()),
-    connection: staffProcedure.query(({ ctx }) =>
-      ownedIntegrationConnectionStatus("apollo", ctx.employeeId),
-    ),
+    connection: staffProcedure.query(async ({ ctx }) => ({
+      ...(await ownedIntegrationConnectionStatus("apollo", ctx.employeeId)),
+      principalId: ctx.employeeId,
+    })),
     search: salesOperatorProcedure
       .input(
         z

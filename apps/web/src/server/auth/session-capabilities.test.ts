@@ -26,13 +26,19 @@ describe("staff session capabilities", () => {
   });
 
   it("returns booleans rather than raw permission policies to the shell", async () => {
+    const partner = resolveDevUser("partner");
+    const am = resolveDevUser("am");
     await expect(callerFor("partner").auth.session()).resolves.toMatchObject({
+      employeeId: partner.employeeId,
+      actorType: "staff",
       canPreviewClient: true,
       canAdminFeatures: true,
       canAdminWork: true,
       canViewAudit: true,
     });
     await expect(callerFor("am").auth.session()).resolves.toMatchObject({
+      employeeId: am.employeeId,
+      actorType: "staff",
       canPreviewClient: false,
       canAdminFeatures: false,
       canAdminWork: false,
