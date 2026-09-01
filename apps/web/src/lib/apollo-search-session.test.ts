@@ -21,7 +21,7 @@ function memoryStorage() {
 const partnerId = "c0000000-0000-4000-8000-000000000001";
 const amId = "c0000000-0000-4000-8000-000000000002";
 const pending: PendingApolloSearch = {
-  idempotencyKey: "51000000-0000-4000-8000-000000000001",
+  idempotencyKey: "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1",
   query: "hospitality",
   titles: ["Marketing Director"],
   perPage: 8,
@@ -69,7 +69,7 @@ describe("Apollo pending-search browser scope", () => {
     clearPendingApolloSearch(
       storage,
       partnerId,
-      "52000000-0000-4000-8000-000000000002",
+      "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2",
     );
     expect(storage.getItem(APOLLO_SEARCH_SESSION_KEY)).not.toBeNull();
     clearPendingApolloSearch(storage, amId, pending.idempotencyKey);
@@ -94,7 +94,7 @@ describe("Apollo pending-search browser scope", () => {
       isCurrentApolloSearchOperation(
         active,
         partnerId,
-        "52000000-0000-4000-8000-000000000002",
+        "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2",
       ),
     ).toBe(false);
     expect(

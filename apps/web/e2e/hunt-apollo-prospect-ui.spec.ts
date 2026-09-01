@@ -11,7 +11,7 @@ function completedSearchResponse(fullName: string) {
       result: {
         data: {
           json: {
-            receiptId: "53000000-0000-4000-8000-000000000003",
+            receiptId: "c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3",
             mode: "mock",
             status: "completed",
             attempts: 1,
@@ -172,7 +172,7 @@ test.describe("Hunt Apollo prospect UI", () => {
   test("renders a terminal receipt only for its current principal", async ({
     page,
   }) => {
-    const idempotencyKey = "54000000-0000-4000-8000-000000000004";
+    const idempotencyKey = "d4d4d4d4-d4d4-4d4d-8d4d-d4d4d4d4d4d4";
     const currentCandidate = "CURRENT PARTNER CANDIDATE";
     await page.addInitScript(
       ({ key, value }) => window.sessionStorage.setItem(key, value),
@@ -297,7 +297,7 @@ test.describe("Hunt Apollo prospect UI", () => {
   test("clears a prior employee's pending state when the account changes", async ({
     page,
   }) => {
-    const idempotencyKey = "52000000-0000-4000-8000-000000000002";
+    const idempotencyKey = "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2";
     const staleCandidate = "STALE PARTNER CANDIDATE MUST NOT RENDER";
     let releaseStatus!: () => void;
     let releaseReadiness!: () => void;
