@@ -3,8 +3,9 @@
 Common metadata for every record: 2026-09-02;
 `client-uae-creative-01/hrmny-os`; host `Bukhari-Laptop`; actor `Codex /root`;
 tool/model `Codex agent (exact model ID not exposed)`; branch
-`ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; commit
-`fc2d288074bc44624abbb9e701b5c5ffa7adb775`.
+`ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
+commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
+`900bc0e548061b5b6872c3552b18ff8d1c309a6b`.
 
 ## `REASON-HRMNY-20260902-APOLLO-010` — one durable lane is the smallest honest boundary
 

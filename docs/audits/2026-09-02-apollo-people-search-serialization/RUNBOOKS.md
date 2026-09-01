@@ -4,7 +4,8 @@ Common metadata for every record: 2026-09-02;
 `client-uae-creative-01/hrmny-os`; host `Bukhari-Laptop`; actor `Codex /root`;
 tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
-commit `fc2d288074bc44624abbb9e701b5c5ffa7adb775`.
+commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
+`900bc0e548061b5b6872c3552b18ff8d1c309a6b`.
 
 ## `PROC-HRMNY-20260902-APOLLO-008` — review, migrate, deploy, and reopen free People Search
 
@@ -52,8 +53,10 @@ commit `fc2d288074bc44624abbb9e701b5c5ffa7adb775`.
 2. Run synthetic concurrent cron/Inngest/employee jobs and forced worker/session
    loss. Verify one healthy provider lane, honest ambiguity, cleanup, alerting,
    and rollback.
-3. Confirm direct Vault rotation uses the governed connection workflow so the
-   `connection_account` version changes.
+3. Prove that an in-place Vault-only rotation invalidates the captured Vault
+   row version before dispatch and prevents a stale 401/403 from disabling the
+   newer credential. Still use the governed connection workflow for every
+   operational rotation so status, audit, and ownership remain reconciled.
 4. Do not reopen on migration or health alone.
 
 ### 4. Bounded live and user checkpoint
