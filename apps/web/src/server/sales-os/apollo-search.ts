@@ -1638,7 +1638,7 @@ export async function runApolloPeopleSearchQueuedJob(
             processedAt: now,
             lastError: reason,
             result: sql`(coalesce(${integrationInbox.result}, '{}'::jsonb) - 'candidates')
-              || jsonb_build_object('bridgeStatus', 'dead_letter', 'reason', ${reason})`,
+              || jsonb_build_object('bridgeStatus', 'dead_letter', 'reason', ${reason}::text)`,
             stateVersion: sql`${integrationInbox.stateVersion} + 1`,
             attemptToken: null,
             attemptLeaseExpiresAt: null,
@@ -1844,7 +1844,7 @@ export async function redactExpiredApolloPeopleSearchCandidates(
     set result = (coalesce(inbox.result, '{}'::jsonb) - 'candidates')
           || jsonb_build_object(
             'candidateDataState', 'redacted',
-            'candidatesRedactedAt', ${now.toISOString()}
+            'candidatesRedactedAt', ${nowIso}::text
           ),
         state_version = state_version + 1,
         updated_at = ${nowIso}::timestamptz
