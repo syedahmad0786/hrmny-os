@@ -458,17 +458,20 @@ describe("Apollo queue PostgreSQL proof", () => {
 
   it("does not let a stale terminal-job repair clear a replacement worker lease", async () => {
     let releaseProvider!: () => void;
-    const source = sourceWith(
-      () =>
-        new Promise<LeadSearchExecution>((resolve) => {
-          releaseProvider = () => resolve(execution("apollo-repair-winner"));
-        }),
-    );
+    const providerGate = new Promise<LeadSearchExecution>((resolve) => {
+      releaseProvider = () => resolve(execution("apollo-repair-winner"));
+    });
+    const source = sourceWith(() => providerGate);
     const input = {
       idempotencyKey: "41000000-0000-4000-8000-000000000020",
       actorEmployeeId: ACTOR,
       query: "terminal repair race",
     };
+    const databaseUrl = process.env.DATABASE_URL!;
+    // Each production DB client is intentionally capped at one connection.
+    // Separate clients model two concurrent requests without pool starvation.
+    const staleRepairDatabase = createDb(databaseUrl);
+    const replacementDatabase = createDb(databaseUrl);
     const pending = await searchApolloPeopleFree(input, { leadSource: source });
     const db = getDb()!;
     const [job] = await db.execute<{ scheduled_job_id: string }>(sql`
@@ -481,46 +484,62 @@ describe("Apollo queue PostgreSQL proof", () => {
     `);
 
     let releaseStaleRepair!: () => void;
+    const staleRepairGate = new Promise<void>((resolve) => {
+      releaseStaleRepair = resolve;
+    });
     const staleRepairStarted = vi.fn();
     const staleRepair = searchApolloPeopleFree(input, {
       leadSource: source,
+      database: staleRepairDatabase,
       beforeTerminalJobRepair: async () => {
         staleRepairStarted();
-        await new Promise<void>((resolve) => {
-          releaseStaleRepair = resolve;
-        });
+        await staleRepairGate;
       },
     });
-    await vi.waitFor(() => expect(staleRepairStarted).toHaveBeenCalledOnce());
+    let replacement:
+      ReturnType<typeof runApolloPeopleSearchQueuedJob> | undefined;
+    try {
+      await vi.waitFor(() => expect(staleRepairStarted).toHaveBeenCalledOnce());
 
-    await expect(
-      searchApolloPeopleFree(input, { leadSource: source }),
-    ).resolves.toMatchObject({ status: "retry_scheduled" });
-    const replacement = runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
-      leadSource: source,
-      authorizeActor: async () => true,
-    });
-    await vi.waitFor(() =>
-      expect(source.searchLeadsWithReceipt).toHaveBeenCalledOnce(),
-    );
+      await expect(
+        searchApolloPeopleFree(input, {
+          leadSource: source,
+          database: replacementDatabase,
+        }),
+      ).resolves.toMatchObject({ status: "retry_scheduled" });
+      replacement = runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+        leadSource: source,
+        authorizeActor: async () => true,
+      });
+      await vi.waitFor(() =>
+        expect(source.searchLeadsWithReceipt).toHaveBeenCalledOnce(),
+      );
 
-    releaseStaleRepair();
-    await staleRepair;
-    const [leased] = await db.execute<{
-      status: string;
-      attempt_token: string | null;
-      lease_expires_at: Date | string | null;
-    }>(sql`
-      select status, attempt_token::text, lease_expires_at
-      from public.scheduled_job
-      where scheduled_job_id = ${job!.scheduled_job_id}::uuid
-    `);
-    expect(leased?.status).toBe("running");
-    expect(leased?.attempt_token).toMatch(/^[0-9a-f-]{36}$/i);
-    expect(leased?.lease_expires_at).not.toBeNull();
+      releaseStaleRepair();
+      await staleRepair;
+      const [leased] = await db.execute<{
+        status: string;
+        attempt_token: string | null;
+        lease_expires_at: Date | string | null;
+      }>(sql`
+        select status, attempt_token::text, lease_expires_at
+        from public.scheduled_job
+        where scheduled_job_id = ${job!.scheduled_job_id}::uuid
+      `);
+      expect(leased?.status).toBe("running");
+      expect(leased?.attempt_token).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(leased?.lease_expires_at).not.toBeNull();
 
-    releaseProvider();
-    await expect(replacement).resolves.toMatchObject({ status: "completed" });
+      releaseProvider();
+      await expect(replacement).resolves.toMatchObject({ status: "completed" });
+    } finally {
+      releaseStaleRepair();
+      releaseProvider();
+      await Promise.allSettled([
+        staleRepair,
+        ...(replacement ? [replacement] : []),
+      ]);
+    }
   });
 
   it("reconciles provider auth revocation to the exact owner connection", async () => {
