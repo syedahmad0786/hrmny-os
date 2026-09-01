@@ -17,6 +17,7 @@ import {
   scheduledJob,
   sql,
   type Db,
+  withPostgresTransactionAdvisoryLock,
 } from "@hrmny/db";
 import { z } from "zod";
 import { getDb } from "../db";
@@ -37,7 +38,10 @@ import { sendApolloSearchRetryEvent } from "../inngest/apollo-search-retry";
 
 export const APOLLO_PEOPLE_SEARCH_OPERATION = "people.search.zero-credit";
 export const APOLLO_PEOPLE_SEARCH_JOB_KIND = "apollo_people_search";
+export const APOLLO_PROVIDER_CONCURRENCY_KEY = "provider:apollo";
 export const APOLLO_PEOPLE_SEARCH_MAX_ATTEMPTS = 3;
+const APOLLO_PROVIDER_BUSY_RETRY_MS = 5_000;
+const APOLLO_PROVIDER_LEASE_MS = 10 * 60_000;
 
 export type ApolloFreeSearchCandidate = Pick<
   LeadCandidate,
@@ -71,6 +75,8 @@ export type ApolloPeopleSearchResult = {
     providerResponseHash: string;
   };
   reason?: string;
+  providerAttemptedPreviously?: boolean;
+  providerMaySettle?: boolean;
 };
 
 type NormalizedSearchCriteria = Required<
@@ -130,12 +136,37 @@ export type ApolloSearchDeps = {
   afterAtomicReceiptInsert?: () => Promise<void>;
   /** Deterministic stale-repair race injection for PostgreSQL CAS proofs. */
   beforeTerminalJobRepair?: (jobId: string) => Promise<void>;
+  /** Deterministic pause immediately before the final dispatch ownership CAS. */
+  beforeProviderDispatchAuthorization?: () => Promise<void>;
+  /** Deterministic pause after final authorization, while the provider lock is held. */
+  afterProviderDispatchAuthorization?: () => Promise<void>;
+  /** Deterministic PostgreSQL proof hook; never an authorization input. */
+  afterProviderLockAcquired?: (backendPid: number) => Promise<void>;
+  /** Internal queued-worker fence; direct callers cannot authorize themselves. */
+  executeAuthorizedProviderDispatch?: (
+    input: {
+      receiptId: string;
+      attemptToken: string;
+      credentialSecretId?: string;
+      credentialVersion?: string;
+      authorizedAt: Date;
+      leaseExpiresAt: Date;
+    },
+    dispatch: () => Promise<ApolloPeopleSearchResult>,
+  ) => Promise<ApolloPeopleSearchResult | null>;
 };
 
 export class ApolloSearchRetryError extends Error {
   constructor(readonly retryAfterSeconds: number) {
     super("APOLLO_SEARCH_RETRY_SCHEDULED");
     this.name = "ApolloSearchRetryError";
+  }
+}
+
+class ApolloProviderSlotBusyError extends Error {
+  constructor(readonly nextAttemptAt: string) {
+    super("APOLLO_PROVIDER_SLOT_BUSY");
+    this.name = "ApolloProviderSlotBusyError";
   }
 }
 
@@ -273,6 +304,16 @@ function resultFromReceipt(
         ? (result.reconciliation as ApolloPeopleSearchResult["reconciliation"])
         : undefined,
     reason: typeof result.reason === "string" ? result.reason : undefined,
+    providerAttemptedPreviously:
+      result.providerAttemptedPreviously === true ||
+      result.providerDispatchEverAuthorized === true
+        ? true
+        : undefined,
+    providerMaySettle:
+      result.providerMaySettle === true ||
+      result.providerOutcomeAmbiguous === true
+        ? true
+        : undefined,
   };
 }
 
@@ -363,8 +404,36 @@ async function configuredSource(
   actorEmployeeId: string | null | undefined,
   connectionAccountId: string | null | undefined,
   deps: ApolloSearchDeps,
-): Promise<LeadSourceAdapter> {
-  if (deps.leadSource) return deps.leadSource;
+): Promise<{
+  source: LeadSourceAdapter;
+  credentialSecretId?: string;
+  credentialVersion?: string;
+}> {
+  if (deps.leadSource) {
+    const db = deps.database ?? getDb();
+    if (!db || !actorEmployeeId || !connectionAccountId) {
+      return { source: deps.leadSource };
+    }
+    const [connection] = await db.execute<{
+      secret_id: string;
+      credential_version: string;
+    }>(sql`
+      select secret_id::text, xmin::text as credential_version
+      from public.connection_account
+      where connection_account_id = ${connectionAccountId}::uuid
+        and owner_employee_id = ${actorEmployeeId}::uuid
+        and toolkit = 'apollo'
+        and scope = 'staff'
+        and status = 'connected'
+        and secret_id is not null
+      limit 1
+    `);
+    return {
+      source: deps.leadSource,
+      credentialSecretId: connection?.secret_id,
+      credentialVersion: connection?.credential_version,
+    };
+  }
   if (!deps.resolveApiKey && !connectionAccountId) {
     throw new ApolloSearchConnectionRequiredError();
   }
@@ -377,11 +446,15 @@ async function configuredSource(
   if (!resolved.apiKey) {
     throw new ApolloSearchConnectionRequiredError();
   }
-  return createLeadSourceLive({
-    mode: "live",
-    apiKey: resolved.apiKey,
-    allowPaidOperations: false,
-  });
+  return {
+    source: createLeadSourceLive({
+      mode: "live",
+      apiKey: resolved.apiKey,
+      allowPaidOperations: false,
+    }),
+    credentialSecretId: resolved.secretId,
+    credentialVersion: resolved.credentialVersion,
+  };
 }
 
 async function assertQueuedActorAuthorized(
@@ -394,7 +467,7 @@ async function assertQueuedActorAuthorized(
     }
     return;
   }
-  const db = getDb();
+  const db = deps.database ?? getDb();
   if (!db) throw new ApolloSearchAuthorizationRevokedError();
   const rows = await db.execute<{ authorized: boolean }>(sql`
     select exists (
@@ -638,6 +711,7 @@ async function enqueueApolloSearchDefault(input: {
           integrationInboxId: receiptRow.receiptId,
           jobKey,
           kind: APOLLO_PEOPLE_SEARCH_JOB_KIND,
+          concurrencyKey: APOLLO_PROVIDER_CONCURRENCY_KEY,
           runAt: input.now,
           payload: {
             receiptId: receiptRow.receiptId,
@@ -817,10 +891,20 @@ function completedResult(input: {
   };
 }
 
-function storedCompletedResult(result: ApolloPeopleSearchResult) {
+function storedCompletedResult(
+  result: ApolloPeopleSearchResult,
+  priorResult: Record<string, unknown> | null | undefined,
+) {
+  // A later successful read cannot prove that an earlier request lost with its
+  // provider outcome unknown. Preserve that durable ambiguity for operators.
+  const providerOutcomeAmbiguous =
+    priorResult?.providerOutcomeAmbiguous === true;
   return {
     bridgeStatus: result.status,
     mode: result.mode,
+    providerDispatchState: providerOutcomeAmbiguous ? "ambiguous" : "settled",
+    providerDispatchEverAuthorized: true,
+    providerOutcomeAmbiguous,
     candidates: result.candidates,
     providerReceipt: result.providerReceipt,
     reconciliation: result.reconciliation,
@@ -841,19 +925,28 @@ async function finishSearch(input: {
     input.criteria,
     input.allowSynthetic,
   );
-  const result = completedResult({
+  const completed = completedResult({
     idempotencyKey: input.idempotencyKey,
     receipt: input.receipt,
     mode: input.source.mode,
     execution,
     now: input.now,
   });
-  const completed = await completeIntegrationReceiptIfProcessing(
+  const priorOutcomeAmbiguous =
+    input.receipt.result?.providerOutcomeAmbiguous === true;
+  const result: ApolloPeopleSearchResult = priorOutcomeAmbiguous
+    ? {
+        ...completed,
+        providerAttemptedPreviously: true,
+        providerMaySettle: true,
+      }
+    : completed;
+  const stored = await completeIntegrationReceiptIfProcessing(
     input.receipt.receiptId,
     input.attemptToken,
-    storedCompletedResult(result),
+    storedCompletedResult(result, input.receipt.result),
   );
-  if (!completed) {
+  if (!stored) {
     const current = await getIntegrationReceipt("apollo", input.idempotencyKey);
     if (!current) throw new Error("APOLLO_SEARCH_RECEIPT_NOT_FOUND");
     return resultFromReceipt(input.idempotencyKey, current, true);
@@ -1061,13 +1154,51 @@ export async function revokeApolloPeopleSearch(
   let revokedNow: boolean;
   if (db && !deps.cancelRetry) {
     revokedNow = await db.transaction(async (tx) => {
+      // Lock the receipt before deciding whether cancellation preceded or
+      // followed final provider-dispatch authorization. This gives the worker
+      // and revoker one atomic ordering without retaining these row locks over
+      // the external request; the provider slot uses a separate advisory lock.
+      const [activeReceipt] = await tx.execute<{
+        status: string;
+        result: Record<string, unknown> | null;
+      }>(sql`
+        select status, result
+        from public.integration_inbox
+        where integration_inbox_id = ${receipt.receiptId}::uuid
+        for update
+      `);
+      if (
+        !activeReceipt ||
+        !new Set(["received", "processing"]).has(activeReceipt.status)
+      ) {
+        return false;
+      }
+      const providerDispatchInFlight =
+        activeReceipt.result?.providerDispatchState === "authorized";
+      const providerAttemptedPreviously =
+        activeReceipt.result?.providerDispatchEverAuthorized === true;
+      const providerMaySettle =
+        providerDispatchInFlight ||
+        activeReceipt.result?.providerOutcomeAmbiguous === true;
+      const storedRevokedResult = {
+        ...revokedResult,
+        reason: providerDispatchInFlight
+          ? "APOLLO_SEARCH_REVOKED_PROVIDER_MAY_SETTLE"
+          : providerMaySettle
+            ? "APOLLO_SEARCH_REVOKED_PROVIDER_OUTCOME_AMBIGUOUS"
+            : providerAttemptedPreviously
+              ? "APOLLO_SEARCH_REVOKED_AFTER_PROVIDER_ATTEMPT"
+              : "APOLLO_SEARCH_REVOKED",
+        providerAttemptedPreviously,
+        providerMaySettle,
+      };
       const [revokedReceipt] = await tx
         .update(integrationInbox)
         .set({
           status: "failed",
           processedAt: new Date(revokedResult.revokedAt),
-          lastError: "APOLLO_SEARCH_REVOKED",
-          result: revokedResult,
+          lastError: storedRevokedResult.reason,
+          result: storedRevokedResult,
           stateVersion: sql`${integrationInbox.stateVersion} + 1`,
           attemptToken: null,
           attemptLeaseExpiresAt: null,
@@ -1075,10 +1206,15 @@ export async function revokeApolloPeopleSearch(
         })
         .where(
           sql`${integrationInbox.integrationInboxId} = ${receipt.receiptId}::uuid
-            and ${integrationInbox.status} in ('received', 'processing')`,
+            and ${integrationInbox.status} = ${activeReceipt.status}`,
         )
         .returning({ id: integrationInbox.integrationInboxId });
       if (!revokedReceipt) return false;
+      // A pending job has no provider effect in flight and can terminate now.
+      // A running job deliberately keeps its attempt token, lease, and
+      // database concurrency slot until the provider call settles or the same
+      // job is recovered after lease expiry. Releasing it here would allow a
+      // second Apollo call to start while the revoked call was still active.
       await tx
         .update(scheduledJob)
         .set({
@@ -1087,12 +1223,14 @@ export async function revokeApolloPeopleSearch(
           leaseExpiresAt: null,
           attemptToken: null,
           completedAt: new Date(revokedResult.revokedAt),
-          lastError: "APOLLO_SEARCH_REVOKED",
+          lastError: storedRevokedResult.reason,
           result: {
             receiptId: receipt.receiptId,
             status: "revoked",
             attempts: receipt.attempts ?? 0,
-            reason: "APOLLO_SEARCH_REVOKED",
+            reason: storedRevokedResult.reason,
+            providerAttemptedPreviously,
+            providerMaySettle,
           },
           stateVersion: sql`${scheduledJob.stateVersion} + 1`,
           updatedAt: new Date(revokedResult.revokedAt),
@@ -1100,7 +1238,7 @@ export async function revokeApolloPeopleSearch(
         .where(
           and(
             eq(scheduledJob.integrationInboxId, receipt.receiptId),
-            sql`${scheduledJob.status} in ('pending', 'running')`,
+            eq(scheduledJob.status, "pending"),
           ),
         );
       return true;
@@ -1141,7 +1279,7 @@ export async function revokeApolloPeopleSearch(
   return result;
 }
 
-export async function runScheduledApolloPeopleSearch(
+async function runScheduledApolloPeopleSearch(
   payload: ApolloPeopleSearchRetryPayload,
   deps: ApolloSearchDeps = {},
 ): Promise<ApolloPeopleSearchResult> {
@@ -1170,6 +1308,9 @@ export async function runScheduledApolloPeopleSearch(
       : null;
     if (leaseExpiresAt && leaseExpiresAt.getTime() <= now.getTime()) {
       const expiredAttemptToken = receipt.attemptToken ?? undefined;
+      const providerOutcomeAmbiguous =
+        receipt.result?.providerOutcomeAmbiguous === true ||
+        receipt.result?.providerDispatchState === "authorized";
       const recovered = await transitionIntegrationReceiptProgress(
         receipt.receiptId,
         {
@@ -1185,6 +1326,13 @@ export async function runScheduledApolloPeopleSearch(
             bridgeStatus: "retry_scheduled",
             nextAttemptAt: now.toISOString(),
             reason: "APOLLO_SEARCH_ATTEMPT_LEASE_EXPIRED",
+            providerDispatchState: providerOutcomeAmbiguous
+              ? "ambiguous"
+              : receipt.result?.providerDispatchState,
+            providerDispatchEverAuthorized:
+              receipt.result?.providerDispatchEverAuthorized === true ||
+              providerOutcomeAmbiguous,
+            providerOutcomeAmbiguous,
           },
         },
       );
@@ -1280,32 +1428,77 @@ export async function runScheduledApolloPeopleSearch(
   const attemptToken = attemptClaim.attemptToken;
   const attemptReceipt = { ...receipt, attempts: attempt };
   let source: LeadSourceAdapter | undefined;
+  let credentialVersion: string | undefined;
   try {
-    source = await configuredSource(
+    const configured = await configuredSource(
       stored.actorEmployeeId,
       receipt.credentialConnectionAccountId,
       deps,
     );
-    return await finishSearch({
-      idempotencyKey: payload.idempotencyKey,
-      receipt: attemptReceipt,
-      attemptToken,
-      source,
-      criteria: stored.criteria,
-      allowSynthetic: deps.allowSynthetic === true,
-      now,
-    });
+    source = configured.source;
+    credentialVersion = configured.credentialVersion;
+    await deps.beforeProviderDispatchAuthorization?.();
+    const dispatch = () =>
+      finishSearch({
+        idempotencyKey: payload.idempotencyKey,
+        receipt: attemptReceipt,
+        attemptToken,
+        source: source!,
+        criteria: stored.criteria,
+        allowSynthetic: deps.allowSynthetic === true,
+        now,
+      });
+    if (deps.executeAuthorizedProviderDispatch) {
+      const authorizedAt = (deps.now ?? (() => new Date()))();
+      const leaseExpiresAt = new Date(
+        authorizedAt.getTime() + APOLLO_PROVIDER_LEASE_MS,
+      );
+      const result = await deps.executeAuthorizedProviderDispatch(
+        {
+          receiptId: receipt.receiptId,
+          attemptToken,
+          credentialSecretId: configured.credentialSecretId,
+          credentialVersion: configured.credentialVersion,
+          authorizedAt,
+          leaseExpiresAt,
+        },
+        dispatch,
+      );
+      if (!result) {
+        const latest = await getIntegrationReceipt(
+          "apollo",
+          payload.idempotencyKey,
+        );
+        if (!latest) throw new Error("APOLLO_SEARCH_RECEIPT_NOT_FOUND");
+        return resultFromReceipt(payload.idempotencyKey, latest, true);
+      }
+      return result;
+    }
+    await deps.afterProviderDispatchAuthorization?.();
+    return await dispatch();
   } catch (error) {
     const mode = source?.mode ?? deps.leadSource?.mode ?? "live";
+    const dispatchReceipt = await getIntegrationReceipt(
+      "apollo",
+      payload.idempotencyKey,
+    ).catch(() => null);
+    const providerDispatchEverAuthorized =
+      dispatchReceipt?.result?.providerDispatchEverAuthorized === true ||
+      error instanceof ApolloProviderRequestError;
+    const providerOutcomeAmbiguous =
+      dispatchReceipt?.result?.providerOutcomeAmbiguous === true ||
+      (error instanceof ApolloProviderRequestError && error.httpStatus == null);
     if (
       error instanceof ApolloProviderRequestError &&
       (error.httpStatus === 401 || error.httpStatus === 403) &&
-      receipt.credentialConnectionAccountId
+      receipt.credentialConnectionAccountId &&
+      credentialVersion
     ) {
       await markOwnedIntegrationConnectionAuthError({
         toolkit: "apollo",
         employeeId: stored.actorEmployeeId,
         connectionAccountId: receipt.credentialConnectionAccountId,
+        credentialVersion,
       }).catch(() => false);
       await transitionIntegrationReceiptProgress(
         receipt.receiptId,
@@ -1322,6 +1515,11 @@ export async function runScheduledApolloPeopleSearch(
             bridgeStatus: "revoked",
             mode,
             reason: "APOLLO_PROVIDER_AUTH_REVOKED",
+            providerDispatchState: providerOutcomeAmbiguous
+              ? "ambiguous"
+              : "settled",
+            providerDispatchEverAuthorized,
+            providerOutcomeAmbiguous,
             providerReceipt: error.providerReceipt,
           },
         },
@@ -1354,6 +1552,8 @@ export async function runScheduledApolloPeopleSearch(
             bridgeStatus: "revoked",
             mode,
             reason: error.message,
+            providerDispatchEverAuthorized,
+            providerOutcomeAmbiguous,
           },
         },
       );
@@ -1390,6 +1590,13 @@ export async function runScheduledApolloPeopleSearch(
             bridgeStatus: "dead_letter",
             mode,
             reason: failure.reason,
+            providerDispatchState: providerOutcomeAmbiguous
+              ? "ambiguous"
+              : providerDispatchEverAuthorized
+                ? "settled"
+                : undefined,
+            providerDispatchEverAuthorized,
+            providerOutcomeAmbiguous,
             providerReceipt: failure.providerReceipt,
           },
         },
@@ -1425,6 +1632,13 @@ export async function runScheduledApolloPeopleSearch(
           mode,
           nextAttemptAt: nextAttemptAt.toISOString(),
           reason: failure.reason,
+          providerDispatchState: providerOutcomeAmbiguous
+            ? "ambiguous"
+            : providerDispatchEverAuthorized
+              ? "settled"
+              : undefined,
+          providerDispatchEverAuthorized,
+          providerOutcomeAmbiguous,
           providerReceipt: failure.providerReceipt,
           queue: receipt.result?.queue,
         },
@@ -1442,6 +1656,17 @@ export async function runScheduledApolloPeopleSearch(
     }
     throw new ApolloSearchRetryError(failure.retryAfterSeconds);
   }
+}
+
+/** Test-only access to the receipt state machine without a live queue worker. */
+export async function runScheduledApolloPeopleSearchForTest(
+  payload: ApolloPeopleSearchRetryPayload,
+  deps: ApolloSearchDeps,
+): Promise<ApolloPeopleSearchResult> {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("APOLLO_TEST_DISPATCH_FORBIDDEN");
+  }
+  return runScheduledApolloPeopleSearch(payload, deps);
 }
 
 export type ApolloPeopleSearchQueueOutcome = {
@@ -1463,6 +1688,17 @@ function queueSummary(
   };
 }
 
+function boundedProviderBusyRetry(
+  now: Date,
+  candidate: Date | string | null | undefined,
+): string {
+  const minimum = now.getTime() + APOLLO_PROVIDER_BUSY_RETRY_MS;
+  const maximum = now.getTime() + APOLLO_PROVIDER_LEASE_MS;
+  const requested = candidate ? new Date(candidate).getTime() : minimum;
+  const finite = Number.isFinite(requested) ? requested : minimum;
+  return new Date(Math.min(Math.max(finite, minimum), maximum)).toISOString();
+}
+
 /**
  * Claim and execute one opaque Apollo job. Provider criteria stay in the
  * immutable, owner-scoped integration receipt and job results retain only a
@@ -1473,7 +1709,7 @@ export async function runApolloPeopleSearchQueuedJob(
   deps: ApolloSearchDeps = {},
 ): Promise<ApolloPeopleSearchQueueOutcome> {
   const jobId = z.string().uuid().parse(jobIdInput);
-  const db = getDb();
+  const db = deps.database ?? getDb();
   if (!db) throw new Error("DATABASE_URL is required for Apollo search jobs");
   const durableDb = db;
   const now = (deps.now ?? (() => new Date()))();
@@ -1538,34 +1774,106 @@ export async function runApolloPeopleSearchQueuedJob(
     };
   }
 
-  const claimed = await durableDb.execute<{
+  type ClaimedApolloJob = {
     payload: Record<string, unknown>;
     attempts: number;
     integration_inbox_id: string | null;
-  }>(sql`
-    update public.scheduled_job
-    set status = 'running', locked_at = ${nowIso}::timestamptz, attempts = attempts + 1,
-        state_version = state_version + 1,
-        attempt_token = ${jobAttemptToken}::uuid,
-        lease_expires_at = ${new Date(now.getTime() + 10 * 60_000).toISOString()}::timestamptz,
-        result = jsonb_build_object('status', 'processing', 'attempts', attempts + 1),
-        updated_at = ${nowIso}::timestamptz
-    where scheduled_job_id = ${jobId}::uuid
-      and kind = ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
-      and (
-        status = 'pending'
-        or (
-          status = 'running'
-          and (
-            lease_expires_at is null
-            or lease_expires_at <= ${nowIso}::timestamptz
+  };
+  const claim = await durableDb.transaction(async (tx) => {
+    // The transaction-level lock serializes the short claim decision only. It
+    // is released at commit before authorization, credential resolution, or
+    // the provider request begins.
+    const [lock] = await tx.execute<{ acquired: boolean }>(sql`
+      select pg_try_advisory_xact_lock(
+        hashtextextended(${APOLLO_PROVIDER_CONCURRENCY_KEY}, 0)
+      ) as acquired
+    `);
+    if (!lock?.acquired) {
+      return {
+        job: null,
+        busyUntil: boundedProviderBusyRetry(now, null),
+      };
+    }
+
+    const [target] = await tx.execute<{
+      status: string;
+      run_at: Date | string;
+      lease_expires_at: Date | string | null;
+    }>(sql`
+      select status, run_at, lease_expires_at
+      from public.scheduled_job
+      where scheduled_job_id = ${jobId}::uuid
+        and kind = ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
+        and concurrency_key = ${APOLLO_PROVIDER_CONCURRENCY_KEY}
+      limit 1
+    `);
+    const targetIsDue =
+      target?.status === "pending" &&
+      new Date(target.run_at).getTime() <= now.getTime();
+    const targetLeaseExpired =
+      target?.status === "running" &&
+      (!target.lease_expires_at ||
+        new Date(target.lease_expires_at).getTime() <= now.getTime());
+    if (!targetIsDue && !targetLeaseExpired) {
+      return { job: null, busyUntil: null };
+    }
+
+    const [active] = await tx.execute<{
+      lease_expires_at: Date | string | null;
+      locked_at: Date | string | null;
+    }>(sql`
+      select lease_expires_at, locked_at
+      from public.scheduled_job
+      where concurrency_key = ${APOLLO_PROVIDER_CONCURRENCY_KEY}
+        and status = 'running'
+        and scheduled_job_id <> ${jobId}::uuid
+      limit 1
+    `);
+    if (active) {
+      const fallbackLease = active.locked_at
+        ? new Date(
+            new Date(active.locked_at).getTime() + APOLLO_PROVIDER_LEASE_MS,
+          )
+        : null;
+      return {
+        job: null,
+        busyUntil: boundedProviderBusyRetry(
+          now,
+          active.lease_expires_at ?? fallbackLease,
+        ),
+      };
+    }
+
+    const rows = await tx.execute<ClaimedApolloJob>(sql`
+      update public.scheduled_job
+      set status = 'running', locked_at = ${nowIso}::timestamptz, attempts = attempts + 1,
+          state_version = state_version + 1,
+          attempt_token = ${jobAttemptToken}::uuid,
+          lease_expires_at = ${new Date(now.getTime() + APOLLO_PROVIDER_LEASE_MS).toISOString()}::timestamptz,
+          result = jsonb_build_object('status', 'processing', 'attempts', attempts + 1),
+          updated_at = ${nowIso}::timestamptz
+      where scheduled_job_id = ${jobId}::uuid
+        and kind = ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
+        and concurrency_key = ${APOLLO_PROVIDER_CONCURRENCY_KEY}
+        and (
+          status = 'pending'
+          or (
+            status = 'running'
+            and (
+              lease_expires_at is null
+              or lease_expires_at <= ${nowIso}::timestamptz
+            )
           )
         )
-      )
-      and run_at <= ${nowIso}::timestamptz
-    returning payload, attempts, integration_inbox_id
-  `);
-  const job = claimed[0];
+        and run_at <= ${nowIso}::timestamptz
+      returning payload, attempts, integration_inbox_id
+    `);
+    return { job: rows[0] ?? null, busyUntil: null };
+  });
+  if (!claim.job && claim.busyUntil) {
+    return { status: "busy", nextAttemptAt: claim.busyUntil };
+  }
+  const job = claim.job;
   if (!job) return readCurrent();
   const claimedJobAttempts = Number(job.attempts);
   const claimedJobReceiptId = job.integration_inbox_id;
@@ -1603,8 +1911,266 @@ export async function runApolloPeopleSearchQueuedJob(
     return Boolean(updated[0]);
   }
 
+  type ProviderDispatchFenceInput = {
+    receiptId: string;
+    attemptToken: string;
+    credentialSecretId?: string;
+    credentialVersion?: string;
+    authorizedAt: Date;
+    leaseExpiresAt: Date;
+  };
+
+  async function authorizeClaimedProviderDispatch(
+    input: ProviderDispatchFenceInput,
+  ): Promise<boolean> {
+    return durableDb.transaction(async (tx) => {
+      // Receipt-before-job is the shared lock order with revocation. The exact
+      // principal and exact employee-owned connection are revalidated after
+      // credential resolution and immediately before provider dispatch.
+      const [ownedReceipt] = await tx.execute<{
+        owner_employee_id: string | null;
+        credential_connection_account_id: string | null;
+        payload_actor_employee_id: string | null;
+      }>(sql`
+        select owner_employee_id::text,
+               credential_connection_account_id::text,
+               payload ->> 'actorEmployeeId' as payload_actor_employee_id
+        from public.integration_inbox
+        where integration_inbox_id = ${input.receiptId}::uuid
+          and provider = 'apollo'
+          and operation = ${APOLLO_PEOPLE_SEARCH_OPERATION}
+          and status = 'processing'
+          and result ->> 'bridgeStatus' = 'processing'
+          and attempt_token = ${input.attemptToken}::uuid
+        for update
+      `);
+      if (!ownedReceipt) return false;
+
+      const [ownedJob] = await tx.execute<{ owned: boolean }>(sql`
+        select true as owned
+        from public.scheduled_job
+        where scheduled_job_id = ${jobId}::uuid
+          and integration_inbox_id = ${input.receiptId}::uuid
+          and kind = ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
+          and concurrency_key = ${APOLLO_PROVIDER_CONCURRENCY_KEY}
+          and status = 'running'
+          and attempts = ${claimedJobAttempts}
+          and attempt_token = ${jobAttemptToken}::uuid
+        for update
+      `);
+      if (!ownedJob?.owned) return false;
+
+      const [authorization] = await tx.execute<{ authorized: boolean }>(sql`
+        select true as authorized
+        from public.employee employee
+        join public.employee_role membership
+          on membership.employee_id = employee.employee_id
+        join public.role role on role.role_id = membership.role_id
+        where employee.employee_id = ${ownedReceipt.owner_employee_id}::uuid
+          and ${ownedReceipt.payload_actor_employee_id}::uuid =
+              employee.employee_id
+          and employee.is_active = true
+          and role.key in ('partner', 'director', 'am', 'account_manager')
+        limit 1
+        for share of employee, membership
+      `);
+      const [connectionAuthorization] = authorization?.authorized
+        ? await tx.execute<{ authorized: boolean }>(sql`
+            select true as authorized
+            from public.connection_account connection
+            where connection.connection_account_id =
+                  ${ownedReceipt.credential_connection_account_id}::uuid
+              and connection.owner_employee_id =
+                  ${ownedReceipt.owner_employee_id}::uuid
+              and connection.toolkit = 'apollo'
+              and connection.scope = 'staff'
+              and connection.status = 'connected'
+              and connection.secret_id =
+                  ${input.credentialSecretId ?? null}::uuid
+              and connection.xmin::text =
+                  ${input.credentialVersion ?? null}
+              and (
+                connection.expires_at is null
+                or connection.expires_at >
+                   ${input.authorizedAt.toISOString()}::timestamptz
+              )
+            limit 1
+            for share of connection
+          `)
+        : [];
+      const refusalReason =
+        authorization?.authorized !== true
+          ? "APOLLO_SEARCH_AUTHORIZATION_REVOKED"
+          : connectionAuthorization?.authorized !== true
+            ? "APOLLO_FREE_SEARCH_CONNECTION_REQUIRED"
+            : null;
+      if (refusalReason) {
+        await tx.execute(sql`
+          update public.integration_inbox
+          set status = 'failed',
+              processed_at = ${input.authorizedAt.toISOString()}::timestamptz,
+              last_error = ${refusalReason},
+              result = (coalesce(result, '{}'::jsonb) - 'candidates')
+                || jsonb_build_object(
+                  'bridgeStatus', 'revoked'::text,
+                  'reason', ${refusalReason}::text
+                ),
+              state_version = state_version + 1,
+              attempt_token = null,
+              attempt_lease_expires_at = null,
+              updated_at = ${input.authorizedAt.toISOString()}::timestamptz
+          where integration_inbox_id = ${input.receiptId}::uuid
+            and status = 'processing'
+            and result ->> 'bridgeStatus' = 'processing'
+            and attempt_token = ${input.attemptToken}::uuid
+        `);
+        return false;
+      }
+
+      await tx.execute(sql`
+        update public.scheduled_job
+        set lease_expires_at = ${input.leaseExpiresAt.toISOString()}::timestamptz,
+            state_version = state_version + 1,
+            updated_at = ${input.authorizedAt.toISOString()}::timestamptz
+        where scheduled_job_id = ${jobId}::uuid
+          and status = 'running'
+          and attempts = ${claimedJobAttempts}
+          and attempt_token = ${jobAttemptToken}::uuid
+      `);
+      await tx.execute(sql`
+        update public.integration_inbox
+        set attempt_lease_expires_at = ${input.leaseExpiresAt.toISOString()}::timestamptz,
+            result = coalesce(result, '{}'::jsonb)
+              || jsonb_build_object(
+                'providerDispatchState', 'authorized'::text,
+                'providerDispatchEverAuthorized', true,
+                'providerDispatchAuthorizedAt',
+                ${input.authorizedAt.toISOString()}::text
+              ),
+            state_version = state_version + 1,
+            updated_at = ${input.authorizedAt.toISOString()}::timestamptz
+        where integration_inbox_id = ${input.receiptId}::uuid
+          and status = 'processing'
+          and result ->> 'bridgeStatus' = 'processing'
+          and attempt_token = ${input.attemptToken}::uuid
+      `);
+      return true;
+    });
+  }
+
+  async function relinquishBusyProviderAttempt(
+    input: ProviderDispatchFenceInput,
+    nextAttemptAt: string,
+  ): Promise<void> {
+    await durableDb.transaction(async (tx) => {
+      const [ownedReceipt] = await tx.execute<{ owned: boolean }>(sql`
+        select true as owned
+        from public.integration_inbox
+        where integration_inbox_id = ${input.receiptId}::uuid
+          and provider = 'apollo'
+          and operation = ${APOLLO_PEOPLE_SEARCH_OPERATION}
+          and status = 'processing'
+          and result ->> 'bridgeStatus' = 'processing'
+          and attempt_token = ${input.attemptToken}::uuid
+        for update
+      `);
+      if (!ownedReceipt?.owned) return;
+
+      const [ownedJob] = await tx.execute<{ owned: boolean }>(sql`
+        select true as owned
+        from public.scheduled_job
+        where scheduled_job_id = ${jobId}::uuid
+          and integration_inbox_id = ${input.receiptId}::uuid
+          and status = 'running'
+          and attempts = ${claimedJobAttempts}
+          and attempt_token = ${jobAttemptToken}::uuid
+        for update
+      `);
+      if (!ownedJob?.owned) return;
+
+      await tx.execute(sql`
+        update public.integration_inbox
+        set attempts = greatest(attempts - 1, 0),
+            last_error = 'APOLLO_PROVIDER_SLOT_BUSY',
+            result = coalesce(result, '{}'::jsonb)
+              || jsonb_build_object(
+                'bridgeStatus', 'retry_scheduled'::text,
+                'nextAttemptAt', ${nextAttemptAt}::text,
+                'reason', 'APOLLO_PROVIDER_SLOT_BUSY'::text
+              ),
+            state_version = state_version + 1,
+            attempt_token = null,
+            attempt_lease_expires_at = null,
+            updated_at = ${input.authorizedAt.toISOString()}::timestamptz
+        where integration_inbox_id = ${input.receiptId}::uuid
+          and status = 'processing'
+          and result ->> 'bridgeStatus' = 'processing'
+          and attempt_token = ${input.attemptToken}::uuid
+      `);
+      await tx.execute(sql`
+        update public.scheduled_job
+        set status = 'pending',
+            run_at = ${nextAttemptAt}::timestamptz,
+            attempts = greatest(attempts - 1, 0),
+            locked_at = null,
+            lease_expires_at = null,
+            attempt_token = null,
+            result = jsonb_build_object(
+              'status', 'retry_scheduled'::text,
+              'reason', 'APOLLO_PROVIDER_SLOT_BUSY'::text
+            ),
+            state_version = state_version + 1,
+            last_error = 'APOLLO_PROVIDER_SLOT_BUSY',
+            updated_at = ${input.authorizedAt.toISOString()}::timestamptz
+        where scheduled_job_id = ${jobId}::uuid
+          and status = 'running'
+          and attempts = ${claimedJobAttempts}
+          and attempt_token = ${jobAttemptToken}::uuid
+      `);
+    });
+  }
+
+  async function executeClaimedProviderDispatch(
+    input: ProviderDispatchFenceInput,
+    dispatch: () => Promise<ApolloPeopleSearchResult>,
+  ): Promise<ApolloPeopleSearchResult | null> {
+    const databaseUrl = process.env.DATABASE_URL?.trim();
+    if (!databaseUrl) {
+      throw new Error("DATABASE_URL is required for Apollo provider locking");
+    }
+    const locked = await withPostgresTransactionAdvisoryLock(
+      databaseUrl,
+      APOLLO_PROVIDER_CONCURRENCY_KEY,
+      async ({ assertLockActive, backendPid }) => {
+        const authorized = await authorizeClaimedProviderDispatch(input);
+        if (!authorized) return null;
+        await deps.afterProviderLockAcquired?.(backendPid);
+        await deps.afterProviderDispatchAuthorization?.();
+        // A host pause may outlive the bounded provider lease. Prove the
+        // transaction-scoped provider lock is still alive after any await and
+        // immediately before the network request.
+        await assertLockActive();
+        return dispatch();
+      },
+    );
+    if (!locked.acquired) {
+      const nextAttemptAt = boundedProviderBusyRetry(input.authorizedAt, null);
+      await relinquishBusyProviderAttempt(input, nextAttemptAt);
+      throw new ApolloProviderSlotBusyError(nextAttemptAt);
+    }
+    return locked.value;
+  }
+
   async function deadLetterInvalidClaimedJob(reason: string): Promise<boolean> {
     return durableDb.transaction(async (tx) => {
+      if (claimedJobReceiptId) {
+        await tx.execute(sql`
+          select integration_inbox_id
+          from public.integration_inbox
+          where integration_inbox_id = ${claimedJobReceiptId}::uuid
+          for update
+        `);
+      }
       const updated = await tx
         .update(scheduledJob)
         .set({
@@ -1706,9 +2272,13 @@ export async function runApolloPeopleSearchQueuedJob(
     const result = await runScheduledApolloPeopleSearch(payload, {
       ...deps,
       workerAttemptToken: jobAttemptToken,
+      executeAuthorizedProviderDispatch: executeClaimedProviderDispatch,
     });
     return persistResult(result);
   } catch (error) {
+    if (error instanceof ApolloProviderSlotBusyError) {
+      return { status: "busy", nextAttemptAt: error.nextAttemptAt };
+    }
     if (error instanceof ApolloSearchRetryError) {
       const receipt = await getIntegrationReceipt(
         "apollo",

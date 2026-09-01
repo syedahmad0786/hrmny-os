@@ -44,9 +44,9 @@ export const apolloSearchRetryFunction = inngest.createFunction(
     id: "sales-apollo-people-search-retry-v1",
     triggers: [{ event: APOLLO_SEARCH_RETRY_EVENT }],
     retries: 2,
-    // One provider call at a time across every owner-bound connection. This is
-    // deliberately stricter than Apollo's changing account limits; HTTP
-    // receipts and Retry-After still govern the next eligible attempt.
+    // One free People Search at a time across every owner-bound connection.
+    // The database claimant also coordinates the cron fallback; paid People
+    // Match remains a separately gated lane and must not inherit this proof.
     concurrency: {
       limit: 1,
     },

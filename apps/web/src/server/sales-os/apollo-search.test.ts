@@ -16,10 +16,12 @@ import {
   ApolloSearchRetryError,
   getApolloPeopleSearchStatus,
   revokeApolloPeopleSearch,
-  runScheduledApolloPeopleSearch,
+  runScheduledApolloPeopleSearchForTest,
   searchApolloPeopleFree,
   type ApolloPeopleSearchRetryPayload,
 } from "./apollo-search";
+
+const runScheduledApolloPeopleSearch = runScheduledApolloPeopleSearchForTest;
 
 const ACTOR = "20000000-0000-4000-8000-000000000001";
 const NOW = new Date("2026-08-31T08:00:00.000Z");

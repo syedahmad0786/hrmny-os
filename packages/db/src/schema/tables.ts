@@ -1,5 +1,6 @@
 import {
   boolean,
+  check,
   customType,
   date,
   index,
@@ -813,6 +814,7 @@ export const scheduledJob = pgTable(
       .default({})
       .notNull(),
     status: text("status").default("pending").notNull(),
+    concurrencyKey: text("concurrency_key"),
     attempts: integer("attempts").default(0).notNull(),
     stateVersion: integer("state_version").default(0).notNull(),
     attemptToken: uuid("attempt_token"),
@@ -829,6 +831,15 @@ export const scheduledJob = pgTable(
       .on(table.integrationInboxId)
       .where(
         sql`${table.kind} = 'apollo_people_search' and ${table.integrationInboxId} is not null`,
+      ),
+    check(
+      "scheduled_job_apollo_concurrency_key_chk",
+      sql`(${table.kind} = 'apollo_people_search' and ${table.concurrencyKey} is not null and ${table.concurrencyKey} = 'provider:apollo') or (${table.kind} <> 'apollo_people_search' and ${table.concurrencyKey} is distinct from 'provider:apollo')`,
+    ),
+    uniqueIndex("scheduled_job_running_concurrency_uniq")
+      .on(table.concurrencyKey)
+      .where(
+        sql`${table.status} = 'running' and ${table.concurrencyKey} is not null`,
       ),
   ],
 );

@@ -16,6 +16,10 @@ import {
   type PendingApolloSearch,
 } from "@/lib/apollo-search-session";
 import { formatReadyLlmLine, type ReadySmoke } from "@/lib/ready-smoke";
+import {
+  apolloCancellationNote,
+  apolloSearchStatusNote,
+} from "./apollo-status-copy";
 import { ResearchConsole } from "../_components/research-console";
 
 const LOOP = [
@@ -62,7 +66,16 @@ type SearchBridgeResult = {
   nextAttemptAt?: string;
   queue?: "inngest" | "scheduled_job_fallback" | "injected_test_queue";
   reason?: string;
+  providerAttemptedPreviously?: boolean;
+  providerMaySettle?: boolean;
 };
+
+function searchStatusNote(payload: SearchBridgeResult): string {
+  return apolloSearchStatusNote({
+    ...payload,
+    candidateCount: payload.candidates.length,
+  });
+}
 
 type PrincipalOperation = {
   principalId: string | null;
@@ -246,17 +259,7 @@ export default function HuntClientsPage() {
         return;
       }
       setApolloSearchResult(payload);
-      setSearchNote(
-        payload.status === "retry_scheduled" || payload.status === "processing"
-          ? payload.reason === "APOLLO_SEARCH_QUEUED"
-            ? payload.queue === "scheduled_job_fallback"
-              ? `Apollo search retained in the durable fallback queue; managed queue activation is still pending. Receipt ${payload.receiptId.slice(0, 8)}. No credits used.`
-              : `Apollo search queued for durable execution; receipt ${payload.receiptId.slice(0, 8)}. No credits used.`
-            : `Apollo is temporarily unavailable. Durable retry scheduled; receipt ${payload.receiptId.slice(0, 8)}. No credits used.`
-          : payload.candidates.length
-            ? `${payload.candidates.length} people found via Apollo ${payload.mode}. Receipt ${payload.receiptId.slice(0, 8)} reconciled; 0 credits used.`
-            : `No people matched. Apollo ${payload.mode} receipt ${payload.receiptId.slice(0, 8)} reconciled; 0 credits used.`,
-      );
+      setSearchNote(searchStatusNote(payload));
       if (
         payload.status !== "retry_scheduled" &&
         payload.status !== "processing"
@@ -327,9 +330,7 @@ export default function HuntClientsPage() {
         return;
       }
       setApolloSearchResult(payload);
-      setSearchNote(
-        `Apollo search cancelled. Receipt ${payload.receiptId.slice(0, 8)} retained for review; 0 credits used.`,
-      );
+      setSearchNote(apolloCancellationNote(payload));
       forgetPendingSearch(variables.idempotencyKey);
     },
     onError: (error, variables, operation) => {
@@ -367,30 +368,13 @@ export default function HuntClientsPage() {
     }
     if (!payload) return;
     setApolloSearchResult(payload);
-    if (payload.status === "retry_scheduled") {
-      setSearchNote(
-        payload.reason === "APOLLO_SEARCH_QUEUED"
-          ? payload.queue === "scheduled_job_fallback"
-            ? `Apollo search is retained in the fallback queue; managed queue activation is still pending. Receipt ${payload.receiptId.slice(0, 8)}. No credits used.`
-            : `Apollo search is queued; receipt ${payload.receiptId.slice(0, 8)}. No credits used.`
-          : `Apollo retry is scheduled for ${payload.nextAttemptAt ?? "the provider-safe window"}. Receipt ${payload.receiptId.slice(0, 8)}. No credits used.`,
-      );
-    } else if (payload.status === "processing") {
-      setSearchNote(
-        `Apollo is processing the same durable request. Receipt ${payload.receiptId.slice(0, 8)}. No credits used.`,
-      );
-    } else if (payload.status === "completed") {
-      setSearchNote(
-        `${payload.candidates.length} Apollo people reconciled from receipt ${payload.receiptId.slice(0, 8)} after ${payload.attempts} attempt${payload.attempts === 1 ? "" : "s"}; 0 credits used.`,
-      );
+    setSearchNote(searchStatusNote(payload));
+    if (payload.status === "completed") {
       forgetPendingSearch(apolloSearchRequestId!);
     } else if (
       payload.status === "dead_letter" ||
       payload.status === "revoked"
     ) {
-      setSearchNote(
-        `Apollo search ${payload.status.replace("_", " ")}. Receipt ${payload.receiptId.slice(0, 8)} retained for review; 0 credits used.`,
-      );
       forgetPendingSearch(apolloSearchRequestId!);
     }
   }, [

@@ -8,6 +8,10 @@ export type ResolvedApiKey = {
   apiKey: string | null;
   source: "env" | "vault" | "memory" | "none";
   connectionAccountId?: string;
+  /** Non-secret Vault identity used to fence delayed dispatch after rotation. */
+  secretId?: string;
+  /** PostgreSQL row version; changes even when Vault rotates in place. */
+  credentialVersion?: string;
 };
 
 const ENV_KEY: Record<ApiKeyToolkit, string> = {
@@ -100,31 +104,29 @@ export async function resolveOwnedIntegrationApiKey(
   const db = getDb();
   if (!db) return { apiKey: null, source: "none" };
 
-  const [row] = await db
-    .select({
-      connectionAccountId: connectionAccount.connectionAccountId,
-      secretId: connectionAccount.secretId,
-    })
-    .from(connectionAccount)
-    .where(
-      and(
-        eq(connectionAccount.ownerEmployeeId, employeeId),
-        eq(connectionAccount.toolkit, toolkit),
-        eq(connectionAccount.scope, "staff"),
-        eq(connectionAccount.status, "connected"),
-        connectionAccountId
-          ? eq(connectionAccount.connectionAccountId, connectionAccountId)
-          : undefined,
-        sql`(${connectionAccount.expiresAt} is null or ${connectionAccount.expiresAt} > now())`,
-      ),
-    )
-    .limit(1);
-  if (!row?.secretId) return { apiKey: null, source: "none" };
+  const [row] = await db.execute<{
+    connection_account_id: string;
+    secret_id: string | null;
+    credential_version: string;
+  }>(sql`
+      select connection_account_id::text, secret_id::text,
+             xmin::text as credential_version
+      from public.connection_account
+      where owner_employee_id = ${employeeId}::uuid
+        and toolkit = ${toolkit}
+        and scope = 'staff'
+        and status = 'connected'
+        and (${connectionAccountId ?? null}::uuid is null
+          or connection_account_id = ${connectionAccountId ?? null}::uuid)
+        and (expires_at is null or expires_at > now())
+      limit 1
+    `);
+  if (!row?.secret_id) return { apiKey: null, source: "none" };
 
   const secrets = await db.execute(
     sql<{ decrypted_secret: string }>`
       select decrypted_secret from vault.decrypted_secrets
-      where id = ${row.secretId}::uuid limit 1
+      where id = ${row.secret_id}::uuid limit 1
     `,
   );
   const decrypted = secrets[0]?.decrypted_secret;
@@ -134,7 +136,9 @@ export async function resolveOwnedIntegrationApiKey(
   return {
     apiKey: decrypted.trim(),
     source: "vault",
-    connectionAccountId: row.connectionAccountId,
+    connectionAccountId: row.connection_account_id,
+    secretId: row.secret_id,
+    credentialVersion: row.credential_version,
   };
 }
 
@@ -168,30 +172,24 @@ export async function markOwnedIntegrationConnectionAuthError(input: {
   toolkit: ApiKeyToolkit;
   employeeId: string;
   connectionAccountId: string;
+  credentialVersion: string;
 }): Promise<boolean> {
   const db = getDb();
   if (!db) return false;
-  const updated = await db
-    .update(connectionAccount)
-    .set({
-      status: "error",
-      lastError: "PROVIDER_AUTHENTICATION_REVOKED",
-      lastTestedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(
-          connectionAccount.connectionAccountId,
-          input.connectionAccountId,
-        ),
-        eq(connectionAccount.ownerEmployeeId, input.employeeId),
-        eq(connectionAccount.toolkit, input.toolkit),
-        eq(connectionAccount.scope, "staff"),
-        eq(connectionAccount.status, "connected"),
-      ),
-    )
-    .returning({ id: connectionAccount.connectionAccountId });
+  const updated = await db.execute<{ id: string }>(sql`
+    update public.connection_account
+    set status = 'error',
+        last_error = 'PROVIDER_AUTHENTICATION_REVOKED',
+        last_tested_at = now(),
+        updated_at = now()
+    where connection_account_id = ${input.connectionAccountId}::uuid
+      and owner_employee_id = ${input.employeeId}::uuid
+      and toolkit = ${input.toolkit}
+      and scope = 'staff'
+      and status = 'connected'
+      and xmin::text = ${input.credentialVersion}
+    returning connection_account_id::text as id
+  `);
   return updated.length === 1;
 }
 

@@ -63,6 +63,7 @@ vi.mock("@/server/recon/cron-sweepers", () => ({
 }));
 vi.mock("@/server/sales-os/apollo-search", () => ({
   APOLLO_PEOPLE_SEARCH_JOB_KIND: "apollo_people_search",
+  APOLLO_PROVIDER_CONCURRENCY_KEY: "provider:apollo",
   redactExpiredApolloPeopleSearchCandidates: mocks.redact,
   runApolloPeopleSearchQueuedJob: mocks.runApolloJob,
 }));
@@ -116,6 +117,13 @@ describe("cron Apollo retention ordering", () => {
     const response = await GET(request());
     expect(response.status).toBe(200);
     expect(mocks.order).toEqual(["retention", "provider"]);
+    const apolloClaimQuery = JSON.stringify(
+      mocks.execute.mock.calls[0]?.[0],
+    ).toLowerCase();
+    expect(apolloClaimQuery).toContain("provider:apollo");
+    expect(apolloClaimQuery).toContain("not exists");
+    expect(apolloClaimQuery).toContain("candidate.status = 'running'");
+    expect(apolloClaimQuery).toContain("limit 1");
     await expect(response.json()).resolves.toMatchObject({
       apollo: {
         considered: 1,
