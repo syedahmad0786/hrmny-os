@@ -423,9 +423,9 @@ async function configuredSource(
     }>(sql`
       select connection.secret_id::text,
              connection.xmin::text as credential_version,
-             secret.xmin::text as secret_version
+             secret.updated_at::text as secret_version
       from public.connection_account connection
-      join vault.secrets secret on secret.id = connection.secret_id
+      join vault.decrypted_secrets secret on secret.id = connection.secret_id
       where connection.connection_account_id = ${connectionAccountId}::uuid
         and connection.owner_employee_id = ${actorEmployeeId}::uuid
         and connection.toolkit = 'apollo'
@@ -1968,9 +1968,10 @@ export async function runApolloPeopleSearchQueuedJob(
       // in-place rotation cannot cross the dispatch authorization boundary.
       const [exactSecret] = await tx.execute<{ exact: boolean }>(sql`
         select true as exact
-        from vault.secrets
+        from vault.decrypted_secrets
         where id = ${input.credentialSecretId ?? null}::uuid
-          and xmin::text = ${input.credentialSecretVersion ?? null}
+          and updated_at =
+              ${input.credentialSecretVersion ?? null}::timestamptz
         for share
       `);
 
