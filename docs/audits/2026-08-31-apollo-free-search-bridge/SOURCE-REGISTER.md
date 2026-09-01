@@ -132,3 +132,35 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 - Supersedes/superseded-by: supersedes the undocumented helper assumption; none.
 - Rollback/correction: revalidate official catalog changes before a PostgreSQL
   major-version upgrade and keep the hosted runtime proof mandatory.
+
+## `SOURCE-HRMNY-20260901-APOLLO-007` — PostgreSQL conflict and lock behavior
+
+- Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; repair commit
+  `15bea2885b2d37696b67f2c06f5a7bfdbbed8a5b`.
+- Decision/finding: official PostgreSQL documentation confirms that inserts
+  against unique indexes can block under concurrency, `ON CONFLICT DO NOTHING`
+  is the conflict alternative, and row/table locks are held to transaction end.
+- Reason: the synthetic stale-repair race must model distinct database sessions
+  instead of treating a one-connection application pool as two concurrent
+  requests.
+- Alternatives considered: increase Vitest timeouts; infer locking from the
+  driver; change the production pool size; move the production compare-and-set
+  outside its transaction.
+- Trade-offs: the proof creates two explicit single-connection clients, matching
+  real concurrent requests while preserving production pool and transaction
+  behavior.
+- Evidence: official PostgreSQL [INSERT](https://www.postgresql.org/docs/current/sql-insert.html),
+  [transaction isolation](https://www.postgresql.org/docs/17/transaction-iso.html),
+  and [explicit locking](https://www.postgresql.org/docs/17/explicit-locking.html)
+  documentation; hosted job `99896730908`; three independent read-only reviews.
+- Confidence/freshness: high; official sources revalidated 2026-09-01 and the
+  local pool limit is explicit in repository source.
+- Affected components: Apollo PostgreSQL race fixture, transaction fencing, and
+  hosted database acceptance.
+- Status: official source bound; corrected hosted execution pending.
+- Supersedes/superseded-by: none.
+- Rollback/correction: keep distinct sessions for true concurrency tests and
+  revalidate against official PostgreSQL documentation on major upgrades.

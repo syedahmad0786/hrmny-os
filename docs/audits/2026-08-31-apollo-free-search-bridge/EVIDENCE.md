@@ -322,3 +322,34 @@ not exposed)`; branch
   `EVID-HRMNY-20260831-APOLLO-013`; none.
 - Rollback/correction: bind any positive claim to the repair SHA, require 14/14
   without unhandled rejection, and retain both failed jobs permanently.
+
+## `EVID-HRMNY-20260901-APOLLO-015` — sixth hosted run passed three Apollo PostgreSQL scenarios
+
+- Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `b9c4e241e08979b5c20aed561c9164a057a4b59f`; repair commit
+  `15bea2885b2d37696b67f2c06f5a7bfdbbed8a5b`.
+- Decision/finding: the push matrix passed full verify/build and 90-test browser
+  acceptance. Its database job again passed migration verification, disposable
+  migration apply, and Sales 3/3; Apollo advanced from 0/14 to 3/14 before a
+  deterministic test-session circular wait.
+- Reason: preserve the timestamp repair's positive proof and identify the first
+  remaining boundary without misclassifying cascade failures.
+- Alternatives considered: discard the run because the overall workflow was
+  red; count each hook timeout separately; weaken the concurrency test.
+- Trade-offs: hosted synthetic acceptance remains open, while the correction is
+  confined to faithful test orchestration and fail-safe cleanup.
+- Evidence: run `33520058503`; verify job `99896730445`; browser job
+  `99896730289`; database job `99896730908`;
+  `FAIL-HRMNY-20260901-APOLLO-014`; local web lint/typecheck, Apollo 17/17, and
+  inbox 5/5.
+- Confidence/freshness: high; hosted receipts and three read-only reviews agree.
+- Affected components: hosted acceptance ledger and Apollo PostgreSQL race
+  fixture.
+- Status: negative diagnostic receipt accepted; repair-hosted proof pending.
+- Supersedes/superseded-by: extends
+  `EVID-HRMNY-20260831-APOLLO-014`; none.
+- Rollback/correction: rerun the complete database sequence on the repair SHA,
+  require all 14 scenarios, and preserve this partial-positive receipt.

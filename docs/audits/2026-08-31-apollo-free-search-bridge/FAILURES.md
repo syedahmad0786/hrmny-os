@@ -314,3 +314,39 @@ not exposed)`; branch
   `FAIL-HRMNY-20260831-APOLLO-012`; none.
 - Rollback/correction: preserve the timestamp encodings and require both hosted
   event matrices to pass all 14 Apollo PostgreSQL scenarios on the exact head.
+
+## `FAIL-HRMNY-20260901-APOLLO-014` — concurrency proof reused a one-connection pool
+
+- Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; failing head
+  `b9c4e241e08979b5c20aed561c9164a057a4b59f`; repair commit
+  `15bea2885b2d37696b67f2c06f5a7bfdbbed8a5b`.
+- Decision/finding: the sixth hosted push run passed 3/14 Apollo PostgreSQL
+  scenarios, then the stale-repair race timed out; ten later test/hook failures
+  were cleanup contamination from the still-paused transaction.
+- Reason: the paused stale request and its awaited replacement both used the
+  cached production client, whose pool is intentionally capped at one
+  connection. The test therefore waited for a second session that could not
+  exist until the test released the first one.
+- Alternatives considered: increase test/hook timeouts; enlarge the production
+  pool; release the stale request before proving a replacement lease; treat all
+  eleven failures as independent runtime defects.
+- Trade-offs: the fixture now gives both simulated requests explicit independent
+  single-connection clients and releases both deferred gates in `finally`; the
+  production transaction, pool size, status/version fence, and assertions are
+  unchanged.
+- Evidence: run `33520058503`; database job `99896730908`; first three tests
+  passed, test four timed out at 5 seconds, and subsequent hooks timed out at 10
+  seconds; three independent source reviews; web lint/typecheck and 22/22
+  focused deterministic tests on the repair commit.
+- Confidence/freshness: high for the deterministic circular wait; hosted repair
+  execution remains pending.
+- Affected components: Apollo stale terminal-job race fixture and CI cleanup.
+- Status: corrected locally; no production, provider, deployment, credit,
+  message, account, or Xero effect occurred.
+- Supersedes/superseded-by: follows
+  `FAIL-HRMNY-20260831-APOLLO-013`; none.
+- Rollback/correction: retain independent sessions and fail-safe gate release,
+  then require 14/14 hosted proof with no hook timeout or unhandled rejection.
