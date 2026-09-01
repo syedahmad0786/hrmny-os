@@ -8,16 +8,16 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 
 ## `GAP-HRMNY-20260831-APOLLO-001` — hosted exact-SHA verification
 
-- Decision/finding: exact head `b9c4e24` passed full verify/build, 90-test
-  browser acceptance, migrations, and Sales PostgreSQL. Apollo passed its first
-  three scenarios, then a one-connection test fixture deadlocked its fourth;
-  repair commit `15bea28` is not yet hosted-verified.
+- Decision/finding: exact head `3c80798` passed full verify/build, 90-test
+  browser acceptance, migrations, Sales PostgreSQL, and 12/14 Apollo scenarios.
+  The two remaining prepared-parameter type failures are repaired by
+  `7c95531`, which is not yet hosted-verified.
 - Reason: local worktree proof is not a hosted receipt.
 - Alternatives considered: infer acceptance from local output.
 - Trade-offs: review remains pending until terminal checks arrive.
 - Evidence:
   `EVID-HRMNY-20260831-APOLLO-001/002/004/010/011/012/013/014` and
-  `EVID-HRMNY-20260901-APOLLO-015`.
+  `EVID-HRMNY-20260901-APOLLO-015/016`.
 - Confidence/freshness: high.
 - Affected components: entire slice.
 - Status: open; exact repair-head database/verify/browser receipts are the next

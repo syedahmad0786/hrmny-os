@@ -323,7 +323,7 @@ not exposed)`; branch
 - Rollback/correction: bind any positive claim to the repair SHA, require 14/14
   without unhandled rejection, and retain both failed jobs permanently.
 
-## `EVID-HRMNY-20260901-APOLLO-015` — sixth hosted run passed three Apollo PostgreSQL scenarios
+## `EVID-HRMNY-20260901-APOLLO-015` — sixth hosted matrices passed three Apollo PostgreSQL scenarios
 
 - Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
   `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
@@ -331,18 +331,19 @@ not exposed)`; branch
   `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
   head `b9c4e241e08979b5c20aed561c9164a057a4b59f`; repair commit
   `15bea2885b2d37696b67f2c06f5a7bfdbbed8a5b`.
-- Decision/finding: the push matrix passed full verify/build and 90-test browser
-  acceptance. Its database job again passed migration verification, disposable
-  migration apply, and Sales 3/3; Apollo advanced from 0/14 to 3/14 before a
-  deterministic test-session circular wait.
+- Decision/finding: both push and PR matrices passed full verify/build and
+  90-test browser acceptance. Their database jobs again passed migration
+  verification, disposable migration apply, and Sales 3/3; Apollo advanced
+  from 0/14 to 3/14 before a deterministic test-session circular wait.
 - Reason: preserve the timestamp repair's positive proof and identify the first
   remaining boundary without misclassifying cascade failures.
 - Alternatives considered: discard the run because the overall workflow was
   red; count each hook timeout separately; weaken the concurrency test.
 - Trade-offs: hosted synthetic acceptance remains open, while the correction is
   confined to faithful test orchestration and fail-safe cleanup.
-- Evidence: run `33520058503`; verify job `99896730445`; browser job
-  `99896730289`; database job `99896730908`;
+- Evidence: push run `33520058503`, verify job `99896730445`, browser job
+  `99896730289`, database job `99896730908`; PR run `33520238687`, verify job
+  `99897340376`, browser job `99897339925`, database job `99897340014`;
   `FAIL-HRMNY-20260901-APOLLO-014`; local web lint/typecheck, Apollo 17/17, and
   inbox 5/5.
 - Confidence/freshness: high; hosted receipts and three read-only reviews agree.
@@ -353,3 +354,37 @@ not exposed)`; branch
   `EVID-HRMNY-20260831-APOLLO-014`; none.
 - Rollback/correction: rerun the complete database sequence on the repair SHA,
   require all 14 scenarios, and preserve this partial-positive receipt.
+
+## `EVID-HRMNY-20260901-APOLLO-016` — seventh hosted push reached 12/14 PostgreSQL scenarios
+
+- Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `3c8079889a522acc9a21d6e76121936ed7fd3fd4`; repair commit
+  `7c9553114b3ab0c5db71c67680db2585e5f9f5c2`.
+- Decision/finding: the push matrix passed full verify/build and 90-test browser
+  acceptance. Its database job passed the complete migration sequence, Sales
+  3/3, and 12/14 Apollo scenarios in 693 ms. The prior timestamp and
+  one-session race defects are therefore repaired; only two prepared-parameter
+  type boundaries remained.
+- Reason: preserve proof progression and distinguish the two final SQL adapter
+  failures from migration, locking, provider, assertion, or cleanup defects.
+- Alternatives considered: report only the overall red conclusion; await an
+  unchanged duplicate PR database job before correcting the proven cause;
+  discard the twelve positive scenario receipts.
+- Trade-offs: hosted acceptance remains open, while the next correction is two
+  explicit type annotations with no state-machine change.
+- Evidence: push run `33522218287`; verify job `99904050281`; browser job
+  `99904050138`; database job `99904049900`; Apollo result `12 passed, 2
+  failed`; `FAIL-HRMNY-20260901-APOLLO-015`.
+- Confidence/freshness: high; all three jobs are terminal on the exact SHA and
+  the database log contains both complete failing queries.
+- Affected components: hosted acceptance ledger, Apollo dead-letter receipt,
+  and retention redaction.
+- Status: negative diagnostic receipt accepted; repaired exact-head hosted
+  proof pending.
+- Supersedes/superseded-by: extends
+  `EVID-HRMNY-20260901-APOLLO-015`; none.
+- Rollback/correction: rerun both event matrices on the repair head, require
+  14/14, and retain the partial-positive job permanently.

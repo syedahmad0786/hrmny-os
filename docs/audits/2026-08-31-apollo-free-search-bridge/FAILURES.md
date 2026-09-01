@@ -323,9 +323,10 @@ not exposed)`; branch
   `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; failing head
   `b9c4e241e08979b5c20aed561c9164a057a4b59f`; repair commit
   `15bea2885b2d37696b67f2c06f5a7bfdbbed8a5b`.
-- Decision/finding: the sixth hosted push run passed 3/14 Apollo PostgreSQL
-  scenarios, then the stale-repair race timed out; ten later test/hook failures
-  were cleanup contamination from the still-paused transaction.
+- Decision/finding: both sixth hosted event matrices passed 3/14 Apollo
+  PostgreSQL scenarios, then the stale-repair race timed out; ten later
+  test/hook failures were cleanup contamination from the still-paused
+  transaction.
 - Reason: the paused stale request and its awaited replacement both used the
   cached production client, whose pool is intentionally capped at one
   connection. The test therefore waited for a second session that could not
@@ -337,8 +338,9 @@ not exposed)`; branch
   single-connection clients and releases both deferred gates in `finally`; the
   production transaction, pool size, status/version fence, and assertions are
   unchanged.
-- Evidence: run `33520058503`; database job `99896730908`; first three tests
-  passed, test four timed out at 5 seconds, and subsequent hooks timed out at 10
+- Evidence: push run `33520058503` / database job `99896730908`; PR run
+  `33520238687` / database job `99897340014`; first three tests passed in both,
+  test four timed out at 5 seconds, and subsequent hooks timed out at 10
   seconds; three independent source reviews; web lint/typecheck and 22/22
   focused deterministic tests on the repair commit.
 - Confidence/freshness: high for the deterministic circular wait; hosted repair
@@ -350,3 +352,41 @@ not exposed)`; branch
   `FAIL-HRMNY-20260831-APOLLO-013`; none.
 - Rollback/correction: retain independent sessions and fail-safe gate release,
   then require 14/14 hosted proof with no hook timeout or unhandled rejection.
+
+## `FAIL-HRMNY-20260901-APOLLO-015` — JSON constructors received untyped parameters
+
+- Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; failing head
+  `3c8079889a522acc9a21d6e76121936ed7fd3fd4`; repair commit
+  `7c9553114b3ab0c5db71c67680db2585e5f9f5c2`.
+- Decision/finding: the seventh hosted push database job passed migrations,
+  Sales 3/3, and 12/14 Apollo PostgreSQL scenarios. The only failures were the
+  dead-letter reason and retention-redaction timestamp passed directly into
+  `jsonb_build_object` without a type context.
+- Reason: PostgreSQL must resolve each prepared parameter type during query
+  analysis; a value used only as a polymorphic JSON-constructor argument has no
+  column assignment from which to infer text.
+- Alternatives considered: serialize the complete JSON value in application
+  code; cast the values to `jsonb`; weaken or remove the two scenarios; change
+  driver parameter handling globally.
+- Trade-offs: two explicit `::text` casts retain the existing JSON string
+  contract and leave receipt state, retention behavior, assertions, and
+  provider execution unchanged.
+- Evidence: push run `33522218287`; database job `99904049900`; PostgreSQL
+  `42P18` for parameters `$4` and `$5`; verify job `99904050281` and browser job
+  `99904050138` both passed; local web lint/typecheck and 22/22 focused tests on
+  the repair commit.
+- Confidence/freshness: high; the hosted query text identifies both exact
+  parameters and a repository scan found no other dynamic untyped
+  `jsonb_build_object` values in this bridge.
+- Affected components: atomic malformed-job dead letter and candidate identity
+  retention redaction.
+- Status: corrected locally; exact-repair-head PostgreSQL execution pending; no
+  production, provider, deployment, credit, message, account, or Xero effect
+  occurred.
+- Supersedes/superseded-by: follows
+  `FAIL-HRMNY-20260901-APOLLO-014`; none.
+- Rollback/correction: retain the explicit text type boundary and require both
+  hosted event matrices to pass all 14 Apollo PostgreSQL scenarios.
