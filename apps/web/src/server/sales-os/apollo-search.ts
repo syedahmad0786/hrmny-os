@@ -149,6 +149,7 @@ export type ApolloSearchDeps = {
       attemptToken: string;
       credentialSecretId?: string;
       credentialVersion?: string;
+      credentialSecretVersion?: string;
       authorizedAt: Date;
       leaseExpiresAt: Date;
     },
@@ -408,6 +409,7 @@ async function configuredSource(
   source: LeadSourceAdapter;
   credentialSecretId?: string;
   credentialVersion?: string;
+  credentialSecretVersion?: string;
 }> {
   if (deps.leadSource) {
     const db = deps.database ?? getDb();
@@ -417,21 +419,26 @@ async function configuredSource(
     const [connection] = await db.execute<{
       secret_id: string;
       credential_version: string;
+      secret_version: string;
     }>(sql`
-      select secret_id::text, xmin::text as credential_version
-      from public.connection_account
-      where connection_account_id = ${connectionAccountId}::uuid
-        and owner_employee_id = ${actorEmployeeId}::uuid
-        and toolkit = 'apollo'
-        and scope = 'staff'
-        and status = 'connected'
-        and secret_id is not null
+      select connection.secret_id::text,
+             connection.xmin::text as credential_version,
+             secret.xmin::text as secret_version
+      from public.connection_account connection
+      join vault.secrets secret on secret.id = connection.secret_id
+      where connection.connection_account_id = ${connectionAccountId}::uuid
+        and connection.owner_employee_id = ${actorEmployeeId}::uuid
+        and connection.toolkit = 'apollo'
+        and connection.scope = 'staff'
+        and connection.status = 'connected'
+        and connection.secret_id is not null
       limit 1
     `);
     return {
       source: deps.leadSource,
       credentialSecretId: connection?.secret_id,
       credentialVersion: connection?.credential_version,
+      credentialSecretVersion: connection?.secret_version,
     };
   }
   if (!deps.resolveApiKey && !connectionAccountId) {
@@ -454,6 +461,7 @@ async function configuredSource(
     }),
     credentialSecretId: resolved.secretId,
     credentialVersion: resolved.credentialVersion,
+    credentialSecretVersion: resolved.secretVersion,
   };
 }
 
@@ -1355,6 +1363,11 @@ async function runScheduledApolloPeopleSearch(
     await assertQueuedActorAuthorized(stored.actorEmployeeId, deps);
   } catch (error) {
     if (!(error instanceof ApolloSearchAuthorizationRevokedError)) throw error;
+    const providerOutcomeAmbiguous =
+      receipt.result?.providerOutcomeAmbiguous === true;
+    const providerDispatchEverAuthorized =
+      receipt.result?.providerDispatchEverAuthorized === true ||
+      providerOutcomeAmbiguous;
     await transitionIntegrationReceiptProgress(
       receipt.receiptId,
       { status: "processing", bridgeStatus: "retry_scheduled" },
@@ -1366,6 +1379,11 @@ async function runScheduledApolloPeopleSearch(
           bridgeStatus: "revoked",
           mode: deps.leadSource?.mode ?? "live",
           reason: error.message,
+          providerDispatchState: providerOutcomeAmbiguous
+            ? "ambiguous"
+            : receipt.result?.providerDispatchState,
+          providerDispatchEverAuthorized,
+          providerOutcomeAmbiguous,
         },
       },
     );
@@ -1400,6 +1418,11 @@ async function runScheduledApolloPeopleSearch(
       latestResult.status === "retry_scheduled" &&
       (latest.attempts ?? 0) >= APOLLO_PEOPLE_SEARCH_MAX_ATTEMPTS
     ) {
+      const providerOutcomeAmbiguous =
+        latest.result?.providerOutcomeAmbiguous === true;
+      const providerDispatchEverAuthorized =
+        latest.result?.providerDispatchEverAuthorized === true ||
+        providerOutcomeAmbiguous;
       await transitionIntegrationReceiptProgress(
         receipt.receiptId,
         { status: "processing", bridgeStatus: "retry_scheduled" },
@@ -1411,6 +1434,11 @@ async function runScheduledApolloPeopleSearch(
             bridgeStatus: "dead_letter",
             mode: deps.leadSource?.mode ?? "live",
             reason: "APOLLO_SEARCH_ATTEMPT_LIMIT_REACHED",
+            providerDispatchState: providerOutcomeAmbiguous
+              ? "ambiguous"
+              : latest.result?.providerDispatchState,
+            providerDispatchEverAuthorized,
+            providerOutcomeAmbiguous,
           },
         },
       );
@@ -1428,7 +1456,9 @@ async function runScheduledApolloPeopleSearch(
   const attemptToken = attemptClaim.attemptToken;
   const attemptReceipt = { ...receipt, attempts: attempt };
   let source: LeadSourceAdapter | undefined;
+  let credentialSecretId: string | undefined;
   let credentialVersion: string | undefined;
+  let credentialSecretVersion: string | undefined;
   try {
     const configured = await configuredSource(
       stored.actorEmployeeId,
@@ -1436,7 +1466,9 @@ async function runScheduledApolloPeopleSearch(
       deps,
     );
     source = configured.source;
+    credentialSecretId = configured.credentialSecretId;
     credentialVersion = configured.credentialVersion;
+    credentialSecretVersion = configured.credentialSecretVersion;
     await deps.beforeProviderDispatchAuthorization?.();
     const dispatch = () =>
       finishSearch({
@@ -1459,6 +1491,7 @@ async function runScheduledApolloPeopleSearch(
           attemptToken,
           credentialSecretId: configured.credentialSecretId,
           credentialVersion: configured.credentialVersion,
+          credentialSecretVersion: configured.credentialSecretVersion,
           authorizedAt,
           leaseExpiresAt,
         },
@@ -1492,13 +1525,17 @@ async function runScheduledApolloPeopleSearch(
       error instanceof ApolloProviderRequestError &&
       (error.httpStatus === 401 || error.httpStatus === 403) &&
       receipt.credentialConnectionAccountId &&
-      credentialVersion
+      credentialVersion &&
+      credentialSecretId &&
+      credentialSecretVersion
     ) {
       await markOwnedIntegrationConnectionAuthError({
         toolkit: "apollo",
         employeeId: stored.actorEmployeeId,
         connectionAccountId: receipt.credentialConnectionAccountId,
         credentialVersion,
+        secretId: credentialSecretId,
+        secretVersion: credentialSecretVersion,
       }).catch(() => false);
       await transitionIntegrationReceiptProgress(
         receipt.receiptId,
@@ -1916,6 +1953,7 @@ export async function runApolloPeopleSearchQueuedJob(
     attemptToken: string;
     credentialSecretId?: string;
     credentialVersion?: string;
+    credentialSecretVersion?: string;
     authorizedAt: Date;
     leaseExpiresAt: Date;
   };
@@ -1924,9 +1962,18 @@ export async function runApolloPeopleSearchQueuedJob(
     input: ProviderDispatchFenceInput,
   ): Promise<boolean> {
     return durableDb.transaction(async (tx) => {
-      // Receipt-before-job is the shared lock order with revocation. The exact
-      // principal and exact employee-owned connection are revalidated after
-      // credential resolution and immediately before provider dispatch.
+      // Credential rotation locks Vault before connection_account. Match that
+      // order, then preserve receipt-before-job for worker/revoker ordering.
+      // The exact secret row is held through the final connection check so an
+      // in-place rotation cannot cross the dispatch authorization boundary.
+      const [exactSecret] = await tx.execute<{ exact: boolean }>(sql`
+        select true as exact
+        from vault.secrets
+        where id = ${input.credentialSecretId ?? null}::uuid
+          and xmin::text = ${input.credentialSecretVersion ?? null}
+        for share
+      `);
+
       const [ownedReceipt] = await tx.execute<{
         owner_employee_id: string | null;
         credential_connection_account_id: string | null;
@@ -1974,8 +2021,9 @@ export async function runApolloPeopleSearchQueuedJob(
         limit 1
         for share of employee, membership
       `);
-      const [connectionAuthorization] = authorization?.authorized
-        ? await tx.execute<{ authorized: boolean }>(sql`
+      const [connectionAuthorization] =
+        authorization?.authorized && exactSecret?.exact === true
+          ? await tx.execute<{ authorized: boolean }>(sql`
             select true as authorized
             from public.connection_account connection
             where connection.connection_account_id =
@@ -1997,7 +2045,7 @@ export async function runApolloPeopleSearchQueuedJob(
             limit 1
             for share of connection
           `)
-        : [];
+          : [];
       const refusalReason =
         authorization?.authorized !== true
           ? "APOLLO_SEARCH_AUTHORIZATION_REVOKED"
