@@ -8,24 +8,24 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
 
 ## `GAP-HRMNY-20260831-APOLLO-001` — hosted exact-SHA verification
 
-- Decision/finding: exact head `3c80798` passed full verify/build, 90-test
-  browser acceptance, migrations, Sales PostgreSQL, and 12/14 Apollo scenarios.
-  The two remaining prepared-parameter type failures are repaired by
-  `7c95531`, which is not yet hosted-verified.
+- Decision/finding: exact head
+  `528803e9b5ac988dff00b3e8e13a92b0d9cb7f71` passed both push and PR matrices:
+  full verify/build, 90-test browser acceptance, migrations, Sales PostgreSQL
+  3/3, and Apollo PostgreSQL 14/14.
 - Reason: local worktree proof is not a hosted receipt.
 - Alternatives considered: infer acceptance from local output.
 - Trade-offs: review remains pending until terminal checks arrive.
 - Evidence:
   `EVID-HRMNY-20260831-APOLLO-001/002/004/010/011/012/013/014` and
-  `EVID-HRMNY-20260901-APOLLO-015/016`.
+  `EVID-HRMNY-20260901-APOLLO-015/016/017`.
 - Confidence/freshness: high.
 - Affected components: entire slice.
-- Status: open; exact repair-head database/verify/browser receipts are the next
-  immediate dependency.
+- Status: closed for source/hosted synthetic verification; deployment and every
+  operational acceptance state remain in their separate gaps.
 - Supersedes/superseded-by: supersedes
   `GAP-HRMNY-20260831-RESEARCH-002/004` only after hosted proof passes; none.
-- Rollback/correction: preserve failed jobs, correct forward, and rerun on the
-  new exact SHA.
+- Rollback/correction: preserve every failed and passing job, and rerun the full
+  matrix on a new exact SHA after any source change.
 
 ## `GAP-HRMNY-20260831-APOLLO-002` — production migration 0075
 

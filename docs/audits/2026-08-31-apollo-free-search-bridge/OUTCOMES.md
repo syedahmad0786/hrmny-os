@@ -96,3 +96,34 @@ commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`.
   none.
 - Rollback/correction: preserve the stacked dependency and fail-closed redirect
   contract; update the ledger with the exact final hosted SHA.
+
+## `OUTCOME-HRMNY-20260901-APOLLO-006` — hosted synthetic bridge proof accepted
+
+- Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; tested head
+  `528803e9b5ac988dff00b3e8e13a92b0d9cb7f71`.
+- Decision/finding: the durable zero-credit bridge is source-complete and
+  hosted-synthetic accepted. Both GitHub event matrices passed all application,
+  browser, migration, Sales PostgreSQL, and 14 Apollo PostgreSQL scenarios.
+- Reason: the phase can advance only after the real PostgreSQL state machine,
+  not just its memory double, proves ownership, replay, lease, revocation,
+  retry, dead-letter, retention, and stale-worker fences.
+- Alternatives considered: carry the hosted gap into the next phase; accept
+  only one event matrix; combine this receipt with deployment or provider
+  acceptance.
+- Trade-offs: the implementation slice is reviewable and dependency-ready, but
+  no operational authority is implied and the two documented P2 rollout gaps
+  remain.
+- Evidence: `EVID-HRMNY-20260901-APOLLO-017`; runs `33523035823` and
+  `33523069634`; PR `244` stacked on the green/open Phase 4c dependency PR.
+- Confidence/freshness: high as of 2026-09-01.
+- Affected components: Sales Growth Person discovery, durable integration
+  runtime, migration 0075, CI, and release evidence.
+- Status: hosted synthetic phase accepted; review pending; do not merge
+  automatically.
+- Supersedes/superseded-by: supersedes the hosted-open portion of
+  `OUTCOME-HRMNY-20260831-APOLLO-003/005`; none.
+- Rollback/correction: revert or correct forward through review, preserve all
+  receipts, and rerun the exact matrix before any later release checkpoint.

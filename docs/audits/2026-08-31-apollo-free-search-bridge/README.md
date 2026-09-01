@@ -10,7 +10,10 @@
   (Phase 4c dependency merge), `a6ed4e3` (CI setup isolation), and `8a94ef6`
   (edge coverage and public-fixture hardening), plus `bb75712` (first hosted
   runtime/catalog repair) and `e033206` (documented catalog joins)
-- Review: pending stacked pull request; do not merge automatically
+- Hosted synthetic acceptance head:
+  `528803e9b5ac988dff00b3e8e13a92b0d9cb7f71`
+- Pull request: `#244`, stacked on the green/open Phase 4c dependency; do not
+  merge automatically
 
 ## Outcome
 
@@ -53,7 +56,7 @@ Inngest, which remains open in `GAP-HRMNY-20260831-APOLLO-010`.
 | documented | yes |
 | authorized | code, local synthetic execution, and review only |
 | configured | local synthetic runtime only; no live provider or managed Inngest acceptance |
-| tested | local unit, schema-contract, integration, static, build, and five browser journeys passed; audited path map is 24/30 (80%); hosted exact-SHA checks pending |
+| tested | hosted synthetic accepted at exact SHA `528803e9b5ac988dff00b3e8e13a92b0d9cb7f71`: both event matrices passed 712 application tests, builds, 90 browser journeys, migrations, Sales PostgreSQL 3/3, and Apollo PostgreSQL 14/14; audited path map remains 24/30 (80%) |
 | deployed | no |
 | provider accepted | no for this durable bridge; an older direct-path receipt is historical only |
 | destination verified | no |

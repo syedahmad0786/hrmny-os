@@ -361,8 +361,8 @@ not exposed)`; branch
   `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; failing head
   `3c8079889a522acc9a21d6e76121936ed7fd3fd4`; repair commit
   `7c9553114b3ab0c5db71c67680db2585e5f9f5c2`.
-- Decision/finding: the seventh hosted push database job passed migrations,
-  Sales 3/3, and 12/14 Apollo PostgreSQL scenarios. The only failures were the
+- Decision/finding: both seventh hosted database jobs passed migrations, Sales
+  3/3, and 12/14 Apollo PostgreSQL scenarios. The only failures were the
   dead-letter reason and retention-redaction timestamp passed directly into
   `jsonb_build_object` without a type context.
 - Reason: PostgreSQL must resolve each prepared parameter type during query
@@ -374,10 +374,11 @@ not exposed)`; branch
 - Trade-offs: two explicit `::text` casts retain the existing JSON string
   contract and leave receipt state, retention behavior, assertions, and
   provider execution unchanged.
-- Evidence: push run `33522218287`; database job `99904049900`; PostgreSQL
-  `42P18` for parameters `$4` and `$5`; verify job `99904050281` and browser job
-  `99904050138` both passed; local web lint/typecheck and 22/22 focused tests on
-  the repair commit.
+- Evidence: push run `33522218287`, database job `99904049900`, verify job
+  `99904050281`, browser job `99904050138`; PR run `33522338367`, database job
+  `99904454935`, verify job `99904455185`, browser job `99904455028`;
+  PostgreSQL `42P18` for parameters `$4` and `$5` in both matrices; local web
+  lint/typecheck and 22/22 focused tests on the repair commit.
 - Confidence/freshness: high; the hosted query text identifies both exact
   parameters and a repository scan found no other dynamic untyped
   `jsonb_build_object` values in this bridge.

@@ -88,19 +88,24 @@ lineage `6b82f165b3c552a2daa95c88d4010156aafbbcc1`, `d66be9d`,
 - Trade-offs: proof depends on hosted runner availability.
 - Evidence: CI database job; distinct `test:ci:postgres` and
   `test:ci:apollo-postgres` commands; both setup modules' fail-closed guards.
-- Confidence/freshness: high for design; execution pending.
+- Confidence/freshness: high; push and PR execution passed on exact tested head
+  `528803e9b5ac988dff00b3e8e13a92b0d9cb7f71` on 2026-09-01.
 - Affected components: CI, PostgreSQL, migration 0075, bridge concurrency.
-- Status: pending exact-SHA hosted receipt.
+- Status: accepted for hosted disposable synthetic proof; no production or
+  live-provider authority is granted.
 - Supersedes/superseded-by: intended to close
   `GAP-HRMNY-20260831-RESEARCH-004` after success.
 - Rollback/correction: allow teardown of the disposable CI service only; never
-  permit non-local host or another database name.
+  permit non-local host or another database name; rerun both event matrices
+  after any source change.
 - Prerequisites/permissions: review branch stacked on Phase 4c; GitHub-hosted
   ephemeral service; `CI=true`; explicit CI write/proof gates; loopback host;
   exact disposable database; no production secret. Plaintext TLS is permitted
   only for this fully gated loopback tuple; every other target defaults to TLS.
-- Tests: migration verifier, Sales proposal PostgreSQL proof, and
-  `apollo-search-postgres.test.ts` through separate configurations.
+- Tests: migration verifier (75 fresh plus both idempotent upgrade bands), Sales
+  proposal PostgreSQL 3/3, Apollo PostgreSQL 14/14, 712 application tests, two
+  builds, and 90 browser journeys in both GitHub event matrices; receipt
+  `EVID-HRMNY-20260901-APOLLO-017`.
 
 ## `PROC-HRMNY-20260831-APOLLO-005` — production migration 0075 checkpoint
 

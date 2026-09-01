@@ -355,7 +355,7 @@ not exposed)`; branch
 - Rollback/correction: rerun the complete database sequence on the repair SHA,
   require all 14 scenarios, and preserve this partial-positive receipt.
 
-## `EVID-HRMNY-20260901-APOLLO-016` — seventh hosted push reached 12/14 PostgreSQL scenarios
+## `EVID-HRMNY-20260901-APOLLO-016` — seventh hosted matrices reached 12/14 PostgreSQL scenarios
 
 - Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
   `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
@@ -363,11 +363,11 @@ not exposed)`; branch
   `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
   head `3c8079889a522acc9a21d6e76121936ed7fd3fd4`; repair commit
   `7c9553114b3ab0c5db71c67680db2585e5f9f5c2`.
-- Decision/finding: the push matrix passed full verify/build and 90-test browser
-  acceptance. Its database job passed the complete migration sequence, Sales
-  3/3, and 12/14 Apollo scenarios in 693 ms. The prior timestamp and
-  one-session race defects are therefore repaired; only two prepared-parameter
-  type boundaries remained.
+- Decision/finding: both matrices passed full verify/build and 90-test browser
+  acceptance. Their database jobs passed the complete migration sequence,
+  Sales 3/3, and 12/14 Apollo scenarios in 693 ms and 934 ms. The prior
+  timestamp and one-session race defects are therefore repaired; only two
+  prepared-parameter type boundaries remained.
 - Reason: preserve proof progression and distinguish the two final SQL adapter
   failures from migration, locking, provider, assertion, or cleanup defects.
 - Alternatives considered: report only the overall red conclusion; await an
@@ -375,9 +375,10 @@ not exposed)`; branch
   discard the twelve positive scenario receipts.
 - Trade-offs: hosted acceptance remains open, while the next correction is two
   explicit type annotations with no state-machine change.
-- Evidence: push run `33522218287`; verify job `99904050281`; browser job
-  `99904050138`; database job `99904049900`; Apollo result `12 passed, 2
-  failed`; `FAIL-HRMNY-20260901-APOLLO-015`.
+- Evidence: push run `33522218287`, verify job `99904050281`, browser job
+  `99904050138`, database job `99904049900`; PR run `33522338367`, verify job
+  `99904455185`, browser job `99904455028`, database job `99904454935`; Apollo
+  result `12 passed, 2 failed` in both; `FAIL-HRMNY-20260901-APOLLO-015`.
 - Confidence/freshness: high; all three jobs are terminal on the exact SHA and
   the database log contains both complete failing queries.
 - Affected components: hosted acceptance ledger, Apollo dead-letter receipt,
@@ -388,3 +389,40 @@ not exposed)`; branch
   `EVID-HRMNY-20260901-APOLLO-015`; none.
 - Rollback/correction: rerun both event matrices on the repair head, require
   14/14, and retain the partial-positive job permanently.
+
+## `EVID-HRMNY-20260901-APOLLO-017` — exact-head hosted synthetic matrix passed
+
+- Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `528803e9b5ac988dff00b3e8e13a92b0d9cb7f71`.
+- Decision/finding: both push and pull-request CI matrices completed green on
+  the exact head. Each independently passed 127 test files/712 tests, complete
+  builds, 90 Chromium journeys, 75 fresh migrations plus idempotent prior-head
+  and current-schema upgrade paths, Sales PostgreSQL 3/3, and Apollo PostgreSQL
+  14/14.
+- Reason: close the source/hosted synthetic gate only when both event paths
+  execute the complete database, application, and browser proofs on one exact
+  Git object.
+- Alternatives considered: accept the local 22-test subset; accept one GitHub
+  event; infer PostgreSQL correctness from the earlier 12/14 receipt; reuse a
+  historic direct-provider production search.
+- Trade-offs: code and hosted synthetic acceptance are now proven, while
+  deployment, managed Inngest, provider, destination, recovery, named-user, and
+  production acceptance remain separate and open.
+- Evidence: push run `33523035823` with verify `99906793816`, browser
+  `99906793973`, database `99906794151`; PR run `33523069634` with verify
+  `99906909454`, browser `99906909066`, database `99906909586`; both workflow
+  conclusions `success`; public-diff redaction scan `HIGH=0`.
+- Confidence/freshness: high; terminal GitHub receipts inspected 2026-09-01 and
+  bound to the full 40-character SHA.
+- Affected components: Phase 4d source, CI, migration 0075, Sales proposal
+  persistence, Apollo durable bridge, and staff browser regression suite.
+- Status: hosted synthetic acceptance passed; no deployment or live-provider
+  effect occurred.
+- Supersedes/superseded-by: supersedes the open hosted-execution portion of
+  `EVID-HRMNY-20260901-APOLLO-016`; none.
+- Rollback/correction: retain both receipts, rerun the same matrix after any
+  source change, and never extend this state to later operational acceptance
+  without its own immutable receipt.
