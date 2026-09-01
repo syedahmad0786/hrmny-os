@@ -5,26 +5,29 @@ Common metadata for every record: 2026-09-02;
 tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
-`900bc0e548061b5b6872c3552b18ff8d1c309a6b`.
+`900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
+`d1ab23c36ebbde5320967f0d806251193919b1c6`.
 
 ## `GAP-HRMNY-20260902-APOLLO-014` — hosted PostgreSQL proof pending
 
 - Decision/finding: corrected local lint, types, tests, and builds pass, but the
   29-case PostgreSQL runtime suite and disposable migration verifier require
-  hosted CI. The initial `afc708a` matrices failed and cannot be reused.
+  hosted CI. The initial `afc708a` matrices and the direct-Vault-table
+  `d1a137d` matrices failed and cannot be reused.
 - Reason: no safe local PostgreSQL service or authorized database URL was
   available; the default web suite intentionally excludes this file.
 - Alternatives considered: point tests at production; claim unit proof as
   database execution; install an unapproved local service.
 - Trade-offs: the branch cannot close the prior provider-wide free-search gap
   until both hosted event matrices pass the exact head.
-- Evidence: `EVID-HRMNY-20260902-APOLLO-021/022/023`.
+- Evidence: `EVID-HRMNY-20260902-APOLLO-021/022/023` and
+  `FAIL-HRMNY-20260902-APOLLO-022`.
 - Confidence/freshness: high.
 - Affected components: migration `0076`, advisory lock, concurrent workers,
   forced session loss, and recovery.
 - Status: open P1 until hosted disposable PostgreSQL proof.
-- Supersedes/superseded-by: will be superseded by
-  `EVID-HRMNY-20260902-APOLLO-023` if accepted.
+- Supersedes/superseded-by: will be superseded by a new exact-head hosted
+  acceptance receipt if accepted.
 - Rollback/correction: leave the PR unmerged and live Apollo closed on any CI
   failure; correct forward and rerun both matrices.
 
@@ -70,7 +73,8 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 ## `GAP-HRMNY-20260902-APOLLO-017` — session-loss and credential operations need live proof
 
 - Decision/finding: transaction/session loss is modeled as a durable ambiguous
-  outcome, and both connection-row and Vault-row revisions fence delayed work.
+  outcome, and both connection-row and Vault update revisions fence delayed
+  work.
   The production pooler/runtime path, alerting, reconciliation, governed
   credential-rotation procedure, and recovery cadence are not accepted.
 - Reason: source tests cannot prove production network, pooler, operational

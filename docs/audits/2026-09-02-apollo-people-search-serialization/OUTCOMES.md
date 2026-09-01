@@ -5,7 +5,8 @@ Common metadata for every record: 2026-09-02;
 tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
-`900bc0e548061b5b6872c3552b18ff8d1c309a6b`.
+`900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
+`d1ab23c36ebbde5320967f0d806251193919b1c6`.
 
 ## `OUTCOME-HRMNY-20260902-APOLLO-009` — dependency-ready free-search lane
 
@@ -18,7 +19,7 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Alternatives considered: leave live activation blocked indefinitely; expand
   into paid Match or production rollout in the same slice.
 - Trade-offs: hosted database and all operational acceptance states remain open.
-- Evidence: implementation commit, `EVID-HRMNY-20260902-APOLLO-021/022`, and
+- Evidence: implementation commits, `EVID-HRMNY-20260902-APOLLO-021/022/023`, and
   migration SHA `4941903ab873fabbb4a7359a83b95a48daee1df9eddae9ba38fa3cfb78bd68a7`.
 - Confidence/freshness: high for source and local deterministic proof.
 - Affected components: free Sales Growth person discovery through Apollo.

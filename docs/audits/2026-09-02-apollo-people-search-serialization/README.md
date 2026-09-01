@@ -7,7 +7,8 @@
 - Branch: `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`
 - Stacked base: `8b672fd4e1ee2671d6919011e29b91886d706278`
 - Implementation commits: `fc2d288074bc44624abbb9e701b5c5ffa7adb775`,
-  `900bc0e548061b5b6872c3552b18ff8d1c309a6b`
+  `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, and
+  `d1ab23c36ebbde5320967f0d806251193919b1c6`
 - Pull request: <https://github.com/syedahmad0786/hrmny-os/pull/246>
 - Scope: free Apollo People Search scheduling, final dispatch authorization,
   credential fencing, receipts, migration `0076`, and operator status copy
@@ -22,8 +23,9 @@ call does not retain ordinary application row locks.
 
 Immediately before dispatch, HRMNY revalidates the exact active employee,
 Sales role, receipt owner, connected staff-scoped Apollo account, Vault secret
-identity, connection-row version, and Vault-row version. An in-place Vault-only
-rotation therefore invalidates both final dispatch and stale-auth-error
+identity, connection-row version, and Vault update revision. An in-place Vault-only
+rotation changes the permitted `vault.decrypted_secrets.updated_at` revision
+and therefore invalidates both final dispatch and stale-auth-error
 reconciliation without requiring the secret ID to change. Revocation and
 terminalization share a receipt-before-job lock order. A worker that loses its
 database session after dispatch authorization records an ambiguous durable
@@ -63,9 +65,13 @@ The corrected local proof passed repository-wide lint, type checking, 962
 deterministic tests, and both production builds. The PostgreSQL
 concurrency/runtime file now has 29 cases and requires the hosted CI database.
 The first hosted matrices at `afc708a` failed one stale busy-window assertion
-whose early exit retained the test lock, plus one stale browser-copy assertion;
-both failures and their cascades are permanently recorded. Corrected exact-head
-hosted proof remains pending. Passing CI or a preview will still not grant
+whose early exit retained the test lock, plus one stale browser-copy assertion.
+The next matrices at `d1a137d` proved the browser correction but exposed that
+the runtime role cannot query `vault.secrets` directly. Commit `d1ab23c` now
+uses the already-permitted decrypted view and its official `updated_at`
+revision without expanding Vault privileges. Every failure is permanently
+recorded; fresh exact-head hosted PostgreSQL proof remains pending. Passing CI
+or a preview will still not grant
 provider, migration, deployment, recovery, user, or production acceptance.
 
 ## Reviewed primary sources
@@ -76,6 +82,10 @@ provider, migration, deployment, recovery, user, or production acceptance.
   <https://www.postgresql.org/docs/current/runtime-config-client.html>
 - PostgreSQL transaction advisory-lock functions:
   <https://www.postgresql.org/docs/current/functions-admin.html>
+- Supabase Vault official repository and API behavior:
+  <https://github.com/supabase/vault>
+- Supabase Vault extension SQL (`decrypted_secrets` and `update_secret`):
+  <https://github.com/supabase/vault/blob/main/sql/supabase_vault--0.3.0.sql>
 
 ## Package
 

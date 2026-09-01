@@ -5,7 +5,8 @@ Common metadata for every record: 2026-09-02;
 tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
-`900bc0e548061b5b6872c3552b18ff8d1c309a6b`.
+`900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
+`d1ab23c36ebbde5320967f0d806251193919b1c6`.
 
 ## `PROC-HRMNY-20260902-APOLLO-008` — review, migrate, deploy, and reopen free People Search
 
@@ -53,10 +54,13 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 2. Run synthetic concurrent cron/Inngest/employee jobs and forced worker/session
    loss. Verify one healthy provider lane, honest ambiguity, cleanup, alerting,
    and rollback.
-3. Prove that an in-place Vault-only rotation invalidates the captured Vault
-   row version before dispatch and prevents a stale 401/403 from disabling the
-   newer credential. Still use the governed connection workflow for every
-   operational rotation so status, audit, and ownership remain reconciled.
+3. Prove that an in-place Vault-only rotation changes the captured
+   `vault.decrypted_secrets.updated_at` revision before dispatch and prevents a
+   stale 401/403 from disabling the newer credential. Confirm that `FOR SHARE`
+   through the permitted view blocks a concurrent rotation without granting
+   direct access to `vault.secrets`. Still use the governed connection workflow
+   for every operational rotation so status, audit, and ownership remain
+   reconciled.
 4. Do not reopen on migration or health alone.
 
 ### 4. Bounded live and user checkpoint

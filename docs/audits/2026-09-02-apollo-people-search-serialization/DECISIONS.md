@@ -5,7 +5,8 @@ Common metadata for every record: 2026-09-02;
 tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
-`900bc0e548061b5b6872c3552b18ff8d1c309a6b`; base
+`900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
+`d1ab23c36ebbde5320967f0d806251193919b1c6`; base
 `8b672fd4e1ee2671d6919011e29b91886d706278`.
 
 ## `ADR-HRMNY-20260902-APOLLO-013` — serialize free People Search in PostgreSQL
@@ -41,19 +42,21 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Decision/finding: after credential resolution and immediately before the
   provider request, revalidate the receipt owner, payload actor, active
   employee, allowed Sales role, exact staff Apollo connection, secret ID,
-  expiry, `connection_account.xmin`, and `vault.secrets.xmin`. A stale 401/403
-  may disable only the exact connection and Vault row versions that dispatched
-  it.
+  expiry, `connection_account.xmin`, and the permitted
+  `vault.decrypted_secrets.updated_at` revision. A stale 401/403 may disable
+  only the exact connection and Vault revisions that dispatched it.
 - Reason: enqueue-time approval and an ACTIVE connection do not authorize a
   delayed external operation after role removal, revocation, or key rotation.
 - Alternatives considered: trust the queued actor ID; compare display email;
   validate only connection status; disable any connection after a stale 401.
-- Trade-offs: both `xmin` values are short-lived fail-closed version fences
-  rather than business identifiers. Direct Vault-only rotation is detected,
-  but the governed connection workflow remains required for audit and status
-  reconciliation. A tiny database-to-provider TOCTOU remains unavoidable.
-- Evidence: `EVID-HRMNY-20260902-APOLLO-021/022` and the forced rotation,
-  revocation, and stale-401 cases.
+- Trade-offs: `connection_account.xmin` and the Vault update timestamp are
+  short-lived fail-closed revision fences rather than business identifiers.
+  Direct Vault-only rotation is detected, but the governed connection workflow
+  remains required for audit and status reconciliation. A tiny
+  database-to-provider TOCTOU remains unavoidable.
+- Evidence: `EVID-HRMNY-20260902-APOLLO-021/022/023`,
+  `FAIL-HRMNY-20260902-APOLLO-022`, and the forced rotation, revocation, and
+  stale-401 cases.
 - Confidence/freshness: high for code and deterministic tests; production
   credential-rotation operations are not accepted.
 - Affected components: employee authorization, connection accounts, Vault
@@ -63,6 +66,36 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Rollback/correction: disable the provider lane and restore only after exact
   actor/connection denial and rotation tests pass; never weaken action-time
   checks to recover availability.
+
+## `ADR-HRMNY-20260902-APOLLO-016` — use the permitted Vault view as the rotation fence
+
+- Decision/finding: read and lock the exact row through
+  `vault.decrypted_secrets`, and compare its `updated_at` value as the
+  in-place-rotation revision. Do not grant the application role direct access
+  to `vault.secrets`.
+- Reason: hosted CI proved that the runtime's supported Vault contract permits
+  the decrypted view but rejects direct table reads. The official extension
+  updates `updated_at` when `vault.update_secret` rotates a secret.
+- Alternatives considered: broaden application privileges on
+  `vault.secrets`; remove the rotation fence; compare only the stable secret
+  ID; introduce an additional security-definer function before trying the
+  supported view.
+- Trade-offs: timestamp equality is a technical revision marker, not a durable
+  business version. Hosted PostgreSQL must still prove that `FOR SHARE` through
+  the simple view locks the underlying row as intended.
+- Evidence: push run `33552684634`, database job `100005748422`; pull-request
+  run `33552691805`, database job `100005773724`; official Supabase Vault
+  repository/extension SQL; correction `d1ab23c`.
+- Confidence/freshness: high for the permission failure and official update
+  behavior; pending exact-head hosted lock execution.
+- Affected components: owned key resolution, final Apollo dispatch, stale-auth
+  reconciliation, Vault permissions, and PostgreSQL acceptance.
+- Status: implemented and locally verified; hosted exact-head proof pending.
+- Supersedes/superseded-by: corrects the direct-table implementation detail in
+  `ADR-HRMNY-20260902-APOLLO-014`; none.
+- Rollback/correction: leave the lane closed if the view cannot carry the lock;
+  then add a narrowly reviewed security-definer helper rather than granting
+  broad Vault-table access.
 
 ## `ADR-HRMNY-20260902-APOLLO-015` — require a quiesced migration cutover
 
