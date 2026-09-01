@@ -5,7 +5,29 @@ Common metadata for every record: 2026-09-02;
 tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
-`900bc0e548061b5b6872c3552b18ff8d1c309a6b`.
+`900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
+`d1ab23c36ebbde5320967f0d806251193919b1c6`.
+
+## `REASON-HRMNY-20260902-APOLLO-012` — preserve least privilege at the Vault boundary
+
+- Decision/finding: use the supported decrypted view's update revision rather
+  than changing database grants to make a direct-table query pass.
+- Reason: runtime compatibility must not be repaired by giving the application
+  broader access to encrypted Vault storage.
+- Alternatives considered: grant `SELECT` on `vault.secrets`; omit the
+  in-place-rotation fence; add a new privileged helper immediately.
+- Trade-offs: the view-lock behavior needs hosted proof, but the correction
+  keeps the existing privilege boundary intact.
+- Evidence: identical hosted `permission denied for table secrets` failures,
+  Supabase Vault source, and correction `d1ab23c`.
+- Confidence/freshness: high on 2026-09-02.
+- Affected components: credential resolution, dispatch authorization, and
+  stale-auth reconciliation.
+- Status: accepted for the correction; hosted execution pending.
+- Supersedes/superseded-by: explains
+  `ADR-HRMNY-20260902-APOLLO-016`; none.
+- Rollback/correction: fail closed and prefer a narrow reviewed helper if the
+  official view cannot satisfy the row-lock requirement.
 
 ## `REASON-HRMNY-20260902-APOLLO-010` — one durable lane is the smallest honest boundary
 

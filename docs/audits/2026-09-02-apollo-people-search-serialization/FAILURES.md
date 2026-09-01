@@ -5,7 +5,8 @@ Common metadata for every record: 2026-09-02;
 tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
-`900bc0e548061b5b6872c3552b18ff8d1c309a6b`.
+`900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
+`d1ab23c36ebbde5320967f0d806251193919b1c6`.
 
 ## `FAIL-HRMNY-20260902-APOLLO-016` — ambiguity was initially understated
 
@@ -126,3 +127,31 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Supersedes/superseded-by: none.
 - Rollback/correction: keep the explicit current-attempt and receipt assertions;
   investigate local browser startup separately if hosted Linux disagrees.
+
+## `FAIL-HRMNY-20260902-APOLLO-022` — runtime queried a Vault table outside its grant boundary
+
+- Decision/finding: both second hosted database jobs passed migration
+  verification/application and the Sales PostgreSQL proof, then failed the
+  Apollo suite with `permission denied for table secrets`. The corrected
+  browser journey and repository verify jobs passed in both matrices.
+- Reason: the rotation fence joined or queried `vault.secrets` directly even
+  though the application role's supported contract is
+  `vault.decrypted_secrets` plus Vault functions.
+- Alternatives considered: grant the application role direct table access;
+  remove the rotation fence; treat the CI role as misconfigured; hide the
+  failure because preview and browser checks passed.
+- Trade-offs: correction `d1ab23c` uses the permitted view's `updated_at`
+  revision without a privilege expansion; its `FOR SHARE` behavior still needs
+  a fresh hosted PostgreSQL proof.
+- Evidence: push run `33552684634`, database job `100005748422`; pull-request
+  run `33552691805`, database job `100005773724`; both e2e jobs and both verify
+  jobs passed; official Supabase Vault repository and extension SQL.
+- Confidence/freshness: high on 2026-09-02 from identical disposable-database
+  failures and primary-source verification.
+- Affected components: owned Apollo key resolution, dispatch fence, stale-auth
+  reconciliation, and hosted database acceptance; no production database.
+- Status: corrected locally in `d1ab23c`; fresh hosted proof pending.
+- Supersedes/superseded-by: none; no acceptance receipt superseded.
+- Rollback/correction: keep the PR unmerged and Apollo closed; if row locking
+  through the permitted view fails, introduce a narrow reviewed helper rather
+  than broadening Vault-table grants.

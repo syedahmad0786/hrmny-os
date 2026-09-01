@@ -5,7 +5,8 @@ Common metadata for every record: 2026-09-02;
 tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
-`900bc0e548061b5b6872c3552b18ff8d1c309a6b`.
+`900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
+`d1ab23c36ebbde5320967f0d806251193919b1c6`.
 
 ## `TRADE-HRMNY-20260902-APOLLO-010` — bounded mutual exclusion over false exactly-once
 
@@ -47,3 +48,24 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Supersedes/superseded-by: none.
 - Rollback/correction: retain `APOLLO_ALLOW_PAID_OPERATIONS=false` and disable
   the one-shot paid route until its own contract is accepted.
+
+## `TRADE-HRMNY-20260902-APOLLO-012` — permitted Vault view over broader grants
+
+- Decision/finding: use `vault.decrypted_secrets.updated_at` as the rotation
+  revision and retain `FOR SHARE` through the permitted view.
+- Reason: the application already needs scoped decrypted-secret access, while
+  direct `vault.secrets` access would widen its database privilege surface.
+- Alternatives considered: grant direct table reads; create a privileged
+  helper immediately; remove in-place-rotation protection.
+- Trade-offs: the timestamp is a technical fence and view-lock behavior is
+  PostgreSQL-specific; hosted CI must prove it before source acceptance.
+- Evidence: `FAIL-HRMNY-20260902-APOLLO-022`, official Vault extension SQL,
+  and correction `d1ab23c`.
+- Confidence/freshness: high for least privilege; hosted lock proof pending.
+- Affected components: Vault grants, credential rotation, Apollo dispatch, and
+  auth-error reconciliation.
+- Status: accepted as the narrow correction; operational acceptance open.
+- Supersedes/superseded-by: none.
+- Rollback/correction: if the view cannot carry the required lock, keep Apollo
+  closed and replace it with a narrowly scoped reviewed helper—not a broad
+  table grant.
