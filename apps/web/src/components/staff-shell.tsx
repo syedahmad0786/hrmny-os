@@ -28,7 +28,7 @@ type StaffNavDefinition = {
 const PRIMARY_NAV: readonly StaffNavDefinition[] = [
   {
     id: "home",
-    label: "Home",
+    label: "Today",
     index: "01",
     destinations: [{ href: "/", feature: "core.home" }],
     match: (p: string) => p === "/",
@@ -39,17 +39,21 @@ const PRIMARY_NAV: readonly StaffNavDefinition[] = [
     index: "02",
     destinations: [{ href: "/crm/hunt", feature: "crm.workspace" }],
     match: (p: string) =>
-      p === "/crm" ||
-      p.startsWith("/crm/") ||
-      p.startsWith("/sales") ||
-      p.startsWith("/clients"),
+      p === "/crm" || p.startsWith("/crm/") || p.startsWith("/sales"),
+  },
+  {
+    id: "clients",
+    label: "Clients",
+    index: "03",
+    destinations: [{ href: "/clients", feature: "crm.workspace" }],
+    match: (p: string) => p === "/clients" || p.startsWith("/clients/"),
   },
   {
     id: "work",
-    label: "Work",
-    index: "03",
+    label: "My work",
+    index: "04",
     destinations: [
-      { href: "/tasks", feature: "work.my_tasks" },
+      { href: "/work/my-tasks", feature: "work.my_tasks" },
       { href: "/work", feature: "work.projects" },
     ],
     match: (p: string) =>
@@ -61,7 +65,7 @@ const PRIMARY_NAV: readonly StaffNavDefinition[] = [
   {
     id: "delivery",
     label: "Delivery",
-    index: "04",
+    index: "05",
     destinations: [{ href: "/delivery", feature: "delivery.workspace" }],
     match: (p: string) =>
       ["/delivery", "/traffic", "/creative", "/account", "/assets"].some(
@@ -71,14 +75,14 @@ const PRIMARY_NAV: readonly StaffNavDefinition[] = [
   {
     id: "chat",
     label: "Chat",
-    index: "05",
+    index: "06",
     destinations: [{ href: "/chat", feature: "ai.os_chat" }],
     match: (p: string) => p === "/chat" || p.startsWith("/chat/"),
   },
   {
     id: "support",
     label: "Support",
-    index: "06",
+    index: "07",
     destinations: [
       { href: "/tickets", feature: "support.tickets" },
       { href: "/notifications", feature: "os.notifications" },
@@ -97,7 +101,7 @@ const PRIMARY_NAV: readonly StaffNavDefinition[] = [
   {
     id: "finance",
     label: "Finance",
-    index: "07",
+    index: "08",
     destinations: [{ href: "/finance", feature: "finance.workspace" }],
     match: (p: string) =>
       ["/finance", "/billing", "/margin", "/payroll"].some(
@@ -106,15 +110,15 @@ const PRIMARY_NAV: readonly StaffNavDefinition[] = [
   },
   {
     id: "insights",
-    label: "Insights",
-    index: "08",
+    label: "Reports",
+    index: "09",
     destinations: [{ href: "/dashboards", feature: "analytics.dashboards" }],
     match: (p: string) => p === "/dashboards" || p.startsWith("/dashboards/"),
   },
   {
     id: "people",
     label: "People",
-    index: "09",
+    index: "10",
     destinations: [
       { href: "/people", feature: "people.core_hr" },
       { href: "/time", feature: "people.leave_attendance" },
@@ -138,8 +142,8 @@ const PRIMARY_NAV: readonly StaffNavDefinition[] = [
   },
   {
     id: "settings",
-    label: "Settings",
-    index: "10",
+    label: "Connections",
+    index: "11",
     destinations: [
       {
         href: "/admin/features",
@@ -462,7 +466,6 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     session.data?.roles ?? [],
     availableNavigation,
   );
-  const moreActive = navigation.more.some((item) => item.match(pathname));
   const renderNavItem = (item: ResolvedNavItem) => {
     const active = item.match(pathname);
     return (
@@ -580,21 +583,6 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         <p className="desk-nav-label">Operate</p>
         <nav className="desk-nav" aria-label="Primary">
           {navigation.primary.map(renderNavItem)}
-          {navigation.more.length ? (
-            <details className="desk-nav-more" open={moreActive || undefined}>
-              <summary
-                className={`desk-nav-btn desk-nav-more-toggle${moreActive ? " active" : ""}`}
-                data-testid="staff-more-toggle"
-              >
-                <span className="desk-nav-index">+</span>
-                <span>More</span>
-                <span aria-hidden>⌄</span>
-              </summary>
-              <div className="desk-nav-more-list">
-                {navigation.more.map(renderNavItem)}
-              </div>
-            </details>
-          ) : null}
         </nav>
         <div className="desk-sidebar-foot">
           <div className="desk-side-meta">
@@ -617,6 +605,21 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
             <kbd>Ctrl K</kbd>
           </Link>
           <div className="desk-top-actions">
+            {enabledFeatures.has("integrations.connections") ? (
+              <Link href="/settings/connections" className="desk-topbar-link">
+                Connections
+              </Link>
+            ) : null}
+            {enabledFeatures.has("os.notifications") ? (
+              <Link
+                href="/notifications"
+                className="desk-icon-btn"
+                aria-label="Open notifications"
+                title="Notifications"
+              >
+                <span aria-hidden>●</span>
+              </Link>
+            ) : null}
             {(users.data ?? []).length > 0 ? (
               <div className="desk-devbox">
                 <label htmlFor="persona">Dev only</label>

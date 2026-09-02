@@ -7,8 +7,8 @@ export default function CrmResearchPage() {
   return (
     <main data-testid="crm-research">
       <CrmPageHeader
-        title="Hunt / research"
-        description="Company research, three human gates, Apollo enrich. LinkedIn is copy-assist only."
+        title="Research a company"
+        description="Turn a prospect into a useful brief before writing outreach. You decide what gets saved and sent."
       />
       <ResearchConsole />
     </main>

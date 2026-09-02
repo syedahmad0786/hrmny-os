@@ -5,12 +5,20 @@ const SYNTHETIC_NAME_PATTERNS = [
   /^live proof\b/i,
   /^inbound proof\b/i,
   /^closed loop\b/i,
-  /^demo funnel\b/i,
+  /^demo\b/i,
   /^handover smoke\b/i,
   /^invite proof\b/i,
   /^memory prospect\b/i,
-  /^demo hunt\b/i,
   /^apollo unit\b/i,
+  /^m\d[- ]proof\b/i,
+  /^personal\s+\d{10,}\b/i,
+  /^ui e2e\b/i,
+  /^\[agent\](?:\s|$)/i,
+] as const;
+
+const SYNTHETIC_ADDRESS_PATTERNS = [
+  /@example\.(?:com|test|invalid)$/i,
+  /@example\.org$/i,
 ] as const;
 
 const SYNTHETIC_AGENT_PATTERNS = [
@@ -29,11 +37,26 @@ const SYNTHETIC_AGENT_PATTERNS = [
 export function isSyntheticRecordName(
   value: string | null | undefined,
 ): boolean {
+  // ponytail: legacy rows have no durable class; replace this name heuristic with
+  // reviewed operational/synthetic/quarantined classification when its migration is approved.
   const name = value?.trim() ?? "";
   return (
     Boolean(name) &&
     SYNTHETIC_NAME_PATTERNS.some((pattern) => pattern.test(name))
   );
+}
+
+/** Known fixture markers across names, titles, and recipient addresses. */
+export function hasSyntheticMarker(
+  ...values: Array<string | null | undefined>
+): boolean {
+  return values.some((value) => {
+    const normalized = value?.trim() ?? "";
+    return (
+      isSyntheticRecordName(normalized) ||
+      SYNTHETIC_ADDRESS_PATTERNS.some((pattern) => pattern.test(normalized))
+    );
+  });
 }
 
 export function isSyntheticAgent(input: {
