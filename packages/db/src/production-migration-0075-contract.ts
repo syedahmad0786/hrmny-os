@@ -31,6 +31,11 @@ export type Production0075Inputs = {
   confirmation: string | undefined;
 };
 
+export type Production0075TargetInputs = Pick<
+  Production0075Inputs,
+  "databaseUrl" | "projectRef"
+>;
+
 export type ValidatedProduction0075Target = {
   databaseUrl: URL;
   projectRef: typeof HRMNY_PRODUCTION_PROJECT_REF;
@@ -59,11 +64,13 @@ export type ValidatedProduction0075Journal = {
   legacyRowsPreserved: number;
 };
 
-export function validateProduction0075RepositoryEntry(entry: {
-  tag?: unknown;
-  when?: unknown;
-  [key: string]: unknown;
-} | null): void {
+export function validateProduction0075RepositoryEntry(
+  entry: {
+    tag?: unknown;
+    when?: unknown;
+    [key: string]: unknown;
+  } | null,
+): void {
   if (
     entry?.tag !== HRMNY_PRODUCTION_0075_MIGRATION.tag ||
     String(entry.when) !== HRMNY_PRODUCTION_0075_MIGRATION.createdAt
@@ -110,15 +117,23 @@ export function validateProduction0075RepositoryBand(
 export function validateProduction0075Inputs(
   input: Production0075Inputs,
 ): ValidatedProduction0075Target {
-  if (input.projectRef !== HRMNY_PRODUCTION_PROJECT_REF) {
-    throw new Error("Canonical HRMNY Supabase project ref was not confirmed.");
-  }
   if (input.confirmation !== HRMNY_PRODUCTION_0075_CONFIRMATION) {
     throw new Error("Exact 0075 production confirmation phrase is missing.");
   }
   const backupReceipt = input.backupReceipt?.trim();
   if (!backupReceipt || backupReceipt.length < 8) {
     throw new Error("A backup or PITR receipt reference is required.");
+  }
+
+  return validateProduction0075Target(input);
+}
+
+/** Lock any later production runner to the same exact database identity. */
+export function validateProduction0075Target(
+  input: Production0075TargetInputs,
+): ValidatedProduction0075Target {
+  if (input.projectRef !== HRMNY_PRODUCTION_PROJECT_REF) {
+    throw new Error("Canonical HRMNY Supabase project ref was not confirmed.");
   }
   const rawUrl = input.databaseUrl?.trim();
   if (!rawUrl) {
@@ -149,10 +164,7 @@ export function validateProduction0075Inputs(
   }
   const sslModes = databaseUrl.searchParams.getAll("sslmode");
   const sslMode = sslModes[0]?.toLowerCase();
-  if (
-    sslModes.length !== 1 ||
-    sslMode !== "verify-full"
-  ) {
+  if (sslModes.length !== 1 || sslMode !== "verify-full") {
     throw new Error(
       "Production migration target must authenticate TLS with sslmode=verify-full.",
     );
