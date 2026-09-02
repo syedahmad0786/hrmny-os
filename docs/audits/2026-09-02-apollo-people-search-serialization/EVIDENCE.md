@@ -226,7 +226,7 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
   deployment, recovery, user, and production acceptance remain open.
 - Supersedes/superseded-by: supersedes
   `EVID-HRMNY-20260902-APOLLO-024` only as the current local-source receipt;
-  none.
+  superseded by `EVID-HRMNY-20260902-APOLLO-027` for hosted-pending state only.
 - Rollback/correction: any later implementation source edit invalidates this
   receipt and requires the complete deterministic gate again.
 
