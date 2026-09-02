@@ -288,8 +288,9 @@ try {
           and trigger_info.tgenabled = 'O'
           and trigger_info.tgrelid =
             to_regclass('public.qm_command_decision')
-          and lower(pg_get_triggerdef(trigger_info.oid, true)) like
-            '%before update or delete%') as triggers,
+          and trigger_info.tgtype = 27
+          and trigger_info.tgfoid =
+            'public.reject_qm_decision_mutation()'::regprocedure) as triggers,
       (select count(*)::int from pg_class relation
         where relation.oid in (
           to_regclass('public.qm_session_binding'),

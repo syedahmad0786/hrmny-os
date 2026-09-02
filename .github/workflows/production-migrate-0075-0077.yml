@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Audit is read-only; apply requires the receipts below
+        description: Audit checks 0074; verify checks 0077; apply appends with receipts
         required: true
         default: audit
         type: choice
         options:
           - audit
+          - verify
           - apply
       project_ref:
         description: Canonical Supabase project ref
@@ -98,6 +99,7 @@ jobs:
           );
           NODE
       - name: Read-only exact 0074 and zero-running preflight
+        if: inputs.operation != 'verify'
         env:
           PRODUCTION_MIGRATION_PHASE: ${{ inputs.operation == 'apply' && 'preflight' || 'audit' }}
           HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
@@ -109,7 +111,7 @@ jobs:
         if: inputs.operation == 'apply'
         run: DIRECT_URL="$HRMNY_PRODUCTION_DATABASE_URL" pnpm --filter @hrmny/db migrate
       - name: Read back Apollo fencing, serialization, QM security, and journal
-        if: inputs.operation == 'apply'
+        if: inputs.operation != 'audit'
         env:
           PRODUCTION_MIGRATION_PHASE: verify
           HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
