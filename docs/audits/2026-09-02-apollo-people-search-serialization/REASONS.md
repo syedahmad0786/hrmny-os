@@ -7,7 +7,8 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
 `d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
-`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`.
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`, plus fixture correction
+`0f3ac24ddd2645b4b03247ec720fe078406a0d15`.
 
 ## `REASON-HRMNY-20260902-APOLLO-012` — preserve least privilege at the Vault boundary
 
@@ -98,3 +99,27 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
   `REASON-HRMNY-20260902-APOLLO-012`; none.
 - Rollback/correction: keep the provider closed and revert/correct forward
   without expanding Vault grants.
+
+## `REASON-HRMNY-20260902-APOLLO-014` — prove dependency recovery independently of feature correctness
+
+- Decision/finding: separate the database-driver crash mitigation from the
+  Apollo provider-slot correction while making it an immediate prerequisite
+  for recovery acceptance.
+- Reason: feature tests can prove transaction invariants while still masking a
+  process-level dependency failure. A driver patch needs its own pre-patch
+  crash receipt, post-patch child-process survival, bounded rejection, and pool
+  reconnection proof.
+- Alternatives considered: infer recovery from test-client cleanup; fold the
+  dependency patch into every feature PR; wait for production to reproduce the
+  crash.
+- Trade-offs: one more vertical slice is required, but each review has a clear
+  contract and a reversible dependency boundary.
+- Evidence: `ADR-HRMNY-20260902-APOLLO-018`, `FAIL-025`, `GAP-019`, upstream
+  issue #1066 and PR #1168, and independent architecture review.
+- Confidence/freshness: high on 2026-09-02.
+- Affected components: dependency lifecycle, chaos testing, failover,
+  observability, and recovery acceptance.
+- Status: accepted rationale; remediation pending.
+- Supersedes/superseded-by: none.
+- Rollback/correction: do not mark recovery green until the isolated patch and
+  exact runtime artifact pass the deterministic loss proof.

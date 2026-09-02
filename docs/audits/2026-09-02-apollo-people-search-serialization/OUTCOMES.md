@@ -7,7 +7,8 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
 `d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
-`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`.
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`, plus fixture correction
+`0f3ac24ddd2645b4b03247ec720fe078406a0d15`.
 
 ## `OUTCOME-HRMNY-20260902-APOLLO-009` — dependency-ready free-search lane
 
@@ -50,3 +51,33 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Supersedes/superseded-by: none.
 - Rollback/correction: none required; any future external effect needs its own
   approval and receipt.
+
+## `OUTCOME-HRMNY-20260902-APOLLO-011` — hosted disagreement corrected without weakening production
+
+- Decision/finding: the two exact-head hosted matrices exposed five bounded
+  PostgreSQL fixture defects. Source correction `0f3ac24` now follows the
+  database clock, preserves append-only audit history, settles killed-client
+  continuations, and uses a fresh recovery client. The complete local gate is
+  green, while fresh hosted proof remains pending.
+- Reason: acceptance evidence must correct the fixture when the runtime and
+  database contract are right, and must preserve a separately discovered
+  dependency failure instead of hiding it.
+- Alternatives considered: change production semantics to satisfy stale
+  expectations; erase audit evidence; accept successful CI sub-jobs; mix the
+  Postgres.js mitigation into the current PR.
+- Trade-offs: PR #246 needs another hosted matrix, and connection-loss recovery
+  remains blocked by the isolated `GAP-019` dependency slice.
+- Evidence: `EVID-HRMNY-20260902-APOLLO-025/026`,
+  `FAIL-HRMNY-20260902-APOLLO-024/025`, source commit `0f3ac24`, and clean
+  independent review.
+- Confidence/freshness: high for local corrected source on 2026-09-02; hosted
+  correction and runtime recovery are unaccepted.
+- Affected components: Apollo PostgreSQL proof, evidence state, dependency
+  roadmap, and recovery acceptance.
+- Status: locally accepted, unmerged, undeployed, provider-unaccepted; hosted
+  proof pending.
+- Supersedes/superseded-by: supersedes only the stale local-source status in
+  `OUTCOME-HRMNY-20260902-APOLLO-009`; none.
+- Rollback/correction: keep production and Apollo unchanged, preserve all
+  failed receipts, and require exact-head hosted proof before the next stacked
+  dependency slice.

@@ -7,7 +7,8 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
 `d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
-`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`.
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`, plus fixture correction
+`0f3ac24ddd2645b4b03247ec720fe078406a0d15`.
 
 ## `PROC-HRMNY-20260902-APOLLO-008` — review, migrate, deploy, and reopen free People Search
 
@@ -92,3 +93,48 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
    remains closed until reconciled; never clear it merely to restore UI health.
 5. Correct forward or restore under separate approval; never drop migration
    objects or erase ambiguity to make the dashboard appear healthy.
+
+## `PROC-HRMNY-20260902-APOLLO-009` — harden Postgres.js connection-close behavior
+
+- Decision/finding: use a separate, test-first dependency slice before any
+  connection-loss recovery or production-acceptance claim.
+- Reason: Postgres.js `3.4.9` can throw outside query promises after a socket
+  closes; suppressing the dereference alone does not prove bounded settlement
+  or pool recovery.
+- Alternatives considered: patch inside PR #246; rely on in-process Vitest;
+  wait for upstream; switch drivers without a migration plan.
+- Trade-offs: the project temporarily owns a pinned consumer patch and
+  upstream watch, but the change remains small, reversible, and independently
+  reviewable.
+- Evidence: `ADR-HRMNY-20260902-APOLLO-018`, `FAIL-025`, `GAP-019`, upstream
+  issue #1066 and PR #1168.
+- Confidence/freshness: high for procedure version 1 on 2026-09-02; unexecuted.
+- Affected components: `postgres` dependency, lockfile, CI disposable
+  PostgreSQL, Node 24 process behavior, pooling, monitoring, and recovery.
+- Status: documented, dependency-ready, unexecuted.
+- Supersedes/superseded-by: none.
+- Rollback/correction: revert the isolated patch and lockfile together if any
+  normal query, shutdown, transaction, or reconnect regression appears; keep
+  recovery acceptance closed.
+
+### Proof sequence
+
+1. Create a small branch from the exact reviewed Phase 4f source; do not edit
+   PR #246 or production resources in place.
+2. In a child process against a disposable PostgreSQL database, capture a
+   transaction backend PID, terminate it from a test-only control connection,
+   exercise cleanup and another query, and preserve the pre-patch nonzero exit
+   plus exact `nextWrite` error.
+3. Apply a reviewed patch pinned to `postgres@3.4.9`; include its checksum in
+   the lockfile and cover every module path used by the production artifact.
+4. Under Node 24, repeat the race enough times to assert no process exit,
+   uncaught exception, unhandled rejection, hung query, or lost pool slot.
+   Require the killed query to reject within a timeout and the next query to
+   reconnect or reject within a timeout.
+5. Pass normal query, transaction, shutdown, reconnect, frozen-install, test,
+   lint, type-check, and production-build gates. Use no live or production
+   database and grant no production `pg_signal_backend` privilege.
+6. Open a separate pull request, keep it unmerged pending review, and monitor
+   the exact crash signature after any separately approved deployment.
+7. Replace the consumer patch only when an official release contains the fix
+   and passes this same proof.

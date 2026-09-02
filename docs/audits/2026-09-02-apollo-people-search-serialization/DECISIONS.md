@@ -7,7 +7,8 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
 `d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
-`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`; base
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`, plus fixture correction
+`0f3ac24ddd2645b4b03247ec720fe078406a0d15`; base
 `8b672fd4e1ee2671d6919011e29b91886d706278`.
 
 ## `ADR-HRMNY-20260902-APOLLO-013` — serialize free People Search in PostgreSQL
@@ -169,3 +170,36 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Rollback/correction: keep workers quiesced, do not drop objects automatically,
   and use a separately reviewed forward migration or restore plan after backup
   verification.
+
+## `ADR-HRMNY-20260902-APOLLO-018` — isolate Postgres.js connection-close hardening
+
+- Decision/finding: preserve PR #246 as the bounded provider-slot slice and
+  address the confirmed Postgres.js `3.4.9` queued-write-after-close defect in
+  an immediate, separate dependency-hardening branch. Do not claim
+  connection-loss recovery or production acceptance until that slice passes a
+  child-process chaos proof and the current branch is revalidated as needed.
+- Reason: the driver defect affects system-wide availability and deserves its
+  own dependency patch, lockfile checksum, failure reproducer, and rollback;
+  mixing it into the Apollo fixture correction would obscure both reviews.
+- Alternatives considered: apply upstream PR #1168 directly in this PR;
+  ignore the crash because test cleanup can avoid it; replace the database
+  driver now; wait for upstream without a bounded mitigation.
+- Trade-offs: a stacked follow-up adds one dependency-ready phase before
+  recovery acceptance. In return, the current PR remains reviewable and the
+  patch must prove query settlement and pool recovery rather than only
+  suppressing a `TypeError`.
+- Evidence: hosted runs `33578743186` and `33578745871`,
+  `FAIL-HRMNY-20260902-APOLLO-025`, local dependency source, upstream issue
+  <https://github.com/porsager/postgres/issues/1066>, upstream PR
+  <https://github.com/porsager/postgres/pull/1168>, and independent
+  architecture review.
+- Confidence/freshness: high for scope and defect on 2026-09-02; remediation
+  confidence remains pending.
+- Affected components: dependency governance, PostgreSQL transactions, API and
+  worker availability, failover, CI chaos proof, and production acceptance.
+- Status: accepted architecture decision; follow-up implementation open under
+  `GAP-HRMNY-20260902-APOLLO-019`.
+- Supersedes/superseded-by: none.
+- Rollback/correction: keep the provider closed, do not silently vendor an
+  untracked patch, and remove any future consumer patch only after an official
+  release passes the same exact reproducer and frozen-install proof.

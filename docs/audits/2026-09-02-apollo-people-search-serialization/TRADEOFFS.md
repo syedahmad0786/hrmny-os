@@ -7,7 +7,8 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
 `d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
-`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`.
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`, plus fixture correction
+`0f3ac24ddd2645b4b03247ec720fe078406a0d15`.
 
 ## `TRADE-HRMNY-20260902-APOLLO-010` — bounded mutual exclusion over false exactly-once
 
@@ -98,3 +99,29 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Rollback/correction: close Apollo, preserve tombstones and receipts, and use a
   separately reviewed helper only if future requirements prove the operational
   lane insufficient.
+
+## `TRADE-HRMNY-20260902-APOLLO-014` — isolated consumer patch over silent acceptance
+
+- Decision/finding: prefer a small, pinned Postgres.js consumer-patch slice
+  with an exact chaos contract over either silently accepting the crash or
+  broadening the current Apollo PR.
+- Reason: the upstream one-line guard is unmerged and only prevents the direct
+  null dereference; HRMNY must additionally prove the affected query settles,
+  the process survives, and a pool slot recovers.
+- Alternatives considered: upgrade to the same affected latest release; vendor
+  an untracked edit; change drivers immediately; classify the race as test-only.
+- Trade-offs: HRMNY temporarily owns a patch checksum and upstream watch, but
+  gains a reversible mitigation and evidence tied to the actual Node 24
+  runtime artifact.
+- Evidence: `FAIL-HRMNY-20260902-APOLLO-025`,
+  `ADR-HRMNY-20260902-APOLLO-018`, official upstream issue/PR, and dependency
+  source review.
+- Confidence/freshness: high for the trade-off on 2026-09-02; implementation
+  unproved.
+- Affected components: lockfile, package install, ESM/CJS runtime paths,
+  transaction cleanup, deployment, and recovery monitoring.
+- Status: accepted with `GAP-HRMNY-20260902-APOLLO-019` open.
+- Supersedes/superseded-by: none.
+- Rollback/correction: remove the consumer patch only after a frozen install of
+  an official fixed release passes the same reproducer and ordinary database
+  regression suite.
