@@ -1,4 +1,4 @@
-import { and, connectionAccount, eq, sql } from "@hrmny/db";
+import { and, connectionAccount, eq, sql, type Db } from "@hrmny/db";
 import { getDb } from "../db";
 import { getMemoryApiKey } from "./memory-keys";
 
@@ -172,6 +172,11 @@ export async function ownedIntegrationConnectionStatus(
         eq(connectionAccount.scope, "staff"),
         eq(connectionAccount.status, "connected"),
         sql`${connectionAccount.secretId} is not null`,
+        sql`exists (
+          select 1
+          from vault.decrypted_secrets secret
+          where secret.id = ${connectionAccount.secretId}
+        )`,
         sql`(${connectionAccount.expiresAt} is null or ${connectionAccount.expiresAt} > now())`,
       ),
     )
@@ -180,29 +185,27 @@ export async function ownedIntegrationConnectionStatus(
 }
 
 /** Reconcile an exact owner-bound provider auth failure without touching its secret. */
-export async function markOwnedIntegrationConnectionAuthError(input: {
-  toolkit: ApiKeyToolkit;
-  employeeId: string;
-  connectionAccountId: string;
-  credentialVersion: string;
-  secretId: string;
-  secretVersion: string;
-}): Promise<boolean> {
-  const db = getDb();
+export async function markOwnedIntegrationConnectionAuthError(
+  input: {
+    toolkit: ApiKeyToolkit;
+    employeeId: string;
+    connectionAccountId: string;
+    credentialVersion: string;
+    secretId: string;
+    secretVersion: string;
+  },
+  deps: {
+    database?: Db;
+    /** PostgreSQL race-proof hook; never an authorization input. */
+    afterConnectionUpdate?: () => Promise<void>;
+  } = {},
+): Promise<boolean> {
+  const db = deps.database ?? getDb();
   if (!db) return false;
   return db.transaction(async (tx) => {
-    // Rotation updates Vault before connection_account. Lock in the same order
-    // so a stale provider response can never mark a newer in-place secret as
-    // errored, including direct Vault rotation that preserves the secret ID.
-    const [secret] = await tx.execute<{ exact: boolean }>(sql`
-      select true as exact
-      from vault.decrypted_secrets
-      where id = ${input.secretId}::uuid
-        and updated_at = ${input.secretVersion}::timestamptz
-      for share
-    `);
-    if (secret?.exact !== true) return false;
-
+    // Compare both revisions in the same statement snapshot. Row-locking the
+    // Vault view would require UPDATE privilege that the application role must
+    // not receive; the exact connection row is the only row this write locks.
     const updated = await tx.execute<{ id: string }>(sql`
       update public.connection_account
       set status = 'error',
@@ -216,8 +219,15 @@ export async function markOwnedIntegrationConnectionAuthError(input: {
         and status = 'connected'
         and secret_id = ${input.secretId}::uuid
         and xmin::text = ${input.credentialVersion}
+        and exists (
+          select 1
+          from vault.decrypted_secrets secret
+          where secret.id = ${input.secretId}::uuid
+            and secret.updated_at = ${input.secretVersion}::timestamptz
+        )
       returning connection_account_id::text as id
     `);
+    if (updated.length === 1) await deps.afterConnectionUpdate?.();
     return updated.length === 1;
   });
 }
