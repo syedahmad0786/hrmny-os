@@ -12,9 +12,9 @@ import {
   decideContact,
   DEFAULT_SALES_OS_SETTINGS,
   draftChannelsForApprovedContact,
-  enrichOneApolloPerson,
-  enrichApprovedCompany,
   getApolloOnePersonCanaryStatus,
+  getApolloPeopleSearchStatus,
+  getResearchReceiptSignalIdsByProposal,
   getSalesOsSettings,
   honorUnsubscribe,
   ingestGmailReply,
@@ -24,12 +24,13 @@ import {
   listEvolveProposals,
   listIntelSignals,
   listSuppression,
+  normalizeResearchEvidence,
   OUTREACH_GUIDELINES,
   processIntentLeads,
   proposeEvolve,
   rejectEvolve,
   RESEARCH_GUIDELINES,
-  runDailyResearch,
+  revokeApolloPeopleSearch,
   searchApolloPeopleFree,
   SALES_OS_SOP_SOURCE,
   saveSalesOsSettings,
@@ -39,7 +40,36 @@ import {
   type SalesOsSettings,
 } from "../sales-os";
 import { getOutreach, listOutreach, patchOutreach } from "../leadgen/store";
-import { router, staffProcedure } from "./trpc";
+import { ownedIntegrationConnectionStatus } from "../integrations/resolve-keys";
+import { middleware, router, staffProcedure } from "./trpc";
+
+const SALES_OPERATOR_ROLES = new Set([
+  "partner",
+  "director",
+  "am",
+  "account_manager",
+]);
+const SALES_ADMIN_ROLES = new Set(["partner", "director"]);
+
+function salesRoleProcedure(allowed: ReadonlySet<string>, message: string) {
+  return staffProcedure.use(
+    middleware(({ ctx, next }) => {
+      if (!ctx.roles.some((role) => allowed.has(role))) {
+        throw new TRPCError({ code: "FORBIDDEN", message });
+      }
+      return next({ ctx });
+    }),
+  );
+}
+
+const salesOperatorProcedure = salesRoleProcedure(
+  SALES_OPERATOR_ROLES,
+  "Sales operator role required",
+);
+const salesAdminProcedure = salesRoleProcedure(
+  SALES_ADMIN_ROLES,
+  "Sales administrator role required",
+);
 
 const settingsPatch = z.object({
   icp: z
@@ -73,12 +103,22 @@ const settingsPatch = z.object({
 });
 
 export const salesOsRouter = router({
+  access: staffProcedure.query(({ ctx }) => ({
+    canOperate: ctx.roles.some((role) => SALES_OPERATOR_ROLES.has(role)),
+    canAdmin: ctx.roles.some((role) => SALES_ADMIN_ROLES.has(role)),
+    principalId: ctx.employeeId,
+  })),
   apollo: router({
     status: staffProcedure.query(() => getApolloOnePersonCanaryStatus()),
-    search: staffProcedure
+    connection: staffProcedure.query(async ({ ctx }) => ({
+      ...(await ownedIntegrationConnectionStatus("apollo", ctx.employeeId)),
+      principalId: ctx.employeeId,
+    })),
+    search: salesOperatorProcedure
       .input(
         z
           .object({
+            idempotencyKey: z.string().uuid(),
             query: z.string().trim().min(2).max(160).optional(),
             titles: z
               .array(z.string().trim().min(2).max(120))
@@ -97,14 +137,34 @@ export const salesOsRouter = router({
           ...input,
           actorEmployeeId: ctx.employeeId,
         });
-        return {
-          mode: result.mode,
-          candidates: result.candidates.map(
-            ({ raw: _raw, ...candidate }) => candidate,
-          ),
-        };
+        return result;
       }),
-    enrichOne: staffProcedure
+    searchStatus: salesOperatorProcedure
+      .input(z.object({ idempotencyKey: z.string().uuid() }))
+      .query(({ input, ctx }) =>
+        getApolloPeopleSearchStatus({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+        }),
+      ),
+    cancelSearch: salesOperatorProcedure
+      .input(z.object({ idempotencyKey: z.string().uuid() }))
+      .mutation(({ input, ctx }) =>
+        revokeApolloPeopleSearch({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+        }),
+      ),
+    revokeSearch: salesAdminProcedure
+      .input(z.object({ idempotencyKey: z.string().uuid() }))
+      .mutation(({ input, ctx }) =>
+        revokeApolloPeopleSearch({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+          administratorOverride: true,
+        }),
+      ),
+    enrichOne: salesOperatorProcedure
       .input(
         z.object({
           candidate: z.object({
@@ -118,12 +178,13 @@ export const salesOsRouter = router({
           confirmCreditUse: z.literal(true),
         }),
       )
-      .mutation(({ input, ctx }) =>
-        enrichOneApolloPerson({
-          ...input,
-          actorEmployeeId: ctx.employeeId,
-        }),
-      ),
+      .mutation(() => {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "APOLLO_PAID_ENRICHMENT_REQUIRES_EXACT_APPROVAL_RECEIPT",
+        });
+      }),
   }),
 
   settings: router({
@@ -165,27 +226,44 @@ export const salesOsRouter = router({
           })
           .optional(),
       )
-      .query(({ input }) => listCompanyResearch(input)),
-    runDaily: staffProcedure
-      .input(z.object({ sector: z.string().optional() }).optional())
-      .mutation(({ input }) => runDailyResearch({ sector: input?.sector })),
-    ingest: staffProcedure
+      .query(async ({ input }) => {
+        const rows = await listCompanyResearch(input);
+        const receipts = await getResearchReceiptSignalIdsByProposal(
+          rows.map((row) => row.id),
+        );
+        return rows.map((row) => {
+          const evidenceAccepted = (() => {
+            try {
+              normalizeResearchEvidence(row.evidence);
+              return true;
+            } catch {
+              return false;
+            }
+          })();
+          const receiptAccepted = (receipts.get(row.id)?.length ?? 0) > 0;
+          return { ...row, evidenceAccepted, receiptAccepted };
+        });
+      }),
+    ingest: salesOperatorProcedure
       .input(
         z.object({
-          name: z.string().min(2),
-          sector: z.string().optional(),
-          whyThis: z.string().min(8),
-          website: z.string().optional(),
-          evidence: z.string().optional(),
+          requestId: z.string().uuid(),
+          name: z.string().trim().min(2).max(180),
+          sector: z.string().trim().max(180).optional(),
+          whyThis: z.string().trim().min(8).max(2_000),
+          website: z.string().trim().url().max(500).optional(),
+          evidence: z.string().trim().url().max(1_000),
           estimatedValueAed: z.number().optional(),
-          suggestedServices: z.string().optional(),
+          suggestedServices: z.string().trim().max(1_000).optional(),
           employeesGlobal: z.number().optional(),
           employeesMena: z.number().optional(),
-          leadSourceLane: z.string().optional(),
+          leadSourceLane: z.string().trim().max(120).optional(),
         }),
       )
-      .mutation(({ input }) => ingestManualResearch(input)),
-    decide: staffProcedure
+      .mutation(({ input, ctx }) =>
+        ingestManualResearch({ ...input, actorEmployeeId: ctx.employeeId }),
+      ),
+    decide: salesOperatorProcedure
       .input(
         z.object({
           id: z.string(),
@@ -199,9 +277,14 @@ export const salesOsRouter = router({
           feedback: input.feedback,
         }),
       ),
-    enrich: staffProcedure
+    enrich: salesOperatorProcedure
       .input(z.object({ id: z.string() }))
-      .mutation(({ input }) => enrichApprovedCompany(input.id)),
+      .mutation(() => {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "APOLLO_DURABLE_SEARCH_RECEIPT_REQUIRED",
+        });
+      }),
   }),
 
   contacts: router({
@@ -217,7 +300,7 @@ export const salesOsRouter = router({
           .optional(),
       )
       .query(({ input }) => listContactResearch(input)),
-    decide: staffProcedure
+    decide: salesOperatorProcedure
       .input(
         z.object({
           id: z.string(),
@@ -231,7 +314,7 @@ export const salesOsRouter = router({
           feedback: input.feedback,
         }),
       ),
-    draft: staffProcedure
+    draft: salesOperatorProcedure
       .input(z.object({ id: z.string() }))
       .mutation(({ input }) => draftChannelsForApprovedContact(input.id)),
   }),
@@ -264,9 +347,11 @@ export const salesOsRouter = router({
 
   digest: staffProcedure.query(() => buildSalesOsDigest()),
 
-  intentCsv: staffProcedure
+  intentCsv: salesOperatorProcedure
     .input(z.object({ csv: z.string().min(3) }))
-    .mutation(({ input }) => processIntentLeads(input.csv)),
+    .mutation(({ input, ctx }) =>
+      processIntentLeads(input.csv, { actorEmployeeId: ctx.employeeId }),
+    ),
 
   replies: router({
     /** Not named `apply` — tRPC proxies collide with Function.prototype.apply. */

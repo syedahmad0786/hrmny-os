@@ -1,16 +1,12 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Chat org-scope OS settle agent (mock-safe).
- * Selects seeded os-settle agent and runs the settle starter so
- * agents-on-command is proven on the primary staff Chat surface.
- *
- * The settle starter uses harness=direct so agent_act always runs the
- * allowlisted settle tools (closed_loop → briefs.os_lock → …) without
- * depending on mock ReAct tool routing among sibling org harness tools.
+ * Chat exposes the OS settle agent's reviewed catalog and can assess readiness,
+ * but it must not auto-execute the catalog. Effectful settle remains an
+ * explicit command in the AI control panel.
  */
 test.describe("Chat OS settle agent UI", () => {
-  test("os-settle agent runs agent_act closed loop from starter", async ({
+  test("os-settle agent reviews readiness without agent_act", async ({
     page,
   }) => {
     // Brief lock + full settle path regularly exceeds Playwright's 30s default.
@@ -53,11 +49,13 @@ test.describe("Chat OS settle agent UI", () => {
     });
     await page.getByTestId("chat-starter-os-settle").click();
 
-    const work = page.getByTestId("chat-work-steps");
-    await expect(work).toBeVisible({ timeout: 120_000 });
-    const agentAct = page.getByTestId("chat-tool-agent_act");
-    await expect(agentAct).toBeVisible({ timeout: 60_000 });
-    await expect(agentAct.getByTestId("chat-tool-observation")).toBeVisible();
-    await expect(page.getByTestId("chat-assistant-message")).toBeVisible();
+    await expect(page.getByTestId("chat-assistant-message")).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(page.getByTestId("chat-work-steps")).toHaveCount(0);
+    await expect(page.getByTestId("chat-tool-agent_act")).toHaveCount(0);
+    await expect(page.getByTestId("chat-user-message")).toContainText(
+      /review os settle readiness/i,
+    );
   });
 });

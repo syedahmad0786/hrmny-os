@@ -12,10 +12,11 @@ import {
 import { z } from "zod";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
-import { router, staffProcedure } from "./trpc";
+import { requirePermission, router, staffProcedure } from "./trpc";
 import { randomUUID } from "node:crypto";
 import {
   FIRST_PARTY_CRM_APPS,
+  getWorkOrganizationPolicy,
   healDisabledConnectedAppPolicy,
   isWorkConnectedAppAllowed,
 } from "../work-governance";
@@ -32,12 +33,19 @@ import {
 } from "../google-workspace-oauth";
 import { isGoogleWorkspaceReconnectRequired } from "@/lib/google-workspace-error";
 import { isHardApiKeyRejection } from "@/lib/api-key-rejection";
+import { hasMemoryApiKey, saveMemoryApiKey } from "../integrations/memory-keys";
+import { sessionHas } from "../auth/session";
+import { ProviderCredentialMutationBusyError } from "../integrations/apollo-provider-slot";
 import {
-  hasMemoryApiKey,
-  saveMemoryApiKey,
-} from "../integrations/memory-keys";
+  disconnectGovernedApiKeyConnection,
+  persistGovernedApiKeyConnection,
+} from "../integrations/governed-api-key";
 
 export { GoogleProfileSchema };
+
+const connectionPolicyAdminProcedure = staffProcedure.use(
+  requirePermission("admin", "features"),
+);
 
 const composioStub = createComposioStub();
 const apiKeyToolkit = z.enum(["apollo", "hunter", "bayzat", "n8n"]);
@@ -515,10 +523,7 @@ async function reconcileComposioManagedStatus(
         updatedAt: new Date(),
       })
       .where(
-        eq(
-          connectionAccount.connectionAccountId,
-          account.connectionAccountId,
-        ),
+        eq(connectionAccount.connectionAccountId, account.connectionAccountId),
       );
   }
 }
@@ -730,20 +735,19 @@ export async function getGoogleWorkspaceAccessToken(
 
 export const connectionsRouter = router({
   organizationPolicy: staffProcedure.query(async ({ ctx }) => {
-    const { healed, policy } = await healDisabledConnectedAppPolicy(
-      ctx.employeeId,
-    );
+    const policy = await getWorkOrganizationPolicy();
     return {
       appPolicy: policy.appPolicy,
-      healed,
+      healed: false,
+      canReopen: Boolean(ctx.user && sessionHas(ctx.user, "admin", "features")),
       firstPartyAlwaysAllowed: true as const,
       firstPartyCrmApps: [...FIRST_PARTY_CRM_APPS],
     };
   }),
 
-  reopenApprovedAppPolicy: staffProcedure.mutation(async ({ ctx }) => {
-    return healDisabledConnectedAppPolicy(ctx.employeeId);
-  }),
+  reopenApprovedAppPolicy: connectionPolicyAdminProcedure.mutation(
+    async ({ ctx }) => healDisabledConnectedAppPolicy(ctx.employeeId),
+  ),
 
   list: staffProcedure
     .input(
@@ -751,7 +755,6 @@ export const connectionsRouter = router({
     )
     .query(async ({ ctx }) => {
       const employeeId = requireEmployeeId(ctx.employeeId);
-      await healDisabledConnectedAppPolicy(employeeId);
       const allowed = new Map(
         await Promise.all(
           CONNECTION_CATALOG.map(
@@ -800,6 +803,11 @@ export const connectionsRouter = router({
           toolkit: connectionAccount.toolkit,
           status: connectionAccount.status,
           secretId: connectionAccount.secretId,
+          vaultSecretExists: sql<boolean>`exists (
+            select 1
+            from vault.decrypted_secrets secret
+            where secret.id = ${connectionAccount.secretId}
+          )`,
           externalConnectionId: connectionAccount.externalConnectionId,
           lastTestedAt: connectionAccount.lastTestedAt,
           lastError: connectionAccount.lastError,
@@ -813,17 +821,23 @@ export const connectionsRouter = router({
         );
       return CONNECTION_CATALOG.map((item) => {
         const row = findStaffConnectionRow(rows, item.toolkit);
+        const missingVaultSecret =
+          Boolean(row?.secretId) && row?.vaultSecretExists !== true;
         return {
           ...item,
           ready: catalogItemReady(item.toolkit, item.ready),
           allowed: allowed.get(item.toolkit) ?? false,
           connectionAccountId: row?.connectionAccountId ?? null,
           scope: "staff" as const,
-          status: row?.status ?? "disconnected",
+          status: missingVaultSecret
+            ? ("error" as const)
+            : (row?.status ?? "disconnected"),
           externalConnectionId: row?.externalConnectionId ?? null,
-          hasSecret: Boolean(row?.secretId),
+          hasSecret: Boolean(row?.secretId) && !missingVaultSecret,
           lastTestedAt: row?.lastTestedAt?.toISOString() ?? null,
-          lastError: row?.lastError ?? null,
+          lastError: missingVaultSecret
+            ? "VAULT_SECRET_MISSING"
+            : (row?.lastError ?? null),
         };
       });
     }),
@@ -839,9 +853,8 @@ export const connectionsRouter = router({
       const employeeId = requireEmployeeId(ctx.employeeId);
       await requireAllowedApp(input.toolkit);
 
-      const { probeIntegrationApiKey } = await import(
-        "../integrations/probe-api-key"
-      );
+      const { probeIntegrationApiKey } =
+        await import("../integrations/probe-api-key");
       const db = getDb();
       const configuredMode = process.env[`${input.toolkit.toUpperCase()}_MODE`]
         ?.trim()
@@ -909,81 +922,25 @@ export const connectionsRouter = router({
           probeWarning,
         };
       }
-      const [existing] = await db
-        .select()
-        .from(connectionAccount)
-        .where(
-          and(
-            eq(connectionAccount.ownerEmployeeId, employeeId),
-            eq(connectionAccount.toolkit, input.toolkit),
-            eq(connectionAccount.scope, "staff"),
-          ),
-        )
-        .limit(1);
-
-      const row = await db.transaction(async (tx) => {
-        let secretId = existing?.secretId ?? null;
-        if (secretId) {
-          await tx.execute(
-            sql`select vault.update_secret(${secretId}::uuid, ${input.apiKey})`,
-          );
-        } else {
-          const created = await tx.execute(
-            sql<{ id: string }>`
-              select vault.create_secret(
-                ${input.apiKey},
-                ${`hrmny:${employeeId}:${input.toolkit}`},
-                ${`${input.toolkit} API key managed by hrmny OS`}
-              ) as id
-            `,
-          );
-          const createdId = created[0]?.id;
-          secretId = typeof createdId === "string" ? createdId : null;
-        }
-        if (!secretId) throw new Error("Vault did not return a secret id");
-
-        const values = {
-          ownerEmployeeId: employeeId,
+      let row: Awaited<ReturnType<typeof persistGovernedApiKeyConnection>>;
+      try {
+        row = await persistGovernedApiKeyConnection({
+          database: db,
+          employeeId,
           toolkit: input.toolkit,
-          scope: "staff",
-          authType: "api_key",
-          label: input.toolkit,
-          secretId,
-          externalConnectionId: existing?.externalConnectionId,
-          status: "connected",
-          lastTestedAt: new Date(),
-          lastError: null,
-          updatedAt: new Date(),
-        };
-        const [saved] = existing
-          ? await tx
-              .update(connectionAccount)
-              .set(values)
-              .where(
-                eq(
-                  connectionAccount.connectionAccountId,
-                  existing.connectionAccountId,
-                ),
-              )
-              .returning()
-          : await tx.insert(connectionAccount).values(values).returning();
-
-        await tx.insert(auditEvent).values({
-          actorEmployeeId: employeeId,
-          action: existing
-            ? "connections.replaceKey"
-            : "connections.connectKey",
-          entityType: "connection_account",
-          entityId: saved!.connectionAccountId,
-          before: existing ? { status: existing.status } : null,
-          after: {
-            toolkit: input.toolkit,
-            status: "connected",
-            probed: probed.ok,
-          },
+          apiKey: input.apiKey,
+          probed: probed.ok,
         });
-        return saved!;
-      });
+      } catch (error) {
+        if (error instanceof ProviderCredentialMutationBusyError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "This provider connection is busy. Retry the key change after the current operation settles.",
+          });
+        }
+        throw error;
+      }
 
       return {
         connectionAccountId: row.connectionAccountId,
@@ -1499,7 +1456,9 @@ export const connectionsRouter = router({
           message: "Google rejected the connection token",
         });
       }
-      const parsed = GoogleProfileSchema.safeParse(await profileResponse.json());
+      const parsed = GoogleProfileSchema.safeParse(
+        await profileResponse.json(),
+      );
       if (!parsed.success) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -1652,9 +1611,8 @@ export const connectionsRouter = router({
     .mutation(async ({ ctx, input }) => {
       await requireAllowedApp("google_workspace");
       const employeeId = requireEmployeeId(ctx.employeeId);
-      const { buildGoogleWorkspaceAuthorizeUrl } = await import(
-        "../google-workspace-oauth"
-      );
+      const { buildGoogleWorkspaceAuthorizeUrl } =
+        await import("../google-workspace-oauth");
       return buildGoogleWorkspaceAuthorizeUrl(employeeId, {
         requestOrigin: input?.origin,
       });
@@ -1686,29 +1644,24 @@ export const connectionsRouter = router({
         .limit(1);
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
 
-      await db.transaction(async (tx) => {
-        if (existing.secretId) {
-          await tx.execute(
-            sql`delete from vault.secrets where id = ${existing.secretId}::uuid`,
-          );
-        }
-        await tx
-          .delete(connectionAccount)
-          .where(
-            eq(
-              connectionAccount.connectionAccountId,
-              existing.connectionAccountId,
-            ),
-          );
-        await tx.insert(auditEvent).values({
-          actorEmployeeId: employeeId,
-          action: "connections.disconnect",
-          entityType: "connection_account",
-          entityId: existing.connectionAccountId,
-          before: { toolkit: existing.toolkit, status: existing.status },
-          after: { status: "disconnected" },
+      try {
+        const disconnected = await disconnectGovernedApiKeyConnection({
+          database: db,
+          employeeId,
+          connectionAccountId: existing.connectionAccountId,
+          expectedToolkit: existing.toolkit,
         });
-      });
+        if (!disconnected) throw new TRPCError({ code: "NOT_FOUND" });
+      } catch (error) {
+        if (error instanceof ProviderCredentialMutationBusyError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "This provider connection is busy. Retry disconnecting after the current operation settles.",
+          });
+        }
+        throw error;
+      }
       return { ok: true as const };
     }),
 
@@ -1718,9 +1671,8 @@ export const connectionsRouter = router({
       await requireAllowedApp(input.toolkit);
       const employeeId = requireEmployeeId(ctx.employeeId);
       if (process.env.COMPOSIO_API_KEY?.trim()) {
-        const accounts = await requireSystemComposio().listUserConnectedAccounts(
-          employeeId,
-        );
+        const accounts =
+          await requireSystemComposio().listUserConnectedAccounts(employeeId);
         const connected = accounts.some(
           (account) =>
             account.toolkit.slug === input.toolkit &&
@@ -2033,10 +1985,8 @@ export const connectionsRouter = router({
 
       let taskId: string | null = null;
       if (input.advanceTask !== false) {
-        const {
-          seedClientCreativeTask,
-          updateDeliveryTaskStatus,
-        } = await import("../tasks/delivery-tasks");
+        const { seedClientCreativeTask, updateDeliveryTaskStatus } =
+          await import("../tasks/delivery-tasks");
         const seeded = await seedClientCreativeTask({
           clientId: input.clientId,
           title: `Portal Canva — ${title.slice(0, 80)}`,

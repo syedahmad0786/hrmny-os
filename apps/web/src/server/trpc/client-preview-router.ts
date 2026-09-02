@@ -1,14 +1,15 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
-  actOnPortalApproval,
   demoPortalClientId,
   readPortalWorkspace,
 } from "../portal-data";
+import { CLIENT_PORTAL_ACTOR_REQUIRED } from "../portal/approval-boundary";
+import { rolesCanPreviewClient } from "../auth/session";
 import { router, staffProcedure } from "./trpc";
 
 function requirePresenter(roles: string[]) {
-  if (!roles.some((role) => role === "partner" || role === "director")) {
+  if (!rolesCanPreviewClient(roles)) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Partner or director access required",
@@ -34,15 +35,11 @@ export const clientPreviewRouter = router({
         feedback: z.string().trim().max(2_000).optional(),
       }),
     )
-    .mutation(async ({ input, ctx }) => {
+    .mutation(({ ctx }) => {
       requirePresenter(ctx.roles);
-      const clientId = input.clientId ?? (await demoPortalClientId());
-      return actOnPortalApproval({
-        clientId,
-        approvalId: input.id,
-        action: input.action,
-        feedback: input.feedback,
-        actorEmployeeId: ctx.employeeId,
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: CLIENT_PORTAL_ACTOR_REQUIRED,
       });
     }),
 });

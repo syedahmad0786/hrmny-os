@@ -354,7 +354,10 @@ function AccountRhythmPageInner() {
 
       <section className="rounded-lg border border-sand bg-white/70 p-4">
         <h2 className="font-display text-lg">Month-1 phases</h2>
-        <ul className="mt-3 flex flex-col gap-2 text-sm" data-testid="account-month1-list">
+        <ul
+          className="mt-3 flex flex-col gap-2 text-sm"
+          data-testid="account-month1-list"
+        >
           {(month1.data ?? []).map((p) => (
             <li
               key={p.phaseIndex}
@@ -462,9 +465,10 @@ function AccountRhythmPageInner() {
           <p className="mt-2 text-muted">
             No content calendar for this client yet.{" "}
             <Link className="underline" href="/crm/hunt">
-              Run demo closed loop on Hunt
+              Open Sales Growth
             </Link>{" "}
-            to seed one, or use Reset M4 demo when demo resets are enabled.
+            to continue the reviewed client handoff, or use Reset M4 demo when
+            synthetic resets are explicitly enabled.
           </p>
         )}
         {msg ? (

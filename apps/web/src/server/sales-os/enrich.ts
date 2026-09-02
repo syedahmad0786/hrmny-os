@@ -1,5 +1,4 @@
 import type { LeadSourceAdapter } from "@hrmny/integrations";
-import { createLeadSourceAdapter } from "@hrmny/integrations";
 import { listCompanies, listContacts } from "../crm/repository";
 import { contactsForTemperature } from "./sops";
 import { isSuppressed } from "./store";
@@ -14,6 +13,7 @@ import type { ContactResearchRow } from "./types";
 
 export type EnrichDeps = {
   leadSource?: LeadSourceAdapter;
+  allowSynthetic?: boolean;
 };
 
 export function strongerDedupeKey(input: {
@@ -94,7 +94,13 @@ export async function enrichApprovedCompany(
       creditsUsed: 0,
     };
   }
-  const leadSource = deps.leadSource ?? createLeadSourceAdapter();
+  const leadSource = deps.leadSource;
+  if (!leadSource || leadSource.mode === "live") {
+    throw new Error("APOLLO_DURABLE_SEARCH_RECEIPT_REQUIRED");
+  }
+  if (deps.allowSynthetic !== true) {
+    throw new Error("SYNTHETIC_CONTACT_DISCOVERY_FORBIDDEN");
+  }
   const candidates = await leadSource.searchLeads({
     query: `${company.name} ${company.sector ?? ""} UAE`,
     titles: settings.stakeholderTitles,

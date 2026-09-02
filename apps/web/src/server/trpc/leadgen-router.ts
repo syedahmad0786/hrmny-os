@@ -12,8 +12,6 @@ import {
 import {
   createComposioLiveSend,
   createComposioStub,
-  createEmailVerificationAdapter,
-  createLeadSourceAdapter,
   type ComposioSendAdapter,
 } from "@hrmny/integrations";
 import { ReplyIntentSchema } from "@hrmny/ai";
@@ -32,7 +30,6 @@ import {
   runCompetitorScan,
   listCompetitorFindings,
 } from "../leadgen/competitor-scan";
-import { runDailyLeadGen } from "../leadgen/pipeline";
 import { router, staffProcedure } from "./trpc";
 import { getVerifiedWorkAppConnection } from "./connections-router";
 
@@ -500,19 +497,15 @@ export const leadgenRouter = router({
       .query(({ input }) => listCompetitorFindings(input?.scopeId)),
   }),
 
-  /** Manual daily-pipeline trigger (Inngest runs the same fn on schedule). */
-  runDailyPipeline: staffProcedure.mutation(async ({ ctx }) => {
-    const {
-      resolveApolloRuntimeConfig,
-      resolveEmailVerificationRuntimeConfig,
-    } = await import("../integrations/runtime-adapters");
-    const [apollo, verifier] = await Promise.all([
-      resolveApolloRuntimeConfig(ctx.employeeId),
-      resolveEmailVerificationRuntimeConfig(ctx.employeeId),
-    ]);
-    return runDailyLeadGen({
-      leadSource: createLeadSourceAdapter(apollo.config),
-      verifier: createEmailVerificationAdapter(verifier.config),
-    });
-  }),
+  /**
+   * Compatibility endpoint for the retired bulk pipeline. It previously turned
+   * one generic staff click into provider reads, paid verification, AI work, and
+   * CRM company/contact/deal creation. Keep the route stable while directing
+   * operators to the accepted Signal → Research → Person approval loop.
+   */
+  runDailyPipeline: staffProcedure.mutation(() => ({
+    ran: false as const,
+    skipped: "legacy_pipeline_disabled" as const,
+    next: "/crm/hunt",
+  })),
 });

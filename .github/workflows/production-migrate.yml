@@ -15,6 +15,10 @@ on:
         description: Type APPLY ADDITIVE MIGRATIONS 0068 THROUGH 0074 TO HRMNY PRODUCTION
         required: true
         type: string
+      reviewed_sha:
+        description: Exact reviewed main commit SHA to execute
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -24,35 +28,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  migrate:
-    name: Guard, migrate, and read back
+  retired:
+    name: Refuse obsolete 0068-0074 runner
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment: Production
-    env:
-      HRMNY_PRODUCTION_DATABASE_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
-      HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
-      HRMNY_PRODUCTION_BACKUP_RECEIPT: ${{ inputs.backup_receipt }}
-      HRMNY_PRODUCTION_MIGRATION_CONFIRMATION: ${{ inputs.confirmation }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 9.15.9
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Read-only target and journal preflight
-        env:
-          PRODUCTION_MIGRATION_PHASE: preflight
-        run: pnpm --filter @hrmny/db exec tsx src/production-migration-guard.ts
-      - name: Append reviewed additive migrations 0068 through 0074
-        env:
-          DIRECT_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
-        run: pnpm --filter @hrmny/db migrate
-      - name: Read back migration and bridge contract
-        env:
-          PRODUCTION_MIGRATION_PHASE: verify
-        run: pnpm --filter @hrmny/db exec tsx src/production-migration-guard.ts
+      - name: Stop before secrets, dependencies, or database access
+        shell: bash
+        run: |
+          echo "::error::The 0068-0074 production runner is retired and cannot access production. Use the separately reviewed 0075 workflow only after an exact human checkpoint."
+          exit 1

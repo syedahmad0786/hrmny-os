@@ -47,7 +47,7 @@ describe("M6 portal + seams", () => {
     const deliveries = await portal.portal.deliveries.list();
     expect(deliveries).toHaveLength(1);
     expect(deliveries[0]!.clientId).toBe(DEMO_CLIENT_ID);
-    expect(JSON.stringify(deliveries)).not.toMatch(/margin|payroll|fee|gross/i);
+    expect(() => assertPortalSafe(deliveries)).not.toThrow();
   });
 
   it("portal cannot call staff finance/margin/payroll", async () => {
@@ -61,14 +61,57 @@ describe("M6 portal + seams", () => {
 
   it("portal_b cannot see Demo Co data", async () => {
     const portalB = callerFor("portal_b");
+    const store = getDemoStore();
     const tasks = await portalB.portal.tasks.list();
     expect(tasks.every((t) => t.title.includes("Other Co"))).toBe(true);
     const assets = await portalB.portal.assets.list();
     expect(assets.every((a) => a.title.includes("Other Co"))).toBe(true);
     expect(tasks.some((t) => t.title.includes("Launch reel"))).toBe(false);
+    const before = {
+      approval: store.portalApprovals.get(DEMO_PORTAL_APPROVE_ID)?.status,
+      audits: store.audits.length,
+      seams: store.seamOutbox.length,
+    };
+    await expect(
+      portalB.portal.approvals.act({
+        id: DEMO_PORTAL_APPROVE_ID,
+        action: "approve",
+      }),
+    ).rejects.toThrow(/NOT_FOUND/);
+    expect({
+      approval: store.portalApprovals.get(DEMO_PORTAL_APPROVE_ID)?.status,
+      audits: store.audits.length,
+      seams: store.seamOutbox.length,
+    }).toEqual(before);
   });
 
-  it("partner preview persists an approval and audits the actor", async () => {
+  it("portal approval permission is checked again at action time", async () => {
+    const user = {
+      ...resolveDevUser("portal_a"),
+      permissions: ["allow:portal:read"],
+    };
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: false,
+      clientId: user.clientId,
+    });
+    const before = getDemoStore().portalApprovals.get(
+      DEMO_PORTAL_APPROVE_ID,
+    )?.status;
+    await expect(
+      caller.portal.approvals.act({
+        id: DEMO_PORTAL_APPROVE_ID,
+        action: "approve",
+      }),
+    ).rejects.toThrow(/FORBIDDEN/);
+    expect(
+      getDemoStore().portalApprovals.get(DEMO_PORTAL_APPROVE_ID)?.status,
+    ).toBe(before);
+  });
+
+  it("partner preview is read-only and cannot record a client decision", async () => {
     const partner = callerFor("partner");
     const preview = await partner.clientPreview.workspace();
     const approval = preview.approvals.find(
@@ -78,33 +121,39 @@ describe("M6 portal + seams", () => {
     );
     expect(preview.clientName).toContain("Demo Co");
     expect(approval).toBeDefined();
-
-    await partner.clientPreview.act({
-      id: approval!.approvalId,
-      action: "approve",
-    });
-
-    expect(
-      getDemoStore().portalApprovals.get(approval!.approvalId)?.status,
-    ).toBe("approved");
-    expect(
-      getDemoStore().audits.some(
-        (a) =>
-          a.action === "portal.approvals.act" &&
-          a.actorEmployeeId === resolveDevUser("partner").employeeId,
-      ),
-    ).toBe(true);
-    const inbox = await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 20 });
-    expect(
-      inbox.some(
-        (n) =>
-          n.kind === "creative" &&
-          /approved/i.test(n.title) &&
-          (n.entityId === approval!.approvalId ||
-            n.entityId === DEMO_CREATIVE_TASK_ID) &&
-          (n.href ?? "").includes("taskId="),
-      ),
-    ).toBe(true);
+    const store = getDemoStore();
+    const assetId = store.portalApprovals.get(approval!.approvalId)!.entityId;
+    const asset = store.assets.get(assetId)!;
+    const before = {
+      approval: store.portalApprovals.get(approval!.approvalId)?.status,
+      asset: asset.status,
+      task: asset.taskId ? store.tasks.get(asset.taskId)?.status : null,
+      audits: store.audits.filter(
+        (event) => event.action === "portal.approvals.act",
+      ).length,
+      seams: store.seamOutbox.length,
+      notifications: (await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 200 }))
+        .length,
+    };
+    await expect(
+      partner.clientPreview.act({
+        id: approval!.approvalId,
+        action: "approve",
+      }),
+    ).rejects.toThrow("CLIENT_PORTAL_ACTOR_REQUIRED");
+    expect({
+      approval: store.portalApprovals.get(approval!.approvalId)?.status,
+      asset: store.assets.get(assetId)?.status,
+      task: asset.taskId ? store.tasks.get(asset.taskId)?.status : null,
+      audits: store.audits.filter(
+        (event) => event.action === "portal.approvals.act",
+      ).length,
+      seams: store.seamOutbox.length,
+      notifications: (await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 200 }))
+        .length,
+    }).toEqual(before);
+    const directorPreview = await callerFor("director").clientPreview.workspace();
+    expect(directorPreview.clientId).toBe(preview.clientId);
     await expect(callerFor("am").clientPreview.workspace()).rejects.toThrow(
       /Partner or director/,
     );
@@ -137,6 +186,16 @@ describe("M6 portal + seams", () => {
     const task = store.tasks.get(DEMO_CREATIVE_TASK_ID)!;
     expect(task.status).toBe("revisions");
     expect(task.clientRevisionCount).toBe(beforeCount + 1);
+
+    const decisionAudit = store.audits.find(
+      (event) =>
+        event.action === "portal.approvals.act" &&
+        event.entityId === pending!.entityId,
+    );
+    expect(decisionAudit?.actorEmployeeId).toBeNull();
+    expect(decisionAudit?.actorPortalUserId).toBe(
+      resolveDevUser("portal_a").employeeId,
+    );
 
     const { listNotifications } = await import("./notifications/store");
     const inbox = await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 20 });
@@ -173,6 +232,16 @@ describe("M6 portal + seams", () => {
     const task = store.tasks.get(DEMO_CREATIVE_APPROVE_TASK_ID)!;
     expect(task.status).toBe("approved");
 
+    const decisionAudit = store.audits.find(
+      (event) =>
+        event.action === "portal.approvals.act" &&
+        event.entityId === pending!.entityId,
+    );
+    expect(decisionAudit?.actorEmployeeId).toBeNull();
+    expect(decisionAudit?.actorPortalUserId).toBe(
+      resolveDevUser("portal_a").employeeId,
+    );
+
     const { listNotifications } = await import("./notifications/store");
     const inbox = await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 20 });
     expect(
@@ -185,6 +254,28 @@ describe("M6 portal + seams", () => {
           (n.href ?? "").includes(`taskId=${DEMO_CREATIVE_APPROVE_TASK_ID}`),
       ),
     ).toBe(true);
+
+    const beforeReplay = {
+      audits: store.audits.filter(
+        (event) => event.action === "portal.approvals.act",
+      ).length,
+      seams: store.seamOutbox.length,
+      notifications: inbox.length,
+    };
+    const replay = await portal.portal.approvals.act({
+      id: pending!.approvalId,
+      action: "approve",
+      feedback: "Looks good — ship it",
+    });
+    expect(replay.changed).toBe(false);
+    expect({
+      audits: store.audits.filter(
+        (event) => event.action === "portal.approvals.act",
+      ).length,
+      seams: store.seamOutbox.length,
+      notifications: (await listNotifications(DEMO_STAFF_LEAD_ID, { limit: 20 }))
+        .length,
+    }).toEqual(beforeReplay);
   });
 
   it("portal onboarding acknowledge notifies staff inbox", async () => {
@@ -254,7 +345,7 @@ describe("M6 portal + seams", () => {
     ).toHaveLength(1);
   });
 
-  it("creative.approved seam sets delivery status", async () => {
+  it("keeps QC review and client approval as distinct receipts", async () => {
     const cd = callerFor("creative_director");
     const store = getDemoStore();
     const task = store.tasks.get(DEMO_CREATIVE_TASK_ID)!;
@@ -267,9 +358,9 @@ describe("M6 portal + seams", () => {
     });
     expect(qc.ok).toBe(true);
     if (!qc.ok) return;
-    expect(qc.seam?.event.name).toBe("creative.approved");
+    expect(qc.seam?.event.name).toBe("creative.qc_passed");
     expect(store.clientDeliveryStatus.get(DEMO_CLIENT_ID)?.status).toBe(
-      "in_delivery",
+      "awaiting_client",
     );
     // Task stays in qc until gate transition; seam only updates delivery status.
     expect(store.tasks.get(DEMO_CREATIVE_TASK_ID)?.status).toBe("qc");
@@ -283,9 +374,31 @@ describe("M6 portal + seams", () => {
     expect(moved.ok).toBe(true);
 
     const portal = callerFor("portal_a");
-    const deliveries = await portal.portal.deliveries.list();
+    let deliveries = await portal.portal.deliveries.list();
+    expect(deliveries[0]!.deliveryStatus).toBe("awaiting_client");
+    expect(deliveries[0]!.lastSeam).toBe("creative.qc_passed");
+
+    const approval = [...store.portalApprovals.values()].find((candidate) => {
+      const asset = store.assets.get(candidate.entityId);
+      return asset?.taskId === DEMO_CREATIVE_TASK_ID;
+    });
+    expect(approval).toBeDefined();
+    const decided = await portal.portal.approvals.act({
+      id: approval!.approvalId,
+      action: "approve",
+    });
+    expect(decided).toMatchObject({ ok: true, changed: true });
+    deliveries = await portal.portal.deliveries.list();
     expect(deliveries[0]!.deliveryStatus).toBe("in_delivery");
     expect(deliveries[0]!.lastSeam).toBe("creative.approved");
+    expect(
+      store.seamOutbox.map((event) => event.idempotencyKey),
+    ).toEqual(
+      expect.arrayContaining([
+        `creative.qc_passed:${DEMO_CREATIVE_TASK_ID}`,
+        `creative.approved:${DEMO_CREATIVE_TASK_ID}`,
+      ]),
+    );
   });
 
   it("dashboards hub lists five system views for staff", async () => {

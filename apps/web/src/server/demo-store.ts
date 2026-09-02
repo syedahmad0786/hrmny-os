@@ -85,7 +85,8 @@ export type DemoDeal = {
 
 export type DemoAudit = {
   auditEventId: string;
-  actorEmployeeId: string;
+  actorEmployeeId: string | null;
+  actorPortalUserId?: string | null;
   action: string;
   entityType: string;
   entityId: string;
@@ -93,6 +94,14 @@ export type DemoAudit = {
   after: Record<string, unknown> | null;
   reason: string | null;
   createdAt: string;
+};
+
+export type DemoPortalUser = {
+  portalUserId: string;
+  clientId: string;
+  email: string;
+  displayName: string;
+  isActive: boolean;
 };
 
 export type DemoAsset = {
@@ -406,8 +415,11 @@ const DEMO_EMPLOYEE_ID = "e1000000-0000-4000-8000-000000000001";
 /** Dev partner — staff inbox recipient for portal/campaign/onboarding notifies in memory mode. */
 const DEMO_STAFF_LEAD_ID = "c0000000-0000-4000-8000-000000000001";
 const DEMO_CLIENT_ID = "c1000000-0000-4000-8000-0000000000a4";
+const DEMO_PORTAL_USER_ID = "c0000000-0000-4000-8000-0000000000a1";
 /** Second client for portal isolation demos (must not leak into portal_a). */
 const DEMO_CLIENT_B_ID = "c1000000-0000-4000-8000-0000000000b4";
+const DEMO_CLIENT_B_PORTAL_USER_ID =
+  "c0000000-0000-4000-8000-0000000000b1";
 const DEMO_CALENDAR_ID = "a1000000-0000-4000-8000-0000000000a4";
 const DEMO_TASK_ID = "b1000000-0000-4000-8000-0000000000a4";
 const DEMO_BRIEF_ID = "d1000000-0000-4000-8000-0000000000a4";
@@ -648,6 +660,8 @@ class MemoryDemoStore {
     string,
     { token: string; clientId: string; email: string; expiresAt: number }
   >();
+  /** Canonical synthetic portal principals; session grants must resolve here. */
+  portalUsers = new Map<string, DemoPortalUser>();
 
   invoices = new Map<string, DemoInvoice>();
   proposals = new Map<string, DemoInvoiceProposal>();
@@ -987,6 +1001,28 @@ class MemoryDemoStore {
 
   resetM6Demo() {
     this.resetM5Demo();
+    this.portalUsers = new Map([
+      [
+        DEMO_PORTAL_USER_ID,
+        {
+          portalUserId: DEMO_PORTAL_USER_ID,
+          clientId: DEMO_CLIENT_ID,
+          email: "alex@democo.example",
+          displayName: "Portal · Demo Co",
+          isActive: true,
+        },
+      ],
+      [
+        DEMO_CLIENT_B_PORTAL_USER_ID,
+        {
+          portalUserId: DEMO_CLIENT_B_PORTAL_USER_ID,
+          clientId: DEMO_CLIENT_B_ID,
+          email: "ops@otherco.example",
+          displayName: "Portal · Other Co",
+          isActive: true,
+        },
+      ],
+    ]);
     this.seamOutbox = [];
     this.clientDeliveryStatus.clear();
     this.portalApprovals.clear();
@@ -1370,7 +1406,9 @@ export {
   DEMO_EMPLOYEE_ID,
   DEMO_STAFF_LEAD_ID,
   DEMO_CLIENT_ID,
+  DEMO_PORTAL_USER_ID,
   DEMO_CLIENT_B_ID,
+  DEMO_CLIENT_B_PORTAL_USER_ID,
   DEMO_CALENDAR_ID,
   DEMO_TASK_ID,
   DEMO_BRIEF_ID,

@@ -17,7 +17,12 @@ import { bootstrapGateRegistry } from "@hrmny/gate";
 import { getDemoStore } from "../demo-store";
 import { getDb } from "../db";
 import { getObjectStore } from "../storage/object-store";
-import { DEV_USERS, getAuthMode } from "../auth/session";
+import {
+  DEV_USERS,
+  getAuthMode,
+  rolesCanPreviewClient,
+  sessionHas,
+} from "../auth/session";
 import {
   emitHealthSignal,
   listAudit,
@@ -124,6 +129,17 @@ export const authRouter = router({
       actorType: ctx.user?.actorType ?? null,
       clientId: ctx.user?.clientId ?? null,
       authMode: getAuthMode(),
+      canPreviewClient:
+        ctx.user?.actorType === "staff" && rolesCanPreviewClient(ctx.roles),
+      canAdminFeatures:
+        ctx.user?.actorType === "staff" &&
+        sessionHas(ctx.user, "admin", "features"),
+      canAdminWork:
+        ctx.user?.actorType === "staff" &&
+        sessionHas(ctx.user, "admin", "work"),
+      canViewAudit:
+        ctx.user?.actorType === "staff" &&
+        sessionHas(ctx.user, "audit", "view"),
       enabledFeatureKeys: resolved
         .filter((item) => item.enabled)
         .map((item) => item.key),
@@ -254,15 +270,27 @@ export const adminRouter = router({
       }),
   }),
   jobs: router({
-    list: protectedProcedure.query(async () => {
-      const db = getDb();
-      if (!db) return [];
-      return db
-        .select()
-        .from(scheduledJob)
-        .orderBy(desc(scheduledJob.createdAt))
-        .limit(20);
-    }),
+    list: protectedProcedure
+      .use(requirePermission("audit", "view"))
+      .query(async () => {
+        const db = getDb();
+        if (!db) return [];
+        return db
+          .select({
+            scheduledJobId: scheduledJob.scheduledJobId,
+            kind: scheduledJob.kind,
+            runAt: scheduledJob.runAt,
+            status: scheduledJob.status,
+            attempts: scheduledJob.attempts,
+            lastError: scheduledJob.lastError,
+            completedAt: scheduledJob.completedAt,
+            createdAt: scheduledJob.createdAt,
+            updatedAt: scheduledJob.updatedAt,
+          })
+          .from(scheduledJob)
+          .orderBy(desc(scheduledJob.createdAt))
+          .limit(20);
+      }),
     scheduleHealth: protectedProcedure
       .input(
         z.object({

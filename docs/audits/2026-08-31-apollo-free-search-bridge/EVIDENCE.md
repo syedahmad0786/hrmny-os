@@ -1,0 +1,428 @@
+# Evidence and acceptance
+
+Common record metadata: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+`Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+`ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; implementation
+commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`. Evidence is local/synthetic
+unless explicitly marked otherwise. It is not deployment, provider,
+destination, recovery, user, or production acceptance.
+
+## `EVID-HRMNY-20260831-APOLLO-001` — immutable implementation slice
+
+- Decision/finding: commit `6b82f165b3c552a2daa95c88d4010156aafbbcc1`
+  contains 40 code/workflow/migration/test files and excludes `.system-harness/`.
+- Reason: bind review to one exact Git object and preserve local harness memory.
+- Alternatives considered: one uncommitted worktree; include generated memory.
+- Trade-offs: evidence documentation follows in a separate commit.
+- Evidence: Git status, cached file list, cached diff check, and commit object.
+- Confidence/freshness: high.
+- Affected components: all files in the Sales bridge slice.
+- Status: passed source-integrity gate; hosted checks pending.
+- Supersedes/superseded-by: none.
+- Rollback/correction: reviewed revert or forward fix; do not delete receipts.
+
+## `EVID-HRMNY-20260831-APOLLO-002` — local repository gates
+
+- Decision/finding: root lint passed 7/7 tasks; root typecheck passed 7/7;
+  root test passed 7/7, including 127 web files/702 tests, 15 integration
+  files/100 tests, and 4 database files/26 tests; root build passed 2/2 and
+  produced the web route graph. Final database typecheck, 26/26 database tests,
+  and diff checks passed after the last hostile-URL fixture correction.
+- Reason: cover compile, behavior, schema contract, adapter, security, retry,
+  and application integration before hosted review.
+- Alternatives considered: focused tests only; source review only.
+- Trade-offs: the local host cannot provide the disposable PostgreSQL service.
+- Evidence: terminal outputs from 2026-08-31.
+- Confidence/freshness: high for the exact implementation worktree.
+- Affected components: monorepo packages, web application, database contracts.
+- Status: passed locally; exact-SHA hosted receipt open.
+- Supersedes/superseded-by: none.
+- Rollback/correction: rerun the full gate after every source correction.
+
+## `EVID-HRMNY-20260831-APOLLO-003` — migration and workflow identity
+
+- Decision/finding: migration 0075 SHA-256 is
+  `8bae97228f848fde220193d8783672636670940dcb59e39bd5f98ef05212f201`
+  and equals the production contract. The guarded workflow pins checkout
+  `3d3c42e5aac5ba805825da76410c181273ba90b1`, setup-node
+  `820762786026740c76f36085b0efc47a31fe5020`, and pnpm setup
+  `0977fd99725f1db4007ccb2928dbb4e90d06cc86`.
+- Reason: make source and runner identity reviewable before any production
+  authority or secret is introduced.
+- Alternatives considered: floating production action tags; unhashed SQL;
+  manual console migration.
+- Trade-offs: upstream action upgrades require explicit review.
+- Evidence: local hash readback, official action repository tags/commits, and
+  production contract tests.
+- Confidence/freshness: high as of 2026-08-31.
+- Affected components: migration 0075 and production runner.
+- Status: source verified; workflow unexecuted.
+- Supersedes/superseded-by: retires the old 0068–0074 runner.
+- Rollback/correction: update both source and hash contract in one reviewed
+  commit; never bypass a mismatch.
+
+## `EVID-HRMNY-20260831-APOLLO-004` — deterministic bridge contracts
+
+- Decision/finding: tests cover exact idempotency, payload mismatch, owner
+  isolation, credential refusal, role changes, revoke races, attempt-token
+  fencing, leases, cancellation, retry/dead letter, reconciliation, provider
+  401/403, safe result mapping, no raw/private persistence, Inngest validation,
+  cron health failure, retention bounds, migration reapply, RLS/grants, indexes,
+  foreign keys, and prior-schema compatibility.
+- Reason: prove negative boundaries as well as the happy path.
+- Alternatives considered: one success test; mock only the UI.
+- Trade-offs: the test suite is larger and the live canary remains separate.
+- Evidence: named test files in the implementation commit and local green gates.
+- Confidence/freshness: high locally; hosted PostgreSQL proof pending.
+- Affected components: bridge, adapter, queue, scheduler, database, UI.
+- Status: passed locally.
+- Supersedes/superseded-by: none.
+- Rollback/correction: preserve regression fixtures with any forward fix.
+
+## `EVID-HRMNY-20260831-APOLLO-005` — desktop/mobile browser journeys
+
+- Decision/finding: with the exact safe synthetic environment and checked-in
+  Windows local bridge, Playwright passed 5/5 in 7.5 seconds: synthetic Apollo
+  fixture to deal/detail, disconnected fail-closed state, rejection of global
+  readiness as employee connection, pending identity after reload, and 390×844
+  no-overflow navigation.
+- Reason: validate real controls and state transitions, including reload and
+  mobile containment.
+- Alternatives considered: component inspection; direct HTTP only.
+- Trade-offs: the first direct transport and incomplete-environment failures are
+  retained in `FAILURES.md`.
+- Evidence: final 5/5 local Playwright output plus preceding negative runs.
+- Confidence/freshness: high for the safe synthetic runtime.
+- Affected components: Sales Hunt UI, session state, role/connection messages.
+- Status: local browser proof passed; hosted/browser/UAT acceptance pending.
+- Supersedes/superseded-by: supersedes the incomplete local product-behavior
+  result, not its transport failure record.
+- Rollback/correction: rerun desktop and mobile journeys after every UI change.
+
+## `EVID-HRMNY-20260831-APOLLO-006` — independent review and non-events
+
+- Decision/finding: three bounded specialist audits concluded with no remaining
+  P0/P1 in their final bridge/fencing scope after remediation. They explicitly
+  did not grant hosted database, deployment, provider, destination, recovery,
+  UAT, or production acceptance. No live external effect occurred.
+- Reason: challenge authorization, data minimization, retry/fencing, migration,
+  and workflow claims independently.
+- Alternatives considered: supervisor-only sign-off; treat review as runtime
+  acceptance.
+- Trade-offs: acceptance remains conservative until exact receipts exist.
+- Evidence: final audit reports from `apollo_acceptance_audit`,
+  `apollo_bridge_review`, and `apollo_fencing_design`; source state.
+- Confidence/freshness: high for the reviewed commit.
+- Affected components: full slice and acceptance ledger.
+- Status: code review clear; operational states open.
+- Supersedes/superseded-by: supersedes remediated findings in
+  `FAIL-HRMNY-20260831-APOLLO-004`; none.
+- Rollback/correction: repeat bounded review after material fixes.
+
+## `EVID-HRMNY-20260831-APOLLO-007` — corrected stacked head verification
+
+- Decision/finding: Phase 4c head
+  `ff80e3ac8befbd2075b537ce23018072b3790203` is now the exact review base.
+  The Apollo redirect repair is `d66be9d`; the dependency merge is `a343a51`;
+  the setup-module repair is `a6ed4e3`. On that source state, root lint passed
+  7/7, typecheck 7/7, test 7/7, database 30/30, integrations 100/100, web
+  702/702, and build 2/2. YAML/JSON parse, conflict scan, diff check, and a
+  high-confidence secret scan passed.
+- Reason: bind local acceptance to the actual stacked dependency and corrected
+  transport, not the earlier sibling source state.
+- Alternatives considered: preserve the old dependency receipt; wait for CI
+  before recording local failures and corrections.
+- Trade-offs: hosted disposable PostgreSQL and full Linux browser execution are
+  still required for exact-SHA hosted acceptance.
+- Evidence: local terminal receipts and three independent read-only audits.
+- Confidence/freshness: high locally at commit `a6ed4e3`.
+- Affected components: full review slice, CI, database proof, Apollo transport.
+- Status: local synthetic/static/build accepted; hosted and every operational
+  state remain open.
+- Supersedes/superseded-by: supersedes the dependency/head scope of
+  `EVID-HRMNY-20260831-APOLLO-001/002/006`; none.
+- Rollback/correction: rerun all gates after any further source change and bind
+  the hosted receipt to the final pushed SHA.
+
+## `EVID-HRMNY-20260831-APOLLO-008` — path coverage reaches the review target
+
+- Decision/finding: an independent GStack-style coverage map initially found
+  21/30 path groups (70%). Three bounded offline test additions cover provider
+  transport/parse/error taxonomy, criteria normalization/clamping, and Inngest
+  terminal/dispatch branches, raising the static map to 24/30 (80%).
+- Reason: meet the review target before publication without widening the
+  provider or production scope.
+- Alternatives considered: publish at the 60% minimum; add broad UI or database
+  changes during ship preparation.
+- Trade-offs: six lower-priority coverage groups remain in the explicit backlog;
+  no production source changed for this improvement.
+- Evidence: 26/26 focused Apollo adapter tests, 111/111 full integrations tests,
+  17/17 focused durable-search tests, 11/11 focused Inngest tests, and the final
+  full local gates: lint 7/7, typecheck 7/7, test 7/7 including web 712/712 and
+  database 30/30, plus build 2/2.
+- Confidence/freshness: high locally for the source and tests represented by
+  this record; exact-SHA hosted execution remains pending.
+- Affected components: Apollo adapter, durable search contract, Inngest bridge,
+  review acceptance.
+- Status: local review target met; hosted/operational acceptance absent.
+- Supersedes/superseded-by: extends
+  `EVID-HRMNY-20260831-APOLLO-007`; none.
+- Rollback/correction: preserve the deterministic tests and rerun the coverage
+  map after material control-flow changes.
+
+## `EVID-HRMNY-20260831-APOLLO-009` — public-diff redaction gate
+
+- Decision/finding: the final added-line scan reports zero high-severity secret
+  findings. Medium matches resolve to deterministic UUID/timestamp fixtures and
+  one explicitly synthetic phone fixture in an adapter test; no real identity
+  or customer data was found.
+- Reason: the canonical repository is public and every candidate secret/PII
+  signal must be resolved before push.
+- Alternatives considered: rely only on an earlier regex scan; treat synthetic
+  database URLs as acceptable high findings.
+- Trade-offs: fixture construction is slightly more verbose and safer to review.
+- Evidence: GStack public-repository added-line scan, exact-location masked
+  classification, and `FAIL-HRMNY-20260831-APOLLO-007` correction.
+- Confidence/freshness: high on the final local review candidate.
+- Affected components: full Phase 4d diff and PR publication boundary.
+- Status: local redaction gate passed; hosted security checks pending.
+- Supersedes/superseded-by: extends the high-confidence secret scan in
+  `EVID-HRMNY-20260831-APOLLO-007`; none.
+- Rollback/correction: rerun after every source or PR-body change and block on
+  any unresolved high finding.
+
+## `EVID-HRMNY-20260831-APOLLO-010` — first hosted run produced bounded repair evidence
+
+- Decision/finding: PR #244 triggered independent push and pull-request runs.
+  Both reproduced the same two failures: stale Node-workflow inventory in the
+  verify job and an exact PostgreSQL catalog argument-type mismatch in the
+  migration verifier. Neither failure reached Apollo, production, or a secret.
+- Reason: retain failures as useful runtime evidence instead of rerunning until
+  green without diagnosis.
+- Alternatives considered: rerun unchanged; weaken exact schema readback;
+  configure Node in the retired workflow.
+- Trade-offs: the review head must advance and all exact-head checks rerun.
+- Evidence: GitHub Actions runs `33412756597` and `33412781344`; repair commit
+  `bb75712`; AI 56/56, database 30/30, and a forced uncached root test run with
+  7/7 tasks, integrations 111/111, and web 712/712.
+- Confidence/freshness: high for reproduced failure and local repair; hosted
+  correction pending.
+- Affected components: CI verify, disposable PostgreSQL proof, evidence ledger.
+- Status: diagnostic evidence accepted; hosted acceptance remains open.
+- Supersedes/superseded-by: none.
+- Rollback/correction: push only the minimal repairs, then bind acceptance to the
+  new exact head after both event runs reach terminal green.
+
+## `EVID-HRMNY-20260831-APOLLO-011` — second hosted database run corrected the diagnosis
+
+- Decision/finding: exact head `86115f5` closed the verify failure, but its first
+  database repair still failed because PostgreSQL 17 exposes no compatible
+  three-argument `get_attname` overload. The failure occurred during disposable
+  schema discovery after migration apply and before the Sales/Apollo proofs.
+- Reason: distinguish an incomplete repair from a flaky rerun and update the
+  permanent diagnosis.
+- Alternatives considered: retry the same cast; weaken constraint readback.
+- Trade-offs: the head advances again and the full hosted matrix must restart.
+- Evidence: GitHub Actions run `33413605732`, job `99558879774`, and
+  `FAIL-HRMNY-20260831-APOLLO-010`; replacement commit `e033206`.
+- Confidence/freshness: high for failure diagnosis; replacement query locally
+  linted, typed, and covered by database 30/30.
+- Affected components: hosted database job, discovery query, acceptance ledger.
+- Status: failure retained; corrected hosted execution pending.
+- Supersedes/superseded-by: refines the database portion of
+  `EVID-HRMNY-20260831-APOLLO-010`; none.
+- Rollback/correction: require terminal hosted proof of the documented catalog
+  joins before closing the database gap.
+
+## `EVID-HRMNY-20260831-APOLLO-012` — third hosted matrix isolated the legacy-identity boundary
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `6828a1a16c6c38592f81200419645dddf85e2279`.
+- Decision/finding: push and PR verify jobs passed all lint, type, test, and
+  build tasks; both browser jobs passed 90/90; both database jobs agreed that
+  the documented catalog joins work and every surfaced 0075 invariant matches.
+  The only mismatch was `priorContractReady=false` on the fresh database.
+- Reason: retain the partial green receipts and the first causal database
+  failure rather than collapsing the overall workflow conclusion into one
+  status.
+- Alternatives considered: report the matrix as wholly failed; rerun unchanged;
+  describe the identity aggregate as a 0075 schema failure.
+- Trade-offs: hosted acceptance remains open until the repair head passes the
+  complete database sequence, including the skipped Sales/Apollo PostgreSQL
+  proofs.
+- Evidence: runs `33414276233` and `33414282467`; verify jobs `99561088409` and
+  `99561108136`; browser jobs `99561088100` and `99561107844`; database jobs
+  `99561088496` and `99561108215`.
+- Confidence/freshness: high; both GitHub event receipts agree.
+- Affected components: CI acceptance ledger, migration verifier, downstream
+  PostgreSQL proofs.
+- Status: negative diagnostic receipt accepted; repair hosted proof pending.
+- Supersedes/superseded-by: extends `EVID-HRMNY-20260831-APOLLO-011`; none.
+- Rollback/correction: bind any success claim to the repaired exact SHA and keep
+  these failed receipts immutable.
+
+## `EVID-HRMNY-20260831-APOLLO-013` — fourth hosted matrix reached exact-0074 preflight
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `07d9917008d8eb16f5abdf07c153abe852fadb0e`.
+- Decision/finding: both verify jobs and both 90-test browser jobs passed again.
+  Both database jobs moved past fresh 0075 readback into the upgrade database,
+  proving the repository/production identity separation behaved as intended;
+  they then agreed on the invalid synthetic `pending` receipt state.
+- Reason: record proof progression and the next first cause independently from
+  the overall failed workflow conclusion.
+- Alternatives considered: discard the run as another generic database failure;
+  claim the fresh migration path fully accepted.
+- Trade-offs: downstream Sales/Apollo PostgreSQL proof remains unaccepted until
+  a later exact head reaches it.
+- Evidence: runs `33416638313`/`33416642940`; database jobs
+  `99568753091`/`99568768913`; `FAIL-HRMNY-20260831-APOLLO-012`.
+- Confidence/freshness: high.
+- Affected components: hosted migration proof and acceptance ledger.
+- Status: negative diagnostic receipt accepted; corrected execution pending.
+- Supersedes/superseded-by: extends `EVID-HRMNY-20260831-APOLLO-012`; none.
+- Rollback/correction: rerun both event matrices on the repair head and preserve
+  this receipt.
+
+## `EVID-HRMNY-20260831-APOLLO-014` — fifth hosted matrix reached the Apollo PostgreSQL proof
+
+- Date/scope/actor: 2026-08-31; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `11a33efd93a472ab7e1e4841ed38b5a17a538e73`; repair commit
+  `1aac6aa57165e4af1311c059747b71c3e8276204`.
+- Decision/finding: both event matrices independently passed the full migration
+  verifier, disposable runtime migration, and Sales PostgreSQL proof. The next
+  and only database failure was the Apollo suite's shared raw-timestamp binding;
+  14/14 scenario failures and one unhandled rejection had the same first cause.
+- Reason: preserve the newly accepted upstream boundaries and distinguish a
+  driver-adapter defect from migration, Sales, provider, or assertion failures.
+- Alternatives considered: summarize the workflows as generically red; count
+  the spy failure as a separate concurrency defect; rerun unchanged.
+- Trade-offs: hosted acceptance remains open, but the next rerun starts from a
+  substantially narrower and independently reviewed boundary.
+- Evidence: runs `33417297082` and `33417302188`; database jobs
+  `99570912450` and `99570929647`; `FAIL-HRMNY-20260831-APOLLO-013`; repair
+  gates of web lint, web typecheck, Apollo 17/17, inbox 5/5, and public-diff
+  redaction with zero high findings.
+- Confidence/freshness: high; push and PR receipts agree on the exact SHA and
+  three agents independently traced the same source boundary.
+- Affected components: hosted database acceptance, Apollo PostgreSQL adapter,
+  and permanent evidence ledger.
+- Status: negative diagnostic receipt accepted; repair-hosted proof pending.
+- Supersedes/superseded-by: extends
+  `EVID-HRMNY-20260831-APOLLO-013`; none.
+- Rollback/correction: bind any positive claim to the repair SHA, require 14/14
+  without unhandled rejection, and retain both failed jobs permanently.
+
+## `EVID-HRMNY-20260901-APOLLO-015` — sixth hosted matrices passed three Apollo PostgreSQL scenarios
+
+- Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `b9c4e241e08979b5c20aed561c9164a057a4b59f`; repair commit
+  `15bea2885b2d37696b67f2c06f5a7bfdbbed8a5b`.
+- Decision/finding: both push and PR matrices passed full verify/build and
+  90-test browser acceptance. Their database jobs again passed migration
+  verification, disposable migration apply, and Sales 3/3; Apollo advanced
+  from 0/14 to 3/14 before a deterministic test-session circular wait.
+- Reason: preserve the timestamp repair's positive proof and identify the first
+  remaining boundary without misclassifying cascade failures.
+- Alternatives considered: discard the run because the overall workflow was
+  red; count each hook timeout separately; weaken the concurrency test.
+- Trade-offs: hosted synthetic acceptance remains open, while the correction is
+  confined to faithful test orchestration and fail-safe cleanup.
+- Evidence: push run `33520058503`, verify job `99896730445`, browser job
+  `99896730289`, database job `99896730908`; PR run `33520238687`, verify job
+  `99897340376`, browser job `99897339925`, database job `99897340014`;
+  `FAIL-HRMNY-20260901-APOLLO-014`; local web lint/typecheck, Apollo 17/17, and
+  inbox 5/5.
+- Confidence/freshness: high; hosted receipts and three read-only reviews agree.
+- Affected components: hosted acceptance ledger and Apollo PostgreSQL race
+  fixture.
+- Status: negative diagnostic receipt accepted; repair-hosted proof pending.
+- Supersedes/superseded-by: extends
+  `EVID-HRMNY-20260831-APOLLO-014`; none.
+- Rollback/correction: rerun the complete database sequence on the repair SHA,
+  require all 14 scenarios, and preserve this partial-positive receipt.
+
+## `EVID-HRMNY-20260901-APOLLO-016` — seventh hosted matrices reached 12/14 PostgreSQL scenarios
+
+- Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `3c8079889a522acc9a21d6e76121936ed7fd3fd4`; repair commit
+  `7c9553114b3ab0c5db71c67680db2585e5f9f5c2`.
+- Decision/finding: both matrices passed full verify/build and 90-test browser
+  acceptance. Their database jobs passed the complete migration sequence,
+  Sales 3/3, and 12/14 Apollo scenarios in 693 ms and 934 ms. The prior
+  timestamp and one-session race defects are therefore repaired; only two
+  prepared-parameter type boundaries remained.
+- Reason: preserve proof progression and distinguish the two final SQL adapter
+  failures from migration, locking, provider, assertion, or cleanup defects.
+- Alternatives considered: report only the overall red conclusion; await an
+  unchanged duplicate PR database job before correcting the proven cause;
+  discard the twelve positive scenario receipts.
+- Trade-offs: hosted acceptance remains open, while the next correction is two
+  explicit type annotations with no state-machine change.
+- Evidence: push run `33522218287`, verify job `99904050281`, browser job
+  `99904050138`, database job `99904049900`; PR run `33522338367`, verify job
+  `99904455185`, browser job `99904455028`, database job `99904454935`; Apollo
+  result `12 passed, 2 failed` in both; `FAIL-HRMNY-20260901-APOLLO-015`.
+- Confidence/freshness: high; all three jobs are terminal on the exact SHA and
+  the database log contains both complete failing queries.
+- Affected components: hosted acceptance ledger, Apollo dead-letter receipt,
+  and retention redaction.
+- Status: negative diagnostic receipt accepted; repaired exact-head hosted
+  proof pending.
+- Supersedes/superseded-by: extends
+  `EVID-HRMNY-20260901-APOLLO-015`; none.
+- Rollback/correction: rerun both event matrices on the repair head, require
+  14/14, and retain the partial-positive job permanently.
+
+## `EVID-HRMNY-20260901-APOLLO-017` — exact-head hosted synthetic matrix passed
+
+- Date/scope/actor: 2026-09-01; `client-uae-creative-01/hrmny-os`; host
+  `Bukhari-Laptop`; actor `Codex /root`; tool/model `Codex agent (exact model ID
+not exposed)`; branch
+  `ahmadbukhari097/codex/phase-4d-apollo-free-receipts-20260831`; exact tested
+  head `528803e9b5ac988dff00b3e8e13a92b0d9cb7f71`.
+- Decision/finding: both push and pull-request CI matrices completed green on
+  the exact head. Each independently passed 127 test files/712 tests, complete
+  builds, 90 Chromium journeys, 75 fresh migrations plus idempotent prior-head
+  and current-schema upgrade paths, Sales PostgreSQL 3/3, and Apollo PostgreSQL
+  14/14.
+- Reason: close the source/hosted synthetic gate only when both event paths
+  execute the complete database, application, and browser proofs on one exact
+  Git object.
+- Alternatives considered: accept the local 22-test subset; accept one GitHub
+  event; infer PostgreSQL correctness from the earlier 12/14 receipt; reuse a
+  historic direct-provider production search.
+- Trade-offs: code and hosted synthetic acceptance are now proven, while
+  deployment, managed Inngest, provider, destination, recovery, named-user, and
+  production acceptance remain separate and open.
+- Evidence: push run `33523035823` with verify `99906793816`, browser
+  `99906793973`, database `99906794151`; PR run `33523069634` with verify
+  `99906909454`, browser `99906909066`, database `99906909586`; both workflow
+  conclusions `success`; public-diff redaction scan `HIGH=0`.
+- Confidence/freshness: high; terminal GitHub receipts inspected 2026-09-01 and
+  bound to the full 40-character SHA.
+- Affected components: Phase 4d source, CI, migration 0075, Sales proposal
+  persistence, Apollo durable bridge, and staff browser regression suite.
+- Status: hosted synthetic acceptance passed; no deployment or live-provider
+  effect occurred.
+- Supersedes/superseded-by: supersedes the open hosted-execution portion of
+  `EVID-HRMNY-20260901-APOLLO-016`; none.
+- Rollback/correction: retain both receipts, rerun the same matrix after any
+  source change, and never extend this state to later operational acceptance
+  without its own immutable receipt.

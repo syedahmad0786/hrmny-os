@@ -12,6 +12,19 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      DATABASE_MODE: memory
+      DATABASE_URL: ""
+      LLM_PROVIDER: mock
+      OPENROUTER_LIVE_SMOKE: "0"
+      EMBEDDING_PROVIDER: none
+      APOLLO_MODE: mock
+      HUNTER_MODE: mock
+      NEVERBOUNCE_MODE: mock
+      RESEND_MODE: mock
+      N8N_MODE: mock
+      XERO_MODE: mock
+      XERO_WRITE_ENABLED: "false"
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -30,6 +43,25 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      DATABASE_MODE: memory
+      DATABASE_URL: ""
+      AUTH_MODE: dev
+      ALLOW_DEV_AUTH: "true"
+      WORK_ENVIRONMENT_KIND: sandbox
+      LLM_PROVIDER: mock
+      EMBEDDING_PROVIDER: none
+      APOLLO_MODE: mock
+      APOLLO_ALLOW_PAID_OPERATIONS: "false"
+      HUNTER_MODE: mock
+      HUNTER_ALLOW_PAID_OPERATIONS: "false"
+      NEVERBOUNCE_MODE: mock
+      NEVERBOUNCE_ALLOW_PAID_OPERATIONS: "false"
+      RESEND_MODE: mock
+      XERO_MODE: mock
+      XERO_WRITE_ENABLED: "false"
+      COMPOSIO_API_KEY: ""
+      GOOGLE_CHAT_WEBHOOK_URL: ""
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -94,4 +126,58 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
           MIGRATION_TEST_ALLOW_DROP: "true"
+          MIGRATION_TEST_RETAIN_FRESH_FOR_PROOF: "true"
         run: pnpm db:verify
+      - name: Apply migrations to disposable runtime database
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: pnpm db:migrate
+      - name: Prove Sales and QM proposal runtime on PostgreSQL
+        env:
+          DATABASE_MODE: postgres
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          HRMNY_CI_POSTGRES_WRITE: "true"
+          HRMNY_DATABASE_SSL_MODE: disable
+          LLM_PROVIDER: mock
+          OPENROUTER_LIVE_SMOKE: "0"
+          EMBEDDING_PROVIDER: none
+          APOLLO_MODE: mock
+          APOLLO_ALLOW_PAID_OPERATIONS: "false"
+          HUNTER_MODE: mock
+          HUNTER_ALLOW_PAID_OPERATIONS: "false"
+          NEVERBOUNCE_MODE: mock
+          NEVERBOUNCE_ALLOW_PAID_OPERATIONS: "false"
+          RESEND_MODE: mock
+          N8N_MODE: mock
+          XERO_MODE: mock
+          XERO_WRITE_ENABLED: "false"
+        run: pnpm --filter @hrmny/web test:ci:postgres
+      - name: Prove Apollo receipt and queue concurrency
+        env:
+          CI: "true"
+          DATABASE_MODE: postgres
+          HRMNY_CI_DATABASE_SCHEME: postgresql
+          HRMNY_CI_DATABASE_USER: postgres
+          HRMNY_CI_DATABASE_PASSWORD: postgres
+          HRMNY_CI_DATABASE_HOST: 127.0.0.1
+          HRMNY_CI_DATABASE_PORT: "5432"
+          HRMNY_CI_DATABASE_NAME: hrmny_migration_fresh
+          CI_POSTGRES_PROOF: "true"
+          HRMNY_CI_POSTGRES_WRITE: "true"
+          HRMNY_DATABASE_SSL_MODE: disable
+          LLM_PROVIDER: mock
+          OPENROUTER_LIVE_SMOKE: "0"
+          EMBEDDING_PROVIDER: none
+          APOLLO_MODE: mock
+          APOLLO_ALLOW_PAID_OPERATIONS: "false"
+          HUNTER_MODE: mock
+          HUNTER_ALLOW_PAID_OPERATIONS: "false"
+          NEVERBOUNCE_MODE: mock
+          NEVERBOUNCE_ALLOW_PAID_OPERATIONS: "false"
+          RESEND_MODE: mock
+          N8N_MODE: mock
+          XERO_MODE: mock
+          XERO_WRITE_ENABLED: "false"
+        run: |
+          export DATABASE_URL="${HRMNY_CI_DATABASE_SCHEME}://${HRMNY_CI_DATABASE_USER}:${HRMNY_CI_DATABASE_PASSWORD}@${HRMNY_CI_DATABASE_HOST}:${HRMNY_CI_DATABASE_PORT}/${HRMNY_CI_DATABASE_NAME}"
+          pnpm --filter @hrmny/web test:ci:apollo-postgres

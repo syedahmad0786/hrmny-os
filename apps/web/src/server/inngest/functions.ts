@@ -3,8 +3,13 @@ import { runLeadgenDailyCron } from "../leadgen/daily-cron";
 import { LEADGEN_DAILY } from "./leadgen-daily";
 import { REPORT_SCHEDULER, runDueReports } from "./report-scheduler";
 import { inngest } from "./client";
+import {
+  APOLLO_SEARCH_RETRY_EVENT,
+  executeApolloSearchRetryEvent,
+} from "./apollo-search-retry";
+import { runApolloPeopleSearchQueuedJob } from "../sales-os/apollo-search";
 
-/** Durable provider runner for the existing once-per-day lead-gen operation. */
+/** Durable policy gate for the contained once-per-day Sales research proposal. */
 export const leadgenDailyFunction = inngest.createFunction(
   {
     id: LEADGEN_DAILY.id,
@@ -12,7 +17,7 @@ export const leadgenDailyFunction = inngest.createFunction(
     retries: 2,
   },
   async ({ step }) =>
-    step.run("leadgen-daily-claim-and-run", () => runLeadgenDailyCron()),
+    step.run("leadgen-daily-policy-gate", () => runLeadgenDailyCron()),
 );
 
 /**
@@ -29,7 +34,37 @@ export const reportSchedulerFunction = inngest.createFunction(
     step.run("claim-and-send-due-reports", () => runDueReports()),
 );
 
+/**
+ * Event-driven Apollo retry worker. The event contains only opaque IDs; the
+ * worker claims the database job and rehydrates criteria from the immutable
+ * integration receipt after reauthorizing the original employee.
+ */
+export const apolloSearchRetryFunction = inngest.createFunction(
+  {
+    id: "sales-apollo-people-search-retry-v1",
+    triggers: [{ event: APOLLO_SEARCH_RETRY_EVENT }],
+    retries: 2,
+    // One free People Search at a time across every owner-bound connection.
+    // The database claimant also coordinates the cron fallback; paid People
+    // Match remains a separately gated lane and must not inherit this proof.
+    concurrency: {
+      limit: 1,
+    },
+  },
+  async ({ event, step }) =>
+    executeApolloSearchRetryEvent(event.data, {
+      sleepUntil: (runAt) => step.sleepUntil("wait-until-due", runAt),
+      runQueuedJob: (jobId) =>
+        step.run("claim-and-run-apollo-search", () =>
+          runApolloPeopleSearchQueuedJob(jobId),
+        ),
+      sendEvent: (nextEvent) =>
+        step.sendEvent("schedule-next-apollo-attempt", nextEvent),
+    }),
+);
+
 export const inngestFunctions = [
   leadgenDailyFunction,
   reportSchedulerFunction,
+  apolloSearchRetryFunction,
 ] as const;

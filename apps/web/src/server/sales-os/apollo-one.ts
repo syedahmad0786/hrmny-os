@@ -1,20 +1,17 @@
 import type {
-  LeadCandidate,
   LeadEnrichmentIdentity,
   LeadSourceAdapter,
 } from "@hrmny/integrations";
-import {
-  createLeadSourceLive,
-  createLeadSourceMock,
-} from "@hrmny/integrations";
+import { createLeadSourceLive } from "@hrmny/integrations";
 import { importApolloPersonToCrm } from "../crm/apollo-import";
 import {
   completeIntegrationReceipt,
   failIntegrationReceipt,
   getIntegrationReceipt,
+  hashIntegrationPayload,
   recordIntegrationReceipt,
 } from "../integrations/inbox";
-import { resolveIntegrationApiKey } from "../integrations/resolve-keys";
+import { resolveOwnedIntegrationApiKey } from "../integrations/resolve-keys";
 import {
   addCredit,
   creditUsed,
@@ -25,6 +22,8 @@ import {
 /** One durable allowance for the explicitly approved production connection test. */
 export const APOLLO_ONE_PERSON_CANARY_ID =
   "sales-growth-one-person-enrichment-v1";
+export const APOLLO_PAID_APPROVAL_ACTION = "apollo.people.match" as const;
+const APOLLO_PAID_APPROVAL_MAX_AGE_MS = 5 * 60_000;
 
 export type ApolloOnePersonResult = {
   receiptId: string;
@@ -46,9 +45,32 @@ export type ApolloOnePersonResult = {
   };
 };
 
+export type ApolloExactApprovalClaim = {
+  approvalReceiptId: string;
+  actorEmployeeId: string;
+  candidateHash: string;
+  action: typeof APOLLO_PAID_APPROVAL_ACTION;
+  requestedAt: string;
+};
+
+export type ApolloConsumedApprovalReceipt = {
+  approvalReceiptId: string;
+  actorEmployeeId: string;
+  candidateHash: string;
+  action: typeof APOLLO_PAID_APPROVAL_ACTION;
+  approvedAt: string;
+  expiresAt: string;
+  status: "consumed";
+};
+
 type ApolloOneDeps = {
   leadSource?: LeadSourceAdapter;
-  resolveApiKey?: typeof resolveIntegrationApiKey;
+  resolveApiKey?: typeof resolveOwnedIntegrationApiKey;
+  allowSynthetic?: boolean;
+  now?: () => Date;
+  consumeExactApproval?: (
+    claim: ApolloExactApprovalClaim,
+  ) => Promise<ApolloConsumedApprovalReceipt>;
 };
 
 async function configuredLiveSource(
@@ -56,8 +78,8 @@ async function configuredLiveSource(
   actorEmployeeId: string | null | undefined,
   deps: ApolloOneDeps,
 ): Promise<LeadSourceAdapter> {
-  const resolver = deps.resolveApiKey ?? resolveIntegrationApiKey;
-  const { apiKey } = await resolver("apollo", actorEmployeeId);
+  const resolver = deps.resolveApiKey ?? resolveOwnedIntegrationApiKey;
+  const { apiKey } = await resolver("apollo", actorEmployeeId, null);
   if (!apiKey) {
     throw new Error(
       "APOLLO_API_KEY is not configured for the HRMNY production runtime",
@@ -68,44 +90,6 @@ async function configuredLiveSource(
     apiKey,
     allowPaidOperations,
   });
-}
-
-export async function searchApolloPeopleFree(
-  input: {
-    query?: string;
-    titles?: string[];
-    perPage?: number;
-    actorEmployeeId?: string | null;
-  },
-  deps: ApolloOneDeps = {},
-): Promise<{
-  mode: "mock" | "live";
-  candidates: LeadCandidate[];
-}> {
-  let source = deps.leadSource;
-  if (!source) {
-    const resolver = deps.resolveApiKey ?? resolveIntegrationApiKey;
-    const resolved = await resolver("apollo", input.actorEmployeeId);
-    source = resolved.apiKey
-      ? createLeadSourceLive({
-          mode: "live",
-          apiKey: resolved.apiKey,
-          allowPaidOperations: false,
-        })
-      : createLeadSourceMock();
-  }
-  const query = input.query?.trim();
-  const titles = input.titles
-    ?.map((title) => title.trim())
-    .filter((title) => title.length > 0);
-  const candidates = await source.searchLeads({
-    query: query || undefined,
-    titles: titles?.length ? titles : undefined,
-    locations: ["United Arab Emirates"],
-    page: 1,
-    perPage: Math.min(Math.max(input.perPage ?? 8, 1), 10),
-  });
-  return { mode: source.mode, candidates };
 }
 
 export async function getApolloOnePersonCanaryStatus(): Promise<{
@@ -144,8 +128,8 @@ export async function getApolloOnePersonCanaryStatus(): Promise<{
     throw error;
   }
   return {
-    available: !receipt,
-    status: receipt?.status ?? "available",
+    available: false,
+    status: receipt?.status ?? "locked_exact_approval_required",
     receiptId: receipt?.receiptId ?? null,
     result: receipt?.result ?? null,
   };
@@ -173,12 +157,20 @@ export async function enrichOneApolloPerson(
   input: {
     candidate: LeadEnrichmentIdentity;
     confirmCreditUse: true;
-    actorEmployeeId?: string | null;
+    actorEmployeeId: string;
+    approvalReceiptId: string;
   },
   deps: ApolloOneDeps = {},
 ): Promise<ApolloOnePersonResult> {
   if (input.confirmCreditUse !== true) {
     throw new Error("APOLLO_CREDIT_CONFIRMATION_REQUIRED");
+  }
+  const actorEmployeeId = input.actorEmployeeId.trim();
+  const approvalReceiptId = input.approvalReceiptId.trim();
+  if (!actorEmployeeId || !approvalReceiptId || !deps.consumeExactApproval) {
+    throw new Error(
+      "APOLLO_PAID_ENRICHMENT_REQUIRES_EXACT_APPROVAL_RECEIPT",
+    );
   }
   const candidate = {
     externalId: input.candidate.externalId?.trim() || undefined,
@@ -208,10 +200,38 @@ export async function enrichOneApolloPerson(
   // reference is safe to retry because no provider request has started.
   const source =
     deps.leadSource ??
-    (await configuredLiveSource(true, input.actorEmployeeId, deps));
+    (await configuredLiveSource(true, actorEmployeeId, deps));
+
+  const candidateHash = hashIntegrationPayload(JSON.stringify(candidate));
+  const requestedAt = (deps.now ?? (() => new Date()))();
+  const approval = await deps.consumeExactApproval({
+    approvalReceiptId,
+    actorEmployeeId,
+    candidateHash,
+    action: APOLLO_PAID_APPROVAL_ACTION,
+    requestedAt: requestedAt.toISOString(),
+  });
+  const approvedAt = Date.parse(approval.approvedAt);
+  const expiresAt = Date.parse(approval.expiresAt);
+  if (
+    approval.status !== "consumed" ||
+    approval.approvalReceiptId !== approvalReceiptId ||
+    approval.actorEmployeeId !== actorEmployeeId ||
+    approval.candidateHash !== candidateHash ||
+    approval.action !== APOLLO_PAID_APPROVAL_ACTION ||
+    !Number.isFinite(approvedAt) ||
+    !Number.isFinite(expiresAt) ||
+    approvedAt > requestedAt.getTime() ||
+    requestedAt.getTime() - approvedAt > APOLLO_PAID_APPROVAL_MAX_AGE_MS ||
+    expiresAt <= requestedAt.getTime()
+  ) {
+    throw new Error("APOLLO_EXACT_APPROVAL_RECEIPT_INVALID_OR_STALE");
+  }
 
   const payload = {
     candidate,
+    approvalReceiptId,
+    candidateHash,
     paidFields: {
       personalEmail: false,
       phone: false,
@@ -284,7 +304,7 @@ export async function enrichOneApolloPerson(
     const crm = await importApolloPersonToCrm({
       person,
       receiptId: receipt.receiptId,
-      ownerEmployeeId: input.actorEmployeeId ?? null,
+      ownerEmployeeId: actorEmployeeId,
     });
     const result: ApolloOnePersonResult = {
       receiptId: receipt.receiptId,

@@ -6,6 +6,11 @@ import { listOutreach } from "../leadgen/store";
 import { getClientOnboarding } from "../clients/onboarding";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
+import {
+  legacySalesEffectRefusal,
+  legacySalesSyntheticRuntimeEnabled,
+} from "../sales-os/legacy-effect-policy";
+import { portalApprovalSyntheticRuntimeEnabled } from "../portal/approval-boundary";
 import { searchMemory } from "./memory-db";
 
 export type AgentToolScope = {
@@ -41,6 +46,38 @@ export const DEFAULT_FUNNEL_AGENT_TOOLS = [
 ] as const;
 
 /**
+ * Effectful client-funnel tools are deliberately separated from generic agent
+ * execution. A free-form/client-scoped agent run is read-only; only a typed
+ * server command may opt into this reviewed draft-only capability.
+ */
+export const CLIENT_FUNNEL_DRAFT_TOOLS = [
+  "tasks.create",
+  "outreach.draft",
+  "crm.note",
+  "campaigns.draft",
+  "briefs.draft",
+  "portal.invite",
+  "creative.sendToPortal",
+] as const;
+
+const CLIENT_EXPLICIT_ACTION_TOOLS = new Set<string>([
+  ...CLIENT_FUNNEL_DRAFT_TOOLS.map((tool) => tool.toLowerCase()),
+  "briefs.os_lock",
+  "creative.os_qc",
+]);
+
+const CLIENT_SCOPED_READ_TOOLS = new Set([
+  "memory.search",
+  "crm.read",
+  "crm.deals",
+  "crm.companies",
+  "delivery.read",
+  "outreach.read",
+  "onboarding.read",
+  "n8n.health",
+]);
+
+/**
  * Demo / Settings preset for org-only OS settle tools (closed loop → finance →
  * outreach → creative QC → portal → campaigns). Never used as empty-allowlist
  * fallback — that stays funnel-only. Prompt gates still apply per tool.
@@ -59,7 +96,6 @@ export const DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS = [
   "creative.os_qc",
   "campaigns.os_approve",
   "campaigns.os_publish",
-  "portal.os_approve",
   "onboarding.os_signoff",
   "calendar.os_ref_approve",
   "clients.os_month1_advance",
@@ -80,16 +116,30 @@ export function resolveAgentAllowedTools(raw: unknown): string[] {
   const normalize = (tools: readonly string[]) =>
     tools.map((t) => t.trim().toLowerCase()).filter((t) => t.length > 0);
   if (!Array.isArray(raw)) return normalize(DEFAULT_FUNNEL_AGENT_TOOLS);
-  const cleaned = normalize(
+  const requested = normalize(
     raw.filter((t): t is string => typeof t === "string"),
   );
-  return cleaned.length > 0 ? cleaned : normalize(DEFAULT_FUNNEL_AGENT_TOOLS);
+  if (requested.length === 0) return normalize(DEFAULT_FUNNEL_AGENT_TOOLS);
+  const blockedClientDecisionTools = new Set([
+    "portal.os_approve",
+    "portal_os_approve",
+    "portal.approve",
+    "portal.approvals",
+    "portal.approvals.act",
+  ]);
+  return requested.filter((tool) => !blockedClientDecisionTools.has(tool));
 }
 
 type ResolvedCrmScope = {
   dealId?: string;
   companyId?: string;
 };
+
+export function isPortalDecisionIntent(prompt: string): boolean {
+  return /(?:^\s*(?:please\s+)?(?:(?:approve|reject|deny)\b[^\n]{0,80}\bportal\b|portal\s+(?:approve|reject|decision)\b|request\s+changes\b[^\n]{0,80}\bportal\b)|\bclient(?:\s+portal)?\s+(?:approval|decision)\b|\b(?:approve|reject)\s+(?:as|for)\s+(?:the\s+)?client\b)/i.test(
+    prompt,
+  );
+}
 
 /**
  * Map a client sandbox to its won deal + company so CRM tools never leak
@@ -127,13 +177,87 @@ async function resolveClientCrmScope(
  * Execute allowlisted agent tools inside the client/user/deal/task sandbox.
  * Unknown tools are skipped (ok:false) — never escalate privileges.
  */
-export async function runAgentTools(input: {
+type AgentToolRunInput = {
   allowedTools: unknown;
   prompt: string;
   scope: AgentToolScope;
+};
+
+/**
+ * Generic/free-form runs are always read-only when bound to a client. This is
+ * the structural authorization boundary; prompt classification below is only
+ * an additional fail-closed guard for recognizable client-decision wording.
+ */
+export async function runAgentTools(
+  input: AgentToolRunInput,
+): Promise<AgentToolResult[]> {
+  return executeAgentTools(input, false);
+}
+
+/**
+ * Typed draft-funnel command for explicit server workflows. Wildcards,
+ * defaults, org actions, approvals, sends, and arbitrary tool names are
+ * rejected before execution.
+ */
+export async function runClientFunnelDraftTools(input: {
+  allowedTools: readonly string[];
+  prompt: string;
+  scope: AgentToolScope & { clientId: string };
 }): Promise<AgentToolResult[]> {
-  const allowed = resolveAgentAllowedTools(input.allowedTools);
+  const requested = input.allowedTools.map((tool) => tool.trim().toLowerCase());
+  const permitted = new Set<string>(
+    CLIENT_FUNNEL_DRAFT_TOOLS.map((tool) => tool.toLowerCase()),
+  );
+  if (
+    requested.length === 0 ||
+    requested.some(
+      (tool) =>
+        !tool ||
+        tool.includes("*") ||
+        !permitted.has(tool),
+    )
+  ) {
+    return [];
+  }
+  return executeAgentTools(
+    { ...input, allowedTools: requested },
+    true,
+  );
+}
+
+/** Execute one exact, typed client action from a server-owned command surface. */
+export async function runExplicitClientAgentTool(input: {
+  tool: string;
+  prompt: string;
+  scope: AgentToolScope & { clientId: string };
+}): Promise<AgentToolResult[]> {
+  const tool = input.tool.trim().toLowerCase();
+  if (
+    !tool ||
+    tool.includes("*") ||
+    !CLIENT_EXPLICIT_ACTION_TOOLS.has(tool)
+  ) {
+    return [];
+  }
+  return executeAgentTools(
+    { allowedTools: [tool], prompt: input.prompt, scope: input.scope },
+    true,
+  );
+}
+
+async function executeAgentTools(
+  input: AgentToolRunInput,
+  allowClientFunnelDrafts: boolean,
+): Promise<AgentToolResult[]> {
+  let allowed = resolveAgentAllowedTools(input.allowedTools);
+  if (input.scope.clientId && !allowClientFunnelDrafts) {
+    allowed = allowed.filter((tool) => CLIENT_SCOPED_READ_TOOLS.has(tool));
+  }
   if (!allowed.length) return [];
+  // A client decision is never an agent command. Refuse the complete run before
+  // reads, drafts, fixtures, tokens, notifications, or any unrelated write can
+  // be triggered by a broad/default allowlist.
+  if (isPortalDecisionIntent(input.prompt)) return [];
 
   const results: AgentToolResult[] = [];
   const want = (name: string) => {
@@ -147,6 +271,8 @@ export async function runAgentTools(input: {
       )
     );
   };
+  const wantExact = (...names: string[]) =>
+    names.some((name) => allowed.includes(name.toLowerCase()));
 
   if (want("memory.search") || want("memory")) {
     try {
@@ -661,7 +787,15 @@ export async function runAgentTools(input: {
     calendarId?: string;
   } = {};
 
-  if (wantsClosedLoop) {
+  if (wantsClosedLoop && !legacySalesSyntheticRuntimeEnabled()) {
+    const refusal = legacySalesEffectRefusal("crm.closed_loop");
+    results.push({
+      tool: "crm.closed_loop",
+      ok: false,
+      error: `${refusal.step}: ${refusal.reason}`,
+      data: refusal,
+    });
+  } else if (wantsClosedLoop) {
     try {
       const { runDemoClosedLoopCore } = await import("../crm/closed-loop");
       const viaApollo =
@@ -1147,70 +1281,6 @@ export async function runAgentTools(input: {
   }
 
   /**
-   * Portal client approve/reject on a client_review task. Prompt-gated;
-   * org-only. Completes creative.os_qc → portal path without magic links.
-   */
-  const wantsPortalApprove =
-    !input.scope.clientId &&
-    (want("portal.os_approve") ||
-      want("portal.approve") ||
-      want("portal.approvals")) &&
-    /(?:os[_\s-]?approve|approve\s+(?:the\s+)?(?:os\s+)?portal|portal[^\n]{0,40}approv|client[_\s-]?approv|reject\s+(?:the\s+)?portal)/i.test(
-      input.prompt,
-    );
-
-  if (wantsPortalApprove) {
-    const { runOsPortalApprove, parseApprovalIdFromPrompt } =
-      await import("../portal/os-portal-approve");
-    const approvalId =
-      parseApprovalIdFromPrompt(input.prompt) ??
-      input.scope.taskId ??
-      loopSeed.taskId ??
-      null;
-    const employeeId =
-      input.scope.employeeId ?? "c0000000-0000-4000-8000-000000000001";
-    if (!approvalId) {
-      results.push({
-        tool: "portal.os_approve",
-        ok: false,
-        error: "approvalId_required",
-      });
-    } else {
-      try {
-        const out = await runOsPortalApprove({
-          approvalId,
-          prompt: input.prompt,
-          actorEmployeeId: employeeId,
-        });
-        results.push({
-          tool: "portal.os_approve",
-          ok: out.ok,
-          error: out.ok ? undefined : out.reason,
-          data: {
-            approvalId: out.approvalId ?? approvalId,
-            clientId: out.clientId,
-            status: out.status,
-            action: out.action,
-            next: out.clientId
-              ? {
-                  portal: `/portal/approvals`,
-                  creative: `/creative?clientId=${encodeURIComponent(out.clientId)}`,
-                }
-              : undefined,
-          },
-        });
-      } catch (err) {
-        results.push({
-          tool: "portal.os_approve",
-          ok: false,
-          error:
-            err instanceof Error ? err.message : "portal_os_approve_failed",
-        });
-      }
-    }
-  }
-
-  /**
    * Onboarding phase signoff (active → signed_off). Org-only; prompt-gated.
    * Seeds clientId from closed_loop when present. Default phaseIndex = 0.
    */
@@ -1429,69 +1499,80 @@ export async function runAgentTools(input: {
       want("prospect.apollo") ||
       want("crm.apollo"))
   ) {
-    try {
-      const {
-        resolveApolloRuntimeConfig,
-        resolveEmailVerificationRuntimeConfig,
-      } = await import("../integrations/runtime-adapters");
-      const { createApolloAdapter, createEmailVerificationAdapter } =
-        await import("@hrmny/integrations");
-      const { importApolloCompaniesToCrm } =
-        await import("../crm/apollo-import");
-      const query = input.prompt.trim().slice(0, 200) || "UAE retail brands";
-      const apollo = await resolveApolloRuntimeConfig(input.scope.employeeId);
-      const verifier = await resolveEmailVerificationRuntimeConfig(
-        input.scope.employeeId,
-      );
-      const apolloClient = createApolloAdapter(apollo.config);
-      const mode = apollo.mode;
-      const hits = await apolloClient.searchCompanies(query);
-      const imported = await importApolloCompaniesToCrm({
-        query,
-        companies: hits as Record<string, unknown>[],
-        mode,
-        ownerEmployeeId: input.scope.employeeId,
-        limit: 3,
-        verifier: createEmailVerificationAdapter(verifier.config),
-      });
-      results.push({
-        tool: "crm.prospect",
-        ok: true,
-        data: {
-          mode: imported.mode,
-          verifyMode: imported.verifyMode,
-          query: imported.query,
-          dealCount: imported.deals.length,
-          deals: imported.deals.slice(0, 3).map((d) => ({
-            dealId: d.dealId,
-            companyName: d.companyName,
-            stage: d.stage,
-            emailVerified: d.emailVerified,
-          })),
-          next: imported.deals[0]
-            ? {
-                deal: `/crm/deals/${encodeURIComponent(imported.deals[0].dealId)}`,
-                hunt: "/crm/hunt",
-              }
-            : { hunt: "/crm/hunt" },
-        },
-      });
-    } catch (err) {
+    if (!legacySalesSyntheticRuntimeEnabled()) {
+      const refusal = legacySalesEffectRefusal("crm.prospect");
       results.push({
         tool: "crm.prospect",
         ok: false,
-        error: err instanceof Error ? err.message : "crm_prospect_failed",
+        error: `${refusal.step}: ${refusal.reason}`,
+        data: refusal,
       });
+    } else {
+      try {
+        const {
+          resolveApolloRuntimeConfig,
+          resolveEmailVerificationRuntimeConfig,
+        } = await import("../integrations/runtime-adapters");
+        const { createApolloAdapter, createEmailVerificationAdapter } =
+          await import("@hrmny/integrations");
+        const { importApolloCompaniesToCrm } =
+          await import("../crm/apollo-import");
+        const query = input.prompt.trim().slice(0, 200) || "UAE retail brands";
+        const apollo = await resolveApolloRuntimeConfig(input.scope.employeeId);
+        const verifier = await resolveEmailVerificationRuntimeConfig(
+          input.scope.employeeId,
+        );
+        const apolloClient = createApolloAdapter(apollo.config);
+        const mode = apollo.mode;
+        const hits = await apolloClient.searchCompanies(query);
+        const imported = await importApolloCompaniesToCrm({
+          query,
+          companies: hits as Record<string, unknown>[],
+          mode,
+          ownerEmployeeId: input.scope.employeeId,
+          limit: 3,
+          verifier: createEmailVerificationAdapter(verifier.config),
+        });
+        results.push({
+          tool: "crm.prospect",
+          ok: true,
+          data: {
+            mode: imported.mode,
+            verifyMode: imported.verifyMode,
+            query: imported.query,
+            dealCount: imported.deals.length,
+            deals: imported.deals.slice(0, 3).map((d) => ({
+              dealId: d.dealId,
+              companyName: d.companyName,
+              stage: d.stage,
+              emailVerified: d.emailVerified,
+            })),
+            next: imported.deals[0]
+              ? {
+                  deal: `/crm/deals/${encodeURIComponent(imported.deals[0].dealId)}`,
+                  hunt: "/crm/hunt",
+                }
+              : { hunt: "/crm/hunt" },
+          },
+        });
+      } catch (err) {
+        results.push({
+          tool: "crm.prospect",
+          ok: false,
+          error: err instanceof Error ? err.message : "crm_prospect_failed",
+        });
+      }
     }
   }
 
   if (
     input.scope.clientId &&
-    (want("portal.invite") ||
-      want("portal.magic_link") ||
-      want("onboarding.invite"))
+    wantExact("portal.invite", "portal.magic_link", "onboarding.invite")
   ) {
     try {
+      if (!portalApprovalSyntheticRuntimeEnabled()) {
+        throw new Error("PORTAL_INVITE_REQUIRES_APPROVAL");
+      }
       const { sendPortalInviteMagicLink } =
         await import("../auth/portal-magic-link");
       const { createResendMock } = await import("@hrmny/integrations");
@@ -1501,8 +1582,7 @@ export async function runAgentTools(input: {
       const email =
         emailMatch?.[0]?.toLowerCase() ??
         `portal+${input.scope.clientId.slice(0, 8)}@example.com`;
-      const placeholderInbox = email.endsWith("@example.com");
-      const emailer = placeholderInbox ? createResendMock() : undefined;
+      const emailer = createResendMock();
       const sent = await sendPortalInviteMagicLink({
         clientId: input.scope.clientId,
         email,
@@ -1549,11 +1629,16 @@ export async function runAgentTools(input: {
 
   if (
     input.scope.clientId &&
-    (want("creative.sendToPortal") ||
-      want("creative.portal") ||
-      want("portal.deliverable"))
+    wantExact(
+      "creative.sendtoportal",
+      "creative.portal",
+      "portal.deliverable",
+    )
   ) {
     try {
+      if (!portalApprovalSyntheticRuntimeEnabled()) {
+        throw new Error("PORTAL_DELIVERY_REQUIRES_APPROVAL");
+      }
       const title =
         `[agent] ${input.prompt.trim().slice(0, 100) || "Creative deliverable"}`.slice(
           0,
@@ -1623,9 +1708,10 @@ export async function runAgentTools(input: {
           ok: true,
           data: await (async () => {
             const clientId = input.scope.clientId!;
+            const { createResendMock } = await import("@hrmny/integrations");
             const portalHref = await (
               await import("../auth/portal-review-href")
-            ).portalReviewHref(clientId);
+            ).portalReviewHref(clientId, { emailer: createResendMock() });
             return {
               assetId: asset.assetId,
               taskId,
@@ -1700,9 +1786,10 @@ export async function runAgentTools(input: {
           ok: true,
           data: await (async () => {
             const clientId = input.scope.clientId!;
+            const { createResendMock } = await import("@hrmny/integrations");
             const portalHref = await (
               await import("../auth/portal-review-href")
-            ).portalReviewHref(clientId);
+            ).portalReviewHref(clientId, { emailer: createResendMock() });
             return {
               assetId,
               taskId,

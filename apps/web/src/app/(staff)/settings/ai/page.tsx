@@ -14,6 +14,16 @@ type AgentKey = Dashboard["agents"][number]["key"];
 
 type GateOutcome = "approved" | "pending" | "rejected" | "auto";
 
+const OS_SETTLE_TOOLS = new Set([
+  "crm.closed_loop",
+  "finance.os_approve",
+  "clients.os_month1_advance",
+]);
+
+function hasOsSettleTool(tools: readonly string[] | null | undefined) {
+  return (tools ?? []).some((tool) => OS_SETTLE_TOOLS.has(tool));
+}
+
 const GATE_TONE: Record<GateOutcome, string> = {
   approved: "bg-emerald-100 text-emerald-800",
   auto: "bg-sky-100 text-sky-800",
@@ -457,9 +467,9 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
       <h2 className="font-display text-xl font-semibold">Custom agents</h2>
       <p className="mt-1 text-sm text-muted">
         Create, modify, remove, and run agents on command with client/user/task
-        memory sandboxes. Funnel tools are the default; OS settle tools run
-        closed-loop → finance → outreach → QC → portal → campaigns (org-only —
-        leave client sandbox empty). Mock LLM when OpenRouter credits are empty.
+        memory sandboxes. Client-sandbox runs are read-only even when the agent
+        catalog lists draft tools. OS settle actions require an explicit org-only
+        Run with no client sandbox. Mock LLM when OpenRouter credits are empty.
       </p>
       {(list.data ?? []).some((a) => a.toolsEmpty) ? (
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm text-ink">
@@ -550,7 +560,7 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
             );
           }}
         >
-          Funnel tools
+          Funnel catalog
         </button>
         <button
           type="button"
@@ -563,7 +573,7 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
           onClick={() => {
             setToolPreset("demo_os_settle");
             setRunPrompt(
-              "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign, sign off onboarding phase, advance month1, ref-approve calendar.",
+              "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance to client review, approve campaign and publish campaign, sign off onboarding phase, advance month1, ref-approve calendar.",
             );
           }}
         >
@@ -572,7 +582,7 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
         <span className="self-center text-xs text-muted">
           {toolPreset === "demo_os_settle"
             ? "Run with no client sandbox (org-only gates)."
-            : "Default funnel allowlist."}
+            : "Client runs are policy-filtered to reads."}
         </span>
       </div>
       <textarea
@@ -700,8 +710,8 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
                 {agent.enabled ? "enabled" : "disabled"} ·{" "}
                 {agent.model ?? "default model"} ·{" "}
                 {agent.toolsEmpty
-                  ? "tools empty (runtime funnel defaults)"
-                  : `${agent.effectiveAllowedTools?.length ?? 0} tools`}
+                  ? "catalog empty (runtime defaults, policy-filtered)"
+                  : `${agent.effectiveAllowedTools?.length ?? 0} catalog entries`}
               </p>
               {!agent.toolsEmpty &&
               Array.isArray(agent.effectiveAllowedTools) &&
@@ -721,15 +731,8 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
                 className="rounded-full border border-sand bg-white px-3 py-1.5 text-xs disabled:opacity-40"
                 disabled={!agent.enabled || runCustom.isPending || !runPrompt.trim()}
                 onClick={() => {
-                  const hasOsSettle = (
-                    agent.effectiveAllowedTools ?? []
-                  ).some((t) =>
-                    [
-                      "crm.closed_loop",
-                      "finance.os_approve",
-                      "portal.os_approve",
-                      "clients.os_month1_advance",
-                    ].includes(t),
+                  const hasOsSettle = hasOsSettleTool(
+                    agent.effectiveAllowedTools,
                   );
                   runCustom.mutate({
                     id: agent.customAgentId,
@@ -740,7 +743,10 @@ function CustomAgentsPanel({ clientId }: { clientId: string }) {
                   });
                 }}
               >
-                Run
+                {clientId &&
+                !hasOsSettleTool(agent.effectiveAllowedTools)
+                  ? "Run read-only"
+                  : "Run"}
                 {clientId &&
                 (agent.effectiveAllowedTools ?? []).some((t) =>
                   ["crm.closed_loop", "finance.os_approve"].includes(t),

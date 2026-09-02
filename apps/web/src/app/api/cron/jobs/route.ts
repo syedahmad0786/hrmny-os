@@ -17,6 +17,13 @@ import { inngestCloudConfigured } from "@/server/inngest/client";
 import { runCrmTaskDigest } from "@/server/reminders/crm-task-digest";
 import { runLeadgenDailyCron } from "@/server/leadgen/daily-cron";
 import { runReconSweepers } from "@/server/recon/cron-sweepers";
+import {
+  APOLLO_PEOPLE_SEARCH_JOB_KIND,
+  APOLLO_PROVIDER_CONCURRENCY_KEY,
+  redactExpiredApolloPeopleSearchCandidates,
+  runApolloPeopleSearchQueuedJob,
+} from "@/server/sales-os/apollo-search";
+import { getSalesOsSettings } from "@/server/sales-os/store";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +52,6 @@ const WorkAiTeammateJobSchema = z.object({
   triggerType: z.enum(["assignment", "mention", "rule", "follow_up"]),
   eventKey: z.string().min(1).max(500),
 });
-
 type ClaimedJob = {
   scheduled_job_id: string;
   kind: string;
@@ -62,16 +68,111 @@ export async function GET(request: Request) {
   const db = getDb();
   if (!db) return new Response("DATABASE_URL missing", { status: 503 });
 
+  // Retention runs before any external call so a slow provider backlog cannot
+  // starve governed erasure. Failure is isolated and surfaced as a health
+  // signal; the next cron tick retries it.
+  let apolloCandidatesRedacted = 0;
+  let apolloRedactionError: string | null = null;
+  let apolloRedactionBacklog = false;
+  try {
+    const settings = await getSalesOsSettings();
+    const batchLimit = 500;
+    const maxBatches = 20;
+    for (let batch = 0; batch < maxBatches; batch += 1) {
+      const redacted = await redactExpiredApolloPeopleSearchCandidates({
+        retentionMonths: settings.retentionMonths,
+        limit: batchLimit,
+      });
+      apolloCandidatesRedacted += redacted;
+      if (redacted < batchLimit) break;
+      if (batch === maxBatches - 1) apolloRedactionBacklog = true;
+    }
+    if (apolloRedactionBacklog) {
+      await emitHealthSignal("apollo_candidate_retention_backlog", "warn", {
+        redacted: apolloCandidatesRedacted,
+        batchLimit,
+        maxBatches,
+      });
+    }
+  } catch {
+    apolloRedactionError = "APOLLO_CANDIDATE_REDACTION_FAILED";
+    await emitHealthSignal("apollo_candidate_retention", "warn", {
+      reason: apolloRedactionError,
+    }).catch(() => undefined);
+  }
+
+  // Apollo jobs own a shared job/receipt attempt fence. Both cron fallback and
+  // Inngest enter through the same claimant; the generic worker must not claim
+  // or reset those rows independently.
+  const apolloDue = await db.execute<{ scheduled_job_id: string }>(sql`
+    select candidate.scheduled_job_id
+    from public.scheduled_job candidate
+    where candidate.kind = ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
+      and candidate.concurrency_key = ${APOLLO_PROVIDER_CONCURRENCY_KEY}
+      and (
+        (
+          candidate.status = 'running'
+          and (
+            candidate.lease_expires_at is null
+            or candidate.lease_expires_at <= now()
+          )
+        )
+        or (
+          candidate.status = 'pending'
+          and candidate.run_at <= now()
+          and not exists (
+            select 1
+            from public.scheduled_job active
+            where active.concurrency_key = candidate.concurrency_key
+              and active.status = 'running'
+          )
+        )
+      )
+    order by
+      case when candidate.status = 'running' then 0 else 1 end,
+      coalesce(
+        candidate.lease_expires_at,
+        candidate.locked_at,
+        candidate.run_at
+      ),
+      candidate.run_at,
+      candidate.scheduled_job_id
+    limit 1
+  `);
+  let apolloCompleted = 0;
+  let apolloFailed = 0;
+  let apolloRuntimeFailures = 0;
+  for (const job of apolloDue) {
+    let outcome: Awaited<ReturnType<typeof runApolloPeopleSearchQueuedJob>>;
+    try {
+      outcome = await runApolloPeopleSearchQueuedJob(job.scheduled_job_id);
+    } catch {
+      apolloFailed += 1;
+      apolloRuntimeFailures += 1;
+      await emitHealthSignal("apollo_people_search_worker", "warn", {
+        jobId: job.scheduled_job_id,
+        reason: "APOLLO_WORKER_RUNTIME_FAILURE",
+      }).catch(() => undefined);
+      continue;
+    }
+    if (outcome.status === "failed" || outcome.status === "dead_letter") {
+      apolloFailed += 1;
+    } else if (outcome.status === "completed" || outcome.status === "revoked") {
+      apolloCompleted += 1;
+    }
+  }
   await db.execute(sql`
     update scheduled_job
     set status = 'pending', locked_at = null, updated_at = now()
     where status = 'running' and locked_at < now() - interval '10 minutes'
+      and kind <> ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
   `);
   const claimedResult = await db.execute(sql`
     with due as (
       select scheduled_job_id
       from scheduled_job
       where status = 'pending' and run_at <= now()
+        and kind <> ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
       order by run_at
       for update skip locked
       limit 20
@@ -188,11 +289,14 @@ export async function GET(request: Request) {
       completed += 1;
     } catch (error) {
       const retry = Number(job.attempts) < 3;
+      const retryDelaySeconds = 5 * 60;
       await db
         .update(scheduledJob)
         .set({
           status: retry ? "pending" : "failed",
-          runAt: retry ? new Date(Date.now() + 5 * 60_000) : new Date(),
+          runAt: retry
+            ? new Date(Date.now() + retryDelaySeconds * 1_000)
+            : new Date(),
           lockedAt: null,
           lastError: String(error).slice(0, 2_000),
           updatedAt: new Date(),
@@ -212,48 +316,67 @@ export async function GET(request: Request) {
       delayedJobs: Number(lag!.count),
     });
   }
-  const [workWebhooks, expiredAiRuns, dueReports, crmTaskDigest, leadgenDaily, recon] =
-    await Promise.all([
-      deliverPendingWorkWebhooks(),
-      cleanupExpiredWorkAiRuns(),
-      // Scheduled reports: interval-based due-check filters to what should send
-      // this tick (mock Resend until RESEND_MODE=live). Never fatal to the job run.
-      inngestCloudConfigured()
-        ? Promise.resolve({ skipped: "inngest_configured" as const })
-        : runDueReports().catch((error) => ({
-            error: String(error).slice(0, 500),
-          })),
-      // CRM task digest: once/day owner nudge via Google Chat. Self-gates on
-      // webhook env + hour window + today's health_signal row. Never fatal.
-      runCrmTaskDigest().catch((error) => ({
-        posted: false,
-        error: String(error).slice(0, 500),
-      })),
-      // Daily lead-gen pipeline (Apollo/Hunter live when keyed). Never fatal.
-      inngestCloudConfigured()
-        ? Promise.resolve({
-            ran: false,
-            skipped: "inngest_configured" as const,
-          })
-        : runLeadgenDailyCron().catch((error) => ({
-            ran: false,
-            error: String(error).slice(0, 500),
-          })),
-      // Xero mirror, competitor scan, retainer drafts, memory embed backfill.
-      // Mock-safe; never fatal to the job run.
-      runReconSweepers().catch((error) => ({
-        error: String(error).slice(0, 500),
-      })),
-    ]);
-  return Response.json({
-    claimed: claimed.length,
-    completed,
-    failed,
+  const [
     workWebhooks,
     expiredAiRuns,
     dueReports,
     crmTaskDigest,
     leadgenDaily,
     recon,
+  ] = await Promise.all([
+    deliverPendingWorkWebhooks(),
+    cleanupExpiredWorkAiRuns(),
+    // Scheduled reports: interval-based due-check filters to what should send
+    // this tick (mock Resend until RESEND_MODE=live). Never fatal to the job run.
+    inngestCloudConfigured()
+      ? Promise.resolve({ skipped: "inngest_configured" as const })
+      : runDueReports().catch((error) => ({
+          error: String(error).slice(0, 500),
+        })),
+    // CRM task digest: once/day owner nudge via Google Chat. Self-gates on
+    // webhook env + hour window + today's health_signal row. Never fatal.
+    runCrmTaskDigest().catch((error) => ({
+      posted: false,
+      error: String(error).slice(0, 500),
+    })),
+    // Daily Sales research gate. It fails closed before provider/CRM work
+    // until the audited policy and proposal-only runtime are both present.
+    inngestCloudConfigured()
+      ? Promise.resolve({
+          ran: false,
+          skipped: "inngest_configured" as const,
+        })
+      : runLeadgenDailyCron().catch((error) => ({
+          ran: false,
+          error: String(error).slice(0, 500),
+        })),
+    // Xero mirror, competitor scan, retainer drafts, memory embed backfill.
+    // Mock-safe; never fatal to the job run.
+    runReconSweepers().catch((error) => ({
+      error: String(error).slice(0, 500),
+    })),
+  ]);
+  const responseBody = {
+    claimed: claimed.length,
+    completed,
+    failed,
+    apollo: {
+      considered: apolloDue.length,
+      completed: apolloCompleted,
+      failed: apolloFailed,
+      runtimeFailures: apolloRuntimeFailures,
+      candidatesRedacted: apolloCandidatesRedacted,
+      redactionError: apolloRedactionError,
+      redactionBacklog: apolloRedactionBacklog,
+    },
+    workWebhooks,
+    expiredAiRuns,
+    dueReports,
+    crmTaskDigest,
+    leadgenDaily,
+    recon,
+  };
+  return Response.json(responseBody, {
+    status: apolloRuntimeFailures > 0 ? 500 : 200,
   });
 }

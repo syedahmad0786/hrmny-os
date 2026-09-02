@@ -6,10 +6,19 @@ import { resetCrmMemory } from "../crm/memory";
 import { listCompanies, listContacts, listDeals } from "../crm/repository";
 import { resetIntegrationReceiptMemory } from "../integrations/inbox";
 import {
+  APOLLO_PAID_APPROVAL_ACTION,
   enrichOneApolloPerson,
   getApolloOnePersonCanaryStatus,
-  searchApolloPeopleFree,
+  type ApolloConsumedApprovalReceipt,
+  type ApolloExactApprovalClaim,
 } from "./apollo-one";
+import {
+  runScheduledApolloPeopleSearchForTest,
+  searchApolloPeopleFree,
+  type ApolloPeopleSearchRetryPayload,
+} from "./apollo-search";
+
+const runScheduledApolloPeopleSearch = runScheduledApolloPeopleSearchForTest;
 import { creditUsed, resetSalesOsStore } from "./store";
 
 function liveStub(): LeadSourceAdapter {
@@ -35,6 +44,24 @@ function liveStub(): LeadSourceAdapter {
   };
 }
 
+const PAID_ACTOR = "20000000-0000-4000-8000-000000000009";
+const PAID_APPROVAL = "43000000-0000-4000-8000-000000000001";
+const PAID_NOW = new Date("2026-08-31T12:00:00.000Z");
+
+function exactApproval() {
+  return vi.fn(
+    async (
+      claim: ApolloExactApprovalClaim,
+    ): Promise<ApolloConsumedApprovalReceipt> => ({
+      ...claim,
+      action: APOLLO_PAID_APPROVAL_ACTION,
+      approvedAt: new Date(PAID_NOW.getTime() - 1_000).toISOString(),
+      expiresAt: new Date(PAID_NOW.getTime() + 60_000).toISOString(),
+      status: "consumed" as const,
+    }),
+  );
+}
+
 describe("Apollo one-person connection canary", () => {
   beforeEach(() => {
     resetCrmMemory();
@@ -47,6 +74,8 @@ describe("Apollo one-person connection canary", () => {
   });
 
   it("uses the staff vault bridge for zero-credit live People Search", async () => {
+    const actorEmployeeId = "20000000-0000-4000-8000-000000000001";
+    let queued: ApolloPeopleSearchRetryPayload | undefined;
     const fetchMock = vi.fn(
       async (_input: string | URL | Request, _init?: RequestInit) =>
         new Response(
@@ -68,21 +97,35 @@ describe("Apollo one-person connection canary", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await searchApolloPeopleFree(
+    const pending = await searchApolloPeopleFree(
       {
+        idempotencyKey: "10000000-0000-4000-8000-000000000001",
         titles: ["Marketing Director"],
-        actorEmployeeId: "employee-1",
+        actorEmployeeId,
       },
       {
-        resolveApiKey: vi.fn(async (toolkit, employeeId) => {
-          expect(toolkit).toBe("apollo");
-          expect(employeeId).toBe("employee-1");
-          return { apiKey: "vault-test-key", source: "vault" as const };
-        }),
+        scheduleRetry: async (payload, runAt) => {
+          queued = payload;
+          return { jobId: "job-live", nextAttemptAt: runAt.toISOString() };
+        },
       },
     );
+    expect(pending.status).toBe("retry_scheduled");
+    const result = await runScheduledApolloPeopleSearch(queued!, {
+      authorizeActor: vi.fn(async () => true),
+      resolveApiKey: vi.fn(async (toolkit, employeeId) => {
+        expect(toolkit).toBe("apollo");
+        expect(employeeId).toBe(actorEmployeeId);
+        return { apiKey: "vault-test-key", source: "vault" as const };
+      }),
+    });
 
     expect(result.mode).toBe("live");
+    expect(result).toMatchObject({
+      status: "completed",
+      duplicate: false,
+      attempts: 1,
+    });
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]).toMatchObject({
       externalId: "apollo-live-person-1",
@@ -102,6 +145,40 @@ describe("Apollo one-person connection canary", () => {
       include_similar_titles: true,
       person_locations: ["United Arab Emirates"],
     });
+  });
+
+  it("fails closed instead of returning synthetic people when Apollo is absent", async () => {
+    const actorEmployeeId = "20000000-0000-4000-8000-000000000002";
+    let queued: ApolloPeopleSearchRetryPayload | undefined;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await searchApolloPeopleFree(
+      {
+        idempotencyKey: "10000000-0000-4000-8000-000000000002",
+        titles: ["Marketing Director"],
+        actorEmployeeId,
+      },
+      {
+        scheduleRetry: async (payload, runAt) => {
+          queued = payload;
+          return { jobId: "job-missing", nextAttemptAt: runAt.toISOString() };
+        },
+      },
+    );
+    await expect(
+      runScheduledApolloPeopleSearch(queued!, {
+        authorizeActor: vi.fn(async () => true),
+        resolveApiKey: vi.fn(async () => ({
+          apiKey: null,
+          source: "none" as const,
+        })),
+      }),
+    ).resolves.toMatchObject({
+      status: "revoked",
+      reason: "APOLLO_FREE_SEARCH_CONNECTION_REQUIRED",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("uses the same staff vault bridge for the bounded People Match canary", async () => {
@@ -135,12 +212,15 @@ describe("Apollo one-person connection canary", () => {
           companyDomain: "live.example",
         },
         confirmCreditUse: true,
-        actorEmployeeId: "employee-2",
+        actorEmployeeId: PAID_ACTOR,
+        approvalReceiptId: PAID_APPROVAL,
       },
       {
+        now: () => PAID_NOW,
+        consumeExactApproval: exactApproval(),
         resolveApiKey: vi.fn(async (toolkit, employeeId) => {
           expect(toolkit).toBe("apollo");
-          expect(employeeId).toBe("employee-2");
+          expect(employeeId).toBe(PAID_ACTOR);
           return { apiKey: "vault-test-key", source: "vault" as const };
         }),
       },
@@ -176,10 +256,18 @@ describe("Apollo one-person connection canary", () => {
         companyDomain: "acme.example",
       },
       confirmCreditUse: true as const,
+      actorEmployeeId: PAID_ACTOR,
+      approvalReceiptId: PAID_APPROVAL,
     };
 
-    const first = await enrichOneApolloPerson(input, { leadSource: source });
-    const replay = await enrichOneApolloPerson(input, { leadSource: source });
+    const approval = exactApproval();
+    const deps = {
+      leadSource: source,
+      now: () => PAID_NOW,
+      consumeExactApproval: approval,
+    };
+    const first = await enrichOneApolloPerson(input, deps);
+    const replay = await enrichOneApolloPerson(input, deps);
 
     expect(first).toMatchObject({
       mode: "live",
@@ -216,18 +304,74 @@ describe("Apollo one-person connection canary", () => {
       {
         candidate: { externalId: "apollo-person-1", fullName: "Mina Lead" },
         confirmCreditUse: true,
+        actorEmployeeId: PAID_ACTOR,
+        approvalReceiptId: PAID_APPROVAL,
       },
-      { leadSource: source },
+      {
+        leadSource: source,
+        now: () => PAID_NOW,
+        consumeExactApproval: exactApproval(),
+      },
     );
     await expect(
       enrichOneApolloPerson(
         {
           candidate: { externalId: "apollo-person-2", fullName: "Other Lead" },
           confirmCreditUse: true,
+          actorEmployeeId: PAID_ACTOR,
+          approvalReceiptId: PAID_APPROVAL,
         },
-        { leadSource: source },
+        {
+          leadSource: source,
+          now: () => PAID_NOW,
+          consumeExactApproval: exactApproval(),
+        },
       ),
     ).rejects.toThrow(/PAYLOAD_MISMATCH/);
     expect(source.enrichLead).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps paid People Match dormant without a fresh exact receipt verifier", async () => {
+    const source = liveStub();
+    await expect(
+      enrichOneApolloPerson(
+        {
+          candidate: { externalId: "apollo-person-locked" },
+          confirmCreditUse: true,
+          actorEmployeeId: PAID_ACTOR,
+          approvalReceiptId: PAID_APPROVAL,
+        },
+        { leadSource: source },
+      ),
+    ).rejects.toThrow(/EXACT_APPROVAL_RECEIPT/);
+    expect(source.enrichLead).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale or candidate-mismatched paid approval before Apollo", async () => {
+    const source = liveStub();
+    await expect(
+      enrichOneApolloPerson(
+        {
+          candidate: { externalId: "apollo-person-stale" },
+          confirmCreditUse: true,
+          actorEmployeeId: PAID_ACTOR,
+          approvalReceiptId: PAID_APPROVAL,
+        },
+        {
+          leadSource: source,
+          now: () => PAID_NOW,
+          consumeExactApproval: async (claim) => ({
+            ...claim,
+            candidateHash: "wrong-candidate",
+            approvedAt: new Date(
+              PAID_NOW.getTime() - 10 * 60_000,
+            ).toISOString(),
+            expiresAt: new Date(PAID_NOW.getTime() + 60_000).toISOString(),
+            status: "consumed",
+          }),
+        },
+      ),
+    ).rejects.toThrow(/INVALID_OR_STALE/);
+    expect(source.enrichLead).not.toHaveBeenCalled();
   });
 });

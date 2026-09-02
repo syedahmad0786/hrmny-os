@@ -1,13 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import {
   demoBlockerConnectionsPath,
   prioritizeDemoBlockers,
 } from "@/lib/demo-blocker-anchor";
+import {
+  clearPendingApolloSearch,
+  isCurrentApolloSearchOperation,
+  persistPendingApolloSearch,
+  restorePendingApolloSearch,
+  type ActiveApolloSearch,
+  type PendingApolloSearch,
+} from "@/lib/apollo-search-session";
 import { formatReadyLlmLine, type ReadySmoke } from "@/lib/ready-smoke";
+import {
+  apolloCancellationNote,
+  apolloSearchStatusNote,
+} from "./apollo-status-copy";
 import { ResearchConsole } from "../_components/research-console";
 
 const LOOP = [
@@ -39,22 +51,100 @@ type SearchCandidate = {
   externalId: string;
   fullName?: string;
   title?: string;
-  email?: string;
-  emailStatus?: string;
   companyName?: string;
   companyDomain?: string;
-  linkedinUrl?: string;
   source: string;
 };
+
+type SearchBridgeResult = {
+  receiptId: string;
+  mode: "mock" | "live";
+  status:
+    "processing" | "retry_scheduled" | "completed" | "dead_letter" | "revoked";
+  attempts: number;
+  candidates: SearchCandidate[];
+  nextAttemptAt?: string;
+  queue?: "inngest" | "scheduled_job_fallback" | "injected_test_queue";
+  reason?: string;
+  providerAttemptedPreviously?: boolean;
+  providerMaySettle?: boolean;
+};
+
+function searchStatusNote(payload: SearchBridgeResult): string {
+  return apolloSearchStatusNote({
+    ...payload,
+    candidateCount: payload.candidates.length,
+  });
+}
+
+type PrincipalOperation = {
+  principalId: string | null;
+  operationId: string;
+};
+
+function operationBelongsToPrincipal(
+  operation: PrincipalOperation | null,
+  principalId: string | null,
+) {
+  return Boolean(
+    operation && principalId && operation.principalId === principalId,
+  );
+}
+
+const EMPTY_REQUEST_ID = "00000000-0000-4000-8000-000000000000";
+
+function samePendingSearch(
+  left: PendingApolloSearch,
+  right: Omit<PendingApolloSearch, "idempotencyKey">,
+) {
+  return (
+    left.query === right.query &&
+    left.perPage === right.perPage &&
+    left.titles.join("\n") === right.titles.join("\n")
+  );
+}
 
 export default function HuntClientsPage() {
   const [result, setResult] = useState<string | null>(null);
   const [searchNote, setSearchNote] = useState<string | null>(null);
   const [title, setTitle] = useState("Marketing Director");
   const [query, setQuery] = useState("");
+  const [syntheticCompany, setSyntheticCompany] = useState("");
+  const [apolloSearchRequestId, setApolloSearchRequestId] = useState<
+    string | null
+  >(null);
+  const [pendingApolloSearch, setPendingApolloSearch] =
+    useState<PendingApolloSearch | null>(null);
+  const [apolloSearchResult, setApolloSearchResult] =
+    useState<SearchBridgeResult | null>(null);
   const [lastApolloDealId, setLastApolloDealId] = useState<string | null>(null);
+  const [uiPrincipalId, setUiPrincipalId] = useState<string | null>(null);
+  const [demoResultPrincipalId, setDemoResultPrincipalId] = useState<
+    string | null
+  >(null);
+  const [freeSearchOperation, setFreeSearchOperation] =
+    useState<PrincipalOperation | null>(null);
+  const [cancelSearchOperation, setCancelSearchOperation] =
+    useState<PrincipalOperation | null>(null);
+  const [apolloImportOperation, setApolloImportOperation] =
+    useState<PrincipalOperation | null>(null);
+  const [demoOperation, setDemoOperation] = useState<PrincipalOperation | null>(
+    null,
+  );
   const [ready, setReady] = useState<ReadySmoke | null>(null);
   const utils = trpc.useUtils();
+  const salesAccess = trpc.salesOs.access.useQuery();
+  const session = trpc.auth.session.useQuery();
+  const staffPrincipalId =
+    session.data?.actorType === "staff" ? session.data.employeeId : null;
+  const verifiedStaffPrincipalId =
+    session.isSuccess && !session.isFetching ? staffPrincipalId : null;
+  const activePrincipalIdRef = useRef<string | null>(verifiedStaffPrincipalId);
+  const activeApolloSearchRef = useRef<ActiveApolloSearch | null>(null);
+  activePrincipalIdRef.current = verifiedStaffPrincipalId;
+  const isUiPrincipalCurrent = Boolean(
+    verifiedStaffPrincipalId && uiPrincipalId === verifiedStaffPrincipalId,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -69,36 +159,249 @@ export default function HuntClientsPage() {
     };
   }, []);
 
-  const apolloStatus = trpc.salesOs.apollo.status.useQuery();
-  const freeSearch = trpc.salesOs.apollo.search.useMutation({
-    onSuccess: (payload) => {
-      setSearchNote(
-        payload.candidates.length
-          ? `${payload.candidates.length} people found via Apollo ${payload.mode}. Search used 0 credits.`
-          : `No people matched. Apollo ${payload.mode} search used 0 credits.`,
-      );
-    },
-    onError: (error) => setSearchNote(error.message),
-  });
-  const enrichOne = trpc.salesOs.apollo.enrichOne.useMutation({
-    onSuccess: (payload) => {
-      setLastApolloDealId(payload.crm?.dealId ?? null);
-      setSearchNote(
-        payload.imported
-          ? `Connection proven. ${payload.crm?.fullName ?? "One person"} was reconciled into ${payload.crm?.companyName ?? "CRM"}; ${payload.creditsRecorded} credit recorded.`
-          : `${payload.reason ?? "Apollo returned no match."} ${payload.creditsRecorded} credit recorded.`,
-      );
-      void utils.salesOs.apollo.status.invalidate();
-      void utils.crm.deals.list.invalidate();
-      void utils.crm.companies.list.invalidate();
-      void utils.crm.contacts.list.invalidate();
-    },
-    onError: (error) => setSearchNote(error.message),
-  });
+  useEffect(() => {
+    activeApolloSearchRef.current = null;
+    setResult(null);
+    setSearchNote(null);
+    setTitle("Marketing Director");
+    setQuery("");
+    setSyntheticCompany("");
+    setPendingApolloSearch(null);
+    setApolloSearchRequestId(null);
+    setApolloSearchResult(null);
+    setLastApolloDealId(null);
+    setDemoResultPrincipalId(null);
+    setFreeSearchOperation(null);
+    setCancelSearchOperation(null);
+    setApolloImportOperation(null);
+    setDemoOperation(null);
+    setUiPrincipalId(staffPrincipalId);
+    const principalId = staffPrincipalId;
+    if (!principalId) return;
+    void utils.salesOs.access.invalidate();
+    void utils.salesOs.apollo.connection.invalidate();
+    const restored = restorePendingApolloSearch(
+      window.sessionStorage,
+      principalId,
+    );
+    if (!restored) return;
+    activeApolloSearchRef.current = {
+      principalId,
+      idempotencyKey: restored.idempotencyKey,
+    };
+    setPendingApolloSearch(restored);
+    setApolloSearchRequestId(restored.idempotencyKey);
+    setTitle(restored.titles[0] ?? "Marketing Director");
+    setQuery(restored.query ?? "");
+    setSearchNote("Restored the pending Apollo receipt; checking its status.");
+  }, [staffPrincipalId, utils]);
 
+  function rememberPendingSearch(pending: PendingApolloSearch) {
+    const principalId = activePrincipalIdRef.current;
+    if (!principalId) return false;
+    if (
+      !persistPendingApolloSearch(window.sessionStorage, principalId, pending)
+    ) {
+      return false;
+    }
+    activeApolloSearchRef.current = {
+      principalId,
+      idempotencyKey: pending.idempotencyKey,
+    };
+    setPendingApolloSearch(pending);
+    setApolloSearchRequestId(pending.idempotencyKey);
+    return true;
+  }
+
+  const forgetPendingSearch = useCallback((expectedIdempotencyKey: string) => {
+    const principalId = activePrincipalIdRef.current;
+    if (
+      !isCurrentApolloSearchOperation(
+        activeApolloSearchRef.current,
+        principalId,
+        expectedIdempotencyKey,
+      )
+    ) {
+      return;
+    }
+    activeApolloSearchRef.current = null;
+    setPendingApolloSearch(null);
+    setApolloSearchRequestId(null);
+    if (principalId) {
+      clearPendingApolloSearch(
+        window.sessionStorage,
+        principalId,
+        expectedIdempotencyKey,
+      );
+    }
+  }, []);
+
+  const apolloStatus = trpc.salesOs.apollo.status.useQuery();
+  const apolloConnection = trpc.salesOs.apollo.connection.useQuery();
+  const freeSearch = trpc.salesOs.apollo.search.useMutation({
+    onMutate: () => {
+      const operation = {
+        principalId: activePrincipalIdRef.current,
+        operationId: crypto.randomUUID(),
+      };
+      setFreeSearchOperation(operation);
+      return operation;
+    },
+    onSuccess: (payload, variables, operation) => {
+      if (
+        operation?.principalId !== activePrincipalIdRef.current ||
+        !isCurrentApolloSearchOperation(
+          activeApolloSearchRef.current,
+          activePrincipalIdRef.current,
+          variables.idempotencyKey,
+        )
+      ) {
+        return;
+      }
+      setApolloSearchResult(payload);
+      setSearchNote(searchStatusNote(payload));
+      if (
+        payload.status !== "retry_scheduled" &&
+        payload.status !== "processing"
+      ) {
+        forgetPendingSearch(variables.idempotencyKey);
+      }
+    },
+    onError: (error, variables, operation) => {
+      if (
+        operation?.principalId !== activePrincipalIdRef.current ||
+        !isCurrentApolloSearchOperation(
+          activeApolloSearchRef.current,
+          activePrincipalIdRef.current,
+          variables.idempotencyKey,
+        )
+      ) {
+        return;
+      }
+      setSearchNote(
+        `${error.message}. Outcome not confirmed; checking the same durable request before any retry.`,
+      );
+    },
+    onSettled: (_data, _error, _variables, operation) => {
+      setFreeSearchOperation((current) =>
+        current?.operationId === operation?.operationId ? null : current,
+      );
+    },
+  });
+  const freeSearchPending = operationBelongsToPrincipal(
+    freeSearchOperation,
+    verifiedStaffPrincipalId,
+  );
+  const hasCurrentApolloSearch = isCurrentApolloSearchOperation(
+    activeApolloSearchRef.current,
+    verifiedStaffPrincipalId,
+    apolloSearchRequestId,
+  );
+  const searchReceipt = trpc.salesOs.apollo.searchStatus.useQuery(
+    { idempotencyKey: apolloSearchRequestId ?? EMPTY_REQUEST_ID },
+    {
+      enabled: hasCurrentApolloSearch,
+      refetchInterval: 3_000,
+    },
+  );
+  const missingApolloReceipt =
+    hasCurrentApolloSearch &&
+    Boolean(pendingApolloSearch) &&
+    searchReceipt.isSuccess &&
+    searchReceipt.data === null;
+  const cancelSearch = trpc.salesOs.apollo.cancelSearch.useMutation({
+    onMutate: () => {
+      const operation = {
+        principalId: activePrincipalIdRef.current,
+        operationId: crypto.randomUUID(),
+      };
+      setCancelSearchOperation(operation);
+      return operation;
+    },
+    onSuccess: (payload, variables, operation) => {
+      if (
+        operation?.principalId !== activePrincipalIdRef.current ||
+        !isCurrentApolloSearchOperation(
+          activeApolloSearchRef.current,
+          activePrincipalIdRef.current,
+          variables.idempotencyKey,
+        )
+      ) {
+        return;
+      }
+      setApolloSearchResult(payload);
+      setSearchNote(apolloCancellationNote(payload));
+      forgetPendingSearch(variables.idempotencyKey);
+    },
+    onError: (error, variables, operation) => {
+      if (
+        operation?.principalId === activePrincipalIdRef.current &&
+        isCurrentApolloSearchOperation(
+          activeApolloSearchRef.current,
+          activePrincipalIdRef.current,
+          variables.idempotencyKey,
+        )
+      ) {
+        setSearchNote(error.message);
+      }
+    },
+    onSettled: (_data, _error, _variables, operation) => {
+      setCancelSearchOperation((current) =>
+        current?.operationId === operation?.operationId ? null : current,
+      );
+    },
+  });
+  const cancelSearchPending = operationBelongsToPrincipal(
+    cancelSearchOperation,
+    verifiedStaffPrincipalId,
+  );
+
+  useEffect(() => {
+    if (!hasCurrentApolloSearch) return;
+    const payload = searchReceipt.data;
+    if (searchReceipt.isSuccess && payload === null && pendingApolloSearch) {
+      setApolloSearchResult(null);
+      setSearchNote(
+        "No server receipt exists for this request. Retry the same request ID; no new provider action has been authorized.",
+      );
+      return;
+    }
+    if (!payload) return;
+    setApolloSearchResult(payload);
+    setSearchNote(searchStatusNote(payload));
+    if (payload.status === "completed") {
+      forgetPendingSearch(apolloSearchRequestId!);
+    } else if (
+      payload.status === "dead_letter" ||
+      payload.status === "revoked"
+    ) {
+      forgetPendingSearch(apolloSearchRequestId!);
+    }
+  }, [
+    apolloSearchRequestId,
+    forgetPendingSearch,
+    hasCurrentApolloSearch,
+    pendingApolloSearch,
+    searchReceipt.data,
+    searchReceipt.isSuccess,
+  ]);
   const toolReady = ready?.tools ?? null;
   const orderedBlockers = prioritizeDemoBlockers(ready?.blockers ?? []);
-  const apolloConnected = toolReady?.apollo === "configured";
+  const salesAccessReady =
+    isUiPrincipalCurrent &&
+    salesAccess.isSuccess &&
+    !salesAccess.isFetching &&
+    salesAccess.data.principalId === verifiedStaffPrincipalId;
+  const apolloConnectionReady =
+    isUiPrincipalCurrent &&
+    apolloConnection.isSuccess &&
+    !apolloConnection.isFetching &&
+    apolloConnection.data.principalId === verifiedStaffPrincipalId;
+  const apolloControlsReady = salesAccessReady && apolloConnectionReady;
+  const canOperateApollo =
+    apolloControlsReady && salesAccess.data.canOperate === true;
+  const apolloConnected =
+    apolloControlsReady && apolloConnection.data.configured === true;
   const canaryResult = apolloStatus.data?.result as
     | {
         mode?: "mock" | "live";
@@ -106,21 +409,26 @@ export default function HuntClientsPage() {
       }
     | undefined;
   const canaryDealId = canaryResult?.crm?.dealId;
-  const apolloProviderAccepted =
-    freeSearch.data?.mode === "live" ||
-    (apolloStatus.data?.status === "completed" &&
-      canaryResult?.mode === "live");
-  const canaryLabel = useMemo(() => {
-    if (apolloStatus.isLoading) return "Checking one-person allowance…";
-    if (apolloStatus.data?.available)
-      return "One approved enrichment available";
-    if (apolloStatus.data?.status === "completed")
-      return "One-person proof completed";
-    return `Enrichment locked · ${apolloStatus.data?.status ?? "unavailable"}`;
-  }, [apolloStatus.data, apolloStatus.isLoading]);
+  const apolloProviderVerified =
+    apolloSearchResult?.mode === "live" &&
+    apolloSearchResult.status === "completed";
+  const canaryLabel =
+    apolloStatus.data?.status === "completed" && canaryResult?.mode === "live"
+      ? "Locked · historical receipt retained"
+      : "Locked · exact approval receipt required";
 
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
-    onSuccess: (data) => {
+    onMutate: () => {
+      const operation = {
+        principalId: activePrincipalIdRef.current,
+        operationId: crypto.randomUUID(),
+      };
+      setDemoOperation(operation);
+      return operation;
+    },
+    onSuccess: (data, _variables, operation) => {
+      if (operation?.principalId !== activePrincipalIdRef.current) return;
+      setDemoResultPrincipalId(operation.principalId);
       if (!data.ok) {
         setResult(`Blocked at ${data.step}: ${data.reason}`);
         return;
@@ -143,10 +451,35 @@ export default function HuntClientsPage() {
       void utils.calendars.invalidate();
       void utils.clients.invalidate();
     },
-    onError: (error) => setResult(error.message),
+    onError: (error, _variables, operation) => {
+      if (operation?.principalId === activePrincipalIdRef.current) {
+        setResult(error.message);
+      }
+    },
+    onSettled: (_data, _error, _variables, operation) => {
+      setDemoOperation((current) =>
+        current?.operationId === operation?.operationId ? null : current,
+      );
+    },
   });
   const apolloImport = trpc.crm.prospect.apolloImport.useMutation({
-    onSuccess: (payload) => {
+    onMutate: () => {
+      const operation = {
+        principalId: activePrincipalIdRef.current,
+        operationId: crypto.randomUUID(),
+      };
+      setApolloImportOperation(operation);
+      return operation;
+    },
+    onSuccess: (payload, _variables, operation) => {
+      if (operation?.principalId !== activePrincipalIdRef.current) return;
+      if ("skipped" in payload) {
+        setLastApolloDealId(null);
+        setResult(
+          "Legacy bulk import is disabled. Use the reviewed free search and exact-person confirmation above.",
+        );
+        return;
+      }
       const count = payload.deals.length;
       const first = payload.deals[0];
       setLastApolloDealId(first?.dealId ?? null);
@@ -163,32 +496,25 @@ export default function HuntClientsPage() {
       );
       void utils.crm.deals.list.invalidate();
     },
-    onError: (error) => setResult(error.message),
+    onError: (error, _variables, operation) => {
+      if (operation?.principalId === activePrincipalIdRef.current) {
+        setResult(error.message);
+      }
+    },
+    onSettled: (_data, _error, _variables, operation) => {
+      setApolloImportOperation((current) =>
+        current?.operationId === operation?.operationId ? null : current,
+      );
+    },
   });
-
-  function approveOne(candidate: SearchCandidate) {
-    const label = `${candidate.fullName ?? "this person"} at ${
-      candidate.companyName ?? "their company"
-    }`;
-    if (
-      !window.confirm(
-        `Use the single approved Apollo enrichment for ${label}? This can use 1 credit. Phone, personal-email, and waterfall enrichment stay off.`,
-      )
-    ) {
-      return;
-    }
-    enrichOne.mutate({
-      candidate: {
-        externalId: candidate.externalId,
-        email: candidate.email,
-        fullName: candidate.fullName,
-        companyName: candidate.companyName,
-        companyDomain: candidate.companyDomain,
-        linkedinUrl: candidate.linkedinUrl,
-      },
-      confirmCreditUse: true,
-    });
-  }
+  const demoPending = operationBelongsToPrincipal(
+    demoOperation,
+    verifiedStaffPrincipalId,
+  );
+  const apolloImportPending = operationBelongsToPrincipal(
+    apolloImportOperation,
+    verifiedStaffPrincipalId,
+  );
 
   return (
     <main className="growth-page" data-testid="sales-growth-page">
@@ -226,7 +552,10 @@ export default function HuntClientsPage() {
       </nav>
 
       <section className="growth-command-grid">
-        <div className="growth-panel growth-search-panel">
+        <div
+          id="apollo-people-search"
+          className="growth-panel growth-search-panel"
+        >
           <div className="growth-panel-heading">
             <div>
               <p className="growth-kicker">Next action</p>
@@ -235,19 +564,45 @@ export default function HuntClientsPage() {
             <span className="growth-cost-badge">0 credits</span>
           </div>
           <p className="growth-panel-copy">
-            Apollo People Search is read-only and free. Review the people first;
-            the separate one-person button is the only paid action enabled.
+            Connected Apollo People Search is read-only and free. Synthetic
+            people stay hidden. Paid People Match remains locked until an exact
+            candidate has a fresh server-side approval receipt.
           </p>
+          {salesAccessReady && !salesAccess.data.canOperate ? (
+            <p className="growth-status" role="status">
+              View only. A Sales operator must run provider searches or paid
+              enrichment.
+            </p>
+          ) : null}
           <form
             className="growth-search-form"
             onSubmit={(event) => {
               event.preventDefault();
+              if (!canOperateApollo || !apolloConnected) {
+                setSearchNote(
+                  "Current employee access and Apollo connection must be verified before a search can start. No search was sent.",
+                );
+                return;
+              }
               setSearchNote(null);
-              freeSearch.mutate({
+              setApolloSearchResult(null);
+              const request = {
                 titles: [title.trim()],
                 query: query.trim() || undefined,
                 perPage: 8,
-              });
+              };
+              const idempotencyKey =
+                pendingApolloSearch &&
+                samePendingSearch(pendingApolloSearch, request)
+                  ? pendingApolloSearch.idempotencyKey
+                  : crypto.randomUUID();
+              if (!rememberPendingSearch({ idempotencyKey, ...request })) {
+                setSearchNote(
+                  "Verified staff identity and durable browser receipt storage are required before a search can start. No search was sent.",
+                );
+                return;
+              }
+              freeSearch.mutate({ idempotencyKey, ...request });
             }}
           >
             <div className="growth-search-fields">
@@ -256,7 +611,12 @@ export default function HuntClientsPage() {
                 <input
                   id="apollo-title"
                   data-testid="hunt-apollo-title"
-                  value={title}
+                  disabled={
+                    !canOperateApollo ||
+                    !apolloConnected ||
+                    hasCurrentApolloSearch
+                  }
+                  value={isUiPrincipalCurrent ? title : "Marketing Director"}
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="e.g. Marketing Director"
                   minLength={2}
@@ -267,7 +627,12 @@ export default function HuntClientsPage() {
                 <input
                   id="apollo-query"
                   data-testid="hunt-apollo-query"
-                  value={query}
+                  disabled={
+                    !canOperateApollo ||
+                    !apolloConnected ||
+                    hasCurrentApolloSearch
+                  }
+                  value={isUiPrincipalCurrent ? query : ""}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="e.g. hospitality"
                 />
@@ -280,16 +645,56 @@ export default function HuntClientsPage() {
               <button
                 type="submit"
                 data-testid="hunt-apollo-search"
-                disabled={freeSearch.isPending || title.trim().length < 2}
+                disabled={
+                  !canOperateApollo ||
+                  !apolloConnected ||
+                  freeSearchPending ||
+                  hasCurrentApolloSearch ||
+                  title.trim().length < 2
+                }
               >
-                {freeSearch.isPending
+                {freeSearchPending
                   ? "Searching…"
-                  : "Search Apollo · 0 credits"}
+                  : !apolloControlsReady
+                    ? "Checking employee connection…"
+                    : !apolloConnected
+                      ? "Connect Apollo to search"
+                      : "Search Apollo · 0 credits"}
               </button>
+              {pendingApolloSearch && hasCurrentApolloSearch ? (
+                missingApolloReceipt ? (
+                  <button
+                    type="button"
+                    data-testid="hunt-apollo-retry-same-search"
+                    data-request-id={pendingApolloSearch.idempotencyKey}
+                    disabled={
+                      !canOperateApollo || !apolloConnected || freeSearchPending
+                    }
+                    onClick={() => freeSearch.mutate(pendingApolloSearch)}
+                  >
+                    {freeSearchPending
+                      ? "Retrying same request…"
+                      : "Retry same request"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="hunt-apollo-cancel-search"
+                    disabled={cancelSearchPending}
+                    onClick={() =>
+                      cancelSearch.mutate({
+                        idempotencyKey: pendingApolloSearch.idempotencyKey,
+                      })
+                    }
+                  >
+                    {cancelSearchPending ? "Cancelling…" : "Cancel search"}
+                  </button>
+                )
+              ) : null}
             </div>
           </form>
 
-          {searchNote ? (
+          {isUiPrincipalCurrent && searchNote ? (
             <p
               className="growth-status"
               role="status"
@@ -305,9 +710,10 @@ export default function HuntClientsPage() {
             </p>
           ) : null}
 
-          {(freeSearch.data?.candidates ?? []).length > 0 ? (
+          {isUiPrincipalCurrent &&
+          (apolloSearchResult?.candidates ?? []).length > 0 ? (
             <ol className="growth-candidates" data-testid="hunt-apollo-results">
-              {(freeSearch.data?.candidates ?? []).map((candidate) => (
+              {(apolloSearchResult?.candidates ?? []).map((candidate) => (
                 <li key={candidate.externalId}>
                   <div>
                     <strong>
@@ -324,27 +730,9 @@ export default function HuntClientsPage() {
                     </small>
                   </div>
                   <div className="growth-candidate-actions">
-                    {candidate.linkedinUrl ? (
-                      <a
-                        href={candidate.linkedinUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Profile
-                      </a>
-                    ) : null}
-                    <button
-                      type="button"
-                      data-testid="hunt-apollo-enrich-one"
-                      disabled={
-                        enrichOne.isPending || !apolloStatus.data?.available
-                      }
-                      onClick={() => approveOne(candidate)}
-                    >
-                      {enrichOne.isPending
-                        ? "Enriching…"
-                        : "Use 1 approved credit"}
-                    </button>
+                    <span data-testid="hunt-apollo-enrichment-locked">
+                      Paid enrichment locked
+                    </span>
                   </div>
                 </li>
               ))}
@@ -359,26 +747,30 @@ export default function HuntClientsPage() {
               <h2>Apollo guardrails</h2>
             </div>
             <span
-              className={`growth-dot${apolloProviderAccepted ? " is-live" : ""}`}
+              className={`growth-dot${apolloProviderVerified ? " is-live" : ""}`}
               aria-label={
-                apolloProviderAccepted
-                  ? "Apollo provider accepted"
-                  : "Apollo provider acceptance pending"
+                apolloProviderVerified
+                  ? "Apollo response verified"
+                  : "Apollo response verification pending"
               }
             />
           </div>
           <dl className="growth-guardrails">
             <div>
               <dt>Credential</dt>
-              <dd>
-                {apolloConnected ? "Reference present" : "Not configured"}
+              <dd data-testid="hunt-apollo-credential">
+                {!apolloControlsReady
+                  ? "Checking current employee"
+                  : apolloConnected
+                    ? "Reference present"
+                    : "Not configured"}
               </dd>
             </div>
             <div>
               <dt>People Search</dt>
               <dd>
-                {apolloProviderAccepted
-                  ? "Provider accepted · 0 credits"
+                {apolloProviderVerified
+                  ? "Response verified · 0 credits"
                   : apolloConnected
                     ? "Ready to verify · 0 credits"
                     : "Unavailable · 0 credits"}
@@ -433,9 +825,17 @@ export default function HuntClientsPage() {
         </aside>
       </section>
 
-      <ResearchConsole />
+      {staffPrincipalId ? (
+        <div
+          hidden={!isUiPrincipalCurrent || !salesAccessReady}
+          inert={!isUiPrincipalCurrent || !salesAccessReady}
+          aria-hidden={!isUiPrincipalCurrent || !salesAccessReady}
+        >
+          <ResearchConsole key={staffPrincipalId} />
+        </div>
+      ) : null}
 
-      {ready?.authMode === "dev" ? (
+      {ready?.syntheticSalesFixtures ? (
         <details className="growth-test-tools">
           <summary data-testid="hunt-test-tools">
             Test tools <span>Creates clearly labeled synthetic records</span>
@@ -445,48 +845,65 @@ export default function HuntClientsPage() {
               These controls support local/acceptance testing. They are
               collapsed so the client workflow stays focused.
             </p>
+            <label className="growth-test-input" htmlFor="synthetic-company">
+              Synthetic company label
+              <input
+                id="synthetic-company"
+                data-testid="hunt-synthetic-company"
+                disabled={!isUiPrincipalCurrent}
+                value={isUiPrincipalCurrent ? syntheticCompany : ""}
+                onChange={(event) => setSyntheticCompany(event.target.value)}
+                placeholder="e.g. E2E Northstar 001"
+                minLength={2}
+              />
+            </label>
             <div className="growth-test-actions">
               <button
                 type="button"
                 data-testid="hunt-apollo-prospect"
                 disabled={
-                  apolloImport.isPending ||
-                  (query.trim() || title.trim()).length < 2
+                  !isUiPrincipalCurrent ||
+                  apolloImportPending ||
+                  syntheticCompany.trim().length < 2
                 }
                 onClick={() => {
                   setResult(null);
-                  apolloImport.mutate({ query: query.trim() || title.trim() });
+                  apolloImport.mutate({ query: syntheticCompany.trim() });
                 }}
               >
-                {apolloImport.isPending
+                {apolloImportPending
                   ? "Importing…"
-                  : "Create mock Apollo deal"}
+                  : "Create synthetic Apollo fixture"}
               </button>
               <button
                 type="button"
-                disabled={demo.isPending}
+                disabled={!isUiPrincipalCurrent || demoPending}
                 onClick={() => {
                   setResult(null);
                   demo.mutate({});
                 }}
               >
-                {demo.isPending ? "Running…" : "Run demo closed loop"}
+                {demoPending ? "Running…" : "Run demo closed loop"}
               </button>
               <button
                 type="button"
                 data-testid="hunt-closed-loop-apollo"
-                disabled={demo.isPending}
+                disabled={
+                  !isUiPrincipalCurrent ||
+                  demoPending ||
+                  syntheticCompany.trim().length < 2
+                }
                 onClick={() => {
                   setResult(null);
                   demo.mutate({
                     viaApollo: true,
-                    companyName: query.trim() || title.trim() || undefined,
+                    companyName: syntheticCompany.trim(),
                   });
                 }}
               >
-                {demo.isPending ? "Running…" : "Closed loop via Apollo"}
+                {demoPending ? "Running…" : "Closed loop via Apollo"}
               </button>
-              {lastApolloDealId ? (
+              {isUiPrincipalCurrent && lastApolloDealId ? (
                 <Link
                   data-testid="hunt-apollo-open-deal"
                   href={`/crm/deals/${lastApolloDealId}`}
@@ -496,7 +913,9 @@ export default function HuntClientsPage() {
               ) : null}
             </div>
 
-            {demo.data && demo.data.ok ? (
+            {demoResultPrincipalId === verifiedStaffPrincipalId &&
+            demo.data &&
+            demo.data.ok ? (
               <nav className="growth-test-links" aria-label="Demo result links">
                 <Link
                   data-testid="hunt-next-deal"
@@ -563,7 +982,7 @@ export default function HuntClientsPage() {
               </nav>
             ) : null}
 
-            {result ? (
+            {isUiPrincipalCurrent && result ? (
               <div
                 className="growth-status"
                 role="status"
@@ -571,7 +990,9 @@ export default function HuntClientsPage() {
                 data-testid="hunt-closed-loop-status"
               >
                 <p>{result}</p>
-                {demo.data && demo.data.ok ? (
+                {demoResultPrincipalId === verifiedStaffPrincipalId &&
+                demo.data &&
+                demo.data.ok ? (
                   <nav
                     className="growth-test-links"
                     aria-label="Demo status links"

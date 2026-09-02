@@ -5,8 +5,9 @@ const DEMO_CLIENT_ID = "c1000000-0000-4000-8000-0000000000a4";
 const DEMO_CREATIVE_TASK_ID = "b2000000-0000-4000-8000-0000000000a4";
 
 /**
- * After Apollo closed loop, Delivery ?clientId=&taskId= must bind the won
- * client's sandbox (not Demo Co) and Run agent returns output on that scope.
+ * After the explicit synthetic Apollo fixture closes the loop, Delivery
+ * ?clientId=&taskId= must bind the won client's sandbox (not Demo Co) and Run
+ * agent returns output on that scope.
  */
 test.describe("Delivery won-client agent sandbox", () => {
   test.setTimeout(180_000);
@@ -22,8 +23,8 @@ test.describe("Delivery won-client agent sandbox", () => {
       timeout: 60_000,
     });
 
-    await page.getByTestId("hunt-apollo-query").fill(query);
     await page.getByTestId("hunt-test-tools").click();
+    await page.getByTestId("hunt-synthetic-company").fill(query);
     await page.getByTestId("hunt-closed-loop-apollo").click();
     await expect(page.getByTestId("hunt-closed-loop-status")).toContainText(
       /Closed loop ready/i,

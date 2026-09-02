@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { qualifyCompany } from "./qualify";
 import { ingestManualResearch } from "./research";
+import { ResearchEvidenceError } from "./research-evidence";
 import { getSalesOsSettings } from "./store";
 import type { CompanyResearchRow } from "./types";
 
@@ -8,6 +10,7 @@ export type IntentCsvRow = {
   domain?: string;
   sector?: string;
   intent?: string;
+  evidence?: string;
   employees?: number;
 };
 
@@ -24,6 +27,7 @@ export function parseIntentCsv(text: string): IntentCsvRow[] {
   const domainIdx = idx(["domain", "website"]);
   const sectorIdx = idx(["sector", "industry"]);
   const intentIdx = idx(["intent", "topic", "signal"]);
+  const evidenceIdx = idx(["evidence", "source_url", "source url"]);
   const empIdx = idx(["employee", "headcount", "size"]);
   const start = companyIdx >= 0 ? 1 : 0;
   const rows: IntentCsvRow[] = [];
@@ -31,12 +35,18 @@ export function parseIntentCsv(text: string): IntentCsvRow[] {
     const cols = splitCsvLine(line);
     const company = (companyIdx >= 0 ? cols[companyIdx] : cols[0])?.trim();
     if (!company) continue;
+    const employeesRaw =
+      empIdx >= 0 && cols[empIdx] ? Number(cols[empIdx]) : undefined;
     rows.push({
       company,
       domain: domainIdx >= 0 ? cols[domainIdx] : undefined,
       sector: sectorIdx >= 0 ? cols[sectorIdx] : undefined,
       intent: intentIdx >= 0 ? cols[intentIdx] : undefined,
-      employees: empIdx >= 0 && cols[empIdx] ? Number(cols[empIdx]) : undefined,
+      evidence: evidenceIdx >= 0 ? cols[evidenceIdx] : undefined,
+      employees:
+        employeesRaw !== undefined && Number.isFinite(employeesRaw)
+          ? employeesRaw
+          : undefined,
     });
   }
   return rows;
@@ -63,14 +73,25 @@ function splitCsvLine(line: string): string[] {
   return out;
 }
 
-export async function processIntentLeads(csvText: string): Promise<{
+export async function processIntentLeads(
+  csvText: string,
+  options: { actorEmployeeId?: string | null } = {},
+): Promise<{
   created: CompanyResearchRow[];
   skipped: { company: string; reason: string }[];
 }> {
   const settings = await getSalesOsSettings();
   const created: CompanyResearchRow[] = [];
   const skipped: { company: string; reason: string }[] = [];
-  for (const row of parseIntentCsv(csvText)) {
+  const batchId = createHash("sha256")
+    .update(`${options.actorEmployeeId ?? "system"}\n${csvText.trim()}`)
+    .digest("hex");
+  const rows = parseIntentCsv(csvText);
+  for (const [index, row] of rows.entries()) {
+    if (!row.evidence?.trim()) {
+      skipped.push({ company: row.company, reason: "missing_evidence" });
+      continue;
+    }
     const why = row.intent
       ? `Apollo intent signal: ${row.intent}`
       : "Apollo intent export — company showing marketing-services intent in UAE.";
@@ -91,17 +112,22 @@ export async function processIntentLeads(csvText: string): Promise<{
       continue;
     }
     try {
-      created.push(
-        await ingestManualResearch({
-          name: row.company,
-          sector: row.sector,
-          whyThis: why,
-          website: row.domain ? `https://${row.domain.replace(/^https?:\/\//, "")}` : undefined,
-          employeesGlobal: row.employees,
-          leadSourceLane: "apollo_intent",
-        }),
-      );
+      const result = await ingestManualResearch({
+        requestId: `${batchId}:${index}`,
+        actorEmployeeId: options.actorEmployeeId,
+        name: row.company,
+        sector: row.sector,
+        whyThis: why,
+        website: row.domain
+          ? `https://${row.domain.replace(/^https?:\/\//, "")}`
+          : undefined,
+        evidence: row.evidence,
+        employeesGlobal: row.employees,
+        leadSourceLane: "apollo_intent",
+      });
+      created.push(result.proposal);
     } catch (err) {
+      if (!(err instanceof ResearchEvidenceError)) throw err;
       skipped.push({
         company: row.company,
         reason: err instanceof Error ? err.message : String(err),

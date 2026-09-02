@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActorContext } from "@hrmny/gate";
+import type { PortalApprovalActor } from "../portal/approval-boundary";
 import type {
   SocialChannel,
   SocialPublishAdapter,
@@ -16,8 +17,13 @@ import {
   portalStateOf,
   transitionCampaign,
 } from "./repository";
+import {
+  DEMO_CLIENT_ID,
+  DEMO_PORTAL_USER_ID,
+  getDemoStore,
+} from "../demo-store";
 
-const CLIENT = "aa000000-0000-4000-8000-0000000000aa";
+const CLIENT = DEMO_CLIENT_ID;
 
 const staffActor: ActorContext = {
   employeeId: "c0000000-0000-4000-8000-000000000001",
@@ -25,17 +31,21 @@ const staffActor: ActorContext = {
   permissions: [],
 };
 
-const portalActor: ActorContext = {
-  employeeId: "d0000000-0000-4000-8000-0000000000a1",
+const portalActor: PortalApprovalActor = {
+  employeeId: DEMO_PORTAL_USER_ID,
   roles: ["portal_client"],
-  permissions: [],
+  permissions: ["allow:portal:approve"],
+  actorType: "portal",
+  clientId: CLIENT,
 };
 
 // Staff actor wearing a non-client role — must be denied the client approval.
-const staffAsClient: ActorContext = {
+const staffAsClient: PortalApprovalActor = {
   employeeId: "c0000000-0000-4000-8000-000000000002",
   roles: ["account_manager"],
   permissions: [],
+  actorType: "staff",
+  clientId: null,
 };
 
 function spyPublisher(): {
@@ -68,6 +78,7 @@ function spyPublisher(): {
 
 describe("campaigns durable layer (memory mode)", () => {
   beforeEach(() => {
+    getDemoStore().resetM6Demo();
     resetCampaignMemory();
   });
 
@@ -205,6 +216,221 @@ describe("campaigns durable layer (memory mode)", () => {
     expect(published.ok).toBe(true);
   });
 
+  it("returns an exact approval replay as no-change with one portal receipt", async () => {
+    const draft = await createCampaignDraft({
+      title: "Replay-safe approval",
+      channel: "linkedin",
+      clientId: CLIENT,
+    });
+    const first = await decidePortalItem({
+      actor: portalActor,
+      clientId: CLIENT,
+      id: draft.campaignItemId,
+      to: "approved",
+    });
+    const replay = await decidePortalItem({
+      actor: portalActor,
+      clientId: CLIENT,
+      id: draft.campaignItemId,
+      to: "approved",
+    });
+
+    expect(first).toMatchObject({ ok: true, changed: true, reconciled: true });
+    expect(replay).toMatchObject({ ok: true, changed: false, reconciled: true });
+    if (!first.ok || !replay.ok) throw new Error("expected replay success");
+    expect(replay.auditId).toBe(first.auditId);
+    const store = getDemoStore();
+    const audits = store.audits.filter(
+      (event) =>
+        event.entityId === draft.campaignItemId &&
+        event.action === "portal_item.transition",
+    );
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      actorEmployeeId: null,
+      actorPortalUserId: portalActor.employeeId,
+    });
+    const intents = store.seamOutbox.filter(
+      (event) =>
+        event.idempotencyKey ===
+        `portal.campaign.decision:${draft.campaignItemId}`,
+    );
+    expect(intents).toHaveLength(1);
+    expect(intents[0]).toMatchObject({ applied: true });
+    expect(intents[0]?.payload).toMatchObject({
+      action: "approved",
+      portalUserId: portalActor.employeeId,
+      auditId: first.auditId,
+    });
+  });
+
+  it("rolls back state and intent when the decision audit fails", async () => {
+    const draft = await createCampaignDraft({
+      title: "Atomic audit failure",
+      channel: "instagram",
+      clientId: CLIENT,
+    });
+    const beforeAudits = getDemoStore().audits.length;
+    await expect(
+      decidePortalItem({
+        actor: portalActor,
+        clientId: CLIENT,
+        id: draft.campaignItemId,
+        to: "approved",
+        audit: async () => {
+          throw new Error("INJECTED_AUDIT_FAILURE");
+        },
+      }),
+    ).rejects.toThrow("INJECTED_AUDIT_FAILURE");
+    expect(portalStateOf((await getCampaign(draft.campaignItemId))!)).toBe(
+      "pending_client",
+    );
+    expect(getDemoStore().audits).toHaveLength(beforeAudits);
+    expect(
+      getDemoStore().seamOutbox.some(
+        (event) =>
+          event.idempotencyKey ===
+          `portal.campaign.decision:${draft.campaignItemId}`,
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps another item's evidence when a delayed decision audit fails", async () => {
+    const failingDraft = await createCampaignDraft({
+      title: "Delayed audit failure",
+      channel: "instagram",
+      clientId: CLIENT,
+    });
+    const successfulDraft = await createCampaignDraft({
+      title: "Concurrent successful approval",
+      channel: "linkedin",
+      clientId: CLIENT,
+    });
+    let markAuditStarted!: () => void;
+    let releaseAudit!: () => void;
+    const auditStarted = new Promise<void>((resolve) => {
+      markAuditStarted = resolve;
+    });
+    const auditRelease = new Promise<void>((resolve) => {
+      releaseAudit = resolve;
+    });
+
+    const failingDecision = decidePortalItem({
+      actor: portalActor,
+      clientId: CLIENT,
+      id: failingDraft.campaignItemId,
+      to: "approved",
+      audit: async () => {
+        markAuditStarted();
+        await auditRelease;
+        throw new Error("INJECTED_DELAYED_AUDIT_FAILURE");
+      },
+    });
+    await auditStarted;
+
+    const successfulDecision = await decidePortalItem({
+      actor: portalActor,
+      clientId: CLIENT,
+      id: successfulDraft.campaignItemId,
+      to: "approved",
+    });
+    expect(successfulDecision).toMatchObject({
+      ok: true,
+      changed: true,
+      reconciled: true,
+    });
+
+    releaseAudit();
+    await expect(failingDecision).rejects.toThrow(
+      "INJECTED_DELAYED_AUDIT_FAILURE",
+    );
+
+    expect(
+      portalStateOf((await getCampaign(failingDraft.campaignItemId))!),
+    ).toBe("pending_client");
+    expect(
+      portalStateOf((await getCampaign(successfulDraft.campaignItemId))!),
+    ).toBe("approved");
+    const store = getDemoStore();
+    const successfulAudits = store.audits.filter(
+      (event) =>
+        event.entityId === successfulDraft.campaignItemId &&
+        event.action === "portal_item.transition",
+    );
+    expect(successfulAudits).toHaveLength(1);
+    const successfulIntents = store.seamOutbox.filter(
+      (event) =>
+        event.idempotencyKey ===
+        `portal.campaign.decision:${successfulDraft.campaignItemId}`,
+    );
+    expect(successfulIntents).toHaveLength(1);
+    expect(successfulIntents[0]).toMatchObject({
+      applied: true,
+      payload: { auditId: successfulAudits[0]!.auditEventId },
+    });
+    expect(
+      store.audits.some(
+        (event) => event.entityId === failingDraft.campaignItemId,
+      ),
+    ).toBe(false);
+    expect(
+      store.seamOutbox.some(
+        (event) =>
+          event.idempotencyKey ===
+          `portal.campaign.decision:${failingDraft.campaignItemId}`,
+      ),
+    ).toBe(false);
+  });
+
+  it("serializes concurrent opposite decisions into one receipt and one conflict", async () => {
+    const draft = await createCampaignDraft({
+      title: "Concurrent decision",
+      channel: "linkedin",
+      clientId: CLIENT,
+    });
+    const [approve, reject] = await Promise.all([
+      decidePortalItem({
+        actor: portalActor,
+        clientId: CLIENT,
+        id: draft.campaignItemId,
+        to: "approved",
+      }),
+      decidePortalItem({
+        actor: portalActor,
+        clientId: CLIENT,
+        id: draft.campaignItemId,
+        to: "rejected",
+        feedback: "Use the shorter caption",
+      }),
+    ]);
+    expect([approve, reject].filter((result) => result.ok)).toHaveLength(1);
+    expect(
+      [approve, reject].filter(
+        (result) => !result.ok && result.code === "CONFLICT",
+      ),
+    ).toHaveLength(1);
+    const item = (await getCampaign(draft.campaignItemId))!;
+    const decision = item.body.clientDecision;
+    expect(decision === "approved" || decision === "rejected").toBe(true);
+    expect(
+      item.status === "approved" && decision === "rejected",
+    ).toBe(false);
+    expect(
+      getDemoStore().audits.filter(
+        (event) =>
+          event.entityId === draft.campaignItemId &&
+          event.action === "portal_item.transition",
+      ),
+    ).toHaveLength(1);
+    expect(
+      getDemoStore().seamOutbox.filter(
+        (event) =>
+          event.idempotencyKey ===
+          `portal.campaign.decision:${draft.campaignItemId}`,
+      ),
+    ).toHaveLength(1);
+  });
+
   it("denies a staff (non-client) actor from approving in the portal", async () => {
     const draft = await createCampaignDraft({
       title: "Self-approval attempt",
@@ -213,18 +439,14 @@ describe("campaigns durable layer (memory mode)", () => {
       clientId: CLIENT,
     });
 
-    const result = await decidePortalItem({
-      actor: staffAsClient,
-      clientId: CLIENT,
-      id: draft.campaignItemId,
-      to: "approved",
-    });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("expected block");
-    expect(
-      result.blockedBy?.some((b) => b.gate === "portal_item.client_approver"),
-    ).toBe(true);
+    await expect(
+      decidePortalItem({
+        actor: staffAsClient,
+        clientId: CLIENT,
+        id: draft.campaignItemId,
+        to: "approved",
+      }),
+    ).rejects.toThrow("CLIENT_PORTAL_ACTOR_REQUIRED");
     // Item untouched — still pending.
     expect(portalStateOf((await getCampaign(draft.campaignItemId))!)).toBe(
       "pending_client",

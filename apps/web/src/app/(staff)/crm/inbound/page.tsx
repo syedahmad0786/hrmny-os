@@ -20,6 +20,7 @@ export default function CrmInboundPage() {
   const deals = trpc.crm.deals.list.useQuery();
   const companies = trpc.crm.companies.list.useQuery();
   const contacts = trpc.crm.contacts.list.useQuery();
+  const salesAccess = trpc.salesOs.access.useQuery();
 
   const createCompany = trpc.crm.companies.create.useMutation();
   const createContact = trpc.crm.contacts.create.useMutation();
@@ -38,7 +39,9 @@ export default function CrmInboundPage() {
   const [error, setError] = useState<string | null>(null);
   const [intentCsv, setIntentCsv] = useState("");
   const [intentNote, setIntentNote] = useState<string | null>(null);
-  const importIntent = trpc.salesOs.intentCsv.useMutation();
+  const importIntent = trpc.salesOs.intentCsv.useMutation({
+    onError: (mutationError) => setIntentNote(mutationError.message),
+  });
 
   // Ids created by a previous, partially-failed submit. A retry reuses them
   // instead of re-creating the company/contact/deal. Cleared whenever an
@@ -58,9 +61,8 @@ export default function CrmInboundPage() {
     const key = companyName.trim().toLowerCase();
     if (!key) return null;
     return (
-      (companies.data ?? []).find(
-        (c) => c.name.trim().toLowerCase() === key,
-      ) ?? null
+      (companies.data ?? []).find((c) => c.name.trim().toLowerCase() === key) ??
+      null
     );
   }, [companies.data, companyName]);
 
@@ -74,9 +76,7 @@ export default function CrmInboundPage() {
     );
   }, [contacts.data, contactEmail]);
 
-  const inboundDeals = (deals.data ?? []).filter(
-    (d) => d.stage === "discover",
-  );
+  const inboundDeals = (deals.data ?? []).filter((d) => d.stage === "discover");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -314,7 +314,10 @@ export default function CrmInboundPage() {
             {deals.isLoading ? (
               <CrmEmpty title="Loading…" />
             ) : deals.error ? (
-              <CrmEmpty title="Could not load deals" hint={deals.error.message} />
+              <CrmEmpty
+                title="Could not load deals"
+                hint={deals.error.message}
+              />
             ) : inboundDeals.length === 0 ? (
               <CrmEmpty title="No inbound yet" />
             ) : (
@@ -342,8 +345,8 @@ export default function CrmInboundPage() {
           <div>
             <h3>Apollo intent CSV</h3>
             <p>
-              Monthly intent export → Gate 1 as lane <code>apollo_intent</code>. No-go
-              rows are skipped.
+              Monthly intent export → evidence-bearing Gate 1 proposals as lane{" "}
+              <code>apollo_intent</code>. No CRM company is created here.
             </p>
           </div>
         </div>
@@ -351,25 +354,40 @@ export default function CrmInboundPage() {
           <textarea
             className="crm-textarea"
             data-testid="inbound-intent-csv-input"
+            disabled={!salesAccess.data?.canOperate}
             value={intentCsv}
             onChange={(e) => setIntentCsv(e.target.value)}
-            placeholder="company,domain,intent,employees"
+            placeholder="company,domain,intent,evidence,employees"
           />
           <CrmBtn
             className="mt-2"
             variant="primary"
             data-testid="inbound-intent-import"
-            disabled={importIntent.isPending || intentCsv.trim().length < 3}
+            disabled={
+              !salesAccess.data?.canOperate ||
+              importIntent.isPending ||
+              intentCsv.trim().length < 3
+            }
             onClick={() =>
-              importIntent.mutateAsync({ csv: intentCsv }).then((r) =>
-                setIntentNote(
-                  `Imported ${r.created.length} companies · skipped ${r.skipped.length}`,
-                ),
-              )
+              importIntent
+                .mutateAsync({ csv: intentCsv })
+                .then((r) =>
+                  setIntentNote(
+                    `Proposed ${r.created.length} for Gate 1 · skipped ${r.skipped.length} · no CRM company created`,
+                  ),
+                )
+                .catch(() => undefined)
             }
           >
-            {importIntent.isPending ? "Importing…" : "Import intent leads"}
+            {importIntent.isPending
+              ? "Creating proposals…"
+              : "Create intent proposals"}
           </CrmBtn>
+          {salesAccess.data && !salesAccess.data.canOperate ? (
+            <p className="crm-note mt-2">
+              View only. A Sales operator must import intent proposals.
+            </p>
+          ) : null}
           {intentNote ? <p className="crm-note mt-2">{intentNote}</p> : null}
         </div>
       </section>
@@ -399,7 +417,9 @@ export default function CrmInboundPage() {
                     </td>
                     <td>{d.sector ?? "—"}</td>
                     <td>
-                      <CrmTag kind="info">{formatLane(d.leadSourceLane)}</CrmTag>
+                      <CrmTag kind="info">
+                        {formatLane(d.leadSourceLane)}
+                      </CrmTag>
                     </td>
                     <td>{d.stage}</td>
                     <td>

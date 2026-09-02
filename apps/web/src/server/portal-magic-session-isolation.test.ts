@@ -2,7 +2,12 @@ process.env.DATABASE_URL = "";
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { createCaller } from "./trpc/root";
-import { DEMO_CLIENT_B_ID, DEMO_CLIENT_ID, getDemoStore } from "./demo-store";
+import {
+  DEMO_CLIENT_B_ID,
+  DEMO_CLIENT_ID,
+  DEMO_PORTAL_USER_ID,
+  getDemoStore,
+} from "./demo-store";
 import {
   issuePortalMagicToken,
   resolvePortalSessionGrant,
@@ -35,24 +40,29 @@ describe("portal magic-link session grant isolation", () => {
     const session = await resolvePortalSessionGrant(verified.sessionGrant);
     expect(session?.clientId).toBe(clientId);
     expect(session?.actorType).toBe("portal");
-    return createCaller({
-      user: session,
-      employeeId: session!.employeeId,
-      roles: session!.roles,
-      canViewMargin: sessionCanViewMargin(session!),
-      clientId: session!.clientId,
-    });
+    return {
+      caller: createCaller({
+        user: session,
+        employeeId: session!.employeeId,
+        roles: session!.roles,
+        canViewMargin: sessionCanViewMargin(session!),
+        clientId: session!.clientId,
+      }),
+      sessionGrant: verified.sessionGrant,
+    };
   }
 
   it("ps_ grants keep Demo Co and Other Co portal lists isolated", async () => {
-    const portalA = await callerFromGrant(
+    const portalAGrant = await callerFromGrant(
       "alex@democo.example",
       DEMO_CLIENT_ID,
     );
-    const portalB = await callerFromGrant(
+    const portalBGrant = await callerFromGrant(
       "ops@otherco.example",
       DEMO_CLIENT_B_ID,
     );
+    const portalA = portalAGrant.caller;
+    const portalB = portalBGrant.caller;
 
     const aTasks = await portalA.portal.tasks.list();
     const aAssets = await portalA.portal.assets.list();
@@ -68,5 +78,65 @@ describe("portal magic-link session grant isolation", () => {
     expect(aBlob).not.toMatch(/Other Co/i);
     expect(bBlob).toMatch(/Other Co/i);
     expect(bBlob).not.toMatch(/Launch reel|Approve launch reel cut|Demo Co/i);
+
+    const pending = aApprovals.find((approval) => approval.status === "pending");
+    expect(pending).toBeDefined();
+    const store = getDemoStore();
+    const approved = await portalA.portal.approvals.act({
+      id: pending!.approvalId,
+      action: "approve",
+    });
+    expect(approved).toMatchObject({ ok: true, changed: true });
+    expect(store.portalApprovals.get(pending!.approvalId)?.status).toBe(
+      "approved",
+    );
+    expect(
+      store.audits.some(
+        (event) =>
+          event.action === "portal.approvals.act" &&
+          event.actorPortalUserId === DEMO_PORTAL_USER_ID &&
+          event.actorEmployeeId === null,
+      ),
+    ).toBe(true);
+
+    const otherPending = aApprovals.find(
+      (approval) =>
+        approval.status === "pending" &&
+        approval.approvalId !== pending!.approvalId,
+    );
+    expect(otherPending).toBeDefined();
+    const beforeCrossClient = {
+      status: store.portalApprovals.get(otherPending!.approvalId)?.status,
+      audits: store.audits.length,
+      seams: store.seamOutbox.length,
+    };
+    await expect(
+      portalB.portal.approvals.act({
+        id: otherPending!.approvalId,
+        action: "approve",
+      }),
+    ).rejects.toThrow(/NOT_FOUND/);
+    expect({
+      status: store.portalApprovals.get(otherPending!.approvalId)?.status,
+      audits: store.audits.length,
+      seams: store.seamOutbox.length,
+    }).toEqual(beforeCrossClient);
+
+    const portalUser = store.portalUsers.get(DEMO_PORTAL_USER_ID)!;
+    portalUser.isActive = false;
+    expect(
+      await resolvePortalSessionGrant(portalAGrant.sessionGrant),
+    ).toBeNull();
+    await expect(
+      portalA.portal.approvals.act({
+        id: otherPending!.approvalId,
+        action: "approve",
+      }),
+    ).rejects.toThrow("PORTAL_IDENTITY_NOT_BOUND");
+    expect({
+      status: store.portalApprovals.get(otherPending!.approvalId)?.status,
+      audits: store.audits.length,
+      seams: store.seamOutbox.length,
+    }).toEqual(beforeCrossClient);
   });
 });

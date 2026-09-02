@@ -39,6 +39,10 @@ import {
   resolveEmailVerificationRuntimeConfig,
   resolveHunterRuntimeConfig,
 } from "../integrations/runtime-adapters";
+import {
+  legacySalesEffectRefusal,
+  legacySalesSyntheticRuntimeEnabled,
+} from "../sales-os/legacy-effect-policy";
 
 bootstrapGateRegistry();
 
@@ -339,6 +343,14 @@ export const dealsRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      if (!legacySalesSyntheticRuntimeEnabled()) {
+        return {
+          ...legacySalesEffectRefusal("deals.verifyEmail"),
+          emailVerified: false as const,
+          provider: "disabled" as const,
+          verdict: "legacy_effect_disabled" as const,
+        };
+      }
       const store = getDemoStore();
       const deal = store.deals.get(input.id);
       if (!deal) throw new Error("NOT_FOUND");
@@ -1085,12 +1097,22 @@ export const clientsRouter = router({
           isActive: boolean;
         };
         if (!db) {
+          const store = getDemoStore();
+          const existing = [...store.portalUsers.values()].find(
+            (candidate) =>
+              candidate.clientId === input.clientId &&
+              candidate.email.toLowerCase() === email,
+          );
           user = {
-            portalUserId: randomUUID(),
+            portalUserId: existing?.portalUserId ?? randomUUID(),
             email,
             displayName: input.displayName,
             isActive: true,
           };
+          store.portalUsers.set(user.portalUserId, {
+            ...user,
+            clientId: input.clientId,
+          });
         } else {
           user = await db.transaction(async (tx) => {
             await tx.execute(sql`
@@ -1592,6 +1614,12 @@ export const leadsRouter = router({
     import: protectedProcedure
       .input(z.object({ query: z.string().min(1) }))
       .mutation(async ({ input, ctx }) => {
+        if (!legacySalesSyntheticRuntimeEnabled()) {
+          return {
+            ...legacySalesEffectRefusal("leads.apollo.import"),
+            deals: [],
+          };
+        }
         const { importApolloCompaniesToCrm } =
           await import("../crm/apollo-import");
         const { createEmailVerificationAdapter } =

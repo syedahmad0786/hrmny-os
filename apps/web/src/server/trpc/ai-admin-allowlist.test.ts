@@ -5,6 +5,7 @@ process.env.HRMNY_TAX_REGISTRATION_NUMBER = "100000000000003";
 
 import { describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "../auth/session";
+import { DEMO_PORTAL_APPROVE_ID, getDemoStore } from "../demo-store";
 import { createCaller } from "./root";
 import {
   DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS,
@@ -95,7 +96,7 @@ describe("customAgents allowlist repair", () => {
     });
     expect(settle.allowedTools).toEqual([...DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS]);
     expect(settle.allowedTools).toContain("crm.closed_loop");
-    expect(settle.allowedTools).toContain("portal.os_approve");
+    expect(settle.allowedTools).not.toContain("portal.os_approve");
     expect(settle.allowedTools).not.toContain("crm.prospect");
 
     const funnelSlug = `funnel-only-${Date.now().toString(36)}`;
@@ -111,7 +112,7 @@ describe("customAgents allowlist repair", () => {
     const run = await caller.aiAdmin.customAgents.run({
       id: settle.customAgentId,
       prompt:
-        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance, approve portal, approve campaign and publish campaign, sign off onboarding phase, ref-approve calendar.",
+        "Run closed loop then settle OS: finance approve and issue invoice, approve outreach, creative QC pass then advance to client review, approve campaign and publish campaign, sign off onboarding phase, ref-approve calendar.",
     });
     expect(run.slug).toBe(settleSlug);
     expect(Array.isArray(run.toolResults)).toBe(true);
@@ -122,11 +123,38 @@ describe("customAgents allowlist repair", () => {
     expect(byTool("finance.os_issue")?.ok).toBe(true);
     expect(byTool("outreach.os_approve")?.ok).toBe(true);
     expect(byTool("creative.os_qc")?.ok).toBe(true);
-    expect(byTool("portal.os_approve")?.ok).toBe(true);
+    expect(byTool("portal.os_approve")).toBeUndefined();
     expect(byTool("campaigns.os_approve")?.ok).toBe(true);
     expect(byTool("campaigns.os_publish")?.ok).toBe(true);
     expect(byTool("onboarding.os_signoff")?.ok).toBe(true);
     expect(byTool("calendar.os_ref_approve")?.ok).toBe(true);
+
+    const staleSlug = `stale-portal-${Date.now().toString(36)}`;
+    const stale = await caller.aiAdmin.customAgents.create({
+      slug: staleSlug,
+      displayName: "Stale portal tool agent",
+    });
+    await caller.aiAdmin.customAgents.update({
+      id: stale.customAgentId,
+      allowedTools: ["portal.os_approve"],
+    });
+    const staleListed = (await caller.aiAdmin.customAgents.list()).find(
+      (agent) => agent.customAgentId === stale.customAgentId,
+    );
+    expect(staleListed?.effectiveAllowedTools).toEqual([]);
+    const before = getDemoStore().portalApprovals.get(
+      DEMO_PORTAL_APPROVE_ID,
+    )?.status;
+    const staleRun = await caller.aiAdmin.customAgents.run({
+      id: stale.customAgentId,
+      prompt: `Approve OS portal taskId: ${DEMO_PORTAL_APPROVE_ID}`,
+    });
+    expect(
+      staleRun.toolResults?.some((result) => result.tool === "portal.os_approve"),
+    ).toBe(false);
+    expect(
+      getDemoStore().portalApprovals.get(DEMO_PORTAL_APPROVE_ID)?.status,
+    ).toBe(before);
   });
 
   it("pruneTestAgents removes proof/e2e slugs but keeps seeded coaches", async () => {

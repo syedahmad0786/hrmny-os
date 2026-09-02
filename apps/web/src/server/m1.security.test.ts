@@ -85,7 +85,7 @@ describe("M1 security insurance", () => {
   it("magic-link token verify is single-use", async () => {
     const token = await issuePortalMagicToken({
       clientId: DEMO_CLIENT_ID,
-      email: "client@demo.local",
+      email: "alex@democo.example",
     });
     expect(token.startsWith("ml_")).toBe(true);
     const anon = createCaller({
@@ -111,6 +111,8 @@ describe("M1 security insurance", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("AUTH_MODE", "dev");
     vi.stubEnv("ALLOW_DEV_AUTH", "");
+    vi.stubEnv("DATABASE_MODE", "auto");
+    vi.stubEnv("DATABASE_URL", "");
     expect(getAuthMode()).toBe("supabase");
 
     const req = new Request("https://hrmny.example/api/trpc", {

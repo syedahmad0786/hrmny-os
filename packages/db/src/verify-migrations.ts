@@ -2,6 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import postgres, { type Sql } from "postgres";
+import {
+  readApollo0075BackfillViolations,
+  readApollo0075SchemaState,
+} from "./production-migration-0075-discovery";
+import {
+  readApollo0076BackfillViolations,
+  readApollo0076DuplicateRunningSlots,
+  readApollo0076SchemaState,
+} from "./production-migration-0076-discovery";
 
 const adminUrl = new URL(
   process.env.DATABASE_URL ??
@@ -25,7 +34,9 @@ const migrationsDirectory = fileURLToPath(
 const journal = JSON.parse(
   await readFile(`${migrationsDirectory}meta/_journal.json`, "utf8"),
 ) as { entries: Array<{ tag: string }> };
-const head = "0074_integration_inbox_invoice_metadata";
+const apolloPriorHead = "0075_apollo_search_fencing";
+const apolloHead = "0076_apollo_people_search_serialization";
+const head = "0077_qm_control_repository";
 assert.equal(
   journal.entries.at(-1)?.tag,
   head,
@@ -134,6 +145,300 @@ async function assertCurrentHead(connection: Sql): Promise<void> {
   `;
   assert.equal(invoiceColumns?.count, 8, "Invoice gate metadata is durable.");
 
+  const [apolloFencing] = await connection<Array<{ ok: boolean }>>`
+    select
+      (
+        select count(*) from information_schema.columns
+        where table_schema = 'public' and table_name = 'integration_inbox'
+          and column_name in (
+            'owner_employee_id', 'credential_connection_account_id',
+            'state_version', 'attempt_token', 'attempt_lease_expires_at'
+          )
+      ) = 5
+      and (
+        select count(*) from information_schema.columns
+        where table_schema = 'public' and table_name = 'scheduled_job'
+          and column_name in (
+            'integration_inbox_id', 'state_version', 'attempt_token',
+            'lease_expires_at'
+          )
+      ) = 4
+      and exists (
+        select 1 from pg_indexes
+        where schemaname = 'public'
+          and indexname = 'scheduled_job_apollo_inbox_uniq'
+      )
+      and (
+        select relrowsecurity from pg_class
+        where oid = 'public.scheduled_job'::regclass
+      ) as ok
+  `;
+  assert.equal(
+    apolloFencing?.ok,
+    true,
+    "Apollo receipt and scheduled-job attempt fencing is installed.",
+  );
+
+  const [scheduledJobBoundary] = await connection<Array<{ ok: boolean }>>`
+    select not (
+      has_table_privilege('anon', 'public.scheduled_job', 'SELECT,INSERT,UPDATE,DELETE')
+      or has_table_privilege('authenticated', 'public.scheduled_job', 'SELECT,INSERT,UPDATE,DELETE')
+    ) as ok
+  `;
+  assert.equal(
+    scheduledJobBoundary?.ok,
+    true,
+    "Browser Data API roles cannot access scheduled jobs.",
+  );
+
+  // The accepted production database has an immutable legacy journal prefix
+  // plus reconciled M1 artifacts that a canonical fresh migration chain does
+  // not reproduce. Keep that identity distinction explicit: disposable proof
+  // validates 0075 itself, while the production guard alone requires the
+  // separately reviewed legacy contract.
+  const { priorContractReady, ...apollo0075Schema } =
+    await readApollo0075SchemaState(connection, "verify");
+  assert.equal(
+    priorContractReady,
+    false,
+    "Disposable migrations must not masquerade as the reconciled production legacy baseline.",
+  );
+  assert.deepEqual(
+    apollo0075Schema,
+    {
+      namedColumnsPresent: 9,
+      correctColumns: 9,
+      namedConstraintsPresent: 3,
+      correctConstraints: 3,
+      namedIndexesPresent: 2,
+      correctIndexes: 2,
+      securedTables: 2,
+      backfillViolations: 0,
+    },
+    "0075 schema readback failed on the disposable database.",
+  );
+
+  const { priorContractReady: prior0076Ready, ...apollo0076Schema } =
+    await readApollo0076SchemaState(connection, "verify");
+  assert.equal(
+    prior0076Ready,
+    false,
+    "Disposable migrations must not masquerade as the reconciled production legacy baseline.",
+  );
+  assert.deepEqual(
+    apollo0076Schema,
+    {
+      namedColumnsPresent: 1,
+      correctColumns: 1,
+      namedChecksPresent: 1,
+      correctChecks: 1,
+      namedIndexesPresent: 1,
+      correctIndexes: 1,
+      namedFunctionsPresent: 1,
+      correctFunctions: 1,
+      namedTriggersPresent: 1,
+      correctTriggers: 1,
+      securedTables: 1,
+      runningApolloJobs: 0,
+      backfillViolations: 0,
+      duplicateRunningSlots: 0,
+    },
+    "0076 schema and compatibility-trigger readback failed on the disposable database.",
+  );
+
+  const [qmRepository] = await connection<Array<{ ok: boolean }>>`
+    select
+      to_regclass('public.qm_session_binding') is not null
+      and to_regclass('public.qm_command_decision') is not null
+      and (
+        select count(*) from pg_constraint
+        where conname in (
+          'qm_session_owner_uniq',
+          'qm_session_scope_uniq',
+          'qm_session_lifecycle_chk',
+          'qm_session_scope_chk',
+          'qm_session_runtime_chk',
+          'qm_session_upstream_pin_chk',
+          'qm_session_state_version_chk',
+          'qm_decision_request_uniq',
+          'qm_decision_input_digest_chk',
+          'qm_decision_outcome_chk',
+          'qm_decision_reason_chk',
+          'qm_decision_capability_chk',
+          'qm_decision_reason_outcome_chk',
+          'qm_decision_session_metadata_chk',
+          'qm_decision_work_record_chk'
+        )
+      ) = 15
+      and (
+        select count(*) from pg_indexes
+        where schemaname = 'public' and indexname in (
+          'qm_session_owner_uniq',
+          'qm_session_scope_uniq',
+          'qm_session_owner_idx',
+          'qm_decision_request_uniq',
+          'qm_decision_proposal_uniq',
+          'qm_decision_precheck_uniq',
+          'qm_decision_session_recorded_idx'
+        )
+      ) = 7
+      and exists (
+        select 1 from pg_trigger
+        where tgname = 'qm_command_decision_immutable_trg'
+          and not tgisinternal
+      )
+      and (
+        select count(*) from pg_class
+        where oid in (
+          'public.qm_session_binding'::regclass,
+          'public.qm_command_decision'::regclass
+        ) and relrowsecurity
+      ) = 2 as ok
+  `;
+  assert.equal(
+    qmRepository?.ok,
+    true,
+    "0077 QM session and immutable decision repository is installed exactly.",
+  );
+
+  const [qmBrowserBoundary] = await connection<Array<{ ok: boolean }>>`
+    select not (
+      has_table_privilege('anon', 'public.qm_session_binding', 'SELECT,INSERT,UPDATE,DELETE')
+      or has_table_privilege('authenticated', 'public.qm_session_binding', 'SELECT,INSERT,UPDATE,DELETE')
+      or has_table_privilege('anon', 'public.qm_command_decision', 'SELECT,INSERT,UPDATE,DELETE')
+      or has_table_privilege('authenticated', 'public.qm_command_decision', 'SELECT,INSERT,UPDATE,DELETE')
+    ) as ok
+  `;
+  assert.equal(
+    qmBrowserBoundary?.ok,
+    true,
+    "Browser Data API roles cannot access QM authority records.",
+  );
+
+  const [legacyBackfill] = await connection<Array<{ ok: boolean }>>`
+    select
+      not exists (
+        select 1 from public.integration_inbox
+        where provider = 'apollo'
+          and external_event_id = 'migration-0075-backfill-proof'
+      )
+      or exists (
+        select 1
+        from public.integration_inbox inbox
+        join public.scheduled_job job
+          on job.integration_inbox_id = inbox.integration_inbox_id
+        where inbox.provider = 'apollo'
+          and inbox.operation = 'people.search.zero-credit'
+          and inbox.external_event_id = 'migration-0075-backfill-proof'
+          and job.job_key =
+            'apollo-people-search:' || inbox.integration_inbox_id::text
+          and job.concurrency_key = 'provider:apollo'
+      ) as ok
+  `;
+  assert.equal(
+    legacyBackfill?.ok,
+    true,
+    "Migration 0075 did not link the exact legacy Apollo receipt and job.",
+  );
+
+  const oldStyleJobs = await connection<
+    Array<{ scheduled_job_id: string; concurrency_key: string | null }>
+  >`
+    insert into public.scheduled_job (job_key, kind, run_at, payload)
+    values
+      ('migration-0076-old-style-a', 'apollo_people_search', now(), '{}'::jsonb),
+      ('migration-0076-old-style-b', 'apollo_people_search', now(), '{}'::jsonb)
+    returning scheduled_job_id, concurrency_key
+  `;
+  assert.equal(
+    oldStyleJobs.length,
+    2,
+    "Two old-style Apollo jobs were inserted.",
+  );
+  assert(
+    oldStyleJobs.every(
+      ({ concurrency_key }) => concurrency_key === "provider:apollo",
+    ),
+    "The compatibility trigger did not assign the exact Apollo slot key.",
+  );
+  await connection`
+    update public.scheduled_job
+    set status = 'running'
+    where scheduled_job_id = ${oldStyleJobs[0]!.scheduled_job_id}::uuid
+  `;
+  await assert.rejects(
+    async () => {
+      await connection`
+        update public.scheduled_job
+        set status = 'running'
+        where scheduled_job_id = ${oldStyleJobs[1]!.scheduled_job_id}::uuid
+      `;
+    },
+    (error: unknown) => {
+      assert.equal(
+        (error as { code?: string }).code,
+        "23505",
+        "The second old-style running job must fail on the unique slot.",
+      );
+      return true;
+    },
+  );
+  await connection`
+    update public.scheduled_job
+    set status = 'completed'
+    where scheduled_job_id = ${oldStyleJobs[0]!.scheduled_job_id}::uuid
+  `;
+  await connection`
+    update public.scheduled_job
+    set status = 'running'
+    where scheduled_job_id = ${oldStyleJobs[1]!.scheduled_job_id}::uuid
+  `;
+  await connection`
+    update public.scheduled_job
+    set status = 'completed'
+    where scheduled_job_id = ${oldStyleJobs[1]!.scheduled_job_id}::uuid
+  `;
+  const [transitioned] = await connection<
+    Array<{ concurrency_key: string | null }>
+  >`
+    update public.scheduled_job
+    set kind = 'apollo_people_match'
+    where scheduled_job_id = ${oldStyleJobs[0]!.scheduled_job_id}::uuid
+    returning concurrency_key
+  `;
+  assert.equal(
+    transitioned?.concurrency_key,
+    null,
+    "Changing away from People Search must release only the reserved Apollo key.",
+  );
+  const [unenrolled] = await connection<
+    Array<{ concurrency_key: string | null }>
+  >`
+    insert into public.scheduled_job (
+      job_key, kind, run_at, payload, status, concurrency_key
+    )
+    values (
+      'migration-0076-unenrolled-operation',
+      'apollo_people_match', now(), '{}'::jsonb, 'running', 'provider:apollo'
+    )
+    returning concurrency_key
+  `;
+  assert.equal(
+    unenrolled?.concurrency_key,
+    null,
+    "0076 must clear the reserved key from paid People Match or other kinds.",
+  );
+  assert.equal(
+    await readApollo0076BackfillViolations(connection, "verify"),
+    0,
+    "Every Apollo People Search job must carry the exact slot key.",
+  );
+  assert.equal(
+    await readApollo0076DuplicateRunningSlots(connection, "verify"),
+    0,
+    "No running execution slot may have duplicate holders.",
+  );
+
   const eventId = "migration-proof-event";
   const first = await connection<Array<{ integration_inbox_id: string }>>`
     insert into public.integration_inbox (
@@ -174,9 +479,215 @@ async function assertCurrentHead(connection: Sql): Promise<void> {
   });
 }
 
+async function assertExact0074Preflight(connection: Sql): Promise<void> {
+  const [objects] = await connection<
+    Array<{ columns: number; constraints: number; indexes: number }>
+  >`
+    select
+      (
+        select count(*)::int from information_schema.columns
+        where table_schema = 'public'
+          and (
+            (table_name = 'integration_inbox' and column_name in (
+              'owner_employee_id', 'credential_connection_account_id',
+              'state_version', 'attempt_token', 'attempt_lease_expires_at'
+            ))
+            or
+            (table_name = 'scheduled_job' and column_name in (
+              'integration_inbox_id', 'state_version', 'attempt_token',
+              'lease_expires_at'
+            ))
+          )
+      ) as columns,
+      (
+        select count(*)::int from pg_constraint
+        where conname in (
+          'integration_inbox_owner_employee_id_employee_fk',
+          'integration_inbox_credential_connection_account_fk',
+          'scheduled_job_integration_inbox_fk'
+        )
+      ) as constraints,
+      (
+        select count(*)::int from pg_indexes
+        where schemaname = 'public' and indexname in (
+          'scheduled_job_apollo_inbox_uniq',
+          'integration_inbox_owner_operation_idx'
+        )
+      ) as indexes
+  `;
+  assert.deepEqual(
+    objects,
+    { columns: 0, constraints: 0, indexes: 0 },
+    "The prior-head database is not an exact 0074 preflight shape.",
+  );
+  await connection`
+    insert into public.scheduled_job (job_key, kind, run_at, payload)
+    values (
+      'apollo-people-search:00000000-0000-4000-8000-000000000075',
+      'apollo_people_search', now(), '{}'::jsonb
+    )
+  `;
+  assert.equal(
+    await readApollo0075BackfillViolations(connection, "preflight"),
+    1,
+    "0074 preflight did not reject an orphan legacy Apollo job.",
+  );
+  await connection`
+    delete from public.scheduled_job
+    where job_key =
+      'apollo-people-search:00000000-0000-4000-8000-000000000075'
+  `;
+  const [receipt] = await connection<Array<{ integration_inbox_id: string }>>`
+    insert into public.integration_inbox (
+      provider, external_event_id, operation, payload_hash, status
+    ) values (
+      'apollo', 'migration-0075-backfill-proof',
+      'people.search.zero-credit', repeat('b', 64), 'received'
+    )
+    returning integration_inbox_id
+  `;
+  assert(receipt, "Legacy Apollo proof receipt was not inserted.");
+  await connection`
+    insert into public.scheduled_job (job_key, kind, run_at, payload)
+    values (
+      ${`apollo-people-search:${receipt.integration_inbox_id}`},
+      'apollo_people_search', now(), '{}'::jsonb
+    )
+  `;
+  const { priorContractReady, ...apollo0075Schema } =
+    await readApollo0075SchemaState(connection, "preflight");
+  assert.equal(
+    priorContractReady,
+    false,
+    "Canonical 0074 must remain distinct from the reconciled production legacy baseline.",
+  );
+  assert.deepEqual(
+    apollo0075Schema,
+    {
+      namedColumnsPresent: 0,
+      correctColumns: 0,
+      namedConstraintsPresent: 0,
+      correctConstraints: 0,
+      namedIndexesPresent: 0,
+      correctIndexes: 0,
+      securedTables: 2,
+      backfillViolations: 0,
+    },
+    "Canonical 0074 preflight schema or safe legacy backfill contract drifted.",
+  );
+}
+
+async function assertExact0075Preflight(connection: Sql): Promise<void> {
+  const { priorContractReady: prior0075Ready, ...apollo0075Schema } =
+    await readApollo0075SchemaState(connection, "verify");
+  assert.equal(
+    prior0075Ready,
+    false,
+    "Disposable 0075 must remain distinct from the reconciled production legacy baseline.",
+  );
+  assert.deepEqual(
+    apollo0075Schema,
+    {
+      namedColumnsPresent: 9,
+      correctColumns: 9,
+      namedConstraintsPresent: 3,
+      correctConstraints: 3,
+      namedIndexesPresent: 2,
+      correctIndexes: 2,
+      securedTables: 2,
+      backfillViolations: 0,
+    },
+    "The prior-head database is not an exact disposable 0075 schema.",
+  );
+
+  const { priorContractReady: prior0076Ready, ...apollo0076Schema } =
+    await readApollo0076SchemaState(connection, "preflight");
+  assert.equal(
+    prior0076Ready,
+    false,
+    "Disposable 0075 must not masquerade as the reconciled production legacy baseline.",
+  );
+  assert.deepEqual(
+    apollo0076Schema,
+    {
+      namedColumnsPresent: 0,
+      correctColumns: 0,
+      namedChecksPresent: 0,
+      correctChecks: 0,
+      namedIndexesPresent: 0,
+      correctIndexes: 0,
+      namedFunctionsPresent: 0,
+      correctFunctions: 0,
+      namedTriggersPresent: 0,
+      correctTriggers: 0,
+      securedTables: 1,
+      runningApolloJobs: 0,
+      backfillViolations: 0,
+      duplicateRunningSlots: 0,
+    },
+    "The exact 0075 preflight has partial 0076 objects or running Apollo People Search work.",
+  );
+}
+
+async function assertMigrationRejectsRunningApollo(
+  connection: Sql,
+): Promise<void> {
+  await connection`
+    insert into public.scheduled_job (job_key, kind, run_at, payload, status)
+    values (
+      'migration-0076-running-preflight-proof',
+      'apollo_people_search', now(), '{}'::jsonb, 'running'
+    )
+  `;
+  await assert.rejects(
+    async () => applyMigration(connection, apolloHead),
+    (error: unknown) => {
+      assert.equal(
+        (error as { code?: string }).code,
+        "55006",
+        "0076 must fail in-transaction when an Apollo People Search job is running.",
+      );
+      return true;
+    },
+  );
+  const [objects] = await connection<
+    Array<{ columns: number; checks: number; indexes: number }>
+  >`
+    select
+      (
+        select count(*)::int from information_schema.columns
+        where table_schema = 'public' and table_name = 'scheduled_job'
+          and column_name = 'concurrency_key'
+      ) as columns,
+      (
+        select count(*)::int from pg_constraint
+        where conrelid = 'public.scheduled_job'::regclass
+          and conname = 'scheduled_job_apollo_concurrency_key_chk'
+      ) as checks,
+      (
+        select count(*)::int from pg_indexes
+        where schemaname = 'public'
+          and indexname = 'scheduled_job_running_concurrency_uniq'
+      ) as indexes
+  `;
+  assert.deepEqual(
+    objects,
+    { columns: 0, checks: 0, indexes: 0 },
+    "A rejected 0076 migration must roll back every schema write.",
+  );
+  await connection`
+    delete from public.scheduled_job
+    where job_key = 'migration-0076-running-preflight-proof'
+  `;
+}
+
 let fresh: Sql | undefined;
 let upgrade: Sql | undefined;
+let upgradeCompetitor: Sql | undefined;
 let upgradeBand: Sql | undefined;
+let verificationPassed = false;
+const retainFreshForProof =
+  process.env.MIGRATION_TEST_RETAIN_FRESH_FOR_PROOF === "true";
 try {
   for (const name of databaseNames) await recreateDatabase(name);
 
@@ -187,9 +698,50 @@ try {
 
   upgrade = postgres(databaseUrl(databaseNames[1]!), options);
   await prepareSupabaseDatabase(upgrade);
-  for (const { tag } of journal.entries.filter(({ tag }) => tag !== head)) {
+  for (const { tag } of journal.entries.filter(
+    ({ tag }) => tag !== apolloPriorHead && tag !== apolloHead && tag !== head,
+  )) {
     await applyMigration(upgrade, tag);
   }
+  await assertExact0074Preflight(upgrade);
+  // Replaying the prior SQL is deliberate: the verifier preserves the
+  // repository's additive/idempotent migration contract before asserting the
+  // exact 0075 schema that 0076 is allowed to extend.
+  await applyMigration(upgrade, apolloPriorHead);
+  await applyMigration(upgrade, apolloPriorHead);
+  await assertExact0075Preflight(upgrade);
+
+  upgradeCompetitor = postgres(databaseUrl(databaseNames[1]!), options);
+  await upgradeCompetitor.unsafe("SET lock_timeout = '250ms'");
+  await upgrade.begin(async (transaction) => {
+    await transaction.unsafe(
+      "LOCK TABLE public.scheduled_job IN SHARE ROW EXCLUSIVE MODE",
+    );
+    await assert.rejects(
+      async () => {
+        await upgradeCompetitor!.unsafe(`
+          INSERT INTO public.scheduled_job (job_key, kind, run_at, payload)
+          VALUES (
+            'migration-0076-lock-conflict-proof',
+            'proof', now(), '{}'::jsonb
+          )
+        `);
+      },
+      (error: unknown) => {
+        assert.equal(
+          (error as { code?: string }).code,
+          "55P03",
+          "SHARE ROW EXCLUSIVE must block the ROW EXCLUSIVE lock used by INSERT.",
+        );
+        return true;
+      },
+    );
+  });
+  await upgradeCompetitor.unsafe("RESET lock_timeout");
+
+  await assertMigrationRejectsRunningApollo(upgrade);
+  await applyMigration(upgrade, apolloHead);
+  await applyMigration(upgrade, apolloHead);
   await applyMigration(upgrade, head);
   await applyMigration(upgrade, head);
   await assertCurrentHead(upgrade);
@@ -215,13 +767,22 @@ try {
   await assertCurrentHead(upgradeBand);
 
   console.log(
-    `Verified ${journal.entries.length} fresh migrations, idempotent 0073 -> 0074, and idempotent current-schema 0068 -> 0074 additive band.`,
+    `Verified ${journal.entries.length} fresh migrations, idempotent prior-head -> ${head}, and idempotent current-schema 0068 -> ${head} additive band.`,
   );
+  verificationPassed = true;
 } finally {
   await fresh?.end({ timeout: 5 });
   await upgrade?.end({ timeout: 5 });
+  await upgradeCompetitor?.end({ timeout: 5 });
   await upgradeBand?.end({ timeout: 5 });
   for (const name of databaseNames) {
+    if (
+      verificationPassed &&
+      retainFreshForProof &&
+      name === databaseNames[0]
+    ) {
+      continue;
+    }
     await admin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
   }
   await admin.end({ timeout: 5 });

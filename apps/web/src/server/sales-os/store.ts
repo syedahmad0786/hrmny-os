@@ -1,23 +1,25 @@
 import { randomUUID } from "node:crypto";
 import {
   and,
+  auditEvent,
   companyResearch,
   contactResearch,
   desc,
   emailEvent,
   eq,
+  integrationInbox,
   intelSignal,
   salesOsCreditLedger,
   salesOsEvolveProposal,
   salesOsSettings,
   suppressionEntry,
+  sql,
   type Db,
 } from "@hrmny/db";
 import { getDb } from "../db";
-import {
-  DEFAULT_SALES_OS_SETTINGS,
-  type SalesOsSettings,
-} from "./sops";
+import { getDemoStore } from "../demo-store";
+import { DEFAULT_SALES_OS_SETTINGS, type SalesOsSettings } from "./sops";
+import { normalizeResearchCompanyName } from "./research-evidence";
 import type {
   CompanyResearchRow,
   ContactResearchRow,
@@ -38,6 +40,16 @@ type Memory = {
   signals: IntelSignalRow[];
   proposals: EvolveProposalRow[];
   credits: CreditLedgerRow[];
+  researchReceipts: Map<
+    string,
+    {
+      receiptId: string;
+      payloadHash: string;
+      proposalId: string;
+      signalId: string;
+      auditId: string;
+    }
+  >;
 };
 
 const memory: Memory = {
@@ -49,7 +61,10 @@ const memory: Memory = {
   signals: [],
   proposals: [],
   credits: [],
+  researchReceipts: new Map(),
 };
+
+const memoryResearchLocks = new Map<string, Promise<void>>();
 
 export function resetSalesOsStore(): void {
   memory.settings = structuredClone(DEFAULT_SALES_OS_SETTINGS);
@@ -60,19 +75,48 @@ export function resetSalesOsStore(): void {
   memory.signals = [];
   memory.proposals = [];
   memory.credits = [];
+  memory.researchReceipts.clear();
+  memoryResearchLocks.clear();
 }
 
-async function withDb<T>(fn: (db: Db) => Promise<T>, fallback: () => T): Promise<T> {
+async function withMemoryResearchLock<T>(
+  key: string,
+  fn: () => Promise<T> | T,
+): Promise<T> {
+  const previous = memoryResearchLocks.get(key) ?? Promise.resolve();
+  const run = previous.then(fn, fn);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  memoryResearchLocks.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (memoryResearchLocks.get(key) === tail) memoryResearchLocks.delete(key);
+  }
+}
+
+async function withDb<T>(
+  fn: (db: Db) => Promise<T>,
+  fallback: () => T,
+): Promise<T> {
   const db = getDb();
   if (!db) return fallback();
   return fn(db);
 }
 
 const iso = (d: Date | string | null | undefined): string =>
-  d instanceof Date ? d.toISOString() : d ? String(d) : new Date().toISOString();
+  d instanceof Date
+    ? d.toISOString()
+    : d
+      ? String(d)
+      : new Date().toISOString();
 
 function mergeSettings(raw: unknown): SalesOsSettings {
-  const incoming = (raw && typeof raw === "object" ? raw : {}) as Partial<SalesOsSettings>;
+  const incoming = (
+    raw && typeof raw === "object" ? raw : {}
+  ) as Partial<SalesOsSettings>;
   return {
     ...DEFAULT_SALES_OS_SETTINGS,
     ...incoming,
@@ -91,7 +135,10 @@ function mergeSettings(raw: unknown): SalesOsSettings {
     buaf: { ...DEFAULT_SALES_OS_SETTINGS.buaf, ...incoming.buaf },
     caps: { ...DEFAULT_SALES_OS_SETTINGS.caps, ...incoming.caps },
     targets: { ...DEFAULT_SALES_OS_SETTINGS.targets, ...incoming.targets },
-    stallDays: { ...DEFAULT_SALES_OS_SETTINGS.stallDays, ...incoming.stallDays },
+    stallDays: {
+      ...DEFAULT_SALES_OS_SETTINGS.stallDays,
+      ...incoming.stallDays,
+    },
   };
 }
 
@@ -138,7 +185,9 @@ export async function saveSalesOsSettings(
   );
 }
 
-function mapCompany(r: typeof companyResearch.$inferSelect): CompanyResearchRow {
+function mapCompany(
+  r: typeof companyResearch.$inferSelect,
+): CompanyResearchRow {
   return {
     id: r.companyResearchId,
     companyId: r.companyId,
@@ -184,7 +233,9 @@ export async function insertCompanyResearch(
           evidence: input.evidence,
           leadSourceLane: input.leadSourceLane,
           estimatedValueAed:
-            input.estimatedValueAed != null ? String(input.estimatedValueAed) : null,
+            input.estimatedValueAed != null
+              ? String(input.estimatedValueAed)
+              : null,
           suggestedServices: input.suggestedServices,
           buafBudget: input.buafBudget,
           buafUrgency: input.buafUrgency,
@@ -201,11 +252,313 @@ export async function insertCompanyResearch(
       return mapCompany(row!);
     },
     () => {
-      const row: CompanyResearchRow = { ...input, id: randomUUID(), createdAt: now, updatedAt: now };
+      const row: CompanyResearchRow = {
+        ...input,
+        id: randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+      };
       memory.companies.set(row.id, row);
       return row;
     },
   );
+}
+
+export type ResearchProposalReceipt = {
+  proposal: CompanyResearchRow;
+  receiptId: string;
+  signalId: string;
+  auditId: string;
+  duplicate: boolean;
+  replayed: boolean;
+};
+
+/**
+ * Atomically claim, persist, and receipt one sourced research proposal. The
+ * existing integration inbox provides the request-id uniqueness boundary; an
+ * advisory lock also prevents equivalent company/source payloads submitted
+ * under different request IDs from racing into duplicate proposals.
+ */
+export async function insertResearchProposalWithSignal(input: {
+  requestId: string;
+  payloadHash: string;
+  actorEmployeeId?: string | null;
+  proposal: Omit<CompanyResearchRow, "id" | "createdAt" | "updatedAt">;
+  signal: Omit<IntelSignalRow, "id" | "createdAt">;
+}): Promise<ResearchProposalReceipt> {
+  const provider = "hrmny";
+  const externalEventId = `sales-research:${input.requestId.trim()}`;
+  const normalizedName = normalizeResearchCompanyName(input.proposal.name);
+  const semanticKey = `${normalizedName}:${input.proposal.evidence ?? ""}`;
+  const db = getDb();
+
+  if (!db) {
+    return withMemoryResearchLock(`request:${externalEventId}`, () =>
+      withMemoryResearchLock(`semantic:${semanticKey}`, () => {
+        const prior = memory.researchReceipts.get(externalEventId);
+        if (prior) {
+          if (prior.payloadHash !== input.payloadHash) {
+            throw new Error("RESEARCH_PROPOSAL_PAYLOAD_MISMATCH");
+          }
+          const proposal = memory.companies.get(prior.proposalId);
+          if (!proposal) throw new Error("RESEARCH_PROPOSAL_RECEIPT_ORPHANED");
+          return {
+            proposal,
+            receiptId: prior.receiptId,
+            signalId: prior.signalId,
+            auditId: prior.auditId,
+            duplicate: true,
+            replayed: true,
+          };
+        }
+
+        const equivalent = [...memory.companies.values()].find(
+          (row) =>
+            normalizeResearchCompanyName(row.name) === normalizedName &&
+            row.evidence === input.proposal.evidence &&
+            row.companyId === null &&
+            (row.approvalState === "researched" ||
+              row.approvalState === "rework"),
+        );
+        const receiptId = randomUUID();
+        const now = new Date().toISOString();
+        const proposal: CompanyResearchRow = equivalent ?? {
+          ...input.proposal,
+          id: randomUUID(),
+          createdAt: now,
+          updatedAt: now,
+        };
+        const signal: IntelSignalRow = {
+          ...input.signal,
+          source: `${input.signal.source}:${input.requestId}`,
+          id: randomUUID(),
+          createdAt: now,
+        };
+        if (!equivalent) memory.companies.set(proposal.id, proposal);
+        memory.signals.push(signal);
+        const audit = getDemoStore().appendAudit({
+          actorEmployeeId: input.actorEmployeeId ?? null,
+          action: "sales.research.proposed",
+          entityType: "company_research",
+          entityId: proposal.id,
+          before: null,
+          after: {
+            receiptId,
+            signalId: signal.id,
+            evidence: input.proposal.evidence,
+            duplicate: Boolean(equivalent),
+          },
+          reason: "Evidence-bearing Sales research proposal",
+        });
+        memory.researchReceipts.set(externalEventId, {
+          receiptId,
+          payloadHash: input.payloadHash,
+          proposalId: proposal.id,
+          signalId: signal.id,
+          auditId: audit.auditEventId,
+        });
+        return {
+          proposal,
+          receiptId,
+          signalId: signal.id,
+          auditId: audit.auditEventId,
+          duplicate: Boolean(equivalent),
+          replayed: false,
+        };
+      }),
+    );
+  }
+
+  return db.transaction(async (tx) => {
+    const [claim] = await tx
+      .insert(integrationInbox)
+      .values({
+        provider,
+        externalEventId,
+        operation: "sales.research.propose",
+        payloadHash: input.payloadHash,
+        payload: {
+          actorEmployeeId: input.actorEmployeeId ?? null,
+          companyName: input.proposal.name,
+          evidence: input.proposal.evidence,
+          leadSourceLane: input.proposal.leadSourceLane,
+        },
+        status: "processing",
+        attempts: 1,
+      })
+      .onConflictDoNothing({
+        target: [integrationInbox.provider, integrationInbox.externalEventId],
+      })
+      .returning({ receiptId: integrationInbox.integrationInboxId });
+
+    if (!claim) {
+      const [prior] = await tx
+        .select({
+          receiptId: integrationInbox.integrationInboxId,
+          payloadHash: integrationInbox.payloadHash,
+          status: integrationInbox.status,
+          result: integrationInbox.result,
+        })
+        .from(integrationInbox)
+        .where(
+          and(
+            eq(integrationInbox.provider, provider),
+            eq(integrationInbox.externalEventId, externalEventId),
+          ),
+        )
+        .limit(1);
+      if (!prior) throw new Error("RESEARCH_PROPOSAL_RECEIPT_CONFLICT");
+      if (prior.payloadHash !== input.payloadHash) {
+        throw new Error("RESEARCH_PROPOSAL_PAYLOAD_MISMATCH");
+      }
+      const proposalId =
+        prior.result && typeof prior.result.proposalId === "string"
+          ? prior.result.proposalId
+          : null;
+      const signalId =
+        prior.result && typeof prior.result.signalId === "string"
+          ? prior.result.signalId
+          : null;
+      const auditId =
+        prior.result && typeof prior.result.auditId === "string"
+          ? prior.result.auditId
+          : null;
+      if (
+        prior.status !== "completed" ||
+        !proposalId ||
+        !signalId ||
+        !auditId
+      ) {
+        throw new Error("RESEARCH_PROPOSAL_RECONCILIATION_REQUIRED");
+      }
+      const [row] = await tx
+        .select()
+        .from(companyResearch)
+        .where(eq(companyResearch.companyResearchId, proposalId))
+        .limit(1);
+      if (!row) throw new Error("RESEARCH_PROPOSAL_RECEIPT_ORPHANED");
+      return {
+        proposal: mapCompany(row),
+        receiptId: prior.receiptId,
+        signalId,
+        auditId,
+        duplicate: true,
+        replayed: true,
+      };
+    }
+
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${semanticKey}, 0))`,
+    );
+    const candidates = input.proposal.evidence
+      ? await tx
+          .select()
+          .from(companyResearch)
+          .where(eq(companyResearch.evidence, input.proposal.evidence))
+      : [];
+    const equivalent = candidates.find(
+      (row) =>
+        normalizeResearchCompanyName(row.name) === normalizedName &&
+        row.companyId === null &&
+        (row.approvalState === "researched" || row.approvalState === "rework"),
+    );
+
+    let proposal: CompanyResearchRow;
+    let duplicate = false;
+    if (equivalent) {
+      proposal = mapCompany(equivalent);
+      duplicate = true;
+    } else {
+      const [proposalRow] = await tx
+        .insert(companyResearch)
+        .values({
+          companyId: input.proposal.companyId,
+          name: input.proposal.name,
+          sector: input.proposal.sector,
+          market: input.proposal.market,
+          website: input.proposal.website,
+          whyThis: input.proposal.whyThis,
+          evidence: input.proposal.evidence,
+          leadSourceLane: input.proposal.leadSourceLane,
+          estimatedValueAed:
+            input.proposal.estimatedValueAed != null
+              ? String(input.proposal.estimatedValueAed)
+              : null,
+          suggestedServices: input.proposal.suggestedServices,
+          buafBudget: input.proposal.buafBudget,
+          buafUrgency: input.proposal.buafUrgency,
+          buafAccess: input.proposal.buafAccess,
+          buafFit: input.proposal.buafFit,
+          buafTotal: input.proposal.buafTotal,
+          temperature: input.proposal.temperature,
+          approvalState: input.proposal.approvalState,
+          reworkFeedback: input.proposal.reworkFeedback,
+          decidedBy: input.proposal.decidedBy,
+          decidedAt: input.proposal.decidedAt
+            ? new Date(input.proposal.decidedAt)
+            : null,
+        })
+        .returning();
+      if (!proposalRow) throw new Error("RESEARCH_PROPOSAL_INSERT_FAILED");
+      proposal = mapCompany(proposalRow);
+    }
+
+    const [signal] = await tx
+      .insert(intelSignal)
+      .values({
+        companyId: input.signal.companyId,
+        contactId: input.signal.contactId,
+        signalType: input.signal.signalType,
+        source: `${input.signal.source}:${input.requestId}`,
+        signalDate: input.signal.signalDate,
+        summary: input.signal.summary,
+        evidenceUrl: input.signal.evidenceUrl,
+      })
+      .returning({ signalId: intelSignal.intelSignalId });
+    if (!signal) throw new Error("RESEARCH_SIGNAL_INSERT_FAILED");
+    const [audit] = await tx
+      .insert(auditEvent)
+      .values({
+        actorEmployeeId: input.actorEmployeeId ?? null,
+        action: "sales.research.proposed",
+        entityType: "company_research",
+        entityId: proposal.id,
+        before: null,
+        after: {
+          receiptId: claim.receiptId,
+          signalId: signal.signalId,
+          evidence: input.proposal.evidence,
+          duplicate,
+        },
+        reason: "Evidence-bearing Sales research proposal",
+      })
+      .returning({ auditId: auditEvent.auditEventId });
+    if (!audit) throw new Error("RESEARCH_PROPOSAL_AUDIT_FAILED");
+
+    await tx
+      .update(integrationInbox)
+      .set({
+        status: "completed",
+        result: {
+          proposalId: proposal.id,
+          signalId: signal.signalId,
+          auditId: audit.auditId,
+          duplicate,
+        },
+        processedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(integrationInbox.integrationInboxId, claim.receiptId));
+
+    return {
+      proposal,
+      receiptId: claim.receiptId,
+      signalId: signal.signalId,
+      auditId: audit.auditId,
+      duplicate,
+      replayed: false,
+    };
+  });
 }
 
 export async function listCompanyResearch(filter?: {
@@ -216,19 +569,26 @@ export async function listCompanyResearch(filter?: {
       const rows = await db
         .select()
         .from(companyResearch)
-        .where(filter?.state ? eq(companyResearch.approvalState, filter.state) : undefined)
+        .where(
+          filter?.state
+            ? eq(companyResearch.approvalState, filter.state)
+            : undefined,
+        )
         .orderBy(desc(companyResearch.createdAt));
       return rows.map(mapCompany);
     },
     () => {
       let rows = [...memory.companies.values()];
-      if (filter?.state) rows = rows.filter((r) => r.approvalState === filter.state);
+      if (filter?.state)
+        rows = rows.filter((r) => r.approvalState === filter.state);
       return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     },
   );
 }
 
-export async function getCompanyResearch(id: string): Promise<CompanyResearchRow | null> {
+export async function getCompanyResearch(
+  id: string,
+): Promise<CompanyResearchRow | null> {
   return withDb(
     async (db) => {
       const [row] = await db
@@ -250,8 +610,10 @@ export async function patchCompanyResearch(
     async (db) => {
       const set: Record<string, unknown> = { updatedAt: new Date() };
       if (patch.companyId !== undefined) set.companyId = patch.companyId;
-      if (patch.approvalState !== undefined) set.approvalState = patch.approvalState;
-      if (patch.reworkFeedback !== undefined) set.reworkFeedback = patch.reworkFeedback;
+      if (patch.approvalState !== undefined)
+        set.approvalState = patch.approvalState;
+      if (patch.reworkFeedback !== undefined)
+        set.reworkFeedback = patch.reworkFeedback;
       if (patch.decidedBy !== undefined) set.decidedBy = patch.decidedBy;
       if (patch.decidedAt !== undefined)
         set.decidedAt = patch.decidedAt ? new Date(patch.decidedAt) : null;
@@ -273,14 +635,20 @@ export async function patchCompanyResearch(
     () => {
       const existing = memory.companies.get(id);
       if (!existing) return null;
-      const next = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+      const next = {
+        ...existing,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
       memory.companies.set(id, next);
       return next;
     },
   );
 }
 
-function mapContact(r: typeof contactResearch.$inferSelect): ContactResearchRow {
+function mapContact(
+  r: typeof contactResearch.$inferSelect,
+): ContactResearchRow {
   return {
     id: r.contactResearchId,
     companyResearchId: r.companyResearchId,
@@ -334,7 +702,12 @@ export async function insertContactResearch(
       return mapContact(row!);
     },
     () => {
-      const row: ContactResearchRow = { ...input, id: randomUUID(), createdAt: now, updatedAt: now };
+      const row: ContactResearchRow = {
+        ...input,
+        id: randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+      };
       memory.contacts.set(row.id, row);
       return row;
     },
@@ -351,7 +724,9 @@ export async function listContactResearch(filter?: {
         filter?.companyResearchId
           ? eq(contactResearch.companyResearchId, filter.companyResearchId)
           : undefined,
-        filter?.state ? eq(contactResearch.approvalState, filter.state) : undefined,
+        filter?.state
+          ? eq(contactResearch.approvalState, filter.state)
+          : undefined,
       ].filter((c) => c !== undefined);
       const rows = await db
         .select()
@@ -363,14 +738,19 @@ export async function listContactResearch(filter?: {
     () => {
       let rows = [...memory.contacts.values()];
       if (filter?.companyResearchId)
-        rows = rows.filter((r) => r.companyResearchId === filter.companyResearchId);
-      if (filter?.state) rows = rows.filter((r) => r.approvalState === filter.state);
+        rows = rows.filter(
+          (r) => r.companyResearchId === filter.companyResearchId,
+        );
+      if (filter?.state)
+        rows = rows.filter((r) => r.approvalState === filter.state);
       return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     },
   );
 }
 
-export async function getContactResearch(id: string): Promise<ContactResearchRow | null> {
+export async function getContactResearch(
+  id: string,
+): Promise<ContactResearchRow | null> {
   return withDb(
     async (db) => {
       const [row] = await db
@@ -391,13 +771,17 @@ export async function patchContactResearch(
   return withDb(
     async (db) => {
       const set: Record<string, unknown> = { updatedAt: new Date() };
-      if (patch.approvalState !== undefined) set.approvalState = patch.approvalState;
-      if (patch.reworkFeedback !== undefined) set.reworkFeedback = patch.reworkFeedback;
+      if (patch.approvalState !== undefined)
+        set.approvalState = patch.approvalState;
+      if (patch.reworkFeedback !== undefined)
+        set.reworkFeedback = patch.reworkFeedback;
       if (patch.contactId !== undefined) set.contactId = patch.contactId;
       if (patch.dealId !== undefined) set.dealId = patch.dealId;
       if (patch.companyId !== undefined) set.companyId = patch.companyId;
-      if (patch.emailVerified !== undefined) set.emailVerified = patch.emailVerified;
-      if (patch.emailVerdict !== undefined) set.emailVerdict = patch.emailVerdict;
+      if (patch.emailVerified !== undefined)
+        set.emailVerified = patch.emailVerified;
+      if (patch.emailVerdict !== undefined)
+        set.emailVerdict = patch.emailVerdict;
       const [row] = await db
         .update(contactResearch)
         .set(set)
@@ -408,7 +792,11 @@ export async function patchContactResearch(
     () => {
       const existing = memory.contacts.get(id);
       if (!existing) return null;
-      const next = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+      const next = {
+        ...existing,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
       memory.contacts.set(id, next);
       return next;
     },
@@ -475,7 +863,10 @@ export async function listSuppression(): Promise<SuppressionRow[]> {
         createdAt: iso(r.createdAt),
       }));
     },
-    () => [...memory.suppression].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    () =>
+      [...memory.suppression].sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt),
+      ),
   );
 }
 
@@ -554,7 +945,10 @@ export async function listEmailEvents(filter?: {
 }): Promise<EmailEventRow[]> {
   return withDb(
     async (db) => {
-      const rows = await db.select().from(emailEvent).orderBy(desc(emailEvent.occurredAt));
+      const rows = await db
+        .select()
+        .from(emailEvent)
+        .orderBy(desc(emailEvent.occurredAt));
       return rows
         .map((r) => ({
           id: r.emailEventId,
@@ -612,14 +1006,20 @@ export async function insertIntelSignal(
       };
     },
     () => {
-      const row: IntelSignalRow = { ...input, id: randomUUID(), createdAt: now };
+      const row: IntelSignalRow = {
+        ...input,
+        id: randomUUID(),
+        createdAt: now,
+      };
       memory.signals.push(row);
       return row;
     },
   );
 }
 
-export async function listIntelSignals(companyId?: string): Promise<IntelSignalRow[]> {
+export async function listIntelSignals(
+  companyId?: string,
+): Promise<IntelSignalRow[]> {
   return withDb(
     async (db) => {
       const rows = await db
@@ -639,8 +1039,124 @@ export async function listIntelSignals(companyId?: string): Promise<IntelSignalR
         createdAt: iso(r.createdAt),
       }));
     },
-    () =>
-      memory.signals.filter((s) => !companyId || s.companyId === companyId),
+    () => memory.signals.filter((s) => !companyId || s.companyId === companyId),
+  );
+}
+
+export async function getResearchReceiptSignalIdsByProposal(
+  proposalIds: string[],
+): Promise<Map<string, string[]>> {
+  const uniqueProposalIds = [...new Set(proposalIds)];
+  if (uniqueProposalIds.length === 0) return new Map();
+  return withDb(
+    async (db) => {
+      const receipts = await db.execute<{
+        proposal_id: string | null;
+        signal_id: string | null;
+      }>(sql`
+        select
+          result ->> 'proposalId' as proposal_id,
+          result ->> 'signalId' as signal_id
+        from public.integration_inbox
+        where provider = 'hrmny'
+          and operation = 'sales.research.propose'
+          and status = 'completed'
+          and result ->> 'proposalId' in (
+            ${sql.join(
+              uniqueProposalIds.map((proposalId) => sql`${proposalId}`),
+              sql`, `,
+            )}
+          )
+      `);
+      const grouped = new Map<string, Set<string>>();
+      for (const receipt of receipts) {
+        if (!receipt.proposal_id || !receipt.signal_id) continue;
+        const signals = grouped.get(receipt.proposal_id) ?? new Set<string>();
+        signals.add(receipt.signal_id);
+        grouped.set(receipt.proposal_id, signals);
+      }
+      return new Map(
+        [...grouped.entries()].map(([proposalId, signals]) => [
+          proposalId,
+          [...signals],
+        ]),
+      );
+    },
+    () => {
+      const allowed = new Set(uniqueProposalIds);
+      const grouped = new Map<string, Set<string>>();
+      for (const receipt of memory.researchReceipts.values()) {
+        if (!allowed.has(receipt.proposalId)) continue;
+        const signals = grouped.get(receipt.proposalId) ?? new Set<string>();
+        signals.add(receipt.signalId);
+        grouped.set(receipt.proposalId, signals);
+      }
+      return new Map(
+        [...grouped.entries()].map(([proposalId, signals]) => [
+          proposalId,
+          [...signals],
+        ]),
+      );
+    },
+  );
+}
+
+export async function getResearchReceiptSignalIds(
+  proposalId: string,
+): Promise<string[]> {
+  return (
+    (await getResearchReceiptSignalIdsByProposal([proposalId])).get(
+      proposalId,
+    ) ?? []
+  );
+}
+
+export async function linkResearchReceiptSignals(
+  proposalId: string,
+  companyId: string,
+): Promise<number> {
+  return withDb(
+    async (db) => {
+      const receipts = await db.execute<{ signal_id: string | null }>(sql`
+        select result ->> 'signalId' as signal_id
+        from public.integration_inbox
+        where provider = 'hrmny'
+          and operation = 'sales.research.propose'
+          and status = 'completed'
+          and result ->> 'proposalId' = ${proposalId}
+      `);
+      const signalIds = receipts
+        .map((row) => row.signal_id)
+        .filter((id): id is string => Boolean(id));
+      if (signalIds.length === 0) return 0;
+      const rows = await db.execute<{ id: string }>(sql`
+        update public.intel_signal
+        set company_id = ${companyId}::uuid
+        where intel_signal_id in (
+          ${sql.join(
+            signalIds.map((id) => sql`${id}::uuid`),
+            sql`, `,
+          )}
+        )
+          and company_id is null
+        returning intel_signal_id as id
+      `);
+      return rows.length;
+    },
+    () => {
+      const signalIds = new Set(
+        [...memory.researchReceipts.values()]
+          .filter((receipt) => receipt.proposalId === proposalId)
+          .map((receipt) => receipt.signalId),
+      );
+      let linked = 0;
+      for (const signal of memory.signals) {
+        if (!signalIds.has(signal.id) || signal.companyId) continue;
+        signal.companyId = companyId;
+        linked += 1;
+      }
+      return linked;
+    },
   );
 }
 
@@ -671,11 +1187,15 @@ export async function addCredit(
 }
 
 function isoWeekKey(date: Date): string {
-  const tmp = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const tmp = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
   const day = tmp.getUTCDay() || 7;
   tmp.setUTCDate(tmp.getUTCDate() + 4 - day);
   const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((tmp.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  const week = Math.ceil(
+    ((tmp.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
+  );
   return `${tmp.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
@@ -691,7 +1211,10 @@ export async function creditUsed(
         .select()
         .from(salesOsCreditLedger)
         .where(
-          and(eq(salesOsCreditLedger.month, month), eq(salesOsCreditLedger.kind, kind)),
+          and(
+            eq(salesOsCreditLedger.month, month),
+            eq(salesOsCreditLedger.kind, kind),
+          ),
         );
       return rows.reduce((sum, r) => sum + r.count, 0);
     },
@@ -762,7 +1285,10 @@ export async function listEvolveProposals(): Promise<EvolveProposalRow[]> {
         decidedAt: r.decidedAt ? iso(r.decidedAt) : null,
       }));
     },
-    () => [...memory.proposals].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    () =>
+      [...memory.proposals].sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt),
+      ),
   );
 }
 

@@ -1,0 +1,54 @@
+# Separately gated live-provider canary. Ordinary CI/nightly suites never load
+# provider credentials and exclude `*.live.test.ts`.
+name: OpenRouter bounded live smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorization_receipt:
+        description: Approval receipt for one free-route provider canary
+        required: true
+        type: string
+      confirmation:
+        description: Type RUN ONE OPENROUTER FREE ROUTE CANARY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openrouter-live-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: Provider Acceptance
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify explicit authority
+        env:
+          APPROVAL_RECEIPT: ${{ inputs.authorization_receipt }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          test "${CONFIRMATION}" = "RUN ONE OPENROUTER FREE ROUTE CANARY"
+          test "${#APPROVAL_RECEIPT}" -ge 8
+      - name: Run one free-route live canary
+        env:
+          LLM_PROVIDER: openrouter
+          OPENROUTER_LIVE_SMOKE: "1"
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LLM_DEFAULT_MODEL: stealth/ox-alpha
+        run: |
+          test -n "${OPENROUTER_API_KEY:-}"
+          pnpm --filter @hrmny/ai test:live:openrouter
