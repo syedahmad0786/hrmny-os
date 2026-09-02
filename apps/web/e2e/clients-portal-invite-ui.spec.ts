@@ -13,9 +13,11 @@ test.describe("Clients portal invite UI", () => {
     await expect(
       page.getByRole("heading", { name: /Client directory/i }),
     ).toBeVisible({ timeout: 60_000 });
+    await page.getByText("Client setup status", { exact: true }).click();
     await expect(page.getByTestId("clients-ready-banner")).toBeVisible({
       timeout: 30_000,
     });
+    await page.getByRole("checkbox", { name: /Show \d+ test client/i }).check();
 
     await page.getByTestId(`clients-manage-portal-${DEMO_CLIENT_ID}`).click();
     await expect(page.getByTestId("clients-portal-access-panel")).toBeVisible({
@@ -23,7 +25,9 @@ test.describe("Clients portal invite UI", () => {
     });
 
     const email = `portal-invite-${Date.now()}@example.com`;
-    await page.getByTestId("clients-portal-invite-name").fill("Portal Invite E2E");
+    await page
+      .getByTestId("clients-portal-invite-name")
+      .fill("Portal Invite E2E");
     await page.getByTestId("clients-portal-invite-email").fill(email);
     await page.getByTestId("clients-portal-invite-submit").click();
 

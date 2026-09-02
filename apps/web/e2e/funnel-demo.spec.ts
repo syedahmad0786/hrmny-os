@@ -68,7 +68,9 @@ test.describe("Demo funnel", () => {
     await expect(
       page.getByRole("heading", { name: /Delivery/i }),
     ).toBeVisible();
-    await expect(page.locator("body")).toContainText(/Run agent on task/i);
+    await expect(
+      page.getByText("Delivery setup and automation", { exact: true }),
+    ).toBeVisible();
 
     await page.goto("/settings/ai", { waitUntil: "domcontentloaded" });
     await expect(page.locator("body")).toContainText(/AI|agent/i);
@@ -235,7 +237,7 @@ test.describe("Demo funnel", () => {
     expect(portalToken).not.toBe(onboardingToken);
   });
 
-  test("delivery Client portal CTA requires a selected task", async ({
+  test("delivery selects the next task before offering client actions", async ({
     page,
   }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
@@ -243,9 +245,10 @@ test.describe("Demo funnel", () => {
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
     });
+    await page.getByRole("checkbox", { name: /Show \d+ test item/i }).check();
     const portalCta = page.getByTestId("delivery-client-portal");
     await expect(portalCta).toBeVisible();
-    await expect(portalCta).toBeDisabled();
+    await expect(portalCta).toBeEnabled();
   });
 
   test("delivery Client portal mints magic link into portal approvals", async ({
@@ -256,6 +259,10 @@ test.describe("Demo funnel", () => {
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
     });
+    await page.getByRole("checkbox", { name: /Show \d+ test item/i }).check();
+    await page
+      .getByText("Delivery setup and automation", { exact: true })
+      .click();
 
     const taskSelect = page.getByTestId("delivery-task-select");
     await expect(taskSelect).toBeVisible();
@@ -290,6 +297,10 @@ test.describe("Demo funnel", () => {
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
     });
+    await page.getByRole("checkbox", { name: /Show \d+ test item/i }).check();
+    await page
+      .getByText("Delivery setup and automation", { exact: true })
+      .click();
 
     const taskSelect = page.getByTestId("delivery-task-select");
     await expect
@@ -1037,6 +1048,7 @@ test.describe("Demo funnel", () => {
   }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("chat-toggle-synthetic").click();
 
     const sandbox = page.getByTestId("chat-sandbox-client");
     await expect(sandbox).toBeVisible({ timeout: 60_000 });

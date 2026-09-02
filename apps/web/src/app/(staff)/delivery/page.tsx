@@ -103,6 +103,32 @@ function DeliveryBoardPageInner() {
       ),
     [allClientNameById, board.data?.board],
   );
+
+  useEffect(() => {
+    if (showTestRecords || (!taskIdFromQuery && !clientIdFromQuery)) return;
+    const requested = (board.data?.board ?? [])
+      .flatMap((column) => column.tasks)
+      .find(
+        (task) =>
+          task.taskId === taskIdFromQuery ||
+          task.clientId === clientIdFromQuery,
+      );
+    if (
+      requested &&
+      hasSyntheticMarker(
+        requested.title,
+        allClientNameById.get(requested.clientId),
+      )
+    ) {
+      setShowTestRecords(true);
+    }
+  }, [
+    allClientNameById,
+    board.data?.board,
+    clientIdFromQuery,
+    showTestRecords,
+    taskIdFromQuery,
+  ]);
   const attentionTasks = flatTasks.filter(
     (task) => ATTENTION_STATES.has(task.status) || task.priority === "urgent",
   );
@@ -234,7 +260,8 @@ function DeliveryBoardPageInner() {
             checked={showTestRecords}
             onChange={(event) => setShowTestRecords(event.target.checked)}
           />
-          Show {hiddenTestCount} test item{hiddenTestCount === 1 ? "" : "s"}
+          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test item
+          {hiddenTestCount === 1 ? "" : "s"}
         </label>
       ) : null}
 

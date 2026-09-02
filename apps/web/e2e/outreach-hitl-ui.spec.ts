@@ -11,6 +11,7 @@ test.describe("Outreach HITL UI", () => {
     await expect(
       page.getByRole("heading", { name: /Outreach drafts/i }),
     ).toBeVisible({ timeout: 60_000 });
+    await page.getByText("Sending setup", { exact: true }).click();
 
     await expect(page.getByTestId("outreach-ready-banner")).toBeVisible({
       timeout: 30_000,
@@ -58,7 +59,9 @@ test.describe("Outreach HITL UI", () => {
       .filter({ hasText: subject });
     await expect(approvedRow).toBeVisible({ timeout: 30_000 });
     await expect(
-      page.locator("[data-outreach-state='draft']").filter({ hasText: subject }),
+      page
+        .locator("[data-outreach-state='draft']")
+        .filter({ hasText: subject }),
     ).toHaveCount(0);
 
     // Explicitly never click Send via Gmail in this mock-safe path.

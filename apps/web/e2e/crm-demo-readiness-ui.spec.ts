@@ -10,12 +10,15 @@ test.describe("CRM demo readiness panel", () => {
     await expect(
       page.getByRole("heading", { name: /^Pipeline$/i }),
     ).toBeVisible({ timeout: 60_000 });
+    await page.getByText("Sales setup", { exact: true }).click();
 
     const panel = page.getByTestId("crm-demo-readiness");
     await expect(panel).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("crm-demo-llm")).toBeVisible();
     await expect(page.getByTestId("crm-demo-blockers-count")).toBeVisible();
-    await expect(panel.getByRole("link", { name: /Sales Growth/i })).toBeVisible();
+    await expect(
+      panel.getByRole("link", { name: /Sales Growth/i }),
+    ).toBeVisible();
     await expect(page.getByTestId("crm-demo-connections")).toBeVisible();
   });
 });

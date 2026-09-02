@@ -486,14 +486,11 @@ test.describe("Hunt Apollo prospect UI", () => {
       page.getByRole("heading", { name: "Find the next right client." }),
     ).toBeVisible();
 
-    await page
-      .getByRole("navigation", { name: "CRM sections" })
-      .locator("summary")
-      .filter({ hasText: "More" })
-      .click();
-    await expect(page.getByRole("link", { name: "Companies" })).toBeVisible();
+    const crmNav = page.getByRole("navigation", { name: "CRM sections" });
+    await expect(crmNav.locator("summary")).toHaveCount(0);
+    await expect(crmNav.getByRole("link", { name: "Contacts" })).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Sales settings" }),
+      crmNav.getByRole("link", { name: "Connected tools" }),
     ).toBeVisible();
   });
 });

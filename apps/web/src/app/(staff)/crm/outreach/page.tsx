@@ -288,7 +288,8 @@ function OutreachInner() {
             checked={showTestRecords}
             onChange={(event) => setShowTestRecords(event.target.checked)}
           />
-          Show {hiddenTestCount} test draft{hiddenTestCount === 1 ? "" : "s"}
+          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test draft
+          {hiddenTestCount === 1 ? "" : "s"}
         </label>
       ) : null}
 

@@ -12,6 +12,7 @@ test.describe("Chat client review starter UI", () => {
     await expect(page.getByTestId("chat-ready-strip")).toBeVisible({
       timeout: 60_000,
     });
+    await page.getByTestId("chat-toggle-synthetic").click();
 
     const sandbox = page.getByTestId("chat-sandbox-client");
     await expect(sandbox).toBeVisible({ timeout: 60_000 });

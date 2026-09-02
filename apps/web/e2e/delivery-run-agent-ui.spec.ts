@@ -16,6 +16,10 @@ test.describe("Delivery Run agent UI", () => {
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
     });
+    await page.getByRole("checkbox", { name: /Show \d+ test item/i }).check();
+    await page
+      .getByText("Delivery setup and automation", { exact: true })
+      .click();
     await expect(page.getByTestId("delivery-ready-banner")).toBeVisible({
       timeout: 30_000,
     });
@@ -67,7 +71,9 @@ test.describe("Delivery Run agent UI", () => {
     const run = page.getByTestId("delivery-run-agent");
     await expect(run).toBeEnabled();
     await expect(page.getByTestId("delivery-agent-sandbox-hint")).toBeVisible();
-    await expect(page.getByTestId("delivery-sandbox-client")).not.toHaveText("");
+    await expect(page.getByTestId("delivery-sandbox-client")).not.toHaveText(
+      "",
+    );
     await expect(page.getByTestId("delivery-agent-allowlist")).toBeVisible();
     await run.click();
 
@@ -89,6 +95,10 @@ test.describe("Delivery Run agent UI", () => {
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
     });
+    await page.getByRole("checkbox", { name: /Show \d+ test item/i }).check();
+    await page
+      .getByText("Delivery setup and automation", { exact: true })
+      .click();
     await expect(page.getByTestId("delivery-ready-portal")).toBeVisible({
       timeout: 30_000,
     });

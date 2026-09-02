@@ -162,7 +162,8 @@ export default function CrmPipelinePage() {
             checked={showTestRecords}
             onChange={(event) => setShowTestRecords(event.target.checked)}
           />
-          Show {hiddenTestCount} test record{hiddenTestCount === 1 ? "" : "s"}
+          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test record
+          {hiddenTestCount === 1 ? "" : "s"}
         </label>
       ) : null}
 

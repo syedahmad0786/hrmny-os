@@ -299,7 +299,8 @@ export default function MyTasksPage() {
             checked={showTestRecords}
             onChange={(event) => setShowTestRecords(event.target.checked)}
           />
-          Show {hiddenTestCount} test task{hiddenTestCount === 1 ? "" : "s"}
+          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test task
+          {hiddenTestCount === 1 ? "" : "s"}
         </label>
       ) : null}
 

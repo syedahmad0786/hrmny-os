@@ -11,25 +11,26 @@ test.describe("Connections blocker anchors", () => {
     await expect(
       page.getByRole("heading", { name: /Connections/i }),
     ).toBeVisible({ timeout: 60_000 });
+    await page.getByText("Connection diagnostics", { exact: true }).click();
 
     const platform = page.getByTestId("connections-platform-ready");
     await expect(platform).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("connections-platform-ready-llm")).toContainText(
-      /mock|openrouter/i,
-    );
-    await expect(page.getByTestId("connections-platform-ready-db")).toContainText(
-      /pgvector/i,
-    );
+    await expect(
+      page.getByTestId("connections-platform-ready-llm"),
+    ).toContainText(/mock|openrouter/i);
+    await expect(
+      page.getByTestId("connections-platform-ready-db"),
+    ).toContainText(/pgvector/i);
 
     const apolloCard = page.getByTestId("conn-card-apollo");
     await expect(apolloCard).toBeVisible({ timeout: 30_000 });
 
-    await expect(page.getByTestId("connections-blocker-link-apollo")).toHaveCount(
-      0,
-    );
-    await expect(page.getByTestId("connections-blocker-link-hunter")).toHaveCount(
-      0,
-    );
+    await expect(
+      page.getByTestId("connections-blocker-link-apollo"),
+    ).toHaveCount(0);
+    await expect(
+      page.getByTestId("connections-blocker-link-hunter"),
+    ).toHaveCount(0);
     await expect(page.getByText(/Live demo blockers/i)).toHaveCount(0);
   });
 });

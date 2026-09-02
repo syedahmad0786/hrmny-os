@@ -193,7 +193,7 @@ function ContactsInner() {
             checked={showTestRecords}
             onChange={(event) => setShowTestRecords(event.target.checked)}
           />
-          Show {hiddenTestCount} test contact
+          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test contact
           {hiddenTestCount === 1 ? "" : "s"}
         </label>
       ) : null}
