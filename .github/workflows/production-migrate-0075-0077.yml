@@ -47,6 +47,13 @@ jobs:
     environment: Production
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Trust the reviewed Supabase certificate authority
+        shell: bash
+        run: |
+          cert="$GITHUB_WORKSPACE/.github/certificates/supabase-prod-ca-2021.crt"
+          cert_hash="$(sha256sum "$cert")"
+          test "${cert_hash%% *}" = "700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7"
+          echo "NODE_EXTRA_CA_CERTS=$cert" >> "$GITHUB_ENV"
       - name: Refuse non-main or unreviewed code
         shell: bash
         env:
