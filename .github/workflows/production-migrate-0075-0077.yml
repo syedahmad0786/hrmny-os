@@ -1,0 +1,90 @@
+name: HRMNY production migrations 0075-0077
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Audit is read-only; apply requires the receipts below
+        required: true
+        default: audit
+        type: choice
+        options:
+          - audit
+          - apply
+      project_ref:
+        description: Canonical Supabase project ref
+        required: true
+        type: string
+      backup_receipt:
+        description: Fresh backup or PITR receipt (required for apply)
+        required: false
+        type: string
+      runtime_receipt:
+        description: Compatible deployed-runtime receipt (required for apply)
+        required: false
+        type: string
+      confirmation:
+        description: Type APPLY MIGRATIONS 0075 THROUGH 0077 TO HRMNY PRODUCTION
+        required: false
+        type: string
+      reviewed_sha:
+        description: Exact reviewed main commit SHA to execute
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hrmny-production-database-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Audit or append 0075-0077 and read back
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: Production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Refuse non-main or unreviewed code
+        shell: bash
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$REVIEWED_SHA"
+          test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
+          echo "Executing reviewed HRMNY migration commit $GITHUB_SHA"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Read-only exact 0074 and zero-running preflight
+        env:
+          PRODUCTION_MIGRATION_PHASE: ${{ inputs.operation == 'apply' && 'preflight' || 'audit' }}
+          HRMNY_PRODUCTION_DATABASE_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
+          HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
+          HRMNY_PRODUCTION_BACKUP_RECEIPT: ${{ inputs.backup_receipt }}
+          HRMNY_PRODUCTION_RUNTIME_RECEIPT: ${{ inputs.runtime_receipt }}
+          HRMNY_PRODUCTION_MIGRATION_CONFIRMATION: ${{ inputs.confirmation }}
+        run: pnpm --filter @hrmny/db exec tsx src/production-migration-0075-0077-guard.ts
+      - name: Append reviewed migrations 0075 through 0077
+        if: inputs.operation == 'apply'
+        env:
+          DIRECT_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
+        run: pnpm --filter @hrmny/db migrate
+      - name: Read back Apollo fencing, serialization, QM security, and journal
+        if: inputs.operation == 'apply'
+        env:
+          PRODUCTION_MIGRATION_PHASE: verify
+          HRMNY_PRODUCTION_DATABASE_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
+          HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
+          HRMNY_PRODUCTION_BACKUP_RECEIPT: ${{ inputs.backup_receipt }}
+          HRMNY_PRODUCTION_RUNTIME_RECEIPT: ${{ inputs.runtime_receipt }}
+          HRMNY_PRODUCTION_MIGRATION_CONFIRMATION: ${{ inputs.confirmation }}
+        run: pnpm --filter @hrmny/db exec tsx src/production-migration-0075-0077-guard.ts
