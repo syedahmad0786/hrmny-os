@@ -15,7 +15,7 @@ export const HRMNY_PRODUCTION_0075_TO_0077_CONFIRMATION =
 export const HRMNY_PRODUCTION_0077_MIGRATION = {
   count: 1,
   createdAt: "1788322190000",
-  hash: "e27f6b87903a856885719489385d221766623ef64914686fecfc2a246e02ae38",
+  hash: "ae83db63c832a235c9c0d441a51fa19c721b119bb8faff50a3b5b81a1545d4ba",
   tag: "0077_qm_control_repository" as const,
 };
 

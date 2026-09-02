@@ -68,7 +68,12 @@ assert.equal(
 
 function repositoryMigrationHash(tag: string): string {
   return createHash("sha256")
-    .update(readFileSync(join(migrationsDirectory, `${tag}.sql`)))
+    .update(
+      readFileSync(join(migrationsDirectory, `${tag}.sql`), "utf8").replace(
+        /\r\n/g,
+        "\n",
+      ),
+    )
     .digest("hex");
 }
 
