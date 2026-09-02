@@ -6,7 +6,8 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
-`d1ab23c36ebbde5320967f0d806251193919b1c6`.
+`d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`.
 
 ## `PROC-HRMNY-20260902-APOLLO-008` — review, migrate, deploy, and reopen free People Search
 
@@ -54,14 +55,21 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 2. Run synthetic concurrent cron/Inngest/employee jobs and forced worker/session
    loss. Verify one healthy provider lane, honest ambiguity, cleanup, alerting,
    and rollback.
-3. Prove that an in-place Vault-only rotation changes the captured
-   `vault.decrypted_secrets.updated_at` revision before dispatch and prevents a
-   stale 401/403 from disabling the newer credential. Confirm that `FOR SHARE`
-   through the permitted view blocks a concurrent rotation without granting
-   direct access to `vault.secrets`. Still use the governed connection workflow
-   for every operational rotation so status, audit, and ownership remain
-   reconciled.
-4. Do not reopen on migration or health alone.
+3. Prove governed key save and disconnect acquire the same Apollo lane as
+   dispatch; a running authorized, ambiguous, legacy may-settle, or unleased
+   processing receipt must return busy without changing the credential,
+   connection, Vault tombstone, or audit counts. Confirm atomic rollback on
+   backend loss and disconnect-cardinality failure.
+4. Prove final authorization reads the exact connection and permitted Vault
+   revision in one snapshot while locking only `connection_account`. Confirm a
+   missing Vault row projects `error`/`VAULT_SECRET_MISSING`, returns no secret
+   metadata, and cannot dispatch or disable a replacement credential after a
+   stale 401/403.
+5. Prohibit direct Vault-only edits during runtime. If exceptional repair is
+   required, disable and drain Apollo first, preserve an incident receipt, use
+   a separately reviewed repair, then reconcile connection status and audit
+   before reopening.
+6. Do not reopen on migration or health alone.
 
 ### 4. Bounded live and user checkpoint
 
@@ -80,5 +88,7 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 2. Reconcile provider responses and CRM destination state by stable request ID.
 3. Rotate credentials through the governed connection path if authentication is
    uncertain. Do not edit Vault alone.
-4. Correct forward or restore under separate approval; never drop migration
+4. Treat a missing Vault projection or null safety lease as an incident that
+   remains closed until reconciled; never clear it merely to restore UI health.
+5. Correct forward or restore under separate approval; never drop migration
    objects or erase ambiguity to make the dashboard appear healthy.

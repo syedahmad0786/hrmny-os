@@ -6,22 +6,23 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
-`d1ab23c36ebbde5320967f0d806251193919b1c6`.
+`d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`.
 
 ## `GAP-HRMNY-20260902-APOLLO-014` — hosted PostgreSQL proof pending
 
-- Decision/finding: corrected local lint, types, tests, and builds pass, but the
-  29-case PostgreSQL runtime suite and disposable migration verifier require
-  hosted CI. The initial `afc708a` matrices and the direct-Vault-table
-  `d1a137d` matrices failed and cannot be reused.
+- Decision/finding: exact-current local lint, types, 964 tests, and builds pass,
+  but the 40-case PostgreSQL runtime suite and disposable migration verifier
+  require hosted CI. The initial `afc708a`, direct-Vault-table `d1a137d`, and
+  Vault-view-lock `65748a1` matrices failed and cannot be reused.
 - Reason: no safe local PostgreSQL service or authorized database URL was
   available; the default web suite intentionally excludes this file.
 - Alternatives considered: point tests at production; claim unit proof as
   database execution; install an unapproved local service.
 - Trade-offs: the branch cannot close the prior provider-wide free-search gap
   until both hosted event matrices pass the exact head.
-- Evidence: `EVID-HRMNY-20260902-APOLLO-021/022/023` and
-  `FAIL-HRMNY-20260902-APOLLO-022`.
+- Evidence: `EVID-HRMNY-20260902-APOLLO-022/023/024` and
+  `FAIL-HRMNY-20260902-APOLLO-022/023`.
 - Confidence/freshness: high.
 - Affected components: migration `0076`, advisory lock, concurrent workers,
   forced session loss, and recovery.
@@ -92,3 +93,31 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Rollback/correction: close the provider lane after an ambiguous-loss alert,
   reconcile receipts, rotate through the governed connection workflow, and
   reopen only after a reviewed receipt.
+
+## `GAP-HRMNY-20260902-APOLLO-018` — direct Vault-only credential edits are outside the supported lane
+
+- Decision/finding: governed Apollo save and disconnect are serialized and
+  audited, and the final read detects an earlier Vault revision change. A
+  privileged operator who edits Vault directly after the action-time snapshot
+  bypasses the application lane; this path has no accepted concurrent safety or
+  audit contract. Missing Vault projections fail closed as disconnected/error.
+- Reason: the runtime role cannot lock Vault relations, and adding privilege or
+  a new security-definer helper solely to support an out-of-band edit would
+  widen the trusted surface.
+- Alternatives considered: broaden grants; introduce a helper now; silently
+  allow direct Vault edits; remove the revision check.
+- Trade-offs: credential emergencies require quiescing Apollo and using the
+  governed path or a separately reviewed repair procedure. Availability yields
+  to credential and effect safety.
+- Evidence: `ADR-HRMNY-20260902-APOLLO-017`, missing-Vault projection tests,
+  atomic save/disconnect tests, and `FAIL-HRMNY-20260902-APOLLO-023`.
+- Confidence/freshness: high for source boundary on 2026-09-02; operational
+  procedure not yet exercised.
+- Affected components: Vault operations, connection administration, provider
+  lane, audit, incident response, and recovery.
+- Status: open P1 operational boundary; not a blocker for synthetic hosted CI.
+- Supersedes/superseded-by: narrows the credential-operation part of
+  `GAP-HRMNY-20260902-APOLLO-017`; none.
+- Rollback/correction: disable and drain Apollo before any exceptional
+  out-of-band Vault repair, preserve the incident receipt, then reconcile the
+  operational connection before reopening.

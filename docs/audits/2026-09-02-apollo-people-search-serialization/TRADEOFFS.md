@@ -6,7 +6,8 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
-`d1ab23c36ebbde5320967f0d806251193919b1c6`.
+`d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`.
 
 ## `TRADE-HRMNY-20260902-APOLLO-010` — bounded mutual exclusion over false exactly-once
 
@@ -49,23 +50,51 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Rollback/correction: retain `APOLLO_ALLOW_PAID_OPERATIONS=false` and disable
   the one-shot paid route until its own contract is accepted.
 
-## `TRADE-HRMNY-20260902-APOLLO-012` — permitted Vault view over broader grants
+## `TRADE-HRMNY-20260902-APOLLO-012` — rejected view-lock proposal over broader grants
 
-- Decision/finding: use `vault.decrypted_secrets.updated_at` as the rotation
-  revision and retain `FOR SHARE` through the permitted view.
+- Decision/finding: the historical proposal used
+  `vault.decrypted_secrets.updated_at` as the rotation revision and retained
+  `FOR SHARE` through the permitted view.
 - Reason: the application already needs scoped decrypted-secret access, while
   direct `vault.secrets` access would widen its database privilege surface.
 - Alternatives considered: grant direct table reads; create a privileged
   helper immediately; remove in-place-rotation protection.
-- Trade-offs: the timestamp is a technical fence and view-lock behavior is
-  PostgreSQL-specific; hosted CI must prove it before source acceptance.
-- Evidence: `FAIL-HRMNY-20260902-APOLLO-022`, official Vault extension SQL,
-  and correction `d1ab23c`.
-- Confidence/freshness: high for least privilege; hosted lock proof pending.
+- Trade-offs: the timestamp remains a technical fence, but hosted CI proved the
+  runtime role cannot use view row-lock behavior. This proposal is retained as
+  rejected evidence.
+- Evidence: `FAIL-HRMNY-20260902-APOLLO-022/023`, official Vault extension SQL,
+  and rejected correction `d1ab23c`.
+- Confidence/freshness: high for least privilege and the hosted rejection; only
+  exact-`8bce512` no-helper execution remains pending.
 - Affected components: Vault grants, credential rotation, Apollo dispatch, and
   auth-error reconciliation.
-- Status: accepted as the narrow correction; operational acceptance open.
-- Supersedes/superseded-by: none.
-- Rollback/correction: if the view cannot carry the required lock, keep Apollo
-  closed and replace it with a narrowly scoped reviewed helper—not a broad
-  table grant.
+- Status: rejected after `FAIL-HRMNY-20260902-APOLLO-023`.
+- Supersedes/superseded-by: superseded by
+  `TRADE-HRMNY-20260902-APOLLO-013`.
+- Rollback/correction: never restore the view lock or use broad table grants.
+
+## `TRADE-HRMNY-20260902-APOLLO-013` — supported operational serialization over a new privileged helper
+
+- Decision/finding: lock only HRMNY operational rows, serialize governed Apollo
+  mutations with provider dispatch, and use existing Vault functions inside
+  the transaction. Do not add a helper or new Vault grants in this slice.
+- Reason: it satisfies the real hosted privilege contract while preserving
+  atomic connection/audit behavior and action-time revision checks.
+- Alternatives considered: a narrow security-definer helper; direct Vault
+  table/view locks; separate non-atomic writes; no revision fence.
+- Trade-offs: supported operations are coherent, but an exceptional direct
+  Vault-only edit must be quiesced. Tombstones consume a Vault row, missing
+  projections surface an error, and an unknown null-lease state blocks
+  rotation/disconnect until reconciled.
+- Evidence: source commit `8bce512`, `ADR-HRMNY-20260902-APOLLO-017`, official
+  Vault SQL, 40-case PostgreSQL specification, and three final reviews.
+- Confidence/freshness: high for source on 2026-09-02; hosted and live recovery
+  proof pending.
+- Affected components: runtime grants, credential lifecycle, Apollo execution,
+  Vault retention, recovery, and operator UX.
+- Status: accepted for current source with `GAP-HRMNY-20260902-APOLLO-018` open.
+- Supersedes/superseded-by: supersedes
+  `TRADE-HRMNY-20260902-APOLLO-012`; none.
+- Rollback/correction: close Apollo, preserve tombstones and receipts, and use a
+  separately reviewed helper only if future requirements prove the operational
+  lane insufficient.
