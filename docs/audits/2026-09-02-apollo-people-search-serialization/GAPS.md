@@ -7,22 +7,26 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
 `d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
-`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`.
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`, plus fixture correction
+`0f3ac24ddd2645b4b03247ec720fe078406a0d15`.
 
 ## `GAP-HRMNY-20260902-APOLLO-014` — hosted PostgreSQL proof pending
 
 - Decision/finding: exact-current local lint, types, 964 tests, and builds pass,
   but the 40-case PostgreSQL runtime suite and disposable migration verifier
   require hosted CI. The initial `afc708a`, direct-Vault-table `d1a137d`, and
-  Vault-view-lock `65748a1` matrices failed and cannot be reused.
+  Vault-view-lock `65748a1` matrices failed and cannot be reused. The later
+  `cd146c3` matrices passed migrations, Sales PostgreSQL proof, browser, and
+  repository verification, but their Apollo fixture finished 35/40; corrected
+  source `0f3ac24` still requires both fresh matrices.
 - Reason: no safe local PostgreSQL service or authorized database URL was
   available; the default web suite intentionally excludes this file.
 - Alternatives considered: point tests at production; claim unit proof as
   database execution; install an unapproved local service.
 - Trade-offs: the branch cannot close the prior provider-wide free-search gap
   until both hosted event matrices pass the exact head.
-- Evidence: `EVID-HRMNY-20260902-APOLLO-022/023/024` and
-  `FAIL-HRMNY-20260902-APOLLO-022/023`.
+- Evidence: `EVID-HRMNY-20260902-APOLLO-022/023/025/026` and
+  `FAIL-HRMNY-20260902-APOLLO-022/023/024/025`.
 - Confidence/freshness: high.
 - Affected components: migration `0076`, advisory lock, concurrent workers,
   forced session loss, and recovery.
@@ -121,3 +125,36 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Rollback/correction: disable and drain Apollo before any exceptional
   out-of-band Vault repair, preserve the incident receipt, then reconcile the
   operational connection before reopening.
+
+## `GAP-HRMNY-20260902-APOLLO-019` — Postgres.js connection-close crash needs an isolated hardening slice
+
+- Decision/finding: pinned `postgres@3.4.9` can schedule a small write after a
+  closed connection has nulled its socket, producing an uncaught process-level
+  `TypeError`. The upstream guard remains open and unreleased. PR #246 must not
+  claim connection-loss recovery or production acceptance from test-client
+  disposal alone.
+- Reason: the failure can follow ordinary infrastructure loss, not only the
+  privileged `pg_terminate_backend` reproducer, and app-level retry cannot
+  catch an exception thrown from the deferred callback.
+- Alternatives considered: accept the risk; mix a consumer patch into PR #246;
+  switch database drivers inside this slice; wait for an unspecified upstream
+  release.
+- Trade-offs: a separate small branch delays recovery acceptance but preserves
+  review scope and can test the actual dependency patch, frozen install,
+  bounded query settlement, process survival, pool recovery, and both runtime
+  module paths.
+- Evidence: `FAIL-HRMNY-20260902-APOLLO-025`, Postgres.js issue
+  <https://github.com/porsager/postgres/issues/1066>, open PR
+  <https://github.com/porsager/postgres/pull/1168>, and independent review.
+- Confidence/freshness: high for the defect on 2026-09-02; remediation remains
+  unproved.
+- Affected components: database client, API and worker availability, failover,
+  recovery runbook, deployment acceptance, and every PostgreSQL-backed path.
+- Status: open P1 and a blocker for connection-loss recovery and production
+  acceptance; not a blocker for correcting PR #246's synthetic fixture.
+- Supersedes/superseded-by: narrows one concrete dependency risk inside
+  `GAP-HRMNY-20260902-APOLLO-017`; none.
+- Rollback/correction: create an immediate isolated dependency-hardening branch
+  after the current exact-head hosted proof, preserve the pre-patch crash
+  receipt, apply a pinned checksummed patch only after review, and remove it
+  only when an upstream release passes the same Node 24 chaos proof.

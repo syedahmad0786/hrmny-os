@@ -7,7 +7,8 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
 `d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
-`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`; base
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`, plus fixture correction
+`0f3ac24ddd2645b4b03247ec720fe078406a0d15`; base
 `8b672fd4e1ee2671d6919011e29b91886d706278`.
 
 ## `EVID-HRMNY-20260902-APOLLO-021` — historical local source gate, invalidated
@@ -142,3 +143,89 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
   the current local source receipt; none.
 - Rollback/correction: any later source edit invalidates this receipt and
   requires the complete deterministic gate again.
+
+## `EVID-HRMNY-20260902-APOLLO-025` — exact-head hosted matrices exposed bounded fixture defects
+
+- Decision/finding: push run `33578743186` and pull-request run
+  `33578745871` tested exact head
+  `cd146c35db0840fcaffed580c4644ecb6b6e28e5`. Both repository verify jobs
+  and both browser jobs passed. Both disposable-database jobs passed migration
+  verification/application and the Sales PostgreSQL proof, then the 40-case
+  Apollo suite finished with 35 passed, five failed, and one unhandled error.
+  One assertion expected an injected application-clock retry timestamp while
+  the runtime correctly used the database clock. Four cases attempted to
+  remove prior `audit_event` fixture rows even though the ledger is
+  append-only. A force-terminated PostgreSQL client also emitted a late
+  write-after-close error.
+- Reason: the exact no-helper source needed hosted execution against a real
+  disposable PostgreSQL runtime. That execution correctly rejected fixture
+  assumptions that contradicted the database-clock and append-only-audit
+  contracts.
+- Alternatives considered: accept the successful sub-jobs as whole-matrix
+  proof; change production retry timing to satisfy the fixture; weaken or
+  bypass the append-only trigger; reuse a terminated database client; rerun
+  the unchanged head.
+- Trade-offs: the bounded correction changes only
+  `apps/web/src/server/sales-os/apollo-search-postgres.test.ts`. It brackets the
+  five-second retry with database timestamps, preserves immutable audit rows
+  and asserts audit deltas from a captured baseline, waits for killed backend
+  PIDs to disappear, closes independent or terminated database clients, and
+  uses a fresh recovery client. The source change invalidates the prior
+  exact-current local receipt and requires fresh deterministic and hosted
+  proof.
+- Evidence: push run
+  <https://github.com/syedahmad0786/hrmny-os/actions/runs/33578743186>,
+  database job `100088315750`, e2e job `100088315513`, verify job
+  `100088315747`; pull-request run
+  <https://github.com/syedahmad0786/hrmny-os/actions/runs/33578745871>,
+  database job `100088323877`, e2e job `100088323939`, verify job
+  `100088323748`; PR
+  <https://github.com/syedahmad0786/hrmny-os/pull/246>; bounded fixture
+  correction `0f3ac24ddd2645b4b03247ec720fe078406a0d15`.
+- Confidence/freshness: high on 2026-09-02 from two identical hosted
+  disposable-database failures and the bounded test-only source delta.
+- Affected components: Apollo PostgreSQL acceptance fixture, disposable client
+  lifecycle, and source acceptance state; no production database, provider,
+  migration, or runtime implementation.
+- Status: negative hosted evidence accepted; both whole matrices remain
+  unaccepted. The fixture correction requires both fresh hosted event
+  matrices.
+- Supersedes/superseded-by: supplements
+  `EVID-HRMNY-20260902-APOLLO-023`. It invalidates
+  `EVID-HRMNY-20260902-APOLLO-024`; `EVID-026` is the replacement local-source
+  receipt.
+- Rollback/correction: preserve both failed runs, keep PR #246 unmerged,
+  exclude unrelated `.system-harness/` state, and require terminal push and
+  pull-request matrices on the corrected exact head.
+
+## `EVID-HRMNY-20260902-APOLLO-026` — fixture-corrected deterministic source gate
+
+- Decision/finding: source commit
+  `0f3ac24ddd2645b4b03247ec720fe078406a0d15` passed seven lint tasks, seven
+  type-check tasks, 964 deterministic tests (web 730, database 38,
+  integrations 111, gate 25, AI 56, cache 4), and both production builds. The
+  web build generated 86 routes. The focused Apollo import contract passed
+  3/3, formatting and `git diff --check` passed, and independent read-only
+  review found no actionable defect.
+- Reason: the hosted fixture correction changed source after `EVID-024`, so a
+  complete deterministic gate was required before another push.
+- Alternatives considered: inherit `EVID-024`; run only the focused contract;
+  rely on the passing hosted verify and browser sub-jobs; call a live provider.
+- Trade-offs: the 40-case PostgreSQL runtime file still requires CI's
+  disposable database. This receipt does not cure or accept the upstream
+  Postgres.js queued-write-after-close risk recorded in `GAP-019`.
+- Evidence: `pnpm test`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, focused
+  import-contract run, formatter, `git diff --check`, exact source commit
+  `0f3ac24ddd2645b4b03247ec720fe078406a0d15`, and clean independent review.
+- Confidence/freshness: high for exact implementation source on 2026-09-02;
+  hosted PostgreSQL confidence remains pending.
+- Affected components: one Apollo PostgreSQL acceptance test file and source
+  acceptance state; production code, migration, provider, and production
+  resources are unchanged.
+- Status: exact-current local implementation gate accepted; hosted, provider,
+  deployment, recovery, user, and production acceptance remain open.
+- Supersedes/superseded-by: supersedes
+  `EVID-HRMNY-20260902-APOLLO-024` only as the current local-source receipt;
+  none.
+- Rollback/correction: any later implementation source edit invalidates this
+  receipt and requires the complete deterministic gate again.

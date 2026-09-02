@@ -7,7 +7,8 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
 `d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
-`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`.
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`, plus fixture correction
+`0f3ac24ddd2645b4b03247ec720fe078406a0d15`.
 
 ## `FAIL-HRMNY-20260902-APOLLO-016` — ambiguity was initially understated
 
@@ -193,3 +194,76 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Rollback/correction: keep PR #246 unmerged and production unchanged. Do not
   restore a Vault relation lock or broaden grants; correct forward and require
   both exact-head hosted matrices.
+
+## `FAIL-HRMNY-20260902-APOLLO-024` — exact-head fixture violated database-owned invariants
+
+- Decision/finding: both exact-head database jobs failed identically because
+  the PostgreSQL fixture conflated the injected application clock with the
+  database clock, attempted to delete append-only audit evidence, asserted
+  absolute audit totals across a reused synthetic identity, and did not
+  deterministically settle and close force-terminated database clients.
+- Reason: deterministic unit-test conventions were carried into a hosted
+  PostgreSQL proof whose clock, immutable ledger, and connection lifecycle are
+  owned by the database and driver.
+- Alternatives considered: alter runtime behavior to match the fixture;
+  disable append-only enforcement; erase historical audit evidence; reuse a
+  killed client for recovery; classify all five failures as production logic
+  defects.
+- Trade-offs: correction `0f3ac24` retains the fixed synthetic employee and
+  immutable audit history, baselines audit counts before each operation,
+  retires only mutable connection/Vault fixture state, brackets retry timing
+  with database timestamps, explicitly closes extra clients, and creates a
+  fresh client after backend loss. This adds fixture lifecycle code without
+  changing the production contract.
+- Evidence: push run `33578743186`, database job `100088315750`;
+  pull-request run `33578745871`, database job `100088323877`; each reported
+  35/40 tests, four `audit_event is append-only` failures, one database-clock
+  retry mismatch, and one late Postgres.js write-after-close error.
+- Confidence/freshness: high on 2026-09-02 from identical hosted results and
+  direct source comparison.
+- Affected components: one PostgreSQL acceptance test file and current-source
+  acceptance; no provider, production database, migration, or application
+  runtime.
+- Status: reproduced and corrected in test-only source `0f3ac24`; exact-head
+  hosted correction receipts pending.
+- Supersedes/superseded-by: distinct from
+  `FAIL-HRMNY-20260902-APOLLO-020`, which recorded the earlier unreleased test
+  lock. It does not supersede any acceptance receipt.
+- Rollback/correction: never weaken database-clock leases or append-only audit
+  enforcement to make CI pass. Preserve the failed receipts and require both
+  fresh hosted matrices before acceptance.
+
+## `FAIL-HRMNY-20260902-APOLLO-025` — Postgres.js can queue a write after its socket closes
+
+- Decision/finding: the hosted force-termination proof reproduced a fatal
+  Postgres.js `3.4.9` race: a small write deferred with `setImmediate` can run
+  after connection cleanup has set the socket to `null`, throwing outside the
+  query promise. The test correction disposes deliberately killed clients in
+  time, but it does not remove the runtime dependency defect.
+- Reason: backend termination is a deterministic trigger for an upstream
+  connection-pool race that can also follow failover, pooler resets, backend
+  restarts, or network loss.
+- Alternatives considered: hide the unhandled error; treat explicit test
+  disposal as a production fix; apply an unreviewed one-line patch in this
+  already-scoped PR; wait indefinitely for upstream.
+- Trade-offs: isolating a consumer patch keeps PR #246 reviewable and allows a
+  child-process chaos test to prove bounded query settlement and reconnection,
+  not merely absence of the crash. Connection-loss resilience remains
+  unaccepted until that separate slice passes.
+- Evidence: hosted database jobs `100088315750` and `100088323877`; local
+  `postgres@3.4.9` `connection.js`; upstream issue
+  <https://github.com/porsager/postgres/issues/1066>; open upstream PR
+  <https://github.com/porsager/postgres/pull/1168>; independent architecture
+  review.
+- Confidence/freshness: high for the race and affected pinned version on
+  2026-09-02; medium for any proposed consumer patch until the required chaos
+  proof passes.
+- Affected components: PostgreSQL client availability, transaction cleanup,
+  worker/API process stability, failover, recovery evidence, and deployment.
+- Status: reproduced dependency defect; unresolved in runtime; tracked by
+  `GAP-HRMNY-20260902-APOLLO-019`.
+- Supersedes/superseded-by: none.
+- Rollback/correction: keep connection-loss recovery unaccepted; implement a
+  pinned, checksummed consumer patch in a separate reviewable branch, prove
+  pre/post behavior under Node 24 against a disposable database, and remove it
+  only after an upstream release passes the same proof.

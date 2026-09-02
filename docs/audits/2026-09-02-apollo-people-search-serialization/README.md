@@ -9,7 +9,8 @@
 - Implementation commits: `fc2d288074bc44624abbb9e701b5c5ffa7adb775`,
   `900bc0e548061b5b6872c3552b18ff8d1c309a6b`,
   `d1ab23c36ebbde5320967f0d806251193919b1c6`, and no-helper correction
-  `8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`
+  `8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`, plus fixture correction
+  `0f3ac24ddd2645b4b03247ec720fe078406a0d15`
 - Pull request: <https://github.com/syedahmad0786/hrmny-os/pull/246>
 - Scope: free Apollo People Search scheduling, final dispatch authorization,
   credential fencing, receipts, migration `0076`, and operator status copy
@@ -58,7 +59,7 @@ accounting write, or UAT occurred in this phase.
 | documented           | yes                                                               |
 | authorized           | source and synthetic local testing only                           |
 | configured           | code and migration prepared; production unchanged                 |
-| tested               | exact-source local suites pass; corrected hosted proof pending    |
+| tested               | corrected local suites pass; exact-head hosted proof pending      |
 | deployed             | prior previews only; exact-current preview pending; production no |
 | provider accepted    | no                                                                |
 | destination verified | no                                                                |
@@ -79,9 +80,20 @@ the runtime role cannot query `vault.secrets` directly. The third matrices at
 supported credential mutations under the same Apollo lane, preserves atomic
 Vault/connection/audit behavior, uses database-authoritative lease clocks, and
 fails closed on missing Vault projections and unknown unleased processing.
-Every failure is permanently recorded; fresh exact-head hosted PostgreSQL
-proof remains pending. Passing CI or a preview will still not grant
-provider, migration, deployment, recovery, user, or production acceptance.
+The next exact-head matrices at `cd146c3` passed both browser and repository
+verification jobs and reached 35/40 Apollo PostgreSQL cases after migration and
+Sales database proof. They then exposed a stale host-clock assertion, fixture
+cleanup that contradicted the append-only audit ledger, and a late
+Postgres.js write-after-close error. Test-only correction `0f3ac24` now brackets
+retry timing with database timestamps, preserves historical audit rows, and
+deterministically disposes killed clients before using a fresh recovery client.
+Its complete local gate passes; fresh hosted proof remains pending.
+
+The Postgres.js `3.4.9` queued-write-after-close race remains an explicit P1
+dependency gap. It will be handled in an isolated, checksummed consumer-patch
+slice with a child-process chaos proof; test cleanup is not treated as a
+runtime fix. Passing CI or a preview will still not grant provider, migration,
+deployment, recovery, user, or production acceptance.
 
 ## Reviewed primary sources
 
@@ -95,6 +107,10 @@ provider, migration, deployment, recovery, user, or production acceptance.
   <https://github.com/supabase/vault>
 - Supabase Vault extension SQL (`decrypted_secrets` and `update_secret`):
   <https://github.com/supabase/vault/blob/main/sql/supabase_vault--0.3.0.sql>
+- Postgres.js queued-write-after-close issue:
+  <https://github.com/porsager/postgres/issues/1066>
+- Postgres.js proposed null-socket guard (open and unmerged):
+  <https://github.com/porsager/postgres/pull/1168>
 
 ## Package
 
