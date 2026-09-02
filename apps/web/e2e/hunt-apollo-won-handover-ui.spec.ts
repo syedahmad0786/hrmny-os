@@ -277,7 +277,7 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     await page.goto(outreachHref!, { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(/\/crm\/outreach/);
     await expect(
-      page.getByRole("heading", { name: /Outreach drafts/i }),
+      page.getByRole("heading", { name: /^Outreach$/i }),
     ).toBeVisible({ timeout: 60_000 });
 
     await page.goto(portalHref!, { waitUntil: "domcontentloaded" });

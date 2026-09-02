@@ -102,7 +102,7 @@ test.describe("Hunt Apollo prospect UI", () => {
       timeout: 60_000,
     });
     await expect(page.getByTestId("hunt-apollo-credential")).toHaveText(
-      "Not configured",
+      "Not connected",
     );
     await expect(page.getByTestId("hunt-apollo-search")).toBeDisabled();
     await expect(page.getByTestId("hunt-apollo-search")).toHaveText(
@@ -402,9 +402,6 @@ test.describe("Hunt Apollo prospect UI", () => {
       "old operator only",
     );
     await expect(page.getByTestId("hunt-apollo-cancel-search")).toBeVisible();
-    await page
-      .getByTestId("sales-os-signal-company")
-      .fill("Partner private draft");
     await expect
       .poll(() =>
         page.evaluate(
@@ -431,7 +428,6 @@ test.describe("Hunt Apollo prospect UI", () => {
       "Marketing Director",
     );
     await expect(page.getByTestId("hunt-apollo-query")).toHaveValue("");
-    await expect(page.getByTestId("sales-os-signal-company")).toHaveValue("");
     expect(apolloEffectRequests).toBe(0);
     await expect(page.getByTestId("hunt-apollo-retry-same-search")).toHaveCount(
       0,

@@ -47,6 +47,12 @@ test.describe("Outreach HITL UI", () => {
       .fill("E2E body — approve only, do not send.");
     await page.getByTestId("outreach-draft-create").click();
 
+    const showTestDrafts = page.getByRole("checkbox", {
+      name: /Show \d+ test drafts?/i,
+    });
+    await expect(showTestDrafts).toBeVisible({ timeout: 30_000 });
+    await showTestDrafts.check();
+
     const draftRow = page
       .locator("[data-outreach-state='draft']")
       .filter({ hasText: subject });
