@@ -76,6 +76,10 @@ function namedDatabase(name: string): Db {
   return createDb(url.toString());
 }
 
+async function closeDatabase(database: Db): Promise<void> {
+  await database.$client.end({ timeout: 0 });
+}
+
 async function replaceActorApolloKey(
   database: Db,
   apiKey: string,
@@ -103,11 +107,6 @@ async function cleanupDisconnectProofFixture(database: Db): Promise<void> {
       delete from public.connection_account
       where connection_account_id = ${DISCONNECT_CONNECTION}::uuid
     `);
-    await tx.execute(sql`
-      delete from public.audit_event
-      where entity_id = ${DISCONNECT_CONNECTION}::uuid
-        or actor_employee_id = ${DISCONNECT_ACTOR}::uuid
-    `);
     if (secret?.id) {
       await tx.execute(sql`
         select vault.update_secret(
@@ -118,10 +117,6 @@ async function cleanupDisconnectProofFixture(database: Db): Promise<void> {
         )
       `);
     }
-    await tx.execute(sql`
-      delete from public.employee
-      where employee_id = ${DISCONNECT_ACTOR}::uuid
-    `);
   });
 }
 
@@ -790,17 +785,40 @@ describe("Apollo queue PostgreSQL proof", () => {
     try {
       await vi.waitFor(() => expect(firstStarted).toHaveBeenCalledOnce());
 
-      await expect(
-        runApolloPeopleSearchQueuedJob(secondJob.scheduled_job_id, {
+      const [beforeBusy] = await db.execute<{
+        database_now: Date | string;
+      }>(sql`select statement_timestamp() as database_now`);
+      const busy = await runApolloPeopleSearchQueuedJob(
+        secondJob.scheduled_job_id,
+        {
           leadSource: secondSource,
           authorizeActor: async () => true,
           database: secondDatabase,
           now: () => now,
-        }),
-      ).resolves.toEqual({
+        },
+      );
+      const [afterBusy] = await db.execute<{
+        database_now: Date | string;
+      }>(sql`select statement_timestamp() as database_now`);
+      expect(busy).toMatchObject({
         status: "busy",
-        nextAttemptAt: "2026-09-01T10:00:05.000Z",
+        nextAttemptAt: expect.any(String),
       });
+      if (
+        busy.status !== "busy" ||
+        typeof busy.nextAttemptAt !== "string" ||
+        !beforeBusy?.database_now ||
+        !afterBusy?.database_now
+      ) {
+        throw new Error("CI provider-slot database clock proof is incomplete");
+      }
+      const retryAt = Date.parse(busy.nextAttemptAt);
+      expect(retryAt).toBeGreaterThanOrEqual(
+        new Date(beforeBusy.database_now).getTime() + 5_000,
+      );
+      expect(retryAt).toBeLessThanOrEqual(
+        new Date(afterBusy.database_now).getTime() + 5_000,
+      );
       expect(secondSource.searchLeadsWithReceipt).not.toHaveBeenCalled();
 
       const stateWhileBusy = await db.execute<{
@@ -850,6 +868,10 @@ describe("Apollo queue PostgreSQL proof", () => {
     } finally {
       releaseFirst();
       await Promise.allSettled([firstRun]);
+      await Promise.all([
+        closeDatabase(firstDatabase),
+        closeDatabase(secondDatabase),
+      ]);
     }
   });
 
@@ -2081,35 +2103,55 @@ describe("Apollo queue PostgreSQL proof", () => {
   it("rolls back Vault, connection, and audit writes when the mutation backend is lost", async () => {
     const db = getDb()!;
     const mutationDatabase = namedDatabase("hrmny_test_rotation_backend_loss");
-    const before = await readActorCredentialState(db);
+    try {
+      const before = await readActorCredentialState(db);
 
-    let terminatedBackendPid = 0;
-    const backendTerminated = vi.fn();
-    const failure = await replaceActorApolloKey(
-      mutationDatabase,
-      "synthetic-apollo-proof-key-a-rollback",
-      async (backendPid) => {
-        expect(backendPid).toBeGreaterThan(0);
-        terminatedBackendPid = backendPid;
-        const [terminated] = await db.execute<{ terminated: boolean }>(sql`
-          select pg_terminate_backend(${backendPid}) as terminated
-        `);
-        expect(terminated?.terminated).toBe(true);
-        backendTerminated();
-      },
-    ).then(
-      () => null,
-      (error: unknown) => error,
-    );
-    expect(backendTerminated).toHaveBeenCalledOnce();
-    expect(terminatedBackendPid).toBeGreaterThan(0);
-    expect(failure).toBeInstanceOf(Error);
-    expect(
-      `${(failure as { code?: string }).code ?? ""} ${String(failure)}`,
-    ).toMatch(/57P01|CONNECTION_(?:CLOSED|DESTROYED)|terminat|connection/i);
+      let terminatedBackendPid = 0;
+      const backendTerminated = vi.fn();
+      const failure = await replaceActorApolloKey(
+        mutationDatabase,
+        "synthetic-apollo-proof-key-a-rollback",
+        async (backendPid) => {
+          expect(backendPid).toBeGreaterThan(0);
+          terminatedBackendPid = backendPid;
+          const [terminated] = await db.execute<{ terminated: boolean }>(sql`
+            select pg_terminate_backend(${backendPid}) as terminated
+          `);
+          expect(terminated?.terminated).toBe(true);
+          await vi.waitFor(
+            async () => {
+              const [backend] = await db.execute<{ active: boolean }>(sql`
+                select exists (
+                  select 1 from pg_stat_activity where pid = ${backendPid}
+                ) as active
+              `);
+              expect(backend?.active).toBe(false);
+            },
+            { timeout: 10_000, interval: 50 },
+          );
+          await closeDatabase(mutationDatabase);
+          backendTerminated();
+        },
+      ).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await vi.waitFor(() => expect(backendTerminated).toHaveBeenCalledOnce(), {
+        timeout: 10_000,
+      });
+      expect(terminatedBackendPid).toBeGreaterThan(0);
+      expect(failure).toBeInstanceOf(Error);
+      expect(
+        `${(failure as { code?: string }).code ?? ""} ${String(failure)}`,
+      ).toMatch(
+        /57P01|CONNECTION_(?:CLOSED|DESTROYED|ENDED)|terminat|connection/i,
+      );
 
-    const after = await readActorCredentialState(db);
-    expect(after).toEqual(before);
+      const after = await readActorCredentialState(db);
+      expect(after).toEqual(before);
+    } finally {
+      await closeDatabase(mutationDatabase);
+    }
   });
 
   it("does not report a connected credential when its Vault row is missing", async () => {
@@ -2277,6 +2319,13 @@ describe("Apollo queue PostgreSQL proof", () => {
     const db = getDb()!;
     try {
       const secretId = await createDisconnectProofFixture(db);
+      const before = await readDisconnectProofState(db, secretId);
+      expect(before).toMatchObject({
+        connections: 1,
+        active_secrets: 1,
+        original_secret: true,
+        tombstones: 0,
+      });
 
       await expect(
         disconnectGovernedApiKeyConnection({
@@ -2305,7 +2354,7 @@ describe("Apollo queue PostgreSQL proof", () => {
         active_secrets: 0,
         original_secret: false,
         tombstones: 1,
-        audits: 1,
+        audits: before.audits + 1,
       });
     } finally {
       await cleanupDisconnectProofFixture(db);
@@ -2317,6 +2366,7 @@ describe("Apollo queue PostgreSQL proof", () => {
     const mutationDatabase = namedDatabase(
       "hrmny_test_disconnect_backend_loss",
     );
+    let recoveryDatabase: Db | undefined;
     try {
       const secretId = await createDisconnectProofFixture(db);
       const before = await readDisconnectProofState(db, secretId);
@@ -2335,18 +2385,34 @@ describe("Apollo queue PostgreSQL proof", () => {
             select pg_terminate_backend(${backendPid}) as terminated
           `);
           expect(terminated?.terminated).toBe(true);
+          await vi.waitFor(
+            async () => {
+              const [backend] = await db.execute<{ active: boolean }>(sql`
+                select exists (
+                  select 1 from pg_stat_activity where pid = ${backendPid}
+                ) as active
+              `);
+              expect(backend?.active).toBe(false);
+            },
+            { timeout: 10_000, interval: 50 },
+          );
+          await closeDatabase(mutationDatabase);
           backendTerminated();
         },
       }).then(
         () => null,
         (error: unknown) => error,
       );
-      expect(backendTerminated).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(backendTerminated).toHaveBeenCalledOnce(), {
+        timeout: 10_000,
+      });
       expect(terminatedBackendPid).toBeGreaterThan(0);
       expect(failure).toBeInstanceOf(Error);
       expect(
         `${(failure as { code?: string }).code ?? ""} ${String(failure)}`,
-      ).toMatch(/57P01|CONNECTION_(?:CLOSED|DESTROYED)|terminat|connection/i);
+      ).toMatch(
+        /57P01|CONNECTION_(?:CLOSED|DESTROYED|ENDED)|terminat|connection/i,
+      );
 
       const after = await readDisconnectProofState(db, secretId);
       expect(after).toEqual(before);
@@ -2355,18 +2421,23 @@ describe("Apollo queue PostgreSQL proof", () => {
         active_secrets: 1,
         original_secret: true,
         tombstones: 0,
-        audits: 0,
+        audits: before.audits,
       });
 
+      recoveryDatabase = namedDatabase(
+        "hrmny_test_disconnect_backend_loss_recovery",
+      );
       await expect(
         disconnectGovernedApiKeyConnection({
-          database: mutationDatabase,
+          database: recoveryDatabase,
           employeeId: DISCONNECT_ACTOR,
           connectionAccountId: DISCONNECT_CONNECTION,
           expectedToolkit: "apollo",
         }),
       ).resolves.toMatchObject({ connectionAccountId: DISCONNECT_CONNECTION });
     } finally {
+      await closeDatabase(mutationDatabase);
+      if (recoveryDatabase) await closeDatabase(recoveryDatabase);
       await cleanupDisconnectProofFixture(db);
     }
   });
@@ -2728,11 +2799,12 @@ describe("Apollo queue PostgreSQL proof", () => {
         active_secrets: 0,
         original_secret: false,
         tombstones: 1,
-        audits: 1,
+        audits: disconnectBefore.audits + 1,
       });
     } finally {
       releaseProvider();
       await Promise.allSettled(runSettled ? [runSettled] : []);
+      await closeDatabase(mutationDatabase);
       await cleanupDisconnectProofFixture(db);
     }
   });
@@ -3304,6 +3376,7 @@ describe("Apollo queue PostgreSQL proof", () => {
         disconnectBefore,
       );
     } finally {
+      await closeDatabase(mutationDatabase);
       await cleanupDisconnectProofFixture(db);
     }
   });
