@@ -11,15 +11,17 @@
 
 All commands were run in the isolated worktree with database, Supabase, Apollo, Fly, and live-proof environment inputs cleared.
 
-| Check                      | Result                             |
-| -------------------------- | ---------------------------------- |
-| Focused QM tests           | 2 files passed, 15 tests passed    |
-| Web type check             | Passed                             |
-| Targeted QM ESLint         | Passed                             |
-| Prettier                   | Passed                             |
-| Full web tests             | 133 files passed, 745 tests passed |
-| Next.js production build   | Passed; 86 static pages generated  |
-| Diff whitespace validation | Passed                             |
+| Check                      | Result                                                           |
+| -------------------------- | ---------------------------------------------------------------- |
+| Focused QM tests           | 2 files passed, 15 tests passed                                  |
+| Web type check             | Passed                                                           |
+| Targeted QM ESLint         | Passed                                                           |
+| Prettier                   | Passed                                                           |
+| Full web tests             | 133 files passed, 745 tests passed                               |
+| Next.js production build   | Passed; 86 static pages generated                                |
+| Diff whitespace validation | Passed                                                           |
+| GitHub CI                  | Database, end-to-end, and verify jobs passed                     |
+| Vercel previews            | Both web-preview checks passed; no QM route or runtime connected |
 
 The build emitted the repository's existing warning that the Next.js plugin is not detected in the ESLint configuration. Compilation, type validation, page generation, and build completion all succeeded.
 
@@ -40,4 +42,4 @@ The build emitted the repository's existing warning that the Next.js plugin is n
 
 ## Explicitly absent evidence
 
-No live database, QM process, Fly resource, private network, external provider, destination delivery, credential, deployment, failure injection, recovery drill, UAT session, merge, or production change was used to obtain these results.
+No live database, QM process, Fly resource, private network, external provider, destination delivery, credential, connected QM deployment, failure injection, recovery drill, UAT session, merge, or production change was used to obtain these results. Existing PR automation created Vercel web previews, but this server-only contract has no exposed route or connected runtime in those previews; they are build receipts rather than QM integration acceptance.

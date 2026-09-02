@@ -13,7 +13,7 @@
 
 ## Current classification
 
-`contract-ready / local-synthetic / not provider-connected / not deployed / not UAT-accepted / not production-accepted`
+`contract-ready / local-synthetic / web-preview-green / no connected QM runtime / not provider-accepted / not UAT-accepted / not production-accepted`
 
 ## Next proof
 
