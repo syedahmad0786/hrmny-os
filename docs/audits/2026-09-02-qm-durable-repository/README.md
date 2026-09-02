@@ -3,7 +3,7 @@
 - Date: 2026-09-02
 - Branch: `ahmadbukhari097/codex/phase-5b-qm-durable-repository-20260902`
 - Base: `7900ec69746438750e4bc919e862599fa3591ab7`
-- Code receipt: `56b20af`
+- Code receipts: `56b20af`, `ba4557b`
 
 ## Outcome
 
