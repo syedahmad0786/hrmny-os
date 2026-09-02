@@ -20,6 +20,8 @@
 | Production build           | Passed; 86 static pages     |
 | Diff whitespace check      | Passed                      |
 
+The final read-only security review found no P0/P1 issue and one P2 nullable-`CHECK` risk. Commit `ba4557b` closes it by making every JSON work-record branch explicitly `IS TRUE`, requiring a JSON object, and adding a raw malformed-insert rejection proof. The reviewer confirmed the finding resolved.
+
 The local migration verifier was not run because it intentionally recreates and force-drops databases. The hosted database workflow uses a disposable Supabase PostgreSQL service with its explicit write/drop gates and will provide the runtime receipt after the branch is pushed.
 
 ## Safety receipt
