@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS public.qm_command_decision (
         outcome = 'workspace_read_precheck_recorded'
         AND precheck_id IS NOT NULL
         AND proposal_id IS NULL
-        AND read_precheck IS NOT NULL
+        AND jsonb_typeof(read_precheck) = 'object'
         AND proposal IS NULL
         AND read_precheck->>'precheckId' = precheck_id::text
         AND read_precheck->>'organizationId' = organization_id::text
@@ -181,13 +181,13 @@ CREATE TABLE IF NOT EXISTS public.qm_command_decision (
         AND read_precheck->>'sessionId' = session_id::text
         AND read_precheck->>'requestedByEmployeeId' = actor_employee_id::text
         AND (read_precheck->>'createdAt')::timestamptz = recorded_at
-      )
+      ) IS TRUE
       OR
       (
         outcome = 'effect_proposal_recorded'
         AND proposal_id IS NOT NULL
         AND precheck_id IS NULL
-        AND proposal IS NOT NULL
+        AND jsonb_typeof(proposal) = 'object'
         AND read_precheck IS NULL
         AND proposal->>'proposalId' = proposal_id::text
         AND proposal->>'organizationId' = organization_id::text
@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS public.qm_command_decision (
         AND proposal->>'sessionId' = session_id::text
         AND proposal->>'proposedByEmployeeId' = actor_employee_id::text
         AND (proposal->>'createdAt')::timestamptz = recorded_at
-      )
+      ) IS TRUE
       OR
       (
         outcome IN ('denied', 'idempotency_conflict')
@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS public.qm_command_decision (
         AND precheck_id IS NULL
         AND proposal IS NULL
         AND read_precheck IS NULL
-      )
+      ) IS TRUE
     )
 );
 

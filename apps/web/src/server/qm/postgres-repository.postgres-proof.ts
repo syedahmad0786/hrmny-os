@@ -15,7 +15,7 @@ import {
   type QmSessionBinding,
   type QmStoredDecision,
 } from "./contracts";
-import { evaluateQmCommand } from "./control-plane";
+import { evaluateQmCommand, qmSessionPolicyDigest } from "./control-plane";
 import {
   createPostgresQmControlRepository,
   QM_SESSION_POLICY_CHANGED_BEFORE_COMMIT,
@@ -226,5 +226,33 @@ describe("QM durable repository on disposable PostgreSQL", () => {
       ) as ok
     `);
     expect(boundary?.ok).toBe(true);
+  });
+
+  it("rejects malformed raw JSON before it can consume an immutable key", async () => {
+    const recordedAt = new Date("2026-09-02T06:00:00.000Z");
+    await expect(
+      databaseA.insert(qmCommandDecision).values({
+        receiptId: randomUUID(),
+        requestId: randomUUID(),
+        inputDigest: "d".repeat(64),
+        organizationId: ORGANIZATION_A,
+        actorEmployeeId: EMPLOYEE_A,
+        sessionId: SESSION_A,
+        scopeId: BINDING_A.scopeId,
+        outcome: "effect_proposal_recorded",
+        reasonCode: "EFFECT_PROPOSAL_RECORDED",
+        requiredCapability: "effect.propose",
+        sessionStateVersion: 0,
+        sessionPolicyDigest: qmSessionPolicyDigest(BINDING_A),
+        upstreamCommit: QM_UPSTREAM_PIN.commit,
+        runtimeKind: "local-synthetic",
+        providerReadbackReceipt: null,
+        proposalId: randomUUID(),
+        precheckId: null,
+        proposal: {},
+        readPrecheck: null,
+        recordedAt,
+      }),
+    ).rejects.toMatchObject({ code: "23514" });
   });
 });
