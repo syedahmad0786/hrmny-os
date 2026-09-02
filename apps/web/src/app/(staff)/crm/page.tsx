@@ -236,7 +236,7 @@ export default function CrmPipelinePage() {
                               {tempVal}
                             </CrmTag>
                           ) : (
-                            <CrmTag kind="info">unset</CrmTag>
+                            <CrmTag kind="info">No priority</CrmTag>
                           )}
                         </div>
                         <h4>{d.sector ?? "Opportunity"}</h4>

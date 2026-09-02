@@ -158,6 +158,7 @@ const WORK_APP_FAMILIES = [
 
 export default function ConnectionsPage() {
   const utils = trpc.useUtils();
+  const [personalToolsOpen, setPersonalToolsOpen] = useState(false);
   const list = trpc.connections.list.useQuery();
   const asanaStatus = trpc.connections.asanaStatus.useQuery(undefined, {
     retry: false,
@@ -216,9 +217,10 @@ export default function ConnectionsPage() {
   const [toolPage, setToolPage] = useState(1);
   const managedToolkits = trpc.connections.managedToolkits.useQuery(
     { search: toolSearch, page: toolPage, pageSize: 12 },
-    { retry: false },
+    { enabled: personalToolsOpen, retry: false },
   );
   const managedAccounts = trpc.connections.managedAccounts.useQuery(undefined, {
+    enabled: personalToolsOpen,
     retry: false,
     refetchInterval: 3_000,
   });
@@ -333,11 +335,11 @@ export default function ConnectionsPage() {
 
       <div id="direct-business-connections">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
-          Core tools
+          Business tools
         </p>
         <p className="mt-1 text-sm text-muted">
-          Apollo finds prospects. Google Workspace sends approved email. Use
-          Connect to add an account or Replace/Reconnect to switch accounts.
+          Start with Apollo for prospecting and Google Workspace for approved
+          email. Open another card only when that tool is part of your workflow.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -586,8 +588,14 @@ export default function ConnectionsPage() {
         })}
       </div>
 
-      <section className="rounded-xl border border-sand bg-white/70 p-5">
-        <div className="flex flex-wrap items-end justify-between gap-4">
+      <details
+        className="rounded-xl border border-sand bg-white/70 p-5"
+        onToggle={(event) => setPersonalToolsOpen(event.currentTarget.open)}
+      >
+        <summary className="cursor-pointer font-medium text-ink">
+          More personal tools
+        </summary>
+        <div className="mt-5 flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
               Personal tools via Composio
@@ -707,10 +715,13 @@ export default function ConnectionsPage() {
             Next
           </Button>
         </div>
-      </section>
+      </details>
 
       {workApps.data?.apps.length ? (
-        <section className="flex flex-col gap-4">
+        <details className="flex flex-col gap-4 rounded-xl border border-sand bg-white/70 p-5">
+          <summary className="cursor-pointer font-medium text-ink">
+            Work app integrations
+          </summary>
           <div>
             <h2 className="font-display text-2xl font-semibold">
               Work app integrations
@@ -842,7 +853,7 @@ export default function ConnectionsPage() {
               </div>
             );
           })}
-        </section>
+        </details>
       ) : null}
 
       {redirect ? (

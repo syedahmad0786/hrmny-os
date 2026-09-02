@@ -22,9 +22,18 @@ type AgentToolRow = {
 };
 
 const ATTENTION_STATES = new Set(["brief_ready", "qc", "client_review"]);
-
-const humanStatus = (value: string) =>
-  value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+const DELIVERY_LANES: readonly {
+  label: string;
+  statuses: ReadonlySet<string>;
+}[] = [
+  { label: "Plan", statuses: new Set(["backlog", "briefing", "brief_ready"]) },
+  { label: "Create", statuses: new Set(["production"]) },
+  {
+    label: "Review",
+    statuses: new Set(["internal_review", "qc", "client_review", "revisions"]),
+  },
+  { label: "Complete", statuses: new Set(["approved", "delivered"]) },
+];
 
 function DeliveryBoardPageInner() {
   const utils = trpc.useUtils();
@@ -126,6 +135,10 @@ function DeliveryBoardPageInner() {
   const attentionTasks = flatTasks.filter(
     (task) => ATTENTION_STATES.has(task.status) || task.priority === "urgent",
   );
+  const deliveryLanes = DELIVERY_LANES.map((lane) => ({
+    ...lane,
+    tasks: flatTasks.filter((task) => lane.statuses.has(task.status)),
+  }));
   const selected = flatTasks.find((task) => task.taskId === taskKey);
   const selectedAgent = (agents.data ?? []).find(
     (agent) => agent.customAgentId === agentId,
@@ -223,7 +236,10 @@ function DeliveryBoardPageInner() {
           className="inline-flex min-h-11 items-center rounded-full bg-ink px-5 text-sm font-semibold text-paper"
           data-testid="delivery-traffic-link"
         >
-          Open next blocked item →
+          {attentionTasks.length
+            ? "Open next blocked item"
+            : "Open delivery plan"}{" "}
+          →
         </Link>
       </header>
 
@@ -330,21 +346,19 @@ function DeliveryBoardPageInner() {
           </p>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {visibleBoard.map((column) => (
+            {deliveryLanes.map((lane) => (
               <section
-                key={column.status}
+                key={lane.label}
                 className="min-w-0 rounded-xl bg-[var(--muted-surface-soft)] p-3"
               >
                 <div className="mb-2 flex items-center justify-between gap-2 px-1">
-                  <h3 className="text-xs font-bold text-ink">
-                    {humanStatus(column.status)}
-                  </h3>
+                  <h3 className="text-xs font-bold text-ink">{lane.label}</h3>
                   <span className="rounded-full bg-white px-2 py-0.5 text-[10px] text-muted">
-                    {column.tasks.length}
+                    {lane.tasks.length}
                   </span>
                 </div>
                 <ul className="space-y-2">
-                  {column.tasks.map((task) => (
+                  {lane.tasks.map((task) => (
                     <li key={task.taskId}>
                       <button
                         type="button"
@@ -361,7 +375,7 @@ function DeliveryBoardPageInner() {
                       </button>
                     </li>
                   ))}
-                  {column.tasks.length === 0 ? (
+                  {lane.tasks.length === 0 ? (
                     <li className="px-2 py-5 text-center text-xs text-muted">
                       Nothing here
                     </li>
