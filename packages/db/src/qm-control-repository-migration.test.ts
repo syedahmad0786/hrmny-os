@@ -45,6 +45,7 @@ describe("0077 QM control repository migration", () => {
       "qm_decision_reason_outcome_chk",
       "qm_decision_session_metadata_chk",
       "qm_decision_work_record_chk",
+      ") IS TRUE",
       "ENABLE ROW LEVEL SECURITY",
       "FROM anon",
       "FROM authenticated",

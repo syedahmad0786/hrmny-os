@@ -2053,35 +2053,39 @@ export const qmCommandDecision = pgTable(
     check(
       "qm_decision_work_record_chk",
       sql`(
-        ${table.outcome} = 'workspace_read_precheck_recorded'
-        and ${table.precheckId} is not null
-        and ${table.proposalId} is null
-        and ${table.readPrecheck} is not null
-        and ${table.proposal} is null
-        and ${table.readPrecheck}->>'precheckId' = ${table.precheckId}::text
-        and ${table.readPrecheck}->>'organizationId' = ${table.organizationId}::text
-        and ${table.readPrecheck}->>'scopeId' = ${table.scopeId}
-        and ${table.readPrecheck}->>'sessionId' = ${table.sessionId}::text
-        and ${table.readPrecheck}->>'requestedByEmployeeId' = ${table.actorEmployeeId}::text
-        and (${table.readPrecheck}->>'createdAt')::timestamptz = ${table.recordedAt}
-      ) or (
-        ${table.outcome} = 'effect_proposal_recorded'
-        and ${table.proposalId} is not null
-        and ${table.precheckId} is null
-        and ${table.proposal} is not null
-        and ${table.readPrecheck} is null
-        and ${table.proposal}->>'proposalId' = ${table.proposalId}::text
-        and ${table.proposal}->>'organizationId' = ${table.organizationId}::text
-        and ${table.proposal}->>'scopeId' = ${table.scopeId}
-        and ${table.proposal}->>'sessionId' = ${table.sessionId}::text
-        and ${table.proposal}->>'proposedByEmployeeId' = ${table.actorEmployeeId}::text
-        and (${table.proposal}->>'createdAt')::timestamptz = ${table.recordedAt}
-      ) or (
-        ${table.outcome} in ('denied', 'idempotency_conflict')
-        and ${table.proposalId} is null
-        and ${table.precheckId} is null
-        and ${table.proposal} is null
-        and ${table.readPrecheck} is null
+        (
+          ${table.outcome} = 'workspace_read_precheck_recorded'
+          and ${table.precheckId} is not null
+          and ${table.proposalId} is null
+          and jsonb_typeof(${table.readPrecheck}) = 'object'
+          and ${table.proposal} is null
+          and ${table.readPrecheck}->>'precheckId' = ${table.precheckId}::text
+          and ${table.readPrecheck}->>'organizationId' = ${table.organizationId}::text
+          and ${table.readPrecheck}->>'scopeId' = ${table.scopeId}
+          and ${table.readPrecheck}->>'sessionId' = ${table.sessionId}::text
+          and ${table.readPrecheck}->>'requestedByEmployeeId' = ${table.actorEmployeeId}::text
+          and (${table.readPrecheck}->>'createdAt')::timestamptz = ${table.recordedAt}
+        ) is true
+        or (
+          ${table.outcome} = 'effect_proposal_recorded'
+          and ${table.proposalId} is not null
+          and ${table.precheckId} is null
+          and jsonb_typeof(${table.proposal}) = 'object'
+          and ${table.readPrecheck} is null
+          and ${table.proposal}->>'proposalId' = ${table.proposalId}::text
+          and ${table.proposal}->>'organizationId' = ${table.organizationId}::text
+          and ${table.proposal}->>'scopeId' = ${table.scopeId}
+          and ${table.proposal}->>'sessionId' = ${table.sessionId}::text
+          and ${table.proposal}->>'proposedByEmployeeId' = ${table.actorEmployeeId}::text
+          and (${table.proposal}->>'createdAt')::timestamptz = ${table.recordedAt}
+        ) is true
+        or (
+          ${table.outcome} in ('denied', 'idempotency_conflict')
+          and ${table.proposalId} is null
+          and ${table.precheckId} is null
+          and ${table.proposal} is null
+          and ${table.readPrecheck} is null
+        ) is true
       )`,
     ),
   ],
