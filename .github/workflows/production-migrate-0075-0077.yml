@@ -64,10 +64,35 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Upgrade the runner connection to certificate-verified TLS
+        shell: bash
+        env:
+          HRMNY_PRODUCTION_DATABASE_URL_RAW: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from "node:fs";
+
+          const raw = process.env.HRMNY_PRODUCTION_DATABASE_URL_RAW?.trim();
+          if (!raw) throw new Error("Production database URL is missing.");
+          const url = new URL(raw);
+          const modes = url.searchParams
+            .getAll("sslmode")
+            .map((mode) => mode.toLowerCase());
+          if (
+            modes.length > 1 ||
+            (modes[0] && !["require", "verify-full"].includes(modes[0]))
+          ) {
+            throw new Error("Production database TLS mode cannot be upgraded safely.");
+          }
+          url.searchParams.set("sslmode", "verify-full");
+          appendFileSync(
+            process.env.GITHUB_ENV,
+            `HRMNY_PRODUCTION_DATABASE_URL=${url.toString()}\n`,
+          );
+          NODE
       - name: Read-only exact 0074 and zero-running preflight
         env:
           PRODUCTION_MIGRATION_PHASE: ${{ inputs.operation == 'apply' && 'preflight' || 'audit' }}
-          HRMNY_PRODUCTION_DATABASE_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
           HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
           HRMNY_PRODUCTION_BACKUP_RECEIPT: ${{ inputs.backup_receipt }}
           HRMNY_PRODUCTION_RUNTIME_RECEIPT: ${{ inputs.runtime_receipt }}
@@ -75,14 +100,11 @@ jobs:
         run: pnpm --filter @hrmny/db exec tsx src/production-migration-0075-0077-guard.ts
       - name: Append reviewed migrations 0075 through 0077
         if: inputs.operation == 'apply'
-        env:
-          DIRECT_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
-        run: pnpm --filter @hrmny/db migrate
+        run: DIRECT_URL="$HRMNY_PRODUCTION_DATABASE_URL" pnpm --filter @hrmny/db migrate
       - name: Read back Apollo fencing, serialization, QM security, and journal
         if: inputs.operation == 'apply'
         env:
           PRODUCTION_MIGRATION_PHASE: verify
-          HRMNY_PRODUCTION_DATABASE_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
           HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
           HRMNY_PRODUCTION_BACKUP_RECEIPT: ${{ inputs.backup_receipt }}
           HRMNY_PRODUCTION_RUNTIME_RECEIPT: ${{ inputs.runtime_receipt }}
