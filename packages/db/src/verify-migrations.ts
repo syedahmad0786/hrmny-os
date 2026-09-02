@@ -34,8 +34,9 @@ const migrationsDirectory = fileURLToPath(
 const journal = JSON.parse(
   await readFile(`${migrationsDirectory}meta/_journal.json`, "utf8"),
 ) as { entries: Array<{ tag: string }> };
-const priorHead = "0075_apollo_search_fencing";
-const head = "0076_apollo_people_search_serialization";
+const apolloPriorHead = "0075_apollo_search_fencing";
+const apolloHead = "0076_apollo_people_search_serialization";
+const head = "0077_qm_control_repository";
 assert.equal(
   journal.entries.at(-1)?.tag,
   head,
@@ -243,6 +244,75 @@ async function assertCurrentHead(connection: Sql): Promise<void> {
       duplicateRunningSlots: 0,
     },
     "0076 schema and compatibility-trigger readback failed on the disposable database.",
+  );
+
+  const [qmRepository] = await connection<Array<{ ok: boolean }>>`
+    select
+      to_regclass('public.qm_session_binding') is not null
+      and to_regclass('public.qm_command_decision') is not null
+      and (
+        select count(*) from pg_constraint
+        where conname in (
+          'qm_session_owner_uniq',
+          'qm_session_scope_uniq',
+          'qm_session_lifecycle_chk',
+          'qm_session_scope_chk',
+          'qm_session_runtime_chk',
+          'qm_session_upstream_pin_chk',
+          'qm_session_state_version_chk',
+          'qm_decision_request_uniq',
+          'qm_decision_input_digest_chk',
+          'qm_decision_outcome_chk',
+          'qm_decision_reason_chk',
+          'qm_decision_capability_chk',
+          'qm_decision_reason_outcome_chk',
+          'qm_decision_session_metadata_chk',
+          'qm_decision_work_record_chk'
+        )
+      ) = 15
+      and (
+        select count(*) from pg_indexes
+        where schemaname = 'public' and indexname in (
+          'qm_session_owner_uniq',
+          'qm_session_scope_uniq',
+          'qm_session_owner_idx',
+          'qm_decision_request_uniq',
+          'qm_decision_proposal_uniq',
+          'qm_decision_precheck_uniq',
+          'qm_decision_session_recorded_idx'
+        )
+      ) = 7
+      and exists (
+        select 1 from pg_trigger
+        where tgname = 'qm_command_decision_immutable_trg'
+          and not tgisinternal
+      )
+      and (
+        select count(*) from pg_class
+        where oid in (
+          'public.qm_session_binding'::regclass,
+          'public.qm_command_decision'::regclass
+        ) and relrowsecurity
+      ) = 2 as ok
+  `;
+  assert.equal(
+    qmRepository?.ok,
+    true,
+    "0077 QM session and immutable decision repository is installed exactly.",
+  );
+
+  const [qmBrowserBoundary] = await connection<Array<{ ok: boolean }>>`
+    select not (
+      has_table_privilege('anon', 'public.qm_session_binding', 'SELECT,INSERT,UPDATE,DELETE')
+      or has_table_privilege('authenticated', 'public.qm_session_binding', 'SELECT,INSERT,UPDATE,DELETE')
+      or has_table_privilege('anon', 'public.qm_command_decision', 'SELECT,INSERT,UPDATE,DELETE')
+      or has_table_privilege('authenticated', 'public.qm_command_decision', 'SELECT,INSERT,UPDATE,DELETE')
+    ) as ok
+  `;
+  assert.equal(
+    qmBrowserBoundary?.ok,
+    true,
+    "Browser Data API roles cannot access QM authority records.",
   );
 
   const [legacyBackfill] = await connection<Array<{ ok: boolean }>>`
@@ -570,7 +640,7 @@ async function assertMigrationRejectsRunningApollo(
     )
   `;
   await assert.rejects(
-    async () => applyMigration(connection, head),
+    async () => applyMigration(connection, apolloHead),
     (error: unknown) => {
       assert.equal(
         (error as { code?: string }).code,
@@ -629,7 +699,7 @@ try {
   upgrade = postgres(databaseUrl(databaseNames[1]!), options);
   await prepareSupabaseDatabase(upgrade);
   for (const { tag } of journal.entries.filter(
-    ({ tag }) => tag !== priorHead && tag !== head,
+    ({ tag }) => tag !== apolloPriorHead && tag !== apolloHead && tag !== head,
   )) {
     await applyMigration(upgrade, tag);
   }
@@ -637,8 +707,8 @@ try {
   // Replaying the prior SQL is deliberate: the verifier preserves the
   // repository's additive/idempotent migration contract before asserting the
   // exact 0075 schema that 0076 is allowed to extend.
-  await applyMigration(upgrade, priorHead);
-  await applyMigration(upgrade, priorHead);
+  await applyMigration(upgrade, apolloPriorHead);
+  await applyMigration(upgrade, apolloPriorHead);
   await assertExact0075Preflight(upgrade);
 
   upgradeCompetitor = postgres(databaseUrl(databaseNames[1]!), options);
@@ -670,6 +740,8 @@ try {
   await upgradeCompetitor.unsafe("RESET lock_timeout");
 
   await assertMigrationRejectsRunningApollo(upgrade);
+  await applyMigration(upgrade, apolloHead);
+  await applyMigration(upgrade, apolloHead);
   await applyMigration(upgrade, head);
   await applyMigration(upgrade, head);
   await assertCurrentHead(upgrade);

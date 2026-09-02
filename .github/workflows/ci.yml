@@ -132,7 +132,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
         run: pnpm db:migrate
-      - name: Prove Sales proposal runtime on PostgreSQL
+      - name: Prove Sales and QM proposal runtime on PostgreSQL
         env:
           DATABASE_MODE: postgres
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres

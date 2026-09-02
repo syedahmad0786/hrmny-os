@@ -143,69 +143,225 @@ export const QmReasonCodeSchema = z.enum([
 
 export type QmReasonCode = z.infer<typeof QmReasonCodeSchema>;
 
-export type QmWorkspaceReadPrecheck = {
-  precheckId: string;
-  organizationId: string;
-  scopeId: string;
-  sessionId: string;
-  requestedByEmployeeId: string;
-  resourceKind: "work" | "crm" | "approved-memory";
-  resourceId: string;
-  purposeDigest: string;
-  resolution: "repository-scope-required";
-  createdAt: string;
-};
+const isoTimestampSchema = z.string().datetime();
 
-export type QmEffectProposal = {
-  proposalId: string;
-  organizationId: string;
-  scopeId: string;
-  sessionId: string;
-  proposedByEmployeeId: string;
-  effectKind: QmEffectKind;
-  targetRef: string;
-  previewDigest: string;
-  rationaleDigest: string;
-  status: "proposed";
-  createdAt: string;
-};
+export const QmWorkspaceReadPrecheckSchema = z
+  .object({
+    precheckId: uuidSchema,
+    organizationId: uuidSchema,
+    scopeId: safeReferenceSchema,
+    sessionId: uuidSchema,
+    requestedByEmployeeId: uuidSchema,
+    resourceKind: z.enum(["work", "crm", "approved-memory"]),
+    resourceId: uuidSchema,
+    purposeDigest: sha256Schema,
+    resolution: z.literal("repository-scope-required"),
+    createdAt: isoTimestampSchema,
+  })
+  .strict();
 
-export type QmDecisionReceipt = {
-  receiptId: string;
-  requestId: string;
-  inputDigest: string;
-  organizationId: string;
-  actorEmployeeId: string;
-  sessionId: string;
-  scopeId: string | null;
-  outcome: QmDecisionOutcome;
-  reasonCode: QmReasonCode;
-  requiredCapability: QmCapability;
-  sessionStateVersion: number | null;
-  sessionPolicyDigest: string | null;
-  upstreamCommit: string | null;
-  runtimeKind: QmRuntimeBinding["kind"] | null;
-  providerReadbackReceipt: string | null;
-  proposalId: string | null;
-  precheckId: string | null;
-  createdAt: string;
-};
+export type QmWorkspaceReadPrecheck = z.infer<
+  typeof QmWorkspaceReadPrecheckSchema
+>;
 
-export type QmStoredDecision = {
-  receipt: QmDecisionReceipt;
-  proposal?: QmEffectProposal;
-  readPrecheck?: QmWorkspaceReadPrecheck;
-};
+export const QmEffectProposalSchema = z
+  .object({
+    proposalId: uuidSchema,
+    organizationId: uuidSchema,
+    scopeId: safeReferenceSchema,
+    sessionId: uuidSchema,
+    proposedByEmployeeId: uuidSchema,
+    effectKind: QmEffectKindSchema,
+    targetRef: safeReferenceSchema,
+    previewDigest: sha256Schema,
+    rationaleDigest: sha256Schema,
+    status: z.literal("proposed"),
+    createdAt: isoTimestampSchema,
+  })
+  .strict();
+
+export type QmEffectProposal = z.infer<typeof QmEffectProposalSchema>;
+
+export const QmDecisionReceiptSchema = z
+  .object({
+    receiptId: uuidSchema,
+    requestId: uuidSchema,
+    inputDigest: sha256Schema,
+    organizationId: uuidSchema,
+    actorEmployeeId: uuidSchema,
+    sessionId: uuidSchema,
+    scopeId: safeReferenceSchema.nullable(),
+    outcome: QmDecisionOutcomeSchema,
+    reasonCode: QmReasonCodeSchema,
+    requiredCapability: QmCapabilitySchema,
+    sessionStateVersion: z.number().int().nonnegative().nullable(),
+    sessionPolicyDigest: sha256Schema.nullable(),
+    upstreamCommit: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/)
+      .nullable(),
+    runtimeKind: z.enum(["local-synthetic", "provider"]).nullable(),
+    providerReadbackReceipt: receiptReferenceSchema.nullable(),
+    proposalId: uuidSchema.nullable(),
+    precheckId: uuidSchema.nullable(),
+    createdAt: isoTimestampSchema,
+  })
+  .strict()
+  .superRefine((receipt, context) => {
+    const sessionMetadata = [
+      receipt.scopeId,
+      receipt.sessionStateVersion,
+      receipt.sessionPolicyDigest,
+      receipt.upstreamCommit,
+      receipt.runtimeKind,
+    ];
+    if (receipt.outcome === "denied") {
+      if (
+        receipt.reasonCode !== "AUTHORIZATION_DENIED" ||
+        sessionMetadata.some((value) => value !== null) ||
+        receipt.providerReadbackReceipt !== null ||
+        receipt.proposalId !== null ||
+        receipt.precheckId !== null
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Denied QM receipts cannot disclose session metadata",
+        });
+      }
+      return;
+    }
+
+    const reasonMatchesOutcome =
+      (receipt.outcome === "workspace_read_precheck_recorded" &&
+        receipt.reasonCode === "WORKSPACE_READ_PRECHECK_RECORDED" &&
+        receipt.requiredCapability === "workspace.read") ||
+      (receipt.outcome === "effect_proposal_recorded" &&
+        receipt.reasonCode === "EFFECT_PROPOSAL_RECORDED" &&
+        receipt.requiredCapability === "effect.propose") ||
+      (receipt.outcome === "idempotency_conflict" &&
+        ["REQUEST_ID_PAYLOAD_CONFLICT", "SESSION_POLICY_CHANGED"].includes(
+          receipt.reasonCode,
+        ));
+    if (!reasonMatchesOutcome) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "QM receipt reason and capability must match its outcome",
+      });
+    }
+
+    if (sessionMetadata.some((value) => value === null)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Authorized QM receipts must bind the session policy",
+      });
+    }
+    if (
+      receipt.runtimeKind === "provider" &&
+      receipt.providerReadbackReceipt === null
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provider QM receipts require provider readback",
+      });
+    }
+    if (
+      receipt.runtimeKind === "local-synthetic" &&
+      receipt.providerReadbackReceipt !== null
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Local QM receipts cannot carry provider readback",
+      });
+    }
+  });
+
+export type QmDecisionReceipt = z.infer<typeof QmDecisionReceiptSchema>;
+
+export const QmStoredDecisionSchema = z
+  .object({
+    receipt: QmDecisionReceiptSchema,
+    proposal: QmEffectProposalSchema.optional(),
+    readPrecheck: QmWorkspaceReadPrecheckSchema.optional(),
+  })
+  .strict()
+  .superRefine((decision, context) => {
+    const { receipt, proposal, readPrecheck } = decision;
+    if (receipt.outcome === "effect_proposal_recorded") {
+      if (
+        !proposal ||
+        readPrecheck ||
+        receipt.proposalId !== proposal.proposalId ||
+        receipt.precheckId !== null
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Effect decisions require exactly one matching proposal",
+        });
+      }
+    } else if (receipt.outcome === "workspace_read_precheck_recorded") {
+      if (
+        !readPrecheck ||
+        proposal ||
+        receipt.precheckId !== readPrecheck.precheckId ||
+        receipt.proposalId !== null
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Read decisions require exactly one matching precheck",
+        });
+      }
+    } else if (
+      proposal ||
+      readPrecheck ||
+      receipt.proposalId !== null ||
+      receipt.precheckId !== null
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Denied or conflicting decisions cannot carry work records",
+      });
+    }
+
+    const workRecord = proposal ?? readPrecheck;
+    if (
+      workRecord &&
+      (workRecord.organizationId !== receipt.organizationId ||
+        workRecord.scopeId !== receipt.scopeId ||
+        workRecord.sessionId !== receipt.sessionId ||
+        workRecord.createdAt !== receipt.createdAt)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "QM work records must match their decision receipt",
+      });
+    }
+    if (
+      (proposal && proposal.proposedByEmployeeId !== receipt.actorEmployeeId) ||
+      (readPrecheck &&
+        readPrecheck.requestedByEmployeeId !== receipt.actorEmployeeId)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "QM work records must match the authenticated actor",
+      });
+    }
+  });
+
+export type QmStoredDecision = z.infer<typeof QmStoredDecisionSchema>;
 
 export type QmCommandDecision = QmStoredDecision & {
   replayed: boolean;
 };
 
-export type QmDecisionKey = {
-  organizationId: string;
-  actorEmployeeId: string;
-  requestId: string;
-};
+export const QmDecisionKeySchema = z
+  .object({
+    organizationId: uuidSchema,
+    actorEmployeeId: uuidSchema,
+    requestId: uuidSchema,
+  })
+  .strict();
+
+export type QmDecisionKey = z.infer<typeof QmDecisionKeySchema>;
 
 export interface QmControlRepository {
   getSession(sessionId: string): Promise<QmSessionBinding | null>;
