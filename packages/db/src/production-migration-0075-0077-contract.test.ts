@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   HRMNY_PRODUCTION_0075_TO_0077_BAND,
@@ -21,8 +25,21 @@ const exactPrefix = {
   actualOldTailFingerprint: "exact-0068-0074-tail",
   expectedOldTailFingerprint: "exact-0068-0074-tail",
 };
+const migrationsDirectory = fileURLToPath(
+  new URL("../migrations/", import.meta.url),
+);
 
 describe("production 0075-0077 runner contract", () => {
+  it("pins canonical SQL hashes across operating systems", () => {
+    for (const { tag, hash } of HRMNY_PRODUCTION_0075_TO_0077_BAND) {
+      const sql = readFileSync(
+        join(migrationsDirectory, `${tag}.sql`),
+        "utf8",
+      ).replace(/\r\n/g, "\n");
+      expect(createHash("sha256").update(sql).digest("hex")).toBe(hash);
+    }
+  });
+
   it("keeps audit read-only and requires receipts for an apply preflight", () => {
     expect(
       validateProduction0075To0077Inputs({
