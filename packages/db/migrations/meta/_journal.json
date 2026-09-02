@@ -533,6 +533,13 @@
       "when": 1788283943222,
       "tag": "0076_apollo_people_search_serialization",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1788322190000,
+      "tag": "0077_qm_control_repository",
+      "breakpoints": true
     }
   ]
 }

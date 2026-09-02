@@ -1277,7 +1277,10 @@ export const agentRuns = pgTable(
     agentRunId: uuid("agent_run_id").defaultRandom().primaryKey(),
     agent: text("agent").notNull(),
     model: text("model").notNull(),
-    input: jsonb("input").$type<Record<string, unknown>>().default({}).notNull(),
+    input: jsonb("input")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
     output: jsonb("output")
       .$type<Record<string, unknown>>()
       .default({})
@@ -1503,7 +1506,10 @@ export const importLineage = pgTable(
       table.sourceId,
     ),
     index("import_lineage_target_idx").on(table.targetTable, table.targetId),
-    index("import_lineage_system_idx").on(table.sourceSystem, table.sourceTable),
+    index("import_lineage_system_idx").on(
+      table.sourceSystem,
+      table.sourceTable,
+    ),
   ],
 );
 
@@ -1674,9 +1680,16 @@ export const crmQuote = pgTable(
 
 /** Sales OS singleton SOP settings (migration 0072). */
 export const salesOsSettings = pgTable("sales_os_settings", {
-  salesOsSettingsId: text("sales_os_settings_id").primaryKey().default("default"),
-  settings: jsonb("settings").$type<Record<string, unknown>>().default({}).notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  salesOsSettingsId: text("sales_os_settings_id")
+    .primaryKey()
+    .default("default"),
+  settings: jsonb("settings")
+    .$type<Record<string, unknown>>()
+    .default({})
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
   updatedBy: uuid("updated_by"),
 });
 
@@ -1686,9 +1699,14 @@ export const salesOsEvolveProposal = pgTable("sales_os_evolve_proposal", {
     .primaryKey(),
   focus: text("focus").default("").notNull(),
   summary: text("summary").default("").notNull(),
-  proposed: jsonb("proposed").$type<Record<string, unknown>>().default({}).notNull(),
+  proposed: jsonb("proposed")
+    .$type<Record<string, unknown>>()
+    .default({})
+    .notNull(),
   state: text("state").default("proposed").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
 });
 
@@ -1703,8 +1721,13 @@ export const companyResearch = pgTable(
     website: text("website"),
     whyThis: text("why_this").default("").notNull(),
     evidence: text("evidence"),
-    leadSourceLane: text("lead_source_lane").default("industry_scanning").notNull(),
-    estimatedValueAed: numeric("estimated_value_aed", { precision: 14, scale: 2 }),
+    leadSourceLane: text("lead_source_lane")
+      .default("industry_scanning")
+      .notNull(),
+    estimatedValueAed: numeric("estimated_value_aed", {
+      precision: 14,
+      scale: 2,
+    }),
     suggestedServices: text("suggested_services"),
     buafBudget: integer("buaf_budget").default(0).notNull(),
     buafUrgency: integer("buaf_urgency").default(0).notNull(),
@@ -1716,11 +1739,18 @@ export const companyResearch = pgTable(
     reworkFeedback: text("rework_feedback"),
     decidedBy: uuid("decided_by"),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => [
-    index("company_research_state_idx").on(table.approvalState, table.createdAt),
+    index("company_research_state_idx").on(
+      table.approvalState,
+      table.createdAt,
+    ),
     index("company_research_company_idx").on(table.companyId),
   ],
 );
@@ -1745,8 +1775,12 @@ export const contactResearch = pgTable(
     enrichProvider: text("enrich_provider"),
     approvalState: text("approval_state").default("found").notNull(),
     reworkFeedback: text("rework_feedback"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => [
     index("contact_research_company_idx").on(
@@ -1759,12 +1793,16 @@ export const contactResearch = pgTable(
 export const suppressionEntry = pgTable(
   "suppression_entry",
   {
-    suppressionEntryId: uuid("suppression_entry_id").defaultRandom().primaryKey(),
+    suppressionEntryId: uuid("suppression_entry_id")
+      .defaultRandom()
+      .primaryKey(),
     email: text("email"),
     domain: text("domain"),
     reason: text("reason").notNull(),
     source: text("source"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => [
     index("suppression_entry_email_idx").on(table.email),
@@ -1781,11 +1819,19 @@ export const emailEvent = pgTable(
     kind: text("kind").notNull(),
     provider: text("provider").default("gmail").notNull(),
     externalId: text("external_id"),
-    payload: jsonb("payload").$type<Record<string, unknown>>().default({}).notNull(),
-    occurredAt: timestamp("occurred_at", { withTimezone: true }).defaultNow().notNull(),
+    payload: jsonb("payload")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => [
-    index("email_event_outreach_idx").on(table.outreachItemId, table.occurredAt),
+    index("email_event_outreach_idx").on(
+      table.outreachItemId,
+      table.occurredAt,
+    ),
     index("email_event_kind_idx").on(table.kind, table.occurredAt),
   ],
 );
@@ -1801,9 +1847,13 @@ export const intelSignal = pgTable(
     signalDate: date("signal_date"),
     summary: text("summary").default("").notNull(),
     evidenceUrl: text("evidence_url"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
-  (table) => [index("intel_signal_company_idx").on(table.companyId, table.createdAt)],
+  (table) => [
+    index("intel_signal_company_idx").on(table.companyId, table.createdAt),
+  ],
 );
 
 export const salesOsCreditLedger = pgTable(
@@ -1815,7 +1865,224 @@ export const salesOsCreditLedger = pgTable(
     month: text("month").notNull(),
     kind: text("kind").notNull(),
     count: integer("count").default(1).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
-  (table) => [index("sales_os_credit_ledger_month_idx").on(table.month, table.kind)],
+  (table) => [
+    index("sales_os_credit_ledger_month_idx").on(table.month, table.kind),
+  ],
+);
+
+/**
+ * Personal QM runtime binding. HRMNY remains the identity, authorization, and
+ * operational authority; provider/runtime details are metadata, not grants.
+ */
+export const qmSessionBinding = pgTable(
+  "qm_session_binding",
+  {
+    sessionId: uuid("session_id").primaryKey(),
+    organizationId: uuid("organization_id").notNull(),
+    scopeId: text("scope_id").notNull(),
+    ownerEmployeeId: uuid("owner_employee_id")
+      .notNull()
+      .references(() => employee.employeeId, { onDelete: "restrict" }),
+    lifecycle: text("lifecycle").notNull(),
+    workspaceReadEnabled: boolean("workspace_read_enabled")
+      .default(false)
+      .notNull(),
+    effectProposeEnabled: boolean("effect_propose_enabled")
+      .default(false)
+      .notNull(),
+    runtimeKind: text("runtime_kind").notNull(),
+    localFixtureId: text("local_fixture_id"),
+    provider: text("provider"),
+    providerResourceRef: text("provider_resource_ref"),
+    providerReadbackReceipt: text("provider_readback_receipt"),
+    upstreamVersion: text("upstream_version").notNull(),
+    upstreamCommit: text("upstream_commit").notNull(),
+    stateVersion: integer("state_version").default(0).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("qm_session_owner_uniq").on(
+      table.organizationId,
+      table.ownerEmployeeId,
+    ),
+    uniqueIndex("qm_session_scope_uniq").on(table.scopeId),
+    index("qm_session_owner_idx").on(
+      table.organizationId,
+      table.ownerEmployeeId,
+      table.lifecycle,
+    ),
+    check(
+      "qm_session_lifecycle_chk",
+      sql`${table.lifecycle} in ('active', 'suspended', 'revoked')`,
+    ),
+    check(
+      "qm_session_scope_chk",
+      sql`${table.scopeId} = 'qm:organization:' || ${table.organizationId}::text || ':employee:' || ${table.ownerEmployeeId}::text`,
+    ),
+    check(
+      "qm_session_runtime_chk",
+      sql`(
+        ${table.runtimeKind} = 'local-synthetic'
+        and ${table.localFixtureId} is not null
+        and ${table.provider} is null
+        and ${table.providerResourceRef} is null
+        and ${table.providerReadbackReceipt} is null
+      ) or (
+        ${table.runtimeKind} = 'provider'
+        and ${table.localFixtureId} is null
+        and ${table.provider} = 'flyio'
+        and ${table.providerResourceRef} is not null
+        and ${table.providerReadbackReceipt} is not null
+      )`,
+    ),
+    check(
+      "qm_session_upstream_pin_chk",
+      sql`${table.upstreamVersion} = 'v0.1.5' and ${table.upstreamCommit} = 'd931fe963de3ac20b9a7526ea9a4873c0d8ed18e'`,
+    ),
+    check("qm_session_state_version_chk", sql`${table.stateVersion} >= 0`),
+  ],
+);
+
+/** Immutable idempotency and authorization receipt for one QM command. */
+export const qmCommandDecision = pgTable(
+  "qm_command_decision",
+  {
+    receiptId: uuid("receipt_id").primaryKey(),
+    requestId: uuid("request_id").notNull(),
+    inputDigest: text("input_digest").notNull(),
+    organizationId: uuid("organization_id").notNull(),
+    actorEmployeeId: uuid("actor_employee_id")
+      .notNull()
+      .references(() => employee.employeeId, { onDelete: "restrict" }),
+    // Intentionally not an FK: a generic denial may name an unknown session.
+    sessionId: uuid("session_id").notNull(),
+    scopeId: text("scope_id"),
+    outcome: text("outcome").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    requiredCapability: text("required_capability").notNull(),
+    sessionStateVersion: integer("session_state_version"),
+    sessionPolicyDigest: text("session_policy_digest"),
+    upstreamCommit: text("upstream_commit"),
+    runtimeKind: text("runtime_kind"),
+    providerReadbackReceipt: text("provider_readback_receipt"),
+    proposalId: uuid("proposal_id"),
+    precheckId: uuid("precheck_id"),
+    proposal: jsonb("proposal").$type<unknown>(),
+    readPrecheck: jsonb("read_precheck").$type<unknown>(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("qm_decision_request_uniq").on(
+      table.organizationId,
+      table.actorEmployeeId,
+      table.requestId,
+    ),
+    uniqueIndex("qm_decision_proposal_uniq")
+      .on(table.proposalId)
+      .where(sql`${table.proposalId} is not null`),
+    uniqueIndex("qm_decision_precheck_uniq")
+      .on(table.precheckId)
+      .where(sql`${table.precheckId} is not null`),
+    index("qm_decision_session_recorded_idx").on(
+      table.sessionId,
+      table.recordedAt.desc(),
+    ),
+    check(
+      "qm_decision_input_digest_chk",
+      sql`${table.inputDigest} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "qm_decision_outcome_chk",
+      sql`${table.outcome} in ('workspace_read_precheck_recorded', 'effect_proposal_recorded', 'denied', 'idempotency_conflict')`,
+    ),
+    check(
+      "qm_decision_reason_chk",
+      sql`${table.reasonCode} in ('WORKSPACE_READ_PRECHECK_RECORDED', 'EFFECT_PROPOSAL_RECORDED', 'AUTHORIZATION_DENIED', 'REQUEST_ID_PAYLOAD_CONFLICT', 'SESSION_POLICY_CHANGED')`,
+    ),
+    check(
+      "qm_decision_capability_chk",
+      sql`${table.requiredCapability} in ('workspace.read', 'effect.propose')`,
+    ),
+    check(
+      "qm_decision_reason_outcome_chk",
+      sql`(
+        ${table.outcome} = 'workspace_read_precheck_recorded'
+        and ${table.reasonCode} = 'WORKSPACE_READ_PRECHECK_RECORDED'
+        and ${table.requiredCapability} = 'workspace.read'
+      ) or (
+        ${table.outcome} = 'effect_proposal_recorded'
+        and ${table.reasonCode} = 'EFFECT_PROPOSAL_RECORDED'
+        and ${table.requiredCapability} = 'effect.propose'
+      ) or (
+        ${table.outcome} = 'denied'
+        and ${table.reasonCode} = 'AUTHORIZATION_DENIED'
+      ) or (
+        ${table.outcome} = 'idempotency_conflict'
+        and ${table.reasonCode} in ('REQUEST_ID_PAYLOAD_CONFLICT', 'SESSION_POLICY_CHANGED')
+      )`,
+    ),
+    check(
+      "qm_decision_session_metadata_chk",
+      sql`(
+        ${table.outcome} = 'denied'
+        and ${table.reasonCode} = 'AUTHORIZATION_DENIED'
+        and ${table.scopeId} is null
+        and ${table.sessionStateVersion} is null
+        and ${table.sessionPolicyDigest} is null
+        and ${table.upstreamCommit} is null
+        and ${table.runtimeKind} is null
+        and ${table.providerReadbackReceipt} is null
+      ) or (
+        ${table.outcome} <> 'denied'
+        and ${table.scopeId} is not null
+        and ${table.sessionStateVersion} >= 0
+        and ${table.sessionPolicyDigest} ~ '^[a-f0-9]{64}$'
+        and ${table.upstreamCommit} ~ '^[a-f0-9]{40}$'
+        and (
+          (${table.runtimeKind} = 'provider' and ${table.providerReadbackReceipt} is not null)
+          or (${table.runtimeKind} = 'local-synthetic' and ${table.providerReadbackReceipt} is null)
+        )
+      )`,
+    ),
+    check(
+      "qm_decision_work_record_chk",
+      sql`(
+        ${table.outcome} = 'workspace_read_precheck_recorded'
+        and ${table.precheckId} is not null
+        and ${table.proposalId} is null
+        and ${table.readPrecheck} is not null
+        and ${table.proposal} is null
+        and ${table.readPrecheck}->>'precheckId' = ${table.precheckId}::text
+        and ${table.readPrecheck}->>'organizationId' = ${table.organizationId}::text
+        and ${table.readPrecheck}->>'scopeId' = ${table.scopeId}
+        and ${table.readPrecheck}->>'sessionId' = ${table.sessionId}::text
+        and ${table.readPrecheck}->>'requestedByEmployeeId' = ${table.actorEmployeeId}::text
+        and (${table.readPrecheck}->>'createdAt')::timestamptz = ${table.recordedAt}
+      ) or (
+        ${table.outcome} = 'effect_proposal_recorded'
+        and ${table.proposalId} is not null
+        and ${table.precheckId} is null
+        and ${table.proposal} is not null
+        and ${table.readPrecheck} is null
+        and ${table.proposal}->>'proposalId' = ${table.proposalId}::text
+        and ${table.proposal}->>'organizationId' = ${table.organizationId}::text
+        and ${table.proposal}->>'scopeId' = ${table.scopeId}
+        and ${table.proposal}->>'sessionId' = ${table.sessionId}::text
+        and ${table.proposal}->>'proposedByEmployeeId' = ${table.actorEmployeeId}::text
+        and (${table.proposal}->>'createdAt')::timestamptz = ${table.recordedAt}
+      ) or (
+        ${table.outcome} in ('denied', 'idempotency_conflict')
+        and ${table.proposalId} is null
+        and ${table.precheckId} is null
+        and ${table.proposal} is null
+        and ${table.readPrecheck} is null
+      )`,
+    ),
+  ],
 );
