@@ -16,8 +16,13 @@ test.describe("Connections Google Workspace OAuth", () => {
 
     const gwCard = page.getByTestId("conn-card-google_workspace");
     await expect(gwCard).toBeVisible({ timeout: 30_000 });
-    await expect(gwCard.getByRole("heading", { name: /Google Workspace/i })).toBeVisible();
-    await expect(gwCard).not.toContainText(/Blocked by the organization connected-app policy/i);
+    await expect(
+      gwCard.getByRole("heading", { name: /Google Workspace/i }),
+    ).toBeVisible();
+    await expect(gwCard).not.toContainText(
+      /Blocked by the organization connected-app policy/i,
+    );
+    await page.getByText("Connection diagnostics", { exact: true }).click();
     await expect(page.getByTestId("connections-app-policy")).toBeVisible();
     await expect(page.getByTestId("conn-card-apollo")).not.toContainText(
       /Blocked by the organization connected-app policy/i,
@@ -39,9 +44,9 @@ test.describe("Connections Google Workspace OAuth", () => {
     );
 
     await expect(page.getByText(/Live demo blockers/i)).toHaveCount(0);
-    await expect(page.getByTestId("connections-blocker-link-apollo")).toHaveCount(
-      0,
-    );
+    await expect(
+      page.getByTestId("connections-blocker-link-apollo"),
+    ).toHaveCount(0);
 
     await page.goto(
       "/settings/connections?gw=connected&account=developer%40hrmny.co",
@@ -59,6 +64,7 @@ test.describe("Connections Google Workspace OAuth", () => {
   test("pasting an n8n key saves through the backend", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/settings/connections", { waitUntil: "domcontentloaded" });
+    await page.getByText("Connection diagnostics", { exact: true }).click();
     await expect(page.getByTestId("connections-backend-store")).toBeVisible({
       timeout: 30_000,
     });
@@ -75,9 +81,12 @@ test.describe("Connections Google Workspace OAuth", () => {
   test("HITL and Hunt deep-link to the mailbox card", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/outreach", { waitUntil: "domcontentloaded" });
+    await page.getByText("Sending setup", { exact: true }).click();
     const gw = page.getByTestId("outreach-ready-gw");
     await expect(gw).toBeVisible({ timeout: 30_000 });
-    const reconnect = gw.getByRole("link", { name: /Reconnect in Connections/i });
+    const reconnect = gw.getByRole("link", {
+      name: /Reconnect in Connections/i,
+    });
     if ((await reconnect.count()) > 0) {
       await expect(reconnect).toHaveAttribute(
         "href",
@@ -85,7 +94,9 @@ test.describe("Connections Google Workspace OAuth", () => {
       );
     }
 
-    await page.goto("/crm/settings/sales-os", { waitUntil: "domcontentloaded" });
+    await page.goto("/crm/settings/sales-os", {
+      waitUntil: "domcontentloaded",
+    });
     await expect(page.getByTestId("sales-os-settings")).toBeVisible({
       timeout: 30_000,
     });

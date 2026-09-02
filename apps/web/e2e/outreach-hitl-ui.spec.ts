@@ -9,8 +9,9 @@ test.describe("Outreach HITL UI", () => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/outreach", { waitUntil: "domcontentloaded" });
     await expect(
-      page.getByRole("heading", { name: /Outreach drafts/i }),
+      page.getByRole("heading", { name: /^Outreach$/i }),
     ).toBeVisible({ timeout: 60_000 });
+    await page.getByText("Sending setup", { exact: true }).click();
 
     await expect(page.getByTestId("outreach-ready-banner")).toBeVisible({
       timeout: 30_000,
@@ -46,6 +47,12 @@ test.describe("Outreach HITL UI", () => {
       .fill("E2E body — approve only, do not send.");
     await page.getByTestId("outreach-draft-create").click();
 
+    const showTestDrafts = page.getByRole("checkbox", {
+      name: /Show \d+ test drafts?/i,
+    });
+    await expect(showTestDrafts).toBeVisible({ timeout: 30_000 });
+    await showTestDrafts.check();
+
     const draftRow = page
       .locator("[data-outreach-state='draft']")
       .filter({ hasText: subject });
@@ -58,7 +65,9 @@ test.describe("Outreach HITL UI", () => {
       .filter({ hasText: subject });
     await expect(approvedRow).toBeVisible({ timeout: 30_000 });
     await expect(
-      page.locator("[data-outreach-state='draft']").filter({ hasText: subject }),
+      page
+        .locator("[data-outreach-state='draft']")
+        .filter({ hasText: subject }),
     ).toHaveCount(0);
 
     // Explicitly never click Send via Gmail in this mock-safe path.

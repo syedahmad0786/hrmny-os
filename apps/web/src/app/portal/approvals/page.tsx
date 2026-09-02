@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@hrmny/ui";
 import { trpc } from "@/lib/trpc";
+import { hasSyntheticMarker } from "@/lib/synthetic-records";
 
 export default function PortalApprovalsPage() {
   const utils = trpc.useUtils();
@@ -10,13 +11,26 @@ export default function PortalApprovalsPage() {
   const act = trpc.portal.approvals.act.useMutation({
     onSuccess: () => void utils.portal.approvals.list.invalidate(),
   });
+  const items = (list.data ?? []).filter(
+    (item) => !hasSyntheticMarker(item.title),
+  );
 
   return (
     <main className="flex flex-col gap-6" data-testid="portal-approvals">
-      <h1 className="font-display text-3xl font-semibold text-ink">Approvals</h1>
-      <p className="text-muted">Pending client approvals for your account only.</p>
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
+          Your decisions
+        </p>
+        <h1 className="mt-1 font-display text-3xl font-semibold text-ink">
+          Approvals
+        </h1>
+        <p className="mt-2 text-muted">
+          Review what needs your decision. If something is not right, request
+          changes and tell the team exactly what to fix.
+        </p>
+      </div>
       <ul className="space-y-4" data-testid="portal-approvals-list">
-        {(list.data ?? []).map((item) => (
+        {items.map((item) => (
           <ApprovalRow
             key={item.approvalId}
             item={item}
@@ -33,9 +47,12 @@ export default function PortalApprovalsPage() {
             pending={act.isPending}
           />
         ))}
-        {!list.data?.length && (
-          <li className="text-sm text-muted" data-testid="portal-approvals-empty">
-            No approvals queued
+        {!list.isLoading && items.length === 0 && (
+          <li
+            className="rounded-xl border border-[#D9D0C4] bg-white/70 p-5 text-sm text-muted"
+            data-testid="portal-approvals-empty"
+          >
+            Nothing needs your approval right now.
           </li>
         )}
       </ul>
@@ -65,18 +82,25 @@ function ApprovalRow({
 
   return (
     <li
-      className="flex flex-col gap-3 border-b border-[#D9D0C4] pb-4"
+      className="flex flex-col gap-4 rounded-xl border border-[#D9D0C4] bg-white/70 p-5"
       data-testid={`portal-approval-${item.approvalId}`}
       data-approval-status={item.status}
       data-approval-title={item.title}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="font-medium text-ink" data-testid="portal-approval-title">
+          <p
+            className="font-medium text-ink"
+            data-testid="portal-approval-title"
+          >
             {item.title}
           </p>
           <p className="text-sm text-muted">
-            {item.kind} · SLA {item.slaHours}h · {item.status}
+            <span className="capitalize">{item.kind.replaceAll("_", " ")}</span>
+            {" · "}
+            {item.status === "pending"
+              ? `Decision requested within ${item.slaHours} hours`
+              : item.status.replaceAll("_", " ")}
           </p>
         </div>
         {item.status === "pending" && !rejecting && (

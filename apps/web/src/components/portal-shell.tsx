@@ -8,24 +8,16 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { featureForPathname } from "@/features/catalog";
 
 const NAV = [
-  { href: "/portal", label: "Home", feature: "portal.client" },
-  { href: "/portal/work", label: "Shared work", feature: "work.guests" },
-  { href: "/portal/onboarding", label: "Onboarding", feature: "portal.client" },
-  { href: "/portal/deliveries", label: "Deliveries", feature: "portal.client" },
-  { href: "/portal/approvals", label: "Approvals", feature: "portal.client" },
-  {
-    href: "/portal/campaign-approvals",
-    label: "Campaigns",
-    feature: "portal.client",
-  },
-  { href: "/portal/reports", label: "Reports", feature: "portal.client" },
-];
+  { href: "/portal", label: "Home" },
+  { href: "/portal/approvals", label: "Approvals" },
+  { href: "/portal/deliveries", label: "Deliveries" },
+  { href: "/portal/reports", label: "Reports" },
+] as const;
 
-/** Portal chrome only — never import finance/margin/payroll modules here. */
+/** Client-only chrome. Staff, finance, and administration links never render here. */
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  // Login + magic-link verify are pre-auth: no session gate, no redirect.
   const isAuthPage =
     pathname === "/portal/login" || pathname.startsWith("/portal/login/");
   const [role, setRole] = useState("portal_a");
@@ -36,7 +28,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   });
   const users = trpc.auth.devUsers.useQuery();
   const portalUsers = (users.data ?? []).filter(
-    (u) => u.actorType === "portal",
+    (user) => user.actorType === "portal",
   );
 
   useEffect(() => {
@@ -51,9 +43,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   }, [isAuthPage]);
 
   useEffect(() => {
-    if (!isAuthPage && session.isError) {
-      router.replace("/portal/login");
-    }
+    if (!isAuthPage && session.isError) router.replace("/portal/login");
   }, [isAuthPage, router, session.isError]);
 
   async function onRoleChange(next: string) {
@@ -70,11 +60,10 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   }
 
   if (isAuthPage) return children;
-
   if (session.isLoading || session.isError) {
     return (
       <main className="flex min-h-screen items-center justify-center text-sm text-muted">
-        Checking portal access…
+        Opening your workspace…
       </main>
     );
   }
@@ -84,82 +73,84 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const pageEnabled = !requiredFeature || enabled.has(requiredFeature);
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(160deg,#F7F3EE_0%,#EFE8DF_45%,#F7F3EE_100%)]">
-      <header className="border-b border-[#D9D0C4]/bg-paper/90 backdrop-blur">
-        <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-4 px-6 py-4">
-          <div>
-            <p className="font-display text-xs uppercase tracking-[0.25em] text-ochre">
-              hrmny portal
-            </p>
-            <p className="text-sm text-muted">
-              {session.data?.displayName ?? "Portal client"} ·{" "}
-              {session.data?.clientName ?? "—"}
-              <span className="ml-2 text-xs text-[#9A9188]">
-                (no finance · scoped to client)
-              </span>
-            </p>
-          </div>
-          {portalUsers.length > 0 ? (
-            <label className="flex items-center gap-2 text-sm">
-              <span className="text-muted">Client persona</span>
-              <select
-                className="rounded border border-[#D9D0C4] bg-white px-2 py-1"
-                value={role}
-                onChange={(e) => void onRoleChange(e.target.value)}
+    <div className="min-h-screen bg-[#f7f4ef]">
+      <header className="sticky top-0 z-30 border-b border-[#ddd4c8] bg-[#f7f4ef]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+          <Link href="/portal" className="flex items-center gap-3">
+            <span className="grid size-9 place-items-center rounded-[50%_50%_50%_8px] bg-ochre font-display text-lg font-bold text-ink">
+              h
+            </span>
+            <span>
+              <strong className="block font-display text-lg leading-none text-ink">
+                hrmny
+              </strong>
+              <small className="mt-1 block text-[10px] text-muted">
+                {session.data?.clientName ?? "Client workspace"}
+              </small>
+            </span>
+          </Link>
+          <div className="flex items-center gap-2">
+            {portalUsers.length > 0 ? (
+              <details className="relative">
+                <summary className="cursor-pointer list-none rounded-lg border border-[#ddd4c8] bg-white px-3 py-2 text-xs text-muted">
+                  Preview client
+                </summary>
+                <label className="absolute right-0 top-12 z-40 w-56 rounded-xl border border-[#ddd4c8] bg-white p-3 text-xs shadow-lg">
+                  <span className="mb-2 block text-muted">Test persona</span>
+                  <select
+                    className="w-full rounded border border-[#ddd4c8] bg-white px-2 py-2"
+                    value={role}
+                    onChange={(event) => void onRoleChange(event.target.value)}
+                  >
+                    {portalUsers.map((user) => (
+                      <option key={user.key} value={user.key}>
+                        {user.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </details>
+            ) : (
+              <button
+                type="button"
+                className="min-h-11 rounded-lg px-3 text-sm text-muted hover:text-ink"
+                onClick={() => void onSignOut()}
               >
-                {portalUsers.map((u) => (
-                  <option key={u.key} value={u.key}>
-                    {u.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
+                Sign out
+              </button>
+            )}
+          </div>
         </div>
-        <nav className="mx-auto flex max-w-4xl gap-1 px-4 pb-3">
-          {NAV.filter((item) => enabled.has(item.feature)).map((item) => {
-            const active = pathname === item.href;
+        <nav
+          className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-4 pb-3 sm:px-6"
+          aria-label="Client workspace"
+        >
+          {NAV.map((item) => {
+            const active =
+              pathname === item.href ||
+              (item.href !== "/portal" && pathname.startsWith(`${item.href}/`));
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={
-                  active
-                    ? "rounded px-3 py-1.5 text-sm font-medium text-ochre"
-                    : "rounded px-3 py-1.5 text-sm text-muted hover:text-ink"
-                }
+                className={`inline-flex min-h-11 shrink-0 items-center rounded-lg px-4 text-sm font-medium ${active ? "bg-ink text-paper" : "text-muted hover:bg-white hover:text-ink"}`}
               >
                 {item.label}
               </Link>
             );
           })}
-          <Link
-            href="/"
-            className="ml-auto rounded px-3 py-1.5 text-sm text-muted hover:text-ink"
-          >
-            Staff app →
-          </Link>
-          {portalUsers.length === 0 ? (
-            <button
-              type="button"
-              className="rounded px-3 py-1.5 text-sm text-muted hover:text-ink"
-              onClick={() => void onSignOut()}
-            >
-              Sign out
-            </button>
-          ) : null}
         </nav>
       </header>
-      <div className="mx-auto max-w-4xl px-6 py-8">
+      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
         {pageEnabled ? (
           children
         ) : (
-          <main className="rounded-lg border border-[#D9D0C4] bg-white/70 p-6">
-            <h1 className="font-display text-2xl font-semibold">
-              This feature is not included in your portal.
+          <main className="rounded-xl border border-[#ddd4c8] bg-white p-6">
+            <h1 className="font-display text-2xl font-semibold text-ink">
+              This area is not available.
             </h1>
             <p className="mt-2 text-sm text-muted">
-              Ask your workspace administrator if you need access.
+              Contact your hrmny account lead if you expected to see it.
             </p>
           </main>
         )}

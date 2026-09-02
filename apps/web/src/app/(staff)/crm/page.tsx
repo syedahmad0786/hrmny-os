@@ -20,6 +20,7 @@ import {
 } from "@/components/crm/format";
 import { DemoReadinessPanel } from "@/components/demo-readiness-panel";
 import { DashStrip } from "./_components/dash-strip";
+import { isSyntheticRecordName } from "@/lib/synthetic-records";
 
 export default function CrmPipelinePage() {
   const utils = trpc.useUtils();
@@ -37,6 +38,7 @@ export default function CrmPipelinePage() {
   const [lane, setLane] = useState("all");
   const [temp, setTemp] = useState("all");
   const [companyName, setCompanyName] = useState("");
+  const [showTestRecords, setShowTestRecords] = useState(false);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
@@ -65,6 +67,8 @@ export default function CrmPipelinePage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (deals.data ?? []).filter((d) => {
+      if (!showTestRecords && isSyntheticRecordName(d.companyName))
+        return false;
       if (lane !== "all" && d.leadSourceLane !== lane) return false;
       if (temp !== "all" && (d.buafTemperature ?? "") !== temp) return false;
       if (!q) return true;
@@ -74,7 +78,11 @@ export default function CrmPipelinePage() {
         formatLane(d.leadSourceLane).toLowerCase().includes(q)
       );
     });
-  }, [deals.data, search, lane, temp]);
+  }, [deals.data, search, lane, temp, showTestRecords]);
+
+  const hiddenTestCount = (deals.data ?? []).filter((deal) =>
+    isSyntheticRecordName(deal.companyName),
+  ).length;
 
   const stageList = stages.data ?? [];
 
@@ -82,19 +90,20 @@ export default function CrmPipelinePage() {
     <main>
       <CrmPageHeader
         title="Pipeline"
-        description="Move opportunities through guarded stages, from first signal to handover."
+        description="See every active opportunity, who owns it, and the next stage it needs to reach."
         actions={
           <>
             <CrmBtn
               onClick={() => {
-                const name = companyName.trim() || "New prospect";
+                const name = companyName.trim();
+                if (!name) return;
                 void create.mutateAsync({
                   companyName: name,
                   leadSourceLane: "relationship_led",
                 });
                 setCompanyName("");
               }}
-              disabled={create.isPending}
+              disabled={create.isPending || !companyName.trim()}
               variant="primary"
             >
               ＋ Create deal
@@ -103,7 +112,14 @@ export default function CrmPipelinePage() {
         }
       />
 
-      <DemoReadinessPanel testIdPrefix="crm" />
+      <details className="mb-4 rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm text-muted">
+        <summary className="cursor-pointer font-medium text-ink">
+          Sales setup
+        </summary>
+        <div className="mt-3">
+          <DemoReadinessPanel testIdPrefix="crm" />
+        </div>
+      </details>
 
       <CrmFilterBar>
         <input
@@ -139,8 +155,21 @@ export default function CrmPipelinePage() {
         </div>
       </CrmFilterBar>
 
+      {hiddenTestCount ? (
+        <label className="mb-3 flex w-fit items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={showTestRecords}
+            onChange={(event) => setShowTestRecords(event.target.checked)}
+          />
+          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test record
+          {hiddenTestCount === 1 ? "" : "s"}
+        </label>
+      ) : null}
+
       <p className="mb-3 text-[11px] text-[var(--muted)]">
-        Live CRM · mode {health.data?.mode ?? "…"} · {filtered.length} deals shown
+        {health.isError ? "Pipeline unavailable" : "Pipeline up to date"} ·{" "}
+        {filtered.length} active deal{filtered.length === 1 ? "" : "s"}
       </p>
 
       <DashStrip />
@@ -203,21 +232,28 @@ export default function CrmPipelinePage() {
                         <div className="crm-deal-top">
                           <span className={`crm-temp-dot ${tempVal ?? ""}`} />
                           {tempVal ? (
-                            <CrmTag kind={tagKindForTemp(tempVal)}>{tempVal}</CrmTag>
+                            <CrmTag kind={tagKindForTemp(tempVal)}>
+                              {tempVal}
+                            </CrmTag>
                           ) : (
-                            <CrmTag kind="info">unset</CrmTag>
+                            <CrmTag kind="info">No priority</CrmTag>
                           )}
                         </div>
                         <h4>{d.sector ?? "Opportunity"}</h4>
                         <span className="company">{d.companyName}</span>
-                        <div className="crm-deal-value">{formatAed(d.quoteValue)}</div>
+                        <div className="crm-deal-value">
+                          {formatAed(d.quoteValue)}
+                        </div>
                         <div className="crm-deal-meta">
                           <span>{formatLane(d.leadSourceLane)}</span>
                           <span className="crm-initials">
                             {initials(d.ownerEmployeeId ? "AM" : "CH")}
                           </span>
                         </div>
-                        <div className="crm-deal-meta" style={{ border: 0, paddingTop: 7 }}>
+                        <div
+                          className="crm-deal-meta"
+                          style={{ border: 0, paddingTop: 7 }}
+                        >
                           <span>Updated {formatRelative(d.updatedAt)}</span>
                           <span>Open →</span>
                         </div>

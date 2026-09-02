@@ -37,15 +37,15 @@ function AppPolicyBanner() {
         {disabled ? (
           <>
             Organization policy is still <strong>disabled</strong> in the
-            database, so Work / Composio extras stay grey. First-party CRM
-            cards (Google Workspace, Apollo) stay connectable.
+            database, so Work / Composio extras stay grey. First-party CRM cards
+            (Google Workspace, Apollo) stay connectable.
           </>
         ) : (
           <>
             Organization policy is{" "}
             <strong>{policy.data.appPolicy.replaceAll("_", " ")}</strong>
-            {policy.data.healed ? " (just reopened)" : ""}. First-party CRM
-            apps are always allowed.
+            {policy.data.healed ? " (just reopened)" : ""}. First-party CRM apps
+            are always allowed.
           </>
         )}
       </p>
@@ -127,7 +127,10 @@ function BackendStoreBanner() {
         <p className="mt-1">
           This process has no database. Pasted keys save in memory for this
           server instance so Connect is not a dead button. Use{" "}
-          <a className="underline" href="https://hrmny-os.vercel.app/settings/connections">
+          <a
+            className="underline"
+            href="https://hrmny-os.vercel.app/settings/connections"
+          >
             production Connections
           </a>{" "}
           as an @hrmny.co staff seat for Vault persistence. Google OAuth client:{" "}
@@ -155,6 +158,7 @@ const WORK_APP_FAMILIES = [
 
 export default function ConnectionsPage() {
   const utils = trpc.useUtils();
+  const [personalToolsOpen, setPersonalToolsOpen] = useState(false);
   const list = trpc.connections.list.useQuery();
   const asanaStatus = trpc.connections.asanaStatus.useQuery(undefined, {
     retry: false,
@@ -213,9 +217,10 @@ export default function ConnectionsPage() {
   const [toolPage, setToolPage] = useState(1);
   const managedToolkits = trpc.connections.managedToolkits.useQuery(
     { search: toolSearch, page: toolPage, pageSize: 12 },
-    { retry: false },
+    { enabled: personalToolsOpen, retry: false },
   );
   const managedAccounts = trpc.connections.managedAccounts.useQuery(undefined, {
+    enabled: personalToolsOpen,
     retry: false,
     refetchInterval: 3_000,
   });
@@ -266,7 +271,11 @@ export default function ConnectionsPage() {
     }
     if (gw || xero === "connected" || xero === "error") {
       const id =
-        gw != null ? "conn-google_workspace" : xero != null ? "conn-xero" : null;
+        gw != null
+          ? "conn-google_workspace"
+          : xero != null
+            ? "conn-xero"
+            : null;
       if (id) {
         window.setTimeout(() => {
           document.getElementById(id)?.scrollIntoView({
@@ -290,21 +299,25 @@ export default function ConnectionsPage() {
       <div>
         <h1 className="font-display text-3xl font-semibold">Connections</h1>
         <p className="mt-2 text-muted">
-          Business credentials stay encrypted in Supabase Vault. Personal tools
-          use Composio-hosted authorization and are never exposed to the
-          browser.{" "}
-          <Link href="/settings/automations" className="underline">
-            Automations / n8n smoke
-          </Link>
-          .
+          Connect, replace, or disconnect the accounts HRMNY uses. Each card
+          shows whether the tool is ready and the next available action.
         </p>
       </div>
 
-      <PlatformReadyStrip testId="connections-platform-ready" />
-      <BackendStoreBanner />
-      <AppPolicyBanner />
-
-      <ConnectionHealth />
+      <details className="rounded-xl border border-sand bg-white/70 px-4 py-3 text-sm text-muted">
+        <summary className="cursor-pointer font-medium text-ink">
+          Connection diagnostics
+        </summary>
+        <div className="mt-4 flex flex-col gap-4">
+          <PlatformReadyStrip testId="connections-platform-ready" />
+          <BackendStoreBanner />
+          <AppPolicyBanner />
+          <ConnectionHealth />
+          <Link href="/settings/automations" className="w-fit underline">
+            Automation settings
+          </Link>
+        </div>
+      </details>
 
       {oauthBanner ? (
         <p
@@ -322,12 +335,11 @@ export default function ConnectionsPage() {
 
       <div id="direct-business-connections">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
-          Direct business connections
+          Business tools
         </p>
         <p className="mt-1 text-sm text-muted">
-          Sales Growth is available. Connect Google Workspace when you want
-          live HITL Gmail. Apollo is optional for provider-backed discovery;
-          Hunter is not used.
+          Start with Apollo for prospecting and Google Workspace for approved
+          email. Open another card only when that tool is part of your workflow.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -377,9 +389,15 @@ export default function ConnectionsPage() {
                     type="button"
                     variant="ghost"
                     disabled={disconnect.isPending}
-                    onClick={() =>
-                      disconnect.mutate({ id: item.connectionAccountId! })
-                    }
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `Disconnect ${item.label}? HRMNY will stop using this account until another one is connected.`,
+                        )
+                      )
+                        return;
+                      disconnect.mutate({ id: item.connectionAccountId! });
+                    }}
                   >
                     {item.toolkit === "google_workspace" &&
                     (item.status === "error" || item.lastError)
@@ -399,8 +417,8 @@ export default function ConnectionsPage() {
                       autoComplete="off"
                       placeholder={
                         item.hasSecret
-                          ? "Paste replacement key (live-probed)"
-                          : "Paste API key (live-probed on save)"
+                          ? "Paste a replacement API key"
+                          : "Paste your API key"
                       }
                       value={keys[item.toolkit] ?? ""}
                       onChange={(event) =>
@@ -420,10 +438,7 @@ export default function ConnectionsPage() {
                       onClick={() => {
                         saveKey.mutate({
                           toolkit: item.toolkit as
-                            | "apollo"
-                            | "hunter"
-                            | "bayzat"
-                            | "n8n",
+                            "apollo" | "hunter" | "bayzat" | "n8n",
                           apiKey: keys[item.toolkit]!,
                         });
                       }}
@@ -485,21 +500,21 @@ export default function ConnectionsPage() {
                     {item.ready
                       ? item.toolkit === "canva" || item.toolkit === "linkedin"
                         ? item.status === "connected"
-                          ? "Reconnect with Composio"
-                          : "Connect with Composio"
+                          ? "Reconnect"
+                          : "Connect"
                         : item.status === "error" || item.lastError
-                          ? "Reconnect (token revoked)"
+                          ? "Reconnect"
                           : item.status === "connected"
-                            ? "Reconnect with OAuth"
-                            : "Connect with OAuth"
-                      : "Provider setup needed"}
+                            ? "Reconnect"
+                            : "Connect"
+                      : "Setup required"}
                   </Button>
                   {item.toolkit === "google_workspace" &&
                   isGoogleWorkspaceReconnectRequired(item.lastError) ? (
                     <p className="w-full text-xs text-red-700">
-                      Heal cannot restore a revoked Google token. Use Reconnect —
-                      it starts a dedicated Google consent that writes tokens to
-                      Vault with the same client used for refresh.
+                      Heal cannot restore a revoked Google token. Use Reconnect
+                      — it starts a dedicated Google consent that writes tokens
+                      to Vault with the same client used for refresh.
                     </p>
                   ) : null}
                   {item.toolkit === "google_workspace" &&
@@ -526,7 +541,9 @@ export default function ConnectionsPage() {
                   {probeGoogle.data && item.toolkit === "google_workspace" ? (
                     <p
                       className={`w-full text-xs ${
-                        probeGoogle.data.ok ? "text-emerald-700" : "text-red-700"
+                        probeGoogle.data.ok
+                          ? "text-emerald-700"
+                          : "text-red-700"
                       }`}
                     >
                       {probeGoogle.data.ok
@@ -571,8 +588,14 @@ export default function ConnectionsPage() {
         })}
       </div>
 
-      <section className="rounded-xl border border-sand bg-white/70 p-5">
-        <div className="flex flex-wrap items-end justify-between gap-4">
+      <details
+        className="rounded-xl border border-sand bg-white/70 p-5"
+        onToggle={(event) => setPersonalToolsOpen(event.currentTarget.open)}
+      >
+        <summary className="cursor-pointer font-medium text-ink">
+          More personal tools
+        </summary>
+        <div className="mt-5 flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
               Personal tools via Composio
@@ -634,11 +657,17 @@ export default function ConnectionsPage() {
                       type="button"
                       variant="ghost"
                       disabled={disconnectManaged.isPending}
-                      onClick={() =>
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            `Disconnect ${toolkit.name}? You can reconnect it at any time.`,
+                          )
+                        )
+                          return;
                         disconnectManaged.mutate({
                           id: account.connectionAccountId,
-                        })
-                      }
+                        });
+                      }}
                     >
                       Disconnect
                     </Button>
@@ -686,10 +715,13 @@ export default function ConnectionsPage() {
             Next
           </Button>
         </div>
-      </section>
+      </details>
 
       {workApps.data?.apps.length ? (
-        <section className="flex flex-col gap-4">
+        <details className="flex flex-col gap-4 rounded-xl border border-sand bg-white/70 p-5">
+          <summary className="cursor-pointer font-medium text-ink">
+            Work app integrations
+          </summary>
           <div>
             <h2 className="font-display text-2xl font-semibold">
               Work app integrations
@@ -821,7 +853,7 @@ export default function ConnectionsPage() {
               </div>
             );
           })}
-        </section>
+        </details>
       ) : null}
 
       {redirect ? (

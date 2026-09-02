@@ -69,6 +69,7 @@ describe("staff workspace policy", () => {
     const items: { id: StaffNavId; label: string }[] = [
       { id: "home", label: "Home" },
       { id: "sales", label: "Sales" },
+      { id: "clients", label: "Clients" },
       { id: "work", label: "Work" },
       { id: "delivery", label: "Delivery" },
       { id: "chat", label: "Chat" },

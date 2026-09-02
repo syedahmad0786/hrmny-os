@@ -102,7 +102,7 @@ test.describe("Hunt Apollo prospect UI", () => {
       timeout: 60_000,
     });
     await expect(page.getByTestId("hunt-apollo-credential")).toHaveText(
-      "Not configured",
+      "Not connected",
     );
     await expect(page.getByTestId("hunt-apollo-search")).toBeDisabled();
     await expect(page.getByTestId("hunt-apollo-search")).toHaveText(
@@ -402,9 +402,6 @@ test.describe("Hunt Apollo prospect UI", () => {
       "old operator only",
     );
     await expect(page.getByTestId("hunt-apollo-cancel-search")).toBeVisible();
-    await page
-      .getByTestId("sales-os-signal-company")
-      .fill("Partner private draft");
     await expect
       .poll(() =>
         page.evaluate(
@@ -431,7 +428,6 @@ test.describe("Hunt Apollo prospect UI", () => {
       "Marketing Director",
     );
     await expect(page.getByTestId("hunt-apollo-query")).toHaveValue("");
-    await expect(page.getByTestId("sales-os-signal-company")).toHaveValue("");
     expect(apolloEffectRequests).toBe(0);
     await expect(page.getByTestId("hunt-apollo-retry-same-search")).toHaveCount(
       0,
@@ -469,7 +465,7 @@ test.describe("Hunt Apollo prospect UI", () => {
       page.getByRole("heading", { name: "Find the next right client." }),
     ).toBeVisible({ timeout: 60_000 });
     await expect(
-      page.getByRole("navigation", { name: "CRM sections" }),
+      page.getByRole("navigation", { name: "Sales sections" }),
     ).toBeVisible();
     await expect(page.getByTestId("hunt-apollo-search")).toBeVisible();
 
@@ -486,14 +482,11 @@ test.describe("Hunt Apollo prospect UI", () => {
       page.getByRole("heading", { name: "Find the next right client." }),
     ).toBeVisible();
 
-    await page
-      .getByRole("navigation", { name: "CRM sections" })
-      .locator("summary")
-      .filter({ hasText: "More" })
-      .click();
-    await expect(page.getByRole("link", { name: "Companies" })).toBeVisible();
+    const crmNav = page.getByRole("navigation", { name: "Sales sections" });
+    await expect(crmNav.locator("summary")).toHaveCount(0);
+    await expect(crmNav.getByRole("link", { name: "Contacts" })).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Sales settings" }),
+      crmNav.getByRole("link", { name: "Connected tools" }),
     ).toBeVisible();
   });
 });

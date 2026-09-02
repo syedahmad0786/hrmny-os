@@ -12,6 +12,10 @@ import {
 } from "@/components/crm/ui";
 import { formatRelative } from "@/components/crm/format";
 import { HitlReadyBanner } from "@/components/hitl-ready-banner";
+import {
+  hasSyntheticMarker,
+  isSyntheticRecordName,
+} from "@/lib/synthetic-records";
 
 /** Serialized shape of a @hrmny/gate TransitionResult refusal. */
 type GateOutcome =
@@ -61,6 +65,7 @@ function OutreachInner() {
   const [draftChannel, setDraftChannel] = useState("gmail");
   const [reworkFeedback, setReworkFeedback] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [showTestRecords, setShowTestRecords] = useState(false);
 
   const invalidate = () => void utils.leadgen.outreach.invalidate();
   const onErr = (e: { message: string }) => setGateError(e.message);
@@ -122,7 +127,9 @@ function OutreachInner() {
       setCopiedId(item.id);
       setSendNote("Copied — paste into LinkedIn, then mark sent.");
     } catch {
-      setGateError("Clipboard copy failed — select the draft and copy manually.");
+      setGateError(
+        "Clipboard copy failed — select the draft and copy manually.",
+      );
     }
   }
 
@@ -133,7 +140,15 @@ function OutreachInner() {
   }, [deals.data]);
 
   const byState = useMemo(() => {
-    const all = items.data ?? [];
+    const all = (items.data ?? []).filter(
+      (item) =>
+        showTestRecords ||
+        !hasSyntheticMarker(
+          companyByDeal.get(item.dealId),
+          item.recipient,
+          item.subject,
+        ),
+    );
     const sortFocus = <T extends { id: string }>(list: T[]) => {
       if (!focusId) return list;
       return [...list].sort((a, b) => {
@@ -145,11 +160,17 @@ function OutreachInner() {
     return {
       drafts: sortFocus(all.filter((i) => i.state === "draft")),
       approved: sortFocus(all.filter((i) => i.state === "approved")),
-      history: all.filter(
-        (i) => i.state === "sent" || i.state === "discarded",
-      ),
+      history: all.filter((i) => i.state === "sent" || i.state === "discarded"),
     };
-  }, [items.data, focusId]);
+  }, [items.data, focusId, companyByDeal, showTestRecords]);
+
+  const hiddenTestCount = (items.data ?? []).filter((item) =>
+    hasSyntheticMarker(
+      companyByDeal.get(item.dealId),
+      item.recipient,
+      item.subject,
+    ),
+  ).length;
 
   useEffect(() => {
     if (!focusId) return;
@@ -173,7 +194,9 @@ function OutreachInner() {
           setSendNote(parts.length ? `Sent · ${parts.join(" · ")}` : "Sent");
         }
       } else if (verb === "Mark sent") {
-        setSendNote("Marked sent — LinkedIn assist recorded against the weekly cap.");
+        setSendNote(
+          "Marked sent — LinkedIn assist recorded against the weekly cap.",
+        );
       } else if (verb === "Accepted") {
         setSendNote("Connection marked accepted — follow-up can be sent.");
       } else if (verb === "Rework") {
@@ -193,11 +216,7 @@ function OutreachInner() {
     );
   }
 
-  async function run(
-    id: string,
-    verb: string,
-    fn: () => Promise<GateOutcome>,
-  ) {
+  async function run(id: string, verb: string, fn: () => Promise<GateOutcome>) {
     setBusyId(id);
     try {
       surface(await fn(), verb);
@@ -230,10 +249,14 @@ function OutreachInner() {
           {companyByDeal.get(item.dealId) ?? "Deal"} → {item.recipient || "—"}
         </span>
       </div>
-      <h4 data-testid="outreach-item-subject">{item.subject ?? "(no subject)"}</h4>
+      <h4 data-testid="outreach-item-subject">
+        {item.subject ?? "(no subject)"}
+      </h4>
       <p style={{ whiteSpace: "pre-wrap" }}>{item.body}</p>
       {item.reworkFeedback ? (
-        <p className="text-xs text-[var(--muted)]">Rework: {item.reworkFeedback}</p>
+        <p className="text-xs text-[var(--muted)]">
+          Rework: {item.reworkFeedback}
+        </p>
       ) : null}
       {item.acceptedAt ? (
         <p className="text-xs text-[var(--muted)]">Connection accepted</p>
@@ -245,13 +268,30 @@ function OutreachInner() {
   return (
     <main>
       <CrmPageHeader
-        title="Outreach drafts"
-        description="AI proposes; the gate disposes. Email send is two clicks (approve ≠ send). LinkedIn is copy + open + mark sent — never automated."
+        title="Outreach"
+        description="Review every draft before anything is sent. Approving a draft and sending it are always two separate decisions."
       />
 
-      <div className="mt-4">
-        <HitlReadyBanner testIdPrefix="outreach" />
-      </div>
+      <details className="mt-4 rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm text-muted">
+        <summary className="cursor-pointer font-medium text-ink">
+          Sending setup
+        </summary>
+        <div className="mt-3">
+          <HitlReadyBanner testIdPrefix="outreach" />
+        </div>
+      </details>
+
+      {hiddenTestCount ? (
+        <label className="mt-3 flex w-fit items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={showTestRecords}
+            onChange={(event) => setShowTestRecords(event.target.checked)}
+          />
+          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test draft
+          {hiddenTestCount === 1 ? "" : "s"}
+        </label>
+      ) : null}
 
       {focusId ? (
         <p className="sr-only" data-testid="outreach-active-id">
@@ -275,7 +315,9 @@ function OutreachInner() {
           <div className="crm-panel-head">
             <div>
               <h3>Awaiting approval</h3>
-              <p>Draft → approved is a gated transition</p>
+              <p>
+                Read the message, then approve, request changes, or discard it.
+              </p>
             </div>
             <CrmTag kind="warn">{byState.drafts.length} pending</CrmTag>
           </div>
@@ -357,7 +399,10 @@ function OutreachInner() {
           <div className="crm-panel-head">
             <div>
               <h3>Approved — ready to send</h3>
-              <p>Gmail send after suppression + cap checks. LinkedIn is copy-assist only.</p>
+              <p>
+                Email sends only after a second confirmation. LinkedIn stays
+                manual.
+              </p>
             </div>
             <CrmTag kind="success">{byState.approved.length} ready</CrmTag>
           </div>
@@ -467,7 +512,9 @@ function OutreachInner() {
           <div className="crm-panel-head">
             <div>
               <h3>New draft</h3>
-              <p>Leave the body empty to let the outreach-draft agent write it</p>
+              <p>
+                Leave the body empty to let the outreach-draft agent write it
+              </p>
             </div>
           </div>
           <div className="crm-panel-body">
@@ -500,11 +547,17 @@ function OutreachInner() {
                   <option value="">
                     {deals.isLoading ? "Loading deals…" : "Select a deal"}
                   </option>
-                  {(deals.data ?? []).map((d) => (
-                    <option key={d.dealId} value={d.dealId}>
-                      {d.companyName} · {String(d.stage).replace(/_/g, " ")}
-                    </option>
-                  ))}
+                  {(deals.data ?? [])
+                    .filter(
+                      (deal) =>
+                        showTestRecords ||
+                        !isSyntheticRecordName(deal.companyName),
+                    )
+                    .map((d) => (
+                      <option key={d.dealId} value={d.dealId}>
+                        {d.companyName} · {String(d.stage).replace(/_/g, " ")}
+                      </option>
+                    ))}
                 </select>
               </div>
               <div className="crm-field">
@@ -516,8 +569,12 @@ function OutreachInner() {
                   onChange={(e) => setDraftChannel(e.target.value)}
                 >
                   <option value="gmail">Email (Gmail HITL)</option>
-                  <option value="linkedin_connect">LinkedIn connect (copy)</option>
-                  <option value="linkedin_followup">LinkedIn follow-up (copy)</option>
+                  <option value="linkedin_connect">
+                    LinkedIn connect (copy)
+                  </option>
+                  <option value="linkedin_followup">
+                    LinkedIn follow-up (copy)
+                  </option>
                 </select>
               </div>
               <div className="crm-field">
@@ -554,28 +611,40 @@ function OutreachInner() {
 
         <aside className="crm-panel">
           <div className="crm-panel-head">
-            <h3>Channel rules</h3>
+            <h3>Before anything is sent</h3>
           </div>
           <div className="crm-panel-body">
             <div className="crm-checklist">
               <div className="crm-check-row">
-                Gmail <span><CrmTag kind="warn">Approval required</CrmTag></span>
+                Gmail{" "}
+                <span>
+                  <CrmTag kind="warn">Approval required</CrmTag>
+                </span>
               </div>
               <div className="crm-check-row">
-                LinkedIn <span><CrmTag kind="info">Copy + mark sent</CrmTag></span>
+                LinkedIn{" "}
+                <span>
+                  <CrmTag kind="info">Copy + mark sent</CrmTag>
+                </span>
               </div>
               <div className="crm-check-row">
-                Auto-send <span><CrmTag kind="danger">Disabled</CrmTag></span>
+                Auto-send{" "}
+                <span>
+                  <CrmTag kind="danger">Disabled</CrmTag>
+                </span>
               </div>
               <div className="crm-check-row">
-                Tracking pixels <span><CrmTag kind="danger">Off</CrmTag></span>
+                Tracking pixels{" "}
+                <span>
+                  <CrmTag kind="danger">Off</CrmTag>
+                </span>
               </div>
             </div>
             <div className="crm-note">
-              LinkedIn is never automated. Copy the draft, send in LinkedIn, then
-              mark sent / accepted. Follow-up stays locked until the connect is
-              marked Accepted. Email send checks suppression, daily cap, and the
-              identity footer first.
+              LinkedIn is never automated. Copy the draft, send in LinkedIn,
+              then mark sent / accepted. Follow-up stays locked until the
+              connect is marked Accepted. Email send checks suppression, daily
+              cap, and the identity footer first.
             </div>
           </div>
         </aside>
@@ -604,9 +673,7 @@ function OutreachInner() {
                 byState.history.map((item) => (
                   <tr key={item.id}>
                     <td>
-                      <strong>
-                        {companyByDeal.get(item.dealId) ?? "—"}
-                      </strong>
+                      <strong>{companyByDeal.get(item.dealId) ?? "—"}</strong>
                     </td>
                     <td>{item.channel}</td>
                     <td>{item.recipient || "—"}</td>

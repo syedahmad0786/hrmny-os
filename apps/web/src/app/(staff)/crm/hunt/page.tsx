@@ -20,32 +20,6 @@ import {
   apolloCancellationNote,
   apolloSearchStatusNote,
 } from "./apollo-status-copy";
-import { ResearchConsole } from "../_components/research-console";
-
-const LOOP = [
-  {
-    label: "Signal",
-    href: "/crm/inbound",
-    detail: "Find a real reason to talk",
-  },
-  { label: "Research", href: "/crm/research", detail: "Prove fit and timing" },
-  {
-    label: "Person",
-    href: "/crm/contacts",
-    detail: "Choose one decision-maker",
-  },
-  {
-    label: "Outreach",
-    href: "/crm/outreach",
-    detail: "Approve a relevant draft",
-  },
-  { label: "Pipeline", href: "/crm", detail: "Move the next action" },
-  {
-    label: "Learn",
-    href: "/crm/settings/sales-os",
-    detail: "Review outcomes weekly",
-  },
-] as const;
 
 type SearchCandidate = {
   externalId: string;
@@ -520,36 +494,23 @@ export default function HuntClientsPage() {
     <main className="growth-page" data-testid="sales-growth-page">
       <header className="growth-header">
         <div>
-          <p className="growth-kicker">Sales Growth</p>
+          <p className="growth-kicker">Find clients</p>
           <h1>Find the next right client.</h1>
           <p>
-            One clear loop from a market signal to a qualified conversation.
-            Every message and paid lookup stays human-approved.
+            Search Apollo for the right decision-maker, review the fit, then
+            choose what enters outreach. Search is free; paid details and sends
+            always need a separate approval.
           </p>
         </div>
         <div className="growth-header-actions">
           <Link href="/crm" className="growth-primary-link">
             Open pipeline <span aria-hidden>→</span>
           </Link>
-          <Link href="/crm/settings/sales-os" className="growth-text-link">
-            Growth settings
+          <Link href="/settings/connections" className="growth-text-link">
+            Manage Apollo
           </Link>
         </div>
       </header>
-
-      <nav className="growth-loop" aria-label="Sales Growth operating loop">
-        {LOOP.map((step, index) => (
-          <Link
-            key={step.label}
-            href={step.href}
-            className={index === 0 ? "is-next" : undefined}
-          >
-            <span>{String(index + 1).padStart(2, "0")}</span>
-            <strong>{step.label}</strong>
-            <small>{step.detail}</small>
-          </Link>
-        ))}
-      </nav>
 
       <section className="growth-command-grid">
         <div
@@ -564,9 +525,9 @@ export default function HuntClientsPage() {
             <span className="growth-cost-badge">0 credits</span>
           </div>
           <p className="growth-panel-copy">
-            Connected Apollo People Search is read-only and free. Synthetic
-            people stay hidden. Paid People Match remains locked until an exact
-            candidate has a fresh server-side approval receipt.
+            Search by role and company or industry. This step never unlocks an
+            email address and uses no Apollo credits. Review a person before
+            requesting any paid details.
           </p>
           {salesAccessReady && !salesAccess.data.canOperate ? (
             <p className="growth-status" role="status">
@@ -743,8 +704,8 @@ export default function HuntClientsPage() {
         <aside className="growth-panel growth-connection-panel">
           <div className="growth-panel-heading">
             <div>
-              <p className="growth-kicker">Connection proof</p>
-              <h2>Apollo guardrails</h2>
+              <p className="growth-kicker">Connected tool</p>
+              <h2>Apollo status</h2>
             </div>
             <span
               className={`growth-dot${apolloProviderVerified ? " is-live" : ""}`}
@@ -760,29 +721,29 @@ export default function HuntClientsPage() {
               <dt>Credential</dt>
               <dd data-testid="hunt-apollo-credential">
                 {!apolloControlsReady
-                  ? "Checking current employee"
+                  ? "Checking connection"
                   : apolloConnected
-                    ? "Reference present"
-                    : "Not configured"}
+                    ? "Connected"
+                    : "Not connected"}
               </dd>
             </div>
             <div>
               <dt>People Search</dt>
               <dd>
                 {apolloProviderVerified
-                  ? "Response verified · 0 credits"
+                  ? "Working · 0 credits"
                   : apolloConnected
-                    ? "Ready to verify · 0 credits"
+                    ? "Ready · 0 credits"
                     : "Unavailable · 0 credits"}
               </dd>
             </div>
             <div>
-              <dt>People Match</dt>
+              <dt>Paid details</dt>
               <dd>{canaryLabel}</dd>
             </div>
             <div>
-              <dt>Paid fields</dt>
-              <dd>Phone, personal email, waterfalls off</dd>
+              <dt>Private details</dt>
+              <dd>Locked until you approve one exact person</dd>
             </div>
             <div>
               <dt>Outbound</dt>
@@ -824,16 +785,6 @@ export default function HuntClientsPage() {
           ) : null}
         </aside>
       </section>
-
-      {staffPrincipalId ? (
-        <div
-          hidden={!isUiPrincipalCurrent || !salesAccessReady}
-          inert={!isUiPrincipalCurrent || !salesAccessReady}
-          aria-hidden={!isUiPrincipalCurrent || !salesAccessReady}
-        >
-          <ResearchConsole key={staffPrincipalId} />
-        </div>
-      ) : null}
 
       {ready?.syntheticSalesFixtures ? (
         <details className="growth-test-tools">

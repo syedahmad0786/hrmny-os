@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { Button, Card } from "@hrmny/ui";
 import { useState } from "react";
-import { CrmSubnav } from "@/components/crm/subnav";
 import { OnboardingReadyBanner } from "@/components/onboarding-ready-banner";
 import { trpc } from "@/lib/trpc";
 import { deliveryRhythmFor } from "@/lib/delivery-rhythm";
+import { isSyntheticRecordName } from "@/lib/synthetic-records";
 
 type ClientRow = {
   clientId: string;
@@ -21,6 +21,7 @@ export default function ClientsPage() {
   const utils = trpc.useUtils();
   const clients = trpc.clients.list.useQuery();
   const [showCreate, setShowCreate] = useState(false);
+  const [showTestRecords, setShowTestRecords] = useState(false);
   const [name, setName] = useState("");
   const [market, setMarket] = useState<"UAE" | "KSA" | "Both">("UAE");
   const [engagementType, setEngagementType] = useState<"project" | "retainer">(
@@ -80,22 +81,27 @@ export default function ClientsPage() {
       );
     },
   });
-  const rows = (clients.data ?? []) as ClientRow[];
+  const allRows = (clients.data ?? []) as ClientRow[];
+  const hiddenTestCount = allRows.filter((client) =>
+    isSyntheticRecordName(client.name),
+  ).length;
+  const rows = allRows.filter(
+    (client) => showTestRecords || !isSyntheticRecordName(client.name),
+  );
 
   return (
     <main className="flex flex-col gap-6">
-      <CrmSubnav />
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-ochre">
-            CRM
+            Clients
           </p>
           <h1 className="mt-1 font-display text-3xl font-semibold">
             Client directory
           </h1>
           <p className="mt-2 text-sm text-muted">
-            Create client accounts, grant portal access, and open each client’s
-            exact portal view.
+            See each relationship, its current stage, and the work that needs
+            attention next.
           </p>
         </div>
         <Button type="button" onClick={() => setShowCreate((value) => !value)}>
@@ -103,7 +109,26 @@ export default function ClientsPage() {
         </Button>
       </header>
 
-      <OnboardingReadyBanner testIdPrefix="clients" />
+      <details className="rounded-xl border border-sand bg-white/70 px-4 py-3 text-sm text-muted">
+        <summary className="cursor-pointer font-medium text-ink">
+          Client setup status
+        </summary>
+        <div className="mt-3">
+          <OnboardingReadyBanner testIdPrefix="clients" />
+        </div>
+      </details>
+
+      {hiddenTestCount ? (
+        <label className="flex w-fit items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={showTestRecords}
+            onChange={(event) => setShowTestRecords(event.target.checked)}
+          />
+          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test client
+          {hiddenTestCount === 1 ? "" : "s"}
+        </label>
+      ) : null}
 
       {showCreate ? (
         <form

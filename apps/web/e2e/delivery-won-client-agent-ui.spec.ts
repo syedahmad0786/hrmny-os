@@ -49,6 +49,9 @@ test.describe("Delivery won-client agent sandbox", () => {
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
     });
+    await page
+      .getByText("Delivery setup and automation", { exact: true })
+      .click();
     await expect(page.getByTestId("delivery-task-select")).toHaveValue(
       taskId!,
       {

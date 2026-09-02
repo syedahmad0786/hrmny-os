@@ -28,7 +28,6 @@ export function DashStrip() {
   const pipeline = trpc.crmForecast.pipeline.useQuery();
   const forecast = trpc.crmForecast.forecast.useQuery({});
   const winLoss = trpc.crmForecast.winLoss.useQuery({});
-  const digest = trpc.salesOs.digest.useQuery();
 
   const error = pipeline.error ?? forecast.error ?? winLoss.error;
   if (error) {
@@ -39,8 +38,7 @@ export function DashStrip() {
     );
   }
 
-  const loading =
-    pipeline.isLoading || forecast.isLoading || winLoss.isLoading;
+  const loading = pipeline.isLoading || forecast.isLoading || winLoss.isLoading;
   if (loading || !pipeline.data || !forecast.data || !winLoss.data) {
     return (
       <div className="mb-4 grid gap-[11px] md:grid-cols-4">
@@ -88,42 +86,6 @@ export function DashStrip() {
           }
         />
       </div>
-
-      {digest.data ? (
-        <div
-          className="mt-[11px] grid gap-[11px] md:grid-cols-4"
-          data-testid="sales-os-digest"
-        >
-          <Metric
-            label="Coverage vs H1"
-            value={`${digest.data.coverage.coverageX.toFixed(1)}×`}
-            detail={`${digest.data.coverage.healthy ? "On track" : "Below"} ${digest.data.coverage.targetX}× · target ${formatAed(digest.data.coverage.targetMonthlyAed)} / mo`}
-          />
-          <Metric
-            label="Approval queues"
-            value={String(
-              digest.data.researchedWaiting +
-                digest.data.contactsWaiting +
-                digest.data.outreachDrafts,
-            )}
-            detail={`Companies ${digest.data.researchedWaiting} · contacts ${digest.data.contactsWaiting} · drafts ${digest.data.outreachDrafts}`}
-          />
-          <Metric
-            label="Stalled deals"
-            value={String(digest.data.stalled.length)}
-            detail={
-              digest.data.stalled[0]
-                ? `${digest.data.stalled[0].companyName} · ${digest.data.stalled[0].daysInStage}d in ${digest.data.stalled[0].stage}`
-                : "No stalls"
-            }
-          />
-          <Metric
-            label="Reply rate"
-            value={`${Math.round(digest.data.replyRate.rate * 100)}%`}
-            detail={`${digest.data.replyRate.replied} / ${digest.data.replyRate.sent} sent · sector ${digest.data.sectorHint}`}
-          />
-        </div>
-      ) : null}
 
       <div className="crm-metric mt-[11px]" style={{ minHeight: 0 }}>
         <span className="crm-metric-label">Weighted pipeline by stage</span>

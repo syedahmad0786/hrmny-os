@@ -12,6 +12,7 @@ import {
   type PersonalCalendarMode,
 } from "@/lib/work-personal";
 import { trpc } from "@/lib/trpc";
+import { hasSyntheticMarker } from "@/lib/synthetic-records";
 
 type View = "list" | "board" | "calendar";
 type Sort = "due" | "priority" | "project" | "title";
@@ -55,6 +56,7 @@ export default function MyTasksPage() {
     "" | "low" | "medium" | "high" | "urgent"
   >("");
   const [quickSectionId, setQuickSectionId] = useState("");
+  const [showTestRecords, setShowTestRecords] = useState(false);
   const today = localDateKey(new Date());
   const weekStart = startOfWeek(today);
   const tasks = trpc.work.personal.myTasks.useQuery({
@@ -62,6 +64,17 @@ export default function MyTasksPage() {
     includeCompleted,
   });
   type MyTask = NonNullable<typeof tasks.data>[number];
+  const hiddenTestCount = (tasks.data ?? []).filter((task) =>
+    hasSyntheticMarker(task.title, task.projectName),
+  ).length;
+  const visibleTasks = useMemo(
+    () =>
+      (tasks.data ?? []).filter(
+        (task) =>
+          showTestRecords || !hasSyntheticMarker(task.title, task.projectName),
+      ),
+    [showTestRecords, tasks.data],
+  );
   const sections = trpc.work.personal.myTaskSections.list.useQuery(undefined, {
     enabled: sectionsEnabled,
   });
@@ -126,7 +139,7 @@ export default function MyTasksPage() {
     (sections.data ?? []).map((section) => [section.sectionId, section.name]),
   );
   const filteredTasks = useMemo(() => {
-    const rows = (tasks.data ?? []).filter((task) => {
+    const rows = visibleTasks.filter((task) => {
       const due = dueDateKey(task.dueAt);
       if (dueFilter === "overdue") return Boolean(due && due < today);
       if (dueFilter === "today") return due === today;
@@ -145,7 +158,7 @@ export default function MyTasksPage() {
       if (sort === "title") return a.title.localeCompare(b.title);
       return (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999");
     });
-  }, [dueFilter, sort, tasks.data, today, weekEnd]);
+  }, [dueFilter, sort, visibleTasks, today, weekEnd]);
   const effectiveView =
     view === "board" && !boardEnabled
       ? "list"
@@ -279,6 +292,18 @@ export default function MyTasksPage() {
         </p>
       </header>
 
+      {hiddenTestCount ? (
+        <label className="flex w-fit items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={showTestRecords}
+            onChange={(event) => setShowTestRecords(event.target.checked)}
+          />
+          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test task
+          {hiddenTestCount === 1 ? "" : "s"}
+        </label>
+      ) : null}
+
       {quickAddEnabled ? (
         <section className="rounded-xl border border-sand bg-white/70 p-4">
           <h2 className="text-sm font-semibold">Add a private task</h2>
@@ -397,7 +422,7 @@ export default function MyTasksPage() {
                 onChange={(event) => setFocusItemId(event.target.value)}
               >
                 <option value="">Choose a task</option>
-                {(tasks.data ?? [])
+                {visibleTasks
                   .filter((task) => !task.completedAt)
                   .map((task) => (
                     <option key={task.itemId} value={task.itemId}>

@@ -1,6 +1,7 @@
 export type StaffNavId =
   | "home"
   | "sales"
+  | "clients"
   | "work"
   | "delivery"
   | "chat"
@@ -73,22 +74,29 @@ const PATHS = {
     "/crm/hunt",
     "crm.workspace",
     "Growth",
-    "Run Sales Growth",
-    "Signal → research → person → outreach → pipeline → learn.",
+    "Find new clients",
+    "Search, review, and move the right prospect into outreach.",
+  ),
+  clients: path(
+    "/clients",
+    "crm.workspace",
+    "Clients",
+    "Open client work",
+    "See each relationship, current milestone, and next action.",
   ),
   tasks: path(
     "/work/my-tasks",
     "work.my_tasks",
     "Owned work",
-    "Open My Tasks",
-    "Open assigned work, due dates, dependencies, and next actions.",
+    "Open my work",
+    "See assigned work, due dates, blockers, and the next action.",
   ),
   delivery: path(
     "/delivery",
     "delivery.workspace",
     "Delivery",
-    "Move client delivery",
-    "Coordinate briefs, capacity, creative, approvals, and assets.",
+    "Move client work",
+    "Coordinate briefs, creative review, approvals, and delivery.",
   ),
   traffic: path(
     "/traffic",
@@ -156,11 +164,12 @@ const PROFILES: Record<StaffWorkspaceProfile["key"], StaffWorkspaceProfile> = {
     emphasis: "Keep work moving.",
     description:
       "Start with decisions and owned work, then follow the evidence into growth or delivery.",
-    primaryNav: ["home", "sales", "work", "delivery", "insights"],
+    primaryNav: ["home", "sales", "clients", "delivery", "insights"],
     paths: [
-      PATHS.tasks,
       PATHS.sales,
+      PATHS.tasks,
       PATHS.delivery,
+      PATHS.clients,
       PATHS.insights,
       PATHS.approvals,
       PATHS.finance,

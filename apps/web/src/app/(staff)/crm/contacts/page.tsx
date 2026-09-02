@@ -15,6 +15,10 @@ import {
 import { formatRelative, initials } from "@/components/crm/format";
 import { CsvActions } from "../_components/csv-actions";
 import { MergeDuplicates } from "../_components/merge-dedupe";
+import {
+  hasSyntheticMarker,
+  isSyntheticRecordName,
+} from "@/lib/synthetic-records";
 
 function ContactsInner() {
   const utils = trpc.useUtils();
@@ -29,6 +33,7 @@ function ContactsInner() {
   const [search, setSearch] = useState("");
   const [companyId, setCompanyId] = useState("all");
   const [verify, setVerify] = useState("all");
+  const [showTestRecords, setShowTestRecords] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [email, setEmail] = useState("");
 
@@ -51,6 +56,16 @@ function ContactsInner() {
     const dealList = deals.data ?? [];
     return (contacts.data ?? [])
       .filter((c) => {
+        const companyName = c.companyId ? companyMap.get(c.companyId) : null;
+        if (
+          !showTestRecords &&
+          hasSyntheticMarker(
+            `${c.firstName} ${c.lastName ?? ""}`,
+            c.email,
+            companyName,
+          )
+        )
+          return false;
         if (companyId !== "all" && c.companyId !== companyId) return false;
         if (verify === "verified" && !c.emailVerified) return false;
         if (verify === "unverified" && c.emailVerified) return false;
@@ -73,9 +88,7 @@ function ContactsInner() {
         ).length;
         return {
           ...c,
-          companyName: c.companyId
-            ? (companyMap.get(c.companyId) ?? "—")
-            : "—",
+          companyName: c.companyId ? (companyMap.get(c.companyId) ?? "—") : "—",
           lastTouch: lastAct?.occurredAt ?? c.updatedAt,
           dealCount,
         };
@@ -85,18 +98,27 @@ function ContactsInner() {
     search,
     companyId,
     verify,
+    showTestRecords,
     companyMap,
     activities.data,
     deals.data,
   ]);
 
   const verifiedPct = useMemo(() => {
-    const all = contacts.data ?? [];
+    const all = rows;
     if (all.length === 0) return 0;
     return Math.round(
       (all.filter((c) => c.emailVerified).length / all.length) * 100,
     );
-  }, [contacts.data]);
+  }, [rows]);
+
+  const hiddenTestCount = (contacts.data ?? []).filter((contact) =>
+    hasSyntheticMarker(
+      `${contact.firstName} ${contact.lastName ?? ""}`,
+      contact.email,
+      contact.companyId ? companyMap.get(contact.companyId) : null,
+    ),
+  ).length;
 
   return (
     <main>
@@ -105,25 +127,25 @@ function ContactsInner() {
         description="Verified people, linked to companies, deals and activity."
         actions={
           <>
-          <CsvActions kind="contacts" />
-          <CrmBtn
-            variant="primary"
-            disabled={create.isPending || !firstName.trim()}
-            onClick={() =>
-              void create
-                .mutateAsync({
-                  firstName: firstName.trim(),
-                  email: email.trim() || null,
-                  companyId: companyId === "all" ? null : companyId,
-                })
-                .then(() => {
-                  setFirstName("");
-                  setEmail("");
-                })
-            }
-          >
-            ＋ Add contact
-          </CrmBtn>
+            <CsvActions kind="contacts" />
+            <CrmBtn
+              variant="primary"
+              disabled={create.isPending || !firstName.trim()}
+              onClick={() =>
+                void create
+                  .mutateAsync({
+                    firstName: firstName.trim(),
+                    email: email.trim() || null,
+                    companyId: companyId === "all" ? null : companyId,
+                  })
+                  .then(() => {
+                    setFirstName("");
+                    setEmail("");
+                  })
+              }
+            >
+              ＋ Add contact
+            </CrmBtn>
           </>
         }
       />
@@ -144,13 +166,18 @@ function ContactsInner() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <select value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
+        <select
+          value={companyId}
+          onChange={(e) => setCompanyId(e.target.value)}
+        >
           <option value="all">All companies</option>
-          {(companies.data ?? []).map((c) => (
-            <option key={c.companyId} value={c.companyId}>
-              {c.name}
-            </option>
-          ))}
+          {(companies.data ?? [])
+            .filter((company) => !isSyntheticRecordName(company.name))
+            .map((c) => (
+              <option key={c.companyId} value={c.companyId}>
+                {c.name}
+              </option>
+            ))}
         </select>
         <select value={verify} onChange={(e) => setVerify(e.target.value)}>
           <option value="all">Verification: any</option>
@@ -159,12 +186,27 @@ function ContactsInner() {
         </select>
       </CrmFilterBar>
 
+      {hiddenTestCount ? (
+        <label className="mb-4 flex w-fit items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={showTestRecords}
+            onChange={(event) => setShowTestRecords(event.target.checked)}
+          />
+          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test contact
+          {hiddenTestCount === 1 ? "" : "s"}
+        </label>
+      ) : null}
+
       <MergeDuplicates kind="contacts" />
 
       {contacts.isLoading ? (
         <CrmEmpty title="Loading contacts…" />
       ) : rows.length === 0 ? (
-        <CrmEmpty title="No contacts yet" hint="Add people linked to companies and deals." />
+        <CrmEmpty
+          title="No contacts yet"
+          hint="Add people linked to companies and deals."
+        />
       ) : (
         <CrmTableShell
           foot={`${rows.length} people · ${verifiedPct}% verified email coverage`}

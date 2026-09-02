@@ -18,6 +18,10 @@ test.describe("Delivery → Traffic clientId UI", () => {
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
     });
+    await page.getByRole("checkbox", { name: /Show \d+ test item/i }).check();
+    await page
+      .getByText("Delivery setup and automation", { exact: true })
+      .click();
 
     const taskSelect = page.getByTestId("delivery-task-select");
     await expect
@@ -62,6 +66,9 @@ test.describe("Delivery → Traffic clientId UI", () => {
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
       timeout: 60_000,
     });
+    await page
+      .getByText("Delivery setup and automation", { exact: true })
+      .click();
     await expect(page.getByTestId("delivery-task-select")).toHaveValue(
       DEMO_CREATIVE_TASK_ID,
       { timeout: 60_000 },
