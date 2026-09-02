@@ -1,6 +1,6 @@
 # 2026-09-02
 
-- Continued the interrupted build past the skipped cyber-sensitive Phase 4G worktree and preserved all of its user-owned package/patch changes untouched.
-- Added the server-only QM PostgreSQL repository at `56b20af` plus nullable-JSON hardening at `ba4557b`: two tables, atomic replay, current-policy locking, strict stored-row parsing, append-only receipts, and no memory fallback or effect executor.
-- Passed 19 focused QM tests, all 751 web tests, all 41 database tests, both type checks, targeted lint, and a production build with 86 static pages; PR 248 then passed both hosted database, verify, and end-to-end runs plus security and preview checks.
-- Route activation still requires a trusted HRMNY organization source, verified auth provenance, and a default-denied `qm:use` permission; exact-preview approval, provider, recovery, UAT, merge, and production acceptance remain separate gates.
+- Rebase-merged PR 246 at `d53c47b`, PR 247 at `398c214`, and PR 248 at `f18bc38`; every destination branch head matched its GitHub receipt and no branch was deleted.
+- Prepared this main-rollup review branch from the exact PR 248-reviewed tree: 77 commits ahead of `main`, zero behind, 266 changed files, and a conflict-free local merge preview.
+- The reviewed proof remains 19 focused QM tests, 751 web tests, 41 database tests, both type checks, targeted lint, an 86-page production build, duplicated hosted database/e2e/verify runs, security review, approval review, and both previews.
+- The excluded Phase 4G worktree remains untouched; main/production promotion, trusted organization and auth provenance, exact-preview execution, providers, recovery, and UAT remain separate gates.
