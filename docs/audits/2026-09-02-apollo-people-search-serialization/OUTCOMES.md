@@ -38,7 +38,9 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 
 - Decision/finding: this phase made no live provider request, consumed no
   Apollo credit, sent no message, changed no production database, deployed no
-  runtime, merged no branch, and performed no accounting write.
+  production runtime, merged no branch, and performed no accounting write.
+  Automated non-production Vercel previews completed but are not operational
+  deployment or acceptance.
 - Reason: Phase 4f authorization covers source and synthetic verification only.
 - Alternatives considered: use a live canary as a test shortcut.
 - Trade-offs: provider acceptance remains open but evidence boundaries remain
@@ -47,7 +49,8 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
   workflow, and change/secret review.
 - Confidence/freshness: high on 2026-09-02.
 - Affected components: Apollo, Supabase, deployment, Gmail, Xero.
-- Status: verified no-effect local phase; `XERO_WRITE_ENABLED=false` preserved.
+- Status: verified no-live-effect source/synthetic phase;
+  `XERO_WRITE_ENABLED=false` preserved.
 - Supersedes/superseded-by: none.
 - Rollback/correction: none required; any future external effect needs its own
   approval and receipt.
@@ -77,7 +80,8 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Status: locally accepted, unmerged, undeployed, provider-unaccepted; hosted
   proof pending.
 - Supersedes/superseded-by: supersedes only the stale local-source status in
-  `OUTCOME-HRMNY-20260902-APOLLO-009`; none.
+  `OUTCOME-HRMNY-20260902-APOLLO-009`; superseded by
+  `OUTCOME-HRMNY-20260902-APOLLO-012` for hosted-pending state only.
 - Rollback/correction: keep production and Apollo unchanged, preserve all
   failed receipts, and require exact-head hosted proof before the next stacked
   dependency slice.

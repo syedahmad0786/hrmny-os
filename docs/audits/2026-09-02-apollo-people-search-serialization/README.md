@@ -48,8 +48,9 @@ after migration so the old runtime cannot be reopened accidentally.
 
 This is bounded mutual exclusion, not an exactly-once provider guarantee.
 Paid People Match is outside this lane and remains a separate P1 activation
-gap. No live Apollo call, credit, production migration, deployment, message,
-accounting write, or UAT occurred in this phase.
+gap. No live Apollo call, credit, production migration or deployment, message,
+accounting write, or UAT occurred in this phase. Automated non-production PR
+previews remained outside operational acceptance.
 
 ## Acceptance state
 
@@ -57,7 +58,7 @@ accounting write, or UAT occurred in this phase.
 | -------------------- | ------------------------------------------------- |
 | planned              | yes                                               |
 | documented           | yes                                               |
-| authorized           | source and synthetic local testing only           |
+| authorized           | source plus synthetic local/hosted testing only   |
 | configured           | code and migration prepared; production unchanged |
 | tested               | local and both exact-head hosted CI matrices pass |
 | deployed             | preview automation only; production unchanged     |
