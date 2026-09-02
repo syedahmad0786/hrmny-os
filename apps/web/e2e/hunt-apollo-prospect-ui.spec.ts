@@ -1,5 +1,36 @@
 import { expect, test } from "@playwright/test";
 
+const PARTNER_EMPLOYEE_ID = "c0000000-0000-4000-8000-000000000001";
+const AM_EMPLOYEE_ID = "c0000000-0000-4000-8000-000000000002";
+const APOLLO_SEARCH_SESSION_KEY = "hrmny.apollo-search.pending.v2";
+const LEGACY_APOLLO_SEARCH_SESSION_KEY = "hrmny.apollo-search.pending.v1";
+
+function completedSearchResponse(fullName: string) {
+  return JSON.stringify([
+    {
+      result: {
+        data: {
+          json: {
+            receiptId: "c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3",
+            mode: "mock",
+            status: "completed",
+            attempts: 1,
+            candidates: [
+              {
+                externalId: "synthetic-completed-person",
+                fullName,
+                title: "Private Search Result",
+                companyName: "Principal Scoped Result",
+                source: "apollo",
+              },
+            ],
+          },
+        },
+      },
+    },
+  ]);
+}
+
 /** Explicit synthetic acceptance fixtures; the normal Apollo surface remains
  * disconnected and fail-closed without a live, scoped provider credential. */
 test.describe("Hunt Apollo prospect UI", () => {
@@ -86,8 +117,10 @@ test.describe("Hunt Apollo prospect UI", () => {
     await page.addInitScript(
       ({ key, value }) => window.sessionStorage.setItem(key, value),
       {
-        key: "hrmny.apollo-search.pending.v1",
+        key: APOLLO_SEARCH_SESSION_KEY,
         value: JSON.stringify({
+          version: 2,
+          principalId: PARTNER_EMPLOYEE_ID,
           idempotencyKey,
           titles: ["Marketing Director"],
           perPage: 8,
@@ -130,10 +163,299 @@ test.describe("Hunt Apollo prospect UI", () => {
           (key) =>
             JSON.parse(window.sessionStorage.getItem(key) ?? "{}")
               .idempotencyKey,
-          "hrmny.apollo-search.pending.v1",
+          APOLLO_SEARCH_SESSION_KEY,
         ),
       )
       .toBe(idempotencyKey);
+  });
+
+  test("renders a terminal receipt only for its current principal", async ({
+    page,
+  }) => {
+    const idempotencyKey = "d4d4d4d4-d4d4-4d4d-8d4d-d4d4d4d4d4d4";
+    const currentCandidate = "CURRENT PARTNER CANDIDATE";
+    await page.addInitScript(
+      ({ key, value }) => window.sessionStorage.setItem(key, value),
+      {
+        key: APOLLO_SEARCH_SESSION_KEY,
+        value: JSON.stringify({
+          version: 2,
+          principalId: PARTNER_EMPLOYEE_ID,
+          idempotencyKey,
+          titles: ["Marketing Director"],
+          perPage: 8,
+        }),
+      },
+    );
+    await page.route("**/api/trpc/**", async (route) => {
+      if (route.request().url().includes("salesOs.apollo.searchStatus")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: completedSearchResponse(currentCandidate),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+    await expect(page.getByText(currentCandidate)).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
+      /current Apollo mock attempt/i,
+    );
+    await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
+      /receipt c3c3c3c3/i,
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (key) => window.sessionStorage.getItem(key),
+          APOLLO_SEARCH_SESSION_KEY,
+        ),
+      )
+      .toBeNull();
+  });
+
+  test("does not carry an old employee's pending mutation into the new account", async ({
+    page,
+  }) => {
+    const staleCandidate = "STALE IN-FLIGHT PARTNER RESULT";
+    let releaseSearch!: () => void;
+    let markSearchStarted!: () => void;
+    let markSearchFinished!: () => void;
+    const searchGate = new Promise<void>((resolve) => {
+      releaseSearch = resolve;
+    });
+    const searchStarted = new Promise<void>((resolve) => {
+      markSearchStarted = resolve;
+    });
+    const searchFinished = new Promise<void>((resolve) => {
+      markSearchFinished = resolve;
+    });
+
+    await page.route("**/api/trpc/**", async (route) => {
+      const requestUrl = route.request().url();
+      const procedurePath = decodeURIComponent(
+        new URL(requestUrl).pathname.split("/api/trpc/")[1] ?? "",
+      );
+      const procedures = procedurePath.split(",");
+      if (procedures.includes("salesOs.apollo.search")) {
+        markSearchStarted();
+        await searchGate;
+        try {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: completedSearchResponse(staleCandidate),
+          });
+        } finally {
+          markSearchFinished();
+        }
+        return;
+      }
+      const connectionIndex = procedures.indexOf("salesOs.apollo.connection");
+      if (connectionIndex >= 0) {
+        const response = await route.fetch();
+        const body = (await response.json()) as Array<unknown>;
+        const isAm = route.request().headers()["x-dev-role"] === "am";
+        body[connectionIndex] = {
+          result: {
+            data: {
+              json: {
+                configured: !isAm,
+                principalId: isAm ? AM_EMPLOYEE_ID : PARTNER_EMPLOYEE_ID,
+              },
+            },
+          },
+        };
+        await route.fulfill({ response, json: body });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+    const search = page.getByTestId("hunt-apollo-search");
+    await expect(search).toBeEnabled({ timeout: 60_000 });
+    await search.click();
+    await searchStarted;
+    await expect(search).toHaveText("Searching…");
+
+    await page.setExtraHTTPHeaders({ "x-dev-role": "am" });
+    await page.locator("#persona").selectOption("am");
+    await expect(search).toBeDisabled();
+    await expect(search).toHaveText("Connect Apollo to search");
+    await expect(search).not.toHaveText("Searching…");
+    releaseSearch();
+    await searchFinished;
+    await page.waitForTimeout(250);
+    await expect(page.getByText(staleCandidate)).toHaveCount(0);
+    await expect(page.getByTestId("hunt-apollo-results")).toHaveCount(0);
+    await expect(page.getByTestId("hunt-apollo-search-status")).toHaveCount(0);
+  });
+
+  test("clears a prior employee's pending state when the account changes", async ({
+    page,
+  }) => {
+    const idempotencyKey = "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2";
+    const staleCandidate = "STALE PARTNER CANDIDATE MUST NOT RENDER";
+    let releaseStatus!: () => void;
+    let releaseReadiness!: () => void;
+    let markStatusStarted!: () => void;
+    let markStatusFinished!: () => void;
+    let markReadinessStarted!: () => void;
+    const statusGate = new Promise<void>((resolve) => {
+      releaseStatus = resolve;
+    });
+    const statusStarted = new Promise<void>((resolve) => {
+      markStatusStarted = resolve;
+    });
+    const statusFinished = new Promise<void>((resolve) => {
+      markStatusFinished = resolve;
+    });
+    const readinessGate = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    const readinessStarted = new Promise<void>((resolve) => {
+      markReadinessStarted = resolve;
+    });
+    let delayedStatus = false;
+    let delayedReadiness = false;
+    let apolloEffectRequests = 0;
+    await page.route("**/api/trpc/**", async (route) => {
+      const requestUrl = route.request().url();
+      const devRole = route.request().headers()["x-dev-role"];
+      const procedurePath = decodeURIComponent(
+        new URL(requestUrl).pathname.split("/api/trpc/")[1] ?? "",
+      );
+      const procedures = new Set(procedurePath.split(","));
+      if (
+        procedures.has("salesOs.apollo.search") ||
+        procedures.has("salesOs.apollo.cancelSearch")
+      ) {
+        apolloEffectRequests += 1;
+      }
+      if (!delayedStatus && procedures.has("salesOs.apollo.searchStatus")) {
+        delayedStatus = true;
+        markStatusStarted();
+        await statusGate;
+        try {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: completedSearchResponse(staleCandidate),
+          });
+        } catch {
+          // Disabling the old principal's query may cancel the intercepted
+          // request, which is also an accepted stale-response outcome.
+        } finally {
+          markStatusFinished();
+        }
+        return;
+      }
+      if (
+        devRole === "am" &&
+        (procedures.has("auth.session") ||
+          procedures.has("salesOs.access") ||
+          procedures.has("salesOs.apollo.connection"))
+      ) {
+        if (!delayedReadiness) {
+          delayedReadiness = true;
+          markReadinessStarted();
+        }
+        await readinessGate;
+      }
+      await route.continue();
+    });
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
+      timeout: 60_000,
+    });
+    await page.evaluate(
+      ({ key, legacyKey, value }) => {
+        window.sessionStorage.setItem(key, value);
+        window.sessionStorage.setItem(legacyKey, value);
+      },
+      {
+        key: APOLLO_SEARCH_SESSION_KEY,
+        legacyKey: LEGACY_APOLLO_SEARCH_SESSION_KEY,
+        value: JSON.stringify({
+          version: 2,
+          principalId: PARTNER_EMPLOYEE_ID,
+          idempotencyKey,
+          query: "old operator only",
+          titles: ["Chief Growth Officer"],
+          perPage: 8,
+        }),
+      },
+    );
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await statusStarted;
+    await expect(page.getByTestId("hunt-apollo-title")).toHaveValue(
+      "Chief Growth Officer",
+    );
+    await expect(page.getByTestId("hunt-apollo-query")).toHaveValue(
+      "old operator only",
+    );
+    await expect(page.getByTestId("hunt-apollo-cancel-search")).toBeVisible();
+    await page
+      .getByTestId("sales-os-signal-company")
+      .fill("Partner private draft");
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (key) => window.sessionStorage.getItem(key),
+          LEGACY_APOLLO_SEARCH_SESSION_KEY,
+        ),
+      )
+      .toBeNull();
+
+    await page.setExtraHTTPHeaders({ "x-dev-role": "am" });
+    await page.locator("#persona").selectOption("am");
+    await readinessStarted;
+    await expect(page.getByTestId("hunt-apollo-search")).toBeDisabled();
+    await expect(page.getByTestId("hunt-apollo-search")).toHaveText(
+      "Checking employee connection…",
+    );
+    await page.getByTestId("hunt-apollo-search").evaluate((button) => {
+      button.closest("form")?.requestSubmit();
+    });
+    await page.waitForTimeout(100);
+    expect(apolloEffectRequests).toBe(0);
+    releaseReadiness();
+    await expect(page.getByTestId("hunt-apollo-title")).toHaveValue(
+      "Marketing Director",
+    );
+    await expect(page.getByTestId("hunt-apollo-query")).toHaveValue("");
+    await expect(page.getByTestId("sales-os-signal-company")).toHaveValue("");
+    expect(apolloEffectRequests).toBe(0);
+    await expect(page.getByTestId("hunt-apollo-retry-same-search")).toHaveCount(
+      0,
+    );
+    await expect(page.getByTestId("hunt-apollo-cancel-search")).toHaveCount(0);
+    await expect(page.getByTestId("hunt-apollo-search-status")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (key) => window.sessionStorage.getItem(key),
+          APOLLO_SEARCH_SESSION_KEY,
+        ),
+      )
+      .toBeNull();
+
+    releaseStatus();
+    await statusFinished;
+    await page.waitForTimeout(250);
+    await expect(page.getByTestId("hunt-apollo-search-status")).toHaveCount(0);
+    await expect(page.getByText(staleCandidate)).toHaveCount(0);
+    await expect(page.getByTestId("hunt-apollo-results")).toHaveCount(0);
+    await expect(page.getByTestId("hunt-apollo-title")).toHaveValue(
+      "Marketing Director",
+    );
   });
 
   test("Sales Growth remains navigable at a narrow client viewport", async ({

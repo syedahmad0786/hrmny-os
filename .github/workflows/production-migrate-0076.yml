@@ -1,0 +1,94 @@
+name: HRMNY production migration 0076
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_ref:
+        description: Canonical Supabase project ref
+        required: true
+        type: string
+      backup_receipt:
+        description: Backup or PITR receipt reference verified before this run
+        required: true
+        type: string
+      quiescence_receipt:
+        description: Receipt proving old Apollo People Search workers are drained and disabled
+        required: true
+        type: string
+      confirmation:
+        description: Type APPLY MIGRATION 0076 APOLLO PEOPLE SEARCH SERIALIZATION TO HRMNY PRODUCTION
+        required: true
+        type: string
+      maintenance_confirmation:
+        description: Type KEEP APOLLO PEOPLE SEARCH QUIESCED UNTIL THE NEW RUNTIME IS VALIDATED
+        required: true
+        type: string
+      reviewed_sha:
+        description: Exact reviewed main commit SHA to execute
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hrmny-production-database-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Guard, append 0076, and read back
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: Production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Refuse non-main or unreviewed code
+        shell: bash
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$REVIEWED_SHA"
+          test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
+          echo "Executing reviewed HRMNY migration commit $GITHUB_SHA"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Read-only exact 0075 target and zero-running Apollo People Search preflight
+        env:
+          PRODUCTION_MIGRATION_PHASE: preflight
+          HRMNY_PRODUCTION_DATABASE_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
+          HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
+          HRMNY_PRODUCTION_BACKUP_RECEIPT: ${{ inputs.backup_receipt }}
+          HRMNY_PRODUCTION_QUIESCENCE_RECEIPT: ${{ inputs.quiescence_receipt }}
+          HRMNY_PRODUCTION_MIGRATION_CONFIRMATION: ${{ inputs.confirmation }}
+          HRMNY_PRODUCTION_MAINTENANCE_CONFIRMATION: ${{ inputs.maintenance_confirmation }}
+        run: pnpm --filter @hrmny/db exec tsx src/production-migration-0076-guard.ts
+      - name: Append reviewed migration 0076 only
+        env:
+          DIRECT_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
+        run: pnpm --filter @hrmny/db migrate
+      - name: Read back 0076 schema, provider slot, security, and journal
+        env:
+          PRODUCTION_MIGRATION_PHASE: verify
+          HRMNY_PRODUCTION_DATABASE_URL: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
+          HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
+          HRMNY_PRODUCTION_BACKUP_RECEIPT: ${{ inputs.backup_receipt }}
+          HRMNY_PRODUCTION_QUIESCENCE_RECEIPT: ${{ inputs.quiescence_receipt }}
+          HRMNY_PRODUCTION_MIGRATION_CONFIRMATION: ${{ inputs.confirmation }}
+          HRMNY_PRODUCTION_MAINTENANCE_CONFIRMATION: ${{ inputs.maintenance_confirmation }}
+        run: pnpm --filter @hrmny/db exec tsx src/production-migration-0076-guard.ts
+      - name: Keep Apollo People Search closed for runtime cutover
+        shell: bash
+        run: |
+          {
+            echo "Migration 0076 is verified, but Apollo People Search must remain quiesced."
+            echo "Drain old instances, deploy and validate the new runtime, then use a separately approved checkpoint to reopen it."
+            echo "This workflow does not deploy, validate, or reopen the runtime."
+          } >> "$GITHUB_STEP_SUMMARY"
