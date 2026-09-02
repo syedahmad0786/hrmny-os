@@ -81,3 +81,31 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Rollback/correction: keep production and Apollo unchanged, preserve all
   failed receipts, and require exact-head hosted proof before the next stacked
   dependency slice.
+
+## `OUTCOME-HRMNY-20260902-APOLLO-012` — Phase 4f synthetic proof accepted
+
+- Decision/finding: exact head
+  `ca6408b2e50cc0ece42b5859770785d93bed8147` passed both push and
+  pull-request CI matrices, including all 40 Apollo PostgreSQL cases, migration
+  and Sales database proof, repository verification/build, and browser
+  acceptance.
+- Reason: Phase 4f required two terminal, independent hosted event receipts
+  after the fixture correction before the slice could become dependency-ready.
+- Alternatives considered: accept one event path; accept database only; merge
+  automatically; broaden the phase into driver hardening or a live canary.
+- Trade-offs: the slice is now ready for human review, but remains unmerged and
+  production/provider acceptance stays closed. The separate Postgres.js P1 is
+  the immediate dependency-ready engineering slice.
+- Evidence: `EVID-HRMNY-20260902-APOLLO-027`, push run `33582006041`,
+  pull-request run `33582008378`, and PR #246.
+- Confidence/freshness: high for exact-head source and synthetic behavior on
+  2026-09-02.
+- Affected components: free Apollo People Search, migration `0076`, hosted CI,
+  browser acceptance, evidence state, and the next dependency.
+- Status: source and synthetic acceptance complete; unmerged, production
+  undeployed, provider-unaccepted, recovery-unverified, and user-unaccepted.
+- Supersedes/superseded-by: supersedes the hosted-pending state in
+  `OUTCOME-HRMNY-20260902-APOLLO-011`; none.
+- Rollback/correction: preserve exact run receipts, keep Apollo and production
+  unchanged, and invalidate this acceptance if implementation or acceptance
+  fixture source changes.

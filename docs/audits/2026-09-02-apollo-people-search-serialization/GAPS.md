@@ -10,29 +10,31 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`, plus fixture correction
 `0f3ac24ddd2645b4b03247ec720fe078406a0d15`.
 
-## `GAP-HRMNY-20260902-APOLLO-014` — hosted PostgreSQL proof pending
+## `GAP-HRMNY-20260902-APOLLO-014` — hosted PostgreSQL proof accepted
 
-- Decision/finding: exact-current local lint, types, 964 tests, and builds pass,
-  but the 40-case PostgreSQL runtime suite and disposable migration verifier
-  require hosted CI. The initial `afc708a`, direct-Vault-table `d1a137d`, and
-  Vault-view-lock `65748a1` matrices failed and cannot be reused. The later
-  `cd146c3` matrices passed migrations, Sales PostgreSQL proof, browser, and
-  repository verification, but their Apollo fixture finished 35/40; corrected
-  source `0f3ac24` still requires both fresh matrices.
+- Decision/finding: exact head
+  `ca6408b2e50cc0ece42b5859770785d93bed8147` passed both hosted event
+  matrices, including the disposable migration verifier, Sales PostgreSQL
+  proof, all 40 Apollo cases, full repository verification/build, and browser
+  acceptance. Earlier failed heads remain permanent negative evidence and are
+  not reused.
 - Reason: no safe local PostgreSQL service or authorized database URL was
   available; the default web suite intentionally excludes this file.
 - Alternatives considered: point tests at production; claim unit proof as
   database execution; install an unapproved local service.
-- Trade-offs: the branch cannot close the prior provider-wide free-search gap
-  until both hosted event matrices pass the exact head.
-- Evidence: `EVID-HRMNY-20260902-APOLLO-022/023/025/026` and
-  `FAIL-HRMNY-20260902-APOLLO-022/023/024/025`.
+- Trade-offs: synthetic hosted proof is closed, while merge, production,
+  provider, recovery, UAT, and the separate Postgres.js dependency gap remain
+  open.
+- Evidence: `EVID-HRMNY-20260902-APOLLO-022/023/025/026/027`,
+  `FAIL-HRMNY-20260902-APOLLO-022/023/024/025`, push run `33582006041`, and
+  pull-request run `33582008378`.
 - Confidence/freshness: high.
 - Affected components: migration `0076`, advisory lock, concurrent workers,
   forced session loss, and recovery.
-- Status: open P1 until hosted disposable PostgreSQL proof.
-- Supersedes/superseded-by: will be superseded by a new exact-head hosted
-  acceptance receipt if accepted.
+- Status: closed for exact-head local and synthetic hosted proof on 2026-09-02;
+  this does not grant any later acceptance state.
+- Supersedes/superseded-by: superseded by
+  `EVID-HRMNY-20260902-APOLLO-027`.
 - Rollback/correction: leave the PR unmerged and live Apollo closed on any CI
   failure; correct forward and rerun both matrices.
 

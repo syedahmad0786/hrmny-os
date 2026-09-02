@@ -229,3 +229,40 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
   none.
 - Rollback/correction: any later implementation source edit invalidates this
   receipt and requires the complete deterministic gate again.
+
+## `EVID-HRMNY-20260902-APOLLO-027` — exact-head hosted acceptance
+
+- Decision/finding: exact evidence head
+  `ca6408b2e50cc0ece42b5859770785d93bed8147` passed both independent hosted
+  CI event paths. Each matrix passed the disposable migration verifier, Sales
+  PostgreSQL proof, all 40 Apollo receipt/queue cases, repository lint,
+  type-checking, deterministic tests, production builds, and Playwright browser
+  acceptance.
+- Reason: the fixture correction could be accepted only after the push and
+  pull-request workflows independently exercised the same exact head and
+  reached terminal success.
+- Alternatives considered: accept only the database jobs; inherit the earlier
+  successful browser/verify jobs; rely on local proof; call a live provider.
+- Trade-offs: this closes synthetic hosted proof for Phase 4f but does not fix
+  or accept the Postgres.js runtime dependency gap, merge the branch, deploy to
+  production, contact Apollo, consume credit, verify recovery, or complete UAT.
+- Evidence: push run
+  <https://github.com/syedahmad0786/hrmny-os/actions/runs/33582006041>,
+  database job `100098044556`, e2e job `100098044547`, verify job
+  `100098044260`; pull-request run
+  <https://github.com/syedahmad0786/hrmny-os/actions/runs/33582008378>,
+  database job `100098051293`, e2e job `100098051528`, verify job
+  `100098051432`; PR
+  <https://github.com/syedahmad0786/hrmny-os/pull/246>.
+- Confidence/freshness: high on 2026-09-02 for exact head `ca6408b` from two
+  terminal hosted matrices.
+- Affected components: migration `0076`, Sales PostgreSQL runtime proof, Apollo
+  provider-lane serialization, full repository verification, and browser
+  journeys; no live provider or production resource.
+- Status: local and synthetic hosted source acceptance complete; merge,
+  deployment, provider, destination, recovery, user, and production acceptance
+  remain open.
+- Supersedes/superseded-by: supersedes the hosted-pending part of
+  `EVID-HRMNY-20260902-APOLLO-025/026`; none.
+- Rollback/correction: any later implementation or acceptance-fixture source
+  change invalidates this receipt and requires both hosted event matrices again.

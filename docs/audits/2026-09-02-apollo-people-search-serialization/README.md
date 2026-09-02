@@ -53,19 +53,19 @@ accounting write, or UAT occurred in this phase.
 
 ## Acceptance state
 
-| State                | Result                                                            |
-| -------------------- | ----------------------------------------------------------------- |
-| planned              | yes                                                               |
-| documented           | yes                                                               |
-| authorized           | source and synthetic local testing only                           |
-| configured           | code and migration prepared; production unchanged                 |
-| tested               | corrected local suites pass; exact-head hosted proof pending      |
-| deployed             | prior previews only; exact-current preview pending; production no |
-| provider accepted    | no                                                                |
-| destination verified | no                                                                |
-| recovery verified    | no                                                                |
-| user accepted        | no                                                                |
-| production accepted  | no                                                                |
+| State                | Result                                            |
+| -------------------- | ------------------------------------------------- |
+| planned              | yes                                               |
+| documented           | yes                                               |
+| authorized           | source and synthetic local testing only           |
+| configured           | code and migration prepared; production unchanged |
+| tested               | local and both exact-head hosted CI matrices pass |
+| deployed             | preview automation only; production unchanged     |
+| provider accepted    | no                                                |
+| destination verified | no                                                |
+| recovery verified    | no                                                |
+| user accepted        | no                                                |
+| production accepted  | no                                                |
 
 The exact-current local proof passed repository-wide lint, type checking, 964
 deterministic tests, and both production builds; the web build exposes 86
@@ -87,7 +87,10 @@ cleanup that contradicted the append-only audit ledger, and a late
 Postgres.js write-after-close error. Test-only correction `0f3ac24` now brackets
 retry timing with database timestamps, preserves historical audit rows, and
 deterministically disposes killed clients before using a fresh recovery client.
-Its complete local gate passes; fresh hosted proof remains pending.
+Its complete local gate passes. Exact evidence head `ca6408b` then passed both
+hosted event matrices: push run `33582006041` and pull-request run
+`33582008378`. Each passed migrations, Sales PostgreSQL proof, all 40 Apollo
+cases, repository verification/build, and browser acceptance.
 
 The Postgres.js `3.4.9` queued-write-after-close race remains an explicit P1
 dependency gap. It will be handled in an isolated, checksummed consumer-patch
