@@ -104,31 +104,25 @@ function DeliveryBoardPageInner() {
     [allClientNameById, board.data?.board],
   );
 
+  const requestedTestTask = (board.data?.board ?? [])
+    .flatMap((column) => column.tasks)
+    .find(
+      (task) =>
+        (taskIdFromQuery && task.taskId === taskIdFromQuery) ||
+        (clientIdFromQuery && task.clientId === clientIdFromQuery),
+    );
+  const requestedTestTaskIsHidden = Boolean(
+    !showTestRecords &&
+    requestedTestTask &&
+    hasSyntheticMarker(
+      requestedTestTask.title,
+      allClientNameById.get(requestedTestTask.clientId),
+    ),
+  );
+
   useEffect(() => {
-    if (showTestRecords || (!taskIdFromQuery && !clientIdFromQuery)) return;
-    const requested = (board.data?.board ?? [])
-      .flatMap((column) => column.tasks)
-      .find(
-        (task) =>
-          task.taskId === taskIdFromQuery ||
-          task.clientId === clientIdFromQuery,
-      );
-    if (
-      requested &&
-      hasSyntheticMarker(
-        requested.title,
-        allClientNameById.get(requested.clientId),
-      )
-    ) {
-      setShowTestRecords(true);
-    }
-  }, [
-    allClientNameById,
-    board.data?.board,
-    clientIdFromQuery,
-    showTestRecords,
-    taskIdFromQuery,
-  ]);
+    if (requestedTestTaskIsHidden) setShowTestRecords(true);
+  }, [requestedTestTaskIsHidden]);
   const attentionTasks = flatTasks.filter(
     (task) => ATTENTION_STATES.has(task.status) || task.priority === "urgent",
   );
@@ -144,7 +138,7 @@ function DeliveryBoardPageInner() {
       : [];
 
   useEffect(() => {
-    if (!flatTasks.length || taskKey) return;
+    if (!flatTasks.length || taskKey || requestedTestTaskIsHidden) return;
     const taskMatch = taskIdFromQuery
       ? flatTasks.find((task) => task.taskId === taskIdFromQuery)
       : null;
@@ -161,7 +155,14 @@ function DeliveryBoardPageInner() {
         attentionTasks[0]?.taskId ??
         flatTasks[0]!.taskId,
     );
-  }, [attentionTasks, clientIdFromQuery, flatTasks, taskIdFromQuery, taskKey]);
+  }, [
+    attentionTasks,
+    clientIdFromQuery,
+    flatTasks,
+    requestedTestTaskIsHidden,
+    taskIdFromQuery,
+    taskKey,
+  ]);
 
   function openPortal(next: "/portal/approvals" | "/portal/onboarding") {
     if (!selected?.clientId) return;

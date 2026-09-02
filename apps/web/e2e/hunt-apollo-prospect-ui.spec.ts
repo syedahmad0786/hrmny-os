@@ -469,7 +469,7 @@ test.describe("Hunt Apollo prospect UI", () => {
       page.getByRole("heading", { name: "Find the next right client." }),
     ).toBeVisible({ timeout: 60_000 });
     await expect(
-      page.getByRole("navigation", { name: "CRM sections" }),
+      page.getByRole("navigation", { name: "Sales sections" }),
     ).toBeVisible();
     await expect(page.getByTestId("hunt-apollo-search")).toBeVisible();
 
@@ -486,7 +486,7 @@ test.describe("Hunt Apollo prospect UI", () => {
       page.getByRole("heading", { name: "Find the next right client." }),
     ).toBeVisible();
 
-    const crmNav = page.getByRole("navigation", { name: "CRM sections" });
+    const crmNav = page.getByRole("navigation", { name: "Sales sections" });
     await expect(crmNav.locator("summary")).toHaveCount(0);
     await expect(crmNav.getByRole("link", { name: "Contacts" })).toBeVisible();
     await expect(

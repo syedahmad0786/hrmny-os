@@ -9,7 +9,7 @@ test.describe("Outreach HITL UI", () => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/outreach", { waitUntil: "domcontentloaded" });
     await expect(
-      page.getByRole("heading", { name: /Outreach drafts/i }),
+      page.getByRole("heading", { name: /^Outreach$/i }),
     ).toBeVisible({ timeout: 60_000 });
     await page.getByText("Sending setup", { exact: true }).click();
 

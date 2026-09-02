@@ -6,6 +6,7 @@ const SYNTHETIC_NAME_PATTERNS = [
   /^inbound proof\b/i,
   /^closed loop\b/i,
   /^demo\b/i,
+  /^other co\b/i,
   /^handover smoke\b/i,
   /^invite proof\b/i,
   /^memory prospect\b/i,

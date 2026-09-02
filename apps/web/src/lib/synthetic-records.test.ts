@@ -12,6 +12,7 @@ describe("synthetic record visibility", () => {
     expect(isSyntheticRecordName("Live Proof 123")).toBe(true);
     expect(isSyntheticRecordName("Closed Loop 123")).toBe(true);
     expect(isSyntheticRecordName("Demo Co LLC")).toBe(true);
+    expect(isSyntheticRecordName("Other Co FZ-LLC")).toBe(true);
     expect(isSyntheticRecordName("M1-PROOF handover")).toBe(true);
     expect(isSyntheticRecordName("Personal 1787286650761")).toBe(true);
     expect(isSyntheticRecordName("Emaar Hospitality Group")).toBe(false);
