@@ -16,7 +16,7 @@
 
 ## Blocking production acceptance
 
-1. Deploy to a named non-production destination and verify the exact revision there.
+1. Deploy a connected QM runtime and integration route to a named non-production destination and verify the exact revision there. The automatic Vercel web preview does not satisfy this gate.
 2. Run synthetic canaries against the deployed durable adapter.
 3. Obtain explicit approval before any connection-loss, process-termination, rollback, or recovery test.
 4. Complete owner UAT, recovery acceptance, security review, merge review, and production acceptance as separate gates.
