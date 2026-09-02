@@ -1,4 +1,4 @@
-import { createDb, sql } from "@hrmny/db";
+import { createDb, sql, type Db } from "@hrmny/db";
 import {
   ApolloProviderRequestError,
   type LeadCandidate,
@@ -20,6 +20,16 @@ import {
   hashIntegrationPayload,
 } from "../integrations/inbox";
 import {
+  disconnectGovernedApiKeyConnection,
+  persistGovernedApiKeyConnection,
+} from "../integrations/governed-api-key";
+import {
+  markOwnedIntegrationConnectionAuthError,
+  ownedIntegrationConnectionStatus,
+} from "../integrations/resolve-keys";
+import type { SessionUser } from "../auth/session";
+import { connectionsRouter } from "../trpc/connections-router";
+import {
   APOLLO_PEOPLE_SEARCH_MAX_ATTEMPTS,
   APOLLO_PEOPLE_SEARCH_OPERATION,
   getApolloPeopleSearchStatus,
@@ -31,11 +41,213 @@ import {
 
 const ACTOR = "20000000-0000-4000-8000-000000000001";
 const OTHER_ACTOR = "20000000-0000-4000-8000-000000000002";
+const DISCONNECT_ACTOR = "20000000-0000-4000-8000-000000000003";
 const ACTOR_CONNECTION = "42000000-0000-4000-8000-000000000001";
 const OTHER_CONNECTION = "42000000-0000-4000-8000-000000000002";
+const DISCONNECT_CONNECTION = "42000000-0000-4000-8000-000000000003";
+const DISCONNECT_SECRET_NAME = "ci:apollo-proof:disconnect";
+const DISCONNECT_SECRET_VALUE = "synthetic-apollo-disconnect-proof-key";
 
 let actorSecretId = "";
 let otherSecretId = "";
+
+const ACTOR_USER: SessionUser = {
+  employeeId: ACTOR,
+  email: "apollo-proof-actor@example.test",
+  displayName: "Apollo Proof Actor",
+  roles: ["partner"],
+  permissions: ["allow:*:*"],
+  actorType: "staff",
+  clientId: null,
+};
+
+function actorConnectionsCaller() {
+  return connectionsRouter.createCaller({
+    user: ACTOR_USER,
+    employeeId: ACTOR,
+    roles: ACTOR_USER.roles,
+    canViewMargin: true,
+  });
+}
+
+function namedDatabase(name: string): Db {
+  const url = new URL(process.env.DATABASE_URL!);
+  url.searchParams.set("application_name", name);
+  return createDb(url.toString());
+}
+
+async function replaceActorApolloKey(
+  database: Db,
+  apiKey: string,
+  afterConnectionWrite?: (backendPid: number) => Promise<void>,
+) {
+  return persistGovernedApiKeyConnection({
+    database,
+    employeeId: ACTOR,
+    toolkit: "apollo",
+    apiKey,
+    probed: true,
+    afterConnectionWrite,
+  });
+}
+
+async function cleanupDisconnectProofFixture(database: Db): Promise<void> {
+  await database.transaction(async (tx) => {
+    const [secret] = await tx.execute<{ id: string }>(sql`
+      select id::text
+      from vault.decrypted_secrets
+      where name = ${DISCONNECT_SECRET_NAME}
+      limit 1
+    `);
+    await tx.execute(sql`
+      delete from public.connection_account
+      where connection_account_id = ${DISCONNECT_CONNECTION}::uuid
+    `);
+    await tx.execute(sql`
+      delete from public.audit_event
+      where entity_id = ${DISCONNECT_CONNECTION}::uuid
+        or actor_employee_id = ${DISCONNECT_ACTOR}::uuid
+    `);
+    if (secret?.id) {
+      await tx.execute(sql`
+        select vault.update_secret(
+          ${secret.id}::uuid,
+          gen_random_uuid()::text || gen_random_uuid()::text,
+          'ci:apollo-proof:disconnect:retired:' || gen_random_uuid()::text,
+          'Retired disposable CI disconnect fixture'
+        )
+      `);
+    }
+    await tx.execute(sql`
+      delete from public.employee
+      where employee_id = ${DISCONNECT_ACTOR}::uuid
+    `);
+  });
+}
+
+async function createDisconnectProofFixture(database: Db): Promise<string> {
+  await cleanupDisconnectProofFixture(database);
+  await database.execute(sql`
+    insert into public.employee (employee_id, display_name, email, is_active)
+    values (
+      ${DISCONNECT_ACTOR}::uuid,
+      'Apollo Disconnect Proof',
+      'apollo-disconnect-proof@example.test',
+      true
+    )
+    on conflict (employee_id) do update
+      set is_active = true, updated_at = now()
+  `);
+  const [secret] = await database.execute<{ id: string }>(sql`
+    select vault.create_secret(
+      ${DISCONNECT_SECRET_VALUE},
+      ${DISCONNECT_SECRET_NAME},
+      'Disposable CI-only disconnect proof'
+    ) as id
+  `);
+  if (!secret?.id)
+    throw new Error("CI disconnect Vault fixture was not created");
+  await database.execute(sql`
+    insert into public.connection_account (
+      connection_account_id, owner_employee_id, toolkit, scope, auth_type,
+      label, secret_id, status
+    ) values (
+      ${DISCONNECT_CONNECTION}::uuid,
+      ${DISCONNECT_ACTOR}::uuid,
+      'apollo',
+      'staff',
+      'api_key',
+      'CI Apollo disconnect',
+      ${secret.id}::uuid,
+      'connected'
+    )
+  `);
+  return secret.id;
+}
+
+type ActorCredentialState = {
+  credential_version: string;
+  secret_version: string;
+  status: string;
+  last_error: string | null;
+  replace_audit_count: number;
+  disconnect_audit_count: number;
+};
+
+async function readActorCredentialState(
+  database: Db,
+): Promise<ActorCredentialState> {
+  const [state] = await database.execute<ActorCredentialState>(sql`
+    select connection.xmin::text as credential_version,
+           secret.updated_at::text as secret_version,
+           connection.status,
+           connection.last_error,
+           (
+             select count(*)::int
+             from public.audit_event audit
+             where audit.entity_id = ${ACTOR_CONNECTION}::uuid
+               and audit.action = 'connections.replaceKey'
+           ) as replace_audit_count,
+           (
+             select count(*)::int
+             from public.audit_event audit
+             where audit.entity_id = ${ACTOR_CONNECTION}::uuid
+               and audit.action = 'connections.disconnect'
+           ) as disconnect_audit_count
+    from public.connection_account connection
+    join vault.decrypted_secrets secret on secret.id = connection.secret_id
+    where connection.connection_account_id = ${ACTOR_CONNECTION}::uuid
+  `);
+  if (!state) throw new Error("CI actor credential fixture is missing");
+  return state;
+}
+
+type DisconnectProofState = {
+  connections: number;
+  active_secrets: number;
+  original_secret: boolean;
+  tombstones: number;
+  audits: number;
+};
+
+async function readDisconnectProofState(
+  database: Db,
+  secretId: string,
+): Promise<DisconnectProofState> {
+  const [state] = await database.execute<DisconnectProofState>(sql`
+    select
+      (
+        select count(*)::int
+        from public.connection_account
+        where connection_account_id = ${DISCONNECT_CONNECTION}::uuid
+      ) as connections,
+      (
+        select count(*)::int
+        from vault.decrypted_secrets
+        where id = ${secretId}::uuid
+          and name = ${DISCONNECT_SECRET_NAME}
+      ) as active_secrets,
+      coalesce((
+        select decrypted_secret = ${DISCONNECT_SECRET_VALUE}
+        from vault.decrypted_secrets
+        where id = ${secretId}::uuid
+      ), false) as original_secret,
+      (
+        select count(*)::int
+        from vault.decrypted_secrets
+        where id = ${secretId}::uuid
+          and name = ${`hrmny:revoked:${secretId}`}
+      ) as tombstones,
+      (
+        select count(*)::int
+        from public.audit_event
+        where entity_id = ${DISCONNECT_CONNECTION}::uuid
+          and action = 'connections.disconnect'
+      ) as audits
+  `);
+  if (!state) throw new Error("CI disconnect proof state is missing");
+  return state;
+}
 
 function execution(id = "apollo-postgres-person"): LeadSearchExecution {
   const candidate: LeadCandidate = {
@@ -212,6 +424,48 @@ afterEach(async () => {
 });
 
 describe("Apollo queue PostgreSQL proof", () => {
+  it("uses the database clock to decide when a queued job is due", async () => {
+    const source = sourceWith(async () => execution("database-clock-due"));
+    const pending = await searchApolloPeopleFree(
+      {
+        idempotencyKey: "41000000-0000-4000-8000-000000000045",
+        actorEmployeeId: ACTOR,
+        query: "database due clock",
+      },
+      { leadSource: source },
+    );
+    const db = getDb()!;
+    const [job] = await db.execute<{ scheduled_job_id: string }>(sql`
+      update public.scheduled_job
+      set run_at = statement_timestamp() + interval '5 minutes'
+      where integration_inbox_id = ${pending.receiptId}::uuid
+      returning scheduled_job_id
+    `);
+
+    await expect(
+      runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+        leadSource: source,
+        authorizeActor: async () => true,
+        now: () => new Date("2099-09-01T12:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ status: "not_due" });
+    expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+
+    await db.execute(sql`
+      update public.scheduled_job
+      set run_at = statement_timestamp() - interval '1 millisecond'
+      where scheduled_job_id = ${job!.scheduled_job_id}::uuid
+    `);
+    await expect(
+      runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+        leadSource: source,
+        authorizeActor: async () => true,
+        now: () => new Date("2000-09-01T12:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ status: "completed" });
+    expect(source.searchLeadsWithReceipt).toHaveBeenCalledOnce();
+  });
+
   it("rolls back both receipt and job when enqueue crashes inside the transaction", async () => {
     const idempotencyKey = "41000000-0000-4000-8000-000000000010";
     await expect(
@@ -746,7 +1000,7 @@ describe("Apollo queue PostgreSQL proof", () => {
     });
   });
 
-  it("does not let a stale 401 disable an in-place rotated credential", async () => {
+  it("does not let a stale 401 disable a governed replacement credential", async () => {
     const providerReceipt = {
       provider: "apollo" as const,
       operation: "people.search" as const,
@@ -756,12 +1010,13 @@ describe("Apollo queue PostgreSQL proof", () => {
       rateLimit: {},
     };
     let rejectProvider!: (error: Error) => void;
-    const source = sourceWith(
-      () =>
-        new Promise<LeadSearchExecution>((_resolve, reject) => {
-          rejectProvider = reject;
-        }),
+    const providerGate = new Promise<LeadSearchExecution>(
+      (_resolve, reject) => {
+        rejectProvider = reject;
+      },
     );
+    void providerGate.catch(() => undefined);
+    const source = sourceWith(() => providerGate);
     const pending = await searchApolloPeopleFree(
       {
         idempotencyKey: "41000000-0000-4000-8000-000000000035",
@@ -775,48 +1030,208 @@ describe("Apollo queue PostgreSQL proof", () => {
       select scheduled_job_id from public.scheduled_job
       where integration_inbox_id = ${pending.receiptId}::uuid
     `);
+    let releaseReconciliation!: () => void;
+    const reconciliationGate = new Promise<void>((resolve) => {
+      releaseReconciliation = resolve;
+    });
+    const reconciliationPaused = vi.fn();
     const run = runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
       leadSource: source,
       authorizeActor: async () => true,
+      beforeProviderAuthErrorReconciliation: async () => {
+        reconciliationPaused();
+        await reconciliationGate;
+      },
     });
-    await vi.waitFor(() =>
-      expect(source.searchLeadsWithReceipt).toHaveBeenCalledOnce(),
-    );
+    try {
+      await vi.waitFor(
+        () => expect(source.searchLeadsWithReceipt).toHaveBeenCalledOnce(),
+        { timeout: 10_000 },
+      );
+      rejectProvider(
+        new ApolloProviderRequestError(
+          "stale credential rejected",
+          401,
+          false,
+          undefined,
+          providerReceipt,
+        ),
+      );
+      await vi.waitFor(
+        () => expect(reconciliationPaused).toHaveBeenCalledOnce(),
+        { timeout: 10_000 },
+      );
+      await replaceActorApolloKey(db, "synthetic-apollo-proof-key-a-newer");
+      releaseReconciliation();
 
+      await expect(run).resolves.toMatchObject({
+        status: "revoked",
+        reason: "APOLLO_PROVIDER_AUTH_REVOKED",
+      });
+      const [connection] = await db.execute<{
+        status: string;
+        last_error: string | null;
+        secret_id: string;
+      }>(sql`
+        select status, last_error, secret_id::text
+        from public.connection_account
+        where connection_account_id = ${ACTOR_CONNECTION}::uuid
+      `);
+      expect(connection).toEqual({
+        status: "connected",
+        last_error: null,
+        secret_id: actorSecretId,
+      });
+    } finally {
+      rejectProvider(new Error("SYNTHETIC_PROVIDER_GATE_CLEANUP"));
+      releaseReconciliation();
+      await Promise.allSettled([run]);
+    }
+  });
+
+  it("lets governed rotation restore a connection after stale auth reconciliation locks first", async () => {
+    const db = getDb()!;
+    const [captured] = await db.execute<{
+      credential_version: string;
+      secret_version: string;
+    }>(sql`
+      select connection.xmin::text as credential_version,
+             secret.updated_at::text as secret_version
+      from public.connection_account connection
+      join vault.decrypted_secrets secret on secret.id = connection.secret_id
+      where connection.connection_account_id = ${ACTOR_CONNECTION}::uuid
+    `);
+    const staleDatabase = createDb(process.env.DATABASE_URL!);
+    const rotationDatabase = namedDatabase(
+      "hrmny_test_stale_auth_governed_rotation",
+    );
+    let releaseStale!: () => void;
+    const staleGate = new Promise<void>((resolve) => {
+      releaseStale = resolve;
+    });
+    const staleLocked = vi.fn();
+    const rotationUpdatedConnection = vi.fn();
+    const stale = markOwnedIntegrationConnectionAuthError(
+      {
+        toolkit: "apollo",
+        employeeId: ACTOR,
+        connectionAccountId: ACTOR_CONNECTION,
+        credentialVersion: captured!.credential_version,
+        secretId: actorSecretId,
+        secretVersion: captured!.secret_version,
+      },
+      {
+        database: staleDatabase,
+        afterConnectionUpdate: async () => {
+          staleLocked();
+          await staleGate;
+        },
+      },
+    );
+    let rotation: Promise<unknown> | undefined;
+    try {
+      await vi.waitFor(() => expect(staleLocked).toHaveBeenCalledOnce(), {
+        timeout: 10_000,
+      });
+      rotation = replaceActorApolloKey(
+        rotationDatabase,
+        "synthetic-apollo-proof-key-a-governed-race",
+      ).then((value) => {
+        rotationUpdatedConnection();
+        return value;
+      });
+      await vi.waitFor(
+        async () => {
+          const [state] = await db.execute<{ blocked: boolean }>(sql`
+          select exists (
+            select 1
+            from pg_stat_activity activity
+            where activity.pid <> pg_backend_pid()
+              and activity.datname = current_database()
+              and activity.application_name =
+                  'hrmny_test_stale_auth_governed_rotation'
+              and cardinality(pg_blocking_pids(activity.pid)) > 0
+          ) as blocked
+        `);
+          expect(state?.blocked).toBe(true);
+        },
+        { timeout: 10_000, interval: 50 },
+      );
+      expect(rotationUpdatedConnection).not.toHaveBeenCalled();
+
+      releaseStale();
+      await expect(stale).resolves.toBe(true);
+      await rotation;
+
+      const [connection] = await db.execute<{
+        status: string;
+        last_error: string | null;
+      }>(sql`
+        select status, last_error
+        from public.connection_account
+        where connection_account_id = ${ACTOR_CONNECTION}::uuid
+      `);
+      expect(connection).toEqual({ status: "connected", last_error: null });
+      expect(rotationUpdatedConnection).toHaveBeenCalledOnce();
+      const [audit] = await db.execute<{
+        before: Record<string, unknown> | null;
+        after: Record<string, unknown> | null;
+      }>(sql`
+        select before, after
+        from public.audit_event
+        where entity_id = ${ACTOR_CONNECTION}::uuid
+          and action = 'connections.replaceKey'
+        order by created_at desc, audit_event_id desc
+        limit 1
+      `);
+      expect(audit).toEqual({
+        before: { status: "error" },
+        after: { toolkit: "apollo", status: "connected", probed: true },
+      });
+    } finally {
+      releaseStale();
+      await Promise.allSettled([stale, ...(rotation ? [rotation] : [])]);
+    }
+  });
+
+  it("detects an already-committed out-of-band Vault change before stale auth reconciliation", async () => {
+    const db = getDb()!;
+    const [captured] = await db.execute<{
+      credential_version: string;
+      secret_version: string;
+    }>(sql`
+      select connection.xmin::text as credential_version,
+             secret.updated_at::text as secret_version
+      from public.connection_account connection
+      join vault.decrypted_secrets secret on secret.id = connection.secret_id
+      where connection.connection_account_id = ${ACTOR_CONNECTION}::uuid
+    `);
     await db.execute(sql`
       select vault.update_secret(
         ${actorSecretId}::uuid,
-        'synthetic-apollo-proof-key-a-newer'
+        'synthetic-apollo-proof-key-a-out-of-band'
       )
     `);
-    rejectProvider(
-      new ApolloProviderRequestError(
-        "stale credential rejected",
-        401,
-        false,
-        undefined,
-        providerReceipt,
-      ),
-    );
 
-    await expect(run).resolves.toMatchObject({
-      status: "revoked",
-      reason: "APOLLO_PROVIDER_AUTH_REVOKED",
-    });
+    await expect(
+      markOwnedIntegrationConnectionAuthError({
+        toolkit: "apollo",
+        employeeId: ACTOR,
+        connectionAccountId: ACTOR_CONNECTION,
+        credentialVersion: captured!.credential_version,
+        secretId: actorSecretId,
+        secretVersion: captured!.secret_version,
+      }),
+    ).resolves.toBe(false);
     const [connection] = await db.execute<{
       status: string;
       last_error: string | null;
-      secret_id: string;
     }>(sql`
-      select status, last_error, secret_id::text
+      select status, last_error
       from public.connection_account
       where connection_account_id = ${ACTOR_CONNECTION}::uuid
     `);
-    expect(connection).toEqual({
-      status: "connected",
-      last_error: null,
-      secret_id: actorSecretId,
-    });
+    expect(connection).toEqual({ status: "connected", last_error: null });
   });
 
   it("persists provider Retry-After without exposing criteria in the job", async () => {
@@ -1014,7 +1429,25 @@ describe("Apollo queue PostgreSQL proof", () => {
       runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
         leadSource: recovered,
         authorizeActor: async () => true,
-        now: () => new Date(now.getTime() + 10 * 60_000 + 1),
+        now: () => new Date("2099-08-31T13:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ status: "busy" });
+    expect(recovered.searchLeadsWithReceipt).not.toHaveBeenCalled();
+    await db.execute(sql`
+      update public.integration_inbox
+      set attempt_lease_expires_at = statement_timestamp() - interval '1 millisecond'
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+    await db.execute(sql`
+      update public.scheduled_job
+      set lease_expires_at = statement_timestamp() - interval '1 millisecond'
+      where scheduled_job_id = ${job!.scheduled_job_id}::uuid
+    `);
+    await expect(
+      runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+        leadSource: recovered,
+        authorizeActor: async () => true,
+        now: () => new Date("2000-08-31T13:00:00.000Z"),
       }),
     ).resolves.toMatchObject({ status: "completed" });
     expect(internalFailure.searchLeadsWithReceipt).toHaveBeenCalledTimes(1);
@@ -1424,7 +1857,7 @@ describe("Apollo queue PostgreSQL proof", () => {
     expect(other?.status).toBe("connected");
   });
 
-  it("rejects an in-place Vault rotation after resolution and before dispatch", async () => {
+  it("rejects governed credential rotation after resolution and before dispatch", async () => {
     const source = sourceWith(async () =>
       execution("must-not-run-with-rotated-secret"),
     );
@@ -1454,12 +1887,7 @@ describe("Apollo queue PostgreSQL proof", () => {
     });
     await vi.waitFor(() => expect(authorizationPaused).toHaveBeenCalledOnce());
 
-    await db.execute(sql`
-      select vault.update_secret(
-        ${actorSecretId}::uuid,
-        'synthetic-apollo-proof-key-a-rotated'
-      )
-    `);
+    await replaceActorApolloKey(db, "synthetic-apollo-proof-key-a-rotated");
     releaseAuthorization();
 
     await expect(run).resolves.toMatchObject({
@@ -1467,6 +1895,76 @@ describe("Apollo queue PostgreSQL proof", () => {
       reason: "APOLLO_FREE_SEARCH_CONNECTION_REQUIRED",
     });
     expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+  });
+
+  it("rejects an already-committed out-of-band Vault change before dispatch", async () => {
+    const source = sourceWith(async () =>
+      execution("must-not-run-after-out-of-band-change"),
+    );
+    const pending = await searchApolloPeopleFree(
+      {
+        idempotencyKey: "41000000-0000-4000-8000-000000000040",
+        actorEmployeeId: ACTOR,
+        query: "out-of-band credential changed before dispatch",
+      },
+      { leadSource: source },
+    );
+    const db = getDb()!;
+    const [job] = await db.execute<{ scheduled_job_id: string }>(sql`
+      select scheduled_job_id from public.scheduled_job
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+    let releaseAuthorization!: () => void;
+    const authorizationGate = new Promise<void>((resolve) => {
+      releaseAuthorization = resolve;
+    });
+    const authorizationPaused = vi.fn();
+    const run = runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+      leadSource: source,
+      authorizeActor: async () => true,
+      beforeProviderDispatchAuthorization: async () => {
+        authorizationPaused();
+        await authorizationGate;
+      },
+    });
+    try {
+      await vi.waitFor(
+        () => expect(authorizationPaused).toHaveBeenCalledOnce(),
+        { timeout: 10_000 },
+      );
+      const [claimedLease] = await db.execute<{
+        receipt_lease: string;
+        job_lease: string;
+        lease_ms: number;
+      }>(sql`
+        select inbox.attempt_lease_expires_at::text as receipt_lease,
+               job.lease_expires_at::text as job_lease,
+               extract(epoch from (job.lease_expires_at - job.locked_at))
+                 * 1000 as lease_ms
+        from public.integration_inbox inbox
+        join public.scheduled_job job
+          on job.integration_inbox_id = inbox.integration_inbox_id
+        where inbox.integration_inbox_id = ${pending.receiptId}::uuid
+      `);
+      expect(claimedLease?.receipt_lease).toBe(claimedLease?.job_lease);
+      expect(Number(claimedLease?.lease_ms)).toBe(10 * 60_000);
+      await db.execute(sql`
+        select vault.update_secret(
+          ${actorSecretId}::uuid,
+          'synthetic-apollo-proof-key-a-out-of-band-dispatch'
+        )
+      `);
+      releaseAuthorization();
+
+      await expect(run).resolves.toMatchObject({
+        status: "revoked",
+        reason: "APOLLO_FREE_SEARCH_CONNECTION_REQUIRED",
+      });
+      expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+    } finally {
+      releaseAuthorization();
+      await Promise.allSettled([run]);
+    }
   });
 
   it("holds the provider lock after final authorization even when the lease clock expires", async () => {
@@ -1489,48 +1987,405 @@ describe("Apollo queue PostgreSQL proof", () => {
       where integration_inbox_id = ${pending.receiptId}::uuid
     `);
     let releaseDispatch!: () => void;
+    const dispatchGate = new Promise<void>((resolve) => {
+      releaseDispatch = resolve;
+    });
     const dispatchPaused = vi.fn();
     const run = runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
       leadSource: source,
       authorizeActor: async () => true,
       now: () => clock,
-      afterProviderDispatchAuthorization: () =>
-        new Promise<void>((resolve) => {
-          dispatchPaused();
-          releaseDispatch = resolve;
-        }),
+      afterProviderDispatchAuthorization: async () => {
+        dispatchPaused();
+        await dispatchGate;
+      },
     });
-    await vi.waitFor(() => expect(dispatchPaused).toHaveBeenCalledOnce());
-    expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+    const mutationDatabase = namedDatabase(
+      "hrmny_test_provider_locked_rotation",
+    );
+    const before = await readActorCredentialState(db);
+    try {
+      await vi.waitFor(() => expect(dispatchPaused).toHaveBeenCalledOnce(), {
+        timeout: 10_000,
+      });
+      expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+      const [leasePair] = await db.execute<{
+        receipt_lease: string;
+        job_lease: string;
+        authorization_lease_ms: number;
+      }>(sql`
+        select inbox.attempt_lease_expires_at::text as receipt_lease,
+               job.lease_expires_at::text as job_lease,
+               extract(epoch from (
+                 job.lease_expires_at
+                   - (inbox.result ->> 'providerDispatchAuthorizedAt')::timestamptz
+               )) * 1000 as authorization_lease_ms
+        from public.integration_inbox inbox
+        join public.scheduled_job job
+          on job.integration_inbox_id = inbox.integration_inbox_id
+        where inbox.integration_inbox_id = ${pending.receiptId}::uuid
+      `);
+      expect(leasePair?.receipt_lease).toBe(leasePair?.job_lease);
+      expect(Number(leasePair?.authorization_lease_ms)).toBe(10 * 60_000);
 
-    clock = new Date(clock.getTime() + 10 * 60_000 + 1);
+      await expect(
+        replaceActorApolloKey(
+          mutationDatabase,
+          "synthetic-apollo-proof-key-a-must-stay-pending",
+        ),
+      ).rejects.toThrow("APOLLO_PROVIDER_MUTATION_BUSY");
+      await expect(
+        disconnectGovernedApiKeyConnection({
+          database: mutationDatabase,
+          employeeId: ACTOR,
+          connectionAccountId: ACTOR_CONNECTION,
+          expectedToolkit: "apollo",
+        }),
+      ).rejects.toThrow("APOLLO_PROVIDER_MUTATION_BUSY");
+      const whileLocked = await readActorCredentialState(db);
+      expect(whileLocked).toEqual(before);
+
+      clock = new Date(clock.getTime() + 10 * 60_000 + 1);
+      await expect(
+        runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+          leadSource: replacementSource,
+          authorizeActor: async () => true,
+          now: () => clock,
+        }),
+      ).resolves.toMatchObject({ status: "busy" });
+      expect(replacementSource.searchLeadsWithReceipt).not.toHaveBeenCalled();
+
+      releaseDispatch();
+      await expect(run).resolves.toMatchObject({ status: "completed" });
+      expect(source.searchLeadsWithReceipt).toHaveBeenCalledOnce();
+
+      await expect(
+        replaceActorApolloKey(
+          mutationDatabase,
+          "synthetic-apollo-proof-key-a-after-provider",
+        ),
+      ).resolves.toMatchObject({
+        connectionAccountId: ACTOR_CONNECTION,
+        status: "connected",
+      });
+      const after = await readActorCredentialState(db);
+      expect(after.credential_version).not.toBe(before.credential_version);
+      expect(after.secret_version).not.toBe(before.secret_version);
+      expect(after.replace_audit_count).toBe(before.replace_audit_count + 1);
+    } finally {
+      releaseDispatch();
+      await Promise.allSettled([run]);
+    }
+  });
+
+  it("rolls back Vault, connection, and audit writes when the mutation backend is lost", async () => {
+    const db = getDb()!;
+    const mutationDatabase = namedDatabase("hrmny_test_rotation_backend_loss");
+    const before = await readActorCredentialState(db);
+
+    let terminatedBackendPid = 0;
+    const backendTerminated = vi.fn();
+    const failure = await replaceActorApolloKey(
+      mutationDatabase,
+      "synthetic-apollo-proof-key-a-rollback",
+      async (backendPid) => {
+        expect(backendPid).toBeGreaterThan(0);
+        terminatedBackendPid = backendPid;
+        const [terminated] = await db.execute<{ terminated: boolean }>(sql`
+          select pg_terminate_backend(${backendPid}) as terminated
+        `);
+        expect(terminated?.terminated).toBe(true);
+        backendTerminated();
+      },
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(backendTerminated).toHaveBeenCalledOnce();
+    expect(terminatedBackendPid).toBeGreaterThan(0);
+    expect(failure).toBeInstanceOf(Error);
+    expect(
+      `${(failure as { code?: string }).code ?? ""} ${String(failure)}`,
+    ).toMatch(/57P01|CONNECTION_(?:CLOSED|DESTROYED)|terminat|connection/i);
+
+    const after = await readActorCredentialState(db);
+    expect(after).toEqual(before);
+  });
+
+  it("does not report a connected credential when its Vault row is missing", async () => {
+    const db = getDb()!;
+    const mutationDatabase = namedDatabase("hrmny_test_missing_vault_secret");
+    const missingSecretId = "43000000-0000-4000-8000-000000000099";
+    const previousComposioApiKey = process.env.COMPOSIO_API_KEY;
+    process.env.COMPOSIO_API_KEY = "";
+    try {
+      await expect(
+        ownedIntegrationConnectionStatus("apollo", ACTOR),
+      ).resolves.toEqual({ configured: true });
+      const connected = (await actorConnectionsCaller().list()).find(
+        (item) => item.toolkit === "apollo",
+      );
+      expect(connected).toMatchObject({
+        connectionAccountId: ACTOR_CONNECTION,
+        status: "connected",
+        hasSecret: true,
+      });
+
+      await db.execute(sql`
+        update public.connection_account
+        set secret_id = ${missingSecretId}::uuid, updated_at = now()
+        where connection_account_id = ${ACTOR_CONNECTION}::uuid
+      `);
+      const [before] = await db.execute<{
+        credential_version: string;
+        secret_id: string;
+        status: string;
+        last_error: string | null;
+        audit_count: number;
+      }>(sql`
+        select connection.xmin::text as credential_version,
+               connection.secret_id::text,
+               connection.status,
+               connection.last_error,
+               (
+                 select count(*)::int
+                 from public.audit_event audit
+                 where audit.entity_id = ${ACTOR_CONNECTION}::uuid
+                   and audit.action = 'connections.replaceKey'
+               ) as audit_count
+        from public.connection_account connection
+        where connection.connection_account_id = ${ACTOR_CONNECTION}::uuid
+      `);
+
+      await expect(
+        ownedIntegrationConnectionStatus("apollo", ACTOR),
+      ).resolves.toEqual({ configured: false });
+      const missing = (await actorConnectionsCaller().list()).find(
+        (item) => item.toolkit === "apollo",
+      );
+      expect(missing).toMatchObject({
+        connectionAccountId: ACTOR_CONNECTION,
+        status: "error",
+        hasSecret: false,
+        lastError: "VAULT_SECRET_MISSING",
+      });
+      expect(missing).not.toHaveProperty("secretId");
+      expect(missing).not.toHaveProperty("decryptedSecret");
+      expect(JSON.stringify(missing)).not.toContain(
+        "synthetic-apollo-proof-key",
+      );
+
+      await expect(
+        replaceActorApolloKey(
+          mutationDatabase,
+          "synthetic-apollo-proof-key-must-not-be-receipted",
+        ),
+      ).rejects.toThrow("Vault secret was not found during key replacement");
+
+      const [after] = await db.execute<{
+        credential_version: string;
+        secret_id: string;
+        status: string;
+        last_error: string | null;
+        audit_count: number;
+      }>(sql`
+        select connection.xmin::text as credential_version,
+               connection.secret_id::text,
+               connection.status,
+               connection.last_error,
+               (
+                 select count(*)::int
+                 from public.audit_event audit
+                 where audit.entity_id = ${ACTOR_CONNECTION}::uuid
+                   and audit.action = 'connections.replaceKey'
+               ) as audit_count
+        from public.connection_account connection
+        where connection.connection_account_id = ${ACTOR_CONNECTION}::uuid
+      `);
+      expect(after).toEqual(before);
+    } finally {
+      if (previousComposioApiKey === undefined) {
+        delete process.env.COMPOSIO_API_KEY;
+      } else {
+        process.env.COMPOSIO_API_KEY = previousComposioApiKey;
+      }
+    }
+  });
+
+  it("bounds governed mutation row-lock waits and releases the Apollo lane", async () => {
+    const db = getDb()!;
+    const lockDatabase = namedDatabase("hrmny_test_rotation_row_lock_holder");
+    const mutationDatabase = namedDatabase(
+      "hrmny_test_rotation_row_lock_waiter",
+    );
+    const before = await readActorCredentialState(db);
+
+    let releaseRowLock!: () => void;
+    const rowLockGate = new Promise<void>((resolve) => {
+      releaseRowLock = resolve;
+    });
+    const rowLocked = vi.fn();
+    const holder = lockDatabase.transaction(async (tx) => {
+      await tx.execute(sql`
+        select connection_account_id
+        from public.connection_account
+        where connection_account_id = ${ACTOR_CONNECTION}::uuid
+        for update
+      `);
+      rowLocked();
+      await rowLockGate;
+    });
+    const holderSettled = holder.then(
+      () => ({ status: "fulfilled" as const }),
+      (reason: unknown) => ({ status: "rejected" as const, reason }),
+    );
+    let holderFailure: unknown;
+    try {
+      await vi.waitFor(() => expect(rowLocked).toHaveBeenCalledOnce(), {
+        timeout: 10_000,
+      });
+      const waitStartedAt = Date.now();
+      await expect(
+        replaceActorApolloKey(
+          mutationDatabase,
+          "synthetic-apollo-proof-key-a-must-time-out",
+        ),
+      ).rejects.toThrow("APOLLO_PROVIDER_MUTATION_BUSY");
+      expect(Date.now() - waitStartedAt).toBeLessThan(15_000);
+
+      const afterTimeout = await readActorCredentialState(db);
+      expect(afterTimeout).toEqual(before);
+    } finally {
+      releaseRowLock();
+      const settled = await holderSettled;
+      if (settled.status === "rejected") holderFailure = settled.reason;
+    }
+    if (holderFailure) throw holderFailure;
+
     await expect(
-      runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
-        leadSource: replacementSource,
-        authorizeActor: async () => true,
-        now: () => clock,
-      }),
-    ).resolves.toMatchObject({ status: "busy" });
-    expect(replacementSource.searchLeadsWithReceipt).not.toHaveBeenCalled();
+      replaceActorApolloKey(
+        mutationDatabase,
+        "synthetic-apollo-proof-key-a-after-row-timeout",
+      ),
+    ).resolves.toMatchObject({
+      connectionAccountId: ACTOR_CONNECTION,
+      status: "connected",
+    });
+  });
 
-    releaseDispatch();
-    await expect(run).resolves.toMatchObject({ status: "completed" });
-    expect(source.searchLeadsWithReceipt).toHaveBeenCalledOnce();
+  it("disconnects one owned Apollo connection atomically and audits it once", async () => {
+    const db = getDb()!;
+    try {
+      const secretId = await createDisconnectProofFixture(db);
+
+      await expect(
+        disconnectGovernedApiKeyConnection({
+          database: db,
+          employeeId: DISCONNECT_ACTOR,
+          connectionAccountId: DISCONNECT_CONNECTION,
+          expectedToolkit: "apollo",
+        }),
+      ).resolves.toMatchObject({
+        connectionAccountId: DISCONNECT_CONNECTION,
+        secretId,
+        status: "connected",
+      });
+      await expect(
+        disconnectGovernedApiKeyConnection({
+          database: db,
+          employeeId: DISCONNECT_ACTOR,
+          connectionAccountId: DISCONNECT_CONNECTION,
+          expectedToolkit: "apollo",
+        }),
+      ).resolves.toBeNull();
+
+      const proof = await readDisconnectProofState(db, secretId);
+      expect(proof).toEqual({
+        connections: 0,
+        active_secrets: 0,
+        original_secret: false,
+        tombstones: 1,
+        audits: 1,
+      });
+    } finally {
+      await cleanupDisconnectProofFixture(db);
+    }
+  });
+
+  it("rolls back a disconnect when its backend is lost after Vault tombstoning", async () => {
+    const db = getDb()!;
+    const mutationDatabase = namedDatabase(
+      "hrmny_test_disconnect_backend_loss",
+    );
+    try {
+      const secretId = await createDisconnectProofFixture(db);
+      const before = await readDisconnectProofState(db, secretId);
+
+      let terminatedBackendPid = 0;
+      const backendTerminated = vi.fn();
+      const failure = await disconnectGovernedApiKeyConnection({
+        database: mutationDatabase,
+        employeeId: DISCONNECT_ACTOR,
+        connectionAccountId: DISCONNECT_CONNECTION,
+        expectedToolkit: "apollo",
+        afterSecretTombstone: async (backendPid) => {
+          expect(backendPid).toBeGreaterThan(0);
+          terminatedBackendPid = backendPid;
+          const [terminated] = await db.execute<{ terminated: boolean }>(sql`
+            select pg_terminate_backend(${backendPid}) as terminated
+          `);
+          expect(terminated?.terminated).toBe(true);
+          backendTerminated();
+        },
+      }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(backendTerminated).toHaveBeenCalledOnce();
+      expect(terminatedBackendPid).toBeGreaterThan(0);
+      expect(failure).toBeInstanceOf(Error);
+      expect(
+        `${(failure as { code?: string }).code ?? ""} ${String(failure)}`,
+      ).toMatch(/57P01|CONNECTION_(?:CLOSED|DESTROYED)|terminat|connection/i);
+
+      const after = await readDisconnectProofState(db, secretId);
+      expect(after).toEqual(before);
+      expect(after).toEqual({
+        connections: 1,
+        active_secrets: 1,
+        original_secret: true,
+        tombstones: 0,
+        audits: 0,
+      });
+
+      await expect(
+        disconnectGovernedApiKeyConnection({
+          database: mutationDatabase,
+          employeeId: DISCONNECT_ACTOR,
+          connectionAccountId: DISCONNECT_CONNECTION,
+          expectedToolkit: "apollo",
+        }),
+      ).resolves.toMatchObject({ connectionAccountId: DISCONNECT_CONNECTION });
+    } finally {
+      await cleanupDisconnectProofFixture(db);
+    }
   });
 
   it("surfaces ambiguity and fences stale completion after provider-lock session loss", async () => {
-    let clock = new Date("2026-09-01T14:00:00.000Z");
+    const clock = new Date("2026-09-01T14:00:00.000Z");
     let releaseLostProvider!: () => void;
-    const lostSource = sourceWith(
-      () =>
-        new Promise<LeadSearchExecution>((resolve) => {
-          releaseLostProvider = () =>
-            resolve(execution("must-not-win-after-session-loss"));
-        }),
-    );
+    const lostProviderGate = new Promise<LeadSearchExecution>((resolve) => {
+      releaseLostProvider = () =>
+        resolve(execution("must-not-win-after-session-loss"));
+    });
+    const lostSource = sourceWith(() => lostProviderGate);
     const replacementSource = sourceWith(async () =>
       execution("apollo-session-loss-replacement"),
     );
+    let releaseReplacementAuthorization!: () => void;
+    const replacementAuthorizationGate = new Promise<void>((resolve) => {
+      releaseReplacementAuthorization = resolve;
+    });
     const pending = await searchApolloPeopleFree(
       {
         idempotencyKey: "41000000-0000-4000-8000-000000000036",
@@ -1561,74 +2416,325 @@ describe("Apollo queue PostgreSQL proof", () => {
       (value) => ({ status: "fulfilled" as const, value }),
       (reason: unknown) => ({ status: "rejected" as const, reason }),
     );
-    await vi.waitFor(() => expect(backendObserved).toHaveBeenCalledOnce());
-    await vi.waitFor(() =>
-      expect(lostSource.searchLeadsWithReceipt).toHaveBeenCalledOnce(),
-    );
-    expect(providerLockBackendPid).toBeGreaterThan(0);
+    let replacementSettled: Promise<unknown> | undefined;
+    try {
+      await vi.waitFor(() => expect(backendObserved).toHaveBeenCalledOnce());
+      await vi.waitFor(() =>
+        expect(lostSource.searchLeadsWithReceipt).toHaveBeenCalledOnce(),
+      );
+      expect(providerLockBackendPid).toBeGreaterThan(0);
 
-    const [terminated] = await db.execute<{ terminated: boolean }>(sql`
-      select pg_terminate_backend(${providerLockBackendPid}) as terminated
-    `);
-    expect(terminated?.terminated).toBe(true);
+      const [terminated] = await db.execute<{ terminated: boolean }>(sql`
+        select pg_terminate_backend(${providerLockBackendPid}) as terminated
+      `);
+      expect(terminated?.terminated).toBe(true);
+      await vi.waitFor(
+        async () => {
+          const [backend] = await db.execute<{ active: boolean }>(sql`
+            select exists (
+              select 1 from pg_stat_activity
+              where pid = ${providerLockBackendPid}
+            ) as active
+          `);
+          expect(backend?.active).toBe(false);
+        },
+        { timeout: 10_000, interval: 50 },
+      );
 
-    const beforeLease = new Date(clock.getTime() + 9 * 60_000);
-    await expect(
-      runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
-        leadSource: replacementSource,
-        authorizeActor: async () => true,
-        now: () => beforeLease,
-      }),
-    ).resolves.toMatchObject({ status: "busy" });
-    expect(replacementSource.searchLeadsWithReceipt).not.toHaveBeenCalled();
+      const mutationDatabase = namedDatabase(
+        "hrmny_test_ambiguous_provider_rotation",
+      );
+      const beforeMutation = await readActorCredentialState(db);
+      await expect(
+        replaceActorApolloKey(
+          mutationDatabase,
+          "synthetic-apollo-proof-key-a-must-wait-for-recovery",
+        ),
+      ).rejects.toThrow("APOLLO_PROVIDER_MUTATION_BUSY");
+      const afterMutation = await readActorCredentialState(db);
+      expect(afterMutation).toEqual(beforeMutation);
 
-    clock = new Date(clock.getTime() + 10 * 60_000 + 1);
-    let releaseReplacementAuthorization!: () => void;
-    const replacementPaused = vi.fn();
-    const replacementRun = runApolloPeopleSearchQueuedJob(
-      job!.scheduled_job_id,
-      {
-        leadSource: replacementSource,
-        authorizeActor: async () => true,
-        now: () => clock,
-        beforeProviderDispatchAuthorization: () =>
-          new Promise<void>((resolve) => {
+      const beforeLease = new Date(clock.getTime() + 9 * 60_000);
+      await expect(
+        runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+          leadSource: replacementSource,
+          authorizeActor: async () => true,
+          now: () => beforeLease,
+        }),
+      ).resolves.toMatchObject({ status: "busy" });
+      expect(replacementSource.searchLeadsWithReceipt).not.toHaveBeenCalled();
+
+      await db.execute(sql`
+        update public.integration_inbox
+        set attempt_lease_expires_at = statement_timestamp() - interval '1 millisecond'
+        where integration_inbox_id = ${pending.receiptId}::uuid
+      `);
+      await db.execute(sql`
+        update public.scheduled_job
+        set lease_expires_at = statement_timestamp() - interval '1 millisecond'
+        where scheduled_job_id = ${job!.scheduled_job_id}::uuid
+      `);
+      const replacementPaused = vi.fn();
+      const replacementRun = runApolloPeopleSearchQueuedJob(
+        job!.scheduled_job_id,
+        {
+          leadSource: replacementSource,
+          authorizeActor: async () => true,
+          now: () => clock,
+          beforeProviderDispatchAuthorization: async () => {
             replacementPaused();
-            releaseReplacementAuthorization = resolve;
-          }),
-      },
+            await replacementAuthorizationGate;
+          },
+        },
+      );
+      replacementSettled = replacementRun.then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason: unknown) => ({ status: "rejected" as const, reason }),
+      );
+      await vi.waitFor(() => expect(replacementPaused).toHaveBeenCalledOnce());
+      await expect(
+        getApolloPeopleSearchStatus({
+          idempotencyKey: pending.idempotencyKey,
+          actorEmployeeId: ACTOR,
+        }),
+      ).resolves.toMatchObject({
+        status: "processing",
+        providerAttemptedPreviously: true,
+        providerMaySettle: true,
+      });
+      expect(replacementSource.searchLeadsWithReceipt).not.toHaveBeenCalled();
+
+      releaseReplacementAuthorization();
+      await expect(replacementRun).resolves.toMatchObject({
+        status: "completed",
+      });
+      releaseLostProvider();
+      await lostSettled;
+
+      await expect(
+        getApolloPeopleSearchStatus({
+          idempotencyKey: pending.idempotencyKey,
+          actorEmployeeId: ACTOR,
+        }),
+      ).resolves.toMatchObject({
+        status: "completed",
+        providerAttemptedPreviously: true,
+        providerMaySettle: true,
+        candidates: [{ externalId: "apollo-session-loss-replacement" }],
+      });
+    } finally {
+      releaseReplacementAuthorization();
+      releaseLostProvider();
+      await Promise.allSettled([
+        lostSettled,
+        ...(replacementSettled ? [replacementSettled] : []),
+      ]);
+    }
+  });
+
+  it("keeps revoked in-flight work mutation-fenced after provider backend loss", async () => {
+    const db = getDb()!;
+    const mutationDatabase = namedDatabase(
+      "hrmny_test_revoked_provider_backend_loss",
     );
-    await vi.waitFor(() => expect(replacementPaused).toHaveBeenCalledOnce());
-    await expect(
-      getApolloPeopleSearchStatus({
-        idempotencyKey: pending.idempotencyKey,
-        actorEmployeeId: ACTOR,
-      }),
-    ).resolves.toMatchObject({
-      status: "processing",
-      providerAttemptedPreviously: true,
-      providerMaySettle: true,
+    let releaseProvider: () => void = () => undefined;
+    const providerGate = new Promise<LeadSearchExecution>((resolve) => {
+      releaseProvider = () =>
+        resolve(execution("must-not-win-after-revoked-backend-loss"));
     });
-    expect(replacementSource.searchLeadsWithReceipt).not.toHaveBeenCalled();
+    const source = sourceWith(() => providerGate);
+    const recoverySource = sourceWith(async () =>
+      execution("must-not-dispatch-revoked-recovery"),
+    );
+    let providerBackendPid = 0;
+    const backendObserved = vi.fn();
+    let runSettled: Promise<unknown> | undefined;
+    try {
+      const disconnectSecretId = await createDisconnectProofFixture(db);
+      const pending = await searchApolloPeopleFree(
+        {
+          idempotencyKey: "41000000-0000-4000-8000-000000000044",
+          actorEmployeeId: ACTOR,
+          query: "revoked provider backend loss",
+        },
+        { leadSource: source },
+      );
+      const [job] = await db.execute<{ scheduled_job_id: string }>(sql`
+        select scheduled_job_id
+        from public.scheduled_job
+        where integration_inbox_id = ${pending.receiptId}::uuid
+      `);
+      const run = runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+        leadSource: source,
+        authorizeActor: async () => true,
+        afterProviderLockAcquired: async (backendPid) => {
+          providerBackendPid = backendPid;
+          backendObserved();
+        },
+      });
+      runSettled = run.then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason: unknown) => ({ status: "rejected" as const, reason }),
+      );
+      await vi.waitFor(() => expect(backendObserved).toHaveBeenCalledOnce());
+      await vi.waitFor(() =>
+        expect(source.searchLeadsWithReceipt).toHaveBeenCalledOnce(),
+      );
 
-    releaseReplacementAuthorization();
-    await expect(replacementRun).resolves.toMatchObject({
-      status: "completed",
-    });
-    releaseLostProvider();
-    await lostSettled;
+      await expect(
+        revokeApolloPeopleSearch({
+          idempotencyKey: pending.idempotencyKey,
+          actorEmployeeId: ACTOR,
+        }),
+      ).resolves.toMatchObject({
+        status: "revoked",
+        reason: "APOLLO_SEARCH_REVOKED_PROVIDER_MAY_SETTLE",
+        providerMaySettle: true,
+      });
+      const [revokedFence] = await db.execute<{
+        job_status: string;
+        dispatch_state: string;
+        ever_authorized: boolean;
+        outcome_ambiguous: boolean;
+        may_settle: boolean;
+      }>(sql`
+        select job.status as job_status,
+               inbox.result ->> 'providerDispatchState' as dispatch_state,
+               (inbox.result ->> 'providerDispatchEverAuthorized')::boolean
+                 as ever_authorized,
+               (inbox.result ->> 'providerOutcomeAmbiguous')::boolean
+                 as outcome_ambiguous,
+               (inbox.result ->> 'providerMaySettle')::boolean as may_settle
+        from public.integration_inbox inbox
+        join public.scheduled_job job
+          on job.integration_inbox_id = inbox.integration_inbox_id
+        where inbox.integration_inbox_id = ${pending.receiptId}::uuid
+      `);
+      expect(revokedFence).toEqual({
+        job_status: "running",
+        dispatch_state: "ambiguous",
+        ever_authorized: true,
+        outcome_ambiguous: true,
+        may_settle: true,
+      });
 
-    await expect(
-      getApolloPeopleSearchStatus({
-        idempotencyKey: pending.idempotencyKey,
-        actorEmployeeId: ACTOR,
-      }),
-    ).resolves.toMatchObject({
-      status: "completed",
-      providerAttemptedPreviously: true,
-      providerMaySettle: true,
-      candidates: [{ externalId: "apollo-session-loss-replacement" }],
-    });
+      const [terminated] = await db.execute<{ terminated: boolean }>(sql`
+        select pg_terminate_backend(${providerBackendPid}) as terminated
+      `);
+      expect(terminated?.terminated).toBe(true);
+      await vi.waitFor(
+        async () => {
+          const [backend] = await db.execute<{ active: boolean }>(sql`
+            select exists (
+              select 1 from pg_stat_activity where pid = ${providerBackendPid}
+            ) as active
+          `);
+          expect(backend?.active).toBe(false);
+        },
+        { timeout: 10_000, interval: 50 },
+      );
+
+      const actorBefore = await readActorCredentialState(db);
+      const disconnectBefore = await readDisconnectProofState(
+        db,
+        disconnectSecretId,
+      );
+      await expect(
+        replaceActorApolloKey(
+          mutationDatabase,
+          "synthetic-apollo-proof-key-must-wait-after-revoke",
+        ),
+      ).rejects.toThrow("APOLLO_PROVIDER_MUTATION_BUSY");
+      await expect(
+        disconnectGovernedApiKeyConnection({
+          database: mutationDatabase,
+          employeeId: DISCONNECT_ACTOR,
+          connectionAccountId: DISCONNECT_CONNECTION,
+          expectedToolkit: "apollo",
+        }),
+      ).rejects.toThrow("APOLLO_PROVIDER_MUTATION_BUSY");
+      expect(await readActorCredentialState(db)).toEqual(actorBefore);
+      expect(await readDisconnectProofState(db, disconnectSecretId)).toEqual(
+        disconnectBefore,
+      );
+
+      await db.execute(sql`
+        update public.integration_inbox
+        set result = result
+              - 'providerDispatchState'
+              - 'providerOutcomeAmbiguous'
+        where integration_inbox_id = ${pending.receiptId}::uuid
+          and result ->> 'providerMaySettle' = 'true'
+      `);
+      await expect(
+        replaceActorApolloKey(
+          mutationDatabase,
+          "synthetic-apollo-proof-key-must-wait-for-legacy-receipt",
+        ),
+      ).rejects.toThrow("APOLLO_PROVIDER_MUTATION_BUSY");
+      await expect(
+        disconnectGovernedApiKeyConnection({
+          database: mutationDatabase,
+          employeeId: DISCONNECT_ACTOR,
+          connectionAccountId: DISCONNECT_CONNECTION,
+          expectedToolkit: "apollo",
+        }),
+      ).rejects.toThrow("APOLLO_PROVIDER_MUTATION_BUSY");
+      expect(await readActorCredentialState(db)).toEqual(actorBefore);
+      expect(await readDisconnectProofState(db, disconnectSecretId)).toEqual(
+        disconnectBefore,
+      );
+
+      await db.execute(sql`
+        update public.scheduled_job
+        set lease_expires_at = statement_timestamp() - interval '1 millisecond'
+        where scheduled_job_id = ${job!.scheduled_job_id}::uuid
+      `);
+      await expect(
+        runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+          leadSource: recoverySource,
+          authorizeActor: async () => true,
+          now: () => new Date("2000-09-01T12:00:00.000Z"),
+        }),
+      ).resolves.toMatchObject({ status: "revoked" });
+      expect(recoverySource.searchLeadsWithReceipt).not.toHaveBeenCalled();
+      const [releasedJob] = await db.execute<{ status: string }>(sql`
+        select status from public.scheduled_job
+        where scheduled_job_id = ${job!.scheduled_job_id}::uuid
+      `);
+      expect(releasedJob?.status).toBe("failed");
+
+      await expect(
+        replaceActorApolloKey(
+          mutationDatabase,
+          "synthetic-apollo-proof-key-after-revoked-recovery",
+        ),
+      ).resolves.toMatchObject({
+        connectionAccountId: ACTOR_CONNECTION,
+        status: "connected",
+      });
+      await expect(
+        disconnectGovernedApiKeyConnection({
+          database: mutationDatabase,
+          employeeId: DISCONNECT_ACTOR,
+          connectionAccountId: DISCONNECT_CONNECTION,
+          expectedToolkit: "apollo",
+        }),
+      ).resolves.toMatchObject({
+        connectionAccountId: DISCONNECT_CONNECTION,
+      });
+      expect(await readDisconnectProofState(db, disconnectSecretId)).toEqual({
+        connections: 0,
+        active_secrets: 0,
+        original_secret: false,
+        tombstones: 1,
+        audits: 1,
+      });
+    } finally {
+      releaseProvider();
+      await Promise.allSettled(runSettled ? [runSettled] : []);
+      await cleanupDisconnectProofFixture(db);
+    }
   });
 
   it("retains provider-attempt history when a retry is cancelled", async () => {
@@ -1798,6 +2904,20 @@ describe("Apollo queue PostgreSQL proof", () => {
       providerAttemptedPreviously: true,
       providerMaySettle: true,
     });
+    const [durableAmbiguity] = await db.execute<{
+      dispatch_state: string;
+      outcome_ambiguous: boolean;
+    }>(sql`
+      select result ->> 'providerDispatchState' as dispatch_state,
+             (result ->> 'providerOutcomeAmbiguous')::boolean
+               as outcome_ambiguous
+      from public.integration_inbox
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+    expect(durableAmbiguity).toEqual({
+      dispatch_state: "ambiguous",
+      outcome_ambiguous: true,
+    });
   });
 
   it("preserves prior provider ambiguity when the actor loses authorization", async () => {
@@ -1916,7 +3036,7 @@ describe("Apollo queue PostgreSQL proof", () => {
     });
   });
 
-  it("prevents an expired stale worker from dispatching after its replacement", async () => {
+  it("uses the database clock before replacing an expired stale worker", async () => {
     let clock = new Date("2026-09-01T12:00:00.000Z");
     const staleSource = sourceWith(async () =>
       execution("must-not-run-stale-dispatch"),
@@ -1958,7 +3078,26 @@ describe("Apollo queue PostgreSQL proof", () => {
       expect(staleAuthorizationPaused).toHaveBeenCalledOnce(),
     );
 
-    clock = new Date(clock.getTime() + 10 * 60_000 + 1);
+    clock = new Date("2099-09-01T12:00:00.000Z");
+    await expect(
+      runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+        leadSource: replacementSource,
+        authorizeActor: async () => true,
+        now: () => clock,
+      }),
+    ).resolves.toMatchObject({ status: "busy" });
+    expect(replacementSource.searchLeadsWithReceipt).not.toHaveBeenCalled();
+
+    await db.execute(sql`
+      update public.integration_inbox
+      set attempt_lease_expires_at = statement_timestamp() - interval '1 millisecond'
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+    await db.execute(sql`
+      update public.scheduled_job
+      set lease_expires_at = statement_timestamp() - interval '1 millisecond'
+      where scheduled_job_id = ${job!.scheduled_job_id}::uuid
+    `);
     const replacementRun = runApolloPeopleSearchQueuedJob(
       job!.scheduled_job_id,
       {
@@ -2000,25 +3139,24 @@ describe("Apollo queue PostgreSQL proof", () => {
       where integration_inbox_id = ${pending.receiptId}::uuid
     `);
     const staleToken = "43000000-0000-4000-8000-000000000025";
-    const leaseExpiresAt = new Date(now.getTime() + 10 * 60_000);
     await db.execute(sql`
       update public.integration_inbox
       set status = 'processing', attempts = 1,
           result = jsonb_build_object('bridgeStatus', 'processing'),
           attempt_token = ${staleToken}::uuid,
-          attempt_lease_expires_at = ${leaseExpiresAt.toISOString()}::timestamptz,
+          attempt_lease_expires_at = statement_timestamp() - interval '1 millisecond',
           state_version = state_version + 1,
-          updated_at = ${now.toISOString()}::timestamptz
+          updated_at = statement_timestamp() - interval '1 second'
       where integration_inbox_id = ${pending.receiptId}::uuid
     `);
     await db.execute(sql`
       update public.scheduled_job
       set status = 'running', attempts = 1,
-          locked_at = ${now.toISOString()}::timestamptz,
+          locked_at = statement_timestamp() - interval '11 minutes',
           attempt_token = ${staleToken}::uuid,
-          lease_expires_at = ${leaseExpiresAt.toISOString()}::timestamptz,
+          lease_expires_at = statement_timestamp() - interval '1 millisecond',
           state_version = state_version + 1,
-          updated_at = ${now.toISOString()}::timestamptz
+          updated_at = statement_timestamp() - interval '1 second'
       where scheduled_job_id = ${job!.scheduled_job_id}::uuid
     `);
 
@@ -2050,7 +3188,7 @@ describe("Apollo queue PostgreSQL proof", () => {
       runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
         leadSource: source,
         authorizeActor: async () => true,
-        now: () => new Date(leaseExpiresAt.getTime() + 1),
+        now: () => new Date("2099-09-01T11:00:00.000Z"),
       }),
     ).resolves.toMatchObject({ status: "revoked" });
     expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
@@ -2070,6 +3208,104 @@ describe("Apollo queue PostgreSQL proof", () => {
       attempt_token: null,
       lease_expires_at: null,
     });
+  });
+
+  it("fails closed when a legacy running job and receipt have no leases", async () => {
+    const source = sourceWith(async () =>
+      execution("must-not-run-without-durable-lease"),
+    );
+    const mutationDatabase = namedDatabase("hrmny_test_null_lease_fence");
+    const db = getDb()!;
+    const disconnectSecretId = await createDisconnectProofFixture(db);
+    try {
+      const pending = await searchApolloPeopleFree(
+        {
+          idempotencyKey: "41000000-0000-4000-8000-000000000043",
+          actorEmployeeId: ACTOR,
+          query: "legacy null lease",
+        },
+        { leadSource: source },
+      );
+      const [job] = await db.execute<{ scheduled_job_id: string }>(sql`
+      select scheduled_job_id
+      from public.scheduled_job
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+      const staleToken = "43000000-0000-4000-8000-000000000043";
+      await db.execute(sql`
+      update public.integration_inbox
+      set status = 'processing', attempts = 1,
+          result = jsonb_build_object('bridgeStatus', 'processing'),
+          attempt_token = ${staleToken}::uuid,
+          attempt_lease_expires_at = null,
+          state_version = state_version + 1
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+      await db.execute(sql`
+      update public.scheduled_job
+      set status = 'running', attempts = 1,
+          locked_at = statement_timestamp() - interval '1 day',
+          attempt_token = ${staleToken}::uuid,
+          lease_expires_at = null,
+          state_version = state_version + 1
+      where scheduled_job_id = ${job!.scheduled_job_id}::uuid
+    `);
+
+      await expect(
+        runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+          leadSource: source,
+          authorizeActor: async () => true,
+          now: () => new Date("2099-09-01T12:00:00.000Z"),
+        }),
+      ).resolves.toMatchObject({ status: "busy" });
+      expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+      const [unchanged] = await db.execute<{
+        job_status: string;
+        job_token: string;
+        receipt_status: string;
+        receipt_token: string;
+      }>(sql`
+      select job.status as job_status,
+             job.attempt_token::text as job_token,
+             inbox.status as receipt_status,
+             inbox.attempt_token::text as receipt_token
+      from public.scheduled_job job
+      join public.integration_inbox inbox
+        on inbox.integration_inbox_id = job.integration_inbox_id
+      where job.scheduled_job_id = ${job!.scheduled_job_id}::uuid
+    `);
+      expect(unchanged).toEqual({
+        job_status: "running",
+        job_token: staleToken,
+        receipt_status: "processing",
+        receipt_token: staleToken,
+      });
+      const actorBefore = await readActorCredentialState(db);
+      const disconnectBefore = await readDisconnectProofState(
+        db,
+        disconnectSecretId,
+      );
+      await expect(
+        replaceActorApolloKey(
+          mutationDatabase,
+          "synthetic-apollo-proof-key-must-wait-for-null-lease",
+        ),
+      ).rejects.toThrow("APOLLO_PROVIDER_MUTATION_BUSY");
+      await expect(
+        disconnectGovernedApiKeyConnection({
+          database: mutationDatabase,
+          employeeId: DISCONNECT_ACTOR,
+          connectionAccountId: DISCONNECT_CONNECTION,
+          expectedToolkit: "apollo",
+        }),
+      ).rejects.toThrow("APOLLO_PROVIDER_MUTATION_BUSY");
+      expect(await readActorCredentialState(db)).toEqual(actorBefore);
+      expect(await readDisconnectProofState(db, disconnectSecretId)).toEqual(
+        disconnectBefore,
+      );
+    } finally {
+      await cleanupDisconnectProofFixture(db);
+    }
   });
 
   it("rejects completion from an expired attempt after a replacement worker claims", async () => {

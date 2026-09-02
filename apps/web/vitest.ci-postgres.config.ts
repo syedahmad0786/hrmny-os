@@ -7,6 +7,7 @@ export default defineConfig({
     include: ["src/server/sales-os/apollo-search-postgres.test.ts"],
     setupFiles: ["./src/test/ci-postgres-setup.ts"],
     fileParallelism: false,
+    testTimeout: 30_000,
   },
   resolve: {
     alias: {
