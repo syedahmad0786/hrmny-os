@@ -6,7 +6,8 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
-`d1ab23c36ebbde5320967f0d806251193919b1c6`; base
+`d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`; base
 `8b672fd4e1ee2671d6919011e29b91886d706278`.
 
 ## `ADR-HRMNY-20260902-APOLLO-013` — serialize free People Search in PostgreSQL
@@ -24,7 +25,7 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Trade-offs: a bounded lock-only transaction remains open during the request;
   session loss can make the provider outcome ambiguous; paid Match is not
   covered.
-- Evidence: `EVID-HRMNY-20260902-APOLLO-021/022/023`.
+- Evidence: `EVID-HRMNY-20260902-APOLLO-022/023/024`.
 - Confidence/freshness: high for reviewed code and local deterministic proof on
   2026-09-02; hosted PostgreSQL execution pending.
 - Affected components: scheduled jobs, cron, Inngest, Apollo receipt state,
@@ -54,9 +55,9 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
   Direct Vault-only rotation is detected, but the governed connection workflow
   remains required for audit and status reconciliation. A tiny
   database-to-provider TOCTOU remains unavoidable.
-- Evidence: `EVID-HRMNY-20260902-APOLLO-021/022/023`,
-  `FAIL-HRMNY-20260902-APOLLO-022`, and the forced rotation, revocation, and
-  stale-401 cases.
+- Evidence: `EVID-HRMNY-20260902-APOLLO-022/023/024`,
+  `FAIL-HRMNY-20260902-APOLLO-022/023`, and the forced rotation, revocation,
+  and stale-401 cases.
 - Confidence/freshness: high for code and deterministic tests; production
   credential-rotation operations are not accepted.
 - Affected components: employee authorization, connection accounts, Vault
@@ -67,9 +68,9 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
   actor/connection denial and rotation tests pass; never weaken action-time
   checks to recover availability.
 
-## `ADR-HRMNY-20260902-APOLLO-016` — use the permitted Vault view as the rotation fence
+## `ADR-HRMNY-20260902-APOLLO-016` — rejected proposal: lock the permitted Vault view
 
-- Decision/finding: read and lock the exact row through
+- Decision/finding: the historical proposal was to read and lock the exact row through
   `vault.decrypted_secrets`, and compare its `updated_at` value as the
   in-place-rotation revision. Do not grant the application role direct access
   to `vault.secrets`.
@@ -80,22 +81,69 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
   `vault.secrets`; remove the rotation fence; compare only the stable secret
   ID; introduce an additional security-definer function before trying the
   supported view.
-- Trade-offs: timestamp equality is a technical revision marker, not a durable
-  business version. Hosted PostgreSQL must still prove that `FOR SHARE` through
-  the simple view locks the underlying row as intended.
-- Evidence: push run `33552684634`, database job `100005748422`; pull-request
-  run `33552691805`, database job `100005773724`; official Supabase Vault
-  repository/extension SQL; correction `d1ab23c`.
-- Confidence/freshness: high for the permission failure and official update
-  behavior; pending exact-head hosted lock execution.
+- Trade-offs: timestamp equality remains useful as a technical revision marker,
+  but hosted PostgreSQL proved that the runtime role cannot request `FOR SHARE`
+  through this view. The proposal is retained as rejected history rather than
+  rewritten as if it had worked.
+- Evidence: push run `33554283761`, database job `100011168058`; pull-request
+  run `33554289195`, database job `100011185659`; official Supabase Vault
+  repository/extension SQL; rejected correction `d1ab23c`.
+- Confidence/freshness: high for the rejection on 2026-09-02 from identical
+  hosted PostgreSQL failures.
 - Affected components: owned key resolution, final Apollo dispatch, stale-auth
   reconciliation, Vault permissions, and PostgreSQL acceptance.
-- Status: implemented and locally verified; hosted exact-head proof pending.
-- Supersedes/superseded-by: corrects the direct-table implementation detail in
+- Status: rejected; never operationally accepted.
+- Supersedes/superseded-by: corrected the direct-table detail in
+  `ADR-HRMNY-20260902-APOLLO-014`; superseded by
+  `ADR-HRMNY-20260902-APOLLO-017`.
+- Rollback/correction: do not restore either direct Vault-table access or a
+  Vault-view row lock. Keep this record as failure provenance.
+
+## `ADR-HRMNY-20260902-APOLLO-017` — serialize supported credential mutations without a privileged helper
+
+- Decision/finding: the runtime role must not rely on row-lock privileges for
+  Vault relations. Final authorization and stale-auth reconciliation read the
+  exact owned connection and Vault revision in one statement while locking
+  only `connection_account`. Governed Apollo save and disconnect acquire the
+  same transaction advisory lane as provider dispatch, lock the exact owned
+  connection, and atomically update or tombstone the Vault secret with the
+  connection and audit receipt. The mutation fence covers canonical
+  authorized/ambiguous states, legacy `providerMaySettle`, and a running
+  processing pair with either required lease missing. Claims and final
+  authorization use database timestamps and paired lease values; null safety
+  leases fail closed.
+- Reason: hosted CI proved both `vault.secrets` and row locking through
+  `vault.decrypted_secrets` exceed the runtime grant. Supabase Vault exposes
+  security-definer create/update functions but no delete function, while the
+  operational database can safely serialize supported mutations without a new
+  privileged helper.
+- Alternatives considered: broaden Vault grants; add a security-definer helper;
+  split Vault, connection, and audit writes across transactions; keep direct
+  Vault-only rotation as supported; remove action-time revision checks.
+- Trade-offs: supported rotation/disconnect can return a bounded five-second
+  busy result while provider state is unsettled. Disconnect retains a random
+  tombstone instead of deleting the Vault row. Missing projections, corrupt
+  null leases, and unsupported privileged Vault-only edits require quiescence
+  and operator correction rather than optimistic continuation.
+- Evidence: source commit
+  `8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`; push run `33554283761`,
+  database job `100011168058`; pull-request run `33554289195`, database job
+  `100011185659`; official Supabase Vault extension SQL; the 40-case
+  PostgreSQL proof; and three independent final reviews with no remaining
+  P0–P2 finding.
+- Confidence/freshness: high for exact source and local deterministic proof on
+  2026-09-02; exact-head hosted PostgreSQL execution is pending.
+- Affected components: connection settings, Vault access, Apollo dispatch,
+  receipt settlement, leases, stale 401/403 reconciliation, tRPC connection
+  status, and recovery.
+- Status: implemented and locally verified; hosted and operational acceptance
+  remain open.
+- Supersedes/superseded-by: supersedes
+  `ADR-HRMNY-20260902-APOLLO-016` and corrects the implementation detail in
   `ADR-HRMNY-20260902-APOLLO-014`; none.
-- Rollback/correction: leave the lane closed if the view cannot carry the lock;
-  then add a narrowly reviewed security-definer helper rather than granting
-  broad Vault-table access.
+- Rollback/correction: keep Apollo closed, preserve receipts and tombstones,
+  revert the unmerged source commit, or correct forward under a new ADR. Never
+  repair a runtime failure by granting broad Vault relation access.
 
 ## `ADR-HRMNY-20260902-APOLLO-015` — require a quiesced migration cutover
 

@@ -7,8 +7,9 @@
 - Branch: `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`
 - Stacked base: `8b672fd4e1ee2671d6919011e29b91886d706278`
 - Implementation commits: `fc2d288074bc44624abbb9e701b5c5ffa7adb775`,
-  `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, and
-  `d1ab23c36ebbde5320967f0d806251193919b1c6`
+  `900bc0e548061b5b6872c3552b18ff8d1c309a6b`,
+  `d1ab23c36ebbde5320967f0d806251193919b1c6`, and no-helper correction
+  `8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`
 - Pull request: <https://github.com/syedahmad0786/hrmny-os/pull/246>
 - Scope: free Apollo People Search scheduling, final dispatch authorization,
   credential fencing, receipts, migration `0076`, and operator status copy
@@ -23,14 +24,18 @@ call does not retain ordinary application row locks.
 
 Immediately before dispatch, HRMNY revalidates the exact active employee,
 Sales role, receipt owner, connected staff-scoped Apollo account, Vault secret
-identity, connection-row version, and Vault update revision. An in-place Vault-only
-rotation changes the permitted `vault.decrypted_secrets.updated_at` revision
-and therefore invalidates both final dispatch and stale-auth-error
-reconciliation without requiring the secret ID to change. Revocation and
-terminalization share a receipt-before-job lock order. A worker that loses its
-database session after dispatch authorization records an ambiguous durable
-outcome; later success, role loss, or attempt-limit terminalization does not
-erase that warning.
+identity, connection-row version, and Vault update revision in one database
+snapshot. It locks only the operational `connection_account` row and reads the
+permitted Vault projection without requesting row-lock privileges on any Vault
+relation. Supported key rotation and disconnect use the same Apollo provider
+lane, atomically update or tombstone the Vault secret with the connection and
+audit receipt, and refuse to cross an authorized, ambiguous, legacy
+may-settle, or unleased-processing dispatch. Direct privileged Vault-only edits
+remain unsupported and require quiescence. Revocation and terminalization
+share a receipt-before-job lock order. A worker that loses its database session
+after dispatch authorization records an ambiguous durable outcome; later
+success, role loss, or attempt-limit terminalization does not erase that
+warning.
 
 Migration `0076` assigns only `apollo_people_search` the reserved
 `provider:apollo` key, clears that key when a job changes to another kind,
@@ -47,31 +52,35 @@ accounting write, or UAT occurred in this phase.
 
 ## Acceptance state
 
-| State                | Result                                                          |
-| -------------------- | --------------------------------------------------------------- |
-| planned              | yes                                                             |
-| documented           | yes                                                             |
-| authorized           | source and synthetic local testing only                         |
-| configured           | code and migration prepared; production unchanged               |
-| tested               | local deterministic suites pass; corrected hosted proof pending |
-| deployed             | initial previews only; corrected preview pending; production no |
-| provider accepted    | no                                                              |
-| destination verified | no                                                              |
-| recovery verified    | no                                                              |
-| user accepted        | no                                                              |
-| production accepted  | no                                                              |
+| State                | Result                                                            |
+| -------------------- | ----------------------------------------------------------------- |
+| planned              | yes                                                               |
+| documented           | yes                                                               |
+| authorized           | source and synthetic local testing only                           |
+| configured           | code and migration prepared; production unchanged                 |
+| tested               | exact-source local suites pass; corrected hosted proof pending    |
+| deployed             | prior previews only; exact-current preview pending; production no |
+| provider accepted    | no                                                                |
+| destination verified | no                                                                |
+| recovery verified    | no                                                                |
+| user accepted        | no                                                                |
+| production accepted  | no                                                                |
 
-The corrected local proof passed repository-wide lint, type checking, 962
-deterministic tests, and both production builds. The PostgreSQL
-concurrency/runtime file now has 29 cases and requires the hosted CI database.
+The exact-current local proof passed repository-wide lint, type checking, 964
+deterministic tests, and both production builds; the web build exposes 86
+routes. The PostgreSQL concurrency/runtime file now has 40 cases and requires
+the hosted CI database.
 The first hosted matrices at `afc708a` failed one stale busy-window assertion
 whose early exit retained the test lock, plus one stale browser-copy assertion.
 The next matrices at `d1a137d` proved the browser correction but exposed that
-the runtime role cannot query `vault.secrets` directly. Commit `d1ab23c` now
-uses the already-permitted decrypted view and its official `updated_at`
-revision without expanding Vault privileges. Every failure is permanently
-recorded; fresh exact-head hosted PostgreSQL proof remains pending. Passing CI
-or a preview will still not grant
+the runtime role cannot query `vault.secrets` directly. The third matrices at
+`65748a1` then proved the runtime also cannot request `FOR SHARE` through
+`vault.decrypted_secrets`. Commit `8bce512` removes Vault row locking, moves
+supported credential mutations under the same Apollo lane, preserves atomic
+Vault/connection/audit behavior, uses database-authoritative lease clocks, and
+fails closed on missing Vault projections and unknown unleased processing.
+Every failure is permanently recorded; fresh exact-head hosted PostgreSQL
+proof remains pending. Passing CI or a preview will still not grant
 provider, migration, deployment, recovery, user, or production acceptance.
 
 ## Reviewed primary sources

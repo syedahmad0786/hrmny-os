@@ -6,10 +6,11 @@ tool/model `Codex agent (exact model ID not exposed)`; branch
 `ahmadbukhari097/codex/phase-4f-apollo-provider-slot-20260901`; implementation
 commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 `900bc0e548061b5b6872c3552b18ff8d1c309a6b`, plus correction
-`d1ab23c36ebbde5320967f0d806251193919b1c6`; base
+`d1ab23c36ebbde5320967f0d806251193919b1c6` and no-helper correction
+`8bce5127ef4c817789a3fe8ad3e10677bd9a9c82`; base
 `8b672fd4e1ee2671d6919011e29b91886d706278`.
 
-## `EVID-HRMNY-20260902-APOLLO-021` — deterministic local source gate
+## `EVID-HRMNY-20260902-APOLLO-021` — historical local source gate, invalidated
 
 - Decision/finding: root lint passed seven tasks; root typecheck passed seven
   tasks; root tests passed 962 cases (web 728, database 38, integrations 111,
@@ -29,9 +30,10 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Confidence/freshness: high on 2026-09-02.
 - Affected components: all implementation files in commits `fc2d288`,
   `900bc0e`, and `d1ab23c`.
-- Status: local source gate accepted; hosted database gate pending.
-- Supersedes/superseded-by: will be supplemented, not replaced, by hosted
-  evidence.
+- Status: historical receipt invalidated by source commit `8bce512`; it is not
+  exact-current acceptance.
+- Supersedes/superseded-by: superseded by
+  `EVID-HRMNY-20260902-APOLLO-024` for the current source.
 - Rollback/correction: any source change invalidates this exact-head receipt and
   requires the full gate again.
 
@@ -42,10 +44,11 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
   rotation, stale 401 handling, migration exactness, paid-operation leakage,
   and UI ambiguity. They found an in-place Vault-rotation fence gap and two
   terminal paths that could drop prior ambiguity. Commit `900bc0e` added the
-  Vault rotation fence and preserved ambiguity. Its final logic re-audit found
-  no remaining P0/P1/P2 defect, while later hosted execution separately found
-  the unsupported direct-table permission assumption now corrected by
-  `d1ab23c`.
+  Vault rotation fence and preserved ambiguity. Hosted execution then found
+  unsupported direct-table and view-lock permission assumptions. Review of the
+  no-helper redesign found one unleased-processing mutation-fence gap; commit
+  `8bce512` corrected it and the final exact-source re-review found no remaining
+  concrete P0/P1/P2 defect.
 - Reason: concurrency and external-effect boundaries require adversarial races,
   not only line coverage.
 - Alternatives considered: self-review only; allow reviewers to provision a
@@ -55,8 +58,9 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 - Evidence: forced `pg_terminate_backend` test, concurrent independent-client
   claim tests, in-flight revoke case, exact actor/connection/Vault loss cases,
   stale 401 after Vault-only rotation, role-loss and attempt-limit ambiguity
-  preservation, Search-to-Match migration transition proof, and final
-  SQL/hash/security re-review.
+  preservation, canonical and legacy mutation fences, null-lease fail-closed
+  proof, missing-Vault status projection, Search-to-Match migration transition
+  proof, and final SQL/hash/security re-review.
 - Confidence/freshness: high for current source; hosted runtime pending.
 - Affected components: runtime claimant, receipts, migration, connection fence,
   and operator copy.
@@ -69,9 +73,11 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
 
 - Decision/finding: both hosted matrices for initial head
   `afc708a078eb72de98200195e8faed03fb51ca90` and both matrices for corrected
-  head `d1a137d42fa81daa3a9844d0dcc79bba2dfe9b8e` failed and are not accepted.
-  The second matrices proved the browser correction, but the Apollo PostgreSQL
-  suite exposed an unsupported direct `vault.secrets` permission assumption.
+  head `d1a137d42fa81daa3a9844d0dcc79bba2dfe9b8e`, plus both matrices for head
+  `65748a1bf88076ebc240cd17737f28e7fa7b7c56`, failed and are not accepted.
+  The second matrices proved the browser correction but exposed an unsupported
+  direct `vault.secrets` assumption; the third exposed the same unsupported
+  row-lock assumption through `vault.decrypted_secrets`.
 - Reason: the first concurrency test expected the obsolete ten-minute lease
   retry rather than the bounded five-second busy retry. Its assertion exited
   before releasing the first provider promise, so the open advisory transaction
@@ -79,25 +85,60 @@ commits `fc2d288074bc44624abbb9e701b5c5ffa7adb775` and
   `reconciled from receipt` wording after status copy changed to identify the
   current attempt and receipt explicitly. The next implementation queried
   `vault.secrets` directly even though the runtime role is granted the
-  supported `vault.decrypted_secrets` view.
+  supported `vault.decrypted_secrets` view. The next correction still requested
+  `FOR SHARE` through that view, which the runtime role also cannot do.
 - Alternatives considered: rerun the same head; hide cascade failures; reuse
   successful verify/preview checks as whole-matrix acceptance.
-- Trade-offs: all failed evidence remains permanent. The least-privilege
-  correction `d1ab23c36ebbde5320967f0d806251193919b1c6` requires fresh hosted
-  matrices and does not inherit successful sub-jobs from either failed head.
+- Trade-offs: all failed evidence remains permanent. The no-helper correction
+  `8bce5127ef4c817789a3fe8ad3e10677bd9a9c82` requires fresh hosted matrices and
+  does not inherit successful sub-jobs from any failed head.
 - Evidence: push run `33549333254`, database job `99994613400`, e2e job
   `99994613933`, verify job `99994613796`; pull-request run `33549371235`,
   database job `99994746031`, e2e job `99994746036`, verify job
   `99994745678`; second push run `33552684634`, database `100005748422`, e2e
   `100005748139`, verify `100005748387`; second pull-request run `33552691805`,
-  database `100005773724`, e2e `100005773580`, verify `100005773396`; PR
+  database `100005773724`, e2e `100005773580`, verify `100005773396`; third
+  push run `33554283761`, database `100011168058`, e2e `100011167515`, verify
+  `100011167816`; third pull-request run `33554289195`, database
+  `100011185659`, e2e `100011185985`, verify `100011185901`; PR
   <https://github.com/syedahmad0786/hrmny-os/pull/246>.
 - Confidence/freshness: high on 2026-09-02.
 - Affected components: hosted PostgreSQL proof, browser acceptance, and source
   acceptance state; no provider or production resource.
-- Status: two source heads tested and failed honestly; `d1ab23c` is locally
+- Status: three source heads tested and failed honestly; `8bce512` is locally
   verified and not yet hosted.
 - Supersedes/superseded-by: does not supersede an acceptance receipt; a later
   exact-head hosted receipt must supplement it.
 - Rollback/correction: keep the PR unmerged and production unchanged; require
   both corrected push and pull-request matrices before source acceptance.
+
+## `EVID-HRMNY-20260902-APOLLO-024` — exact-current deterministic source gate
+
+- Decision/finding: source head
+  `8bce5127ef4c817789a3fe8ad3e10677bd9a9c82` passed seven lint tasks, seven
+  type-check tasks, 964 deterministic tests (web 730, database 38,
+  integrations 111, gate 25, AI 56, cache 4), and both production builds. The
+  web build generated 86 routes. The focused import contract passed 3/3.
+- Reason: the no-helper credential lifecycle, database-clock leases,
+  missing-Vault projection, and null-lease mutation fence changed source after
+  the prior local receipt.
+- Alternatives considered: inherit `EVID-021`; run only focused tests; treat
+  reviewer approval as execution proof; call a live provider.
+- Trade-offs: the 40-case PostgreSQL runtime file is intentionally excluded
+  from the default suite and remains pending on CI's disposable database. The
+  local machine still has no safe PostgreSQL URL or working Docker daemon.
+- Evidence: `pnpm test`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, formatter
+  check, `git diff --check`, zero changed-file credential-shape findings,
+  PostgreSQL case count 40, and unchanged migration SHA
+  `4941903ab873fabbb4a7359a83b95a48daee1df9eddae9ba38fa3cfb78bd68a7`.
+  Three independent reviews ended with no remaining P0–P2 finding.
+- Confidence/freshness: high for exact local source on 2026-09-02; hosted
+  PostgreSQL confidence remains pending.
+- Affected components: the eight implementation/test files in `8bce512`, the
+  Apollo runtime contract, connection status projection, and acceptance state.
+- Status: exact-current local source gate accepted; hosted, provider,
+  deployment, recovery, user, and production acceptance remain open.
+- Supersedes/superseded-by: supersedes `EVID-HRMNY-20260902-APOLLO-021` only as
+  the current local source receipt; none.
+- Rollback/correction: any later source edit invalidates this receipt and
+  requires the complete deterministic gate again.
