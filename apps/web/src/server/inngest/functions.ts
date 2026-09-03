@@ -8,6 +8,10 @@ import {
   executeApolloSearchRetryEvent,
 } from "./apollo-search-retry";
 import { runApolloPeopleSearchQueuedJob } from "../sales-os/apollo-search";
+import {
+  GOOGLE_CHAT_INTERACTION_EVENT,
+  runGoogleChatQueuedJob,
+} from "../google-chat";
 
 /** Durable policy gate for the contained once-per-day Sales research proposal. */
 export const leadgenDailyFunction = inngest.createFunction(
@@ -63,8 +67,22 @@ export const apolloSearchRetryFunction = inngest.createFunction(
     }),
 );
 
+/** Event-driven Google Chat reply worker; the database row is the claim fence. */
+export const googleChatInteractionFunction = inngest.createFunction(
+  {
+    id: "google-chat-interaction-v1",
+    triggers: [{ event: GOOGLE_CHAT_INTERACTION_EVENT }],
+    retries: 2,
+  },
+  async ({ event, step }) =>
+    step.run("claim-and-reply-in-google-chat", () =>
+      runGoogleChatQueuedJob(event.data),
+    ),
+);
+
 export const inngestFunctions = [
   leadgenDailyFunction,
   reportSchedulerFunction,
   apolloSearchRetryFunction,
+  googleChatInteractionFunction,
 ] as const;

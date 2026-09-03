@@ -2,8 +2,11 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetIntegrationReceiptMemory } from "./integrations/inbox";
 import {
+  googleChatAsyncConfigured,
   googleChatEndpoint,
+  googleChatReplyMessageId,
   handleGoogleChatRequest,
+  sendGoogleChatReply,
   verifyGoogleChatJwt,
 } from "./google-chat";
 
@@ -44,7 +47,10 @@ const audience =
 const now = 1_800_000_000;
 
 beforeEach(() => resetIntegrationReceiptMemory());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 function token(overrides: Record<string, unknown> = {}) {
   const encodedHeader = Buffer.from(
@@ -106,6 +112,63 @@ describe("Google Chat request verification", () => {
 
   it("publishes the exact Google Chat endpoint", () => {
     expect(googleChatEndpoint("https://hrmny-os.vercel.app/")).toBe(audience);
+  });
+
+  it("posts one deterministic threaded reply and verifies it by readback", async () => {
+    vi.stubEnv(
+      "GOOGLE_CHAT_SERVICE_ACCOUNT_JSON",
+      JSON.stringify({
+        client_email: "hrmny-chat@example.iam.gserviceaccount.com",
+        private_key: privateKey.export({ format: "pem", type: "pkcs8" }),
+      }),
+    );
+    const receiptId = "550e8400-e29b-41d4-a716-446655440000";
+    const messageId = googleChatReplyMessageId(receiptId);
+    const messageName = `spaces/AAAA/messages/${messageId}`;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ access_token: "access-token" }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ name: messageName }))
+      .mockResolvedValueOnce(Response.json({ name: messageName }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      sendGoogleChatReply({
+        receiptId,
+        spaceName: "spaces/AAAA",
+        threadName: "spaces/AAAA/threads/thread-1",
+        text: "Pipeline is ready.",
+      }),
+    ).resolves.toMatchObject({ name: messageName });
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ access_token: "access-token" }))
+      .mockResolvedValueOnce(Response.json({ name: messageName }));
+    await expect(
+      sendGoogleChatReply({
+        receiptId,
+        spaceName: "spaces/AAAA",
+        threadName: "spaces/AAAA/threads/thread-1",
+        text: "Pipeline is ready.",
+      }),
+    ).resolves.toMatchObject({ name: messageName });
+    expect(googleChatAsyncConfigured()).toBe(true);
+    expect(messageId).toMatch(/^client-[a-f0-9]{40}$/);
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain(
+      "messageReplyOption=REPLY_MESSAGE_OR_FAIL",
+    );
+    expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(
+      JSON.stringify({
+        text: "Pipeline is ready.",
+        thread: { name: "spaces/AAAA/threads/thread-1" },
+      }),
+    );
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes("/messages?") && init?.method === "POST",
+      ),
+    ).toHaveLength(1);
   });
 
   it("accepts and replays one signed staff onboarding event", async () => {

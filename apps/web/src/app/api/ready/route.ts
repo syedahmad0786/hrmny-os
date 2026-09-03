@@ -15,6 +15,7 @@ export async function GET() {
   let database: "up" | "down" = "down";
   let pgvector = false;
   let integrationInbox = false;
+  let googleChatDelivered = false;
   if (db) {
     try {
       await db.execute(sql`select 1`);
@@ -29,6 +30,17 @@ export async function GET() {
       `);
       pgvector = Boolean(rows[0]?.pgvector);
       integrationInbox = Boolean(rows[0]?.integration_inbox);
+      if (integrationInbox) {
+        const [chat] = await db.execute<{ delivered: boolean }>(sql`
+          select exists(
+            select 1 from public.integration_inbox
+            where provider = 'google-chat'
+              and status = 'completed'
+              and result ->> 'bridgeStatus' = 'delivered'
+          ) as delivered
+        `);
+        googleChatDelivered = Boolean(chat?.delivered);
+      }
     } catch {
       database = "down";
     }
@@ -106,7 +118,12 @@ export async function GET() {
     googleOAuthRedirectUri: googleWorkspaceRedirectUri(),
     surfaces: {
       googleChat: {
-        status: "endpoint_ready",
+        status:
+          has("GOOGLE_CHAT_SERVICE_ACCOUNT_JSON") && googleChatDelivered
+            ? "live"
+            : has("GOOGLE_CHAT_SERVICE_ACCOUNT_JSON")
+              ? "async_configured"
+              : "endpoint_ready",
         eventUrl: `${appOrigin}/api/integrations/google-chat/events`,
         openUrl: `${appOrigin}/chat`,
       },

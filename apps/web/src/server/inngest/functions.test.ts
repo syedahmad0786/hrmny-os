@@ -13,8 +13,8 @@ describe("Inngest bridge", () => {
     vi.unstubAllEnvs();
   });
 
-  it("registers schedules plus the durable Apollo event worker locally", () => {
-    expect(inngestFunctions).toHaveLength(3);
+  it("registers schedules plus durable Apollo and Google Chat workers", () => {
+    expect(inngestFunctions).toHaveLength(4);
   });
 
   it("does not claim provider acceptance without both exact key refs", () => {

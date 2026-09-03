@@ -283,6 +283,27 @@ export async function resolveActiveStaffByEmail(
   return hydrateActiveStaff(staff);
 }
 
+/** Re-check a queued external action against the current staff allowlist. */
+export async function resolveActiveStaffById(
+  employeeId: string,
+): Promise<SessionUser | null> {
+  const db = getDb();
+  if (!db) throw new Error("Staff authentication requires DATABASE_URL");
+  const [staff] = await db
+    .select({
+      employeeId: employee.employeeId,
+      email: employee.email,
+      displayName: employee.displayName,
+      isActive: employee.isActive,
+    })
+    .from(employee)
+    .where(
+      sql`${employee.isActive} = true and ${employee.employeeId} = ${employeeId}::uuid`,
+    )
+    .limit(1);
+  return hydrateActiveStaff(staff);
+}
+
 /** Verify a Supabase access token, then load authorization from Postgres. */
 export async function resolveSupabaseUser(
   accessToken: string,

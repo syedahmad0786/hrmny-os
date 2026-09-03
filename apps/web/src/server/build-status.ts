@@ -31,6 +31,9 @@ export async function getBuildStatus() {
   const googleOAuthConfigured = Boolean(
     process.env.GOOGLE_OAUTH_CLIENT_ID?.trim(),
   );
+  const googleChatConfigured = Boolean(
+    process.env.GOOGLE_CHAT_SERVICE_ACCOUNT_JSON?.trim(),
+  );
   const qmUrl = (
     process.env.QM_PUBLIC_URL?.trim() ||
     process.env.NEXT_PUBLIC_QM_URL?.trim() ||
@@ -152,7 +155,9 @@ export async function getBuildStatus() {
       id: "google-chat",
       label: "Google Chat",
       status: "endpoint_ready",
-      detail: `Signed-event endpoint ready: ${appOrigin}/api/integrations/google-chat/events. Google Cloud app configuration and a live canary remain.`,
+      detail: googleChatConfigured
+        ? "The service-account credential is present and durable asynchronous replies are built; a named-user live canary remains."
+        : `Signed-event endpoint ready: ${appOrigin}/api/integrations/google-chat/events. Add the Google Chat service account and run a live canary.`,
     },
     {
       id: "qm",

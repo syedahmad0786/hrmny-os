@@ -1,6 +1,6 @@
 # hrmny OS — Credentials & Access Needed (ordered by blocking impact)
 
-**Prepared:** 2026-07-30 · **Updated:** 2026-08-21 · **Owner:** Ahmad Bukhari
+**Prepared:** 2026-07-30 · **Updated:** 2026-09-03 · **Owner:** Ahmad Bukhari
 **Rule:** never send secrets through chat/email/git. Put each value in the approved Keeper folder (or paste directly into Vercel env), and reply only "done" per line item.
 
 **Start here:** fill [BUILD-ACCESS-INVENTORY.md](./BUILD-ACCESS-INVENTORY.md) first. Client lock: `XERO_WRITE_ENABLED=false`, dual OpenRouter workspaces (general + privileged).
@@ -32,7 +32,7 @@ Companion: `PRODUCTION-OWNERSHIP-ACCESS-REGISTER.md` (ownership + how each conne
 | 9 | Vercel access for developer@hrmny.co team `team_1JFUzpwQIfMIYzFhsmVaBatl` — team token, or add Ahmad's MCP-connected account as member | vercel.com → team settings → Tokens/Members | Automated deploys, env management for the REAL prod project `hrmny-os` |
 | 10 | Supabase access token for the org owning ref `klrugedztqxlvyghyzxs` — personal access token, or org invite | supabase.com/dashboard → Access Tokens | Migrations, logs, advisors on the REAL prod DB |
 | 11 | n8n API key for `hrmny.app.n8n.cloud` | n8n → Settings → API | `N8N_API_KEY`, `N8N_WEBHOOK_SECRET` — automation seams |
-| 12 | Google Chat webhook (rotate the old one — it was pasted in chat once) | Chat space → Apps & integrations → Webhooks | `GOOGLE_CHAT_WEBHOOK_URL` — health + cap alerts |
+| 12 | Google Chat alert webhook plus Chat app service account | Chat space → Apps & integrations → Webhooks; Google Cloud project owning the Chat app → service account JSON | `GOOGLE_CHAT_WEBHOOK_URL` — health + cap alerts; `GOOGLE_CHAT_SERVICE_ACCOUNT_JSON` and exact `GOOGLE_CHAT_AUDIENCE` — durable threaded assistant replies |
 
 ## Tier 4 — milestone-specific (can arrive later, before their milestone)
 
@@ -61,7 +61,7 @@ Already set in prod (no action): Supabase URL/keys/`DATABASE_URL`, Google OAuth 
 >
 > To go from demo-mode to live AI, I need the following. Please add each to the Keeper folder (never email the values) and tick them off:
 >
-> **This week (blocks everything):** 1) OpenRouter API key, 2) OpenAI API key, 3) Apollo API key, 4) Hunter account re-activated + verifier credits, 5) NeverBounce credits, 6) Composio workspace + API key with Gmail authorized, 7) Inngest keys, 8) add me to the developer@hrmny.co Vercel team + Supabase org (or issue me tokens), 9) n8n API key, 10) a fresh Google Chat webhook.
+> **This week (blocks everything):** 1) OpenRouter API key, 2) OpenAI API key, 3) Apollo API key, 4) Hunter account re-activated + verifier credits, 5) NeverBounce credits, 6) Composio workspace + API key with Gmail authorized, 7) Inngest keys, 8) add me to the developer@hrmny.co Vercel team + Supabase org (or issue me tokens), 9) n8n API key, 10) a fresh Google Chat webhook plus the Chat app service-account JSON added directly to Vercel.
 >
 > **Before their milestones (2–8 weeks out):** Xero developer app + finance authorization; Composio LinkedIn + Canva connections; Meta/Google/TikTok ads read-only access; Sentry; transactional email/SMTP for the portal; Bayzat exports; Asana + Airtable access; Tejari access.
 >
