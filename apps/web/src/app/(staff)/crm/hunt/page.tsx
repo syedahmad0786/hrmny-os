@@ -329,6 +329,18 @@ export default function HuntClientsPage() {
     cancelSearchOperation,
     verifiedStaffPrincipalId,
   );
+  const saveCandidate = trpc.salesOs.apollo.saveCandidate.useMutation({
+    onSuccess: (payload) => {
+      setLastApolloDealId(payload.dealId);
+      setSearchNote(
+        `${payload.companyName} is in the pipeline${
+          payload.duplicate ? " (already saved)" : ""
+        }. Paid contact details remain locked.`,
+      );
+      void utils.crm.deals.list.invalidate();
+    },
+    onError: (error) => setSearchNote(error.message),
+  });
 
   useEffect(() => {
     if (!hasCurrentApolloSearch) return;
@@ -691,8 +703,35 @@ export default function HuntClientsPage() {
                     </small>
                   </div>
                   <div className="growth-candidate-actions">
+                    <button
+                      type="button"
+                      data-testid={`hunt-apollo-save-${candidate.externalId}`}
+                      disabled={
+                        !canOperateApollo ||
+                        (saveCandidate.isPending &&
+                          saveCandidate.variables?.candidate.externalId ===
+                            candidate.externalId)
+                      }
+                      onClick={() =>
+                        saveCandidate.mutate({
+                          candidate: {
+                            externalId: candidate.externalId,
+                            fullName: candidate.fullName,
+                            title: candidate.title,
+                            companyName: candidate.companyName,
+                            companyDomain: candidate.companyDomain,
+                          },
+                        })
+                      }
+                    >
+                      {saveCandidate.isPending &&
+                      saveCandidate.variables?.candidate.externalId ===
+                        candidate.externalId
+                        ? "Adding…"
+                        : "Add to pipeline · free"}
+                    </button>
                     <span data-testid="hunt-apollo-enrichment-locked">
-                      Paid enrichment locked
+                      Paid details locked
                     </span>
                   </div>
                 </li>

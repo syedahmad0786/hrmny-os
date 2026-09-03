@@ -88,10 +88,10 @@ export type ApolloPersonImportResult = {
 };
 
 /**
- * Persist one explicitly enriched Apollo person into the canonical CRM.
+ * Persist one explicitly reviewed Apollo person into the canonical CRM.
  * Company, contact, and open-deal dedupe are all performed before inserts.
- * No guessed email is created, and Apollo's own verdict is the only email
- * verification evidence used by this path.
+ * No guessed email is created. When enrichment supplied an email, Apollo's
+ * own verdict is the only verification evidence used by this path.
  */
 export async function importApolloPersonToCrm(input: {
   person: LeadCandidate;
@@ -115,7 +115,7 @@ export async function importApolloPersonToCrm(input: {
       name: companyName,
       market: "UAE",
       website: domain ? `https://${domain}` : null,
-      notes: "Created from one-person Apollo enrichment receipt.",
+      notes: "Created from a reviewed Apollo person receipt.",
     });
   }
 
@@ -184,7 +184,7 @@ export async function importApolloPersonToCrm(input: {
     companyId: company.companyId,
     contactId: contact.contactId,
     authorEmployeeId: input.ownerEmployeeId ?? null,
-    body: `Apollo one-person enrichment reconciled. ${JSON.stringify({
+    body: `Apollo person reconciled. ${JSON.stringify({
       receiptId: input.receiptId,
       externalId: person.externalId,
       source: person.source,

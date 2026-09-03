@@ -16,7 +16,7 @@ export type MilestoneCard = {
 export type ConnectionCard = {
   id: string;
   label: string;
-  status: "active" | "missing" | "mock" | "tomorrow";
+  status: "active" | "endpoint_ready" | "missing" | "mock";
   detail: string;
 };
 
@@ -28,9 +28,21 @@ export async function getBuildStatus() {
   const apolloMode = process.env.APOLLO_MODE ?? "mock";
   const hunterMode = process.env.HUNTER_MODE ?? "mock";
   const authMode = process.env.AUTH_MODE ?? "dev";
+  const googleOAuthConfigured = Boolean(
+    process.env.GOOGLE_OAUTH_CLIENT_ID?.trim(),
+  );
+  const qmUrl = (
+    process.env.QM_PUBLIC_URL?.trim() ||
+    process.env.NEXT_PUBLIC_QM_URL?.trim() ||
+    ""
+  ).replace(/\/$/, "");
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+  const appOrigin = (appUrl || "https://hrmny-os.vercel.app").replace(
+    /\/$/,
+    "",
+  );
 
   const dbPing = await pingDatabase(databaseUrl);
 
@@ -40,7 +52,8 @@ export async function getBuildStatus() {
       title: "Substrate",
       fee: "$1,500",
       status: "live_pending",
-      summary: "Core live; durable jobs, Chat alert, and team rollout remain",
+      summary:
+        "Core live; Google Chat endpoint and QM/Sprites need provider rollout",
       href: "/gate",
       demoReady: true,
     },
@@ -58,10 +71,10 @@ export async function getBuildStatus() {
       title: "Sales platform",
       fee: "$1,500",
       status:
-        apolloMode === "live" && hunterMode === "live"
+        apolloMode === "live" && googleOAuthConfigured
           ? "done"
           : "live_pending",
-      summary: "BUAF, quotes, HITL outreach, Won→Handover",
+      summary: "Apollo → CRM → draft → approve → Gmail → Won handover",
       href: "/crm",
       demoReady: true,
     },
@@ -130,9 +143,24 @@ export async function getBuildStatus() {
     {
       id: "google-workspace",
       label: "Google Workspace",
-      status: "missing",
-      detail:
-        "Each user connects Gmail, Calendar, Drive, and Sheets in Settings.",
+      status: googleOAuthConfigured ? "active" : "missing",
+      detail: googleOAuthConfigured
+        ? "OAuth client ready; each user connects Gmail, Calendar, Drive, and Sheets in Settings."
+        : "Add the Google OAuth client, then each user connects their own Workspace account.",
+    },
+    {
+      id: "google-chat",
+      label: "Google Chat",
+      status: "endpoint_ready",
+      detail: `Signed-event endpoint ready: ${appOrigin}/api/integrations/google-chat/events. Google Cloud app configuration and a live canary remain.`,
+    },
+    {
+      id: "qm",
+      label: "QM + Fly Sprites",
+      status: qmUrl ? "active" : "missing",
+      detail: qmUrl
+        ? `${qmUrl} — user sandboxes available`
+        : "Deployment contract ready; Fly billing and quota must be unlocked before provisioning.",
     },
     {
       id: "asana",
@@ -156,20 +184,14 @@ export async function getBuildStatus() {
     {
       id: "xero",
       label: "Xero",
-      status: "tomorrow",
-      detail: `Mode: ${xeroMode} — credentials tomorrow`,
+      status: xeroMode === "live" ? "active" : "mock",
+      detail: `Mode: ${xeroMode}`,
     },
     {
       id: "apollo",
       label: "Apollo",
-      status: "tomorrow",
-      detail: `Mode: ${apolloMode} — credentials tomorrow`,
-    },
-    {
-      id: "hunter",
-      label: "Hunter",
-      status: "tomorrow",
-      detail: `Mode: ${hunterMode} — credentials tomorrow`,
+      status: apolloMode === "live" ? "active" : "mock",
+      detail: `Mode: ${apolloMode} — free discovery is available; paid detail lookup remains approval-gated.`,
     },
   ];
 
@@ -193,11 +215,13 @@ export async function getBuildStatus() {
     connections,
     nextActions: [
       dbPing.ok ? "Postgres live" : "Fix DATABASE_URL",
-      "M1: wire durable background jobs and the Google Chat health webhook",
-      "M1: provision and verify every staff role",
+      `Point the Google Chat app at ${appOrigin}/api/integrations/google-chat/events`,
+      qmUrl
+        ? "Run QM live conformance and connect its portal in HRMNY"
+        : "Enable Fly billing, then publish the QM sandbox and deploy the stack",
       "Connect Google Workspace per staff user in Settings",
-      "LinkedIn: keep copy-draft only (no account connect)",
-      "Tomorrow: Xero + Apollo + Hunter keys → flip *_MODE=live",
+      "Run Sales in order: Apollo search → choose → draft → approve → send",
+      `Xero mode: ${xeroMode}; Hunter is retired (${hunterMode})`,
     ],
     updatedAt: new Date().toISOString(),
   };

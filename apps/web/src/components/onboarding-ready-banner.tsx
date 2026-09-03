@@ -49,7 +49,10 @@ export function OnboardingReadyBanner({
             ? "Resend key present — set RESEND_MODE=live for real portal email."
             : "Resend mock — portal invites show magic links in UI without email."}{" "}
         {resend !== "live" ? (
-          <Link href="/settings/connections" className="underline">
+          <Link
+            href="/settings/connections"
+            className="inline-flex min-h-11 items-center underline"
+          >
             Configure Resend
           </Link>
         ) : null}

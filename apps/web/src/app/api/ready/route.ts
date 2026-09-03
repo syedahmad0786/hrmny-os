@@ -78,6 +78,16 @@ export async function GET() {
 
   const blockers = buildDemoBlockers({ tools, connections });
   const llm = runtimeLlmSnapshot();
+  const appOrigin = (
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "") ||
+    "https://hrmny-os.vercel.app"
+  ).replace(/\/$/, "");
+  const qmUrl = (
+    process.env.QM_PUBLIC_URL?.trim() ||
+    process.env.NEXT_PUBLIC_QM_URL?.trim() ||
+    ""
+  ).replace(/\/$/, "");
 
   const body = {
     ok: database === "up",
@@ -94,6 +104,18 @@ export async function GET() {
     portalMagicLink: portalMagicLink ? "enabled" : "disabled",
     connectedAppPolicy: orgPolicy.appPolicy,
     googleOAuthRedirectUri: googleWorkspaceRedirectUri(),
+    surfaces: {
+      googleChat: {
+        status: "endpoint_ready",
+        eventUrl: `${appOrigin}/api/integrations/google-chat/events`,
+        openUrl: `${appOrigin}/chat`,
+      },
+      qm: {
+        status: qmUrl ? "configured" : "deployment_ready",
+        publicUrl: qmUrl || null,
+        plannedUrl: "https://hrmny-qm-portal.fly.dev",
+      },
+    },
     tools,
     /** Connected staff accounts (counts + lastError snippets — no secrets). */
     connections,

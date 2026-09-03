@@ -2540,6 +2540,30 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 }
 
 @media (max-width: 720px) {
+  .crm-btn,
+  .crm-filterbar input,
+  .crm-filterbar select,
+  .crm-view-switch a,
+  .crm-view-switch button,
+  .crm-subnav a,
+  .crm-subnav-more > summary,
+  .growth-header-actions .growth-text-link,
+  .growth-candidate-actions a,
+  .growth-candidate-actions button,
+  .growth-test-actions button,
+  .growth-test-links a,
+  .growth-status a {
+    min-height: 44px;
+  }
+
+  .growth-header-actions .growth-text-link,
+  .growth-candidate-actions a,
+  .growth-test-links a,
+  .growth-status a {
+    display: inline-flex;
+    align-items: center;
+  }
+
   .crm-subnav {
     flex-wrap: wrap;
     overflow: visible;

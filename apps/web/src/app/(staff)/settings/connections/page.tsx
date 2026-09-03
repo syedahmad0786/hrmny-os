@@ -150,6 +150,75 @@ function BackendStoreBanner() {
   );
 }
 
+function OperatingSurfaces() {
+  const appOrigin = (
+    process.env.NEXT_PUBLIC_APP_URL ?? "https://hrmny-os.vercel.app"
+  ).replace(/\/$/, "");
+  const googleChatUrl = `${appOrigin}/api/integrations/google-chat/events`;
+  const qmUrl = process.env.NEXT_PUBLIC_QM_URL?.trim().replace(/\/$/, "");
+
+  return (
+    <section data-testid="operating-surfaces" className="grid gap-4 lg:grid-cols-2">
+      <article className="rounded-xl border border-emerald-300 bg-emerald-50 p-5 text-emerald-950">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em]">
+          Team chat · endpoint ready
+        </p>
+        <h2 className="mt-1 font-display text-xl">Google Chat → HRMNY</h2>
+        <p className="mt-2 text-sm">
+          Staff messages enter the same HRMNY assistant and keep one conversation
+          per person and Chat space. Google-signed requests and active staff are
+          verified before anything runs.
+        </p>
+        <code className="mt-3 block overflow-x-auto rounded-lg bg-white/70 p-3 text-xs">
+          {googleChatUrl}
+        </code>
+        <Link
+          href="/chat"
+          className="mt-3 inline-flex min-h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white"
+        >
+          Open HRMNY Chat
+        </Link>
+      </article>
+
+      <article className="rounded-xl border border-sand bg-white/75 p-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
+          Agent computers · {qmUrl ? "connected" : "deployment ready"}
+        </p>
+        <h2 className="mt-1 font-display text-xl">QM + Fly Sprites</h2>
+        <p className="mt-2 text-sm text-muted">
+          One isolated operator environment per user. The version-pinned deploy
+          package is ready; Fly must be billing-enabled before its apps and
+          Sprites can be created.
+        </p>
+        <code className="mt-3 block overflow-x-auto rounded-lg bg-cream/70 p-3 text-xs">
+          {qmUrl ?? "https://hrmny-qm-portal.fly.dev"}
+        </code>
+        {qmUrl ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a
+              href={qmUrl}
+              className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white"
+            >
+              Open QM
+            </a>
+            <a
+              href={`${qmUrl}/admin/connectors`}
+              className="inline-flex min-h-11 items-center rounded-lg border border-sand bg-white px-4 text-sm font-semibold"
+            >
+              Manage connectors
+            </a>
+          </div>
+        ) : (
+          <p className="mt-3 text-xs font-medium text-amber-800">
+            No dead link is shown until the Fly deployment is live and
+            NEXT_PUBLIC_QM_URL is set.
+          </p>
+        )}
+      </article>
+    </section>
+  );
+}
+
 const WORK_APP_FAMILIES = [
   { key: "files", label: "Cloud files" },
   { key: "communication", label: "Communication" },
@@ -313,11 +382,16 @@ export default function ConnectionsPage() {
           <BackendStoreBanner />
           <AppPolicyBanner />
           <ConnectionHealth />
-          <Link href="/settings/automations" className="w-fit underline">
+          <Link
+            href="/settings/automations"
+            className="inline-flex min-h-11 w-fit items-center underline"
+          >
             Automation settings
           </Link>
         </div>
       </details>
+
+      <OperatingSurfaces />
 
       {oauthBanner ? (
         <p
