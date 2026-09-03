@@ -75,6 +75,7 @@ function operationBelongsToPrincipal(
 }
 
 const EMPTY_REQUEST_ID = "00000000-0000-4000-8000-000000000000";
+const SERVER_RESTORE_NOTE = "Restored your latest Apollo search from HRMNY.";
 
 function samePendingSearch(
   left: PendingApolloSearch,
@@ -128,6 +129,7 @@ export default function HuntClientsPage() {
     session.isSuccess && !session.isFetching ? staffPrincipalId : null;
   const activePrincipalIdRef = useRef<string | null>(verifiedStaffPrincipalId);
   const activeApolloSearchRef = useRef<ActiveApolloSearch | null>(null);
+  const serverRestorePrincipalRef = useRef<string | null>(null);
   activePrincipalIdRef.current = verifiedStaffPrincipalId;
   const isUiPrincipalCurrent = Boolean(
     verifiedStaffPrincipalId && uiPrincipalId === verifiedStaffPrincipalId,
@@ -148,6 +150,7 @@ export default function HuntClientsPage() {
 
   useEffect(() => {
     activeApolloSearchRef.current = null;
+    serverRestorePrincipalRef.current = null;
     setResult(null);
     setSearchNote(null);
     setTitle("Marketing Director");
@@ -173,16 +176,20 @@ export default function HuntClientsPage() {
       window.sessionStorage,
       principalId,
     );
-    if (!restored) return;
-    activeApolloSearchRef.current = {
-      principalId,
-      idempotencyKey: restored.idempotencyKey,
-    };
-    setPendingApolloSearch(restored);
-    setApolloSearchRequestId(restored.idempotencyKey);
-    setTitle(restored.titles[0] ?? "Marketing Director");
-    setQuery(restored.query ?? "");
-    setSearchNote("Restored the pending Apollo receipt; checking its status.");
+    if (restored) {
+      serverRestorePrincipalRef.current = principalId;
+      activeApolloSearchRef.current = {
+        principalId,
+        idempotencyKey: restored.idempotencyKey,
+      };
+      setPendingApolloSearch(restored);
+      setApolloSearchRequestId(restored.idempotencyKey);
+      setTitle(restored.titles[0] ?? "Marketing Director");
+      setQuery(restored.query ?? "");
+      setSearchNote(
+        "Restored the pending Apollo receipt; checking its status.",
+      );
+    }
   }, [staffPrincipalId, utils]);
 
   function rememberPendingSearch(pending: PendingApolloSearch) {
@@ -227,6 +234,54 @@ export default function HuntClientsPage() {
 
   const apolloStatus = trpc.salesOs.apollo.status.useQuery();
   const apolloConnection = trpc.salesOs.apollo.connection.useQuery();
+  const latestApolloSearch = trpc.salesOs.apollo.latestSearch.useQuery(
+    undefined,
+    {
+      enabled: Boolean(
+        verifiedStaffPrincipalId &&
+        isUiPrincipalCurrent &&
+        !apolloSearchRequestId &&
+        serverRestorePrincipalRef.current !== verifiedStaffPrincipalId,
+      ),
+      retry: false,
+    },
+  );
+  useEffect(() => {
+    const principalId = verifiedStaffPrincipalId;
+    if (
+      !principalId ||
+      !isUiPrincipalCurrent ||
+      serverRestorePrincipalRef.current === principalId ||
+      !latestApolloSearch.isSuccess
+    ) {
+      return;
+    }
+    serverRestorePrincipalRef.current = principalId;
+    const snapshot = latestApolloSearch.data;
+    if (!snapshot || activeApolloSearchRef.current) return;
+    activeApolloSearchRef.current = {
+      principalId,
+      idempotencyKey: snapshot.search.idempotencyKey,
+    };
+    setPendingApolloSearch(snapshot.search);
+    setApolloSearchRequestId(snapshot.search.idempotencyKey);
+    setTitle(snapshot.search.titles[0] ?? "Marketing Director");
+    setQuery(snapshot.search.query ?? "");
+    setApolloSearchResult(snapshot.result);
+    setSearchNote(
+      `${SERVER_RESTORE_NOTE} ${searchStatusNote(snapshot.result)}`,
+    );
+    persistPendingApolloSearch(
+      window.sessionStorage,
+      principalId,
+      snapshot.search,
+    );
+  }, [
+    isUiPrincipalCurrent,
+    latestApolloSearch.data,
+    latestApolloSearch.isSuccess,
+    verifiedStaffPrincipalId,
+  ]);
   const freeSearch = trpc.salesOs.apollo.search.useMutation({
     onMutate: () => {
       const operation = {
@@ -461,7 +516,11 @@ export default function HuntClientsPage() {
     }
     if (!payload) return;
     setApolloSearchResult(payload);
-    setSearchNote(searchStatusNote(payload));
+    setSearchNote((current) =>
+      current?.startsWith(SERVER_RESTORE_NOTE)
+        ? `${SERVER_RESTORE_NOTE} ${searchStatusNote(payload)}`
+        : searchStatusNote(payload),
+    );
     if (payload.status === "dead_letter" || payload.status === "revoked") {
       forgetPendingSearch(apolloSearchRequestId!);
     }

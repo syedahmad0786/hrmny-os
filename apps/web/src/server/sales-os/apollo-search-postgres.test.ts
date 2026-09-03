@@ -32,6 +32,7 @@ import { connectionsRouter } from "../trpc/connections-router";
 import {
   APOLLO_PEOPLE_SEARCH_MAX_ATTEMPTS,
   APOLLO_PEOPLE_SEARCH_OPERATION,
+  getLatestApolloPeopleSearch,
   getApolloPeopleSearchStatus,
   redactExpiredApolloPeopleSearchCandidates,
   revokeApolloPeopleSearch,
@@ -419,6 +420,65 @@ afterEach(async () => {
 });
 
 describe("Apollo queue PostgreSQL proof", () => {
+  it("restores the newest durable search for the exact employee", async () => {
+    const source = sourceWith(async () => execution("latest-search-proof"));
+    const db = getDb()!;
+    const first = await searchApolloPeopleFree(
+      {
+        idempotencyKey: "41000000-0000-4000-8000-000000000046",
+        actorEmployeeId: ACTOR,
+        query: "first durable search",
+        titles: ["Brand Director"],
+      },
+      { leadSource: source },
+    );
+    const second = await searchApolloPeopleFree(
+      {
+        idempotencyKey: "41000000-0000-4000-8000-000000000047",
+        actorEmployeeId: ACTOR,
+        query: "hospitality",
+        titles: ["Marketing Director"],
+      },
+      { leadSource: source },
+    );
+    await searchApolloPeopleFree(
+      {
+        idempotencyKey: "41000000-0000-4000-8000-000000000048",
+        actorEmployeeId: OTHER_ACTOR,
+        query: "another employee only",
+        titles: ["Private Role"],
+      },
+      { leadSource: source },
+    );
+    await db.execute(sql`
+      update public.integration_inbox
+      set received_at = case external_event_id
+        when '41000000-0000-4000-8000-000000000046' then '2026-09-04T00:00:00Z'::timestamptz
+        when '41000000-0000-4000-8000-000000000047' then '2026-09-04T00:01:00Z'::timestamptz
+        else '2026-09-04T00:02:00Z'::timestamptz
+      end
+      where external_event_id in (
+        '41000000-0000-4000-8000-000000000046',
+        '41000000-0000-4000-8000-000000000047',
+        '41000000-0000-4000-8000-000000000048'
+      )
+    `);
+
+    await expect(
+      getLatestApolloPeopleSearch({ actorEmployeeId: ACTOR, database: db }),
+    ).resolves.toMatchObject({
+      search: {
+        idempotencyKey: "41000000-0000-4000-8000-000000000047",
+        query: "hospitality",
+        titles: ["Marketing Director"],
+        perPage: 8,
+      },
+      result: { receiptId: second.receiptId },
+    });
+    expect(first.receiptId).not.toBe(second.receiptId);
+    expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+  });
+
   it("uses the database clock to decide when a queued job is due", async () => {
     const source = sourceWith(async () => execution("database-clock-due"));
     const pending = await searchApolloPeopleFree(
