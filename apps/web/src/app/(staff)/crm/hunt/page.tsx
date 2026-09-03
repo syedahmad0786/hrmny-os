@@ -75,6 +75,7 @@ function operationBelongsToPrincipal(
 }
 
 const EMPTY_REQUEST_ID = "00000000-0000-4000-8000-000000000000";
+const SERVER_RESTORE_NOTE = "Restored your latest Apollo search from HRMNY.";
 
 function samePendingSearch(
   left: PendingApolloSearch,
@@ -173,16 +174,49 @@ export default function HuntClientsPage() {
       window.sessionStorage,
       principalId,
     );
-    if (!restored) return;
-    activeApolloSearchRef.current = {
-      principalId,
-      idempotencyKey: restored.idempotencyKey,
-    };
-    setPendingApolloSearch(restored);
-    setApolloSearchRequestId(restored.idempotencyKey);
-    setTitle(restored.titles[0] ?? "Marketing Director");
-    setQuery(restored.query ?? "");
-    setSearchNote("Restored the pending Apollo receipt; checking its status.");
+    if (restored) {
+      activeApolloSearchRef.current = {
+        principalId,
+        idempotencyKey: restored.idempotencyKey,
+      };
+      setPendingApolloSearch(restored);
+      setApolloSearchRequestId(restored.idempotencyKey);
+      setTitle(restored.titles[0] ?? "Marketing Director");
+      setQuery(restored.query ?? "");
+      setSearchNote(
+        "Restored the pending Apollo receipt; checking its status.",
+      );
+      return;
+    }
+    void utils.salesOs.apollo.latestSearch
+      .fetch()
+      .then((snapshot) => {
+        if (
+          !snapshot ||
+          activePrincipalIdRef.current !== principalId ||
+          activeApolloSearchRef.current
+        ) {
+          return;
+        }
+        activeApolloSearchRef.current = {
+          principalId,
+          idempotencyKey: snapshot.search.idempotencyKey,
+        };
+        setPendingApolloSearch(snapshot.search);
+        setApolloSearchRequestId(snapshot.search.idempotencyKey);
+        setTitle(snapshot.search.titles[0] ?? "Marketing Director");
+        setQuery(snapshot.search.query ?? "");
+        setApolloSearchResult(snapshot.result);
+        setSearchNote(
+          `${SERVER_RESTORE_NOTE} ${searchStatusNote(snapshot.result)}`,
+        );
+        persistPendingApolloSearch(
+          window.sessionStorage,
+          principalId,
+          snapshot.search,
+        );
+      })
+      .catch(() => undefined);
   }, [staffPrincipalId, utils]);
 
   function rememberPendingSearch(pending: PendingApolloSearch) {
@@ -461,7 +495,11 @@ export default function HuntClientsPage() {
     }
     if (!payload) return;
     setApolloSearchResult(payload);
-    setSearchNote(searchStatusNote(payload));
+    setSearchNote((current) =>
+      current?.startsWith(SERVER_RESTORE_NOTE)
+        ? `${SERVER_RESTORE_NOTE} ${searchStatusNote(payload)}`
+        : searchStatusNote(payload),
+    );
     if (payload.status === "dead_letter" || payload.status === "revoked") {
       forgetPendingSearch(apolloSearchRequestId!);
     }

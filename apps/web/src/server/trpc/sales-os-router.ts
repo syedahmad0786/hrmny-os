@@ -15,6 +15,7 @@ import {
   draftChannelsForApprovedContact,
   enrichOneApolloPerson,
   getApolloOnePersonCanaryStatus,
+  getLatestApolloPeopleSearch,
   getApolloPeopleSearchStatus,
   getResearchReceiptSignalIdsByProposal,
   getSalesOsSettings,
@@ -168,6 +169,9 @@ export const salesOsRouter = router({
           actorEmployeeId: ctx.employeeId,
         }),
       ),
+    latestSearch: salesOperatorProcedure.query(({ ctx }) =>
+      getLatestApolloPeopleSearch({ actorEmployeeId: ctx.employeeId }),
+    ),
     cancelSearch: salesOperatorProcedure
       .input(z.object({ idempotencyKey: z.string().uuid() }))
       .mutation(({ input, ctx }) =>

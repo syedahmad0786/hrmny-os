@@ -12,6 +12,7 @@ import {
 import {
   and,
   connectionAccount,
+  desc,
   eq,
   integrationInbox,
   scheduledJob,
@@ -78,6 +79,16 @@ export type ApolloPeopleSearchResult = {
   reason?: string;
   providerAttemptedPreviously?: boolean;
   providerMaySettle?: boolean;
+};
+
+export type ApolloPeopleSearchSnapshot = {
+  search: {
+    idempotencyKey: string;
+    query?: string;
+    titles: string[];
+    perPage: number;
+  };
+  result: ApolloPeopleSearchResult;
 };
 
 type NormalizedSearchCriteria = Required<
@@ -1129,6 +1140,62 @@ export async function getApolloPeopleSearchStatus(input: {
   if (!receipt) return null;
   assertReceiptOwner(receipt, input.actorEmployeeId);
   return resultFromReceipt(input.idempotencyKey, receipt, true);
+}
+
+export async function getLatestApolloPeopleSearch(input: {
+  actorEmployeeId?: string | null;
+  database?: Db;
+}): Promise<ApolloPeopleSearchSnapshot | null> {
+  const actorEmployeeId = z.string().uuid().parse(input.actorEmployeeId);
+  const db = input.database ?? getDb();
+  if (!db) return null;
+  const [row] = await db
+    .select({
+      idempotencyKey: integrationInbox.externalEventId,
+      receiptId: integrationInbox.integrationInboxId,
+      status: integrationInbox.status,
+      operation: integrationInbox.operation,
+      payload: integrationInbox.payload,
+      payloadHash: integrationInbox.payloadHash,
+      attempts: integrationInbox.attempts,
+      stateVersion: integrationInbox.stateVersion,
+      attemptToken: integrationInbox.attemptToken,
+      attemptLeaseExpiresAt: integrationInbox.attemptLeaseExpiresAt,
+      ownerEmployeeId: integrationInbox.ownerEmployeeId,
+      credentialConnectionAccountId:
+        integrationInbox.credentialConnectionAccountId,
+      result: integrationInbox.result,
+      lastError: integrationInbox.lastError,
+    })
+    .from(integrationInbox)
+    .where(
+      and(
+        eq(integrationInbox.provider, "apollo"),
+        eq(integrationInbox.operation, APOLLO_PEOPLE_SEARCH_OPERATION),
+        eq(integrationInbox.ownerEmployeeId, actorEmployeeId),
+        sql`${integrationInbox.result} ->> 'bridgeStatus' in ('processing', 'retry_scheduled', 'completed')`,
+      ),
+    )
+    .orderBy(desc(integrationInbox.receivedAt))
+    .limit(1);
+  if (!row) return null;
+  const stored = StoredApolloPeopleSearchPayloadSchema.safeParse(row.payload);
+  if (!stored.success || stored.data.actorEmployeeId !== actorEmployeeId) {
+    return null;
+  }
+  return {
+    search: {
+      idempotencyKey: row.idempotencyKey,
+      query: stored.data.criteria.query,
+      titles: stored.data.criteria.titles ?? [],
+      perPage: stored.data.criteria.perPage,
+    },
+    result: resultFromReceipt(
+      row.idempotencyKey,
+      durableReceipt(row, true),
+      true,
+    ),
+  };
 }
 
 export async function revokeApolloPeopleSearch(

@@ -187,6 +187,67 @@ test.describe("Hunt Apollo prospect UI", () => {
       .toBe(idempotencyKey);
   });
 
+  test("restores the latest durable search in a fresh browser session", async ({
+    page,
+  }) => {
+    const idempotencyKey = "51000000-0000-4000-8000-000000000002";
+    const restoredCandidate = "RESTORED SERVER CANDIDATE";
+    let providerSearchCalls = 0;
+    await page.route("**/api/trpc/**", async (route) => {
+      const procedurePath = decodeURIComponent(
+        new URL(route.request().url()).pathname.split("/api/trpc/")[1] ?? "",
+      );
+      const procedures = procedurePath.split(",");
+      if (procedures.includes("salesOs.apollo.search")) {
+        providerSearchCalls += 1;
+      }
+      const latestIndex = procedures.indexOf("salesOs.apollo.latestSearch");
+      const statusIndex = procedures.indexOf("salesOs.apollo.searchStatus");
+      if (latestIndex < 0 && statusIndex < 0) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      const body = (await response.json()) as Array<unknown>;
+      const result = JSON.parse(completedSearchResponse(restoredCandidate))[0];
+      if (latestIndex >= 0) {
+        body[latestIndex] = {
+          result: {
+            data: {
+              json: {
+                search: {
+                  idempotencyKey,
+                  query: "hospitality",
+                  titles: ["Marketing Director"],
+                  perPage: 8,
+                },
+                result: result.result.data.json,
+              },
+            },
+          },
+        };
+      }
+      if (statusIndex >= 0) body[statusIndex] = result;
+      await route.fulfill({ response, json: body });
+    });
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+
+    await expect(page.getByText(restoredCandidate)).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(page.getByTestId("hunt-apollo-title")).toHaveValue(
+      "Marketing Director",
+    );
+    await expect(page.getByTestId("hunt-apollo-query")).toHaveValue(
+      "hospitality",
+    );
+    await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
+      "Restored your latest Apollo search from HRMNY",
+    );
+    expect(providerSearchCalls).toBe(0);
+  });
+
   test("renders a terminal receipt only for its current principal", async ({
     page,
   }) => {
