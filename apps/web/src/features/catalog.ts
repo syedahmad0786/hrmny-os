@@ -122,11 +122,11 @@ export const FEATURE_CATALOG: readonly FeatureDefinition[] = [
   feature({
     key: "people.workplace",
     name: "Workplace",
-    description: "Expenses, travel, letters, assets, and workplace services.",
+    description: "Announcements, company knowledge, workflows, and services.",
     group: "People",
     source: "bayzat",
     availability: "available",
-    defaultEnabled: false,
+    defaultEnabled: true,
     route: "/workplace",
   }),
   feature({

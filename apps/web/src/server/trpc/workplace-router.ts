@@ -7,6 +7,17 @@ import {
   isWorkplaceAdmin,
 } from "../workplace";
 import { getDb } from "../db";
+import {
+  GBRAIN_SHARE_CONFIRMATION,
+  GBRAIN_UPSTREAM_REVISION,
+  GBRAIN_UPSTREAM_VERSION,
+  GbrainError,
+  gbrainConfigured,
+  projectKnowledgeArticle,
+  publishKnowledgeToGbrain,
+  type PublishedKnowledgeArticle,
+} from "../gbrain";
+import { getIntegrationReceipt } from "../integrations/inbox";
 import { writeAudit } from "../m1-persistence";
 import { router, staffProcedure, type TrpcContext } from "./trpc";
 
@@ -76,6 +87,66 @@ const requestStatus = z.enum([
   "resolved",
   "closed",
 ]);
+
+async function publishedKnowledgeArticle(
+  articleId: string,
+): Promise<PublishedKnowledgeArticle> {
+  const rows = await requireDb().execute<PublishedKnowledgeArticle>(sql`
+    select
+      a.knowledge_article_id::text as "articleId",
+      a.slug,
+      a.title,
+      a.category,
+      a.current_version::integer as version,
+      v.body
+    from public.knowledge_article a
+    join public.knowledge_article_version v
+      on v.knowledge_article_id = a.knowledge_article_id
+     and v.version_number = a.current_version
+    where a.knowledge_article_id = ${articleId}::uuid
+      and a.status = 'published'
+      and a.published_at <= now()
+    limit 1
+  `);
+  if (!rows[0]) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Publish this knowledge article before sharing it",
+    });
+  }
+  return rows[0];
+}
+
+function gbrainFailure(error: unknown): never {
+  if (!(error instanceof GbrainError)) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Company brain share could not be recorded",
+    });
+  }
+  if (error.code === "GBRAIN_NOT_CONFIGURED") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Company brain setup is required in Connections",
+    });
+  }
+  if (error.code === "GBRAIN_OPERATION_IN_PROGRESS") {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "This exact article version is already being shared",
+    });
+  }
+  if (error.code === "GBRAIN_MANUAL_RECONCILIATION_REQUIRED") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Company brain needs manual receipt reconciliation before retry",
+    });
+  }
+  throw new TRPCError({
+    code: "BAD_GATEWAY",
+    message: `Company brain did not verify the share (${error.code})`,
+  });
+}
 
 export const workplaceRouter = router({
   announcements: router({
@@ -244,6 +315,94 @@ export const workplaceRouter = router({
           limit 1
         `);
         return rows[0] ?? null;
+      }),
+
+    brainPreview: staffProcedure
+      .input(z.object({ articleId: uuid }))
+      .query(async ({ input, ctx }) => {
+        requireAdmin(ctx);
+        const article = await publishedKnowledgeArticle(input.articleId);
+        const projection = projectKnowledgeArticle(article);
+        const eventId = `knowledge:${article.articleId}:v${article.version}:project`;
+        const receipt = await getIntegrationReceipt("gbrain", eventId);
+        const result = receipt?.result as Record<string, unknown> | null;
+        return {
+          configured: gbrainConfigured(),
+          upstreamVersion: GBRAIN_UPSTREAM_VERSION,
+          upstreamRevision: GBRAIN_UPSTREAM_REVISION,
+          articleId: article.articleId,
+          title: article.title,
+          category: article.category,
+          body: article.body,
+          version: article.version,
+          slug: projection.gbrainSlug,
+          contentHash: projection.contentHash,
+          bytes: projection.bytes,
+          receiptId: receipt?.receiptId ?? null,
+          receiptStatus: receipt?.status ?? "not_shared",
+          bridgeStatus:
+            typeof result?.bridgeStatus === "string"
+              ? result.bridgeStatus
+              : "not_shared",
+          shared:
+            receipt?.status === "completed" &&
+            result?.bridgeStatus === "verified" &&
+            result.contentHash === projection.contentHash,
+        };
+      }),
+
+    shareWithBrain: staffProcedure
+      .input(
+        z.object({
+          articleId: uuid,
+          expectedVersion: z.number().int().positive(),
+          expectedContentHash: z.string().regex(/^[a-f0-9]{64}$/),
+          confirmation: z.literal(GBRAIN_SHARE_CONFIRMATION),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const current = requireAdmin(ctx);
+        const article = await publishedKnowledgeArticle(input.articleId);
+        const projection = projectKnowledgeArticle(article);
+        if (
+          article.version !== input.expectedVersion ||
+          projection.contentHash !== input.expectedContentHash
+        ) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "The article changed after review; review it again",
+          });
+        }
+        try {
+          const shared = await publishKnowledgeToGbrain(
+            article,
+            current.employeeId,
+          );
+          await audit(
+            ctx,
+            "workplace.knowledge.gbrain.share",
+            "knowledge_article",
+            article.articleId,
+            {
+              version: article.version,
+              contentHash: projection.contentHash,
+              slug: projection.gbrainSlug,
+              receiptId: shared.receiptId,
+              replay: shared.replay,
+            },
+          );
+          return {
+            articleId: article.articleId,
+            version: article.version,
+            slug: projection.gbrainSlug,
+            contentHash: projection.contentHash,
+            receiptId: shared.receiptId,
+            replay: shared.replay,
+            verified: true,
+          };
+        } catch (error) {
+          gbrainFailure(error);
+        }
       }),
 
     create: staffProcedure

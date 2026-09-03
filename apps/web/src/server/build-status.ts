@@ -1,5 +1,6 @@
 import { pingDatabase } from "@hrmny/db";
 import { getSupabasePublicConfig } from "@/lib/supabase-config";
+import { GBRAIN_UPSTREAM_VERSION, gbrainConfigured } from "@/server/gbrain";
 
 export type MilestoneStatus = "done" | "live_pending" | "blocked" | "next";
 
@@ -34,6 +35,7 @@ export async function getBuildStatus() {
   const googleChatConfigured = Boolean(
     process.env.GOOGLE_CHAT_SERVICE_ACCOUNT_JSON?.trim(),
   );
+  const companyBrainConfigured = gbrainConfigured();
   const qmUrl = (
     process.env.QM_PUBLIC_URL?.trim() ||
     process.env.NEXT_PUBLIC_QM_URL?.trim() ||
@@ -55,8 +57,7 @@ export async function getBuildStatus() {
       title: "Substrate",
       fee: "$1,500",
       status: "live_pending",
-      summary:
-        "Core live; Google Chat endpoint and QM/Sprites need provider rollout",
+      summary: "Core live; Google Chat, GBrain and QM need provider acceptance",
       href: "/gate",
       demoReady: true,
     },
@@ -166,6 +167,14 @@ export async function getBuildStatus() {
       detail: qmUrl
         ? `${qmUrl} — user sandboxes available`
         : "Deployment contract ready; Fly billing and quota must be unlocked before provisioning.",
+    },
+    {
+      id: "gbrain",
+      label: "GBrain company knowledge",
+      status: companyBrainConfigured ? "endpoint_ready" : "missing",
+      detail: companyBrainConfigured
+        ? `Scoped ${GBRAIN_UPSTREAM_VERSION} bridge configured; share one published article to verify read-back.`
+        : `Pinned ${GBRAIN_UPSTREAM_VERSION} bridge is built; add the dedicated MCP URL, projector token, and source ID.`,
     },
     {
       id: "asana",

@@ -34,6 +34,10 @@ Companion: `PRODUCTION-OWNERSHIP-ACCESS-REGISTER.md` (ownership + how each conne
 | 11 | n8n API key for `hrmny.app.n8n.cloud` | n8n → Settings → API | `N8N_API_KEY`, `N8N_WEBHOOK_SECRET` — automation seams |
 | 12 | Google Chat alert webhook plus Chat app service account | Chat space → Apps & integrations → Webhooks; Google Cloud project owning the Chat app → service account JSON | `GOOGLE_CHAT_WEBHOOK_URL` — health + cap alerts; `GOOGLE_CHAT_SERVICE_ACCOUNT_JSON` and exact `GOOGLE_CHAT_AUDIENCE` — durable threaded assistant replies |
 
+### Company brain cutover
+
+Deploy `garrytan/gbrain` `v0.48.2.0` at commit `5cfb84f1d3a809c70064c292c23db3d538d5c551` with its own PostgreSQL database. Register one `hrmny-os` write client bound server-side to `hrmny/knowledge/`, then set `GBRAIN_MCP_URL`, `GBRAIN_ACCESS_TOKEN`, and `GBRAIN_SOURCE_ID=hrmny-os` in Vercel. Never give hrmny OS or QM the raw GBrain database credential.
+
 ## Tier 4 — milestone-specific (can arrive later, before their milestone)
 
 | # | What | Env var(s) | Needed by |
@@ -61,7 +65,7 @@ Already set in prod (no action): Supabase URL/keys/`DATABASE_URL`, Google OAuth 
 >
 > To go from demo-mode to live AI, I need the following. Please add each to the Keeper folder (never email the values) and tick them off:
 >
-> **This week (blocks everything):** 1) OpenRouter API key, 2) OpenAI API key, 3) Apollo API key, 4) Hunter account re-activated + verifier credits, 5) NeverBounce credits, 6) Composio workspace + API key with Gmail authorized, 7) Inngest keys, 8) add me to the developer@hrmny.co Vercel team + Supabase org (or issue me tokens), 9) n8n API key, 10) a fresh Google Chat webhook plus the Chat app service-account JSON added directly to Vercel.
+> **This week (blocks everything):** 1) OpenRouter API key, 2) OpenAI API key, 3) Apollo API key, 4) Hunter account re-activated + verifier credits, 5) NeverBounce credits, 6) Composio workspace + API key with Gmail authorized, 7) Inngest keys, 8) add me to the developer@hrmny.co Vercel team + Supabase org (or issue me tokens), 9) n8n API key, 10) a fresh Google Chat webhook plus the Chat app service-account JSON added directly to Vercel, 11) the dedicated GBrain MCP URL plus its source-scoped projector token added directly to Vercel.
 >
 > **Before their milestones (2–8 weeks out):** Xero developer app + finance authorization; Composio LinkedIn + Canva connections; Meta/Google/TikTok ads read-only access; Sentry; transactional email/SMTP for the portal; Bayzat exports; Asana + Airtable access; Tejari access.
 >

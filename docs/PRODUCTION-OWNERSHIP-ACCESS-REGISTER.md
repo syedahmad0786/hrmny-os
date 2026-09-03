@@ -45,6 +45,7 @@
 | Upstash | TBD | Redis REST | console.upstash.com | deferred |
 | Keeper | vault owners | `hrmny-os / production` | Keeper | need |
 | Google Chat | ops | health alerts | Chat space → webhooks | rotate (previous value leaked) |
+| GBrain | HRMNY platform owner (name required) | dedicated `v0.48.2.0` runtime; `hrmny-os` source and projector client bound to `hrmny/knowledge/` | organization-owned runtime + Vercel encrypted env | need owner, runtime, scoped token, backup, and first article read-back |
 
 Fill names (not secrets) below when known:
 
@@ -57,3 +58,4 @@ Fill names (not secrets) below when known:
 | Google OAuth client display name | | |
 | Cron secret rotation owner | | |
 | Vercel production deploy owner | | |
+| GBrain runtime and backup owner | | |
