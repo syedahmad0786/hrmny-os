@@ -68,7 +68,8 @@ function seedCompanies(): Map<string, CompanyRow> {
       market: "UAE",
       website: null,
       linkedinUrl: null,
-      notes: "Sandbox isolation client B — must not leak into Demo Co CRM tools",
+      notes:
+        "Sandbox isolation client B — must not leak into Demo Co CRM tools",
       createdAt: t,
       updatedAt: t,
     },
@@ -370,6 +371,28 @@ export function getCrmMemory(): CrmMemory {
           updatedAt: t,
         },
       ],
+      [
+        "13000000-0000-4000-8000-000000000005",
+        {
+          activityId: "13000000-0000-4000-8000-000000000005",
+          type: "system",
+          subject: "Synthetic signed agreement recorded for quote v1",
+          body: null,
+          companyId: "11000000-0000-4000-8000-000000000001",
+          contactId: "12000000-0000-4000-8000-000000000001",
+          dealId: "e0000000-0000-4000-8000-000000000005",
+          actorEmployeeId: EMP_PARTNER,
+          occurredAt: t,
+          metadata: {
+            quoteId: "16000000-0000-4000-8000-000000000001",
+            quoteVersion: 1,
+            evidenceUrl: "https://fixtures.hrmny.co/signed-agreement",
+            synthetic: true,
+          },
+          createdAt: t,
+          updatedAt: t,
+        },
+      ],
     ]),
     notes: new Map([
       [
@@ -418,7 +441,33 @@ export function getCrmMemory(): CrmMemory {
         },
       ],
     ]),
-    quotes: new Map(),
+    quotes: new Map([
+      [
+        "16000000-0000-4000-8000-000000000001",
+        {
+          quoteId: "16000000-0000-4000-8000-000000000001",
+          dealId: "e0000000-0000-4000-8000-000000000005",
+          version: 1,
+          lineItems: [
+            {
+              label: "Synthetic JWMM retainer",
+              unitSell: 85_000,
+              unitCost: 48_000,
+              qty: 1,
+            },
+          ],
+          quoteValue: "85000.00",
+          internalCost: "48000.00",
+          marginPct: "43.53",
+          discountPct: null,
+          discountApprovalTier: null,
+          status: "accepted",
+          createdBy: EMP_PARTNER,
+          createdAt: t,
+          updatedAt: t,
+        },
+      ],
+    ]),
   };
   return memory;
 }

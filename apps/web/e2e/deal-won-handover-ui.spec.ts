@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { advanceDealToClose } from "./sales-flow";
 
 /** Seed JW Marriott deal already at propose (memory + SQL). */
 const PROPOSE_DEAL_ID = "e0000000-0000-4000-8000-000000000005";
@@ -16,16 +17,7 @@ async function ensureDealHandoverNext(page: Page) {
     /JW Marriott/i,
   );
 
-  const advance = page.getByTestId("deal-advance");
-  if (await advance.isVisible()) {
-    await advance.click();
-    await expect(
-      page
-        .getByTestId("deal-mark-won")
-        .or(page.getByTestId("deal-handover"))
-        .or(page.getByTestId("deal-handover-next")),
-    ).toBeVisible({ timeout: 30_000 });
-  }
+  await advanceDealToClose(page);
 
   const markWon = page.getByTestId("deal-mark-won");
   if (await markWon.isVisible()) {
@@ -66,7 +58,9 @@ test.describe("Deal won → handover UI", () => {
 
     await creative.click();
     await expect(page).toHaveURL(/\/creative\?.*taskId=/);
-    await expect(page.getByRole("heading", { name: /^Creative$/i })).toBeVisible({
+    await expect(
+      page.getByRole("heading", { name: /^Creative$/i }),
+    ).toBeVisible({
       timeout: 60_000,
     });
   });
@@ -80,7 +74,9 @@ test.describe("Deal won → handover UI", () => {
     const portal = page.getByTestId("deal-handover-portal");
     await expect(portal).toBeVisible();
     await expect(portal).toHaveAttribute("href", /\/portal\/login\/verify/);
-    const onboardingInvite = page.getByTestId("deal-handover-onboarding-invite");
+    const onboardingInvite = page.getByTestId(
+      "deal-handover-onboarding-invite",
+    );
     await expect(onboardingInvite).toBeVisible();
     await expect(onboardingInvite).toHaveAttribute(
       "href",
@@ -93,7 +89,9 @@ test.describe("Deal won → handover UI", () => {
     expect(portalHref).not.toBe(onboardingHref);
 
     await portal.click();
-    await expect(page).toHaveURL(/\/portal\/login\/verify/, { timeout: 60_000 });
+    await expect(page).toHaveURL(/\/portal\/login\/verify/, {
+      timeout: 60_000,
+    });
     await expect(page).toHaveURL(/token=/);
     await expect(
       page.getByRole("heading", { name: /^Approvals$/i }),

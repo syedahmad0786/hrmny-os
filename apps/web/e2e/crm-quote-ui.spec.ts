@@ -31,7 +31,9 @@ test.describe("CRM quote Save version UI", () => {
 
     await page.getByTestId("quote-save").click();
     const status = page.getByTestId("quote-save-status");
-    await expect(status).toContainText(/Saved v\d+/i, { timeout: 30_000 });
+    await expect(status).toContainText(/Saved draft v\d+/i, {
+      timeout: 30_000,
+    });
     await expect(status).toContainText(/No discount approval needed|Tier/i);
     // Partner sees computed margin after save.
     await expect(page.locator(".crm-metric strong")).toContainText(/\d+\.\d%/);

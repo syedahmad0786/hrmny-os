@@ -62,6 +62,7 @@ jobs:
       XERO_WRITE_ENABLED: "false"
       COMPOSIO_API_KEY: ""
       GOOGLE_CHAT_WEBHOOK_URL: ""
+      SALES_UNSUBSCRIBE_SECRET: "ci-only-unsubscribe-signing-key-not-for-production"
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
