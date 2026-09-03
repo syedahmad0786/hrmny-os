@@ -18,7 +18,7 @@ const SYNTHETIC_NAME_PATTERNS = [
   /^unit demo\b/i,
   /^fixture co\b/i,
   /^acme(?:\s+llc)?$/i,
-  /^(?:emp keep co|keep|other)$/i,
+  /^(?:audit co|boom co|domain co(?: two)?|emp keep co|fine co|fresh co|keep(?: co)?|name match llc|oneshot(?: settle co)?|other|solo co)$/i,
   /^test brand(?:\s+llc)?$/i,
   /^uae hospitality brands$/i,
   /^(?:uae retail brand|portal|campaign|creative|outreach|finance|agent)$/i,
