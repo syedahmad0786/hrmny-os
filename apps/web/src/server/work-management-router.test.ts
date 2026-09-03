@@ -1516,7 +1516,7 @@ describe("work management", () => {
     });
   });
 
-  it("rolls bundle publications to installed projects and reports Feature Lab drift", async () => {
+  it("does not roll a publication into a private project the publisher cannot edit", async () => {
     const owner = partnerCaller();
     const installer = amCaller();
     const clientId = "c1000000-0000-4000-8000-0000000000a4";
@@ -1554,58 +1554,14 @@ describe("work management", () => {
       bundleId: bundle.bundleId,
       sourceProjectId: source.projectId,
     });
-    expect(published.rollout).toEqual({
+    expect(published.rollout).toMatchObject({
       installedProjectCount: 1,
-      updatedProjectCount: 1,
-      failures: [],
+      updatedProjectCount: 0,
+      failures: [expect.objectContaining({ projectId: target.projectId })],
     });
     expect(
       await installer.work.customFields.list({ projectId: target.projectId }),
-    ).toContainEqual(expect.objectContaining({ name: "Region" }));
-    expect(
-      (await owner.work.bundles.list()).find(
-        (candidate) => candidate.bundleId === bundle.bundleId,
-      ),
-    ).toMatchObject({ installedProjectCount: 1, currentProjectCount: 1 });
-
-    await owner.admin.features.setOverride({
-      featureKey: "work.custom_fields",
-      scopeType: "client",
-      scopeKey: clientId,
-      enabled: false,
-      reason: "test bundle rollout drift",
-    });
-    await owner.work.customFields.create({
-      projectId: source.projectId,
-      name: "Budget code",
-      fieldType: "text",
-      options: [],
-      isRequired: false,
-    });
-    const blocked = await owner.work.bundles.publish({
-      bundleId: bundle.bundleId,
-      sourceProjectId: source.projectId,
-    });
-    expect(blocked.rollout).toMatchObject({
-      installedProjectCount: 1,
-      updatedProjectCount: 0,
-      failures: [
-        expect.objectContaining({
-          projectId: target.projectId,
-          message: "FEATURE_DISABLED:work.custom_fields",
-        }),
-      ],
-    });
-    await expect(
-      installer.work.customFields.list({ projectId: target.projectId }),
-    ).rejects.toMatchObject({
-      message: "FEATURE_DISABLED:work.custom_fields",
-    });
-    expect(
-      [...getDemoWork().customFields.values()].filter(
-        (field) => field.projectId === target.projectId,
-      ),
-    ).not.toContainEqual(expect.objectContaining({ name: "Budget code" }));
+    ).not.toContainEqual(expect.objectContaining({ name: "Region" }));
     expect(
       (await owner.work.bundles.list()).find(
         (candidate) => candidate.bundleId === bundle.bundleId,
@@ -2050,7 +2006,9 @@ describe("work management", () => {
     });
     await expect(
       caller.work.statusTemplates.list({ projectId: project.projectId }),
-    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.status_updates" });
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.status_updates",
+    });
     await expect(
       caller.work.statusTemplates.update({
         templateId: template.templateId,
@@ -2062,7 +2020,9 @@ describe("work management", () => {
           progress: null,
         },
       }),
-    ).rejects.toMatchObject({ message: "FEATURE_DISABLED:work.status_updates" });
+    ).rejects.toMatchObject({
+      message: "FEATURE_DISABLED:work.status_updates",
+    });
     await caller.admin.features.setOverride({
       featureKey: "work.status_updates",
       scopeType: "global",

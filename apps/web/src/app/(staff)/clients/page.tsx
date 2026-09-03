@@ -43,7 +43,6 @@ export default function ClientsPage() {
       await utils.clients.list.invalidate();
     },
   });
-  const [demoPortalLink, setDemoPortalLink] = useState<string | null>(null);
   const [inviteDeliveryNote, setInviteDeliveryNote] = useState<string | null>(
     null,
   );
@@ -54,14 +53,11 @@ export default function ClientsPage() {
       const mode = data.delivery?.mode;
       setInviteDeliveryNote(
         mode === "live"
-          ? `Invite emailed — open ${data.portalPath}`
+          ? "Access granted and a sign-in link was emailed"
           : mode === "mock"
-            ? `Invite ready (email not sent — Resend mock). Open magic link: ${data.portalPath}`
-            : data.portalPath
-              ? `Invite ready — open ${data.portalPath}`
-              : null,
+            ? "Access granted; email delivery is in mock mode"
+            : null,
       );
-      if (data.portalPath) setDemoPortalLink(data.portalPath);
       await Promise.all([
         utils.clients.list.invalidate(),
         utils.clients.portalUsers.list.invalidate(),
@@ -70,7 +66,6 @@ export default function ClientsPage() {
   });
   const issueDemoToken = trpc.clients.portalUsers.issueDemoToken.useMutation({
     onSuccess: (data) => {
-      setDemoPortalLink(data.portalPath);
       const mode = data.delivery?.mode;
       setInviteDeliveryNote(
         mode === "live"
@@ -279,6 +274,13 @@ export default function ClientsPage() {
             className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]"
             onSubmit={(event) => {
               event.preventDefault();
+              if (
+                !window.confirm(
+                  `Grant portal access and email a 15-minute sign-in link to ${portalEmail.trim()}?`,
+                )
+              ) {
+                return;
+              }
               invitePortalUser.mutate({
                 clientId: accessClientId,
                 displayName: portalName,
@@ -330,21 +332,6 @@ export default function ClientsPage() {
               {issueDemoToken.error.message}
             </p>
           ) : null}
-          {demoPortalLink ? (
-            <p
-              className="mt-3 rounded-lg border border-sand bg-cream/40 p-3 text-sm"
-              data-testid="clients-portal-demo-link"
-            >
-              Demo portal link (single-use):{" "}
-              <a
-                className="font-medium text-ochre underline"
-                href={demoPortalLink}
-                data-testid="clients-portal-demo-link-href"
-              >
-                {demoPortalLink}
-              </a>
-            </p>
-          ) : null}
           <div className="mt-4 space-y-2 text-sm">
             {(portalUsers.data ?? []).map((user) => (
               <div
@@ -370,7 +357,7 @@ export default function ClientsPage() {
                         })
                       }
                     >
-                      Open portal link
+                      Email sign-in link
                     </button>
                   ) : null}
                 </div>

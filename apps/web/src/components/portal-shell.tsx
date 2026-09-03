@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getDevRole, setDevRole, trpc } from "@/lib/trpc";
+import { getDevRole, setDevRole, setPortalGrant, trpc } from "@/lib/trpc";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { featureForPathname } from "@/features/catalog";
 
@@ -21,7 +21,9 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const isAuthPage =
     pathname === "/portal/login" || pathname.startsWith("/portal/login/");
   const [role, setRole] = useState("portal_a");
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const utils = trpc.useUtils();
+  const logout = trpc.portal.auth.logout.useMutation();
   const session = trpc.portal.auth.session.useQuery(undefined, {
     enabled: !isAuthPage,
     retry: false,
@@ -54,9 +56,18 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   }
 
   async function onSignOut() {
-    await getSupabaseBrowserClient()?.auth.signOut();
-    await utils.invalidate();
-    router.replace("/portal/login");
+    setSignOutError(null);
+    try {
+      await logout.mutateAsync();
+      await getSupabaseBrowserClient()?.auth.signOut();
+      setPortalGrant(null);
+      await utils.invalidate();
+      router.replace("/portal/login");
+    } catch {
+      setSignOutError(
+        "Sign out could not revoke this session. Please try again.",
+      );
+    }
   }
 
   if (isAuthPage) return children;
@@ -140,6 +151,14 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+        {signOutError ? (
+          <p
+            className="mx-auto max-w-5xl px-4 pb-3 text-sm text-red-700 sm:px-6"
+            role="alert"
+          >
+            {signOutError}
+          </p>
+        ) : null}
       </header>
       <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
         {pageEnabled ? (

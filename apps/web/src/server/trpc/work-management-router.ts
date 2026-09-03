@@ -3241,9 +3241,9 @@ async function requireScopedFeature(
 ) {
   if (
     !(await featureEnabled(featureKey, {
-      userId: ctx.workBundleRollout ? undefined : ctx.employeeId,
+      userId: ctx.employeeId,
       clientId: projectId ? await projectClientId(projectId) : ctx.clientId,
-      roles: ctx.workBundleRollout ? undefined : ctx.roles,
+      roles: ctx.roles,
     }))
   )
     throw new TRPCError({
@@ -4244,9 +4244,9 @@ async function requireRuleTriggerFeature(
   if (
     featureKey &&
     !(await featureEnabled(featureKey, {
-      userId: ctx.workBundleRollout ? undefined : ctx.employeeId,
+      userId: ctx.employeeId,
       clientId: await projectClientId(projectId),
-      roles: ctx.workBundleRollout ? undefined : ctx.roles,
+      roles: ctx.roles,
     }))
   )
     throw new TRPCError({
@@ -4540,12 +4540,14 @@ async function captureBundleBlueprint(
       select name from public.work_section
       where work_project_id = ${projectId}::uuid order by position
     `),
-      db.execute<{
-        name: string;
-        fieldType: WorkCustomFieldType;
-        options: unknown;
-        isRequired: boolean;
-      } & CustomFieldSecurity>(sql`
+      db.execute<
+        {
+          name: string;
+          fieldType: WorkCustomFieldType;
+          options: unknown;
+          isRequired: boolean;
+        } & CustomFieldSecurity
+      >(sql`
       select name, field_type as "fieldType", options,
         is_required as "isRequired", source_platform as "sourcePlatform",
         external_id as "externalId", privacy_setting as "privacySetting",
@@ -4669,7 +4671,6 @@ async function requireBundleCustomTaskTypeAccess(
 ) {
   if (!blueprint.customTaskTypes.length) return;
   await requireScopedFeature(ctx, "work.custom_task_types", projectId);
-  if (ctx.workBundleRollout) return;
   await Promise.all(
     blueprint.customTaskTypes.map((type) =>
       requireCustomTaskTypeAccess(ctx, type.customTaskTypeId),
@@ -7979,9 +7980,7 @@ export const workManagementRouter = router({
           order by position, created_at
         `);
         return rows
-          .filter(
-            (row) => customFieldAccessLevel(row, memberships) !== "none",
-          )
+          .filter((row) => customFieldAccessLevel(row, memberships) !== "none")
           .map((row) => ({
             ...row,
             options: Array.isArray(row.options)
@@ -8076,7 +8075,8 @@ export const workManagementRouter = router({
         const memberships = await customFieldMembershipAccess(ctx);
         if (!db) {
           return [...getDemoWork().customFields.values()].flatMap((field) => {
-            if (customFieldAccessLevel(field, memberships) === "none") return [];
+            if (customFieldAccessLevel(field, memberships) === "none")
+              return [];
             const key = `${input.itemId}:${field.customFieldId}`;
             return getDemoWork().customFieldValues.has(key)
               ? [
@@ -8118,10 +8118,7 @@ export const workManagementRouter = router({
         const memberships = await customFieldMembershipAccess(ctx);
         if (!db) {
           const field = getDemoWork().customFields.get(input.customFieldId);
-          if (
-            !field ||
-            customFieldAccessLevel(field, memberships) === "none"
-          )
+          if (!field || customFieldAccessLevel(field, memberships) === "none")
             throw new TRPCError({
               code: "NOT_FOUND",
               message: "Field not found",
@@ -8151,10 +8148,12 @@ export const workManagementRouter = router({
           );
           return { customFieldId: input.customFieldId, value };
         }
-        const [field] = await db.execute<{
-          fieldType: WorkCustomFieldType;
-          options: unknown;
-        } & CustomFieldSecurity & { isValueReadOnly: boolean }>(sql`
+        const [field] = await db.execute<
+          {
+            fieldType: WorkCustomFieldType;
+            options: unknown;
+          } & CustomFieldSecurity & { isValueReadOnly: boolean }
+        >(sql`
           select field_type as "fieldType", options,
             field.source_platform as "sourcePlatform",
             field.external_id as "externalId",
@@ -8408,10 +8407,7 @@ export const workManagementRouter = router({
         if (attachment.externalUrl)
           return { url: attachment.externalUrl, expiresAt: null };
         if (!attachment.storagePath) throw new TRPCError({ code: "NOT_FOUND" });
-        return getObjectStore().signedUrl(
-          attachment.storagePath,
-          300,
-        );
+        return getObjectStore().signedUrl(attachment.storagePath, 300);
       }),
     remove: staffProcedure
       .input(z.object({ attachmentId: uuid }))
@@ -9359,8 +9355,7 @@ export const workManagementRouter = router({
             clientId,
             roles: ctx.roles,
           }).some(
-            (feature) =>
-              feature.key === "work.dependencies" && feature.enabled,
+            (feature) => feature.key === "work.dependencies" && feature.enabled,
           );
         const db = getDb();
         if (!db) {
@@ -11572,28 +11567,16 @@ export const workManagementRouter = router({
     applyToProject: staffProcedure
       .input(z.object({ bundleId: uuid, projectId: uuid }))
       .mutation(async ({ input, ctx }) => {
-        const automaticRollout =
-          ctx.workBundleRollout?.bundleId === input.bundleId;
-        if (!automaticRollout)
-          await requireProjectAccess(ctx, input.projectId, "editor");
-        else {
-          const db = getDb();
-          const exists = !db
-            ? getDemoWork().projects.has(input.projectId)
-            : Boolean(
-                (
-                  await db.execute(sql`
-                    select 1 from public.work_project
-                    where work_project_id = ${input.projectId}::uuid
-                      and archived_at is null
-                  `)
-                )[0],
-              );
-          if (!exists) throw new TRPCError({ code: "NOT_FOUND" });
-        }
-        await requireScopedFeature(ctx, "work.bundles", input.projectId);
         const employeeId = actor(ctx);
         const db = getDb();
+        const project = await requireProjectAccess(ctx, input.projectId, "editor");
+        if (
+          !db &&
+          project.privacy === "private" &&
+          project.ownerEmployeeId !== employeeId
+        )
+          throw new TRPCError({ code: "NOT_FOUND" });
+        await requireScopedFeature(ctx, "work.bundles", input.projectId);
         const raw = !db
           ? getDemoWork().bundles.get(input.bundleId)
           : (
@@ -12058,7 +12041,6 @@ export const workManagementRouter = router({
         await audit(ctx, "work.bundle.apply", "work_project", input.projectId, {
           bundleId: input.bundleId,
           version: raw.version,
-          automaticRollout,
         });
         return {
           projectId: input.projectId,
@@ -14809,10 +14791,7 @@ async function rolloutPublishedBundle(
   bundleId: string,
   projectIds: readonly string[],
 ): Promise<BundleRolloutResult> {
-  const caller = createCallerFactory(workManagementRouter)({
-    ...ctx,
-    workBundleRollout: { bundleId },
-  });
+  const caller = createCallerFactory(workManagementRouter)(ctx);
   const failures: BundleRolloutResult["failures"] = [];
   let updatedProjectCount = 0;
   for (const projectId of projectIds) {

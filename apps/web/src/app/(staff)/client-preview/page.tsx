@@ -120,7 +120,7 @@ export default function ClientPreviewPage() {
         </div>
       </div>
 
-      <section>
+      <section id="approvals">
         <p className="font-display text-sm uppercase tracking-[0.2em] text-ochre">
           hrmny client workspace
         </p>

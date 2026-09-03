@@ -47,6 +47,7 @@ describe("portal magic-link session grant isolation", () => {
         roles: session!.roles,
         canViewMargin: sessionCanViewMargin(session!),
         clientId: session!.clientId,
+        portalGrant: verified.sessionGrant,
       }),
       sessionGrant: verified.sessionGrant,
     };
@@ -79,7 +80,9 @@ describe("portal magic-link session grant isolation", () => {
     expect(bBlob).toMatch(/Other Co/i);
     expect(bBlob).not.toMatch(/Launch reel|Approve launch reel cut|Demo Co/i);
 
-    const pending = aApprovals.find((approval) => approval.status === "pending");
+    const pending = aApprovals.find(
+      (approval) => approval.status === "pending",
+    );
     expect(pending).toBeDefined();
     const store = getDemoStore();
     const approved = await portalA.portal.approvals.act({
@@ -138,5 +141,22 @@ describe("portal magic-link session grant isolation", () => {
       audits: store.audits.length,
       seams: store.seamOutbox.length,
     }).toEqual(beforeCrossClient);
+  });
+
+  it("revokes only the presented portal session grant", async () => {
+    const first = await callerFromGrant("alex@democo.example", DEMO_CLIENT_ID);
+    const second = await callerFromGrant("alex@democo.example", DEMO_CLIENT_ID);
+
+    await expect(first.caller.portal.auth.logout()).resolves.toEqual({
+      revoked: true,
+    });
+    await expect(
+      resolvePortalSessionGrant(first.sessionGrant),
+    ).resolves.toBeNull();
+    await expect(
+      resolvePortalSessionGrant(second.sessionGrant),
+    ).resolves.toMatchObject({
+      clientId: DEMO_CLIENT_ID,
+    });
   });
 });

@@ -7,6 +7,7 @@ import { getAuthMode } from "../auth/session";
 import {
   portalMagicLinkEnabled,
   requestPortalMagicLink,
+  revokePortalSessionGrant,
   verifyPortalMagicToken,
 } from "../auth/portal-magic-link";
 import { getSupabasePublicConfig } from "@/lib/supabase-config";
@@ -33,7 +34,12 @@ import {
   signoffOnboardingPhase,
   notifyStaffOfOnboardingSignoff,
 } from "../clients/onboarding";
-import { driveSeamAsync, listSeams, resolveDirectAssetUrl, type SeamName } from "../seams";
+import {
+  driveSeamAsync,
+  listSeams,
+  resolveDirectAssetUrl,
+  type SeamName,
+} from "../seams";
 import { getDemoGuestShare } from "../work-governance";
 import { getDemoWork } from "./work-management-router";
 import {
@@ -282,6 +288,11 @@ export const portalRouter = router({
           .map((feature) => feature.key),
       };
     }),
+    logout: portalProcedure.mutation(async ({ ctx }) => ({
+      revoked: ctx.portalGrant
+        ? await revokePortalSessionGrant(ctx.portalGrant)
+        : false,
+    })),
   }),
 
   work: router({
@@ -487,20 +498,23 @@ export const portalRouter = router({
   }),
 
   briefs: router({
-    list: portalProcedure.query(async ({ ctx }) =>
-      (await readPortalWorkspace(requireClientId(ctx))).briefs,
+    list: portalProcedure.query(
+      async ({ ctx }) =>
+        (await readPortalWorkspace(requireClientId(ctx))).briefs,
     ),
   }),
 
   tasks: router({
-    list: portalProcedure.query(async ({ ctx }) =>
-      (await readPortalWorkspace(requireClientId(ctx))).tasks,
+    list: portalProcedure.query(
+      async ({ ctx }) =>
+        (await readPortalWorkspace(requireClientId(ctx))).tasks,
     ),
   }),
 
   assets: router({
-    list: portalProcedure.query(async ({ ctx }) =>
-      (await readPortalWorkspace(requireClientId(ctx))).assets,
+    list: portalProcedure.query(
+      async ({ ctx }) =>
+        (await readPortalWorkspace(requireClientId(ctx))).assets,
     ),
     signedUrl: portalProcedure
       .input(
@@ -651,8 +665,9 @@ export const portalRouter = router({
   }),
 
   approvals: router({
-    list: portalProcedure.query(async ({ ctx }) =>
-      (await readPortalWorkspace(requireClientId(ctx))).approvals,
+    list: portalProcedure.query(
+      async ({ ctx }) =>
+        (await readPortalWorkspace(requireClientId(ctx))).approvals,
     ),
     act: portalProcedure
       .use(requirePermission("portal", "approve"))
