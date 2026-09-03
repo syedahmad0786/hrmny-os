@@ -18,6 +18,7 @@ const SYNTHETIC_NAME_PATTERNS = [
   /^unit demo\b/i,
   /^fixture co\b/i,
   /^acme(?:\s+llc)?$/i,
+  /^(?:emp keep co|keep|other)$/i,
   /^test brand(?:\s+llc)?$/i,
   /^uae hospitality brands$/i,
   /^(?:uae retail brand|portal|campaign|creative|outreach|finance|agent)$/i,
@@ -32,6 +33,7 @@ const SYNTHETIC_ADDRESS_PATTERNS = [
   /@example\.(?:com|test|invalid)$/i,
   /@example\.org$/i,
   /@[^@\s]+\.example$/i,
+  /@example-/i,
 ] as const;
 
 const SYNTHETIC_AGENT_PATTERNS = [

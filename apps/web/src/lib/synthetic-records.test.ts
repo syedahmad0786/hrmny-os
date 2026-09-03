@@ -22,6 +22,8 @@ describe("synthetic record visibility", () => {
     expect(isSyntheticRecordName("Campaign")).toBe(true);
     expect(isSyntheticRecordName("Acme LLC")).toBe(true);
     expect(isSyntheticRecordName("Fixture Co")).toBe(true);
+    expect(isSyntheticRecordName("Emp Keep Co")).toBe(true);
+    expect(isSyntheticRecordName("Keep")).toBe(true);
     expect(isSyntheticRecordName("fintechdubai LLC")).toBe(true);
     expect(isSyntheticRecordName("Emaar Hospitality Group")).toBe(false);
     expect(isSyntheticRecordName("Acme Industrial Partners")).toBe(false);
@@ -29,6 +31,9 @@ describe("synthetic record visibility", () => {
       true,
     );
     expect(hasSyntheticMarker("Normal draft", "hello@democo.example")).toBe(
+      true,
+    );
+    expect(hasSyntheticMarker("Normal draft", "noura@example-albaik.sa")).toBe(
       true,
     );
   });

@@ -143,6 +143,7 @@ function OutreachInner() {
     const all = (items.data ?? []).filter(
       (item) =>
         showTestRecords ||
+        item.id === focusId ||
         !hasSyntheticMarker(
           companyByDeal.get(item.dealId),
           item.recipient,
