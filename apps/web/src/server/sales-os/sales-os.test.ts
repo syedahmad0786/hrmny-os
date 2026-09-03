@@ -9,6 +9,7 @@ import {
   listCompanies,
   listContacts,
   listDeals,
+  listNotes,
 } from "../crm/repository";
 import { getDemoStore } from "../demo-store";
 import {
@@ -674,6 +675,11 @@ describe("Sales research authorization", () => {
     expect(
       (await listDeals()).filter((deal) => deal.dealId === first.dealId),
     ).toHaveLength(1);
+    expect(await listNotes({ dealId: first.dealId })).toEqual([
+      expect.objectContaining({
+        body: "Added Mina Lead (Marketing Director) from Apollo to Northstar Hospitality. No email was unlocked. No phone, personal email, or waterfall lookup was used.",
+      }),
+    ]);
     expect(await creditUsed("apollo_contact")).toBe(0);
   });
 

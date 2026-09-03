@@ -179,23 +179,19 @@ export async function importApolloPersonToCrm(input: {
     deal = (await updateDeal(deal.dealId, { emailVerified: true })) ?? deal;
   }
 
+  const contactName = `${contact.firstName} ${contact.lastName ?? ""}`.trim();
+  const contactTitle = contact.title ? ` (${contact.title})` : "";
+  const emailSummary = email
+    ? verified
+      ? "Apollo verified the saved work email."
+      : "A work email was saved but is not verified."
+    : "No email was unlocked.";
   await createNote({
     dealId: deal.dealId,
     companyId: company.companyId,
     contactId: contact.contactId,
     authorEmployeeId: input.ownerEmployeeId ?? null,
-    body: `Apollo person reconciled. ${JSON.stringify({
-      receiptId: input.receiptId,
-      externalId: person.externalId,
-      source: person.source,
-      emailStatus: person.emailStatus ?? null,
-      paidFields: {
-        personalEmail: false,
-        phone: false,
-        emailWaterfall: false,
-        phoneWaterfall: false,
-      },
-    })}`,
+    body: `Added ${contactName}${contactTitle} from Apollo to ${company.name}. ${emailSummary} No phone, personal email, or waterfall lookup was used.`,
   });
 
   return {
