@@ -1131,7 +1131,7 @@ export default function HuntClientsPage() {
                       data-testid="hunt-status-onboarding"
                       href={demo.data.next.onboarding}
                     >
-                      Review client onboarding
+                      Review onboarding board
                     </Link>
                   </nav>
                 ) : null}
