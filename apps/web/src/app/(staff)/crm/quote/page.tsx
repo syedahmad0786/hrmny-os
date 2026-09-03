@@ -3,12 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
-import {
-  CrmBtn,
-  CrmEmpty,
-  CrmPageHeader,
-  CrmTag,
-} from "@/components/crm/ui";
+import { CrmBtn, CrmEmpty, CrmPageHeader, CrmTag } from "@/components/crm/ui";
 import { formatAed, formatRelative } from "@/components/crm/format";
 
 type DraftLine = {
@@ -23,8 +18,6 @@ const TIER_LABELS: Record<string, string> = {
   md: "Tier 2 · MD approval",
   partner: "Tier 3 · Partner approval",
 };
-
-const STATUSES = ["draft", "sent", "accepted", "rejected"] as const;
 
 function emptyLine(): DraftLine {
   return { label: "", qty: "1", unitSell: "0", unitCost: "0" };
@@ -55,10 +48,13 @@ export default function CrmQuotePage() {
   const save = trpc.crm.quotes.save.useMutation({
     onSuccess: () => void utils.crm.quotes.invalidate(),
   });
+  const acceptSigned = trpc.crm.quotes.acceptSigned.useMutation({
+    onSuccess: () => void utils.crm.quotes.invalidate(),
+  });
 
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
   const [discount, setDiscount] = useState("");
-  const [status, setStatus] = useState<(typeof STATUSES)[number]>("draft");
+  const [evidenceUrl, setEvidenceUrl] = useState("");
   const [seededDeal, setSeededDeal] = useState<string | null>(null);
 
   // Seed the editor from the latest saved version whenever the deal changes.
@@ -77,7 +73,6 @@ export default function CrmQuotePage() {
         })),
       );
       setDiscount(latest.discountPct ? String(Number(latest.discountPct)) : "");
-      setStatus(latest.status);
     } else {
       setLines([
         {
@@ -88,7 +83,6 @@ export default function CrmQuotePage() {
         },
       ]);
       setDiscount("");
-      setStatus("draft");
     }
     setSeededDeal(selected.dealId);
     setViewId(null);
@@ -97,6 +91,9 @@ export default function CrmQuotePage() {
   }, [selected, versions.data, versions.isLoading, seededDeal]);
 
   const marginAllowed = Boolean(session.data?.canViewMargin);
+  const canAcceptSigned = Boolean(
+    session.data?.roles.some((role) => ["partner", "director"].includes(role)),
+  );
 
   const parsedLines = lines
     .map((l) => ({
@@ -108,6 +105,7 @@ export default function CrmQuotePage() {
     .filter((l) => l.label.length > 0);
   const subtotal = parsedLines.reduce((s, l) => s + l.qty * l.unitSell, 0);
   const discountNum = Math.min(100, Math.max(0, Number(discount) || 0));
+  const discountedTotal = subtotal * (1 - discountNum / 100);
 
   const saved = save.data?.ok === true ? save.data : null;
   const saveFailed = save.data?.ok === false ? save.data.reason : null;
@@ -137,7 +135,6 @@ export default function CrmQuotePage() {
       dealId: selected.dealId,
       lineItems: parsedLines,
       discountPct: discountNum > 0 ? discountNum : undefined,
-      status,
     });
   };
 
@@ -160,7 +157,10 @@ export default function CrmQuotePage() {
       ) : deals.isError ? (
         <CrmEmpty title="Could not load deals" hint={deals.error.message} />
       ) : !selected ? (
-        <CrmEmpty title="No deals" hint="Create a deal before opening commercial." />
+        <CrmEmpty
+          title="No deals"
+          hint="Create a deal before opening commercial."
+        />
       ) : (
         <section className="crm-split">
           <div className="crm-panel">
@@ -169,7 +169,9 @@ export default function CrmQuotePage() {
                 <h3>Quote · {selected.companyName}</h3>
                 <p>
                   {selected.dealId.slice(0, 8)} · {String(selected.stage)}
-                  {latest ? ` · v${latest.version} saved` : " · no versions yet"}
+                  {latest
+                    ? ` · v${latest.version} saved`
+                    : " · no versions yet"}
                 </p>
               </div>
               <CrmTag kind={latest ? "success" : undefined}>
@@ -215,7 +217,9 @@ export default function CrmQuotePage() {
                               data-testid="quote-line-label"
                               placeholder="Line item"
                               value={l.label}
-                              onChange={(e) => setLine(i, { label: e.target.value })}
+                              onChange={(e) =>
+                                setLine(i, { label: e.target.value })
+                              }
                             />
                           </td>
                           <td>
@@ -226,7 +230,9 @@ export default function CrmQuotePage() {
                               min={1}
                               style={{ width: 70 }}
                               value={l.qty}
-                              onChange={(e) => setLine(i, { qty: e.target.value })}
+                              onChange={(e) =>
+                                setLine(i, { qty: e.target.value })
+                              }
                             />
                           </td>
                           <td>
@@ -260,7 +266,8 @@ export default function CrmQuotePage() {
                           <td>
                             <strong>
                               {formatAed(
-                                (Number(l.qty) || 1) * (Number(l.unitSell) || 0),
+                                (Number(l.qty) || 1) *
+                                  (Number(l.unitSell) || 0),
                               )}
                             </strong>
                           </td>
@@ -318,25 +325,9 @@ export default function CrmQuotePage() {
                   </div>
                 </div>
                 <div className="crm-field">
-                  <label>Status</label>
-                  <select
-                    className="crm-select"
-                    value={status}
-                    onChange={(e) =>
-                      setStatus(e.target.value as (typeof STATUSES)[number])
-                    }
-                  >
-                    {STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="crm-field">
                   <label>Quote total</label>
                   <div className="font-display text-2xl font-semibold">
-                    {formatAed(subtotal)}
+                    {formatAed(discountedTotal)}
                   </div>
                 </div>
               </div>
@@ -376,7 +367,7 @@ export default function CrmQuotePage() {
                   style={{ marginTop: 10 }}
                   data-testid="quote-save-status"
                 >
-                  Saved v{saved.quote.version} ·{" "}
+                  Saved draft v{saved.quote.version} ·{" "}
                   {saved.approvalTier
                     ? (TIER_LABELS[saved.approvalTier] ?? saved.approvalTier)
                     : "No discount approval needed"}
@@ -386,6 +377,48 @@ export default function CrmQuotePage() {
                   {saved.marginBelowFloor
                     ? ` · margin below ${saved.floorPct}% floor (target ${saved.targetPct}%)`
                     : ""}
+                </div>
+              ) : null}
+
+              {latest?.status === "accepted" ? (
+                <div className="crm-note" style={{ marginTop: 10 }}>
+                  Signed agreement recorded for v{latest.version}. The deal can
+                  be marked won after it passes the commercial stage gates.
+                </div>
+              ) : canAcceptSigned && latest ? (
+                <div className="crm-form-grid" style={{ marginTop: 14 }}>
+                  <div className="crm-field">
+                    <label>Signed agreement URL</label>
+                    <input
+                      className="crm-input"
+                      type="url"
+                      placeholder="https://drive.google.com/…"
+                      value={evidenceUrl}
+                      onChange={(event) => setEvidenceUrl(event.target.value)}
+                    />
+                  </div>
+                  <div className="crm-field">
+                    <label>Client acceptance</label>
+                    <CrmBtn
+                      disabled={
+                        acceptSigned.isPending ||
+                        !evidenceUrl.trim().startsWith("https://")
+                      }
+                      onClick={() =>
+                        void acceptSigned
+                          .mutateAsync({
+                            quoteId: latest.quoteId,
+                            evidenceUrl: evidenceUrl.trim(),
+                          })
+                          .then(() => setEvidenceUrl(""))
+                      }
+                    >
+                      Record signed agreement
+                    </CrmBtn>
+                  </div>
+                  {acceptSigned.error ? (
+                    <div className="crm-note">{acceptSigned.error.message}</div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -400,15 +433,19 @@ export default function CrmQuotePage() {
                 <>
                   <div className="crm-metric" style={{ marginBottom: 10 }}>
                     <span className="crm-metric-label">Margin</span>
-                    <strong>{Number(latestMargin.marginPct).toFixed(1)}%</strong>
+                    <strong>
+                      {Number(latestMargin.marginPct).toFixed(1)}%
+                    </strong>
                     <small>Latest saved version</small>
                   </div>
                   <div className="crm-checklist">
                     <div className="crm-check-row">
-                      Internal cost <span>{formatAed(latestMargin.internalCost)}</span>
+                      Internal cost{" "}
+                      <span>{formatAed(latestMargin.internalCost)}</span>
                     </div>
                     <div className="crm-check-row">
-                      Quote value <span>{formatAed(latestMargin.quoteValue)}</span>
+                      Quote value{" "}
+                      <span>{formatAed(latestMargin.quoteValue)}</span>
                     </div>
                   </div>
                   <div className="crm-note">
@@ -420,7 +457,9 @@ export default function CrmQuotePage() {
                   <strong className="block font-display text-lg">
                     No margin data yet
                   </strong>
-                  <p className="mt-2">Save a version to compute cost and margin.</p>
+                  <p className="mt-2">
+                    Save a version to compute cost and margin.
+                  </p>
                 </div>
               ) : (
                 <>
@@ -429,8 +468,8 @@ export default function CrmQuotePage() {
                       Commercial cost is restricted
                     </strong>
                     <p className="mt-2">
-                      Account Managers can shape scope and client price. Internal
-                      cost and margin are not loaded for this role.
+                      Account Managers can shape scope and client price.
+                      Internal cost and margin are not loaded for this role.
                     </p>
                   </div>
                   <div className="crm-note">
@@ -464,7 +503,8 @@ export default function CrmQuotePage() {
                           : ""}
                       </span>
                       <span>
-                        {formatAed(q.quoteValue)} · {formatRelative(q.createdAt)}{" "}
+                        {formatAed(q.quoteValue)} ·{" "}
+                        {formatRelative(q.createdAt)}{" "}
                         <CrmBtn
                           variant="ghost"
                           onClick={() =>
@@ -536,7 +576,6 @@ export default function CrmQuotePage() {
                           setDiscount(
                             q.discountPct ? String(Number(q.discountPct)) : "",
                           );
-                          setStatus(q.status);
                         }}
                       >
                         Load into editor

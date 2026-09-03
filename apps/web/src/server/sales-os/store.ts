@@ -1186,6 +1186,53 @@ export async function addCredit(
   );
 }
 
+/** Atomically reserve provider credits before a paid request starts. */
+export async function reserveCreditWithinCap(
+  kind: CreditLedgerRow["kind"],
+  cap: number,
+  count = 1,
+  period?: string,
+): Promise<boolean> {
+  if (!Number.isInteger(count) || count < 1 || !Number.isInteger(cap)) {
+    throw new Error("Valid credit count and cap required");
+  }
+  const month =
+    period ??
+    (kind === "linkedin_assist"
+      ? isoWeekKey(new Date())
+      : new Date().toISOString().slice(0, 7));
+  const db = getDb();
+  if (!db) {
+    const used = memory.credits
+      .filter((credit) => credit.month === month && credit.kind === kind)
+      .reduce((sum, credit) => sum + credit.count, 0);
+    if (used + count > cap) return false;
+    memory.credits.push({
+      id: randomUUID(),
+      month,
+      kind,
+      count,
+      createdAt: new Date().toISOString(),
+    });
+    return true;
+  }
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      select pg_advisory_xact_lock(
+        hashtextextended(${`sales-credit:${month}:${kind}`}, 0)
+      )
+    `);
+    const rows = await tx.execute<{ used: number | string }>(sql`
+      select coalesce(sum(count), 0)::int as used
+      from public.sales_os_credit_ledger
+      where month = ${month} and kind = ${kind}
+    `);
+    if (Number(rows[0]?.used ?? 0) + count > cap) return false;
+    await tx.insert(salesOsCreditLedger).values({ month, kind, count });
+    return true;
+  });
+}
+
 function isoWeekKey(date: Date): string {
   const tmp = new Date(
     Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),

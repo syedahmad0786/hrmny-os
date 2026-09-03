@@ -561,6 +561,8 @@ export async function updateDeal(
     quoteValue: string | null;
     internalCost: string | null;
     marginPct: string | null;
+    discountPct: string | null;
+    discountApprovalTier: CrmQuoteRow["discountApprovalTier"];
     closeOutcome: DealRow["closeOutcome"];
     lostReason: string | null;
   }>,
@@ -980,6 +982,33 @@ export async function getQuote(quoteId: string): Promise<CrmQuoteRow | null> {
   );
 }
 
+export async function updateQuoteStatus(
+  quoteId: string,
+  status: CrmQuoteRow["status"],
+): Promise<CrmQuoteRow | null> {
+  return withDb(
+    async (db) => {
+      const [row] = await db
+        .update(crmQuote)
+        .set({ status, updatedAt: new Date() })
+        .where(eq(crmQuote.quoteId, quoteId))
+        .returning();
+      return row ? mapQuote(row) : null;
+    },
+    () => {
+      const row = getCrmMemory().quotes.get(quoteId);
+      if (!row) return null;
+      const updated = {
+        ...row,
+        status,
+        updatedAt: new Date().toISOString(),
+      };
+      getCrmMemory().quotes.set(quoteId, updated);
+      return updated;
+    },
+  );
+}
+
 function isUniqueViolation(e: unknown): boolean {
   const err = e as { code?: string; cause?: { code?: string } } | null;
   return err?.code === "23505" || err?.cause?.code === "23505";
@@ -1056,7 +1085,9 @@ export async function createQuoteVersion(input: {
 // ── Dedupe & merge ─────────────────────────────────────────
 
 /** Normalize a website URL to a bare domain (strip scheme, www, path). */
-export function normalizeDomain(website: string | null | undefined): string | null {
+export function normalizeDomain(
+  website: string | null | undefined,
+): string | null {
   if (!website?.trim()) return null;
   const stripped = website
     .trim()
@@ -1298,11 +1329,7 @@ export async function omniSearch(q: string): Promise<OmniSearchResult> {
   return withDb(
     async (db) => {
       const [companies, contacts, deals] = await Promise.all([
-        db
-          .select()
-          .from(company)
-          .where(ilike(company.name, pattern))
-          .limit(10),
+        db.select().from(company).where(ilike(company.name, pattern)).limit(10),
         db
           .select()
           .from(contact)

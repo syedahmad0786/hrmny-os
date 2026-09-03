@@ -7,6 +7,9 @@ import { listCompanies, listContacts, listDeals } from "../crm/repository";
 import { resetIntegrationReceiptMemory } from "../integrations/inbox";
 import {
   APOLLO_PAID_APPROVAL_ACTION,
+  apolloExactCandidateHash,
+  approveApolloExactPerson,
+  consumeApolloExactApproval,
   enrichOneApolloPerson,
   getApolloOnePersonCanaryStatus,
   type ApolloConsumedApprovalReceipt,
@@ -19,7 +22,12 @@ import {
 } from "./apollo-search";
 
 const runScheduledApolloPeopleSearch = runScheduledApolloPeopleSearchForTest;
-import { creditUsed, resetSalesOsStore } from "./store";
+import {
+  creditUsed,
+  getSalesOsSettings,
+  resetSalesOsStore,
+  saveSalesOsSettings,
+} from "./store";
 
 function liveStub(): LeadSourceAdapter {
   return {
@@ -62,7 +70,7 @@ function exactApproval() {
   );
 }
 
-describe("Apollo one-person connection canary", () => {
+describe("Apollo exact-person enrichment", () => {
   beforeEach(() => {
     resetCrmMemory();
     resetSalesOsStore();
@@ -246,6 +254,42 @@ describe("Apollo one-person connection canary", () => {
     });
   });
 
+  it("issues one actor-and-candidate-bound approval receipt and consumes it once", async () => {
+    const candidate = {
+      externalId: "apollo-approved-person",
+      fullName: "Approved Person",
+    };
+    const approval = await approveApolloExactPerson({
+      candidate,
+      actorEmployeeId: PAID_ACTOR,
+      now: PAID_NOW,
+    });
+    const claim = {
+      approvalReceiptId: approval.approvalReceiptId,
+      actorEmployeeId: PAID_ACTOR,
+      candidateHash: apolloExactCandidateHash(candidate),
+      action: APOLLO_PAID_APPROVAL_ACTION,
+      requestedAt: PAID_NOW.toISOString(),
+    } as const;
+
+    await expect(
+      consumeApolloExactApproval({
+        ...claim,
+        candidateHash: apolloExactCandidateHash({
+          externalId: "another-person",
+        }),
+      }),
+    ).rejects.toThrow(/INVALID_OR_USED/);
+    await expect(consumeApolloExactApproval(claim)).resolves.toMatchObject({
+      status: "consumed",
+      actorEmployeeId: PAID_ACTOR,
+      candidateHash: approval.candidateHash,
+    });
+    await expect(consumeApolloExactApproval(claim)).rejects.toThrow(
+      /INVALID_OR_USED/,
+    );
+  });
+
   it("uses one call, records one conservative credit, and reconciles CRM", async () => {
     const source = liveStub();
     const input = {
@@ -282,7 +326,7 @@ describe("Apollo one-person connection canary", () => {
       imported: true,
     });
     expect(source.enrichLead).toHaveBeenCalledTimes(1);
-    expect(await creditUsed("apollo_contact")).toBe(1);
+    expect(await creditUsed("apollo_contact", "2026-08")).toBe(1);
     expect((await listCompanies()).some((row) => row.name === "Acme UAE")).toBe(
       true,
     );
@@ -294,23 +338,72 @@ describe("Apollo one-person connection canary", () => {
     ).toBe(true);
     expect(await getApolloOnePersonCanaryStatus()).toMatchObject({
       available: false,
-      status: "completed",
+      status: "locked_exact_approval_required",
     });
   });
 
-  it("locks the one-shot allowance to the first exact candidate", async () => {
+  it("atomically enforces the monthly cap across different candidates", async () => {
+    const settings = await getSalesOsSettings();
+    await saveSalesOsSettings({
+      ...settings,
+      caps: { ...settings.caps, apolloContactsPerMonth: 1 },
+    });
     const source = liveStub();
+    const run = (externalId: string, approvalReceiptId: string) =>
+      enrichOneApolloPerson(
+        {
+          candidate: { externalId, fullName: `Lead ${externalId}` },
+          confirmCreditUse: true,
+          actorEmployeeId: PAID_ACTOR,
+          approvalReceiptId,
+        },
+        {
+          leadSource: source,
+          now: () => PAID_NOW,
+          consumeExactApproval: exactApproval(),
+        },
+      );
+
+    const outcomes = await Promise.allSettled([
+      run("apollo-cap-a", "43000000-0000-4000-8000-000000000011"),
+      run("apollo-cap-b", "43000000-0000-4000-8000-000000000012"),
+    ]);
+    expect(
+      outcomes.filter((outcome) => outcome.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      outcomes.find((outcome) => outcome.status === "rejected"),
+    ).toMatchObject({
+      reason: expect.objectContaining({
+        message: "APOLLO_MONTHLY_CAP_REACHED",
+      }),
+    });
+    expect(source.enrichLead).toHaveBeenCalledTimes(1);
+    expect(await creditUsed("apollo_contact", "2026-08")).toBe(1);
+  });
+
+  it("does not let one exact approval unlock a second candidate", async () => {
+    const source = liveStub();
+    const firstCandidate = {
+      externalId: "apollo-person-1",
+      fullName: "Mina Lead",
+    };
+    const approval = await approveApolloExactPerson({
+      candidate: firstCandidate,
+      actorEmployeeId: PAID_ACTOR,
+      now: PAID_NOW,
+    });
     await enrichOneApolloPerson(
       {
-        candidate: { externalId: "apollo-person-1", fullName: "Mina Lead" },
+        candidate: firstCandidate,
         confirmCreditUse: true,
         actorEmployeeId: PAID_ACTOR,
-        approvalReceiptId: PAID_APPROVAL,
+        approvalReceiptId: approval.approvalReceiptId,
       },
       {
         leadSource: source,
         now: () => PAID_NOW,
-        consumeExactApproval: exactApproval(),
+        consumeExactApproval: consumeApolloExactApproval,
       },
     );
     await expect(
@@ -319,15 +412,15 @@ describe("Apollo one-person connection canary", () => {
           candidate: { externalId: "apollo-person-2", fullName: "Other Lead" },
           confirmCreditUse: true,
           actorEmployeeId: PAID_ACTOR,
-          approvalReceiptId: PAID_APPROVAL,
+          approvalReceiptId: approval.approvalReceiptId,
         },
         {
           leadSource: source,
           now: () => PAID_NOW,
-          consumeExactApproval: exactApproval(),
+          consumeExactApproval: consumeApolloExactApproval,
         },
       ),
-    ).rejects.toThrow(/PAYLOAD_MISMATCH/);
+    ).rejects.toThrow(/INVALID_OR_USED/);
     expect(source.enrichLead).toHaveBeenCalledTimes(1);
   });
 

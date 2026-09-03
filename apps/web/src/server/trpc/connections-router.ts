@@ -404,6 +404,24 @@ function requireSystemComposio() {
   return (systemComposio ??= createComposioLive({ apiKey }));
 }
 
+export async function verifyComposioAccountOwner(input: {
+  employeeId: string;
+  toolkit: WorkAppToolkit;
+  connectedAccountId: string;
+}): Promise<boolean> {
+  const accounts = await requireSystemComposio().listConnectedAccounts({
+    toolkit: input.toolkit,
+    userId: input.employeeId,
+  });
+  return accounts.some(
+    (account) =>
+      account.id === input.connectedAccountId &&
+      account.user_id === input.employeeId &&
+      account.toolkit.slug === input.toolkit &&
+      isActiveComposioStatus(account.status, account.is_disabled),
+  );
+}
+
 /** Where Canva/LinkedIn OAuth should return so reconcile + polling can run. */
 export function composioConnectionsCallbackUrl(): string {
   return new URL(

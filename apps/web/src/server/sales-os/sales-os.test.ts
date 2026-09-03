@@ -1,7 +1,7 @@
 process.env.DATABASE_URL = "";
 
 import { createLeadSourceMock } from "@hrmny/integrations";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetCrmMemory } from "../crm/memory";
 import {
   createDeal,
@@ -62,6 +62,7 @@ import {
   listOutreach,
 } from "../leadgen/store";
 import { resetIntegrationReceiptMemory } from "../integrations/inbox";
+import type { RunAgent } from "../leadgen/agent-run";
 
 async function resetAll() {
   resetCrmMemory();
@@ -469,7 +470,18 @@ describe("research → enrich → draft gates", () => {
     expect(gated.approvalState).toBe("approved");
     expect(gated.dealId).toBeTruthy();
 
-    const drafts = await draftChannelsForApprovedContact(gated.id);
+    const runAgent: RunAgent = vi.fn(async (input) => ({
+      agent: input.agent,
+      model: "test",
+      output: `Hi Mina — I noticed ${approved.name}'s new UAE launch.`,
+      inputTokens: 1,
+      outputTokens: 1,
+      costAed: 0,
+      gateOutcome: "pending" as const,
+    }));
+    const drafts = await draftChannelsForApprovedContact(gated.id, {
+      runAgent,
+    });
     expect(drafts.created.some((d) => d.channel === "linkedin_connect")).toBe(
       true,
     );
@@ -477,7 +489,20 @@ describe("research → enrich → draft gates", () => {
       true,
     );
     const email = drafts.created.find((d) => d.channel === "gmail");
-    if (email) expect(email.body).toContain(FOOTER_MARKER);
+    if (email) {
+      expect(email.body).toContain(FOOTER_MARKER);
+      expect(email.body).toContain(approved.name);
+      expect(email.body).not.toContain("mock outreach");
+    }
+
+    const replay = await draftChannelsForApprovedContact(gated.id, {
+      runAgent,
+    });
+    expect(replay).toMatchObject({ replayed: true, created: [] });
+    expect(runAgent).toHaveBeenCalledTimes(email ? 1 : 0);
+    expect(await listOutreach({ dealId: gated.dealId! })).toHaveLength(
+      drafts.created.length,
+    );
   });
 
   it("refuses to persist synthetic contact discovery on the visible path", async () => {
@@ -632,9 +657,16 @@ describe("Sales research authorization", () => {
       }),
     ).rejects.toThrow(/Sales operator role required/i);
     await expect(
+      hr.salesOs.apollo.approveExact({
+        candidate: { externalId: "apollo-denied-person" },
+        confirmCreditUse: true,
+      }),
+    ).rejects.toThrow(/Sales operator role required/i);
+    await expect(
       hr.salesOs.apollo.enrichOne({
         candidate: { externalId: "apollo-denied-person" },
         confirmCreditUse: true,
+        approvalReceiptId: "43000000-0000-4000-8000-000000000099",
       }),
     ).rejects.toThrow(/Sales operator role required/i);
     await expect(
@@ -683,14 +715,23 @@ describe("Sales research authorization", () => {
     expect(await creditUsed("apollo_contact")).toBe(0);
   });
 
-  it("keeps paid Apollo disabled without an exact server approval receipt", async () => {
+  it("creates a bounded paid approval but rejects an unknown receipt before Apollo", async () => {
     const partner = salesCaller(resolveDevUser("partner"));
+    const approval = await partner.salesOs.apollo.approveExact({
+      candidate: { externalId: "apollo-approved-but-not-run" },
+      confirmCreditUse: true,
+    });
+    expect(approval).toMatchObject({ creditsMaximum: 1 });
+    expect(approval.approvalReceiptId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     await expect(
       partner.salesOs.apollo.enrichOne({
         candidate: { externalId: "apollo-visible-but-unapproved" },
         confirmCreditUse: true,
+        approvalReceiptId: "43000000-0000-4000-8000-000000000098",
       }),
-    ).rejects.toThrow(/EXACT_APPROVAL_RECEIPT/);
+    ).rejects.toThrow(/INVALID_OR_USED/);
     expect(await creditUsed("apollo_contact")).toBe(0);
   });
 

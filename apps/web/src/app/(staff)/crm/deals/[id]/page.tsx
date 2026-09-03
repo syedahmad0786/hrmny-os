@@ -4,12 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
-import {
-  CrmBtn,
-  CrmEmpty,
-  CrmPageHeader,
-  CrmTag,
-} from "@/components/crm/ui";
+import { CrmBtn, CrmEmpty, CrmPageHeader, CrmTag } from "@/components/crm/ui";
 import {
   buafScore,
   formatAed,
@@ -39,7 +34,11 @@ export default function CrmDealDetailPage() {
   const id = params.id;
   const utils = trpc.useUtils();
   const deal = trpc.crm.deals.get.useQuery({ id });
-  const activities = trpc.crm.activities.list.useQuery({ dealId: id, limit: 50 });
+  const session = trpc.auth.session.useQuery();
+  const activities = trpc.crm.activities.list.useQuery({
+    dealId: id,
+    limit: 50,
+  });
   const notes = trpc.crm.notes.list.useQuery({ dealId: id });
   const tasks = trpc.crm.tasks.list.useQuery({ dealId: id });
 
@@ -86,6 +85,9 @@ export default function CrmDealDetailPage() {
 
   const score = useMemo(() => (d ? buafScore(d) : null), [d]);
   const nextStage = d?.stage ? NEXT[String(d.stage)] : undefined;
+  const canConfirmWon = Boolean(
+    session.data?.roles.some((role) => ["partner", "director"].includes(role)),
+  );
 
   if (deal.isLoading) {
     return <CrmEmpty title="Loading deal…" />;
@@ -94,8 +96,14 @@ export default function CrmDealDetailPage() {
   if (!d) {
     return (
       <main>
-        <CrmEmpty title="Deal not found" hint="It may have been removed or the id is invalid." />
-        <Link href="/crm" className="mt-4 inline-block text-[var(--ochre-dark)]">
+        <CrmEmpty
+          title="Deal not found"
+          hint="It may have been removed or the id is invalid."
+        />
+        <Link
+          href="/crm"
+          className="mt-4 inline-block text-[var(--ochre-dark)]"
+        >
           ← Back to pipeline
         </Link>
       </main>
@@ -126,7 +134,8 @@ export default function CrmDealDetailPage() {
                 Advance → {nextStage.replace(/_/g, " ")}
               </CrmBtn>
             ) : null}
-            {(d.stage === "price_cost" || d.stage === "close") &&
+            {canConfirmWon &&
+            d.stage === "close" &&
             d.closeOutcome !== "won" ? (
               <CrmBtn
                 variant="primary"
@@ -143,7 +152,8 @@ export default function CrmDealDetailPage() {
                 Mark won
               </CrmBtn>
             ) : null}
-            {d.closeOutcome === "won" &&
+            {canConfirmWon &&
+            d.closeOutcome === "won" &&
             (d.stage === "close" || d.stage === "handover_pack") ? (
               <CrmBtn
                 variant="primary"
@@ -276,9 +286,7 @@ export default function CrmDealDetailPage() {
                     className="crm-select"
                     data-testid="deal-buaf-temperature"
                     value={temp}
-                    onChange={(e) =>
-                      setTemp(e.target.value as typeof temp)
-                    }
+                    onChange={(e) => setTemp(e.target.value as typeof temp)}
                   >
                     <option value="">Unset</option>
                     <option value="hot">Hot</option>
@@ -312,19 +320,6 @@ export default function CrmDealDetailPage() {
                   }}
                 >
                   Save BUAF
-                </CrmBtn>
-                <CrmBtn
-                  data-testid="deal-email-verify"
-                  disabled={update.isPending || d.emailVerified}
-                  onClick={async () => {
-                    const r = await update.mutateAsync({
-                      id,
-                      emailVerified: true,
-                    });
-                    setLast(r);
-                  }}
-                >
-                  Mark email verified
                 </CrmBtn>
               </div>
             </div>
@@ -366,7 +361,9 @@ export default function CrmDealDetailPage() {
                   </div>
                 ))}
                 {(notes.data ?? []).length === 0 ? (
-                  <p className="text-[11px] text-[var(--muted)]">No notes yet.</p>
+                  <p className="text-[11px] text-[var(--muted)]">
+                    No notes yet.
+                  </p>
                 ) : null}
               </div>
             </div>
@@ -399,7 +396,10 @@ export default function CrmDealDetailPage() {
                   Updated <span>{formatRelative(d.updatedAt)}</span>
                 </div>
               </div>
-              <Link href="/crm/quote" className="mt-3 inline-block text-[var(--ochre-dark)] text-[11px] font-bold">
+              <Link
+                href="/crm/quote"
+                className="mt-3 inline-block text-[var(--ochre-dark)] text-[11px] font-bold"
+              >
                 Open commercial panel →
               </Link>
             </div>

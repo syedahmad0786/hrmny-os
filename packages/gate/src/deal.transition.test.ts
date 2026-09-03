@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   bootstrapGateRegistry,
   clearRegistry,
+  computeQuoteMetrics,
   scoreBuaf,
   transition,
   type ActorContext,
@@ -48,6 +49,21 @@ describe("deal gate transitions", () => {
     ).toEqual({ temperature: "hot", hot: true, score: 4 });
   });
 
+  it("applies vendor markup and discount before margin", () => {
+    expect(
+      computeQuoteMetrics(
+        [{ label: "Vendor", unitSell: 1_000, unitCost: 500, isVendor: true }],
+        10,
+      ),
+    ).toEqual({
+      quoteValue: 990,
+      internalCost: 500,
+      marginPct: (490 / 990) * 100,
+      vendorFeeTotal: 100,
+      vatAmount: 49.5,
+    });
+  });
+
   it("blocks illegal discover → close and writes blocked audit", async () => {
     const audits: unknown[] = [];
     const entity: EntitySnapshot = {
@@ -56,7 +72,12 @@ describe("deal gate transitions", () => {
       state: "discover",
       data: { companyName: "Demo Co LLC", marginPct: "40.00" },
     };
-    const result = await transition(partner, entity, { to: "close" }, deps(audits));
+    const result = await transition(
+      partner,
+      entity,
+      { to: "close" },
+      deps(audits),
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("GATE_BLOCKED");
@@ -124,9 +145,9 @@ describe("deal gate transitions", () => {
     const result = await transition(am, entity, { to: "scope" }, deps(audits));
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.blockedBy?.some((b) => b.gate === "deal.verified_email")).toBe(
-        true,
-      );
+      expect(
+        result.blockedBy?.some((b) => b.gate === "deal.verified_email"),
+      ).toBe(true);
     }
   });
 

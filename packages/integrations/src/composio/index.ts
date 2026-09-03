@@ -8,12 +8,14 @@ export type ComposioSendInput = {
   subject?: string;
   body: string;
   connectionId?: string;
+  messageId?: string;
 };
 
 export type ComposioSendResult = {
   sent: boolean;
   mode: "stub" | "copy_draft" | "live";
   externalId: string;
+  threadId?: string;
   channel: "gmail" | "linkedin";
 };
 
@@ -36,7 +38,10 @@ export function createComposioStub(): ComposioSendAdapter {
     async disconnect() {
       /* no-op stub */
     },
-    async status(_toolkit: string, _ownerId: string): Promise<ConnectionStatus> {
+    async status(
+      _toolkit: string,
+      _ownerId: string,
+    ): Promise<ConnectionStatus> {
       return { connected: false, expiresAt: null };
     },
     async sendAfterApproval(input) {
@@ -66,6 +71,7 @@ function buildGmailRawMessage(input: {
   to: string;
   subject?: string;
   body: string;
+  messageId?: string;
 }): string {
   const subject = (input.subject ?? "(no subject)")
     .replace(/[\r\n]+/g, " ")
@@ -75,6 +81,9 @@ function buildGmailRawMessage(input: {
   const message = [
     `To: ${input.to.trim()}`,
     `Subject: =?UTF-8?B?${encodedSubject}?=`,
+    ...(input.messageId
+      ? [`Message-ID: ${input.messageId.replace(/[\r\n]+/g, "")}`]
+      : []),
     "MIME-Version: 1.0",
     'Content-Type: text/plain; charset="UTF-8"',
     "Content-Transfer-Encoding: 8bit",
@@ -124,7 +133,10 @@ export function createComposioLiveSend(opts: {
       }
 
       const raw = buildGmailRawMessage(input);
-      const result = await opts.client.proxy<{ id?: string }>({
+      const result = await opts.client.proxy<{
+        id?: string;
+        threadId?: string;
+      }>({
         connectedAccountId:
           input.connectionId?.trim() || opts.connectedAccountId,
         endpoint: "/gmail/v1/users/me/messages/send",
@@ -132,12 +144,18 @@ export function createComposioLiveSend(opts: {
         body: { raw },
       });
       const externalId =
-        (typeof result.data?.id === "string" && result.data.id) ||
-        `live-gmail-${seq}`;
+        typeof result.data?.id === "string" ? result.data.id.trim() : "";
+      if (!externalId) {
+        throw new Error("Gmail send returned no provider message id");
+      }
       return {
         sent: true,
         mode: "live",
         externalId,
+        threadId:
+          typeof result.data?.threadId === "string"
+            ? result.data.threadId
+            : undefined,
         channel: "gmail",
       };
     },

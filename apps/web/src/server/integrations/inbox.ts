@@ -397,7 +397,7 @@ export async function updateIntegrationReceiptProgress(
 export async function transitionIntegrationReceiptProgress(
   receiptId: string,
   expected: {
-    status: "received" | "processing";
+    status: "received" | "processing" | "completed" | "failed";
     bridgeStatus?: string;
     attemptToken?: string;
     stateVersion?: number;

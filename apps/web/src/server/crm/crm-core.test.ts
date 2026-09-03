@@ -27,6 +27,7 @@ import {
   listQuotesByDeal,
   mergeCompanies,
   mergeContacts,
+  moveDealStage,
   normalizeDomain,
 } from "./repository";
 
@@ -104,9 +105,7 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
   it("saves quote versions with increment + discount tier validation", async () => {
     const caller = callerFor("partner");
     const [deal] = await caller.crm.deals.list();
-    const lines = [
-      { label: "Film", unitSell: 1000, unitCost: 500, qty: 1 },
-    ];
+    const lines = [{ label: "Film", unitSell: 1000, unitCost: 500, qty: 1 }];
 
     const v1 = await caller.crm.quotes.save({
       dealId: deal!.dealId,
@@ -128,6 +127,10 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
     expect(v2.quote.version).toBe(2);
     expect(v2.approvalTier).toBe("partner");
     expect(v2.escalatedTo).toBeUndefined(); // partner has authority
+    expect(Number(v2.quote.quoteValue)).toBe(800);
+    expect(Number((v2.quote as { marginPct: string }).marginPct)).toBe(37.5);
+    const projected = await caller.crm.deals.get({ id: deal!.dealId });
+    expect(Number(projected?.quoteValue)).toBe(800);
     expect(lastAuditAction()).toBe("crm.quotes.save");
 
     const listed = await caller.crm.quotes.listByDeal({ dealId: deal!.dealId });
@@ -152,9 +155,8 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
     expect(flagged.targetPct).toBeGreaterThan(0);
 
     const caller = callerFor("am");
-    const [deal] = await caller.crm.deals.list();
     const result = await caller.crm.quotes.save({
-      dealId: deal!.dealId,
+      dealId: pDeal!.dealId,
       lineItems: [{ label: "Low margin", unitSell: 1000, unitCost: 900 }],
       discountPct: 10,
     });
@@ -170,9 +172,79 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
     // Margin redacted for AM (no margin view)
     expect("internalCost" in result.quote).toBe(false);
     expect("marginPct" in result.quote).toBe(false);
-    expect(
-      result.quote.lineItems.every((l) => !("unitCost" in l)),
-    ).toBe(true);
+    expect(result.quote.lineItems.every((l) => !("unitCost" in l))).toBe(true);
+  });
+
+  it("records signed acceptance only for the latest quote and an authorized role", async () => {
+    const partner = callerFor("partner");
+    const deal = await partner.crm.deals.create({ companyName: "Signed Co" });
+    const saved = await partner.crm.quotes.save({
+      dealId: deal.dealId,
+      lineItems: [{ label: "Campaign", unitSell: 10_000, unitCost: 5_000 }],
+    });
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+
+    await expect(
+      callerFor("am").crm.quotes.acceptSigned({
+        quoteId: saved.quote.quoteId,
+        evidenceUrl: "https://drive.google.com/signed-agreement",
+      }),
+    ).rejects.toThrow(/Partner or Director/i);
+    await expect(
+      partner.crm.quotes.acceptSigned({
+        quoteId: saved.quote.quoteId,
+        evidenceUrl: "https://drive.google.com/signed-agreement",
+      }),
+    ).resolves.toMatchObject({ status: "accepted" });
+    expect(lastAuditAction()).toBe("crm.quotes.accept_signed");
+  });
+
+  it("requires Sales leadership and a signed-evidence receipt before won handover", async () => {
+    const partner = callerFor("partner");
+    const am = callerFor("am");
+    const hr = callerFor("hr");
+    const deal = await createDeal({ companyName: "Evidence Gate Co" });
+    const quote = await createQuoteVersion({
+      dealId: deal.dealId,
+      lineItems: [
+        { label: "Campaign", unitSell: 10_000, unitCost: 5_000, qty: 1 },
+      ],
+      quoteValue: "10000.00",
+      internalCost: "5000.00",
+      marginPct: "50.00",
+      status: "accepted",
+    });
+    await moveDealStage({ dealId: deal.dealId, to: "close" });
+
+    await expect(
+      am.crm.deals.close({ id: deal.dealId, outcome: "won" }),
+    ).rejects.toThrow(/Partner or Director/i);
+    await expect(
+      hr.crm.deals.close({ id: deal.dealId, outcome: "lost", lostReason: "x" }),
+    ).rejects.toThrow(/Sales operator/i);
+    await expect(
+      partner.crm.deals.close({ id: deal.dealId, outcome: "won" }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/signed-agreement evidence/i),
+    });
+
+    await createActivity({
+      type: "system",
+      subject: "Signed agreement recorded",
+      dealId: deal.dealId,
+      metadata: {
+        quoteId: quote.quoteId,
+        evidenceUrl: "https://drive.google.com/signed-agreement",
+      },
+    });
+    await expect(
+      partner.crm.deals.close({ id: deal.dealId, outcome: "won" }),
+    ).resolves.toMatchObject({ ok: true, deal: { closeOutcome: "won" } });
+    await expect(
+      am.crm.deals.handoverPack({ id: deal.dealId }),
+    ).rejects.toThrow(/Partner or Director/i);
   });
 
   // ── W4 dedupe + merge ────────────────────────────────────
@@ -186,7 +258,10 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
       firstName: "Dup2",
       email: "dup@example.test",
     });
-    await createCompany({ name: "Domain Co", website: "https://www.dupco.com/about" });
+    await createCompany({
+      name: "Domain Co",
+      website: "https://www.dupco.com/about",
+    });
     await createCompany({ name: "Domain Co Two", website: "http://dupco.com" });
     await createCompany({ name: "Name Match LLC" });
     await createCompany({ name: "name match llc" });
@@ -199,9 +274,9 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
       [a.contactId, b.contactId].sort(),
     );
     expect(candidates.companies.some((g) => g.key === "dupco.com")).toBe(true);
-    expect(
-      candidates.companies.some((g) => g.key === "name match llc"),
-    ).toBe(true);
+    expect(candidates.companies.some((g) => g.key === "name match llc")).toBe(
+      true,
+    );
   });
 
   it("merge contacts re-points deal/activity/note/task FKs and deletes duplicate", async () => {
@@ -243,9 +318,7 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
     expect(
       (await listActivities({ contactId: survivor.contactId })).length,
     ).toBeGreaterThanOrEqual(1);
-    expect(
-      (await listNotes({ contactId: survivor.contactId })).length,
-    ).toBe(1);
+    expect((await listNotes({ contactId: survivor.contactId })).length).toBe(1);
     expect(
       (await listCrmTasks()).some(
         (t) => t.contactId === survivor.contactId && t.title === "on dup",
@@ -358,7 +431,7 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
       [{ a: '=HYPERLINK("http://evil","click")', b: "+971501234567" }],
     );
     expect(csv.split("\r\n")[1]).toBe(
-      "\"'=HYPERLINK(\"\"http://evil\"\",\"\"click\"\")\",'+971501234567",
+      '"\'=HYPERLINK(""http://evil"",""click"")",\'+971501234567',
     );
     expect(toCsv(["a"], [{ a: "@cmd" }])).toBe("a\r\n'@cmd");
     expect(toCsv(["a"], [{ a: "safe" }])).toBe("a\r\nsafe");
@@ -449,12 +522,10 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
     });
     expect(latest!.version).toBe(2);
     // partner caller → unredacted row
-    expect(Number((latest as { internalCost: string }).internalCost)).toBe(
-      800,
-    ); // 2 × 400, not 0
+    expect(Number((latest as { internalCost: string }).internalCost)).toBe(800); // 2 × 400, not 0
   });
 
-  it("does not bleed a removed line's cost into a renamed line (label match only)", async () => {
+  it("requires a margin-authorized role to cost a new quote line", async () => {
     const partner = callerFor("partner");
     const deal = await partner.crm.deals.create({ companyName: "Rename Co" });
     const v1 = await partner.crm.quotes.save({
@@ -468,26 +539,20 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
 
     const am = callerFor("am");
     // "Design" removed; new first line must NOT inherit Design's 400 by position.
-    const v2 = await am.crm.quotes.save({
-      dealId: deal.dealId,
-      lineItems: [
-        { label: "Voiceover", qty: 1, unitSell: 500, unitCost: 0 },
-        { label: "Build", qty: 1, unitSell: 2000, unitCost: 0 },
-      ],
-    });
-    expect(v2.ok).toBe(true);
+    await expect(
+      am.crm.quotes.save({
+        dealId: deal.dealId,
+        lineItems: [
+          { label: "Voiceover", qty: 1, unitSell: 500, unitCost: 0 },
+          { label: "Build", qty: 1, unitSell: 2000, unitCost: 0 },
+        ],
+      }),
+    ).rejects.toThrow(/must cost the new line/i);
 
     const [latest] = await partner.crm.quotes.listByDeal({
       dealId: deal.dealId,
     });
-    const costs = Object.fromEntries(
-      (latest!.lineItems as { label: string; unitCost: number }[]).map((l) => [
-        l.label,
-        l.unitCost,
-      ]),
-    );
-    expect(costs["Voiceover"]).toBe(0); // unmatched → keeps client value
-    expect(costs["Build"]).toBe(900); // label match → carried forward
+    expect(latest?.version).toBe(1);
   });
 
   it("allocates distinct quote versions for concurrent saves", async () => {

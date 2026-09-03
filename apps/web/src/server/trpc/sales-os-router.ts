@@ -6,12 +6,14 @@ import { addCredit } from "../sales-os/store";
 import {
   applyEvolve,
   applySalesOsReplyIntent,
+  approveApolloExactPerson,
   assertLinkedInAssistAllowed,
   buildSalesOsDigest,
   decideCompany,
   decideContact,
   DEFAULT_SALES_OS_SETTINGS,
   draftChannelsForApprovedContact,
+  enrichOneApolloPerson,
   getApolloOnePersonCanaryStatus,
   getApolloPeopleSearchStatus,
   getResearchReceiptSignalIdsByProposal,
@@ -36,6 +38,7 @@ import {
   saveSalesOsSettings,
   sectorForDate,
   suppressTarget,
+  consumeApolloExactApproval,
   weekKey,
   type SalesOsSettings,
 } from "../sales-os";
@@ -249,19 +252,33 @@ export const salesOsRouter = router({
           throw error;
         }
       }),
-    enrichOne: salesOperatorProcedure
+    approveExact: salesOperatorProcedure
       .input(
         z.object({
-          candidate: apolloCandidateInput.partial(),
+          candidate: apolloCandidateInput,
           confirmCreditUse: z.literal(true),
         }),
       )
-      .mutation(() => {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "APOLLO_PAID_ENRICHMENT_REQUIRES_EXACT_APPROVAL_RECEIPT",
-        });
-      }),
+      .mutation(({ input, ctx }) =>
+        approveApolloExactPerson({
+          candidate: input.candidate,
+          actorEmployeeId: ctx.employeeId!,
+        }),
+      ),
+    enrichOne: salesOperatorProcedure
+      .input(
+        z.object({
+          candidate: apolloCandidateInput,
+          confirmCreditUse: z.literal(true),
+          approvalReceiptId: z.string().uuid(),
+        }),
+      )
+      .mutation(({ input, ctx }) =>
+        enrichOneApolloPerson(
+          { ...input, actorEmployeeId: ctx.employeeId! },
+          { consumeExactApproval: consumeApolloExactApproval },
+        ),
+      ),
   }),
 
   settings: router({
@@ -393,7 +410,9 @@ export const salesOsRouter = router({
       ),
     draft: salesOperatorProcedure
       .input(z.object({ id: z.string() }))
-      .mutation(({ input }) => draftChannelsForApprovedContact(input.id)),
+      .mutation(({ input, ctx }) =>
+        draftChannelsForApprovedContact(input.id, { roles: ctx.roles }),
+      ),
   }),
 
   suppression: router({

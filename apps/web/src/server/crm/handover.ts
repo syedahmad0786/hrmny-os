@@ -5,7 +5,14 @@ import { persistMemoryChunk } from "../ai/memory-db";
 import { seedClientCreativeTask } from "../tasks/delivery-tasks";
 import { resolveTaxRegistration } from "../finance/tax-registration";
 import { buildHandoverNextLinks } from "./handover-next";
-import { getDeal, getContact, updateDeal, moveDealStage } from "./repository";
+import {
+  getDeal,
+  getContact,
+  listActivities,
+  listQuotesByDeal,
+  updateDeal,
+  moveDealStage,
+} from "./repository";
 import type { DealRow } from "./types";
 
 export type CloseOutcome = "won" | "lost" | "postponed_on_hold";
@@ -20,8 +27,7 @@ export async function closeDurableDeal(input: {
   lostReason?: string | null;
   actorEmployeeId?: string | null;
 }): Promise<
-  | { ok: true; deal: DealRow }
-  | { ok: false; reason: string; code?: string }
+  { ok: true; deal: DealRow } | { ok: false; reason: string; code?: string }
 > {
   const existing = await getDeal(input.dealId);
   if (!existing) return { ok: false, reason: "Deal not found" };
@@ -35,6 +41,41 @@ export async function closeDurableDeal(input: {
   }
 
   const stage = existing.stage;
+  if (input.outcome === "won") {
+    if (stage !== "close") {
+      return {
+        ok: false,
+        reason:
+          "Advance the deal through the commercial gates before marking it won",
+        code: "GATE_BLOCKED",
+      };
+    }
+    const [latestQuote] = await listQuotesByDeal(input.dealId);
+    if (!latestQuote || latestQuote.status !== "accepted") {
+      return {
+        ok: false,
+        reason:
+          "Record the signed agreement against the latest quote before marking the deal won",
+        code: "GATE_BLOCKED",
+      };
+    }
+    const signedAgreementRecorded = (
+      await listActivities({ dealId: input.dealId, limit: 200 })
+    ).some(
+      (activity) =>
+        activity.metadata.quoteId === latestQuote.quoteId &&
+        typeof activity.metadata.evidenceUrl === "string" &&
+        activity.metadata.evidenceUrl.startsWith("https://"),
+    );
+    if (!signedAgreementRecorded) {
+      return {
+        ok: false,
+        reason:
+          "The accepted quote is missing its signed-agreement evidence receipt",
+        code: "GATE_BLOCKED",
+      };
+    }
+  }
   if (stage === "price_cost") {
     const moved = await moveDealStage({
       dealId: input.dealId,
@@ -112,7 +153,7 @@ export type HandoverPackResult = {
   onboardingPhases: number;
   /** Content calendar seeded for Account / Creative continuity. */
   calendarId: string | null;
-  /** Portal user + magic-link invite (mock for @example.com). */
+  /** Synthetic invite receipt; production invites are a separate approval. */
   portalInvite: {
     portalUserId: string;
     email: string;
@@ -158,14 +199,8 @@ async function memoryHandoverPack(input: {
     };
   }
 
-  if (deal.stage === "close") {
-    const moved = await moveDealStage({
-      dealId: input.dealId,
-      to: "handover_pack",
-      actorEmployeeId: input.actorEmployeeId,
-    });
-    if (!moved.ok) return { ok: false, reason: moved.reason };
-  } else if (deal.stage !== "handover_pack") {
+  const needsStageAdvance = deal.stage === "close";
+  if (!needsStageAdvance && deal.stage !== "handover_pack") {
     return {
       ok: false,
       reason: `Unexpected stage ${deal.stage}`,
@@ -226,57 +261,90 @@ async function memoryHandoverPack(input: {
     ownerEmployeeId: input.actorEmployeeId ?? null,
   });
   fired.push("creative.task_seed");
+  if (phases.length === 0 || !creative) {
+    return {
+      ok: false,
+      reason: "Handover core records are incomplete",
+      code: "HANDOVER_INCOMPLETE",
+    };
+  }
+  if (needsStageAdvance) {
+    const moved = await moveDealStage({
+      dealId: input.dealId,
+      to: "handover_pack",
+      actorEmployeeId: input.actorEmployeeId,
+    });
+    if (!moved.ok) return { ok: false, reason: moved.reason };
+  }
 
   let calendarId: string | null;
   try {
     const month = new Date().toISOString().slice(0, 7);
-    calendarId = crypto.randomUUID();
-    const shoot = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
-    store.calendars.set(calendarId, {
-      calendarId,
-      clientId: demoClient.clientId,
-      month,
-      focusPoints: ["Launch reel", "Product stills"],
-      refApprovalState: "pending",
-      finalApprovalState: null,
-      shootDate: shoot,
-      state: "ref_pending",
-      slots: [
-        {
-          calendarSlotId: crypto.randomUUID(),
-          calendarId,
-          slotDate: shoot,
-          slotLabel: "Studio shoot",
-          taskId: creative.taskId,
-          position: 1,
-        },
-      ],
-    });
+    const existingCalendar = [...store.calendars.values()].find(
+      (calendar) =>
+        calendar.clientId === demoClient.clientId && calendar.month === month,
+    );
+    calendarId = existingCalendar?.calendarId ?? crypto.randomUUID();
+    if (!existingCalendar) {
+      const shoot = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
+      store.calendars.set(calendarId, {
+        calendarId,
+        clientId: demoClient.clientId,
+        month,
+        focusPoints: ["Launch reel", "Product stills"],
+        refApprovalState: "pending",
+        finalApprovalState: null,
+        shootDate: shoot,
+        state: "ref_pending",
+        slots: [
+          {
+            calendarSlotId: crypto.randomUUID(),
+            calendarId,
+            slotDate: shoot,
+            slotLabel: "Studio shoot",
+            taskId: creative.taskId,
+            position: 1,
+          },
+        ],
+      });
+    }
     creative.calendarId = calendarId;
     store.tasks.set(creative.taskId, creative);
-    fired.push("calendar.seed");
+    fired.push(existingCalendar ? "calendar.exists" : "calendar.seed");
   } catch {
     calendarId = null;
+    fired.push("calendar.failed");
   }
 
   let campaignItemId: string | null;
   try {
-    const { createCampaignDraft } = await import("../campaigns/repository");
-    const draft = await createCampaignDraft({
-      title: `${demoClient.name} — launch LinkedIn teaser`,
-      channel: "linkedin",
-      scheduledFor: new Date().toISOString().slice(0, 10),
-      clientId: demoClient.clientId,
-      body: {
-        copy: `Excited to partner with ${demoClient.name} on creative that converts across the UAE.`,
-        kind: "won_handover_seed",
-        mode: "memory",
-      },
-    });
+    const { createCampaignDraft, listCampaigns } =
+      await import("../campaigns/repository");
+    const existingCampaign = (
+      await listCampaigns({
+        clientId: demoClient.clientId,
+      })
+    ).find((campaign) => campaign.body.kind === "won_handover_seed");
+    const draft =
+      existingCampaign ??
+      (await createCampaignDraft({
+        title: `${demoClient.name} — launch LinkedIn teaser`,
+        channel: "linkedin",
+        scheduledFor: new Date().toISOString().slice(0, 10),
+        clientId: demoClient.clientId,
+        body: {
+          copy: `Excited to partner with ${demoClient.name} on creative that converts across the UAE.`,
+          kind: "won_handover_seed",
+          mode: "memory",
+        },
+      }));
     campaignItemId = draft.campaignItemId;
-    fired.push("campaign.draft_seed");
+    fired.push(
+      existingCampaign ? "campaign.draft_exists" : "campaign.draft_seed",
+    );
   } catch {
     campaignItemId = null;
+    fired.push("campaign.draft_failed");
   }
 
   let invoiceId: string | null;
@@ -326,6 +394,7 @@ async function memoryHandoverPack(input: {
     }
   } catch {
     invoiceId = null;
+    fired.push("invoice.failed");
   }
 
   let outreachId: string | null;
@@ -352,91 +421,106 @@ async function memoryHandoverPack(input: {
     outreachId = null;
   }
 
-  await persistMemoryChunk({
-    sourceType: "note",
-    sourceId: demoClient.clientId,
-    content: `Handover from won deal ${deal.companyName}: contract ${demoClient.contractValue} AED. Client entering onboarding (memory mode).${
-      invoiceId ? ` First invoice ${invoiceId} proposed.` : ""
-    }${outreachId ? ` Outreach draft ${outreachId}.` : ""}`,
-    metadata: {
-      clientId: demoClient.clientId,
-      dealId: input.dealId,
-      invoiceId,
-      outreachId,
-      kind: "deal.won_handover",
-      mode: "memory",
-    },
-  }).catch(() => undefined);
-  fired.push("memory.handover");
-
-  let portalInvite: HandoverPackResult["portalInvite"] = null;
-  try {
-    const inviteEmail =
-      contactEmail || `portal+${demoClient.clientId.slice(0, 8)}@example.com`;
-    const displayName = `${demoClient.name} Portal`;
-    const existingPortalUser = [...store.portalUsers.values()].find(
-      (candidate) =>
-        candidate.clientId === demoClient.clientId &&
-        candidate.email.toLowerCase() === inviteEmail.toLowerCase(),
-    );
-    const portalUserId =
-      existingPortalUser?.portalUserId ?? crypto.randomUUID();
-    store.portalUsers.set(portalUserId, {
-      portalUserId,
-      clientId: demoClient.clientId,
-      email: inviteEmail.toLowerCase(),
-      displayName,
-      isActive: true,
-    });
-    const { sendPortalInviteMagicLink } = await import(
-      "../auth/portal-magic-link"
-    );
-    const { createResendMock } = await import("@hrmny/integrations");
-    const emailer = createResendMock();
-    const sentPortal = await sendPortalInviteMagicLink({
-      email: inviteEmail,
-      clientId: demoClient.clientId,
-      displayName,
-      next: "/portal/approvals",
-      emailer,
-    });
-    const sentOnboarding = await sendPortalInviteMagicLink({
-      email: inviteEmail,
-      clientId: demoClient.clientId,
-      displayName,
-      next: "/portal/onboarding",
-      emailer,
-    });
-    portalInvite = {
-      portalUserId,
-      email: inviteEmail,
-      portalPath: sentPortal.portalPath,
-      onboardingPath: sentOnboarding.portalPath,
-      delivery: {
-        mode: sentPortal.delivery.mode,
-        id: sentPortal.delivery.id,
-      },
-    };
-    fired.push("portal.invite_mock");
-    fired.push("portal.invite_onboarding");
-  } catch {
-    fired.push("portal.invite_failed");
+  if (needsStageAdvance) {
+    try {
+      await persistMemoryChunk({
+        sourceType: "note",
+        sourceId: demoClient.clientId,
+        content: `Handover from won deal ${deal.companyName}: contract ${demoClient.contractValue} AED. Client entering onboarding (memory mode).${
+          invoiceId ? ` First invoice ${invoiceId} proposed.` : ""
+        }${outreachId ? ` Outreach draft ${outreachId}.` : ""}`,
+        metadata: {
+          clientId: demoClient.clientId,
+          dealId: input.dealId,
+          invoiceId,
+          outreachId,
+          kind: "deal.won_handover",
+          mode: "memory",
+        },
+      });
+      fired.push("memory.handover");
+    } catch {
+      fired.push("memory.handover_failed");
+    }
+  } else {
+    fired.push("memory.handover_exists");
   }
 
-  try {
-    const { notifyEmployee } = await import("../notifications/store");
-    await notifyEmployee({
-      employeeId: input.actorEmployeeId ?? DEMO_STAFF_LEAD_ID,
-      title: `Handover ready: ${demoClient.name}`,
-      body: `Won deal closed — client onboarding seeded (${phases.length} phases).`,
-      kind: "onboarding",
-      href: `/clients/${demoClient.clientId}`,
-      entityType: "client",
-      entityId: demoClient.clientId,
-    });
-    fired.push("staff.notify");
-  } catch {
-    fired.push("staff.notify_failed");
+  let portalInvite: HandoverPackResult["portalInvite"] = null;
+  if (needsStageAdvance) {
+    try {
+      const inviteEmail =
+        contactEmail || `portal+${demoClient.clientId.slice(0, 8)}@example.com`;
+      const displayName = `${demoClient.name} Portal`;
+      const existingPortalUser = [...store.portalUsers.values()].find(
+        (candidate) =>
+          candidate.clientId === demoClient.clientId &&
+          candidate.email.toLowerCase() === inviteEmail.toLowerCase(),
+      );
+      const portalUserId =
+        existingPortalUser?.portalUserId ?? crypto.randomUUID();
+      store.portalUsers.set(portalUserId, {
+        portalUserId,
+        clientId: demoClient.clientId,
+        email: inviteEmail.toLowerCase(),
+        displayName,
+        isActive: true,
+      });
+      const { sendPortalInviteMagicLink } =
+        await import("../auth/portal-magic-link");
+      const { createResendMock } = await import("@hrmny/integrations");
+      const emailer = createResendMock();
+      const sentPortal = await sendPortalInviteMagicLink({
+        email: inviteEmail,
+        clientId: demoClient.clientId,
+        displayName,
+        next: "/portal/approvals",
+        emailer,
+      });
+      const sentOnboarding = await sendPortalInviteMagicLink({
+        email: inviteEmail,
+        clientId: demoClient.clientId,
+        displayName,
+        next: "/portal/onboarding",
+        emailer,
+      });
+      portalInvite = {
+        portalUserId,
+        email: inviteEmail,
+        portalPath: sentPortal.portalPath,
+        onboardingPath: sentOnboarding.portalPath,
+        delivery: {
+          mode: sentPortal.delivery.mode,
+          id: sentPortal.delivery.id,
+        },
+      };
+      fired.push("portal.invite_mock");
+      fired.push("portal.invite_onboarding");
+    } catch {
+      fired.push("portal.invite_failed");
+    }
+  } else {
+    fired.push("portal.invite_already_issued");
+  }
+
+  if (needsStageAdvance) {
+    try {
+      const { notifyEmployee } = await import("../notifications/store");
+      await notifyEmployee({
+        employeeId: input.actorEmployeeId ?? DEMO_STAFF_LEAD_ID,
+        title: `Handover ready: ${demoClient.name}`,
+        body: `Won deal closed — client onboarding seeded (${phases.length} phases).`,
+        kind: "onboarding",
+        href: `/clients/${demoClient.clientId}`,
+        entityType: "client",
+        entityId: demoClient.clientId,
+      });
+      fired.push("staff.notify");
+    } catch {
+      fired.push("staff.notify_failed");
+    }
+  } else {
+    fired.push("staff.notify_exists");
   }
 
   const client = {
@@ -502,6 +586,7 @@ async function memoryHandoverPack(input: {
 
 /**
  * close/won → client + 7-phase onboarding + first creative task (qc) + memory note.
+ * Production portal delivery remains a separate Partner/Director action.
  * Uses Postgres when available; otherwise seeds the in-memory demo store so Hunt
  * closed-loop works in CI / local without DATABASE_URL.
  */
@@ -525,14 +610,8 @@ export async function durableHandoverPack(input: {
     };
   }
 
-  if (deal.stage === "close") {
-    const moved = await moveDealStage({
-      dealId: input.dealId,
-      to: "handover_pack",
-      actorEmployeeId: input.actorEmployeeId,
-    });
-    if (!moved.ok) return { ok: false, reason: moved.reason };
-  } else if (deal.stage !== "handover_pack") {
+  const needsStageAdvance = deal.stage === "close";
+  if (!needsStageAdvance && deal.stage !== "handover_pack") {
     return {
       ok: false,
       reason: `Unexpected stage ${deal.stage}`,
@@ -609,31 +688,55 @@ export async function durableHandoverPack(input: {
     ownerEmployeeId: input.actorEmployeeId ?? null,
   });
   if (task) fired.push("creative.task_seed");
+  if (phases.length === 0 || !task) {
+    return {
+      ok: false,
+      reason: "Handover core records are incomplete",
+      code: "HANDOVER_INCOMPLETE",
+    };
+  }
+  if (needsStageAdvance) {
+    const moved = await moveDealStage({
+      dealId: input.dealId,
+      to: "handover_pack",
+      actorEmployeeId: input.actorEmployeeId,
+    });
+    if (!moved.ok) return { ok: false, reason: moved.reason };
+  }
 
   let campaignItemId: string | null = null;
   try {
-    const { createCampaignDraft } = await import("../campaigns/repository");
-    const draft = await createCampaignDraft({
-      title: `${client.name} — launch LinkedIn teaser`,
-      channel: "linkedin",
-      scheduledFor: new Date().toISOString().slice(0, 10),
-      clientId: client.clientId,
-      body: {
-        copy: `Excited to partner with ${client.name} on creative that converts across the UAE.`,
-        kind: "won_handover_seed",
-      },
-    });
+    const { createCampaignDraft, listCampaigns } =
+      await import("../campaigns/repository");
+    const existingCampaign = (
+      await listCampaigns({
+        clientId: client.clientId,
+      })
+    ).find((campaign) => campaign.body.kind === "won_handover_seed");
+    const draft =
+      existingCampaign ??
+      (await createCampaignDraft({
+        title: `${client.name} — launch LinkedIn teaser`,
+        channel: "linkedin",
+        scheduledFor: new Date().toISOString().slice(0, 10),
+        clientId: client.clientId,
+        body: {
+          copy: `Excited to partner with ${client.name} on creative that converts across the UAE.`,
+          kind: "won_handover_seed",
+        },
+      }));
     campaignItemId = draft.campaignItemId;
-    fired.push("campaign.draft_seed");
+    fired.push(
+      existingCampaign ? "campaign.draft_exists" : "campaign.draft_seed",
+    );
   } catch {
-    /* campaign seed best-effort — portal campaign-approvals can draft manually */
+    fired.push("campaign.draft_failed");
   }
 
   let invoiceId: string | null = null;
   try {
-    const { insertOsInvoice, listOsInvoicesForClientPeriod } = await import(
-      "../finance/os-invoices"
-    );
+    const { insertOsInvoice, listOsInvoicesForClientPeriod } =
+      await import("../finance/os-invoices");
     const { vatOnAmount } = await import("../demo-store");
     const period = new Date().toISOString().slice(0, 7);
     const existingFirst = await listOsInvoicesForClientPeriod({
@@ -667,42 +770,61 @@ export async function durableHandoverPack(input: {
         proposedByEmployeeId: input.actorEmployeeId ?? null,
       });
       invoiceId = seeded?.invoiceId ?? null;
-      if (invoiceId) fired.push("invoice.first_seed");
+      fired.push(invoiceId ? "invoice.first_seed" : "invoice.failed");
     }
   } catch {
-    /* invoice seed best-effort — billing UI can draft manually */
+    fired.push("invoice.failed");
   }
 
-  await persistMemoryChunk({
-    sourceType: "note",
-    sourceId: client.clientId,
-    content: `Handover from won deal ${deal.companyName}: contract ${client.contractValue} AED. Client entering onboarding.${
-      invoiceId ? ` First invoice ${invoiceId} proposed.` : ""
-    }`,
-    metadata: {
-      clientId: client.clientId,
-      dealId: input.dealId,
-      invoiceId,
-      kind: "deal.won_handover",
-    },
-  });
-  fired.push("memory.handover");
+  if (needsStageAdvance) {
+    try {
+      await persistMemoryChunk({
+        sourceType: "note",
+        sourceId: client.clientId,
+        content: `Handover from won deal ${deal.companyName}: contract ${client.contractValue} AED. Client entering onboarding.${
+          invoiceId ? ` First invoice ${invoiceId} proposed.` : ""
+        }`,
+        metadata: {
+          clientId: client.clientId,
+          dealId: input.dealId,
+          invoiceId,
+          kind: "deal.won_handover",
+        },
+      });
+      fired.push("memory.handover");
+    } catch {
+      fired.push("memory.handover_failed");
+    }
+  } else {
+    fired.push("memory.handover_exists");
+  }
 
   let calendarId: string | null = null;
   try {
-    const { createDeliveryCalendar, addDeliveryCalendarSlot } = await import(
-      "../tasks/delivery-calendars"
-    );
+    const {
+      createDeliveryCalendar,
+      addDeliveryCalendarSlot,
+      listDeliveryCalendars,
+    } = await import("../tasks/delivery-calendars");
     const month = new Date().toISOString().slice(0, 7);
-    const calendar = await createDeliveryCalendar({
+    const [existingCalendar] = await listDeliveryCalendars({
       clientId: client.clientId,
       month,
-      focusPoints: ["Launch reel", "Product stills"],
     });
+    const calendar =
+      existingCalendar ??
+      (await createDeliveryCalendar({
+        clientId: client.clientId,
+        month,
+        focusPoints: ["Launch reel", "Product stills"],
+      }));
     calendarId = calendar?.calendarId ?? null;
     if (calendar) {
-      fired.push("calendar.seed");
-      if (task?.taskId) {
+      fired.push(existingCalendar ? "calendar.exists" : "calendar.seed");
+      if (
+        task?.taskId &&
+        !calendar.slots.some((slot) => slot.taskId === task.taskId)
+      ) {
         await addDeliveryCalendarSlot({
           calendarId: calendar.calendarId,
           slotDate: `${month}-15`,
@@ -712,102 +834,15 @@ export async function durableHandoverPack(input: {
         });
         fired.push("calendar.slot");
       }
+    } else {
+      fired.push("calendar.failed");
     }
   } catch {
-    /* calendar optional if schema missing columns on older DBs */
+    fired.push("calendar.failed");
   }
 
-  let portalInvite: HandoverPackResult["portalInvite"] = null;
-  try {
-    const { getContact } = await import("./repository");
-    const contact = deal.primaryContactId
-      ? await getContact(deal.primaryContactId)
-      : null;
-    const inviteEmail =
-      contact?.email?.trim().toLowerCase() ||
-      `portal+${client.clientId.slice(0, 8)}@example.com`;
-    const displayName =
-      [contact?.firstName, contact?.lastName].filter(Boolean).join(" ") ||
-      `${client.name} Portal`;
-    const existingPortal = await db.execute<{
-      portalUserId: string;
-      email: string;
-    }>(sql`
-      select client_portal_user_id as "portalUserId", email
-      from public.client_portal_user
-      where client_id = ${client.clientId}::uuid
-        and lower(email) = ${inviteEmail}
-      limit 1
-    `);
-    let invited = existingPortal[0] ?? null;
-    if (invited) {
-      await db.execute(sql`
-        update public.client_portal_user
-        set is_active = true, display_name = ${displayName},
-            updated_at = now()
-        where client_portal_user_id = ${invited.portalUserId}::uuid
-      `);
-      fired.push("portal.user_exists");
-    } else {
-      const created = await db.execute<{
-        portalUserId: string;
-        email: string;
-      }>(sql`
-        insert into public.client_portal_user (
-          client_id, email, display_name, is_active
-        ) values (
-          ${client.clientId}::uuid,
-          ${inviteEmail},
-          ${displayName},
-          true
-        )
-        returning client_portal_user_id as "portalUserId", email
-      `);
-      invited = created[0] ?? null;
-      if (invited) fired.push("portal.user_create");
-    }
-    if (invited) {
-      const { sendPortalInviteMagicLink } = await import(
-        "../auth/portal-magic-link"
-      );
-      const placeholderInbox = inviteEmail.endsWith("@example.com");
-      const { createResendMock } = await import("@hrmny/integrations");
-      // Two single-use tokens so Portal and Onboarding CTAs do not race.
-      // Live email only for the approvals invite; onboarding stays mock-delivered.
-      const emailer = placeholderInbox ? createResendMock() : undefined;
-      const sentPortal = await sendPortalInviteMagicLink({
-        email: inviteEmail,
-        clientId: client.clientId,
-        displayName,
-        next: "/portal/approvals",
-        emailer,
-      });
-      const sentOnboarding = await sendPortalInviteMagicLink({
-        email: inviteEmail,
-        clientId: client.clientId,
-        displayName,
-        next: "/portal/onboarding",
-        emailer: createResendMock(),
-      });
-      portalInvite = {
-        ...invited,
-        portalPath: sentPortal.portalPath,
-        onboardingPath: sentOnboarding.portalPath,
-        delivery: {
-          mode: sentPortal.delivery.mode,
-          id: sentPortal.delivery.id,
-        },
-      };
-      fired.push(
-        sentPortal.delivery.mode === "live"
-          ? "portal.invite_live"
-          : "portal.invite_mock",
-      );
-      fired.push("portal.invite_onboarding");
-    }
-  } catch {
-    fired.push("portal.invite_failed");
-  }
+  const portalInvite: HandoverPackResult["portalInvite"] = null;
+  fired.push("portal.invite_pending_approval");
 
   let outreachId: string | null = null;
   try {
@@ -832,21 +867,25 @@ export async function durableHandoverPack(input: {
     fired.push("outreach.failed");
   }
 
-  try {
-    const { notifyEmployee } = await import("../notifications/store");
-    const { DEMO_STAFF_LEAD_ID } = await import("../demo-store");
-    await notifyEmployee({
-      employeeId: input.actorEmployeeId ?? DEMO_STAFF_LEAD_ID,
-      title: `Handover ready: ${client.name}`,
-      body: `Won deal closed — client onboarding seeded (${phases.length} phases).`,
-      kind: "onboarding",
-      href: `/clients/${client.clientId}`,
-      entityType: "client",
-      entityId: client.clientId,
-    });
-    fired.push("staff.notify");
-  } catch {
-    fired.push("staff.notify_failed");
+  if (needsStageAdvance) {
+    try {
+      const { notifyEmployee } = await import("../notifications/store");
+      const { DEMO_STAFF_LEAD_ID } = await import("../demo-store");
+      await notifyEmployee({
+        employeeId: input.actorEmployeeId ?? DEMO_STAFF_LEAD_ID,
+        title: `Handover ready: ${client.name}`,
+        body: `Won deal closed — client onboarding seeded (${phases.length} phases).`,
+        kind: "onboarding",
+        href: `/clients/${client.clientId}`,
+        entityType: "client",
+        entityId: client.clientId,
+      });
+      fired.push("staff.notify");
+    } catch {
+      fired.push("staff.notify_failed");
+    }
+  } else {
+    fired.push("staff.notify_exists");
   }
 
   const packId = crypto.randomUUID();
@@ -857,8 +896,6 @@ export async function durableHandoverPack(input: {
     invoiceId,
     outreachId,
     campaignItemId,
-    portalPath: portalInvite?.portalPath,
-    onboardingPath: portalInvite?.onboardingPath,
   });
   return {
     ok: true,

@@ -32,6 +32,12 @@ import {
 } from "../leadgen/competitor-scan";
 import { router, staffProcedure } from "./trpc";
 import { getVerifiedWorkAppConnection } from "./connections-router";
+import {
+  completeIntegrationReceipt,
+  recordIntegrationReceipt,
+  transitionIntegrationReceiptProgress,
+  updateIntegrationReceiptProgress,
+} from "../integrations/inbox";
 
 async function resolveComposioSend(
   employeeId: string | null | undefined,
@@ -110,9 +116,16 @@ function actorFromCtx(ctx: {
   };
 }
 
-/** Staff may drive outreach; portal actors never can. Gate is the real guard. */
+const SALES_OPERATOR_ROLES = new Set([
+  "partner",
+  "director",
+  "am",
+  "account_manager",
+]);
+
+/** Only Sales operators may approve or deliver outreach. */
 function authorizeStaff(actor: ActorContext): boolean {
-  return actor.roles.length > 0 && !actor.roles.includes("portal_client");
+  return actor.roles.some((role) => SALES_OPERATOR_ROLES.has(role));
 }
 
 const defaultAudit: AuditWriter = async (event) => {
@@ -146,6 +159,36 @@ function outreachEntity(item: OutreachItem): EntitySnapshot {
   };
 }
 
+async function recipientBoundEmailBody(item: OutreachItem): Promise<string> {
+  const {
+    buildComplianceFooter,
+    buildUnsubscribeUrl,
+    ensureFooter,
+    hasValidUnsubscribeLink,
+    isEmailChannel,
+  } = await import("../sales-os/compliance");
+  if (
+    !isEmailChannel(item.channel) ||
+    hasValidUnsubscribeLink(item.body, item.recipient)
+  ) {
+    return item.body;
+  }
+  const { getSalesOsSettings } = await import("../sales-os/store");
+  const settings = await getSalesOsSettings();
+  return ensureFooter(
+    item.body,
+    buildComplianceFooter({
+      senderName: settings.outreach.senderName,
+      senderTitle: settings.outreach.senderTitle,
+      physicalAddress: settings.outreach.physicalAddress,
+      unsubscribeUrl: buildUnsubscribeUrl(
+        settings.outreach.unsubscribePath,
+        item.recipient,
+      ),
+    }),
+  );
+}
+
 // ── plain, testable operations ─────────────────────────────
 
 export async function draftOutreach(input: {
@@ -168,6 +211,7 @@ export async function draftOutreach(input: {
     isLinkedInChannel,
     ensureFooter,
     buildComplianceFooter,
+    buildUnsubscribeUrl,
   } = await import("../sales-os/compliance");
   const { getSalesOsSettings } = await import("../sales-os/store");
   const settings = await getSalesOsSettings();
@@ -217,7 +261,9 @@ export async function draftOutreach(input: {
         senderName: settings.outreach.senderName,
         senderTitle: settings.outreach.senderTitle,
         physicalAddress: settings.outreach.physicalAddress,
-        unsubscribeUrl: `${settings.outreach.unsubscribePath}?email=${encodeURIComponent(recipient)}`,
+        unsubscribeUrl: recipient
+          ? buildUnsubscribeUrl(settings.outreach.unsubscribePath, recipient)
+          : undefined,
       }),
     );
   }
@@ -248,9 +294,11 @@ export async function approveOutreach(input: {
     {
       authorize: async (a) => authorizeStaff(a),
       apply: async () => {
+        const body = await recipientBoundEmailBody(item);
         const next = await patchOutreach(input.id, {
           state: "approved",
           approvedBy: input.actor.employeeId,
+          body,
         });
         return outreachEntity(next!);
       },
@@ -293,6 +341,7 @@ export async function sendOutreach(input: {
 }): Promise<
   TransitionResult & {
     externalId?: string;
+    threadId?: string;
     sendMode?: string;
     /** Present when LinkedIn (or other) copy-draft completed without flipping to sent. */
     copyDraft?: boolean;
@@ -300,12 +349,8 @@ export async function sendOutreach(input: {
 > {
   const item = await getOutreach(input.id);
   if (!item) throw new Error(`Outreach not found: ${input.id}`);
-  const {
-    assertEmailSendAllowed,
-    isEmailChannel,
-    isLinkedInChannel,
-    ensureFooter,
-  } = await import("../sales-os/compliance");
+  const { assertEmailSendAllowed, isEmailChannel, isLinkedInChannel } =
+    await import("../sales-os/compliance");
   if (isLinkedInChannel(item.channel)) {
     return {
       ok: true,
@@ -315,16 +360,32 @@ export async function sendOutreach(input: {
       copyDraft: true,
     };
   }
-  if (isEmailChannel(item.channel)) {
-    const allowed = await assertEmailSendAllowed({ email: item.recipient });
+  if (
+    isEmailChannel(item.channel) &&
+    item.state === "approved" &&
+    authorizeStaff(input.actor)
+  ) {
+    const [contact, deal] = await Promise.all([
+      item.contactId ? getContact(item.contactId) : null,
+      getDeal(item.dealId),
+    ]);
+    const recipientMatches =
+      contact?.email?.trim().toLowerCase() ===
+      item.recipient.trim().toLowerCase();
+    const allowed = await assertEmailSendAllowed({
+      email: item.recipient,
+      emailVerified: Boolean(contact?.emailVerified && recipientMatches),
+      body: item.body,
+      companyName: deal?.companyName,
+    });
     if (!allowed.ok) {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: allowed.reason,
       });
     }
-    if (!item.body.includes("— hrmny outreach —")) {
-      const nextBody = ensureFooter(item.body);
+    const nextBody = await recipientBoundEmailBody(item);
+    if (nextBody !== item.body) {
       await patchOutreach(input.id, { body: nextBody });
       item.body = nextBody;
     }
@@ -333,6 +394,7 @@ export async function sendOutreach(input: {
     input.composio ??
     (await resolveComposioSend(input.actor.employeeId, input.actor.roles));
   let externalId: string | undefined;
+  let threadId: string | undefined;
   let sendMode: string | undefined;
   const toolkit =
     item.channel === "linkedin" ? ("linkedin" as const) : ("gmail" as const);
@@ -347,45 +409,148 @@ export async function sendOutreach(input: {
         // Live send + durable "sent" land together. Stub/copy_draft must not
         // flip state — throw so the row stays approved.
         apply: async () => {
-          const res = await composio.sendAfterApproval({
-            toolkit,
-            to: item.recipient,
-            subject: item.subject ?? undefined,
+          const messageId = `<hrmny-outreach-${item.id}@hrmny.co>`;
+          const rawBody = JSON.stringify({
+            outreachItemId: item.id,
+            recipient: item.recipient,
+            subject: item.subject,
             body: item.body,
+            messageId,
           });
-          externalId = res.externalId;
-          sendMode = res.mode;
+          const receipt = await recordIntegrationReceipt({
+            provider: "gmail",
+            externalEventId: `outreach-send:${item.id}`,
+            operation: "messages.send",
+            rawBody,
+            status: "processing",
+            result: { bridgeStatus: "sending" },
+            ownerEmployeeId: input.actor.employeeId,
+            payload: {
+              outreachItemId: item.id,
+              recipient: item.recipient,
+              messageId,
+            },
+          });
 
-          if (res.mode === "copy_draft") {
-            throw Object.assign(new Error("COPY_DRAFT"), {
-              code: "COPY_DRAFT" as const,
-              externalId: res.externalId,
-              sendMode: res.mode,
-            });
+          let shouldSend = !receipt.duplicate;
+          if (
+            receipt.duplicate &&
+            receipt.status === "failed" &&
+            receipt.result?.bridgeStatus === "not_sent"
+          ) {
+            shouldSend = await transitionIntegrationReceiptProgress(
+              receipt.receiptId,
+              {
+                status: "failed",
+                stateVersion: receipt.stateVersion,
+              },
+              {
+                status: "processing",
+                result: { bridgeStatus: "sending" },
+              },
+            );
           }
-          if (!res.sent || res.mode !== "live") {
+
+          if (!shouldSend) {
+            if (
+              receipt.status !== "completed" ||
+              typeof receipt.result?.externalId !== "string"
+            ) {
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message:
+                  "A previous Gmail attempt has an uncertain outcome. Check Sent Mail before taking another action; HRMNY will not send it twice.",
+              });
+            }
+            externalId = receipt.result.externalId;
+            threadId =
+              typeof receipt.result.threadId === "string"
+                ? receipt.result.threadId
+                : undefined;
+            sendMode = "live";
+          } else {
+            try {
+              const res = await composio.sendAfterApproval({
+                toolkit,
+                to: item.recipient,
+                subject: item.subject ?? undefined,
+                body: item.body,
+                messageId,
+              });
+              externalId = res.externalId;
+              threadId = res.threadId;
+              sendMode = res.mode;
+
+              if (res.mode === "copy_draft") {
+                throw Object.assign(new Error("COPY_DRAFT"), {
+                  code: "COPY_DRAFT" as const,
+                  externalId: res.externalId,
+                  sendMode: res.mode,
+                });
+              }
+              if (!res.sent || res.mode !== "live") {
+                throw new TRPCError({
+                  code: "PRECONDITION_FAILED",
+                  message:
+                    res.mode === "stub"
+                      ? "Gmail send is not live. Connect Google Workspace or Composio Gmail under Settings → Connections. Outreach stays approved."
+                      : `Gmail send did not complete (mode=${res.mode}). Outreach stays approved.`,
+                });
+              }
+              await completeIntegrationReceipt(receipt.receiptId, {
+                outreachItemId: item.id,
+                externalId,
+                ...(threadId ? { threadId } : {}),
+                messageId,
+                sendMode,
+              });
+            } catch (error) {
+              const definitelyNotSent = sendMode === "stub";
+              await updateIntegrationReceiptProgress(receipt.receiptId, {
+                status: definitelyNotSent ? "failed" : "processing",
+                result: {
+                  bridgeStatus: definitelyNotSent
+                    ? "not_sent"
+                    : "reconcile_required",
+                  outreachItemId: item.id,
+                  messageId,
+                },
+                lastError:
+                  error instanceof Error ? error.message : "Gmail send failed",
+              }).catch(() => undefined);
+              throw error;
+            }
+          }
+
+          if (!externalId) {
             throw new TRPCError({
-              code: "PRECONDITION_FAILED",
-              message:
-                res.mode === "stub"
-                  ? "Gmail send is not live. Connect Google Workspace or Composio Gmail under Settings → Connections. Outreach stays approved."
-                  : `Gmail send did not complete (mode=${res.mode}). Outreach stays approved.`,
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Gmail send completed without a provider message id",
             });
           }
-
           const next = await patchOutreach(input.id, {
             state: "sent",
             sentAt: new Date().toISOString(),
-            externalId: res.externalId,
+            externalId,
           });
-          const { recordEmailEvent } = await import("../sales-os/store");
-          await recordEmailEvent({
-            outreachItemId: input.id,
-            contactId: item.contactId,
-            kind: "sent",
-            provider: "gmail",
-            externalId: res.externalId ?? null,
-          });
+          const { listEmailEvents, recordEmailEvent } =
+            await import("../sales-os/store");
+          const recorded = (await listEmailEvents({ kind: "sent" })).some(
+            (event) => event.externalId === externalId,
+          );
+          if (!recorded) {
+            await recordEmailEvent({
+              outreachItemId: input.id,
+              contactId: item.contactId,
+              kind: "sent",
+              provider: "gmail",
+              externalId: externalId ?? null,
+              payload: {
+                ownerEmployeeId: input.actor.employeeId,
+                ...(threadId ? { threadId } : {}),
+              },
+            });
+          }
           return outreachEntity(next!);
         },
         audit: input.audit ?? defaultAudit,
@@ -393,7 +558,7 @@ export async function sendOutreach(input: {
       },
     );
 
-    return { ...result, externalId, sendMode };
+    return { ...result, externalId, threadId, sendMode };
   } catch (err) {
     if (
       err &&

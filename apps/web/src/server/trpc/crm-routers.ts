@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import {
   bootstrapGateRegistry,
   computeQuoteMetrics,
@@ -43,6 +44,7 @@ import {
   updateContact,
   updateCrmTask,
   updateDeal,
+  updateQuoteStatus,
 } from "../crm/repository";
 import { redactDealMargin, redactQuoteMargin } from "../crm/types";
 import { emitHealthSignal, writeAudit } from "../m1-persistence";
@@ -50,6 +52,7 @@ import {
   legacySalesEffectRefusal,
   legacySalesSyntheticRuntimeEnabled,
 } from "../sales-os/legacy-effect-policy";
+import { listOutreach } from "../leadgen/store";
 import {
   protectedProcedure,
   publicProcedure,
@@ -230,7 +233,6 @@ export const crmContactsRouter = router({
         phone: z.string().nullable().optional(),
         title: z.string().nullable().optional(),
         linkedinUrl: z.string().nullable().optional(),
-        emailVerified: z.boolean().optional(),
         isPrimary: z.boolean().optional(),
       }),
     )
@@ -319,7 +321,6 @@ export const crmDealsRouter = router({
           .enum(["hot", "warm", "cool", "cold"])
           .nullable()
           .optional(),
-        emailVerified: z.boolean().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -349,11 +350,22 @@ export const crmDealsRouter = router({
       const existing = await getDeal(input.id);
       if (!existing) return { ok: false as const, reason: "Deal not found" };
 
-      // Durable CRM has no voice_check column yet — treat verified email as
-      // voice-check proxy so engage→scope is demoable end-to-end.
+      const contact = existing.primaryContactId
+        ? await getContact(existing.primaryContactId)
+        : null;
+      const { outreachVoiceViolations } =
+        await import("../sales-os/compliance");
+      const voiceCheckPassed = (await listOutreach({ dealId: existing.dealId }))
+        .filter((item) => item.state === "approved" || item.state === "sent")
+        .some(
+          (item) =>
+            outreachVoiceViolations(item.body, existing.companyName).length ===
+            0,
+        );
       const gateData = {
         ...existing,
-        voiceCheckPassed: existing.emailVerified,
+        emailVerified: Boolean(contact?.emailVerified),
+        voiceCheckPassed,
       };
 
       const gateResult = await transition(
@@ -389,7 +401,8 @@ export const crmDealsRouter = router({
               state: moved.deal.stage,
               data: {
                 ...moved.deal,
-                voiceCheckPassed: moved.deal.emailVerified,
+                emailVerified: Boolean(contact?.emailVerified),
+                voiceCheckPassed,
               },
             };
           },
@@ -438,7 +451,7 @@ export const crmDealsRouter = router({
     }),
 
   /** Mark deal won/lost/on-hold (sets closeOutcome; required before handover). */
-  close: protectedProcedure
+  close: staffProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -447,6 +460,21 @@ export const crmDealsRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      const isSalesOperator = ctx.roles.some((role) =>
+        ["partner", "director", "am", "account_manager"].includes(role),
+      );
+      const isSalesLeader = ctx.roles.some((role) =>
+        ["partner", "director"].includes(role),
+      );
+      if (!isSalesOperator || (input.outcome === "won" && !isSalesLeader)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            input.outcome === "won"
+              ? "Partner or Director must confirm a won deal"
+              : "Sales operator role required",
+        });
+      }
       const before = await getDeal(input.id);
       const result = await closeDurableDeal({
         dealId: input.id,
@@ -476,9 +504,15 @@ export const crmDealsRouter = router({
     }),
 
   /** Won deal → client + onboarding + creative QC task + client memory. */
-  handoverPack: protectedProcedure
+  handoverPack: staffProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
+      if (!ctx.roles.some((role) => ["partner", "director"].includes(role))) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Partner or Director must confirm the client handover",
+        });
+      }
       const result = await durableHandoverPack({
         dealId: input.id,
         actorEmployeeId: ctx.employeeId,
@@ -682,7 +716,6 @@ export const crmQuotesRouter = router({
         dealId: z.string().uuid(),
         lineItems: z.array(quoteLineItemSchema).min(1),
         discountPct: z.number().min(0).max(100).optional(),
-        status: z.enum(["draft", "sent", "accepted", "rejected"]).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -699,12 +732,18 @@ export const crmQuotesRouter = router({
         // into renamed/new lines. Unmatched lines keep the client's unitCost.
         lineItems = input.lineItems.map((li) => {
           const match = prior.find((p) => p.label === li.label);
-          return match ? { ...li, unitCost: match.unitCost } : li;
+          if (!match) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `Finance or Partner must cost the new line “${li.label}” before it can be quoted`,
+            });
+          }
+          return { ...li, unitCost: match.unitCost };
         });
       }
 
-      const metrics = computeQuoteMetrics(lineItems);
       const discountPct = input.discountPct ?? 0;
+      const metrics = computeQuoteMetrics(lineItems, discountPct);
       // Same tier thresholds as deals.discount (m3): ≤5 am, ≤15 md, else partner.
       const tier = discountPct > 0 ? discountAuthorityTier(discountPct) : null;
       const escalatedTo =
@@ -723,9 +762,17 @@ export const crmQuotesRouter = router({
         marginPct: metrics.marginPct.toFixed(2),
         discountPct: discountPct > 0 ? discountPct.toFixed(2) : null,
         discountApprovalTier: tier,
-        status: input.status ?? "draft",
+        status: "draft",
         createdBy: ctx.employeeId,
       });
+      const projected = await updateDeal(input.dealId, {
+        quoteValue: quote.quoteValue,
+        internalCost: quote.internalCost,
+        marginPct: quote.marginPct,
+        discountPct: quote.discountPct,
+        discountApprovalTier: quote.discountApprovalTier,
+      });
+      if (!projected) throw new Error("Failed to project quote onto deal");
       await auditMutation(
         ctx,
         "crm.quotes.save",
@@ -762,6 +809,68 @@ export const crmQuotesRouter = router({
         escalatedTo,
         ...marginOracle,
       };
+    }),
+  acceptSigned: staffProcedure
+    .input(
+      z.object({
+        quoteId: z.string().uuid(),
+        evidenceUrl: z
+          .string()
+          .url()
+          .refine(
+            (value) => value.startsWith("https://"),
+            "HTTPS URL required",
+          ),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.roles.some((role) => ["partner", "director"].includes(role))) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Partner or Director approval required",
+        });
+      }
+      const quote = await getQuote(input.quoteId);
+      if (!quote) throw new TRPCError({ code: "NOT_FOUND" });
+      const [latest] = await listQuotesByDeal(quote.dealId);
+      if (latest?.quoteId !== quote.quoteId) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Only the latest quote version can be accepted",
+        });
+      }
+      if (Number(quote.marginPct ?? 0) < MARGIN_FLOOR_PCT) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Margin is below the ${MARGIN_FLOOR_PCT}% floor`,
+        });
+      }
+      const accepted = await updateQuoteStatus(quote.quoteId, "accepted");
+      if (!accepted) throw new Error("Failed to accept quote");
+      await createActivity({
+        type: "system",
+        subject: `Signed agreement recorded for quote v${quote.version}`,
+        dealId: quote.dealId,
+        actorEmployeeId: ctx.employeeId,
+        metadata: {
+          quoteId: quote.quoteId,
+          quoteVersion: quote.version,
+          evidenceUrl: input.evidenceUrl,
+        },
+      });
+      await auditMutation(
+        ctx,
+        "crm.quotes.accept_signed",
+        "crm_quote",
+        quote.quoteId,
+        { status: quote.status },
+        {
+          status: accepted.status,
+          evidenceUrl: input.evidenceUrl,
+          version: accepted.version,
+        },
+      );
+      return redactQuoteMargin(accepted, ctx.canViewMargin);
     }),
 });
 
