@@ -119,9 +119,10 @@ export default function ClientsPage() {
       </details>
 
       {hiddenTestCount ? (
-        <label className="flex w-fit items-center gap-2 text-xs text-muted">
+        <label className="flex min-h-11 w-fit items-center gap-2 text-xs text-muted">
           <input
             type="checkbox"
+            className="size-5"
             checked={showTestRecords}
             onChange={(event) => setShowTestRecords(event.target.checked)}
           />

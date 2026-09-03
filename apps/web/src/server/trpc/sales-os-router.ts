@@ -41,6 +41,12 @@ import {
 } from "../sales-os";
 import { getOutreach, listOutreach, patchOutreach } from "../leadgen/store";
 import { ownedIntegrationConnectionStatus } from "../integrations/resolve-keys";
+import { importApolloPersonToCrm } from "../crm/apollo-import";
+import {
+  completeIntegrationReceipt,
+  failIntegrationReceipt,
+  recordIntegrationReceipt,
+} from "../integrations/inbox";
 import { middleware, router, staffProcedure } from "./trpc";
 
 const SALES_OPERATOR_ROLES = new Set([
@@ -100,6 +106,16 @@ const settingsPatch = z.object({
       voice: z.string().optional(),
     })
     .optional(),
+});
+
+const apolloCandidateInput = z.object({
+  externalId: z.string().trim().min(1).max(180),
+  email: z.string().trim().email().optional(),
+  fullName: z.string().trim().min(2).max(180).optional(),
+  title: z.string().trim().min(1).max(180).optional(),
+  companyName: z.string().trim().min(1).max(180).optional(),
+  companyDomain: z.string().trim().min(1).max(255).optional(),
+  linkedinUrl: z.string().trim().url().max(500).optional(),
 });
 
 export const salesOsRouter = router({
@@ -164,25 +180,86 @@ export const salesOsRouter = router({
           administratorOverride: true,
         }),
       ),
+    saveCandidate: salesOperatorProcedure
+      .input(
+        z.object({ candidate: apolloCandidateInput.omit({ email: true }) }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const receipt = await recordIntegrationReceipt({
+          provider: "apollo",
+          externalEventId: `free-save:${ctx.employeeId}:${input.candidate.externalId}`,
+          operation: "people.search.save_candidate",
+          rawBody: JSON.stringify({
+            employeeId: ctx.employeeId,
+            externalId: input.candidate.externalId,
+          }),
+          status: "processing",
+          ownerEmployeeId: ctx.employeeId,
+          payload: { ...input.candidate, paidDetailsUnlocked: false },
+        });
+        if (receipt.duplicate) {
+          const result = receipt.result;
+          if (
+            result &&
+            typeof result.dealId === "string" &&
+            typeof result.companyId === "string" &&
+            typeof result.contactId === "string" &&
+            typeof result.companyName === "string"
+          ) {
+            return {
+              dealId: result.dealId,
+              companyId: result.companyId,
+              contactId: result.contactId,
+              companyName: result.companyName,
+              duplicate: true,
+            };
+          }
+          if (receipt.status !== "failed") {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message:
+                "This prospect is already being saved. Refresh the pipeline in a moment.",
+            });
+          }
+        }
+        try {
+          const imported = await importApolloPersonToCrm({
+            person: {
+              ...input.candidate,
+              source: "apollo",
+              raw: { freeSearch: true },
+            },
+            receiptId: receipt.receiptId,
+            ownerEmployeeId: ctx.employeeId,
+          });
+          const result = {
+            dealId: imported.dealId,
+            companyId: imported.companyId,
+            contactId: imported.contactId,
+            companyName: imported.companyName,
+            duplicate: false,
+          };
+          await completeIntegrationReceipt(receipt.receiptId, result);
+          return result;
+        } catch (error) {
+          await failIntegrationReceipt(
+            receipt.receiptId,
+            error instanceof Error ? error.message : "save failed",
+          );
+          throw error;
+        }
+      }),
     enrichOne: salesOperatorProcedure
       .input(
         z.object({
-          candidate: z.object({
-            externalId: z.string().trim().min(1).max(180).optional(),
-            email: z.string().trim().email().optional(),
-            fullName: z.string().trim().min(2).max(180).optional(),
-            companyName: z.string().trim().min(1).max(180).optional(),
-            companyDomain: z.string().trim().min(1).max(255).optional(),
-            linkedinUrl: z.string().trim().url().max(500).optional(),
-          }),
+          candidate: apolloCandidateInput.partial(),
           confirmCreditUse: z.literal(true),
         }),
       )
       .mutation(() => {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message:
-            "APOLLO_PAID_ENRICHMENT_REQUIRES_EXACT_APPROVAL_RECEIPT",
+          message: "APOLLO_PAID_ENRICHMENT_REQUIRES_EXACT_APPROVAL_RECEIPT",
         });
       }),
   }),

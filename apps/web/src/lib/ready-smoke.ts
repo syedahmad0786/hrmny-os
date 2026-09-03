@@ -14,6 +14,18 @@ export type ReadySmoke = {
   portalMagicLink?: string;
   connectedAppPolicy?: "allow_all" | "approved_only" | "disabled";
   googleOAuthRedirectUri?: string;
+  surfaces?: {
+    googleChat?: {
+      status?: string;
+      eventUrl?: string;
+      openUrl?: string;
+    };
+    qm?: {
+      status?: string;
+      publicUrl?: string | null;
+      plannedUrl?: string;
+    };
+  };
   tools?: Record<string, string>;
   blockers?: string[];
   connections?: {

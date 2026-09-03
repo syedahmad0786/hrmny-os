@@ -43,6 +43,13 @@ export type SessionUser = {
   clientId: string | null;
 };
 
+type ActiveStaff = {
+  employeeId: string;
+  email: string;
+  displayName: string;
+  isActive: boolean;
+};
+
 export const DEV_USERS: Record<string, SessionUser> = {
   partner: {
     employeeId: "c0000000-0000-4000-8000-000000000001",
@@ -217,6 +224,65 @@ export function sessionHas(
   return hasPermission(user.permissions, resource, action);
 }
 
+async function hydrateActiveStaff(
+  staff: ActiveStaff | undefined,
+): Promise<SessionUser | null> {
+  if (!staff?.isActive) return null;
+  const db = getDb();
+  if (!db) throw new Error("Staff authentication requires DATABASE_URL");
+  const access = await db
+    .select({
+      role: role.key,
+      resource: permissionPolicy.resource,
+      action: permissionPolicy.action,
+      effect: permissionPolicy.effect,
+    })
+    .from(employeeRole)
+    .innerJoin(role, eq(employeeRole.roleId, role.roleId))
+    .leftJoin(
+      permissionPolicy,
+      eq(employeeRole.roleId, permissionPolicy.roleId),
+    )
+    .where(eq(employeeRole.employeeId, staff.employeeId));
+
+  return {
+    employeeId: staff.employeeId,
+    email: staff.email,
+    displayName: staff.displayName,
+    roles: [...new Set(access.map((row) => row.role))],
+    permissions: access.flatMap((row) =>
+      row.resource && row.action && row.effect
+        ? [`${row.effect}:${row.resource}:${row.action}`]
+        : [],
+    ),
+    actorType: "staff",
+    clientId: null,
+  };
+}
+
+/** Resolve a verified external identity against the active staff allowlist. */
+export async function resolveActiveStaffByEmail(
+  rawEmail: string,
+): Promise<SessionUser | null> {
+  const emailAddress = rawEmail.trim().toLowerCase();
+  if (!emailAddress) return null;
+  const db = getDb();
+  if (!db) throw new Error("Staff authentication requires DATABASE_URL");
+  const [staff] = await db
+    .select({
+      employeeId: employee.employeeId,
+      email: employee.email,
+      displayName: employee.displayName,
+      isActive: employee.isActive,
+    })
+    .from(employee)
+    .where(
+      sql`${employee.isActive} = true and lower(${employee.email}) = ${emailAddress}`,
+    )
+    .limit(1);
+  return hydrateActiveStaff(staff);
+}
+
 /** Verify a Supabase access token, then load authorization from Postgres. */
 export async function resolveSupabaseUser(
   accessToken: string,
@@ -281,24 +347,12 @@ export async function resolveSupabaseUser(
       .limit(1);
   }
 
-  if (staff?.isActive) {
-    const access = await db
-      .select({
-        role: role.key,
-        resource: permissionPolicy.resource,
-        action: permissionPolicy.action,
-        effect: permissionPolicy.effect,
-      })
-      .from(employeeRole)
-      .innerJoin(role, eq(employeeRole.roleId, role.roleId))
-      .leftJoin(
-        permissionPolicy,
-        eq(employeeRole.roleId, permissionPolicy.roleId),
-      )
-      .where(eq(employeeRole.employeeId, staff.employeeId));
-
-    const roles = [...new Set(access.map((row) => row.role))];
-    const featureSubject = { userId: staff.employeeId, roles };
+  const staffUser = await hydrateActiveStaff(staff);
+  if (staffUser) {
+    const featureSubject = {
+      userId: staffUser.employeeId,
+      roles: staffUser.roles,
+    };
     const [ssoEnabled, sessionControlsEnabled] = await Promise.all([
       featureEnabled("work.sso_scim", featureSubject),
       featureEnabled("work.domain_controls", featureSubject),
@@ -306,19 +360,7 @@ export async function resolveSupabaseUser(
     if (ssoEnabled && !ssoAccessAllowed(sso, data.user)) return null;
     if (sessionControlsEnabled && sessionExpired) return null;
 
-    return {
-      employeeId: staff.employeeId,
-      email: staff.email,
-      displayName: staff.displayName,
-      roles,
-      permissions: access.flatMap((row) =>
-        row.resource && row.action && row.effect
-          ? [`${row.effect}:${row.resource}:${row.action}`]
-          : [],
-      ),
-      actorType: "staff",
-      clientId: null,
-    };
+    return staffUser;
   }
 
   if (!email || !data.user.email_confirmed_at) return null;

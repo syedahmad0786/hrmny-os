@@ -7,6 +7,7 @@ import {
   createDeal,
   getDeal,
   listCompanies,
+  listContacts,
   listDeals,
 } from "../crm/repository";
 import { getDemoStore } from "../demo-store";
@@ -59,11 +60,13 @@ import {
   insertOutreach,
   listOutreach,
 } from "../leadgen/store";
+import { resetIntegrationReceiptMemory } from "../integrations/inbox";
 
 async function resetAll() {
   resetCrmMemory();
   resetSalesOsStore();
   resetLeadgenStore();
+  resetIntegrationReceiptMemory();
   getDemoStore().audits = [];
 }
 
@@ -633,6 +636,44 @@ describe("Sales research authorization", () => {
         confirmCreditUse: true,
       }),
     ).rejects.toThrow(/Sales operator role required/i);
+    await expect(
+      hr.salesOs.apollo.saveCandidate({
+        candidate: { externalId: "apollo-denied-save" },
+      }),
+    ).rejects.toThrow(/Sales operator role required/i);
+    expect(await creditUsed("apollo_contact")).toBe(0);
+  });
+
+  it("saves a free-search candidate to the pipeline once without using credits", async () => {
+    const partner = salesCaller(resolveDevUser("partner"));
+    const candidate = {
+      externalId: "apollo-free-save-1",
+      fullName: "Mina Lead",
+      title: "Marketing Director",
+      companyName: "Northstar Hospitality",
+      companyDomain: "northstar.example",
+    };
+    const first = await partner.salesOs.apollo.saveCandidate({ candidate });
+    const replay = await partner.salesOs.apollo.saveCandidate({ candidate });
+    expect(first.duplicate).toBe(false);
+    expect(replay).toMatchObject({
+      dealId: first.dealId,
+      duplicate: true,
+    });
+    const savedDeal = await getDeal(first.dealId);
+    expect(savedDeal?.primaryContactId).toBe(first.contactId);
+    expect(await listContacts({ companyId: first.companyId })).toEqual([
+      expect.objectContaining({
+        contactId: first.contactId,
+        firstName: "Mina",
+        lastName: "Lead",
+        email: null,
+        title: "Marketing Director",
+      }),
+    ]);
+    expect(
+      (await listDeals()).filter((deal) => deal.dealId === first.dealId),
+    ).toHaveLength(1);
     expect(await creditUsed("apollo_contact")).toBe(0);
   });
 

@@ -6,6 +6,7 @@ import {
 } from "@hrmny/ai";
 import { sql } from "@hrmny/db";
 import { TRPCError } from "@trpc/server";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { nextLinksFromToolResults } from "../../lib/agent-next-links";
 import { getDb } from "../db";
@@ -39,6 +40,89 @@ const memMessages = new Map<string, MessageRow[]>();
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+export function externalChatThreadId(
+  employeeId: string,
+  externalRef: string,
+): string {
+  const bytes = createHash("sha256")
+    .update("hrmny.external-chat.v1\0")
+    .update(employeeId)
+    .update("\0")
+    .update(externalRef)
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x50;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** One durable HRMNY conversation for each employee + external chat space. */
+export async function getOrCreateExternalChatThread(input: {
+  employeeId: string;
+  externalRef: string;
+  title: string;
+}): Promise<ThreadRow> {
+  if (!input.employeeId.trim() || !input.externalRef.trim()) {
+    throw new Error("EXTERNAL_CHAT_SCOPE_REQUIRED");
+  }
+  const chatThreadId = externalChatThreadId(
+    input.employeeId,
+    input.externalRef,
+  );
+  const title = input.title.trim().slice(0, 120) || "Google Chat";
+  const db = getDb();
+  if (!db) {
+    const existing = memThreads.get(chatThreadId);
+    if (existing) {
+      if (existing.employeeId !== input.employeeId) {
+        throw new Error("EXTERNAL_CHAT_SCOPE_CONFLICT");
+      }
+      return existing;
+    }
+    const createdAt = nowIso();
+    const row: ThreadRow = {
+      chatThreadId,
+      employeeId: input.employeeId,
+      title,
+      agentSlug: null,
+      clientId: null,
+      harness: "direct",
+      createdAt,
+      updatedAt: createdAt,
+    };
+    memThreads.set(chatThreadId, row);
+    memMessages.set(chatThreadId, []);
+    return row;
+  }
+
+  await db.execute(sql`
+    insert into public.chat_thread (
+      chat_thread_id, employee_id, title, harness
+    ) values (
+      ${chatThreadId}::uuid, ${input.employeeId}::uuid, ${title}, 'direct'
+    )
+    on conflict (chat_thread_id) do nothing
+  `);
+  const rows = await db.execute<ThreadRow>(sql`
+    select
+      chat_thread_id as "chatThreadId",
+      employee_id as "employeeId",
+      title,
+      agent_slug as "agentSlug",
+      client_id as "clientId",
+      harness,
+      created_at::text as "createdAt",
+      updated_at::text as "updatedAt"
+    from public.chat_thread
+    where chat_thread_id = ${chatThreadId}::uuid
+      and employee_id = ${input.employeeId}::uuid
+    limit 1
+  `);
+  if (!rows[0]) throw new Error("EXTERNAL_CHAT_THREAD_NOT_FOUND");
+  return rows[0];
 }
 
 /** Exported for unit tests — chat harness tools for a staff/client sandbox. */

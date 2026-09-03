@@ -156,9 +156,10 @@ export default function CrmPipelinePage() {
       </CrmFilterBar>
 
       {hiddenTestCount ? (
-        <label className="mb-3 flex w-fit items-center gap-2 text-xs text-muted">
+        <label className="mb-3 flex min-h-11 w-fit items-center gap-2 text-xs text-muted">
           <input
             type="checkbox"
+            className="size-5"
             checked={showTestRecords}
             onChange={(event) => setShowTestRecords(event.target.checked)}
           />
@@ -259,7 +260,7 @@ export default function CrmPipelinePage() {
                         </div>
                         <select
                           aria-label={`Move ${d.companyName} to stage`}
-                          className="mt-1.5 w-full rounded-md border border-[var(--line)] bg-[var(--paper-2)] px-1.5 py-1 text-[10px] text-[var(--muted)]"
+                          className="mt-1.5 min-h-11 w-full rounded-md border border-[var(--line)] bg-[var(--paper-2)] px-2 py-1 text-xs text-[var(--muted)]"
                           value={d.stage}
                           disabled={move.isPending}
                           onClick={(e) => {

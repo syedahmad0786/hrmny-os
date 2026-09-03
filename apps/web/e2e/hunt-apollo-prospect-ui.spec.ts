@@ -31,6 +31,23 @@ function completedSearchResponse(fullName: string) {
   ]);
 }
 
+function savedCandidateResponse() {
+  return JSON.stringify([
+    {
+      result: {
+        data: {
+          json: {
+            dealId: "e2000000-0000-4000-8000-000000000001",
+            companyId: "c2000000-0000-4000-8000-000000000001",
+            companyName: "Principal Scoped Result",
+            duplicate: false,
+          },
+        },
+      },
+    },
+  ]);
+}
+
 /** Explicit synthetic acceptance fixtures; the normal Apollo surface remains
  * disconnected and fail-closed without a live, scoped provider credential. */
 test.describe("Hunt Apollo prospect UI", () => {
@@ -188,7 +205,16 @@ test.describe("Hunt Apollo prospect UI", () => {
       },
     );
     await page.route("**/api/trpc/**", async (route) => {
-      if (route.request().url().includes("salesOs.apollo.searchStatus")) {
+      const url = route.request().url();
+      if (url.includes("salesOs.apollo.saveCandidate")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: savedCandidateResponse(),
+        });
+        return;
+      }
+      if (url.includes("salesOs.apollo.searchStatus")) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -208,6 +234,18 @@ test.describe("Hunt Apollo prospect UI", () => {
     );
     await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
       /receipt c3c3c3c3/i,
+    );
+    await page
+      .getByTestId("hunt-apollo-save-synthetic-completed-person")
+      .click();
+    await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
+      /Principal Scoped Result is in the pipeline/i,
+    );
+    await expect(
+      page.getByRole("link", { name: /Open CRM deal/i }),
+    ).toHaveAttribute(
+      "href",
+      "/crm/deals/e2000000-0000-4000-8000-000000000001",
     );
     await expect
       .poll(() =>
