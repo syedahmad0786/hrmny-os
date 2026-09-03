@@ -13,6 +13,17 @@ const SYNTHETIC_NAME_PATTERNS = [
   /^apollo unit\b/i,
   /^m\d[- ]proof\b/i,
   /^personal\s+\d{10,}\b/i,
+  /^user-only note\b/i,
+  /^run demo\b/i,
+  /^unit demo\b/i,
+  /^fixture co\b/i,
+  /^acme(?:\s+llc)?$/i,
+  /^test brand(?:\s+llc)?$/i,
+  /^uae hospitality brands$/i,
+  /^(?:uae retail brand|portal|campaign|creative|outreach|finance|agent)$/i,
+  /^(?:marketingagencyprospectsuae|fintechdubai)(?:\s+llc)?$/i,
+  /^(?:presentation client|race co|rename co|cost co|drop co|merge co|new prospect)$/i,
+  /^m1 production acceptance\b/i,
   /^ui e2e\b/i,
   /^\[agent\](?:\s|$)/i,
 ] as const;
@@ -20,6 +31,7 @@ const SYNTHETIC_NAME_PATTERNS = [
 const SYNTHETIC_ADDRESS_PATTERNS = [
   /@example\.(?:com|test|invalid)$/i,
   /@example\.org$/i,
+  /@[^@\s]+\.example$/i,
 ] as const;
 
 const SYNTHETIC_AGENT_PATTERNS = [
