@@ -165,7 +165,7 @@ export default function CrmDealDetailPage() {
                 }}
               >
                 {d.stage === "handover_pack"
-                  ? "Refresh handover links →"
+                  ? "Review handover →"
                   : "Handover pack → client"}
               </CrmBtn>
             ) : null}

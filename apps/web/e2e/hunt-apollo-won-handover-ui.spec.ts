@@ -147,44 +147,22 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     });
   });
 
-  test("Apollo prospect handover portal and onboarding magic links", async ({
+  test("Apollo prospect handover opens the staff client workspace", async ({
     page,
   }) => {
     const query = `Acceptance Apollo Portal ${Date.now()}`;
     await ensureApolloDealHandoverNext(page, query);
 
-    const portal = page.getByTestId("deal-handover-portal");
-    await expect(portal).toBeVisible();
-    await expect(portal).toHaveAttribute("href", /\/portal\/login\/verify/);
-    const onboardingInvite = page.getByTestId(
-      "deal-handover-onboarding-invite",
-    );
-    await expect(onboardingInvite).toBeVisible();
-    await expect(onboardingInvite).toHaveAttribute(
-      "href",
-      /\/portal\/login\/verify/,
-    );
-    const portalHref = await portal.getAttribute("href");
-    const onboardingHref = await onboardingInvite.getAttribute("href");
-    expect(portalHref).toBeTruthy();
-    expect(onboardingHref).toBeTruthy();
-    expect(portalHref).not.toBe(onboardingHref);
+    const client = page.getByTestId("deal-handover-client");
+    await expect(client).toBeVisible();
+    await expect(client).toHaveAttribute("href", /\/clients\//);
+    await expect(page.getByTestId("deal-handover-finance")).toBeVisible();
 
-    await portal.click();
-    await expect(page).toHaveURL(/\/portal\/login\/verify/, {
+    await client.click();
+    await expect(page).toHaveURL(/\/clients\//, { timeout: 60_000 });
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
       timeout: 60_000,
     });
-    await expect(page).toHaveURL(/token=/);
-    await expect(
-      page.getByRole("heading", { name: /^Approvals$/i }),
-    ).toBeVisible({ timeout: 60_000 });
-    await expect(page).toHaveURL(/\/portal\/approvals/);
-
-    await page.goto(onboardingHref!, { waitUntil: "domcontentloaded" });
-    await expect(
-      page.getByRole("heading", { name: /^Onboarding$/i }),
-    ).toBeVisible({ timeout: 60_000 });
-    await expect(page).toHaveURL(/\/portal\/onboarding/);
   });
 
   test("Closed loop via Apollo opens Deal → Client → Creative", async ({

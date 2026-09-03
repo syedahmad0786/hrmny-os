@@ -113,6 +113,11 @@ export default function CrmQuotePage() {
   // Dead-control fix: tier reflects the server-computed approval tier —
   // from the save response first, else the latest persisted version.
   const latest = versions.data?.[0];
+  const currentQuote = saved?.quote ?? latest;
+  const activeQuote =
+    acceptSigned.data?.quoteId === currentQuote?.quoteId
+      ? acceptSigned.data
+      : currentQuote;
   const currentTier = saved
     ? saved.approvalTier
     : (latest?.discountApprovalTier ?? null);
@@ -380,12 +385,13 @@ export default function CrmQuotePage() {
                 </div>
               ) : null}
 
-              {latest?.status === "accepted" ? (
+              {activeQuote?.status === "accepted" ? (
                 <div className="crm-note" style={{ marginTop: 10 }}>
-                  Signed agreement recorded for v{latest.version}. The deal can
-                  be marked won after it passes the commercial stage gates.
+                  Signed agreement recorded for v{activeQuote.version}. The
+                  deal can be marked won after it passes the commercial stage
+                  gates.
                 </div>
-              ) : canAcceptSigned && latest ? (
+              ) : canAcceptSigned && activeQuote ? (
                 <div className="crm-form-grid" style={{ marginTop: 14 }}>
                   <div className="crm-field">
                     <label>Signed agreement URL</label>
@@ -407,7 +413,7 @@ export default function CrmQuotePage() {
                       onClick={() =>
                         void acceptSigned
                           .mutateAsync({
-                            quoteId: latest.quoteId,
+                            quoteId: activeQuote.quoteId,
                             evidenceUrl: evidenceUrl.trim(),
                           })
                           .then(() => setEvidenceUrl(""))
