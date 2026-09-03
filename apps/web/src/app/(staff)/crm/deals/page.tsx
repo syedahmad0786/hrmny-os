@@ -15,16 +15,19 @@ import {
 } from "@/components/crm/ui";
 import {
   buafScore,
+  formatContactName,
   formatAed,
   formatLane,
   formatRelative,
   initials,
+  workEmailState,
 } from "@/components/crm/format";
 
 export default function CrmDealsPage() {
   const router = useRouter();
   const utils = trpc.useUtils();
   const deals = trpc.crm.deals.list.useQuery();
+  const contacts = trpc.crm.contacts.list.useQuery();
   const stages = trpc.crm.stages.useQuery();
   const digest = trpc.salesOs.digest.useQuery();
   const create = trpc.crm.deals.create.useMutation({
@@ -33,6 +36,13 @@ export default function CrmDealsPage() {
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("all");
   const [name, setName] = useState("");
+  const contactById = useMemo(
+    () =>
+      new Map(
+        (contacts.data ?? []).map((contact) => [contact.contactId, contact]),
+      ),
+    [contacts.data],
+  );
 
   const stallByDeal = useMemo(() => {
     const m = new Map<string, { daysInStage: number; maxDays: number }>();
@@ -47,12 +57,16 @@ export default function CrmDealsPage() {
     return (deals.data ?? []).filter((d) => {
       if (stage !== "all" && d.stage !== stage) return false;
       if (!q) return true;
+      const leadName = formatContactName(
+        d.primaryContactId ? contactById.get(d.primaryContactId) : null,
+      );
       return (
         d.companyName.toLowerCase().includes(q) ||
+        (leadName ?? "").toLowerCase().includes(q) ||
         (d.sector ?? "").toLowerCase().includes(q)
       );
     });
-  }, [deals.data, search, stage]);
+  }, [contactById, deals.data, search, stage]);
 
   return (
     <main>
@@ -64,10 +78,12 @@ export default function CrmDealsPage() {
             variant="primary"
             disabled={create.isPending}
             onClick={() =>
-              void create.mutateAsync({
-                companyName: name.trim() || "New prospect",
-                leadSourceLane: "relationship_led",
-              }).then(() => setName(""))
+              void create
+                .mutateAsync({
+                  companyName: name.trim() || "New prospect",
+                  leadSourceLane: "relationship_led",
+                })
+                .then(() => setName(""))
             }
           >
             ＋ Create deal
@@ -103,13 +119,17 @@ export default function CrmDealsPage() {
       </CrmFilterBar>
 
       {digest.data ? (
-        <section className="crm-panel mb-4" data-testid="sales-os-pipeline-review">
+        <section
+          className="crm-panel mb-4"
+          data-testid="sales-os-pipeline-review"
+        >
           <div className="crm-panel-head">
             <div>
               <h3>Pipeline review</h3>
               <p>
                 Coverage {digest.data.coverage.coverageX.toFixed(1)}× vs{" "}
-                {digest.data.coverage.targetX}× H1 · {digest.data.stalled.length} stalled
+                {digest.data.coverage.targetX}× H1 ·{" "}
+                {digest.data.stalled.length} stalled
               </p>
             </div>
             <CrmTag kind={digest.data.coverage.healthy ? "success" : "warn"}>
@@ -124,7 +144,8 @@ export default function CrmDealsPage() {
                     <Link className="underline" href={`/crm/deals/${s.dealId}`}>
                       {s.companyName}
                     </Link>{" "}
-                    · {s.daysInStage}d in {s.stage.replace(/_/g, " ")} (max {s.maxDays})
+                    · {s.daysInStage}d in {s.stage.replace(/_/g, " ")} (max{" "}
+                    {s.maxDays})
                   </li>
                 ))}
               </ul>
@@ -136,13 +157,16 @@ export default function CrmDealsPage() {
       {deals.isLoading ? (
         <CrmEmpty title="Loading deals…" />
       ) : rows.length === 0 ? (
-        <CrmEmpty title="No deals yet" hint="Create a deal to start the pipeline rhythm." />
+        <CrmEmpty
+          title="No deals yet"
+          hint="Create a deal to start the pipeline rhythm."
+        />
       ) : (
         <CrmTableShell foot={`${rows.length} deals · live CRM`}>
           <table className="crm-table">
             <thead>
               <tr>
-                <th>Deal</th>
+                <th>Lead</th>
                 <th>Stage</th>
                 <th>BUAF</th>
                 <th>Lane</th>
@@ -156,6 +180,14 @@ export default function CrmDealsPage() {
             <tbody>
               {rows.map((d) => {
                 const buaf = buafScore(d);
+                const contact = d.primaryContactId
+                  ? contactById.get(d.primaryContactId)
+                  : undefined;
+                const leadName = formatContactName(contact);
+                const email = workEmailState(contact, d.emailVerified);
+                const stageLabel =
+                  stages.data?.find((item) => item.key === d.stage)?.label ??
+                  String(d.stage).replace(/_/g, " ");
                 return (
                   <tr
                     key={d.dealId}
@@ -163,13 +195,13 @@ export default function CrmDealsPage() {
                   >
                     <td>
                       <CompanyCell
-                        name={d.sector ?? "Opportunity"}
+                        name={leadName ?? "Lead name unavailable"}
                         subtitle={d.companyName}
-                        mark={initials(d.companyName)}
+                        mark={initials(leadName ?? d.companyName)}
                       />
                     </td>
                     <td>
-                      <CrmTag kind="info">{String(d.stage).replace(/_/g, " ")}</CrmTag>
+                      <CrmTag kind="info">{stageLabel}</CrmTag>
                     </td>
                     <td>{buaf.label}</td>
                     <td>{formatLane(d.leadSourceLane)}</td>
@@ -177,9 +209,7 @@ export default function CrmDealsPage() {
                       <strong>{formatAed(d.quoteValue)}</strong>
                     </td>
                     <td>
-                      <CrmTag kind={d.emailVerified ? "success" : "warn"}>
-                        {d.emailVerified ? "Verified" : "Unverified"}
-                      </CrmTag>
+                      <CrmTag kind={email.kind}>{email.label}</CrmTag>
                     </td>
                     <td>
                       <span className="crm-initials">

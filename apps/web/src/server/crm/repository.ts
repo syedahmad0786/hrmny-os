@@ -15,6 +15,7 @@ import {
   sql,
   ticket,
   CRM_PIPELINE_STAGES,
+  CRM_PIPELINE_STAGE_DESCRIPTIONS,
   CRM_PIPELINE_STAGE_LABELS,
   type Db,
 } from "@hrmny/db";
@@ -146,6 +147,7 @@ export function pipelineStages() {
   return CRM_PIPELINE_STAGES.map((key) => ({
     key,
     label: CRM_PIPELINE_STAGE_LABELS[key],
+    description: CRM_PIPELINE_STAGE_DESCRIPTIONS[key],
   }));
 }
 

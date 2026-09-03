@@ -422,10 +422,28 @@ export async function enrichOneApolloPerson(
       return result;
     }
 
+    const freeSaveReceipt = candidate.externalId
+      ? await getIntegrationReceipt(
+          "apollo",
+          `free-save:${actorEmployeeId}:${candidate.externalId}`,
+        )
+      : null;
+    const savedContactId =
+      freeSaveReceipt?.status === "completed" &&
+      typeof freeSaveReceipt.result?.contactId === "string"
+        ? freeSaveReceipt.result.contactId
+        : null;
+    const savedDealId =
+      freeSaveReceipt?.status === "completed" &&
+      typeof freeSaveReceipt.result?.dealId === "string"
+        ? freeSaveReceipt.result.dealId
+        : null;
     const crm = await importApolloPersonToCrm({
       person,
       receiptId: receipt.receiptId,
       ownerEmployeeId: actorEmployeeId,
+      existingContactId: savedContactId,
+      existingDealId: savedDealId,
     });
     const result: ApolloOnePersonResult = {
       receiptId: receipt.receiptId,

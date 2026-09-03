@@ -45,9 +45,11 @@ import {
 import { getOutreach, listOutreach, patchOutreach } from "../leadgen/store";
 import { ownedIntegrationConnectionStatus } from "../integrations/resolve-keys";
 import { importApolloPersonToCrm } from "../crm/apollo-import";
+import { getContact } from "../crm/repository";
 import {
   completeIntegrationReceipt,
   failIntegrationReceipt,
+  getIntegrationReceipt,
   recordIntegrationReceipt,
 } from "../integrations/inbox";
 import { middleware, router, staffProcedure } from "./trpc";
@@ -183,6 +185,44 @@ export const salesOsRouter = router({
           administratorOverride: true,
         }),
       ),
+    savedCandidates: staffProcedure
+      .input(
+        z.object({
+          externalIds: z.array(z.string().trim().min(1).max(180)).max(10),
+        }),
+      )
+      .query(async ({ input, ctx }) => {
+        const rows = await Promise.all(
+          [...new Set(input.externalIds)].map(async (externalId) => {
+            const receipt = await getIntegrationReceipt(
+              "apollo",
+              `free-save:${ctx.employeeId}:${externalId}`,
+            );
+            const result =
+              receipt?.status === "completed" ? receipt.result : null;
+            if (
+              !result ||
+              typeof result.dealId !== "string" ||
+              typeof result.contactId !== "string" ||
+              typeof result.companyName !== "string"
+            ) {
+              return null;
+            }
+            const contact = await getContact(result.contactId);
+            return {
+              externalId,
+              dealId: result.dealId,
+              companyName: result.companyName,
+              fullName: contact
+                ? `${contact.firstName} ${contact.lastName ?? ""}`.trim()
+                : null,
+              email: contact?.email ?? null,
+              emailVerified: contact?.emailVerified ?? false,
+            };
+          }),
+        );
+        return rows.flatMap((row) => (row ? [row] : []));
+      }),
     saveCandidate: salesOperatorProcedure
       .input(
         z.object({ candidate: apolloCandidateInput.omit({ email: true }) }),

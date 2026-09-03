@@ -10,6 +10,7 @@ import { isSyntheticRecordName } from "@/lib/synthetic-records";
 
 type ClientRow = {
   clientId: string;
+  dealId?: string | null;
   name: string;
   market: string;
   engagementType: string;
@@ -208,6 +209,11 @@ export default function ClientsPage() {
                   {client.lifecycleStatus}
                 </p>
                 <p className="mt-2 text-xs text-muted">
+                  {client.dealId
+                    ? "Won in Sales · client onboarding started"
+                    : "Added directly to the client directory"}
+                </p>
+                <p className="mt-1 text-xs text-muted">
                   {client.portalUserCount ?? 0} active portal user
                   {(client.portalUserCount ?? 0) === 1 ? "" : "s"}
                 </p>
@@ -219,16 +225,24 @@ export default function ClientsPage() {
             <div className="mt-5 flex flex-wrap gap-2">
               <Link
                 className="rounded-lg bg-ink px-3 py-2 text-sm font-medium text-white"
-                href={`/client-preview?client=${client.clientId}`}
+                href={`/clients/${client.clientId}`}
               >
-                Preview portal
+                Continue onboarding →
               </Link>
               <Link
                 className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
-                href={`/clients/${client.clientId}`}
+                href={`/client-preview?client=${client.clientId}`}
               >
-                Onboarding
+                Preview client portal
               </Link>
+              {client.dealId ? (
+                <Link
+                  className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
+                  href={`/crm/deals/${client.dealId}`}
+                >
+                  Open sales deal
+                </Link>
+              ) : null}
               <button
                 type="button"
                 data-testid={`clients-manage-portal-${client.clientId}`}
@@ -242,7 +256,8 @@ export default function ClientsPage() {
         ))}
         {!clients.isLoading && rows.length === 0 ? (
           <Card className="!p-5 text-sm text-muted">
-            No clients yet. Use “Add client” to create the first account.
+            No clients yet. Mark a sales deal won and create its handover, or
+            add a client directly.
           </Card>
         ) : null}
       </section>

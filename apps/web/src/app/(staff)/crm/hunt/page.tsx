@@ -44,6 +44,15 @@ type SearchBridgeResult = {
   providerMaySettle?: boolean;
 };
 
+type SavedCandidate = {
+  externalId: string;
+  dealId: string;
+  companyName: string;
+  fullName?: string | null;
+  email?: string | null;
+  emailVerified?: boolean;
+};
+
 function searchStatusNote(payload: SearchBridgeResult): string {
   return apolloSearchStatusNote({
     ...payload,
@@ -92,6 +101,10 @@ export default function HuntClientsPage() {
   const [apolloSearchResult, setApolloSearchResult] =
     useState<SearchBridgeResult | null>(null);
   const [lastApolloDealId, setLastApolloDealId] = useState<string | null>(null);
+  const [recentlySaved, setRecentlySaved] = useState<
+    Record<string, SavedCandidate>
+  >({});
+  const [creditReviewId, setCreditReviewId] = useState<string | null>(null);
   const [uiPrincipalId, setUiPrincipalId] = useState<string | null>(null);
   const [demoResultPrincipalId, setDemoResultPrincipalId] = useState<
     string | null
@@ -144,6 +157,8 @@ export default function HuntClientsPage() {
     setApolloSearchRequestId(null);
     setApolloSearchResult(null);
     setLastApolloDealId(null);
+    setRecentlySaved({});
+    setCreditReviewId(null);
     setDemoResultPrincipalId(null);
     setFreeSearchOperation(null);
     setCancelSearchOperation(null);
@@ -234,10 +249,7 @@ export default function HuntClientsPage() {
       }
       setApolloSearchResult(payload);
       setSearchNote(searchStatusNote(payload));
-      if (
-        payload.status !== "retry_scheduled" &&
-        payload.status !== "processing"
-      ) {
+      if (payload.status === "dead_letter" || payload.status === "revoked") {
         forgetPendingSearch(variables.idempotencyKey);
       }
     },
@@ -275,8 +287,19 @@ export default function HuntClientsPage() {
     { idempotencyKey: apolloSearchRequestId ?? EMPTY_REQUEST_ID },
     {
       enabled: hasCurrentApolloSearch,
-      refetchInterval: 3_000,
+      refetchInterval:
+        !apolloSearchResult ||
+        apolloSearchResult.status === "processing" ||
+        apolloSearchResult.status === "retry_scheduled"
+          ? 3_000
+          : false,
     },
+  );
+  const apolloSearchActive = Boolean(
+    hasCurrentApolloSearch &&
+    (!apolloSearchResult ||
+      apolloSearchResult.status === "processing" ||
+      apolloSearchResult.status === "retry_scheduled"),
   );
   const missingApolloReceipt =
     hasCurrentApolloSearch &&
@@ -329,8 +352,30 @@ export default function HuntClientsPage() {
     cancelSearchOperation,
     verifiedStaffPrincipalId,
   );
+  const candidateExternalIds = (apolloSearchResult?.candidates ?? []).map(
+    (candidate) => candidate.externalId,
+  );
+  const persistedCandidates = trpc.salesOs.apollo.savedCandidates.useQuery(
+    { externalIds: candidateExternalIds },
+    {
+      enabled: isUiPrincipalCurrent && candidateExternalIds.length > 0,
+    },
+  );
+  const savedCandidateByExternalId = new Map(
+    [...(persistedCandidates.data ?? []), ...Object.values(recentlySaved)].map(
+      (candidate) => [candidate.externalId, candidate],
+    ),
+  );
   const saveCandidate = trpc.salesOs.apollo.saveCandidate.useMutation({
-    onSuccess: (payload) => {
+    onSuccess: (payload, variables) => {
+      setRecentlySaved((current) => ({
+        ...current,
+        [variables.candidate.externalId]: {
+          externalId: variables.candidate.externalId,
+          dealId: payload.dealId,
+          companyName: payload.companyName,
+        },
+      }));
       setLastApolloDealId(payload.dealId);
       setSearchNote(
         `${payload.companyName} is in the pipeline${
@@ -338,13 +383,31 @@ export default function HuntClientsPage() {
         }. Paid contact details remain locked.`,
       );
       void utils.crm.deals.list.invalidate();
+      void utils.salesOs.apollo.savedCandidates.invalidate();
     },
     onError: (error) => setSearchNote(error.message),
   });
   const enrichExact = trpc.salesOs.apollo.enrichOne.useMutation({
     onMutate: () => ({ principalId: activePrincipalIdRef.current }),
-    onSuccess: (payload, _variables, operation) => {
+    onSuccess: (payload, variables, operation) => {
       if (operation?.principalId !== activePrincipalIdRef.current) return;
+      if (payload.crm?.dealId) {
+        setRecentlySaved((current) => ({
+          ...current,
+          [variables.candidate.externalId]: {
+            externalId: variables.candidate.externalId,
+            dealId: payload.crm!.dealId,
+            companyName:
+              payload.crm!.companyName ??
+              variables.candidate.companyName ??
+              "Unknown company",
+            fullName: payload.crm!.fullName,
+            email: payload.crm!.email,
+            emailVerified: payload.crm!.emailVerified,
+          },
+        }));
+      }
+      setCreditReviewId(null);
       setLastApolloDealId(payload.crm?.dealId ?? null);
       setSearchNote(
         payload.duplicate
@@ -358,10 +421,12 @@ export default function HuntClientsPage() {
             : `${payload.reason ?? "Apollo returned no usable match."} Up to one Apollo credit was recorded.`,
       );
       void utils.crm.deals.list.invalidate();
+      void utils.salesOs.apollo.savedCandidates.invalidate();
       void apolloStatus.refetch();
     },
     onError: (error, _variables, operation) => {
       if (operation?.principalId === activePrincipalIdRef.current) {
+        setCreditReviewId(null);
         setSearchNote(error.message);
       }
     },
@@ -378,6 +443,7 @@ export default function HuntClientsPage() {
     },
     onError: (error, _variables, operation) => {
       if (operation?.principalId === activePrincipalIdRef.current) {
+        setCreditReviewId(null);
         setSearchNote(error.message);
       }
     },
@@ -396,12 +462,7 @@ export default function HuntClientsPage() {
     if (!payload) return;
     setApolloSearchResult(payload);
     setSearchNote(searchStatusNote(payload));
-    if (payload.status === "completed") {
-      forgetPendingSearch(apolloSearchRequestId!);
-    } else if (
-      payload.status === "dead_letter" ||
-      payload.status === "revoked"
-    ) {
+    if (payload.status === "dead_letter" || payload.status === "revoked") {
       forgetPendingSearch(apolloSearchRequestId!);
     }
   }, [
@@ -629,9 +690,7 @@ export default function HuntClientsPage() {
                   id="apollo-title"
                   data-testid="hunt-apollo-title"
                   disabled={
-                    !canOperateApollo ||
-                    !apolloConnected ||
-                    hasCurrentApolloSearch
+                    !canOperateApollo || !apolloConnected || apolloSearchActive
                   }
                   value={isUiPrincipalCurrent ? title : "Marketing Director"}
                   onChange={(event) => setTitle(event.target.value)}
@@ -645,9 +704,7 @@ export default function HuntClientsPage() {
                   id="apollo-query"
                   data-testid="hunt-apollo-query"
                   disabled={
-                    !canOperateApollo ||
-                    !apolloConnected ||
-                    hasCurrentApolloSearch
+                    !canOperateApollo || !apolloConnected || apolloSearchActive
                   }
                   value={isUiPrincipalCurrent ? query : ""}
                   onChange={(event) => setQuery(event.target.value)}
@@ -666,7 +723,7 @@ export default function HuntClientsPage() {
                   !canOperateApollo ||
                   !apolloConnected ||
                   freeSearchPending ||
-                  hasCurrentApolloSearch ||
+                  apolloSearchActive ||
                   title.trim().length < 2
                 }
               >
@@ -678,7 +735,7 @@ export default function HuntClientsPage() {
                       ? "Connect Apollo to search"
                       : "Search Apollo · 0 credits"}
               </button>
-              {pendingApolloSearch && hasCurrentApolloSearch ? (
+              {pendingApolloSearch && apolloSearchActive ? (
                 missingApolloReceipt ? (
                   <button
                     type="button"
@@ -730,100 +787,174 @@ export default function HuntClientsPage() {
           {isUiPrincipalCurrent &&
           (apolloSearchResult?.candidates ?? []).length > 0 ? (
             <ol className="growth-candidates" data-testid="hunt-apollo-results">
-              {(apolloSearchResult?.candidates ?? []).map((candidate) => (
-                <li key={candidate.externalId}>
-                  <div>
-                    <strong>
-                      {candidate.fullName ?? "Named person unavailable"}
-                    </strong>
-                    <span>
-                      {[candidate.title, candidate.companyName]
-                        .filter(Boolean)
-                        .join(" · ") || "Professional profile"}
-                    </span>
-                    <small>
-                      {candidate.companyDomain ?? "Domain unavailable"} · email
-                      not unlocked by search
-                    </small>
-                  </div>
-                  <div className="growth-candidate-actions">
-                    <button
-                      type="button"
-                      data-testid={`hunt-apollo-save-${candidate.externalId}`}
-                      disabled={
-                        !canOperateApollo ||
-                        (saveCandidate.isPending &&
-                          saveCandidate.variables?.candidate.externalId ===
-                            candidate.externalId)
-                      }
-                      onClick={() =>
-                        saveCandidate.mutate({
-                          candidate: {
-                            externalId: candidate.externalId,
-                            fullName: candidate.fullName,
-                            title: candidate.title,
-                            companyName: candidate.companyName,
-                            companyDomain: candidate.companyDomain,
-                          },
-                        })
-                      }
-                    >
-                      {saveCandidate.isPending &&
-                      saveCandidate.variables?.candidate.externalId ===
-                        candidate.externalId
-                        ? "Adding…"
-                        : "Add to pipeline · free"}
-                    </button>
-                    <span data-testid="hunt-apollo-enrichment-locked">
-                      Verified work email remains locked
-                    </span>
-                    <button
-                      type="button"
-                      data-testid={`hunt-apollo-enrich-${candidate.externalId}`}
-                      disabled={
-                        !canOperateApollo ||
-                        !apolloConnected ||
-                        (approveExact.isPending &&
-                          approveExact.variables?.candidate.externalId ===
-                            candidate.externalId) ||
-                        (enrichExact.isPending &&
-                          enrichExact.variables?.candidate.externalId ===
-                            candidate.externalId)
-                      }
-                      onClick={() => {
-                        if (
-                          !window.confirm(
-                            `Use up to 1 Apollo credit to unlock the verified work email for ${
-                              candidate.fullName ?? "this person"
-                            } at ${candidate.companyName ?? "this company"}? Phone numbers, personal emails, and waterfall lookups will stay off.`,
-                          )
-                        ) {
-                          return;
+              {(apolloSearchResult?.candidates ?? []).map((candidate) => {
+                const saved = savedCandidateByExternalId.get(
+                  candidate.externalId,
+                );
+                return (
+                  <li
+                    key={candidate.externalId}
+                    className={saved ? "is-saved" : undefined}
+                    data-testid={`hunt-apollo-candidate-${candidate.externalId}`}
+                  >
+                    <div>
+                      <strong>
+                        {saved?.fullName ??
+                          candidate.fullName ??
+                          "Named person unavailable"}
+                      </strong>
+                      <span>
+                        {[candidate.title, candidate.companyName]
+                          .filter(Boolean)
+                          .join(" · ") || "Professional profile"}
+                      </span>
+                      <small>
+                        {candidate.companyDomain ?? "Domain unavailable"} ·
+                        email not unlocked by search
+                      </small>
+                      {saved ? (
+                        <small className="growth-pipeline-state">
+                          ✓ Saved in the CRM pipeline
+                        </small>
+                      ) : (
+                        <small className="growth-unsaved-state">
+                          Search result only · not saved to CRM
+                        </small>
+                      )}
+                    </div>
+                    <div className="growth-candidate-actions">
+                      <button
+                        type="button"
+                        className={saved ? "growth-added-button" : undefined}
+                        data-testid={`hunt-apollo-save-${candidate.externalId}`}
+                        disabled={
+                          !canOperateApollo ||
+                          Boolean(saved) ||
+                          (saveCandidate.isPending &&
+                            saveCandidate.variables?.candidate.externalId ===
+                              candidate.externalId)
                         }
-                        approveExact.mutate({
-                          candidate: {
-                            externalId: candidate.externalId,
-                            fullName: candidate.fullName,
-                            title: candidate.title,
-                            companyName: candidate.companyName,
-                            companyDomain: candidate.companyDomain,
-                          },
-                          confirmCreditUse: true,
-                        });
-                      }}
-                    >
-                      {(approveExact.isPending &&
-                        approveExact.variables?.candidate.externalId ===
-                          candidate.externalId) ||
-                      (enrichExact.isPending &&
-                        enrichExact.variables?.candidate.externalId ===
-                          candidate.externalId)
-                        ? "Unlocking…"
-                        : "Unlock work email · up to 1 credit"}
-                    </button>
-                  </div>
-                </li>
-              ))}
+                        onClick={() =>
+                          saveCandidate.mutate({
+                            candidate: {
+                              externalId: candidate.externalId,
+                              fullName: candidate.fullName,
+                              title: candidate.title,
+                              companyName: candidate.companyName,
+                              companyDomain: candidate.companyDomain,
+                            },
+                          })
+                        }
+                      >
+                        {saveCandidate.isPending &&
+                        saveCandidate.variables?.candidate.externalId ===
+                          candidate.externalId
+                          ? "Adding…"
+                          : saved
+                            ? "Added to pipeline ✓"
+                            : "Add to pipeline · free"}
+                      </button>
+                      {saved ? (
+                        <Link href={`/crm/deals/${saved.dealId}`}>
+                          Open this lead in CRM →
+                        </Link>
+                      ) : null}
+                      <span
+                        className="growth-email-state"
+                        data-testid="hunt-apollo-enrichment-locked"
+                      >
+                        {saved?.email
+                          ? `Work email: ${saved.email} · ${saved.emailVerified ? "verified" : "needs verification"}`
+                          : "Work email: not unlocked"}
+                      </span>
+                      {creditReviewId === candidate.externalId ? (
+                        <>
+                          <span className="growth-credit-warning">
+                            Confirm {candidate.fullName ?? "this exact person"}{" "}
+                            at {candidate.companyName ?? "this company"}. Apollo
+                            may use up to 1 credit; phone, personal email, and
+                            waterfall lookups stay off.
+                          </span>
+                          <button
+                            type="button"
+                            className="growth-email-unlock"
+                            data-testid={`hunt-apollo-enrich-confirm-${candidate.externalId}`}
+                            disabled={
+                              approveExact.isPending || enrichExact.isPending
+                            }
+                            onClick={() =>
+                              approveExact.mutate({
+                                candidate: {
+                                  externalId: candidate.externalId,
+                                  fullName: candidate.fullName,
+                                  title: candidate.title,
+                                  companyName: candidate.companyName,
+                                  companyDomain: candidate.companyDomain,
+                                },
+                                confirmCreditUse: true,
+                              })
+                            }
+                          >
+                            {approveExact.isPending || enrichExact.isPending
+                              ? "Unlocking…"
+                              : "Confirm unlock · up to 1 credit"}
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`hunt-apollo-enrich-cancel-${candidate.externalId}`}
+                            disabled={
+                              approveExact.isPending || enrichExact.isPending
+                            }
+                            onClick={() => setCreditReviewId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          className="growth-email-unlock"
+                          data-testid={`hunt-apollo-enrich-${candidate.externalId}`}
+                          title={
+                            !apolloControlsReady
+                              ? "Checking your employee access and Apollo connection"
+                              : !apolloConnected
+                                ? "Connect Apollo before unlocking an email"
+                                : !canOperateApollo
+                                  ? "A Sales operator role is required"
+                                  : !saved
+                                    ? "Add this lead to the pipeline before unlocking an email"
+                                    : "Review an exact-person confirmation before using up to one Apollo credit"
+                          }
+                          disabled={
+                            !canOperateApollo ||
+                            !apolloConnected ||
+                            !saved ||
+                            Boolean(saved?.email) ||
+                            approveExact.isPending ||
+                            enrichExact.isPending
+                          }
+                          onClick={() =>
+                            setCreditReviewId(candidate.externalId)
+                          }
+                        >
+                          {saved?.email
+                            ? "Work email unlocked ✓"
+                            : !apolloControlsReady
+                              ? "Checking email access…"
+                              : !apolloConnected
+                                ? "Connect Apollo to unlock email"
+                                : !canOperateApollo
+                                  ? "Sales operator access required"
+                                  : !saved
+                                    ? "Add to pipeline first"
+                                    : "Review email unlock · up to 1 credit"}
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ol>
           ) : null}
         </div>

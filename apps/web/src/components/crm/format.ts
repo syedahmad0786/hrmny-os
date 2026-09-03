@@ -1,4 +1,4 @@
-import type { DealRow } from "@/server/crm/types";
+import type { ContactRow, DealRow } from "@/server/crm/types";
 
 export const LANE_LABELS: Record<string, string> = {
   industry_scanning: "Industry scanning",
@@ -28,6 +28,24 @@ export function formatLane(lane: string | null | undefined): string {
   return LANE_LABELS[lane] ?? lane.replace(/_/g, " ");
 }
 
+export function formatContactName(
+  contact: Pick<ContactRow, "firstName" | "lastName"> | null | undefined,
+): string | null {
+  if (!contact) return null;
+  return `${contact.firstName} ${contact.lastName ?? ""}`.trim();
+}
+
+export function workEmailState(
+  contact: Pick<ContactRow, "email" | "emailVerified"> | null | undefined,
+  dealVerified = false,
+): { label: string; kind: "success" | "warn" | "info" } {
+  if (!contact?.email) return { label: "Not unlocked", kind: "info" };
+  if (contact.emailVerified || dealVerified) {
+    return { label: "Verified", kind: "success" };
+  }
+  return { label: "Needs verification", kind: "warn" };
+}
+
 export function formatRelative(iso: string | null | undefined): string {
   if (!iso) return "—";
   const t = new Date(iso).getTime();
@@ -47,10 +65,9 @@ export function formatRelative(iso: string | null | undefined): string {
   });
 }
 
-export function buafScore(deal: Pick<
-  DealRow,
-  "buafBudget" | "buafUrgency" | "buafAccess" | "buafFit"
->): { done: number; total: number; label: string } {
+export function buafScore(
+  deal: Pick<DealRow, "buafBudget" | "buafUrgency" | "buafAccess" | "buafFit">,
+): { done: number; total: number; label: string } {
   const flags = [
     deal.buafBudget,
     deal.buafUrgency,
@@ -61,10 +78,10 @@ export function buafScore(deal: Pick<
   return { done, total: 4, label: `${done} / 4` };
 }
 
-export function companyStatus(args: {
-  openDeals: number;
-  wonDeals: number;
-}): { label: string; kind: "success" | "info" | "ochre" | "warn" } {
+export function companyStatus(args: { openDeals: number; wonDeals: number }): {
+  label: string;
+  kind: "success" | "info" | "ochre" | "warn";
+} {
   if (args.wonDeals > 0) return { label: "Active client", kind: "success" };
   if (args.openDeals > 0) return { label: "In pipeline", kind: "ochre" };
   return { label: "Prospect", kind: "info" };

@@ -693,6 +693,20 @@ describe("Sales research authorization", () => {
       dealId: first.dealId,
       duplicate: true,
     });
+    expect(
+      await partner.salesOs.apollo.savedCandidates({
+        externalIds: [candidate.externalId, "not-saved"],
+      }),
+    ).toEqual([
+      {
+        externalId: candidate.externalId,
+        dealId: first.dealId,
+        companyName: candidate.companyName,
+        fullName: candidate.fullName,
+        email: null,
+        emailVerified: false,
+      },
+    ]);
     const savedDeal = await getDeal(first.dealId);
     expect(savedDeal?.primaryContactId).toBe(first.contactId);
     expect(await listContacts({ companyId: first.companyId })).toEqual([

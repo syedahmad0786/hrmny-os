@@ -3,6 +3,8 @@ import {
   createContact,
   createDeal,
   createNote,
+  getContact,
+  getDeal,
   listCompanies,
   listContacts,
   listDeals,
@@ -97,6 +99,8 @@ export async function importApolloPersonToCrm(input: {
   person: LeadCandidate;
   receiptId: string;
   ownerEmployeeId?: string | null;
+  existingContactId?: string | null;
+  existingDealId?: string | null;
 }): Promise<ApolloPersonImportResult> {
   const person = input.person;
   const companyName = person.companyName?.trim() || "Unknown company";
@@ -123,17 +127,23 @@ export async function importApolloPersonToCrm(input: {
   const email = person.email?.trim().toLowerCase() || null;
   const linkedin = person.linkedinUrl?.trim() || null;
   const contacts = await listContacts({ companyId: company.companyId });
-  let contact = contacts.find((row) => {
-    const sameEmail = email && row.email?.trim().toLowerCase() === email;
-    const sameLinkedIn =
-      linkedin &&
-      row.linkedinUrl?.trim().toLowerCase().replace(/\/$/, "") ===
-        linkedin.toLowerCase().replace(/\/$/, "");
-    const sameName =
-      `${row.firstName} ${row.lastName ?? ""}`.trim().toLowerCase() ===
-      `${name.firstName} ${name.lastName ?? ""}`.trim().toLowerCase();
-    return Boolean(sameEmail || sameLinkedIn || sameName);
-  });
+  const receiptContact = input.existingContactId
+    ? await getContact(input.existingContactId)
+    : null;
+  let contact =
+    receiptContact?.companyId === company.companyId
+      ? receiptContact
+      : contacts.find((row) => {
+          const sameEmail = email && row.email?.trim().toLowerCase() === email;
+          const sameLinkedIn =
+            linkedin &&
+            row.linkedinUrl?.trim().toLowerCase().replace(/\/$/, "") ===
+              linkedin.toLowerCase().replace(/\/$/, "");
+          const sameName =
+            `${row.firstName} ${row.lastName ?? ""}`.trim().toLowerCase() ===
+            `${name.firstName} ${name.lastName ?? ""}`.trim().toLowerCase();
+          return Boolean(sameEmail || sameLinkedIn || sameName);
+        });
   const reusedContact = Boolean(contact);
   const verified = apolloEmailVerified(person.emailStatus);
   if (!contact) {
@@ -149,6 +159,9 @@ export async function importApolloPersonToCrm(input: {
   }
   const updatedContact = await updateContact(contact.contactId, {
     companyId: company.companyId,
+    ...(person.fullName?.trim()
+      ? { firstName: name.firstName, lastName: name.lastName }
+      : {}),
     email: email ?? contact.email,
     title: person.title ?? contact.title,
     linkedinUrl: linkedin ?? contact.linkedinUrl,
@@ -158,7 +171,13 @@ export async function importApolloPersonToCrm(input: {
   contact = updatedContact ?? contact;
 
   const deals = await listDeals({ companyId: company.companyId });
-  let deal = deals.find((row) => row.closeOutcome === null);
+  const receiptDeal = input.existingDealId
+    ? await getDeal(input.existingDealId)
+    : null;
+  let deal =
+    receiptDeal?.companyId === company.companyId
+      ? receiptDeal
+      : deals.find((row) => row.closeOutcome === null);
   const reusedDeal = Boolean(deal);
   if (!deal) {
     deal = await createDeal({
@@ -169,7 +188,11 @@ export async function importApolloPersonToCrm(input: {
       leadSourceLane: "apollo_intent",
       ownerEmployeeId: input.ownerEmployeeId ?? null,
     });
-  } else if (!deal.primaryContactId) {
+  } else if (
+    !deal.primaryContactId ||
+    (deal.dealId === input.existingDealId &&
+      deal.primaryContactId !== contact.contactId)
+  ) {
     deal =
       (await updateDeal(deal.dealId, {
         primaryContactId: contact.contactId,

@@ -3,8 +3,17 @@ process.env.DATABASE_URL = "";
 import type { LeadSourceAdapter } from "@hrmny/integrations";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetCrmMemory } from "../crm/memory";
-import { listCompanies, listContacts, listDeals } from "../crm/repository";
-import { resetIntegrationReceiptMemory } from "../integrations/inbox";
+import {
+  getDeal,
+  listCompanies,
+  listContacts,
+  listDeals,
+} from "../crm/repository";
+import { importApolloPersonToCrm } from "../crm/apollo-import";
+import {
+  recordIntegrationReceipt,
+  resetIntegrationReceiptMemory,
+} from "../integrations/inbox";
 import {
   APOLLO_PAID_APPROVAL_ACTION,
   apolloExactCandidateHash,
@@ -340,6 +349,80 @@ describe("Apollo exact-person enrichment", () => {
       available: false,
       status: "locked_exact_approval_required",
     });
+  });
+
+  it("upgrades the free-search contact instead of creating a duplicate", async () => {
+    const externalId = "apollo-free-to-paid-1";
+    const free = await importApolloPersonToCrm({
+      person: {
+        externalId,
+        fullName: "Mina L.",
+        title: "Marketing Director",
+        companyName: "Upgrade Hospitality",
+        companyDomain: "upgrade.example",
+        source: "apollo",
+        raw: { freeSearch: true },
+      },
+      receiptId: crypto.randomUUID(),
+      ownerEmployeeId: PAID_ACTOR,
+    });
+    await recordIntegrationReceipt({
+      provider: "apollo",
+      externalEventId: `free-save:${PAID_ACTOR}:${externalId}`,
+      operation: "people.search.save_candidate",
+      rawBody: JSON.stringify({ employeeId: PAID_ACTOR, externalId }),
+      completed: true,
+      ownerEmployeeId: PAID_ACTOR,
+      result: {
+        dealId: free.dealId,
+        companyId: free.companyId,
+        contactId: free.contactId,
+        companyName: free.companyName,
+      },
+    });
+    const source = liveStub();
+    source.enrichLead = vi.fn(async () => ({
+      externalId,
+      fullName: "Mina Lead",
+      title: "Marketing Director",
+      email: "mina@upgrade.example",
+      emailStatus: "verified",
+      companyName: "Upgrade Hospitality",
+      companyDomain: "upgrade.example",
+      source: "apollo",
+      raw: {},
+    }));
+
+    const paid = await enrichOneApolloPerson(
+      {
+        candidate: {
+          externalId,
+          fullName: "Mina L.",
+          companyName: "Upgrade Hospitality",
+          companyDomain: "upgrade.example",
+        },
+        confirmCreditUse: true,
+        actorEmployeeId: PAID_ACTOR,
+        approvalReceiptId: PAID_APPROVAL,
+      },
+      {
+        leadSource: source,
+        now: () => PAID_NOW,
+        consumeExactApproval: exactApproval(),
+      },
+    );
+
+    expect(paid.crm?.contactId).toBe(free.contactId);
+    expect(await listContacts({ companyId: free.companyId })).toEqual([
+      expect.objectContaining({
+        contactId: free.contactId,
+        firstName: "Mina",
+        lastName: "Lead",
+        email: "mina@upgrade.example",
+        emailVerified: true,
+      }),
+    ]);
+    expect((await getDeal(free.dealId))?.primaryContactId).toBe(free.contactId);
   });
 
   it("atomically enforces the monthly cap across different candidates", async () => {

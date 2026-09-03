@@ -27,14 +27,28 @@ export default function CrmQuotePage() {
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
-  const [dealId, setDealId] = useState<string>("");
+  const stages = trpc.crm.stages.useQuery();
+  const [dealId, setDealId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const requestedDealId = new URLSearchParams(window.location.search).get(
+      "dealId",
+    );
+    setDealId(requestedDealId ?? "");
+  }, []);
 
   const dealList = deals.data ?? [];
-  const selected = dealId
-    ? (dealList.find((d) => d.dealId === dealId) ?? dealList[0])
-    : (dealList.find(
-        (d) => d.stage === "propose" || d.stage === "price_cost",
-      ) ?? dealList[0]);
+  const selected =
+    dealId === null
+      ? undefined
+      : dealId
+        ? dealList.find((d) => d.dealId === dealId)
+        : (dealList.find(
+            (d) => d.stage === "propose" || d.stage === "price_cost",
+          ) ?? dealList[0]);
+  const stageLabel = (key: string) =>
+    stages.data?.find((stage) => stage.key === key)?.label ??
+    key.replace(/_/g, " ");
 
   const versions = trpc.crm.quotes.listByDeal.useQuery(
     { dealId: selected?.dealId ?? "" },
@@ -146,8 +160,8 @@ export default function CrmQuotePage() {
   return (
     <main>
       <CrmPageHeader
-        title="Commercial panel"
-        description="Scope, line items and guarded commercial logic for the current deal."
+        title="Scope & pricing"
+        description="Build the client-facing scope and price. Internal cost and margin stay restricted to Partner and Finance roles."
         actions={
           selected ? (
             <Link href={`/crm/deals/${selected.dealId}`}>
@@ -157,23 +171,27 @@ export default function CrmQuotePage() {
         }
       />
 
-      {deals.isLoading ? (
+      {deals.isLoading || dealId === null ? (
         <CrmEmpty title="Loading commercial data…" />
       ) : deals.isError ? (
         <CrmEmpty title="Could not load deals" hint={deals.error.message} />
       ) : !selected ? (
         <CrmEmpty
-          title="No deals"
-          hint="Create a deal before opening commercial."
+          title={dealId ? "Deal not found" : "No deals"}
+          hint={
+            dealId
+              ? "This pricing link is stale or unavailable. Return to the pipeline and open the correct lead."
+              : "Create a deal before building scope and pricing."
+          }
         />
       ) : (
         <section className="crm-split">
           <div className="crm-panel">
             <div className="crm-panel-head">
               <div>
-                <h3>Quote · {selected.companyName}</h3>
+                <h3>Client quote · {selected.companyName}</h3>
                 <p>
-                  {selected.dealId.slice(0, 8)} · {String(selected.stage)}
+                  {stageLabel(String(selected.stage))}
                   {latest
                     ? ` · v${latest.version} saved`
                     : " · no versions yet"}
@@ -194,7 +212,7 @@ export default function CrmQuotePage() {
                 >
                   {dealList.map((d) => (
                     <option key={d.dealId} value={d.dealId}>
-                      {d.companyName} · {d.stage}
+                      {d.companyName} · {stageLabel(String(d.stage))}
                     </option>
                   ))}
                 </select>
@@ -207,8 +225,8 @@ export default function CrmQuotePage() {
                       <tr>
                         <th>Line item</th>
                         <th>Qty</th>
-                        <th>Sell (AED)</th>
-                        {marginAllowed ? <th>Cost (AED)</th> : null}
+                        <th>Client price (AED)</th>
+                        {marginAllowed ? <th>Internal cost (AED)</th> : null}
                         <th>Total</th>
                         <th />
                       </tr>
@@ -387,9 +405,8 @@ export default function CrmQuotePage() {
 
               {activeQuote?.status === "accepted" ? (
                 <div className="crm-note" style={{ marginTop: 10 }}>
-                  Signed agreement recorded for v{activeQuote.version}. The
-                  deal can be marked won after it passes the commercial stage
-                  gates.
+                  Signed agreement recorded for v{activeQuote.version}. The deal
+                  can be marked won after it passes the commercial stage gates.
                 </div>
               ) : canAcceptSigned && activeQuote ? (
                 <div className="crm-form-grid" style={{ marginTop: 14 }}>
@@ -435,7 +452,10 @@ export default function CrmQuotePage() {
 
           <aside className="crm-panel">
             <div className="crm-panel-head">
-              <h3>Commercial controls</h3>
+              <div>
+                <h3>Pricing checks</h3>
+                <p>Review approval level, internal cost, and margin.</p>
+              </div>
             </div>
             <div className="crm-panel-body">
               {latestMargin ? (
