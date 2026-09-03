@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { advanceDealToClose } from "./sales-flow";
 
 /** Seed JW Marriott deal already at propose (memory + SQL). */
 const PROPOSE_DEAL_ID = "e0000000-0000-4000-8000-000000000005";
@@ -23,16 +24,7 @@ test.describe("Clients Continue OS after handover", () => {
       timeout: 60_000,
     });
 
-    const advance = page.getByTestId("deal-advance");
-    if (await advance.isVisible()) {
-      await advance.click();
-      await expect(
-        page
-          .getByTestId("deal-mark-won")
-          .or(page.getByTestId("deal-handover"))
-          .or(page.getByTestId("deal-handover-next")),
-      ).toBeVisible({ timeout: 30_000 });
-    }
+    await advanceDealToClose(page);
 
     const markWon = page.getByTestId("deal-mark-won");
     if (await markWon.isVisible()) {
@@ -156,7 +148,9 @@ test.describe("Clients Continue OS after handover", () => {
     await page.goto(financeHref, { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(new RegExp(`invoiceId=${continueInvoiceId}`));
     await expect(
-      page.locator(`[data-testid="finance-invoice"]#os-invoice-${continueInvoiceId}`),
+      page.locator(
+        `[data-testid="finance-invoice"]#os-invoice-${continueInvoiceId}`,
+      ),
     ).toBeVisible({ timeout: 60_000 });
 
     // clientId-only finance URL must resolve the same won-client first invoice.

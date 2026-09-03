@@ -1,7 +1,26 @@
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetIntegrationReceiptMemory } from "@/server/integrations/inbox";
+import { handleComposioPost } from "./handler";
 import { POST } from "./route";
+import { resetCrmMemory } from "@/server/crm/memory";
+import {
+  createCompany,
+  createContact,
+  createDeal,
+  updateContact,
+} from "@/server/crm/repository";
+import {
+  insertOutreach,
+  patchOutreach,
+  resetLeadgenStore,
+} from "@/server/leadgen/store";
+import {
+  listEmailEvents,
+  recordEmailEvent,
+  resetSalesOsStore,
+} from "@/server/sales-os/store";
+import { ingestGmailReply } from "@/server/sales-os/replies";
 
 const SECRET = "composio-webhook-secret";
 
@@ -26,6 +45,9 @@ describe("Composio webhook route", () => {
     vi.stubEnv("COMPOSIO_WEBHOOK_SECRET", SECRET);
     vi.stubEnv("DATABASE_URL", "");
     resetIntegrationReceiptMemory();
+    resetCrmMemory();
+    resetLeadgenStore();
+    resetSalesOsStore();
   });
 
   afterEach(() => vi.unstubAllEnvs());
@@ -72,5 +94,101 @@ describe("Composio webhook route", () => {
     await expect(conflict.json()).resolves.toMatchObject({
       code: "EVENT_ID_CONFLICT",
     });
+  });
+
+  it("ingests a signed Gmail reply once for its connected owner and thread", async () => {
+    const ownerEmployeeId = "11111111-1111-1111-1111-111111111111";
+    const company = await createCompany({ name: "Acme LLC" });
+    const contact = await createContact({
+      companyId: company.companyId,
+      firstName: "Sara",
+      email: "sara@acme.example",
+    });
+    await updateContact(contact.contactId, { emailVerified: true });
+    const deal = await createDeal({
+      companyName: company.name,
+      companyId: company.companyId,
+      primaryContactId: contact.contactId,
+    });
+    const outreach = await insertOutreach({
+      dealId: deal.dealId,
+      channel: "gmail",
+      recipient: "sara@acme.example",
+      body: "Hi Sara — I noticed Acme LLC is growing in the UAE.",
+      contactId: contact.contactId,
+    });
+    await patchOutreach(outreach.id, {
+      state: "sent",
+      externalId: "sent-1",
+      sentAt: new Date().toISOString(),
+    });
+    await recordEmailEvent({
+      outreachItemId: outreach.id,
+      contactId: contact.contactId,
+      kind: "sent",
+      externalId: "sent-1",
+      payload: { ownerEmployeeId, threadId: "thread-1" },
+    });
+
+    const body = JSON.stringify({
+      type: "composio.trigger.message",
+      metadata: {
+        trigger_slug: "GMAIL_NEW_GMAIL_MESSAGE",
+        user_id: ownerEmployeeId,
+        connected_account_id: "conn-1",
+      },
+      data: {
+        id: "reply-1",
+        thread_id: "thread-1",
+        sender: "Sara <sara@acme.example>",
+        message_text: "Interested — let's schedule a call.",
+        label_ids: ["INBOX"],
+      },
+    });
+    const verifyAccountOwner = vi.fn(async () => true);
+    const deps = { verifyAccountOwner, ingestReply: ingestGmailReply };
+    const first = await handleComposioPost(request("reply-hook-1", body), deps);
+    const replay = await handleComposioPost(
+      request("reply-hook-1", body),
+      deps,
+    );
+
+    await expect(first.json()).resolves.toMatchObject({
+      ok: true,
+      handled: "gmail_reply",
+      result: { intent: "interested", applied: true },
+    });
+    await expect(replay.json()).resolves.toMatchObject({
+      ok: true,
+      duplicate: true,
+    });
+    expect(verifyAccountOwner).toHaveBeenCalledTimes(1);
+    expect(await listEmailEvents({ kind: "replied" })).toHaveLength(1);
+  });
+
+  it("fails closed when the signed event names another Gmail owner", async () => {
+    const body = JSON.stringify({
+      type: "composio.trigger.message",
+      metadata: {
+        trigger_slug: "GMAIL_NEW_GMAIL_MESSAGE",
+        user_id: "11111111-1111-1111-1111-111111111111",
+        connected_account_id: "conn-wrong",
+      },
+      data: {
+        id: "reply-wrong",
+        sender: "person@example.com",
+        message_text: "Interested",
+      },
+    });
+    const response = await handleComposioPost(request("wrong-owner", body), {
+      verifyAccountOwner: async () => false,
+      ingestReply: ingestGmailReply,
+    });
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "PROCESSING_FAILED",
+      reason: expect.stringMatching(/owner mismatch/i),
+    });
+    expect(await listEmailEvents({ kind: "replied" })).toHaveLength(0);
   });
 });

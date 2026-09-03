@@ -341,6 +341,47 @@ export default function HuntClientsPage() {
     },
     onError: (error) => setSearchNote(error.message),
   });
+  const enrichExact = trpc.salesOs.apollo.enrichOne.useMutation({
+    onMutate: () => ({ principalId: activePrincipalIdRef.current }),
+    onSuccess: (payload, _variables, operation) => {
+      if (operation?.principalId !== activePrincipalIdRef.current) return;
+      setLastApolloDealId(payload.crm?.dealId ?? null);
+      setSearchNote(
+        payload.duplicate
+          ? "The existing exact-person result was restored. No new Apollo request was made."
+          : payload.imported
+            ? `${payload.crm?.fullName ?? "The person"} is in the pipeline with ${
+                payload.crm?.emailVerified
+                  ? "a verified work email"
+                  : "the available work contact details"
+              }. Apollo recorded ${payload.creditsRecorded} credit.`
+            : `${payload.reason ?? "Apollo returned no usable match."} Up to one Apollo credit was recorded.`,
+      );
+      void utils.crm.deals.list.invalidate();
+      void apolloStatus.refetch();
+    },
+    onError: (error, _variables, operation) => {
+      if (operation?.principalId === activePrincipalIdRef.current) {
+        setSearchNote(error.message);
+      }
+    },
+  });
+  const approveExact = trpc.salesOs.apollo.approveExact.useMutation({
+    onMutate: () => ({ principalId: activePrincipalIdRef.current }),
+    onSuccess: (approval, variables, operation) => {
+      if (operation?.principalId !== activePrincipalIdRef.current) return;
+      enrichExact.mutate({
+        candidate: variables.candidate,
+        confirmCreditUse: true,
+        approvalReceiptId: approval.approvalReceiptId,
+      });
+    },
+    onError: (error, _variables, operation) => {
+      if (operation?.principalId === activePrincipalIdRef.current) {
+        setSearchNote(error.message);
+      }
+    },
+  });
 
   useEffect(() => {
     if (!hasCurrentApolloSearch) return;
@@ -398,10 +439,13 @@ export default function HuntClientsPage() {
   const apolloProviderVerified =
     apolloSearchResult?.mode === "live" &&
     apolloSearchResult.status === "completed";
-  const canaryLabel =
-    apolloStatus.data?.status === "completed" && canaryResult?.mode === "live"
-      ? "Locked · historical receipt retained"
-      : "Locked · exact approval receipt required";
+  const paidDetailsLabel = !apolloControlsReady
+    ? "Checking access"
+    : !apolloConnected
+      ? "Unavailable · connect Apollo"
+      : !canOperateApollo
+        ? "View only · Sales operator required"
+        : "Ready · exact confirmation · up to 1 credit";
 
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
     onMutate: () => {
@@ -731,8 +775,52 @@ export default function HuntClientsPage() {
                         : "Add to pipeline · free"}
                     </button>
                     <span data-testid="hunt-apollo-enrichment-locked">
-                      Paid details locked
+                      Verified work email remains locked
                     </span>
+                    <button
+                      type="button"
+                      data-testid={`hunt-apollo-enrich-${candidate.externalId}`}
+                      disabled={
+                        !canOperateApollo ||
+                        !apolloConnected ||
+                        (approveExact.isPending &&
+                          approveExact.variables?.candidate.externalId ===
+                            candidate.externalId) ||
+                        (enrichExact.isPending &&
+                          enrichExact.variables?.candidate.externalId ===
+                            candidate.externalId)
+                      }
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            `Use up to 1 Apollo credit to unlock the verified work email for ${
+                              candidate.fullName ?? "this person"
+                            } at ${candidate.companyName ?? "this company"}? Phone numbers, personal emails, and waterfall lookups will stay off.`,
+                          )
+                        ) {
+                          return;
+                        }
+                        approveExact.mutate({
+                          candidate: {
+                            externalId: candidate.externalId,
+                            fullName: candidate.fullName,
+                            title: candidate.title,
+                            companyName: candidate.companyName,
+                            companyDomain: candidate.companyDomain,
+                          },
+                          confirmCreditUse: true,
+                        });
+                      }}
+                    >
+                      {(approveExact.isPending &&
+                        approveExact.variables?.candidate.externalId ===
+                          candidate.externalId) ||
+                      (enrichExact.isPending &&
+                        enrichExact.variables?.candidate.externalId ===
+                          candidate.externalId)
+                        ? "Unlocking…"
+                        : "Unlock work email · up to 1 credit"}
+                    </button>
                   </div>
                 </li>
               ))}
@@ -778,11 +866,11 @@ export default function HuntClientsPage() {
             </div>
             <div>
               <dt>Paid details</dt>
-              <dd>{canaryLabel}</dd>
+              <dd>{paidDetailsLabel}</dd>
             </div>
             <div>
               <dt>Private details</dt>
-              <dd>Locked until you approve one exact person</dd>
+              <dd>Phone + personal email never requested</dd>
             </div>
             <div>
               <dt>Outbound</dt>

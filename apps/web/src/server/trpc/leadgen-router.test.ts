@@ -7,7 +7,12 @@ import type { ComposioSendAdapter } from "@hrmny/integrations";
 import { createComposioStub } from "@hrmny/integrations";
 import type { RunAgent } from "../leadgen/agent-run";
 import { resetCrmMemory } from "../crm/memory";
-import { createCompany, createContact, createDeal } from "../crm/repository";
+import {
+  createCompany,
+  createContact,
+  createDeal,
+  updateContact,
+} from "../crm/repository";
 import { getOutreach, listOutreach, resetLeadgenStore } from "../leadgen/store";
 import { resolveDevUser, sessionCanViewMargin } from "../auth/session";
 import {
@@ -17,6 +22,10 @@ import {
   sendOutreach,
 } from "./leadgen-router";
 import { createCaller } from "./root";
+import {
+  getIntegrationReceipt,
+  resetIntegrationReceiptMemory,
+} from "../integrations/inbox";
 
 const staff: ActorContext = {
   employeeId: "emp-1",
@@ -31,6 +40,12 @@ const portal: ActorContext = {
 
 const audit: AuditWriter = async () => ({ auditId: "audit-test" });
 const emit: EmitHook = async () => {};
+const COMPLIANT_BODY =
+  "Hi Sara — I noticed Acme LLC is growing in the UAE and have one relevant idea to share.";
+
+function sendReceiptId(item: Awaited<ReturnType<typeof draftOutreach>>) {
+  return `outreach-send:${item.id}`;
+}
 
 /** Live-mode adapter that counts sends (unit tests must not durable-send on stub). */
 function countingLiveComposio(): ComposioSendAdapter & { sends: number } {
@@ -62,7 +77,7 @@ function countingLiveComposio(): ComposioSendAdapter & { sends: number } {
   return wrapper;
 }
 
-async function seedDeal() {
+async function seedDeal(verified = true) {
   const company = await createCompany({ name: "Acme LLC" });
   const contact = await createContact({
     companyId: company.companyId,
@@ -74,6 +89,7 @@ async function seedDeal() {
     companyId: company.companyId,
     primaryContactId: contact.contactId,
   });
+  if (verified) await updateContact(contact.contactId, { emailVerified: true });
   return deal;
 }
 
@@ -81,6 +97,7 @@ describe("outreach HITL gate flow", () => {
   beforeEach(() => {
     resetCrmMemory();
     resetLeadgenStore();
+    resetIntegrationReceiptMemory();
   });
 
   it("drafts from a deal, resolving the recipient email", async () => {
@@ -93,6 +110,25 @@ describe("outreach HITL gate flow", () => {
     expect(item.recipient).toBe("sara@acme.example");
     expect(item.body).toContain("Hello there");
     expect(item.body).toContain("— hrmny outreach —");
+    expect(item.body).toContain("?token=");
+  });
+
+  it("replaces a legacy email unsubscribe query before approval", async () => {
+    const deal = await seedDeal();
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      body: COMPLIANT_BODY,
+    });
+    const { patchOutreach } = await import("../leadgen/store");
+    await patchOutreach(item.id, {
+      body: `${COMPLIANT_BODY}\n— hrmny outreach —\nUnsubscribe: /api/sales-os/unsubscribe?email=sara%40acme.example`,
+    });
+
+    await approveOutreach({ id: item.id, actor: staff, audit, emit });
+
+    const approved = (await getOutreach(item.id))!;
+    expect(approved.body).toContain("?token=");
+    expect(approved.body).not.toContain("?email=");
   });
 
   it("REFUSES an empty-body draft when the agent is disabled — nothing inserted", async () => {
@@ -118,7 +154,10 @@ describe("outreach HITL gate flow", () => {
 
   it("BLOCKS send before human approve — no external send fires", async () => {
     const deal = await seedDeal();
-    const item = await draftOutreach({ dealId: deal.dealId, body: "Hello" });
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      body: COMPLIANT_BODY,
+    });
     const composio = countingLiveComposio();
 
     const res = await sendOutreach({
@@ -137,7 +176,10 @@ describe("outreach HITL gate flow", () => {
 
   it("ALLOWS send after approve — live composio fires once and state becomes sent", async () => {
     const deal = await seedDeal();
-    const item = await draftOutreach({ dealId: deal.dealId, body: "Hello" });
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      body: COMPLIANT_BODY,
+    });
     const composio = countingLiveComposio();
 
     const approved = await approveOutreach({
@@ -168,9 +210,95 @@ describe("outreach HITL gate flow", () => {
     expect(final.externalId).toBeTruthy();
   });
 
+  it("reconciles a completed send receipt without sending Gmail twice", async () => {
+    const deal = await seedDeal();
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      body: COMPLIANT_BODY,
+    });
+    const composio = countingLiveComposio();
+    await approveOutreach({ id: item.id, actor: staff, audit, emit });
+    await sendOutreach({ id: item.id, actor: staff, composio, audit, emit });
+    expect(composio.sends).toBe(1);
+
+    const { patchOutreach } = await import("../leadgen/store");
+    await patchOutreach(item.id, { state: "approved", sentAt: null });
+    const replay = await sendOutreach({
+      id: item.id,
+      actor: staff,
+      composio,
+      audit,
+      emit,
+    });
+    expect(replay.ok).toBe(true);
+    expect(composio.sends).toBe(1);
+    expect((await getOutreach(item.id))?.state).toBe("sent");
+  });
+
+  it("blocks replay when a Gmail provider outcome is uncertain", async () => {
+    const deal = await seedDeal();
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      body: COMPLIANT_BODY,
+    });
+    await approveOutreach({ id: item.id, actor: staff, audit, emit });
+    let sends = 0;
+    const uncertain = {
+      ...createComposioStub(),
+      async sendAfterApproval() {
+        sends += 1;
+        throw new Error("connection closed after submit");
+      },
+    } satisfies ComposioSendAdapter;
+
+    await expect(
+      sendOutreach({
+        id: item.id,
+        actor: staff,
+        composio: uncertain,
+        audit,
+        emit,
+      }),
+    ).rejects.toThrow(/connection closed/);
+    await expect(
+      sendOutreach({
+        id: item.id,
+        actor: staff,
+        composio: uncertain,
+        audit,
+        emit,
+      }),
+    ).rejects.toThrow(/will not send it twice/i);
+    expect(sends).toBe(1);
+    expect((await getOutreach(item.id))?.state).toBe("approved");
+    await expect(
+      getIntegrationReceipt("gmail", sendReceiptId(item)),
+    ).resolves.toMatchObject({
+      status: "processing",
+      result: { bridgeStatus: "reconcile_required" },
+    });
+    const { patchOutreach } = await import("../leadgen/store");
+    await patchOutreach(item.id, {
+      body: `${COMPLIANT_BODY} Updated after the uncertain attempt.`,
+    });
+    await expect(
+      sendOutreach({
+        id: item.id,
+        actor: staff,
+        composio: uncertain,
+        audit,
+        emit,
+      }),
+    ).rejects.toThrow(/PAYLOAD_MISMATCH/);
+    expect(sends).toBe(1);
+  });
+
   it("REFUSES stub send — outreach stays approved", async () => {
     const deal = await seedDeal();
-    const item = await draftOutreach({ dealId: deal.dealId, body: "Hello" });
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      body: COMPLIANT_BODY,
+    });
     await approveOutreach({ id: item.id, actor: staff, audit, emit });
     const stub = createComposioStub();
 
@@ -178,6 +306,28 @@ describe("outreach HITL gate flow", () => {
       sendOutreach({ id: item.id, actor: staff, composio: stub, audit, emit }),
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     expect((await getOutreach(item.id))!.state).toBe("approved");
+
+    const live = countingLiveComposio();
+    await expect(
+      sendOutreach({ id: item.id, actor: staff, composio: live, audit, emit }),
+    ).resolves.toMatchObject({ ok: true, sendMode: "live" });
+    expect(live.sends).toBe(1);
+  });
+
+  it("blocks Gmail before the provider when the recipient is unverified", async () => {
+    const deal = await seedDeal(false);
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      body: COMPLIANT_BODY,
+    });
+    await approveOutreach({ id: item.id, actor: staff, audit, emit });
+    const composio = countingLiveComposio();
+
+    await expect(
+      sendOutreach({ id: item.id, actor: staff, composio, audit, emit }),
+    ).rejects.toThrow(/verified by the connected provider/i);
+    expect(composio.sends).toBe(0);
+    expect((await getOutreach(item.id))?.state).toBe("approved");
   });
 
   it("LinkedIn copy-draft stays approved (not sent)", async () => {
@@ -205,7 +355,10 @@ describe("outreach HITL gate flow", () => {
 
   it("BLOCKS a non-staff actor from sending even after approve", async () => {
     const deal = await seedDeal();
-    const item = await draftOutreach({ dealId: deal.dealId, body: "Hello" });
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      body: COMPLIANT_BODY,
+    });
     const composio = countingLiveComposio();
     await approveOutreach({ id: item.id, actor: staff, audit, emit });
 
@@ -233,7 +386,10 @@ describe("outreach HITL gate flow", () => {
     expect(res.ok).toBe(true);
     expect((await getOutreach(item.id))?.state).toBe("discarded");
 
-    const item2 = await draftOutreach({ dealId: deal.dealId, body: "Go" });
+    const item2 = await draftOutreach({
+      dealId: deal.dealId,
+      body: COMPLIANT_BODY,
+    });
     await approveOutreach({ id: item2.id, actor: staff, audit, emit });
     await sendOutreach({
       id: item2.id,

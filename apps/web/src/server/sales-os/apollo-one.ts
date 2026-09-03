@@ -3,6 +3,7 @@ import type {
   LeadSourceAdapter,
 } from "@hrmny/integrations";
 import { createLeadSourceLive } from "@hrmny/integrations";
+import { randomUUID } from "node:crypto";
 import { importApolloPersonToCrm } from "../crm/apollo-import";
 import {
   completeIntegrationReceipt,
@@ -10,13 +11,14 @@ import {
   getIntegrationReceipt,
   hashIntegrationPayload,
   recordIntegrationReceipt,
+  transitionIntegrationReceiptProgress,
+  updateIntegrationReceiptProgress,
 } from "../integrations/inbox";
 import { resolveOwnedIntegrationApiKey } from "../integrations/resolve-keys";
 import {
-  addCredit,
-  creditUsed,
   getSalesOsSettings,
   isSuppressed,
+  reserveCreditWithinCap,
 } from "./store";
 
 /** One durable allowance for the explicitly approved production connection test. */
@@ -24,6 +26,104 @@ export const APOLLO_ONE_PERSON_CANARY_ID =
   "sales-growth-one-person-enrichment-v1";
 export const APOLLO_PAID_APPROVAL_ACTION = "apollo.people.match" as const;
 const APOLLO_PAID_APPROVAL_MAX_AGE_MS = 5 * 60_000;
+
+function normalizedCandidate(input: LeadEnrichmentIdentity) {
+  return {
+    externalId: input.externalId?.trim() || undefined,
+    email: input.email?.trim().toLowerCase() || undefined,
+    fullName: input.fullName?.trim() || undefined,
+    companyName: input.companyName?.trim() || undefined,
+    companyDomain: input.companyDomain?.trim().toLowerCase() || undefined,
+    linkedinUrl: input.linkedinUrl?.trim() || undefined,
+  } satisfies LeadEnrichmentIdentity;
+}
+
+export function apolloExactCandidateHash(input: LeadEnrichmentIdentity) {
+  return hashIntegrationPayload(JSON.stringify(normalizedCandidate(input)));
+}
+
+export async function approveApolloExactPerson(input: {
+  candidate: LeadEnrichmentIdentity;
+  actorEmployeeId: string;
+  now?: Date;
+}) {
+  const candidate = normalizedCandidate(input.candidate);
+  const candidateHash = apolloExactCandidateHash(candidate);
+  const approvalReceiptId = randomUUID();
+  const approvedAt = input.now ?? new Date();
+  const expiresAt = new Date(
+    approvedAt.getTime() + APOLLO_PAID_APPROVAL_MAX_AGE_MS,
+  );
+  await recordIntegrationReceipt({
+    provider: "apollo",
+    externalEventId: `paid-approval:${approvalReceiptId}`,
+    operation: APOLLO_PAID_APPROVAL_ACTION,
+    rawBody: JSON.stringify({
+      approvalReceiptId,
+      actorEmployeeId: input.actorEmployeeId,
+      candidateHash,
+    }),
+    ownerEmployeeId: input.actorEmployeeId,
+    completed: true,
+    result: {
+      status: "approved",
+      action: APOLLO_PAID_APPROVAL_ACTION,
+      approvalReceiptId,
+      actorEmployeeId: input.actorEmployeeId,
+      candidateHash,
+      approvedAt: approvedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    },
+  });
+  return {
+    approvalReceiptId,
+    candidateHash,
+    approvedAt: approvedAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    creditsMaximum: 1 as const,
+  };
+}
+
+export async function consumeApolloExactApproval(
+  claim: ApolloExactApprovalClaim,
+): Promise<ApolloConsumedApprovalReceipt> {
+  const receipt = await getIntegrationReceipt(
+    "apollo",
+    `paid-approval:${claim.approvalReceiptId}`,
+  );
+  const result = receipt?.result;
+  if (
+    !receipt ||
+    receipt.status !== "completed" ||
+    result?.status !== "approved" ||
+    result.action !== claim.action ||
+    result.actorEmployeeId !== claim.actorEmployeeId ||
+    result.candidateHash !== claim.candidateHash
+  ) {
+    throw new Error("APOLLO_EXACT_APPROVAL_RECEIPT_INVALID_OR_USED");
+  }
+  const consumed = await transitionIntegrationReceiptProgress(
+    receipt.receiptId,
+    { status: "completed", stateVersion: receipt.stateVersion },
+    {
+      status: "completed",
+      processed: true,
+      result: { ...result, status: "consumed", consumedAt: claim.requestedAt },
+    },
+  );
+  if (!consumed) {
+    throw new Error("APOLLO_EXACT_APPROVAL_RECEIPT_INVALID_OR_USED");
+  }
+  return {
+    approvalReceiptId: claim.approvalReceiptId,
+    actorEmployeeId: claim.actorEmployeeId,
+    candidateHash: claim.candidateHash,
+    action: claim.action,
+    approvedAt: String(result.approvedAt),
+    expiresAt: String(result.expiresAt),
+    status: "consumed",
+  };
+}
 
 export type ApolloOnePersonResult = {
   receiptId: string;
@@ -148,10 +248,9 @@ function asStoredResult(
 }
 
 /**
- * Execute the one user-authorized People Match call. A fixed durable receipt
- * makes the allowance one-shot across candidates and deploys. Apollo exposes
- * no request idempotency key for this operation, so an uncertain/failed claim
- * remains fail-closed for manual reconciliation instead of being retried.
+ * Execute one explicitly approved People Match call. The candidate-keyed
+ * receipt prevents duplicate spend. Apollo exposes no request idempotency key,
+ * so an uncertain provider outcome remains closed for reconciliation.
  */
 export async function enrichOneApolloPerson(
   input: {
@@ -168,19 +267,9 @@ export async function enrichOneApolloPerson(
   const actorEmployeeId = input.actorEmployeeId.trim();
   const approvalReceiptId = input.approvalReceiptId.trim();
   if (!actorEmployeeId || !approvalReceiptId || !deps.consumeExactApproval) {
-    throw new Error(
-      "APOLLO_PAID_ENRICHMENT_REQUIRES_EXACT_APPROVAL_RECEIPT",
-    );
+    throw new Error("APOLLO_PAID_ENRICHMENT_REQUIRES_EXACT_APPROVAL_RECEIPT");
   }
-  const candidate = {
-    externalId: input.candidate.externalId?.trim() || undefined,
-    email: input.candidate.email?.trim().toLowerCase() || undefined,
-    fullName: input.candidate.fullName?.trim() || undefined,
-    companyName: input.candidate.companyName?.trim() || undefined,
-    companyDomain:
-      input.candidate.companyDomain?.trim().toLowerCase() || undefined,
-    linkedinUrl: input.candidate.linkedinUrl?.trim() || undefined,
-  } satisfies LeadEnrichmentIdentity;
+  const candidate = normalizedCandidate(input.candidate);
   if (!candidate.externalId && !candidate.email && !candidate.fullName) {
     throw new Error("APOLLO_PERSON_IDENTITY_REQUIRED");
   }
@@ -192,17 +281,23 @@ export async function enrichOneApolloPerson(
   if (suppressed) throw new Error("APOLLO_PERSON_IS_SUPPRESSED");
 
   const settings = await getSalesOsSettings();
-  const used = await creditUsed("apollo_contact");
-  if (used >= settings.caps.apolloContactsPerMonth) {
-    throw new Error("APOLLO_MONTHLY_CAP_REACHED");
+  const candidateHash = apolloExactCandidateHash(candidate);
+  const existing = await getIntegrationReceipt(
+    "apollo",
+    `people-match:${candidateHash}`,
+  );
+  if (existing?.status === "completed") {
+    return asStoredResult(existing.receiptId, existing.result);
   }
-  // Resolve credentials before claiming the one-shot receipt. A missing
-  // reference is safe to retry because no provider request has started.
-  const source =
-    deps.leadSource ??
-    (await configuredLiveSource(true, actorEmployeeId, deps));
+  const retryableBeforeProvider =
+    existing?.status === "failed" &&
+    ["cap_not_reserved", "credit_reservation_failed"].includes(
+      String(existing.result?.bridgeStatus ?? ""),
+    );
+  if (existing && !retryableBeforeProvider) {
+    throw new Error(`APOLLO_MATCH_RECONCILIATION_REQUIRED:${existing.status}`);
+  }
 
-  const candidateHash = hashIntegrationPayload(JSON.stringify(candidate));
   const requestedAt = (deps.now ?? (() => new Date()))();
   const approval = await deps.consumeExactApproval({
     approvalReceiptId,
@@ -228,10 +323,12 @@ export async function enrichOneApolloPerson(
     throw new Error("APOLLO_EXACT_APPROVAL_RECEIPT_INVALID_OR_STALE");
   }
 
+  const source =
+    deps.leadSource ??
+    (await configuredLiveSource(true, actorEmployeeId, deps));
+
   const payload = {
     candidate,
-    approvalReceiptId,
-    candidateHash,
     paidFields: {
       personalEmail: false,
       phone: false,
@@ -242,26 +339,50 @@ export async function enrichOneApolloPerson(
   const rawBody = JSON.stringify(payload);
   const receipt = await recordIntegrationReceipt({
     provider: "apollo",
-    externalEventId: APOLLO_ONE_PERSON_CANARY_ID,
-    operation: "people.match.one-person-canary",
+    externalEventId: `people-match:${candidateHash}`,
+    operation: "people.match.exact-person",
     rawBody,
     payload,
     status: "processing",
+    ownerEmployeeId: actorEmployeeId,
   });
-  if (receipt.duplicate) {
-    if (receipt.status === "completed") {
-      return asStoredResult(receipt.receiptId, receipt.result);
-    }
+  let shouldAttempt = !receipt.duplicate;
+  if (receipt.duplicate && retryableBeforeProvider) {
+    shouldAttempt = await transitionIntegrationReceiptProgress(
+      receipt.receiptId,
+      { status: "failed", stateVersion: receipt.stateVersion },
+      { status: "processing", result: { bridgeStatus: "reserving_credit" } },
+    );
+  }
+  if (!shouldAttempt) {
     throw new Error(`APOLLO_CANARY_RECONCILIATION_REQUIRED:${receipt.status}`);
   }
 
-  let providerAttempted = false;
-  let creditRecorded = false;
+  const creditRecorded = await reserveCreditWithinCap(
+    "apollo_contact",
+    settings.caps.apolloContactsPerMonth,
+    1,
+    requestedAt.toISOString().slice(0, 7),
+  ).catch(async (error) => {
+    await updateIntegrationReceiptProgress(receipt.receiptId, {
+      status: "failed",
+      result: { bridgeStatus: "credit_reservation_failed" },
+      lastError:
+        error instanceof Error ? error.message : "Credit reservation failed",
+    }).catch(() => undefined);
+    throw error;
+  });
+  if (!creditRecorded) {
+    await updateIntegrationReceiptProgress(receipt.receiptId, {
+      status: "failed",
+      result: { bridgeStatus: "cap_not_reserved" },
+      lastError: "Apollo monthly cap reached before provider request",
+    });
+    throw new Error("APOLLO_MONTHLY_CAP_REACHED");
+  }
+
   try {
-    providerAttempted = true;
     const person = await source.enrichLead(candidate);
-    await addCredit("apollo_contact", 1);
-    creditRecorded = true;
 
     if (!person) {
       const result: ApolloOnePersonResult = {
@@ -321,11 +442,6 @@ export async function enrichOneApolloPerson(
     );
     return result;
   } catch (error) {
-    if (providerAttempted && !creditRecorded) {
-      // Apollo does not expose a reliable per-request credit receipt here.
-      // Count one conservatively and never retry an uncertain request.
-      await addCredit("apollo_contact", 1).catch(() => undefined);
-    }
     await failIntegrationReceipt(
       receipt.receiptId,
       error instanceof Error ? error.message : "Apollo provider attempt failed",

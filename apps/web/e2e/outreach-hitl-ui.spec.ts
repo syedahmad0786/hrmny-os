@@ -44,7 +44,9 @@ test.describe("Outreach HITL UI", () => {
     await page.getByTestId("outreach-draft-subject").fill(subject);
     await page
       .getByTestId("outreach-draft-body")
-      .fill("E2E body — approve only, do not send.");
+      .fill(
+        "JW Marriott Marquis Dubai team, this is a review-only campaign idea for a relevant hospitality story.",
+      );
     await page.getByTestId("outreach-draft-create").click();
 
     const showTestDrafts = page.getByRole("checkbox", {

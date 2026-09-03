@@ -7,6 +7,8 @@ import {
   createCompany,
   createContact,
   createDeal,
+  createActivity,
+  createQuoteVersion,
   moveDealStage,
   updateDeal,
 } from "./repository";
@@ -164,7 +166,47 @@ export async function runDemoClosedLoopCore(
   await updateDeal(dealId, {
     quoteValue: "50000",
     internalCost: "28000",
+    marginPct: "44",
   });
+  const acceptedQuote = await createQuoteVersion({
+    dealId,
+    lineItems: [
+      {
+        label: "Synthetic closed-loop package",
+        unitSell: 50_000,
+        unitCost: 28_000,
+      },
+    ],
+    quoteValue: "50000",
+    internalCost: "28000",
+    marginPct: "44",
+    status: "accepted",
+    createdBy: input.actorEmployeeId,
+  });
+  await createActivity({
+    type: "system",
+    subject: `Synthetic signed agreement recorded for quote v${acceptedQuote.version}`,
+    dealId,
+    actorEmployeeId: input.actorEmployeeId,
+    metadata: {
+      quoteId: acceptedQuote.quoteId,
+      quoteVersion: acceptedQuote.version,
+      evidenceUrl: "https://fixtures.hrmny.co/signed-agreement",
+      synthetic: true,
+    },
+  });
+  const commerciallyReady = await moveDealStage({
+    dealId,
+    to: "close",
+    actorEmployeeId: input.actorEmployeeId,
+  });
+  if (!commerciallyReady.ok) {
+    return {
+      ok: false,
+      step: "stage:close",
+      reason: commerciallyReady.reason,
+    };
+  }
 
   const closed = await closeDurableDeal({
     dealId,

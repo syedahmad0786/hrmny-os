@@ -92,8 +92,7 @@ export const dealBuafGate: GateFn = async ({ entity, request }) => {
   if (!(entity.state === "qualify" && request.to === "engage")) return null;
 
   const noGo = (entity.data.noGoFlags ?? entity.data.no_go_flags) as
-    | string[]
-    | undefined;
+    string[] | undefined;
   if (Array.isArray(noGo) && noGo.length > 0) {
     return {
       gate: "deal.buaf_nogo",
@@ -148,7 +147,11 @@ export const dealVerifiedEmailGate: GateFn = async ({ entity, request }) => {
 /** G3: engage→scope voice check (lightweight pass flag). */
 export const dealVoiceGate: GateFn = async ({ entity, request }) => {
   if (!(entity.state === "engage" && request.to === "scope")) return null;
-  const passed = boolField(entity.data, "voiceCheckPassed", "voice_check_passed");
+  const passed = boolField(
+    entity.data,
+    "voiceCheckPassed",
+    "voice_check_passed",
+  );
   if (!passed) {
     return {
       gate: "deal.voice",
@@ -210,8 +213,12 @@ export const dealVendorFeeGate: GateFn = async ({ entity, request }) => {
 };
 
 /** close→handover_pack requires won outcome. */
-export const dealWonBeforeHandoverGate: GateFn = async ({ entity, request }) => {
-  if (!(entity.state === "close" && request.to === "handover_pack")) return null;
+export const dealWonBeforeHandoverGate: GateFn = async ({
+  entity,
+  request,
+}) => {
+  if (!(entity.state === "close" && request.to === "handover_pack"))
+    return null;
   const outcome = String(
     entity.data.closeOutcome ?? entity.data.close_outcome ?? "",
   );
@@ -234,14 +241,15 @@ function actorHasDiscountTier(
     );
   }
   if (needed === "md") {
-    return actor.roles.some((r) =>
-      ["md", "director", "partner"].includes(r),
-    );
+    return actor.roles.some((r) => ["md", "director", "partner"].includes(r));
   }
   return actor.roles.includes("partner");
 }
 
-export function computeQuoteMetrics(lines: QuoteLineInput[]): {
+export function computeQuoteMetrics(
+  lines: QuoteLineInput[],
+  discountPct = 0,
+): {
   quoteValue: number;
   internalCost: number;
   marginPct: number;
@@ -261,8 +269,9 @@ export function computeQuoteMetrics(lines: QuoteLineInput[]): {
       vendorFeeTotal += lineCost * (VENDOR_FEE_DEFAULT_PCT / 100);
     }
   }
-  const quoteValue = sell + vendorFeeTotal;
-  const internalCost = cost + vendorFeeTotal;
+  const discount = Math.min(100, Math.max(0, discountPct));
+  const quoteValue = (sell + vendorFeeTotal) * (1 - discount / 100);
+  const internalCost = cost;
   const marginPct =
     quoteValue > 0 ? ((quoteValue - internalCost) / quoteValue) * 100 : 0;
   const vatAmount = quoteValue * 0.05;

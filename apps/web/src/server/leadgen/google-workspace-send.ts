@@ -31,6 +31,9 @@ export function createGoogleWorkspaceGmailSend(
       const message = [
         `To: ${input.to.trim()}`,
         `Subject: =?UTF-8?B?${encodedSubject}?=`,
+        ...(input.messageId
+          ? [`Message-ID: ${input.messageId.replace(/[\r\n]+/g, "")}`]
+          : []),
         "MIME-Version: 1.0",
         'Content-Type: text/plain; charset="UTF-8"',
         "Content-Transfer-Encoding: 8bit",
@@ -56,11 +59,19 @@ export function createGoogleWorkspaceGmailSend(
           `Google Workspace Gmail send failed (${response.status}): ${detail.slice(0, 200)}`,
         );
       }
-      const json = (await response.json()) as { id?: string };
+      const json = (await response.json()) as {
+        id?: string;
+        threadId?: string;
+      };
+      const externalId = typeof json.id === "string" ? json.id.trim() : "";
+      if (!externalId) {
+        throw new Error("Google Workspace Gmail send returned no message id");
+      }
       return {
         sent: true,
         mode: "live",
-        externalId: json.id ?? `gw-gmail-${Date.now()}`,
+        externalId,
+        threadId: json.threadId,
         channel: "gmail",
       };
     },

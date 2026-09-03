@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDemoStore } from "../demo-store";
+import { resetCampaignMemory } from "../campaigns/memory";
+import { listCampaigns } from "../campaigns/repository";
 import { durableHandoverPack } from "./handover";
 import { getCrmMemory, resetCrmMemory } from "./memory";
 
@@ -9,6 +11,7 @@ describe("memory CRM handover", () => {
   beforeEach(() => {
     vi.stubEnv("DATABASE_MODE", "memory");
     resetCrmMemory();
+    resetCampaignMemory();
     getDemoStore().resetM6Demo();
     const deal = getCrmMemory().deals.get(WON_DEAL_ID);
     if (!deal) throw new Error("missing won-deal fixture");
@@ -29,5 +32,15 @@ describe("memory CRM handover", () => {
     if (!first.task || !replay.task) return;
     expect(replay.task.taskId).toBe(first.task.taskId);
     expect(replay.task.briefId).toBe(first.task.briefId);
+    expect(
+      [...getDemoStore().calendars.values()].filter(
+        (calendar) => calendar.clientId === first.client.clientId,
+      ),
+    ).toHaveLength(1);
+    expect(
+      await listCampaigns({ clientId: first.client.clientId }),
+    ).toHaveLength(1);
+    expect(replay.pack.fired).toContain("calendar.exists");
+    expect(replay.pack.fired).toContain("campaign.draft_exists");
   });
 });
