@@ -129,14 +129,25 @@ export default function ClientOnboardingPage() {
   return (
     <main className="flex flex-col gap-6">
       <div>
-        <Link href="/clients" className="text-sm text-ochre underline">
-          ← Clients
-        </Link>
+        <div className="flex flex-wrap gap-3 text-sm">
+          <Link href="/clients" className="text-ochre underline">
+            ← Client directory
+          </Link>
+          {dealId ? (
+            <Link
+              href={`/crm/deals/${dealId}`}
+              className="text-ochre underline"
+            >
+              Open originating sales deal
+            </Link>
+          ) : null}
+        </div>
         <h1 className="font-display text-3xl font-semibold">
           {client.data?.name ?? "Client"}
         </h1>
         <p className="text-muted">
-          Onboarding 7-phase · Immersion form · renewal{" "}
+          {dealId ? "Won in Sales · " : ""}Onboarding 7-phase · Immersion form ·
+          renewal{" "}
           {client.data && "renewalDate" in client.data
             ? String(client.data.renewalDate)
             : "—"}

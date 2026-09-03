@@ -41,7 +41,7 @@ test.describe("CRM inbound Capture UI", () => {
       company,
       { timeout: 60_000 },
     );
-    await expect(page.locator("body")).toContainText(/discover/i);
+    await expect(page.locator("body")).toContainText(/New lead/i);
     await expect(page.getByTestId("deal-advance")).toBeVisible();
   });
 });

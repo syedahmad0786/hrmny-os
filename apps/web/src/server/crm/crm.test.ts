@@ -29,6 +29,17 @@ describe("CRM durable layer", () => {
       "close",
       "handover_pack",
     ]);
+    expect(stages.map((s) => s.label)).toEqual([
+      "New lead",
+      "Check fit",
+      "Start conversation",
+      "Define needs",
+      "Send proposal",
+      "Agree pricing",
+      "Win or close",
+      "Start client onboarding",
+    ]);
+    expect(stages.every((stage) => stage.description.length > 20)).toBe(true);
   });
 
   it("creates company → contact → deal and moves stage", async () => {

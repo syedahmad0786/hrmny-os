@@ -84,8 +84,9 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
       timeout: 60_000,
     });
-    await expect(page.locator("body")).toContainText(/discover/i);
+    await expect(page.locator("body")).toContainText(/New lead/i);
     await expect(page.locator("body")).toContainText(/apollo/i);
+    await expect(page.locator("body")).toContainText(/Work email/i);
   });
 
   test("free people search fails closed when Apollo is not connected", async ({
@@ -191,6 +192,8 @@ test.describe("Hunt Apollo prospect UI", () => {
   }) => {
     const idempotencyKey = "d4d4d4d4-d4d4-4d4d-8d4d-d4d4d4d4d4d4";
     const currentCandidate = "CURRENT PARTNER CANDIDATE";
+    let approveCalls = 0;
+    let enrichCalls = 0;
     await page.addInitScript(
       ({ key, value }) => window.sessionStorage.setItem(key, value),
       {
@@ -206,6 +209,10 @@ test.describe("Hunt Apollo prospect UI", () => {
     );
     await page.route("**/api/trpc/**", async (route) => {
       const url = route.request().url();
+      const procedurePath = decodeURIComponent(
+        new URL(url).pathname.split("/api/trpc/")[1] ?? "",
+      );
+      const procedures = procedurePath.split(",");
       if (url.includes("salesOs.apollo.saveCandidate")) {
         await route.fulfill({
           status: 200,
@@ -214,12 +221,89 @@ test.describe("Hunt Apollo prospect UI", () => {
         });
         return;
       }
-      if (url.includes("salesOs.apollo.searchStatus")) {
+      if (url.includes("salesOs.apollo.approveExact")) {
+        approveCalls += 1;
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: completedSearchResponse(currentCandidate),
+          body: JSON.stringify([
+            {
+              result: {
+                data: {
+                  json: {
+                    approvalReceiptId: "a3000000-0000-4000-8000-000000000001",
+                    candidateHash: "candidate-hash",
+                    approvedAt: "2026-09-04T00:00:00.000Z",
+                    expiresAt: "2026-09-04T00:05:00.000Z",
+                    creditsMaximum: 1,
+                  },
+                },
+              },
+            },
+          ]),
         });
+        return;
+      }
+      if (url.includes("salesOs.apollo.enrichOne")) {
+        enrichCalls += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify([
+            {
+              result: {
+                data: {
+                  json: {
+                    receiptId: "a4000000-0000-4000-8000-000000000001",
+                    duplicate: false,
+                    mode: "live",
+                    matched: true,
+                    creditsRecorded: 1,
+                    imported: true,
+                    crm: {
+                      dealId: "e2000000-0000-4000-8000-000000000001",
+                      companyId: "c2000000-0000-4000-8000-000000000001",
+                      contactId: "d2000000-0000-4000-8000-000000000001",
+                      companyName: "Principal Scoped Result",
+                      fullName: currentCandidate,
+                      email: "candidate@principal.example",
+                      emailVerified: true,
+                      reused: { company: true, contact: true, deal: true },
+                    },
+                  },
+                },
+              },
+            },
+          ]),
+        });
+        return;
+      }
+      const connectionIndex = procedures.indexOf("salesOs.apollo.connection");
+      const searchStatusIndex = procedures.indexOf(
+        "salesOs.apollo.searchStatus",
+      );
+      if (connectionIndex >= 0 || searchStatusIndex >= 0) {
+        const response = await route.fetch();
+        const body = (await response.json()) as Array<unknown>;
+        if (connectionIndex >= 0) {
+          body[connectionIndex] = {
+            result: {
+              data: {
+                json: {
+                  configured: true,
+                  source: "vault",
+                  principalId: PARTNER_EMPLOYEE_ID,
+                },
+              },
+            },
+          };
+        }
+        if (searchStatusIndex >= 0) {
+          body[searchStatusIndex] = JSON.parse(
+            completedSearchResponse(currentCandidate),
+          )[0];
+        }
+        await route.fulfill({ response, json: body });
         return;
       }
       await route.continue();
@@ -238,8 +322,44 @@ test.describe("Hunt Apollo prospect UI", () => {
     await page
       .getByTestId("hunt-apollo-save-synthetic-completed-person")
       .click();
+    const candidate = page.getByTestId(
+      "hunt-apollo-candidate-synthetic-completed-person",
+    );
+    await expect(candidate).toHaveClass(/is-saved/);
+    await expect(
+      page.getByTestId("hunt-apollo-save-synthetic-completed-person"),
+    ).toHaveText(/Added to pipeline/i);
+    await expect(
+      candidate.getByRole("link", { name: /Open this lead in CRM/i }),
+    ).toHaveAttribute(
+      "href",
+      "/crm/deals/e2000000-0000-4000-8000-000000000001",
+    );
+    const unlock = page.getByTestId(
+      "hunt-apollo-enrich-synthetic-completed-person",
+    );
+    await expect(unlock).toBeEnabled();
+    await unlock.click();
+    await expect(candidate).toContainText(
+      `Confirm ${currentCandidate} at Principal Scoped Result`,
+    );
+    await page
+      .getByTestId("hunt-apollo-enrich-cancel-synthetic-completed-person")
+      .click();
+    expect(approveCalls).toBe(0);
+    await unlock.click();
+    await page
+      .getByTestId("hunt-apollo-enrich-confirm-synthetic-completed-person")
+      .click();
+    await expect(candidate).toContainText(
+      "candidate@principal.example · verified",
+    );
+    await expect(unlock).toHaveText(/Work email unlocked/i);
+    await expect(unlock).toBeDisabled();
+    expect(approveCalls).toBe(1);
+    expect(enrichCalls).toBe(1);
     await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
-      /Principal Scoped Result is in the pipeline/i,
+      `${currentCandidate} is in the pipeline`,
     );
     await expect(
       page.getByRole("link", { name: /Open CRM deal/i }),
@@ -250,11 +370,17 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect
       .poll(() =>
         page.evaluate(
-          (key) => window.sessionStorage.getItem(key),
+          (key) =>
+            JSON.parse(window.sessionStorage.getItem(key) ?? "{}")
+              .idempotencyKey,
           APOLLO_SEARCH_SESSION_KEY,
         ),
       )
-      .toBeNull();
+      .toBe(idempotencyKey);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByText(currentCandidate)).toBeVisible({
+      timeout: 60_000,
+    });
   });
 
   test("does not carry an old employee's pending mutation into the new account", async ({

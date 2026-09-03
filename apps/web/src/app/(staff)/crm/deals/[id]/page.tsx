@@ -7,9 +7,11 @@ import { trpc } from "@/lib/trpc";
 import { CrmBtn, CrmEmpty, CrmPageHeader, CrmTag } from "@/components/crm/ui";
 import {
   buafScore,
+  formatContactName,
   formatAed,
   formatLane,
   formatRelative,
+  workEmailState,
 } from "@/components/crm/format";
 import { AiDealPanel } from "../../_components/ai-deal-panel";
 
@@ -34,6 +36,11 @@ export default function CrmDealDetailPage() {
   const id = params.id;
   const utils = trpc.useUtils();
   const deal = trpc.crm.deals.get.useQuery({ id });
+  const stages = trpc.crm.stages.useQuery();
+  const primaryContact = trpc.crm.contacts.get.useQuery(
+    { id: deal.data?.primaryContactId ?? "" },
+    { enabled: Boolean(deal.data?.primaryContactId) },
+  );
   const session = trpc.auth.session.useQuery();
   const activities = trpc.crm.activities.list.useQuery({
     dealId: id,
@@ -72,7 +79,7 @@ export default function CrmDealDetailPage() {
   const [fit, setFit] = useState(false);
   const [temp, setTemp] = useState<"hot" | "warm" | "cool" | "cold" | "">("");
   const [note, setNote] = useState("");
-  const [last, setLast] = useState<unknown>(null);
+  const [actionStatus, setActionStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!d) return;
@@ -85,6 +92,14 @@ export default function CrmDealDetailPage() {
 
   const score = useMemo(() => (d ? buafScore(d) : null), [d]);
   const nextStage = d?.stage ? NEXT[String(d.stage)] : undefined;
+  const stageLabel =
+    stages.data?.find((stage) => stage.key === d?.stage)?.label ??
+    String(d?.stage ?? "").replace(/_/g, " ");
+  const nextStageLabel =
+    stages.data?.find((stage) => stage.key === nextStage)?.label ??
+    nextStage?.replace(/_/g, " ");
+  const contactName = formatContactName(primaryContact.data);
+  const email = workEmailState(primaryContact.data, d?.emailVerified);
   const canConfirmWon = Boolean(
     session.data?.roles.some((role) => ["partner", "director"].includes(role)),
   );
@@ -114,8 +129,8 @@ export default function CrmDealDetailPage() {
     <main>
       <CrmPageHeader
         kicker="CRM · Deal detail"
-        title={d.companyName}
-        description={`${formatLane(d.leadSourceLane)} · ${String(d.stage).replace(/_/g, " ")} · ${formatAed(d.quoteValue)}`}
+        title={contactName ?? d.companyName}
+        description={`${contactName ? `${d.companyName} · ` : ""}${primaryContact.data?.title ? `${primaryContact.data.title} · ` : ""}${stageLabel} · ${formatLane(d.leadSourceLane)} · ${formatAed(d.quoteValue)}`}
         actions={
           <>
             <Link href="/crm">
@@ -128,10 +143,14 @@ export default function CrmDealDetailPage() {
                 disabled={move.isPending}
                 onClick={async () => {
                   const r = await move.mutateAsync({ id, to: nextStage });
-                  setLast(r);
+                  setActionStatus(
+                    r.ok
+                      ? `Moved to ${nextStageLabel}.`
+                      : `Could not advance: ${r.reason ?? "stage requirements are incomplete"}`,
+                  );
                 }}
               >
-                Advance → {nextStage.replace(/_/g, " ")}
+                Next: {nextStageLabel} →
               </CrmBtn>
             ) : null}
             {canConfirmWon &&
@@ -146,7 +165,9 @@ export default function CrmDealDetailPage() {
                     id,
                     outcome: "won",
                   });
-                  setLast(r);
+                  setActionStatus(
+                    r.ok ? "Deal marked won." : `Could not close: ${r.reason}`,
+                  );
                 }}
               >
                 Mark won
@@ -161,7 +182,11 @@ export default function CrmDealDetailPage() {
                 disabled={handover.isPending}
                 onClick={async () => {
                   const r = await handover.mutateAsync({ id });
-                  setLast(r);
+                  setActionStatus(
+                    r.ok
+                      ? "Client handover is ready."
+                      : `Could not create handover: ${r.reason}`,
+                  );
                 }}
               >
                 {d.stage === "handover_pack"
@@ -245,13 +270,19 @@ export default function CrmDealDetailPage() {
         }
       />
 
+      {actionStatus ? (
+        <div className="crm-note mb-4" role="status" aria-live="polite">
+          {actionStatus}
+        </div>
+      ) : null}
+
       <section className="crm-split">
         <div className="space-y-4">
           <div className="crm-panel">
             <div className="crm-panel-head">
               <div>
-                <h3>BUAF qualification</h3>
-                <p>Budget · Urgency · Access · Fit</p>
+                <h3>Lead qualification</h3>
+                <p>Confirm budget, urgency, decision access, and fit.</p>
               </div>
               <CrmTag kind={score && score.done === 4 ? "success" : "warn"}>
                 {score?.label ?? "—"}
@@ -296,10 +327,22 @@ export default function CrmDealDetailPage() {
                   </select>
                 </div>
                 <div className="crm-field">
-                  <label>Email verified</label>
-                  <CrmTag kind={d.emailVerified ? "success" : "warn"}>
-                    {d.emailVerified ? "Verified" : "Unverified"}
-                  </CrmTag>
+                  <label>Work email</label>
+                  <div>
+                    <CrmTag kind={email.kind}>{email.label}</CrmTag>
+                    <p className="mt-2 text-[11px] text-[var(--muted)]">
+                      {primaryContact.data?.email ??
+                        "Free search saved the lead without spending a credit."}
+                    </p>
+                    {!primaryContact.data?.email ? (
+                      <Link
+                        href="/crm/hunt#apollo-people-search"
+                        className="mt-2 inline-block text-[11px] font-bold text-[var(--ochre-dark)] underline"
+                      >
+                        Return to Find clients to unlock this exact lead →
+                      </Link>
+                    ) : null}
+                  </div>
                 </div>
               </div>
               <div className="crm-approval-actions">
@@ -308,7 +351,7 @@ export default function CrmDealDetailPage() {
                   data-testid="deal-buaf-save"
                   disabled={update.isPending}
                   onClick={async () => {
-                    const r = await update.mutateAsync({
+                    await update.mutateAsync({
                       id,
                       buafBudget: budget,
                       buafUrgency: urgency,
@@ -316,7 +359,7 @@ export default function CrmDealDetailPage() {
                       buafFit: fit,
                       buafTemperature: temp || null,
                     });
-                    setLast(r);
+                    setActionStatus("Lead qualification saved.");
                   }}
                 >
                   Save BUAF
@@ -373,7 +416,12 @@ export default function CrmDealDetailPage() {
         <aside className="space-y-4">
           <div className="crm-panel">
             <div className="crm-panel-head">
-              <h3>Commercial</h3>
+              <div>
+                <h3>Scope & pricing</h3>
+                <p>
+                  Build what the client will receive and the price they see.
+                </p>
+              </div>
             </div>
             <div className="crm-panel-body">
               <div className="crm-metric">
@@ -397,10 +445,10 @@ export default function CrmDealDetailPage() {
                 </div>
               </div>
               <Link
-                href="/crm/quote"
+                href={`/crm/quote?dealId=${id}`}
                 className="mt-3 inline-block text-[var(--ochre-dark)] text-[11px] font-bold"
               >
-                Open commercial panel →
+                Build scope & client pricing →
               </Link>
             </div>
           </div>
@@ -457,12 +505,6 @@ export default function CrmDealDetailPage() {
           </div>
         </aside>
       </section>
-
-      {last ? (
-        <pre className="mt-4 overflow-auto rounded-xl border border-[var(--line)] bg-white/70 p-3 text-[10px]">
-          {JSON.stringify(last, null, 2)}
-        </pre>
-      ) : null}
     </main>
   );
 }

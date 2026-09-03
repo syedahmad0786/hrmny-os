@@ -10,9 +10,22 @@ const PROPOSE_DEAL_ID = "e0000000-0000-4000-8000-000000000005";
 test.describe("CRM quote Save version UI", () => {
   test("Save version shows Saved vN and margin", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
-    await page.goto("/crm/quote", { waitUntil: "domcontentloaded" });
+    await page.goto(`/crm/deals/${PROPOSE_DEAL_ID}`, {
+      waitUntil: "domcontentloaded",
+    });
+    const pricing = page.getByRole("link", {
+      name: /Build scope & client pricing/i,
+    });
+    await expect(pricing).toHaveAttribute(
+      "href",
+      `/crm/quote?dealId=${PROPOSE_DEAL_ID}`,
+    );
+    await pricing.click();
+    await expect(page).toHaveURL(
+      new RegExp(`/crm/quote\\?dealId=${PROPOSE_DEAL_ID}$`),
+    );
     await expect(
-      page.getByRole("heading", { name: /Commercial panel/i }),
+      page.getByRole("heading", { name: /Scope & pricing/i }),
     ).toBeVisible({ timeout: 60_000 });
 
     const deal = page.getByTestId("quote-deal-select");
@@ -20,7 +33,7 @@ test.describe("CRM quote Save version UI", () => {
     await expect
       .poll(async () => deal.locator("option").count(), { timeout: 30_000 })
       .toBeGreaterThan(0);
-    await deal.selectOption(PROPOSE_DEAL_ID);
+    await expect(deal).toHaveValue(PROPOSE_DEAL_ID);
 
     const line = page.getByTestId("quote-line").first();
     await expect(line).toBeVisible({ timeout: 30_000 });

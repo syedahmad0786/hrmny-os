@@ -14,8 +14,9 @@ async function ensureDealHandoverNext(page: Page) {
     timeout: 60_000,
   });
   await expect(page.getByRole("heading", { level: 1 })).toContainText(
-    /JW Marriott/i,
+    /Layla Hassan/i,
   );
+  await expect(page.locator("main")).toContainText(/JW Marriott/i);
 
   await advanceDealToClose(page);
 
@@ -65,9 +66,7 @@ test.describe("Deal won → handover UI", () => {
     });
   });
 
-  test("Handover replay does not reissue portal access", async ({
-    page,
-  }) => {
+  test("Handover replay does not reissue portal access", async ({ page }) => {
     test.setTimeout(120_000);
     await ensureDealHandoverNext(page);
 

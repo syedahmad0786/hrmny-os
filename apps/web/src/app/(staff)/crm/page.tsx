@@ -12,11 +12,13 @@ import {
 } from "@/components/crm/ui";
 import {
   LANE_LABELS,
+  formatContactName,
   formatAed,
   formatLane,
   formatRelative,
   initials,
   tagKindForTemp,
+  workEmailState,
 } from "@/components/crm/format";
 import { DemoReadinessPanel } from "@/components/demo-readiness-panel";
 import { DashStrip } from "./_components/dash-strip";
@@ -26,6 +28,7 @@ export default function CrmPipelinePage() {
   const utils = trpc.useUtils();
   const stages = trpc.crm.stages.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
+  const contacts = trpc.crm.contacts.list.useQuery();
   const health = trpc.crm.health.useQuery();
   const create = trpc.crm.deals.create.useMutation({
     onSuccess: () => void utils.crm.deals.invalidate(),
@@ -42,6 +45,13 @@ export default function CrmPipelinePage() {
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const contactById = useMemo(
+    () =>
+      new Map(
+        (contacts.data ?? []).map((contact) => [contact.contactId, contact]),
+      ),
+    [contacts.data],
+  );
 
   /** Move a deal; surface gate rejections (moveStage returns ok:false, it
    * does not throw). No optimistic update, so a blocked move never moves the
@@ -72,13 +82,17 @@ export default function CrmPipelinePage() {
       if (lane !== "all" && d.leadSourceLane !== lane) return false;
       if (temp !== "all" && (d.buafTemperature ?? "") !== temp) return false;
       if (!q) return true;
+      const leadName = formatContactName(
+        d.primaryContactId ? contactById.get(d.primaryContactId) : null,
+      );
       return (
         d.companyName.toLowerCase().includes(q) ||
+        (leadName ?? "").toLowerCase().includes(q) ||
         (d.sector ?? "").toLowerCase().includes(q) ||
         formatLane(d.leadSourceLane).toLowerCase().includes(q)
       );
     });
-  }, [deals.data, search, lane, temp, showTestRecords]);
+  }, [contactById, deals.data, search, lane, temp, showTestRecords]);
 
   const hiddenTestCount = (deals.data ?? []).filter((deal) =>
     isSyntheticRecordName(deal.companyName),
@@ -213,11 +227,19 @@ export default function CrmPipelinePage() {
                   }}
                 >
                   <div className="crm-column-head">
-                    <strong>{stage.label}</strong>
+                    <div>
+                      <strong>{stage.label}</strong>
+                      <small>{stage.description}</small>
+                    </div>
                     <span>{col.length}</span>
                   </div>
                   {col.map((d) => {
                     const tempVal = d.buafTemperature ?? undefined;
+                    const contact = d.primaryContactId
+                      ? contactById.get(d.primaryContactId)
+                      : undefined;
+                    const leadName = formatContactName(contact);
+                    const email = workEmailState(contact, d.emailVerified);
                     return (
                       <Link
                         key={d.dealId}
@@ -239,9 +261,17 @@ export default function CrmPipelinePage() {
                           ) : (
                             <CrmTag kind="info">No priority</CrmTag>
                           )}
+                          <CrmTag kind={email.kind}>{email.label}</CrmTag>
                         </div>
-                        <h4>{d.sector ?? "Opportunity"}</h4>
+                        <h4>{leadName ?? "Lead name unavailable"}</h4>
                         <span className="company">{d.companyName}</span>
+                        {contact?.title || d.sector ? (
+                          <span className="company">
+                            {[contact?.title, d.sector]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        ) : null}
                         <div className="crm-deal-value">
                           {formatAed(d.quoteValue)}
                         </div>
@@ -283,7 +313,7 @@ export default function CrmPipelinePage() {
                   })}
                   {col.length === 0 ? (
                     <div className="px-2 py-6 text-center text-[10px] text-[var(--muted)]">
-                      Drop a deal here
+                      No leads here yet
                     </div>
                   ) : null}
                 </section>
