@@ -209,26 +209,10 @@ test.describe("Hunt Apollo prospect UI", () => {
     );
     await page.route("**/api/trpc/**", async (route) => {
       const url = route.request().url();
-      if (url.includes("salesOs.apollo.connection")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify([
-            {
-              result: {
-                data: {
-                  json: {
-                    configured: true,
-                    source: "vault",
-                    principalId: PARTNER_EMPLOYEE_ID,
-                  },
-                },
-              },
-            },
-          ]),
-        });
-        return;
-      }
+      const procedurePath = decodeURIComponent(
+        new URL(url).pathname.split("/api/trpc/")[1] ?? "",
+      );
+      const procedures = procedurePath.split(",");
       if (url.includes("salesOs.apollo.saveCandidate")) {
         await route.fulfill({
           status: 200,
@@ -294,12 +278,32 @@ test.describe("Hunt Apollo prospect UI", () => {
         });
         return;
       }
-      if (url.includes("salesOs.apollo.searchStatus")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: completedSearchResponse(currentCandidate),
-        });
+      const connectionIndex = procedures.indexOf("salesOs.apollo.connection");
+      const searchStatusIndex = procedures.indexOf(
+        "salesOs.apollo.searchStatus",
+      );
+      if (connectionIndex >= 0 || searchStatusIndex >= 0) {
+        const response = await route.fetch();
+        const body = (await response.json()) as Array<unknown>;
+        if (connectionIndex >= 0) {
+          body[connectionIndex] = {
+            result: {
+              data: {
+                json: {
+                  configured: true,
+                  source: "vault",
+                  principalId: PARTNER_EMPLOYEE_ID,
+                },
+              },
+            },
+          };
+        }
+        if (searchStatusIndex >= 0) {
+          body[searchStatusIndex] = JSON.parse(
+            completedSearchResponse(currentCandidate),
+          )[0];
+        }
+        await route.fulfill({ response, json: body });
         return;
       }
       await route.continue();
