@@ -394,8 +394,11 @@ export default function CrmQuotePage() {
               ) : canAcceptSigned && activeQuote ? (
                 <div className="crm-form-grid" style={{ marginTop: 14 }}>
                   <div className="crm-field">
-                    <label>Signed agreement URL</label>
+                    <label htmlFor="signed-agreement-url">
+                      Signed agreement URL
+                    </label>
                     <input
+                      id="signed-agreement-url"
                       className="crm-input"
                       type="url"
                       placeholder="https://drive.google.com/…"
