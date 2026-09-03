@@ -179,17 +179,16 @@ test.describe("Demo funnel", () => {
     await expect(page.locator("body")).toContainText(/finance|invoice|xero/i);
   });
 
-  test("staff can mint distinct portal vs onboarding magic links", async ({
+  test("staff review routes never mint client credentials", async ({
     request,
   }) => {
-    // CI e2e has no DATABASE_URL for durable handover; mint via reviewHref instead.
     const clientId = "c1000000-0000-4000-8000-0000000000a4";
     const headers = {
       "x-dev-role": "partner",
       "content-type": "application/json",
     };
 
-    async function mint(next: string) {
+    async function reviewPath(next: string) {
       const res = await request.post(
         "/api/trpc/clients.portalUsers.reviewHref",
         {
@@ -215,26 +214,13 @@ test.describe("Demo funnel", () => {
       return portalPath!;
     }
 
-    const portalHref = await mint("/portal/approvals");
-    const onboardingHref = await mint("/portal/onboarding");
+    const portalHref = await reviewPath("/portal/approvals");
+    const onboardingHref = await reviewPath("/portal/onboarding");
 
-    expect(portalHref).toMatch(/\/portal\/login\/verify/);
-    expect(onboardingHref).toMatch(/\/portal\/login\/verify/);
-    expect(portalHref).toContain(encodeURIComponent("/portal/approvals"));
-    expect(onboardingHref).toContain(encodeURIComponent("/portal/onboarding"));
+    expect(portalHref).toBe(`/client-preview?client=${clientId}#approvals`);
+    expect(onboardingHref).toBe(`/clients/${clientId}#onboarding`);
     expect(portalHref).not.toBe(onboardingHref);
-
-    const portalToken = new URL(
-      portalHref,
-      "http://localhost",
-    ).searchParams.get("token");
-    const onboardingToken = new URL(
-      onboardingHref,
-      "http://localhost",
-    ).searchParams.get("token");
-    expect(portalToken).toBeTruthy();
-    expect(onboardingToken).toBeTruthy();
-    expect(portalToken).not.toBe(onboardingToken);
+    expect(`${portalHref}${onboardingHref}`).not.toMatch(/token=|\/portal\//);
   });
 
   test("delivery selects the next task before offering client actions", async ({
@@ -251,7 +237,7 @@ test.describe("Demo funnel", () => {
     await expect(portalCta).toBeEnabled();
   });
 
-  test("delivery Client portal mints magic link into portal approvals", async ({
+  test("delivery opens a read-only staff client preview", async ({
     page,
   }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
@@ -277,16 +263,13 @@ test.describe("Demo funnel", () => {
     await expect(portalCta).toBeEnabled();
     await portalCta.click();
 
-    await expect(page).toHaveURL(/\/portal\/login\/verify/, {
+    await expect(page).toHaveURL(/\/client-preview\?client=.*#approvals/, {
       timeout: 60_000,
     });
-    await expect(page).toHaveURL(/token=/);
-
-    // Verify consumes the token and lands on portal Approvals (default next).
     await expect(
-      page.getByRole("heading", { name: /^Approvals$/i }),
+      page.getByRole("heading", { name: /Client preview/i }),
     ).toBeVisible({ timeout: 60_000 });
-    await expect(page).toHaveURL(/\/portal\/approvals/);
+    await expect(page).not.toHaveURL(/token=|\/portal\//);
   });
 
   test("delivery Run agent uses seeded Delivery coach on a task", async ({
@@ -767,7 +750,7 @@ test.describe("Demo funnel", () => {
     );
   });
 
-  test("magic-link session grants isolate client A vs B without x-dev-role", async ({
+  test("staff invite delivery never returns client credentials", async ({
     request,
   }) => {
     const DEMO_CLIENT_ID = "c1000000-0000-4000-8000-0000000000a4";
@@ -777,103 +760,35 @@ test.describe("Demo funnel", () => {
       "content-type": "application/json",
     };
 
-    async function mintAndVerify(clientId: string, email: string) {
-      const mint = await request.post(
+    async function sendInvite(clientId: string, email: string) {
+      const response = await request.post(
         "/api/trpc/clients.portalUsers.issueDemoToken",
         {
           headers: staffHeaders,
           data: { json: { clientId, email } },
         },
       );
-      const mintText = await mint.text();
-      expect(mint.ok(), mintText).toBeTruthy();
-      const mintBody = JSON.parse(mintText) as {
-        result?: { data?: { json?: { token?: string }; token?: string } };
-      };
-      const token =
-        mintBody.result?.data?.json?.token ?? mintBody.result?.data?.token;
-      expect(token, mintText).toBeTruthy();
-      expect(token!.startsWith("ml_")).toBe(true);
-
-      const verify = await request.post("/api/trpc/portal.auth.verify", {
-        headers: { "content-type": "application/json" },
-        data: { json: { token } },
-      });
-      const verifyText = await verify.text();
-      expect(verify.ok(), verifyText).toBeTruthy();
-      const verifyBody = JSON.parse(verifyText) as {
+      const responseText = await response.text();
+      expect(response.ok(), responseText).toBeTruthy();
+      const body = JSON.parse(responseText) as {
         result?: {
           data?: {
-            json?: {
-              ok?: boolean;
-              clientId?: string;
-              sessionGrant?: string;
-            };
-            ok?: boolean;
-            clientId?: string;
-            sessionGrant?: string;
+            json?: Record<string, unknown>;
           };
         };
       };
-      const verified =
-        verifyBody.result?.data?.json ?? verifyBody.result?.data ?? {};
-      expect(verified.ok, verifyText).toBe(true);
-      expect(verified.clientId).toBe(clientId);
-      expect(verified.sessionGrant?.startsWith("ps_")).toBe(true);
-      return verified.sessionGrant!;
+      const data = body.result?.data?.json ?? {};
+      expect(data.clientId).toBe(clientId);
+      expect(data.email).toBe(email);
+      expect(data.delivery).toBeTruthy();
+      expect(data).not.toHaveProperty("token");
+      expect(data).not.toHaveProperty("sessionGrant");
+      expect(data).not.toHaveProperty("portalPath");
+      return data;
     }
 
-    const grantA = await mintAndVerify(DEMO_CLIENT_ID, "alex@democo.example");
-    const grantB = await mintAndVerify(DEMO_CLIENT_B_ID, "ops@otherco.example");
-    expect(grantA).not.toBe(grantB);
-
-    async function listWithGrant(path: string, grant: string) {
-      const res = await request.get(path, {
-        headers: {
-          "x-portal-grant": grant,
-          "content-type": "application/json",
-        },
-      });
-      const text = await res.text();
-      expect(res.ok(), `${path}: ${text}`).toBeTruthy();
-      // Must not depend on persona headers.
-      expect(text).not.toMatch(/x-dev-role/i);
-      const body = JSON.parse(text) as {
-        result?: { data?: { json?: unknown } };
-      };
-      return body.result?.data?.json ?? body.result?.data ?? null;
-    }
-
-    const aTasks = await listWithGrant("/api/trpc/portal.tasks.list", grantA);
-    const aAssets = await listWithGrant("/api/trpc/portal.assets.list", grantA);
-    const aApprovals = await listWithGrant(
-      "/api/trpc/portal.approvals.list",
-      grantA,
-    );
-    const bTasks = await listWithGrant("/api/trpc/portal.tasks.list", grantB);
-    const bAssets = await listWithGrant("/api/trpc/portal.assets.list", grantB);
-    const bApprovals = await listWithGrant(
-      "/api/trpc/portal.approvals.list",
-      grantB,
-    );
-
-    const blob = (value: unknown) => JSON.stringify(value ?? {});
-
-    expect(blob(aTasks)).toMatch(/Launch reel|Demo Co|Approve launch/i);
-    expect(blob(aTasks)).not.toMatch(/Other Co/i);
-    expect(blob(aAssets)).not.toMatch(/Other Co/i);
-    expect(blob(aApprovals)).toMatch(
-      /Approve launch reel cut|Approve product stills/i,
-    );
-    expect(blob(aApprovals)).not.toMatch(/Other Co/i);
-
-    expect(blob(bTasks)).toMatch(/Other Co/i);
-    expect(blob(bTasks)).not.toMatch(/Launch reel|Demo Co/i);
-    expect(blob(bAssets)).toMatch(/Other Co/i);
-    expect(blob(bAssets)).not.toMatch(/Launch reel|Demo Co/i);
-    expect(blob(bApprovals)).not.toMatch(
-      /Approve launch reel cut|Approve product stills|Demo Co/i,
-    );
+    await sendInvite(DEMO_CLIENT_ID, "alex@democo.example");
+    await sendInvite(DEMO_CLIENT_B_ID, "ops@otherco.example");
   });
 
   test("creative generate attaches to portal review", async ({
@@ -909,7 +824,7 @@ test.describe("Demo funnel", () => {
     await expect(portalReview).toBeVisible({ timeout: 60_000 });
     await expect(portalReview.locator("a")).toHaveAttribute(
       "href",
-      /\/portal\//,
+      /\/client-preview\?client=.*#approvals/,
     );
 
     // Memory-mode portal should now list the freshly attached pending approval.

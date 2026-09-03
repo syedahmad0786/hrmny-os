@@ -87,7 +87,7 @@ test.describe("Delivery Run agent UI", () => {
     await expect(toolResults).toBeVisible({ timeout: 15_000 });
   });
 
-  test("Portal onboarding mint opens portal onboarding route", async ({
+  test("Onboarding opens the staff client workspace", async ({
     page,
   }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
@@ -128,6 +128,9 @@ test.describe("Delivery Run agent UI", () => {
     const onboarding = page.getByTestId("delivery-client-onboarding");
     await expect(onboarding).toBeEnabled({ timeout: 30_000 });
     await onboarding.click();
-    await expect(page).toHaveURL(/\/portal\/onboarding/, { timeout: 60_000 });
+    await expect(page).toHaveURL(/\/clients\/[0-9a-f-]+#onboarding/, {
+      timeout: 60_000,
+    });
+    await expect(page.locator("#onboarding")).toBeVisible();
   });
 });

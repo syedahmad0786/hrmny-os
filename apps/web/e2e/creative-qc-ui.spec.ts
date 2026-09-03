@@ -59,6 +59,6 @@ test.describe("Creative Pass QC UI", () => {
     });
     await expect(
       page.getByTestId("creative-portal-review").locator("a"),
-    ).toHaveAttribute("href", /\/portal\//);
+    ).toHaveAttribute("href", /\/client-preview\?client=.*#approvals/);
   });
 });

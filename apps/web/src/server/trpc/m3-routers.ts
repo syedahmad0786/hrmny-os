@@ -1191,7 +1191,7 @@ export const clientsRouter = router({
         };
       }),
 
-    /** Mint magic-link that lands on portal approvals after verify. */
+    /** Resolve the safe staff review destination without minting client access. */
     reviewHref: staffProcedure
       .input(
         z.object({
