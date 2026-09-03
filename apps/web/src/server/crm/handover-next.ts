@@ -10,16 +10,6 @@ export function buildHandoverNextLinks(input: {
   invoiceId?: string | null;
   outreachId?: string | null;
   campaignItemId?: string | null;
-  /**
-   * Magic-link verify path that lands on portal approvals (own single-use token).
-   * Preferred over bare /portal/*.
-   */
-  portalPath?: string | null;
-  /**
-   * Magic-link verify path that lands on portal onboarding (own single-use token).
-   * Must not share a token with portalPath — tokens are single-use.
-   */
-  onboardingPath?: string | null;
 }): {
   client: string;
   account: string;
@@ -38,12 +28,8 @@ export function buildHandoverNextLinks(input: {
     invoiceId,
     outreachId,
     campaignItemId: _campaignItemId,
-    portalPath,
-    onboardingPath,
   } = input;
   void _campaignItemId;
-  const portalMagic = portalPath?.trim() || null;
-  const onboardingMagic = onboardingPath?.trim() || null;
   const creativeQs = new URLSearchParams({
     clientId,
   });
@@ -74,10 +60,8 @@ export function buildHandoverNextLinks(input: {
     creative: `/creative?${creativeQs.toString()}`,
     finance: `/finance?${financeQs.toString()}`,
     approvals: `/approvals?${approvalsQs.toString()}`,
-    // Prefer minted invites so Hunt CTAs land in the won client's session
-    // (bare /portal/* uses the wrong/dev portal actor or hits login).
-    portal: portalMagic ?? "/portal/login",
-    onboarding: onboardingMagic ?? "/portal/onboarding",
+    portal: `/client-preview?client=${encodeURIComponent(clientId)}#approvals`,
+    onboarding: `/clients/${encodeURIComponent(clientId)}#onboarding`,
     outreach: `/crm/outreach?${outreachQs.toString()}`,
     // Do not pin draft campaignItemIds into Approvals — that inbox only lists
     // approved campaigns (+ outreach drafts). Keep Hunt Approvals on outreach.
