@@ -22,8 +22,8 @@ export type TrpcContext = {
   canViewMargin: boolean;
   /** Set when actorType is portal (app-layer RLS). */
   clientId?: string | null;
-  /** Internal-only context used to propagate a published bundle. */
-  workBundleRollout?: { bundleId: string };
+  /** Exact opaque grant presented on this request, for scoped logout only. */
+  portalGrant?: string | null;
   /** Feature selected from the current tRPC path for resource-scope checks. */
   requestedFeatureKey?: string | null;
 };
@@ -44,6 +44,7 @@ export async function createContext(
         roles: granted.roles,
         canViewMargin: false,
         clientId: granted.clientId,
+        portalGrant,
       };
     }
   }

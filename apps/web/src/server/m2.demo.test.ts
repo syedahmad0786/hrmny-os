@@ -139,6 +139,9 @@ bz-9,Sam Lee,sam@hrmny.local,Ops
   it("blocks ordinary staff from HR administration and payroll data", async () => {
     const staff = callerFor("traffic");
 
+    await expect(staff.invoices.list()).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
     await expect(staff.payroll.runs.list()).rejects.toMatchObject({
       code: "FORBIDDEN",
     });

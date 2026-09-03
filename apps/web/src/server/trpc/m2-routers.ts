@@ -18,6 +18,7 @@ bootstrapGateRegistry();
 
 const HR_ADMIN_ROLES = ["partner", "director", "hr"] as const;
 const PAYROLL_VIEW_ROLES = ["partner", "director", "finance", "hr"] as const;
+const INVOICE_ROLES = ["partner", "director", "finance"] as const;
 
 function requireAnyRole(
   roles: string[],
@@ -31,6 +32,11 @@ function requireAnyRole(
     });
   }
 }
+
+const invoiceProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  requireAnyRole(ctx.roles, INVOICE_ROLES, "access invoices");
+  return next({ ctx });
+});
 
 function actorFromCtx(ctx: {
   employeeId: string | null;
@@ -91,7 +97,7 @@ async function runTransition(
 }
 
 export const invoicesRouter = router({
-  list: protectedProcedure.query(async () => {
+  list: invoiceProcedure.query(async () => {
     if (getDb()) {
       const { listBillingInvoices } = await import("../finance/list-invoices");
       const durable = await listBillingInvoices();
@@ -100,11 +106,11 @@ export const invoicesRouter = router({
     return [...getDemoStore().invoices.values()];
   }),
 
-  proposals: protectedProcedure.query(() => [
+  proposals: invoiceProcedure.query(() => [
     ...getDemoStore().proposals.values(),
   ]),
 
-  intake: protectedProcedure
+  intake: invoiceProcedure
     .input(
       z.object({
         emailRef: z.string().min(1),
@@ -149,7 +155,7 @@ export const invoicesRouter = router({
       return proposal;
     }),
 
-  intakeDecide: protectedProcedure
+  intakeDecide: invoiceProcedure
     .input(
       z.object({
         proposalId: z.string().uuid(),
@@ -244,7 +250,7 @@ export const invoicesRouter = router({
     }),
 
   /** M5: retainer / progress / first invoice draft (VAT 5%). */
-  draft: protectedProcedure
+  draft: invoiceProcedure
     .input(
       z.object({
         clientId: z.string().uuid(),
@@ -329,7 +335,7 @@ export const invoicesRouter = router({
     }),
 
   /** Month-start retainer auto-draft for all active retainer clients. */
-  draftRetainersForMonth: protectedProcedure
+  draftRetainersForMonth: invoiceProcedure
     .input(z.object({ period: z.string().regex(/^\d{4}-\d{2}$/) }))
     .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
@@ -447,7 +453,7 @@ export const invoicesRouter = router({
       return { period: input.period, created };
     }),
 
-  approve: protectedProcedure
+  approve: invoiceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
@@ -509,7 +515,7 @@ export const invoicesRouter = router({
       return { result, invoice: inv };
     }),
 
-  issue: protectedProcedure
+  issue: invoiceProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       const store = getDemoStore();
@@ -640,7 +646,7 @@ export const invoicesRouter = router({
     }),
 
   /** Mirror invoices from Xero (read-only) into Postgres + response. */
-  mirrorFromXero: protectedProcedure.query(async () => {
+  mirrorFromXero: invoiceProcedure.query(async () => {
     const { syncXeroInvoiceMirror } =
       await import("../finance/xero-mirror-sync");
     const synced = await syncXeroInvoiceMirror();
@@ -693,13 +699,13 @@ export const invoicesRouter = router({
   }),
 
   /** Explicit sync mutation for connections / cron. */
-  syncXeroMirror: protectedProcedure.mutation(async () => {
+  syncXeroMirror: invoiceProcedure.mutation(async () => {
     const { syncXeroInvoiceMirror } =
       await import("../finance/xero-mirror-sync");
     return syncXeroInvoiceMirror();
   }),
 
-  transition: protectedProcedure
+  transition: invoiceProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -764,7 +770,7 @@ export const invoicesRouter = router({
       return result;
     }),
 
-  resetDemo: protectedProcedure.mutation(() => {
+  resetDemo: invoiceProcedure.mutation(() => {
     getDemoStore().resetM2Demo();
     return { ok: true as const };
   }),

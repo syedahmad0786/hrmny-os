@@ -314,7 +314,7 @@ function DeliveryBoardPageInner() {
                 disabled={reviewHref.isPending}
                 onClick={() => openPortal("/portal/approvals")}
               >
-                {reviewHref.isPending ? "Opening…" : "Client approvals"}
+                {reviewHref.isPending ? "Opening…" : "Preview approvals"}
               </button>
               <button
                 type="button"

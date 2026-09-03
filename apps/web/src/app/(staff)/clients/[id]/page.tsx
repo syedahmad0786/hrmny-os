@@ -17,14 +17,25 @@ export default function ClientOnboardingPage() {
       ? Number(focusPhaseRaw)
       : null;
   const utils = trpc.useUtils();
+  const session = trpc.auth.session.useQuery();
+  const canAccessInvoices = Boolean(
+    session.data?.roles.some((role) =>
+      ["partner", "director", "finance"].includes(role),
+    ),
+  );
   const client = trpc.clients.get.useQuery({ id });
   const onboarding = trpc.clients.onboarding.get.useQuery({ clientId: id });
   const immersion = trpc.clients.immersion.get.useQuery({ clientId: id });
   const tasks = trpc.tasks.list.useQuery({ clientId: id });
   const calendars = trpc.calendars.listByClient.useQuery({ clientId: id });
-  const invoices = trpc.invoices.list.useQuery();
+  const invoices = trpc.invoices.list.useQuery(undefined, {
+    enabled: canAccessInvoices,
+    retry: false,
+  });
   const dealId =
-    client.data && "dealId" in client.data && typeof client.data.dealId === "string"
+    client.data &&
+    "dealId" in client.data &&
+    typeof client.data.dealId === "string"
       ? client.data.dealId
       : null;
   const outreach = trpc.leadgen.outreach.list.useQuery(
@@ -164,13 +175,15 @@ export default function ClientOnboardingPage() {
           >
             Outreach →
           </Link>
-          <Link
-            href={continueLinks.finance}
-            data-testid="client-continue-finance"
-            className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
-          >
-            Finance →
-          </Link>
+          {canAccessInvoices ? (
+            <Link
+              href={continueLinks.finance}
+              data-testid="client-continue-finance"
+              className="rounded-full border border-sand bg-white/80 px-3 py-1 text-ochre underline-offset-2 hover:underline"
+            >
+              Finance →
+            </Link>
+          ) : null}
           <button
             type="button"
             data-testid="client-continue-portal"
@@ -185,7 +198,9 @@ export default function ClientOnboardingPage() {
                 })
                 .catch((err: unknown) => {
                   setPortalMsg(
-                    err instanceof Error ? err.message : "Portal invite failed",
+                    err instanceof Error
+                      ? err.message
+                      : "Preview could not open",
                   );
                 });
             }}
@@ -193,8 +208,8 @@ export default function ClientOnboardingPage() {
             {reviewHref.isPending &&
             (reviewHref.variables?.next == null ||
               reviewHref.variables.next === "/portal/approvals")
-              ? "Minting portal…"
-              : "Portal approvals →"}
+              ? "Opening preview…"
+              : "Preview approvals →"}
           </button>
           <button
             type="button"
@@ -212,15 +227,15 @@ export default function ClientOnboardingPage() {
                   setPortalMsg(
                     err instanceof Error
                       ? err.message
-                      : "Onboarding invite failed",
+                      : "Onboarding could not open",
                   );
                 });
             }}
           >
             {reviewHref.isPending &&
             reviewHref.variables?.next === "/portal/onboarding"
-              ? "Minting onboarding…"
-              : "Portal onboarding →"}
+              ? "Opening onboarding…"
+              : "Onboarding →"}
           </button>
         </nav>
         {portalMsg ? (
@@ -228,7 +243,10 @@ export default function ClientOnboardingPage() {
         ) : null}
       </div>
 
-      <section className="rounded-lg border border-sand bg-white/70 p-4">
+      <section
+        id="onboarding"
+        className="rounded-lg border border-sand bg-white/70 p-4"
+      >
         <h2 className="font-display text-lg">Onboarding board</h2>
         <ul className="mt-3 flex flex-col gap-3">
           {(onboarding.data ?? []).map((phase) => (

@@ -109,7 +109,9 @@ describe("runAgentTools funnel writes", () => {
     };
     expect(portalAsset?.assetId).toBeTruthy();
     expect(portalAsset?.taskId).toBeTruthy();
-    expect(portalAsset?.portalHref).toMatch(/\/portal\/login\/verify\?token=/);
+    expect(portalAsset?.portalHref).toBe(
+      `/client-preview?client=${CLIENT_ID}#approvals`,
+    );
     expect(portalAsset?.next?.portal).toBe(portalAsset?.portalHref);
     expect(portalAsset?.next?.creative).toContain(CLIENT_ID);
     expect(portalAsset?.next?.delivery).toContain(CLIENT_ID);
@@ -125,7 +127,7 @@ describe("runAgentTools funnel writes", () => {
     }
   });
 
-  it("forces a mock invite for synthetic creative-to-portal even when Resend is live", async () => {
+  it("opens a staff preview without minting an invite when Resend is live", async () => {
     vi.stubEnv("RESEND_MODE", "live");
     vi.stubEnv("RESEND_API_KEY", "synthetic-test-key");
     const fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -143,7 +145,7 @@ describe("runAgentTools funnel writes", () => {
         results.find((row) => row.tool === "creative.sendToPortal")?.ok,
       ).toBe(true);
       expect(fetchSpy).not.toHaveBeenCalled();
-      expect(getDemoStore().portalMagicTokens.size).toBe(beforeTokens + 1);
+      expect(getDemoStore().portalMagicTokens.size).toBe(beforeTokens);
     } finally {
       fetchSpy.mockRestore();
       vi.unstubAllEnvs();
@@ -176,9 +178,8 @@ describe("runAgentTools funnel writes", () => {
     expect(data?.viaApollo).toBe(false);
     expect((data?.onboardingPhases ?? 0) > 0).toBe(true);
     expect(data?.next?.crmDeal).toMatch(/^\/crm\/deals\//);
-    expect(data?.portalInvite?.portalPath ?? "").toMatch(
-      /\/portal\/login\/verify/,
-    );
+    expect(data?.portalInvite).toBeNull();
+    expect(data?.next?.portal).not.toContain("token=");
     expect(data?.fired?.some((f) => f === "staff.notify")).toBe(true);
   });
 
@@ -401,7 +402,6 @@ describe("runAgentTools funnel writes", () => {
     expect((row?.data as { status?: string })?.status).toBe("client_review");
   });
 
-
   it("briefs.os_lock locks DoR-ready brief and spawns creative with next links", async () => {
     const { DEMO_BRIEF_ID, getDemoStore } = await import("../demo-store");
     getDemoStore().resetM4Demo();
@@ -605,7 +605,8 @@ describe("runAgentTools funnel writes", () => {
   it("one-shot OS settle chains closed_loop IDs into settle tools", async () => {
     const { resetCrmMemory } = await import("../crm/memory");
     resetCrmMemory();
-    const { DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS } = await import("./agent-tools");
+    const { DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS } =
+      await import("./agent-tools");
     const results = await runAgentTools({
       allowedTools: [...DEFAULT_DEMO_OS_SETTLE_AGENT_TOOLS],
       prompt:
@@ -633,9 +634,11 @@ describe("runAgentTools funnel writes", () => {
       (byTool("creative.os_qc")?.data as { status?: string })?.status,
     ).toBe("client_review");
     expect(byTool("portal.os_approve")).toBeUndefined();
-    const settledTaskId = (byTool("crm.closed_loop")?.data as {
-      taskId?: string;
-    })?.taskId;
+    const settledTaskId = (
+      byTool("crm.closed_loop")?.data as {
+        taskId?: string;
+      }
+    )?.taskId;
     expect(getDemoStore().tasks.get(settledTaskId!)?.status).toBe(
       "client_review",
     );
@@ -685,7 +688,9 @@ describe("runAgentTools funnel writes", () => {
       },
     });
     expect(results.find((r) => r.tool === "crm.prospect")).toBeUndefined();
-    const crm = results.find((r) => r.tool === "crm.read" || r.tool === "crm.deals");
+    const crm = results.find(
+      (r) => r.tool === "crm.read" || r.tool === "crm.deals",
+    );
     if (crm) expect(crm.ok).toBe(true);
   });
 
@@ -742,10 +747,8 @@ describe("runAgentTools funnel writes", () => {
 
   it("crm.read and outreach.read isolate Demo Co vs Other Co sandboxes", async () => {
     const { resetCrmMemory } = await import("../crm/memory");
-    const {
-      resetLeadgenStore,
-      seedClientSandboxOutreach,
-    } = await import("../leadgen/store");
+    const { resetLeadgenStore, seedClientSandboxOutreach } =
+      await import("../leadgen/store");
     const {
       DEMO_CLIENT_ID,
       DEMO_CLIENT_B_ID,
@@ -871,12 +874,12 @@ describe("runAgentTools funnel writes", () => {
       aCampaigns.some((c) => /Demo Co LinkedIn launch/i.test(c.title)),
     ).toBe(true);
     expect(aCampaigns.every((c) => c.clientId === DEMO_CLIENT_ID)).toBe(true);
-    expect(
-      aCampaigns.some((c) => /Other Co confidential/i.test(c.title)),
-    ).toBe(false);
-    expect(
-      bCampaigns.some((c) => /Other Co confidential/i.test(c.title)),
-    ).toBe(true);
+    expect(aCampaigns.some((c) => /Other Co confidential/i.test(c.title))).toBe(
+      false,
+    );
+    expect(bCampaigns.some((c) => /Other Co confidential/i.test(c.title))).toBe(
+      true,
+    );
     expect(bCampaigns.every((c) => c.clientId === DEMO_CLIENT_B_ID)).toBe(true);
     expect(
       bCampaigns.some((c) => /Demo Co LinkedIn launch/i.test(c.title)),

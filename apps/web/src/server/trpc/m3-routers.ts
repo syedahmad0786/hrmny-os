@@ -1187,12 +1187,11 @@ export const clientsRouter = router({
         });
         return {
           ...user,
-          portalPath: invite.portalPath,
           delivery: invite.delivery,
         };
       }),
 
-    /** Mint magic-link that lands on portal approvals after verify. */
+    /** Resolve the safe staff review destination without minting client access. */
     reviewHref: staffProcedure
       .input(
         z.object({
@@ -1208,7 +1207,7 @@ export const clientsRouter = router({
         return { portalPath, clientId: input.clientId };
       }),
 
-    /** Staff demo: issue a single-use portal magic token and email it. */
+    /** Email a fresh sign-in link without exposing the client credential. */
     issueDemoToken: staffProcedure
       .input(
         z.object({
@@ -1233,8 +1232,6 @@ export const clientsRouter = router({
           email,
         });
         return {
-          token: invite.token,
-          portalPath: invite.portalPath,
           email: invite.email,
           clientId: invite.clientId,
           delivery: invite.delivery,

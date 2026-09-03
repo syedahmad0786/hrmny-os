@@ -90,7 +90,7 @@ test.describe("Creative Canva stub → portal UI", () => {
     });
     await expect(
       page.getByTestId("creative-portal-review").locator("a"),
-    ).toHaveAttribute("href", /\/portal\//);
+    ).toHaveAttribute("href", /\/client-preview\?client=.*#approvals/);
 
     const approvals = await request.get("/api/trpc/portal.approvals.list", {
       headers: {

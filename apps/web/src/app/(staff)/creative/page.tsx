@@ -98,12 +98,7 @@ function CreativeQcPageInner() {
     }
     const fromSeed = ids.data?.clientId?.trim() ?? "";
     if (fromSeed) setPortalClientId(fromSeed);
-  }, [
-    ids.data?.clientId,
-    portalClientId,
-    portalClientTouched,
-    searchParams,
-  ]);
+  }, [ids.data?.clientId, portalClientId, portalClientTouched, searchParams]);
 
   async function tryClientFacing() {
     if (!taskId) return;
@@ -137,10 +132,7 @@ function CreativeQcPageInner() {
     );
     if (result.ok) {
       const clientForPortal =
-        portalClientId ||
-        task.data?.clientId ||
-        ids.data?.clientId ||
-        "";
+        portalClientId || task.data?.clientId || ids.data?.clientId || "";
       if (clientForPortal) {
         try {
           const href = await reviewHref.mutateAsync({
@@ -233,7 +225,8 @@ function CreativeQcPageInner() {
               generate.data.status !== "ready"
             }
             onClick={() => {
-              if (!generate.data?.creativeGenerationId || !portalClientId) return;
+              if (!generate.data?.creativeGenerationId || !portalClientId)
+                return;
               sendToPortal.mutate({
                 creativeGenerationId: generate.data.creativeGenerationId,
                 clientId: portalClientId,
@@ -298,9 +291,9 @@ function CreativeQcPageInner() {
       <section className="rounded-lg border border-sand bg-white/70 p-4 text-sm">
         <h2 className="font-display text-lg font-semibold">Canva → portal</h2>
         <p className="mt-1 text-muted">
-          List Canva designs, export PNG into DAM, and open client_review on
-          the portal. Without a Canva OAuth connection the OS uses stub
-          designs (not live Canva).
+          List Canva designs, export PNG into DAM, and open client_review on the
+          portal. Without a Canva OAuth connection the OS uses stub designs (not
+          live Canva).
         </p>
         {!canvaDesigns.data?.ok ? (
           <p className="mt-3 text-muted">
@@ -312,7 +305,10 @@ function CreativeQcPageInner() {
         ) : (
           <>
             {"mode" in canvaDesigns.data && canvaDesigns.data.mode ? (
-              <p className="mt-2 text-xs text-muted" data-testid="canva-list-mode">
+              <p
+                className="mt-2 text-xs text-muted"
+                data-testid="canva-list-mode"
+              >
                 Mode: {canvaDesigns.data.mode}
                 {canvaDesigns.data.mode === "stub"
                   ? " — connect Canva for live designs"
@@ -326,7 +322,9 @@ function CreativeQcPageInner() {
                   className="flex flex-wrap items-center justify-between gap-2 border-b border-sand/60 pb-2"
                   data-testid={`canva-design-${design.id}`}
                 >
-                  <span className="min-w-0 flex-1 truncate">{design.title}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {design.title}
+                  </span>
                   <Button
                     type="button"
                     variant="ghost"
@@ -423,7 +421,7 @@ function CreativeQcPageInner() {
         {portalHref ? (
           <p className="mt-2 text-sm" data-testid="creative-portal-review">
             <a href={portalHref} className="text-ochre underline">
-              Open portal review →
+              Open read-only client preview →
             </a>
           </p>
         ) : null}

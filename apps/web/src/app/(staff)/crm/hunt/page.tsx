@@ -1121,23 +1121,18 @@ export default function HuntClientsPage() {
                         First invoice
                       </Link>
                     ) : null}
-                    {demo.data.portalInvite?.portalPath ? (
-                      <Link
-                        data-testid="hunt-status-portal"
-                        href={demo.data.portalInvite.portalPath}
-                      >
-                        Portal approvals link (
-                        {demo.data.portalInvite.delivery?.mode ?? "mock"})
-                      </Link>
-                    ) : null}
-                    {demo.data.portalInvite?.onboardingPath ? (
-                      <Link
-                        data-testid="hunt-status-onboarding"
-                        href={demo.data.portalInvite.onboardingPath}
-                      >
-                        Onboarding magic link
-                      </Link>
-                    ) : null}
+                    <Link
+                      data-testid="hunt-status-portal"
+                      href={demo.data.next.portal}
+                    >
+                      Preview client approvals
+                    </Link>
+                    <Link
+                      data-testid="hunt-status-onboarding"
+                      href={demo.data.next.onboarding}
+                    >
+                      Review onboarding board
+                    </Link>
                   </nav>
                 ) : null}
               </div>

@@ -21,8 +21,12 @@ describe("buildHandoverNextLinks", () => {
     expect(next.campaigns).toBe(
       "/creative?clientId=c1000000-0000-4000-8000-000000000001",
     );
-    expect(next.portal).toBe("/portal/login");
-    expect(next.onboarding).toBe("/portal/onboarding");
+    expect(next.portal).toBe(
+      "/client-preview?client=c1000000-0000-4000-8000-000000000001#approvals",
+    );
+    expect(next.onboarding).toBe(
+      "/clients/c1000000-0000-4000-8000-000000000001#onboarding",
+    );
     expect(next.finance).toBe(
       "/finance?clientId=c1000000-0000-4000-8000-000000000001",
     );
@@ -72,22 +76,5 @@ describe("buildHandoverNextLinks", () => {
       "/creative?clientId=c1000000-0000-4000-8000-000000000001",
     );
     expect(next.campaigns).not.toContain("camp-1");
-  });
-
-  it("uses distinct magic-link paths for portal vs onboarding", () => {
-    const portal =
-      "/portal/login/verify?token=ml_portal_deadbeefcafebabe01234567&next=%2Fportal%2Fapprovals";
-    const onboarding =
-      "/portal/login/verify?token=ml_onboard_deadbeefcafebabe0123456&next=%2Fportal%2Fonboarding";
-    const next = buildHandoverNextLinks({
-      clientId: "c1000000-0000-4000-8000-000000000001",
-      portalPath: portal,
-      onboardingPath: onboarding,
-    });
-    expect(next.portal).toBe(portal);
-    expect(next.onboarding).toBe(onboarding);
-    expect(next.portal).not.toBe(next.onboarding);
-    expect(next.portal).not.toContain("ml_onboard_");
-    expect(next.onboarding).not.toContain("ml_portal_");
   });
 });

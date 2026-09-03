@@ -1,11 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { DEMO_CLIENT_ID } from "./route-manifest";
 
-/**
- * Clients directory: grant portal access mints magic link (Resend mock in CI).
- */
+/** Clients directory: grant access emails the client without exposing a credential. */
 test.describe("Clients portal invite UI", () => {
-  test("grant portal access shows mock delivery note and magic link", async ({
+  test("grant portal access confirms delivery without exposing a magic link", async ({
     page,
   }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
@@ -29,14 +27,17 @@ test.describe("Clients portal invite UI", () => {
       .getByTestId("clients-portal-invite-name")
       .fill("Portal Invite E2E");
     await page.getByTestId("clients-portal-invite-email").fill(email);
+    page.once("dialog", async (dialog) => {
+      expect(dialog.message()).toContain(email);
+      await dialog.accept();
+    });
     await page.getByTestId("clients-portal-invite-submit").click();
 
     const note = page.getByTestId("clients-portal-invite-note");
     await expect(note).toBeVisible({ timeout: 30_000 });
-    await expect(note).toContainText(/mock|magic link|Resend/i);
-
-    const link = page.getByTestId("clients-portal-demo-link-href");
-    await expect(link).toBeVisible({ timeout: 30_000 });
-    await expect(link).toHaveAttribute("href", /\/portal\//);
+    await expect(note).toContainText(/Access granted|email delivery|emailed/i);
+    await expect(
+      page.getByTestId("clients-portal-demo-link-href"),
+    ).toHaveCount(0);
   });
 });

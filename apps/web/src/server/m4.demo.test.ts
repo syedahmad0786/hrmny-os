@@ -5,13 +5,15 @@ import { createCaller } from "./trpc/root";
 import {
   DEMO_BRIEF_ID,
   DEMO_CALENDAR_ID,
+  DEMO_CLIENT_ID,
   DEMO_CREATIVE_TASK_ID,
   getDemoStore,
 } from "./demo-store";
 import { resolveDevUser, sessionCanViewMargin } from "./auth/session";
 
 function callerFor(
-  role: "partner" | "am" | "traffic" | "creative_director" | "director",
+  role:
+    "partner" | "am" | "finance" | "traffic" | "creative_director" | "director",
 ) {
   const user = resolveDevUser(role);
   return createCaller({
@@ -76,9 +78,9 @@ describe("M4 delivery demo", () => {
     });
     expect(blocked.ok).toBe(false);
     if (!blocked.ok) {
-      expect(blocked.blockedBy?.some((b) => b.gate === "task.creative_qc")).toBe(
-        true,
-      );
+      expect(
+        blocked.blockedBy?.some((b) => b.gate === "task.creative_qc"),
+      ).toBe(true);
     }
 
     const cd = callerFor("creative_director");
@@ -170,9 +172,56 @@ describe("M4 delivery demo", () => {
     });
     expect(attached.ok).toBe(true);
     expect(attached.mode).toBe("stub");
-    expect(attached.portalHref).toMatch(/\/portal\/login\/verify\?token=/);
+    expect(attached.portalHref).toBe(
+      `/client-preview?client=${clientId}#approvals`,
+    );
     expect(attached.assetId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
+  });
+
+  it("blocks non-delivery roles, non-owners, and staff client approval", async () => {
+    const finance = callerFor("finance");
+    await expect(
+      finance.tasks.create({ clientId: DEMO_CLIENT_ID, taskType: "social" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const employeeId = "c0000000-0000-4000-8000-000000000099";
+    const creative = createCaller({
+      user: {
+        employeeId,
+        email: "creative@hrmny.local",
+        displayName: "Creative",
+        roles: ["creative"],
+        permissions: ["allow:task:*"],
+        actorType: "staff",
+        clientId: null,
+      },
+      employeeId,
+      roles: ["creative"],
+      canViewMargin: false,
+    });
+    await expect(
+      creative.tasks.setSituational({
+        id: DEMO_CREATIVE_TASK_ID,
+        situationalState: "working",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    getDemoStore().tasks.get(DEMO_CREATIVE_TASK_ID)!.ownerEmployeeId =
+      employeeId;
+    await expect(
+      creative.tasks.setSituational({
+        id: DEMO_CREATIVE_TASK_ID,
+        situationalState: "working",
+      }),
+    ).resolves.toMatchObject({ situationalState: "working" });
+
+    await expect(
+      callerFor("partner").calendars.finalApprove({ id: DEMO_CALENDAR_ID }),
+    ).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringMatching(/client portal/i),
+    });
   });
 });

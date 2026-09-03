@@ -445,6 +445,14 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   const requiredFeature = featureForPathname(pathname);
   const pageEnabled = !requiredFeature || enabledFeatures.has(requiredFeature);
   const availableNavigation: ResolvedNavItem[] = PRIMARY_NAV.flatMap((item) => {
+    if (
+      item.id === "finance" &&
+      !session.data?.roles.some((role) =>
+        ["partner", "director", "finance"].includes(role),
+      )
+    ) {
+      return [];
+    }
     const destination = item.destinations.find(
       ({ feature, capability }) =>
         enabledFeatures.has(feature) &&

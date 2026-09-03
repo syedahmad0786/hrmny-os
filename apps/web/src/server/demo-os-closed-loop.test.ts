@@ -64,7 +64,9 @@ describe("demo OS closed loop", () => {
       (a) => a.clientId === DEMO_CLIENT_ID && a.status === "pending",
     );
     expect(pending.some((a) => a.entityId === sent.assetId)).toBe(true);
-    expect(sent.portalHref).toMatch(/\/portal\//);
+    expect(sent.portalHref).toBe(
+      `/client-preview?client=${DEMO_CLIENT_ID}#approvals`,
+    );
   });
 
   it("apollo import writes durable CRM deals visible to crm.deals", async () => {
@@ -101,11 +103,17 @@ describe("demo OS closed loop", () => {
       `clientId=${encodeURIComponent(result.clientId)}`,
     );
     expect(result.fired).toEqual(
-      expect.arrayContaining(["client.create", "onboarding.seed", "creative.task_seed"]),
+      expect.arrayContaining([
+        "client.create",
+        "onboarding.seed",
+        "creative.task_seed",
+      ]),
     );
     const store = getDemoStore();
     expect(store.clients.has(result.clientId)).toBe(true);
-    expect(store.onboarding.get(result.clientId)?.length).toBeGreaterThanOrEqual(1);
+    expect(
+      store.onboarding.get(result.clientId)?.length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it("runDemoClosedLoop without Apollo completes prospect → won → onboarding", async () => {
@@ -122,6 +130,7 @@ describe("demo OS closed loop", () => {
     expect(result.next.creative).toContain(
       `taskId=${encodeURIComponent(result.taskId!)}`,
     );
-    expect(result.portalInvite?.portalPath ?? "").toMatch(/\/portal\//);
+    expect(result.portalInvite).toBeNull();
+    expect(result.next.portal).not.toContain("token=");
   });
 });

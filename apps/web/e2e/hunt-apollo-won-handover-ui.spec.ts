@@ -220,7 +220,7 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     });
   });
 
-  test("Closed loop status panel finance outreach portal onboarding links", async ({
+  test("Closed loop status panel links stay in staff workspaces", async ({
     page,
   }) => {
     const query = `E2E Apollo Status ${Date.now()}`;
@@ -252,11 +252,11 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     await expect(statusOutreach).toHaveAttribute("href", /\/crm\/outreach/);
     await expect(statusPortal).toHaveAttribute(
       "href",
-      /\/portal\/login\/verify/,
+      /\/client-preview\?client=.*#approvals/,
     );
     await expect(statusOnboarding).toHaveAttribute(
       "href",
-      /\/portal\/login\/verify/,
+      /\/clients\/[0-9a-f-]+#onboarding/,
     );
 
     const nextFinance = page.getByTestId("hunt-next-finance");
@@ -290,18 +290,19 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     ).toBeVisible({ timeout: 60_000 });
 
     await page.goto(portalHref!, { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveURL(/\/portal\/login\/verify/, {
+    await expect(page).toHaveURL(/\/client-preview\?client=.*#approvals/, {
       timeout: 60_000,
     });
     await expect(
-      page.getByRole("heading", { name: /^Approvals$/i }),
+      page.getByText("hrmny client workspace", { exact: true }),
     ).toBeVisible({ timeout: 60_000 });
-    await expect(page).toHaveURL(/\/portal\/approvals/);
+    await expect(page).not.toHaveURL(/token=|\/portal\//);
 
     await page.goto(onboardingHref!, { waitUntil: "domcontentloaded" });
     await expect(
-      page.getByRole("heading", { name: /^Onboarding$/i }),
+      page.getByRole("heading", { name: /Onboarding board/i }),
     ).toBeVisible({ timeout: 60_000 });
-    await expect(page).toHaveURL(/\/portal\/onboarding/);
+    await expect(page).toHaveURL(/\/clients\/[0-9a-f-]+#onboarding/);
+    await expect(page).not.toHaveURL(/token=|\/portal\//);
   });
 });

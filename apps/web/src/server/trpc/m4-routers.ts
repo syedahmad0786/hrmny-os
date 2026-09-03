@@ -46,6 +46,57 @@ import {
 } from "../tasks/delivery-calendars";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
 
+const DELIVERY_COORDINATOR_ROLES = [
+  "partner",
+  "director",
+  "traffic",
+  "am",
+  "account_manager",
+  "creative_director",
+] as const;
+const DELIVERY_CONTRIBUTOR_ROLES = [
+  ...DELIVERY_COORDINATOR_ROLES,
+  "creative",
+] as const;
+
+function hasDeliveryRole(roles: string[], allowed: readonly string[]) {
+  return roles.some((role) => allowed.includes(role));
+}
+
+const deliveryCoordinatorProcedure = protectedProcedure.use(
+  async ({ ctx, next }) => {
+    if (!hasDeliveryRole(ctx.roles, DELIVERY_COORDINATOR_ROLES)) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Delivery coordinator access required",
+      });
+    }
+    return next({ ctx });
+  },
+);
+
+const deliveryContributorProcedure = protectedProcedure.use(
+  async ({ ctx, next }) => {
+    if (!hasDeliveryRole(ctx.roles, DELIVERY_CONTRIBUTOR_ROLES)) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Delivery contributor access required",
+      });
+    }
+    return next({ ctx });
+  },
+);
+
+function canMutateTask(
+  ctx: { employeeId: string | null; roles: string[] },
+  task: { ownerEmployeeId: string | null },
+) {
+  return (
+    hasDeliveryRole(ctx.roles, DELIVERY_COORDINATOR_ROLES) ||
+    (Boolean(ctx.employeeId) && task.ownerEmployeeId === ctx.employeeId)
+  );
+}
+
 function actorFrom(ctx: {
   employeeId: string | null;
   roles: string[];
@@ -59,9 +110,7 @@ function actorFrom(ctx: {
 }
 
 function taskSnapshot(task: DemoTask): EntitySnapshot {
-  const waived = Boolean(
-    (task as DemoTask & { qcWaived?: boolean }).qcWaived,
-  );
+  const waived = Boolean((task as DemoTask & { qcWaived?: boolean }).qcWaived);
   return {
     entityType: "task",
     entityId: task.taskId,
@@ -90,32 +139,37 @@ async function applyTaskTransition(
   overrideReason?: string | null,
 ) {
   const store = getDemoStore();
-  return transition(actorFrom(ctx), taskSnapshot(task), {
-    to,
-    from: task.status,
-    payload,
-    overrideReason,
-  }, {
-    authorize: async () => true,
-    apply: async ({ request }) => {
-      task.status = request.to;
-      if (request.payload?.qcPassed === true) task.qcPassed = true;
-      store.tasks.set(task.taskId, task);
-      return taskSnapshot(task);
+  return transition(
+    actorFrom(ctx),
+    taskSnapshot(task),
+    {
+      to,
+      from: task.status,
+      payload,
+      overrideReason,
     },
-    audit: async (event) => {
-      const row = store.appendAudit({
-        actorEmployeeId: event.actorEmployeeId,
-        action: event.action,
-        entityType: event.entityType,
-        entityId: event.entityId ?? task.taskId,
-        before: event.before,
-        after: event.after,
-        reason: event.reason ?? null,
-      });
-      return { auditId: row.auditEventId };
+    {
+      authorize: async () => canMutateTask(ctx, task),
+      apply: async ({ request }) => {
+        task.status = request.to;
+        if (request.payload?.qcPassed === true) task.qcPassed = true;
+        store.tasks.set(task.taskId, task);
+        return taskSnapshot(task);
+      },
+      audit: async (event) => {
+        const row = store.appendAudit({
+          actorEmployeeId: event.actorEmployeeId,
+          action: event.action,
+          entityType: event.entityType,
+          entityId: event.entityId ?? task.taskId,
+          before: event.before,
+          after: event.after,
+          reason: event.reason ?? null,
+        });
+        return { auditId: row.auditEventId };
+      },
     },
-  });
+  );
 }
 
 function deliveryAsDemoTask(task: DeliveryTask): DemoTask {
@@ -151,36 +205,45 @@ async function applyDurableTaskTransition(
   overrideReason?: string | null,
 ) {
   const demo = deliveryAsDemoTask(task);
-  return transition(actorFrom(ctx), taskSnapshot(demo), {
-    to,
-    from: task.status,
-    payload,
-    overrideReason,
-  }, {
-    authorize: async () => true,
-    apply: async ({ request }) => {
-      const qcPassed =
-        request.payload?.qcPassed === true ? true : task.qcPassed;
-      const updated = await updateDeliveryTaskStatus({
-        taskId: task.taskId,
-        status: request.to,
-        qcPassed,
-      });
-      return taskSnapshot(deliveryAsDemoTask(updated ?? { ...task, status: request.to, qcPassed }));
+  return transition(
+    actorFrom(ctx),
+    taskSnapshot(demo),
+    {
+      to,
+      from: task.status,
+      payload,
+      overrideReason,
     },
-    audit: async (event) => {
-      const row = getDemoStore().appendAudit({
-        actorEmployeeId: event.actorEmployeeId,
-        action: event.action,
-        entityType: event.entityType,
-        entityId: event.entityId ?? task.taskId,
-        before: event.before,
-        after: event.after,
-        reason: event.reason ?? null,
-      });
-      return { auditId: row.auditEventId };
+    {
+      authorize: async () => canMutateTask(ctx, task),
+      apply: async ({ request }) => {
+        const qcPassed =
+          request.payload?.qcPassed === true ? true : task.qcPassed;
+        const updated = await updateDeliveryTaskStatus({
+          taskId: task.taskId,
+          status: request.to,
+          qcPassed,
+        });
+        return taskSnapshot(
+          deliveryAsDemoTask(
+            updated ?? { ...task, status: request.to, qcPassed },
+          ),
+        );
+      },
+      audit: async (event) => {
+        const row = getDemoStore().appendAudit({
+          actorEmployeeId: event.actorEmployeeId,
+          action: event.action,
+          entityType: event.entityType,
+          entityId: event.entityId ?? task.taskId,
+          before: event.before,
+          after: event.after,
+          reason: event.reason ?? null,
+        });
+        return { auditId: row.auditEventId };
+      },
     },
-  });
+  );
 }
 
 export const m4DemoRouter = router({
@@ -204,127 +267,126 @@ export const m4DemoRouter = router({
   seedIds: publicProcedure
     .input(z.object({ clientId: z.string().uuid().optional() }).optional())
     .query(async ({ input }) => {
-    const scopedClientId = input?.clientId?.trim() || null;
-    if (getDb()) {
+      const scopedClientId = input?.clientId?.trim() || null;
+      if (getDb()) {
+        if (scopedClientId) {
+          const forClient = await listDeliveryTasks({
+            clientId: scopedClientId,
+          });
+          const task = forClient.find((t) => t.briefId) ?? forClient[0] ?? null;
+          const cals = await listDeliveryCalendars({
+            clientId: scopedClientId,
+          });
+          return {
+            clientId: scopedClientId,
+            calendarId: cals[0]?.calendarId ?? null,
+            taskId: task?.taskId ?? null,
+            briefId: task?.briefId ?? null,
+            creativeTaskId: task?.taskId ?? null,
+            source: cals[0]
+              ? ("durable_client" as const)
+              : ("durable_client_empty" as const),
+          };
+        }
+        const recentCals = await listRecentDeliveryCalendars({ limit: 1 });
+        const latestCal = recentCals[0];
+        if (latestCal) {
+          const forClient = await listDeliveryTasks({
+            clientId: latestCal.clientId,
+          });
+          const task = forClient.find((t) => t.briefId) ?? forClient[0] ?? null;
+          return {
+            clientId: latestCal.clientId,
+            calendarId: latestCal.calendarId,
+            taskId: task?.taskId ?? null,
+            briefId: task?.briefId ?? null,
+            creativeTaskId: task?.taskId ?? null,
+            source: "durable_calendar" as const,
+          };
+        }
+
+        async function withClientCalendar(
+          clientId: string,
+          fallback: {
+            taskId: string | null;
+            briefId: string | null;
+            creativeTaskId: string | null;
+          },
+        ) {
+          const cals = await listDeliveryCalendars({ clientId });
+          return {
+            clientId,
+            calendarId: cals[0]?.calendarId ?? null,
+            ...fallback,
+            source: cals[0]
+              ? ("durable_task" as const)
+              : ("durable_empty" as const),
+          };
+        }
+
+        const unlocked = await listDeliveryTasks({ status: "briefing" });
+        const withBrief = unlocked.find((t) => t.briefId);
+        if (withBrief?.briefId) {
+          return withClientCalendar(withBrief.clientId, {
+            taskId: withBrief.taskId,
+            briefId: withBrief.briefId,
+            creativeTaskId: withBrief.taskId,
+          });
+        }
+        const ready = await listDeliveryTasks({ status: "brief_ready" });
+        const readyBrief = ready.find((t) => t.briefId);
+        if (readyBrief?.briefId) {
+          return withClientCalendar(readyBrief.clientId, {
+            taskId: readyBrief.taskId,
+            briefId: readyBrief.briefId,
+            creativeTaskId: readyBrief.taskId,
+          });
+        }
+        const qcTasks = await listDeliveryTasks({ status: "qc" });
+        if (qcTasks[0]) {
+          return withClientCalendar(qcTasks[0].clientId, {
+            taskId: qcTasks[0].taskId,
+            briefId: qcTasks[0].briefId ?? null,
+            creativeTaskId: qcTasks[0].taskId,
+          });
+        }
+        return {
+          clientId: null,
+          calendarId: null,
+          taskId: null,
+          briefId: null,
+          creativeTaskId: null,
+          source: "durable_empty" as const,
+        };
+      }
+      const store = getDemoStore();
+      if (store.calendars.size === 0) store.seedM4Demo();
       if (scopedClientId) {
-        const forClient = await listDeliveryTasks({
-          clientId: scopedClientId,
-        });
-        const task =
-          forClient.find((t) => t.briefId) ?? forClient[0] ?? null;
-        const cals = await listDeliveryCalendars({
-          clientId: scopedClientId,
-        });
+        const tasks = [...store.tasks.values()].filter(
+          (t) => t.clientId === scopedClientId,
+        );
+        const task = tasks.find((t) => t.briefId) ?? tasks[0] ?? null;
+        const cal = [...store.calendars.values()].find(
+          (c) => c.clientId === scopedClientId,
+        );
         return {
           clientId: scopedClientId,
-          calendarId: cals[0]?.calendarId ?? null,
+          calendarId: cal?.calendarId ?? null,
           taskId: task?.taskId ?? null,
           briefId: task?.briefId ?? null,
           creativeTaskId: task?.taskId ?? null,
-          source: cals[0]
-            ? ("durable_client" as const)
-            : ("durable_client_empty" as const),
+          source: "demo_store_client" as const,
         };
-      }
-      const recentCals = await listRecentDeliveryCalendars({ limit: 1 });
-      const latestCal = recentCals[0];
-      if (latestCal) {
-        const forClient = await listDeliveryTasks({
-          clientId: latestCal.clientId,
-        });
-        const task =
-          forClient.find((t) => t.briefId) ??
-          forClient[0] ??
-          null;
-        return {
-          clientId: latestCal.clientId,
-          calendarId: latestCal.calendarId,
-          taskId: task?.taskId ?? null,
-          briefId: task?.briefId ?? null,
-          creativeTaskId: task?.taskId ?? null,
-          source: "durable_calendar" as const,
-        };
-      }
-
-      async function withClientCalendar(clientId: string, fallback: {
-        taskId: string | null;
-        briefId: string | null;
-        creativeTaskId: string | null;
-      }) {
-        const cals = await listDeliveryCalendars({ clientId });
-        return {
-          clientId,
-          calendarId: cals[0]?.calendarId ?? null,
-          ...fallback,
-          source: cals[0]
-            ? ("durable_task" as const)
-            : ("durable_empty" as const),
-        };
-      }
-
-      const unlocked = await listDeliveryTasks({ status: "briefing" });
-      const withBrief = unlocked.find((t) => t.briefId);
-      if (withBrief?.briefId) {
-        return withClientCalendar(withBrief.clientId, {
-          taskId: withBrief.taskId,
-          briefId: withBrief.briefId,
-          creativeTaskId: withBrief.taskId,
-        });
-      }
-      const ready = await listDeliveryTasks({ status: "brief_ready" });
-      const readyBrief = ready.find((t) => t.briefId);
-      if (readyBrief?.briefId) {
-        return withClientCalendar(readyBrief.clientId, {
-          taskId: readyBrief.taskId,
-          briefId: readyBrief.briefId,
-          creativeTaskId: readyBrief.taskId,
-        });
-      }
-      const qcTasks = await listDeliveryTasks({ status: "qc" });
-      if (qcTasks[0]) {
-        return withClientCalendar(qcTasks[0].clientId, {
-          taskId: qcTasks[0].taskId,
-          briefId: qcTasks[0].briefId ?? null,
-          creativeTaskId: qcTasks[0].taskId,
-        });
       }
       return {
-        clientId: null,
-        calendarId: null,
-        taskId: null,
-        briefId: null,
-        creativeTaskId: null,
-        source: "durable_empty" as const,
+        clientId: DEMO_CLIENT_ID,
+        calendarId: DEMO_CALENDAR_ID,
+        taskId: DEMO_TASK_ID,
+        briefId: DEMO_BRIEF_ID,
+        creativeTaskId: DEMO_CREATIVE_TASK_ID,
+        source: "demo_store" as const,
       };
-    }
-    const store = getDemoStore();
-    if (store.calendars.size === 0) store.seedM4Demo();
-    if (scopedClientId) {
-      const tasks = [...store.tasks.values()].filter(
-        (t) => t.clientId === scopedClientId,
-      );
-      const task = tasks.find((t) => t.briefId) ?? tasks[0] ?? null;
-      const cal = [...store.calendars.values()].find(
-        (c) => c.clientId === scopedClientId,
-      );
-      return {
-        clientId: scopedClientId,
-        calendarId: cal?.calendarId ?? null,
-        taskId: task?.taskId ?? null,
-        briefId: task?.briefId ?? null,
-        creativeTaskId: task?.taskId ?? null,
-        source: "demo_store_client" as const,
-      };
-    }
-    return {
-      clientId: DEMO_CLIENT_ID,
-      calendarId: DEMO_CALENDAR_ID,
-      taskId: DEMO_TASK_ID,
-      briefId: DEMO_BRIEF_ID,
-      creativeTaskId: DEMO_CREATIVE_TASK_ID,
-      source: "demo_store" as const,
-    };
-  }),
+    }),
 });
 
 export const calendarsRouter = router({
@@ -382,7 +444,7 @@ export const calendarsRouter = router({
       };
     }),
 
-  create: protectedProcedure
+  create: deliveryCoordinatorProcedure
     .input(
       z.object({
         clientId: z.string().uuid(),
@@ -426,7 +488,7 @@ export const calendarsRouter = router({
       return calendar;
     }),
 
-  addSlot: protectedProcedure
+  addSlot: deliveryCoordinatorProcedure
     .input(
       z.object({
         calendarId: z.string().uuid(),
@@ -462,7 +524,7 @@ export const calendarsRouter = router({
       return slot;
     }),
 
-  refApprove: protectedProcedure
+  refApprove: deliveryCoordinatorProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       if (getDb()) {
@@ -490,7 +552,7 @@ export const calendarsRouter = router({
       return cal;
     }),
 
-  shoot: protectedProcedure
+  shoot: deliveryCoordinatorProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -651,31 +713,13 @@ export const calendarsRouter = router({
       };
     }),
 
-  finalApprove: protectedProcedure
+  finalApprove: deliveryCoordinatorProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(async ({ input, ctx }) => {
-      if (getDb()) {
-        const durable = await updateDeliveryCalendar({
-          calendarId: input.id,
-          finalApprovalState: "approved",
-          state: "final_approved",
-        });
-        if (durable) return durable;
-      }
-      const cal = getDemoStore().calendars.get(input.id);
-      if (!cal) throw new Error("NOT_FOUND");
-      cal.finalApprovalState = "approved";
-      cal.state = "final_approved";
-      getDemoStore().appendAudit({
-        actorEmployeeId: ctx.employeeId!,
-        action: "calendars.finalApprove",
-        entityType: "calendar",
-        entityId: cal.calendarId,
-        before: null,
-        after: { finalApprovalState: "approved" },
-        reason: null,
+    .mutation(() => {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "Client final approval must come from the client portal",
       });
-      return cal;
     }),
 
   evaluateLock: protectedProcedure
@@ -723,7 +767,7 @@ export const briefsRouter = router({
       return getDemoStore().briefs.get(input.id) ?? null;
     }),
 
-  createForTask: protectedProcedure
+  createForTask: deliveryCoordinatorProcedure
     .input(
       z.object({
         taskId: z.string().uuid(),
@@ -780,7 +824,7 @@ export const briefsRouter = router({
       return brief;
     }),
 
-  updateBody: protectedProcedure
+  updateBody: deliveryCoordinatorProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -821,7 +865,7 @@ export const briefsRouter = router({
       return brief;
     }),
 
-  validateDor: protectedProcedure
+  validateDor: deliveryCoordinatorProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input }) => {
       if (getDb()) {
@@ -856,7 +900,7 @@ export const briefsRouter = router({
       };
     }),
 
-  lock: protectedProcedure
+  lock: deliveryCoordinatorProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       if (getDb()) {
@@ -1005,7 +1049,7 @@ export const tasksRouter = router({
       return getDemoStore().tasks.get(input.id) ?? null;
     }),
 
-  create: protectedProcedure
+  create: deliveryCoordinatorProcedure
     .input(
       z.object({
         clientId: z.string().uuid(),
@@ -1045,7 +1089,7 @@ export const tasksRouter = router({
         title: input.title ?? input.taskType,
         status: (input.status as DemoTask["status"]) ?? "backlog",
         situationalState: null,
-        ownerEmployeeId: null,
+        ownerEmployeeId: ctx.employeeId,
         deadline: input.deadline ?? null,
         priority: input.priority ?? null,
         qcPassed: false,
@@ -1067,7 +1111,7 @@ export const tasksRouter = router({
       return task;
     }),
 
-  assign: protectedProcedure
+  assign: deliveryCoordinatorProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -1123,7 +1167,7 @@ export const tasksRouter = router({
       return { ok: true as const, task };
     }),
 
-  transition: protectedProcedure
+  transition: deliveryContributorProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -1155,16 +1199,19 @@ export const tasksRouter = router({
       );
     }),
 
-  setSituational: protectedProcedure
+  setSituational: deliveryContributorProcedure
     .input(
       z.object({
         id: z.string().uuid(),
         situationalState: z.string().nullable(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const durable = await getDeliveryTask(input.id);
       if (durable) {
+        if (!canMutateTask(ctx, durable)) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
         const task = await updateDeliveryTaskSituational({
           taskId: input.id,
           situationalState: input.situationalState,
@@ -1175,6 +1222,9 @@ export const tasksRouter = router({
       if (getDb()) throw new Error("NOT_FOUND");
       const task = getDemoStore().tasks.get(input.id);
       if (!task) throw new Error("NOT_FOUND");
+      if (!canMutateTask(ctx, task)) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
       task.situationalState = input.situationalState;
       return task;
     }),
@@ -1318,11 +1368,13 @@ export const deliveryDashboardsRouter = router({
       status,
       tasks: tasks.filter((t) => t.status === status),
     }));
-    const bottleneck =
-      board.reduce(
-        (max, col) => (col.tasks.length > max.count ? { status: col.status, count: col.tasks.length } : max),
-        { status: "none", count: 0 },
-      );
+    const bottleneck = board.reduce(
+      (max, col) =>
+        col.tasks.length > max.count
+          ? { status: col.status, count: col.tasks.length }
+          : max,
+      { status: "none", count: 0 },
+    );
     return {
       board,
       bottleneck,
@@ -1339,9 +1391,8 @@ export const month1Router = router({
     .input(z.object({ clientId: z.string().uuid() }))
     .query(async ({ input }) => {
       if (getDb()) {
-        const { ensureClientOnboarding, getClientOnboarding } = await import(
-          "../clients/onboarding"
-        );
+        const { ensureClientOnboarding, getClientOnboarding } =
+          await import("../clients/onboarding");
         let phases = await getClientOnboarding(input.clientId);
         if (!phases.length) {
           phases = await ensureClientOnboarding(input.clientId);
@@ -1369,7 +1420,7 @@ export const month1Router = router({
       return [];
     }),
 
-  transition: protectedProcedure
+  transition: deliveryCoordinatorProcedure
     .input(
       z.object({
         clientId: z.string().uuid(),

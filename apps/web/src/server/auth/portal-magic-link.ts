@@ -262,7 +262,8 @@ function portalAppOrigin(): string {
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
     process.env.VERCEL_URL?.trim() ||
     "http://localhost:3000";
-  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw.replace(/\/$/, "");
+  if (raw.startsWith("http://") || raw.startsWith("https://"))
+    return raw.replace(/\/$/, "");
   return `https://${raw.replace(/\/$/, "")}`;
 }
 
@@ -300,8 +301,7 @@ export async function sendPortalInviteMagicLink(input: {
     input.next,
   );
   const verifyUrl = `${portalAppOrigin()}${portalPath}`;
-  const greeting =
-    input.displayName?.trim() || email;
+  const greeting = input.displayName?.trim() || email;
   const subject = "Your hrmny client portal sign-in link";
   const markdown = [
     `Hi ${greeting},`,
@@ -472,9 +472,29 @@ export async function resolvePortalSessionGrant(
   });
 }
 
-async function withSessionGrant(
-  result: { ok: true; clientId: string; email: string; via: "magic_link" },
-): Promise<VerifyResult> {
+/** Revoke exactly the session presented by the client. */
+export async function revokePortalSessionGrant(
+  token: string,
+): Promise<boolean> {
+  if (!token.startsWith("ps_")) return false;
+  const db = getDb();
+  if (db) {
+    const rows = await db.execute(sql`
+      delete from public.portal_session_grant
+      where token_hash = ${hashToken(token)}
+      returning token_hash
+    `);
+    return rows.length > 0;
+  }
+  return getDemoStore().portalSessionGrants.delete(token);
+}
+
+async function withSessionGrant(result: {
+  ok: true;
+  clientId: string;
+  email: string;
+  via: "magic_link";
+}): Promise<VerifyResult> {
   const principal = await resolveCanonicalPortalSession({
     clientId: result.clientId,
     email: result.email,
