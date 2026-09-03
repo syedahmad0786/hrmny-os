@@ -22,8 +22,20 @@ describe("synthetic record visibility", () => {
     expect(isSyntheticRecordName("Campaign")).toBe(true);
     expect(isSyntheticRecordName("Acme LLC")).toBe(true);
     expect(isSyntheticRecordName("Fixture Co")).toBe(true);
-    expect(isSyntheticRecordName("Emp Keep Co")).toBe(true);
-    expect(isSyntheticRecordName("Keep")).toBe(true);
+    for (const name of [
+      "Audit Co",
+      "Domain Co Two",
+      "Emp Keep Co",
+      "Fine Co",
+      "Fresh Co",
+      "Keep",
+      "Keep Co",
+      "Name Match LLC",
+      "OneShot",
+      "Solo Co",
+    ]) {
+      expect(isSyntheticRecordName(name)).toBe(true);
+    }
     expect(isSyntheticRecordName("fintechdubai LLC")).toBe(true);
     expect(isSyntheticRecordName("Emaar Hospitality Group")).toBe(false);
     expect(isSyntheticRecordName("Acme Industrial Partners")).toBe(false);
