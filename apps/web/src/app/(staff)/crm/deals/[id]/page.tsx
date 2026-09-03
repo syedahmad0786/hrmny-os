@@ -28,6 +28,12 @@ const NEXT: Record<string, string> = {
   close: "handover_pack",
 };
 
+function humanizeCrmBody(body: string): string {
+  return body.startsWith("Apollo person reconciled. {")
+    ? "Apollo contact added to this deal. No phone, personal email, or waterfall lookup was used."
+    : body;
+}
+
 export default function CrmDealDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -355,7 +361,7 @@ export default function CrmDealDetailPage() {
               <div className="crm-checklist">
                 {(notes.data ?? []).map((n) => (
                   <div key={n.crmNoteId} className="crm-check-row">
-                    {n.body}
+                    {humanizeCrmBody(n.body)}
                     <span>{formatRelative(n.createdAt)}</span>
                   </div>
                 ))}
@@ -426,7 +432,7 @@ export default function CrmDealDetailPage() {
                     <span className="crm-timeline-dot" />
                     <div>
                       <h4>{a.subject ?? a.type}</h4>
-                      <p>{a.body ?? a.type}</p>
+                      <p>{humanizeCrmBody(a.body ?? a.type)}</p>
                     </div>
                     <time>{formatRelative(a.occurredAt)}</time>
                   </div>
