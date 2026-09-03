@@ -130,6 +130,7 @@ describe("demo OS closed loop", () => {
     expect(result.next.creative).toContain(
       `taskId=${encodeURIComponent(result.taskId!)}`,
     );
-    expect(result.portalInvite?.portalPath ?? "").toMatch(/\/portal\//);
+    expect(result.portalInvite).toBeNull();
+    expect(result.next.portal).not.toContain("token=");
   });
 });

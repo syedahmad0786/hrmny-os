@@ -178,9 +178,8 @@ describe("runAgentTools funnel writes", () => {
     expect(data?.viaApollo).toBe(false);
     expect((data?.onboardingPhases ?? 0) > 0).toBe(true);
     expect(data?.next?.crmDeal).toMatch(/^\/crm\/deals\//);
-    expect(data?.portalInvite?.portalPath ?? "").toMatch(
-      /\/portal\/login\/verify/,
-    );
+    expect(data?.portalInvite).toBeNull();
+    expect(data?.next?.portal).not.toContain("token=");
     expect(data?.fired?.some((f) => f === "staff.notify")).toBe(true);
   });
 

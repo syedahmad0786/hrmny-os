@@ -45,7 +45,7 @@ describe("chat harness funnel_act", () => {
     expect(clientTools.some((t) => t.name === "crm_closed_loop")).toBe(false);
   });
 
-  it("crm.closed_loop runs prospect→won→onboarding with portal links", async () => {
+  it("crm.closed_loop runs prospect→won→onboarding without client credentials", async () => {
     const { resetCrmMemory } = await import("../crm/memory");
     resetCrmMemory();
     const tools = buildChatDefaultTools({ employeeId: EMPLOYEE_ID });
@@ -71,9 +71,8 @@ describe("chat harness funnel_act", () => {
     expect(loop?.data?.clientId).toBeTruthy();
     expect(loop?.data?.invoiceId).toBeTruthy();
     expect(loop?.data?.next?.finance).toMatch(/invoiceId=/);
-    expect(loop?.data?.portalInvite?.portalPath ?? loop?.data?.next?.portal).toMatch(
-      /\/portal\//,
-    );
+    expect(loop?.data?.portalInvite).toBeNull();
+    expect(loop?.data?.next?.portal).not.toContain("token=");
     expect(loop?.data?.fired?.includes("staff.notify")).toBe(true);
   });
 

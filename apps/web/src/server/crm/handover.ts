@@ -183,7 +183,7 @@ export type HandoverPackResult = {
 
 /**
  * Memory-mode won → OS: demo-store client + onboarding + creative QC task +
- * portal magic links + staff notify. Keeps Hunt closed-loop green without Postgres.
+ * staff notify. Portal invitations remain a separate approved action.
  */
 async function memoryHandoverPack(input: {
   dealId: string;
@@ -446,62 +446,8 @@ async function memoryHandoverPack(input: {
     fired.push("memory.handover_exists");
   }
 
-  let portalInvite: HandoverPackResult["portalInvite"] = null;
-  if (needsStageAdvance) {
-    try {
-      const inviteEmail =
-        contactEmail || `portal+${demoClient.clientId.slice(0, 8)}@example.com`;
-      const displayName = `${demoClient.name} Portal`;
-      const existingPortalUser = [...store.portalUsers.values()].find(
-        (candidate) =>
-          candidate.clientId === demoClient.clientId &&
-          candidate.email.toLowerCase() === inviteEmail.toLowerCase(),
-      );
-      const portalUserId =
-        existingPortalUser?.portalUserId ?? crypto.randomUUID();
-      store.portalUsers.set(portalUserId, {
-        portalUserId,
-        clientId: demoClient.clientId,
-        email: inviteEmail.toLowerCase(),
-        displayName,
-        isActive: true,
-      });
-      const { sendPortalInviteMagicLink } =
-        await import("../auth/portal-magic-link");
-      const { createResendMock } = await import("@hrmny/integrations");
-      const emailer = createResendMock();
-      const sentPortal = await sendPortalInviteMagicLink({
-        email: inviteEmail,
-        clientId: demoClient.clientId,
-        displayName,
-        next: "/portal/approvals",
-        emailer,
-      });
-      const sentOnboarding = await sendPortalInviteMagicLink({
-        email: inviteEmail,
-        clientId: demoClient.clientId,
-        displayName,
-        next: "/portal/onboarding",
-        emailer,
-      });
-      portalInvite = {
-        portalUserId,
-        email: inviteEmail,
-        portalPath: sentPortal.portalPath,
-        onboardingPath: sentOnboarding.portalPath,
-        delivery: {
-          mode: sentPortal.delivery.mode,
-          id: sentPortal.delivery.id,
-        },
-      };
-      fired.push("portal.invite_mock");
-      fired.push("portal.invite_onboarding");
-    } catch {
-      fired.push("portal.invite_failed");
-    }
-  } else {
-    fired.push("portal.invite_already_issued");
-  }
+  const portalInvite: HandoverPackResult["portalInvite"] = null;
+  fired.push("portal.invite_pending_approval");
 
   if (needsStageAdvance) {
     try {
@@ -559,8 +505,6 @@ async function memoryHandoverPack(input: {
     invoiceId,
     outreachId,
     campaignItemId,
-    portalPath: portalInvite?.portalPath,
-    onboardingPath: portalInvite?.onboardingPath,
   });
 
   return {

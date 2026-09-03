@@ -20,6 +20,7 @@ describe("memory CRM handover", () => {
   });
 
   it("replays the same first creative task for one won deal", async () => {
+    const portalTokensBefore = getDemoStore().portalMagicTokens.size;
     const first = await durableHandoverPack({ dealId: WON_DEAL_ID });
     const replay = await durableHandoverPack({ dealId: WON_DEAL_ID });
 
@@ -42,5 +43,9 @@ describe("memory CRM handover", () => {
     ).toHaveLength(1);
     expect(replay.pack.fired).toContain("calendar.exists");
     expect(replay.pack.fired).toContain("campaign.draft_exists");
+    expect(first.portalInvite).toBeNull();
+    expect(replay.portalInvite).toBeNull();
+    expect(first.pack.fired).toContain("portal.invite_pending_approval");
+    expect(getDemoStore().portalMagicTokens.size).toBe(portalTokensBefore);
   });
 });
