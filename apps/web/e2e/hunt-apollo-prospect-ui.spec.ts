@@ -359,7 +359,7 @@ test.describe("Hunt Apollo prospect UI", () => {
     expect(approveCalls).toBe(1);
     expect(enrichCalls).toBe(1);
     await expect(page.getByTestId("hunt-apollo-search-status")).toContainText(
-      /Principal Scoped Result is in the pipeline/i,
+      `${currentCandidate} is in the pipeline`,
     );
     await expect(
       page.getByRole("link", { name: /Open CRM deal/i }),
