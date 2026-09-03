@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { isSyntheticRecordName } from "@/lib/synthetic-records";
 import {
   CompanyCell,
   CrmBtn,
@@ -36,6 +37,7 @@ export default function CrmDealsPage() {
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("all");
   const [name, setName] = useState("");
+  const [showTestRecords, setShowTestRecords] = useState(false);
   const contactById = useMemo(
     () =>
       new Map(
@@ -55,6 +57,9 @@ export default function CrmDealsPage() {
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (deals.data ?? []).filter((d) => {
+      if (!showTestRecords && isSyntheticRecordName(d.companyName)) {
+        return false;
+      }
       if (stage !== "all" && d.stage !== stage) return false;
       if (!q) return true;
       const leadName = formatContactName(
@@ -66,7 +71,13 @@ export default function CrmDealsPage() {
         (d.sector ?? "").toLowerCase().includes(q)
       );
     });
-  }, [contactById, deals.data, search, stage]);
+  }, [contactById, deals.data, search, showTestRecords, stage]);
+  const hiddenTestCount = (deals.data ?? []).filter((deal) =>
+    isSyntheticRecordName(deal.companyName),
+  ).length;
+  const visibleStalled = (digest.data?.stalled ?? []).filter(
+    (deal) => showTestRecords || !isSyntheticRecordName(deal.companyName),
+  );
 
   return (
     <main>
@@ -118,6 +129,19 @@ export default function CrmDealsPage() {
         </div>
       </CrmFilterBar>
 
+      {hiddenTestCount ? (
+        <label className="mb-3 flex min-h-11 w-fit items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            className="size-5"
+            checked={showTestRecords}
+            onChange={(event) => setShowTestRecords(event.target.checked)}
+          />
+          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test deal
+          {hiddenTestCount === 1 ? "" : "s"}
+        </label>
+      ) : null}
+
       {digest.data ? (
         <section
           className="crm-panel mb-4"
@@ -128,18 +152,18 @@ export default function CrmDealsPage() {
               <h3>Pipeline review</h3>
               <p>
                 Coverage {digest.data.coverage.coverageX.toFixed(1)}× vs{" "}
-                {digest.data.coverage.targetX}× H1 ·{" "}
-                {digest.data.stalled.length} stalled
+                {digest.data.coverage.targetX}× H1 · {visibleStalled.length}{" "}
+                stalled
               </p>
             </div>
             <CrmTag kind={digest.data.coverage.healthy ? "success" : "warn"}>
               {digest.data.coverage.healthy ? "Healthy" : "Thin coverage"}
             </CrmTag>
           </div>
-          {digest.data.stalled.length > 0 ? (
+          {visibleStalled.length > 0 ? (
             <div className="crm-panel-body">
               <ul className="text-sm space-y-1">
-                {digest.data.stalled.slice(0, 8).map((s) => (
+                {visibleStalled.slice(0, 8).map((s) => (
                   <li key={s.dealId}>
                     <Link className="underline" href={`/crm/deals/${s.dealId}`}>
                       {s.companyName}

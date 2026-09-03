@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { isSyntheticRecordName } from "@/lib/synthetic-records";
 import { CrmBtn, CrmEmpty, CrmPageHeader, CrmTag } from "@/components/crm/ui";
 import { formatAed, formatRelative } from "@/components/crm/format";
 
@@ -37,7 +38,12 @@ export default function CrmQuotePage() {
     setDealId(requestedDealId ?? "");
   }, []);
 
-  const dealList = deals.data ?? [];
+  const allDeals = deals.data ?? [];
+  const dealList = allDeals.filter(
+    (deal) =>
+      deal.dealId === dealId || !isSyntheticRecordName(deal.companyName),
+  );
+  const hiddenTestCount = allDeals.length - dealList.length;
   const selected =
     dealId === null
       ? undefined
@@ -216,6 +222,13 @@ export default function CrmQuotePage() {
                     </option>
                   ))}
                 </select>
+                {hiddenTestCount ? (
+                  <p className="mt-2 text-[11px] text-[var(--muted)]">
+                    {hiddenTestCount} automated test deal
+                    {hiddenTestCount === 1 ? " is" : "s are"} hidden from this
+                    client selector.
+                  </p>
+                ) : null}
               </div>
 
               <div className="crm-table-shell">
