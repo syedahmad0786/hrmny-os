@@ -6,7 +6,12 @@ import {
   buildUnsubscribeUrl,
   ensureFooter,
 } from "./compliance";
-import { getContactResearch, getSalesOsSettings, isSuppressed } from "./store";
+import {
+  getCompanyResearch,
+  getContactResearch,
+  getSalesOsSettings,
+  isSuppressed,
+} from "./store";
 
 export function failsSpecificityTest(
   body: string,
@@ -29,6 +34,7 @@ export async function draftChannelsForApprovedContact(
     throw new Error("Gate 2 must approve the contact before drafting");
   }
   const settings = await getSalesOsSettings();
+  const companyResearch = await getCompanyResearch(research.companyResearchId);
   const deal = await getDeal(research.dealId);
   if (!deal) throw new Error("Deal missing for approved contact");
   const suppressed = research.email
@@ -52,12 +58,14 @@ export async function draftChannelsForApprovedContact(
   });
 
   const first = research.fullName.split(" ")[0] ?? "there";
+  const reason = companyResearch?.whyThis.trim().replace(/\s+/g, " ");
   const connect =
-    `Hi ${first} — following ${deal.companyName}'s UAE work from hrmny. Would be glad to connect.`.slice(
+    `Hi ${first} — ${reason ? reason.slice(0, 170) : `following ${deal.companyName}'s UAE work`}. Would be glad to connect.`.slice(
       0,
       settings.outreach.linkedinConnectMaxChars,
     );
-  const followup = `Hi ${first}, thanks for connecting. We help brands like ${deal.companyName} land launches in the UAE — open to a short call this week?`;
+  const service = companyResearch?.suggestedServices?.trim();
+  const followup = `Hi ${first}, thanks for connecting. ${service ? `I see a strong ${service} opportunity for ${deal.companyName}.` : `We help brands like ${deal.companyName} land launches in the UAE.`} Open to a short call this week?`;
 
   const created = [];
   if (canEmail && !existing("gmail")) {
@@ -67,7 +75,8 @@ export async function draftChannelsForApprovedContact(
       input: {
         company: deal.companyName,
         contact: research.fullName,
-        whyThis: research.title,
+        whyThis: companyResearch?.whyThis ?? research.title,
+        suggestedServices: companyResearch?.suggestedServices,
         sopVoice: settings.outreach.voice,
       },
     });

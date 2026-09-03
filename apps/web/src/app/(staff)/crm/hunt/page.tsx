@@ -88,6 +88,19 @@ function samePendingSearch(
   );
 }
 
+const APOLLO_CREDIT_LABELS: Record<string, string> = {
+  lead_credit: "Email / lead credits",
+  direct_dial_credit: "Direct dial credits",
+  export_credit: "Export credits",
+  conversation_credit: "Conversation credits",
+  ai_credit: "Apollo AI credits",
+  power_up_credit: "Power-up credits",
+  inbound_website_visitor_credit: "Website visitor credits",
+  contact_website_visitor_credit: "Contact visitor credits",
+  web_search_record_credit: "Web research credits",
+  dialer: "Dialer minutes",
+};
+
 export default function HuntClientsPage() {
   const [result, setResult] = useState<string | null>(null);
   const [searchNote, setSearchNote] = useState<string | null>(null);
@@ -234,6 +247,11 @@ export default function HuntClientsPage() {
 
   const apolloStatus = trpc.salesOs.apollo.status.useQuery();
   const apolloConnection = trpc.salesOs.apollo.connection.useQuery();
+  const apolloCredits = trpc.salesOs.apollo.creditBalance.useQuery(undefined, {
+    enabled: Boolean(verifiedStaffPrincipalId && isUiPrincipalCurrent),
+    retry: false,
+    staleTime: 30_000,
+  });
   const latestApolloSearch = trpc.salesOs.apollo.latestSearch.useQuery(
     undefined,
     {
@@ -478,6 +496,7 @@ export default function HuntClientsPage() {
       void utils.crm.deals.list.invalidate();
       void utils.salesOs.apollo.savedCandidates.invalidate();
       void apolloStatus.refetch();
+      void apolloCredits.refetch();
     },
     onError: (error, _variables, operation) => {
       if (operation?.principalId === activePrincipalIdRef.current) {
@@ -566,6 +585,16 @@ export default function HuntClientsPage() {
       : !canOperateApollo
         ? "View only · Sales operator required"
         : "Ready · exact confirmation · up to 1 credit";
+  const apolloCreditsReady =
+    isUiPrincipalCurrent &&
+    apolloCredits.isSuccess &&
+    !apolloCredits.isFetching &&
+    apolloCredits.data.principalId === verifiedStaffPrincipalId;
+  const liveCredits =
+    apolloCreditsReady && apolloCredits.data.state === "live"
+      ? apolloCredits.data
+      : null;
+  const leadCredits = liveCredits?.credits.lead_credit;
 
   const demo = trpc.crm.runDemoClosedLoop.useMutation({
     onMutate: () => {
@@ -914,8 +943,8 @@ export default function HuntClientsPage() {
                             : "Add to pipeline · free"}
                       </button>
                       {saved ? (
-                        <Link href={`/crm/deals/${saved.dealId}`}>
-                          Open this lead in CRM →
+                        <Link href={`/crm/deals/${saved.dealId}#ai-assist`}>
+                          Next: build the research brief →
                         </Link>
                       ) : null}
                       <span
@@ -1055,6 +1084,28 @@ export default function HuntClientsPage() {
               </dd>
             </div>
             <div>
+              <dt>Work-email credits left</dt>
+              <dd data-testid="hunt-apollo-credit-balance">
+                {leadCredits
+                  ? `${leadCredits.leftOver.toLocaleString()} live`
+                  : !apolloCreditsReady
+                    ? "Checking Apollo"
+                    : (apolloCredits.data?.message ?? "Unavailable")}
+              </dd>
+            </div>
+            {leadCredits ? (
+              <div>
+                <dt>Current credit cycle</dt>
+                <dd>
+                  {leadCredits.consumed.toLocaleString()} used of{" "}
+                  {leadCredits.limit.toLocaleString()}
+                  {liveCredits?.cycle.endDate
+                    ? ` · resets ${new Date(liveCredits.cycle.endDate).toLocaleDateString()}`
+                    : ""}
+                </dd>
+              </div>
+            ) : null}
+            <div>
               <dt>Paid details</dt>
               <dd>{paidDetailsLabel}</dd>
             </div>
@@ -1067,6 +1118,39 @@ export default function HuntClientsPage() {
               <dd>Draft only · no automatic send</dd>
             </div>
           </dl>
+          <button
+            type="button"
+            className="growth-text-link"
+            disabled={apolloCredits.isFetching || !apolloConnected}
+            onClick={() => void apolloCredits.refetch()}
+          >
+            {apolloCredits.isFetching
+              ? "Refreshing balance…"
+              : "Refresh live balance"}
+          </button>
+          {liveCredits ? (
+            <details className="growth-runtime">
+              <summary>See every Apollo credit type</summary>
+              <dl className="growth-guardrails">
+                {Object.entries(liveCredits.credits).map(([kind, bucket]) => (
+                  <div key={kind}>
+                    <dt>
+                      {APOLLO_CREDIT_LABELS[kind] ?? kind.replace(/_/g, " ")}
+                    </dt>
+                    <dd>
+                      {bucket.leftOver.toLocaleString()} left ·{" "}
+                      {bucket.consumed.toLocaleString()} used ·{" "}
+                      {bucket.limit.toLocaleString()} allowance
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <p>
+                Live Apollo team figures. Credit types are not added together;
+                unified plans may share the lead-credit pool.
+              </p>
+            </details>
+          ) : null}
           {canaryDealId ? (
             <Link
               className="growth-primary-link"
@@ -1101,6 +1185,45 @@ export default function HuntClientsPage() {
             </div>
           ) : null}
         </aside>
+      </section>
+
+      <section className="growth-panel" aria-labelledby="sales-next-steps">
+        <div className="growth-panel-heading">
+          <div>
+            <p className="growth-kicker">What happens after Apollo</p>
+            <h2 id="sales-next-steps">One lead, one clear route</h2>
+          </div>
+        </div>
+        <div className="crm-checklist">
+          <div className="crm-check-row">
+            <strong>1 · Save the right person</strong>
+            <span>Free search result → CRM lead</span>
+          </div>
+          <div className="crm-check-row">
+            <strong>2 · Unlock work email only if useful</strong>
+            <span>Exact person · up to 1 Apollo credit</span>
+          </div>
+          <div className="crm-check-row">
+            <strong>3 · Build the knowledge brief</strong>
+            <span>Live sources → pain points → hrmny angle</span>
+          </div>
+          <div className="crm-check-row">
+            <strong>4 · Review channel drafts</strong>
+            <span>Email + LinkedIn copy · nothing sent</span>
+          </div>
+          <div className="crm-check-row">
+            <strong>5 · Approve and deliver</strong>
+            <span>Gmail second click · LinkedIn manual handoff</span>
+          </div>
+        </div>
+        <div className="growth-header-actions">
+          <Link href="/crm" className="growth-primary-link">
+            Continue in pipeline →
+          </Link>
+          <Link href="/crm/outreach" className="growth-text-link">
+            Open outreach queue
+          </Link>
+        </div>
       </section>
 
       {ready?.syntheticSalesFixtures ? (

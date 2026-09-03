@@ -2,6 +2,7 @@ import { z } from "zod";
 import { requirePermission, router, staffProcedure } from "./trpc";
 import {
   accountSummary,
+  companyKnowledgeBrief,
   dealSummary,
   draftOutreachForDeal,
   nextBestAction,
@@ -35,6 +36,23 @@ export const crmAiRouter = router({
   nextBestAction: staffProcedure
     .input(dealInput)
     .query(({ input }) => nextBestAction(input)),
+
+  /** Source-backed brief stored on the deal; live search is explicitly confirmed. */
+  companyKnowledgeBrief: staffProcedure
+    .use(requirePermission("ai", "run"))
+    .input(
+      dealInput.extend({
+        requestId: z.string().uuid(),
+        confirmWebResearch: z.literal(true),
+      }),
+    )
+    .mutation(({ input, ctx }) =>
+      companyKnowledgeBrief({
+        ...input,
+        actorEmployeeId: ctx.employeeId!,
+        roles: ctx.roles,
+      }),
+    ),
 
   /** Re-run the research-agent BUAF scoring on one deal; writes temperature back. */
   rescoreBuaf: staffProcedure

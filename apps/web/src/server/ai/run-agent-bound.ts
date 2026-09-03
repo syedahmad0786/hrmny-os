@@ -25,6 +25,7 @@ export async function persistAgentRun(
           input: input.input,
           context: input.context ?? null,
           roles: input.roles ?? [],
+          webSearch: input.webSearch ?? false,
         })}::jsonb,
         ${JSON.stringify(
           typeof output.output === "string"

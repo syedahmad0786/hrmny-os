@@ -15,7 +15,7 @@ import {
   type ComposioSendAdapter,
 } from "@hrmny/integrations";
 import { ReplyIntentSchema } from "@hrmny/ai";
-import { getContact, getDeal } from "../crm/repository";
+import { getContact, getDeal, listNotes } from "../crm/repository";
 import { emitHealthSignal, writeAudit } from "../m1-persistence";
 import { defaultRunAgent, type RunAgent } from "../leadgen/agent-run";
 import {
@@ -205,6 +205,9 @@ export async function draftOutreach(input: {
   const contact = deal.primaryContactId
     ? await getContact(deal.primaryContactId)
     : null;
+  const knowledgeBrief = (await listNotes({ dealId: deal.dealId })).find(
+    (note) => note.body.startsWith("SALES KNOWLEDGE BRIEF —"),
+  );
   const channel = input.channel ?? "gmail";
   const {
     isEmailChannel,
@@ -231,6 +234,9 @@ export async function draftOutreach(input: {
         sopVoice: settings.outreach.voice,
         channel,
       },
+      context: knowledgeBrief
+        ? { knowledgeBrief: knowledgeBrief.body.slice(0, 10_000) }
+        : undefined,
     });
     const out = (
       typeof run.output === "object" && run.output ? run.output : {}

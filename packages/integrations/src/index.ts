@@ -97,10 +97,12 @@ export {
 export {
   ApolloProviderRequestError,
   apolloRateLimitSnapshot,
+  getApolloCreditUsage,
   createLeadSourceMock,
   createLeadSourceLive,
   createLeadSourceAdapter,
   isRetryableApolloProviderError,
+  type ApolloCreditUsage,
   type LeadSourceConfig,
 } from "./apollo/leadsource";
 export {

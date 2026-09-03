@@ -24,6 +24,15 @@ import {
 
 export type LeadSourceConfig = ApolloActivationConfig;
 
+export type ApolloCreditUsage = {
+  credits: Record<
+    string,
+    { limit: number; consumed: number; leftOver: number }
+  >;
+  cycle: { startDate: string | null; endDate: string | null };
+  receivedAt: string;
+};
+
 export class ApolloProviderRequestError extends IntegrationMisconfiguredError {
   readonly providerCode = "APOLLO_PROVIDER_REQUEST_FAILED" as const;
 
@@ -80,6 +89,136 @@ function isApolloFetchTransportError(error: unknown): boolean {
 
 function responseHash(rawBody: string): string {
   return createHash("sha256").update(rawBody).digest("hex");
+}
+
+function safeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value)
+    ? value
+    : null;
+}
+
+/** Zero-credit Apollo team balance read from the documented usage endpoint. */
+export async function getApolloCreditUsage(
+  apiKeyInput: string,
+): Promise<ApolloCreditUsage> {
+  const apiKey = apiKeyInput.trim();
+  if (!apiKey) {
+    throw new IntegrationMisconfiguredError("apollo", "Apollo API key missing");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(
+      "https://api.apollo.io/api/v1/usage_stats/credit_usage_stats",
+      {
+        method: "POST",
+        redirect: "error",
+        headers: { accept: "application/json", "X-Api-Key": apiKey },
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+  } catch (error) {
+    if (isApolloFetchTransportError(error)) {
+      throw new ApolloProviderRequestError(
+        "Credit balance transport failed",
+        null,
+        true,
+      );
+    }
+    throw error;
+  }
+
+  const rawBody = await response.text();
+  const providerReceipt = {
+    provider: "apollo",
+    operation: "credits.usage",
+    httpStatus: response.status,
+    responseHash: responseHash(rawBody),
+    receivedAt: new Date().toISOString(),
+    rateLimit: apolloRateLimitSnapshot(response.headers),
+  } satisfies LeadSearchExecution["providerReceipt"];
+  if (!response.ok) {
+    throw new ApolloProviderRequestError(
+      `Credit balance failed: HTTP ${response.status}`,
+      response.status,
+      response.status === 408 ||
+        response.status === 429 ||
+        response.status >= 500,
+      providerReceipt.rateLimit.retryAfterSeconds,
+      providerReceipt,
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(rawBody) as unknown;
+  } catch {
+    throw new ApolloProviderRequestError(
+      "Credit balance returned invalid JSON",
+      response.status,
+      false,
+      undefined,
+      providerReceipt,
+    );
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new ApolloProviderRequestError(
+      "Credit balance returned an invalid object",
+      response.status,
+      false,
+      undefined,
+      providerReceipt,
+    );
+  }
+
+  const data = body as Record<string, unknown>;
+  const rawCredits = data.credit_usage_stats;
+  const rawCycle = data.current_credit_cycle;
+  if (
+    !rawCredits ||
+    typeof rawCredits !== "object" ||
+    Array.isArray(rawCredits)
+  ) {
+    throw new ApolloProviderRequestError(
+      "Credit balance omitted credit usage stats",
+      response.status,
+      false,
+      undefined,
+      providerReceipt,
+    );
+  }
+
+  const credits: ApolloCreditUsage["credits"] = {};
+  for (const [kind, raw] of Object.entries(rawCredits)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const bucket = raw as Record<string, unknown>;
+    const limit = safeInteger(bucket.limit);
+    const consumed = safeInteger(bucket.consumed);
+    const leftOver = safeInteger(bucket.left_over);
+    if (limit === null || consumed === null || leftOver === null) continue;
+    credits[kind] = { limit, consumed, leftOver };
+  }
+  if (!Object.keys(credits).length) {
+    throw new ApolloProviderRequestError(
+      "Credit balance contained no valid credit types",
+      response.status,
+      false,
+      undefined,
+      providerReceipt,
+    );
+  }
+  const cycle =
+    rawCycle && typeof rawCycle === "object" && !Array.isArray(rawCycle)
+      ? (rawCycle as Record<string, unknown>)
+      : {};
+  return {
+    credits,
+    cycle: {
+      startDate: typeof cycle.start_date === "string" ? cycle.start_date : null,
+      endDate: typeof cycle.end_date === "string" ? cycle.end_date : null,
+    },
+    receivedAt: providerReceipt.receivedAt,
+  };
 }
 
 /** Stable id from a string so re-running the same search dedupes cleanly. */
@@ -407,9 +546,11 @@ export function createLeadSourceLive(
         providerReceipt,
       );
     }
-    const candidates = people.slice(0, perPage).map((person) =>
-      mapApolloSearchPerson(person as Record<string, unknown>),
-    );
+    const candidates = people
+      .slice(0, perPage)
+      .map((person) =>
+        mapApolloSearchPerson(person as Record<string, unknown>),
+      );
     return {
       candidates,
       providerReceipt,

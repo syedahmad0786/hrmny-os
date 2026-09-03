@@ -84,8 +84,7 @@ export async function runAgent(
   deps: RunAgentDeps = {},
 ): Promise<AgentRunOutput> {
   const { agent } = input;
-  const model =
-    input.model ?? process.env.LLM_DEFAULT_MODEL?.trim() ?? "mock";
+  const model = input.model ?? process.env.LLM_DEFAULT_MODEL?.trim() ?? "mock";
 
   if (!isAgentEnabled(agent)) {
     return {
@@ -155,8 +154,7 @@ export async function runAgent(
   }
 
   const provider = withMetering(
-    deps.provider ??
-      providerForSandbox(sandbox, { defaultModel: input.model }),
+    deps.provider ?? providerForSandbox(sandbox, { defaultModel: input.model }),
     {
       agent,
       onCost: deps.onCost,
@@ -174,6 +172,7 @@ export async function runAgent(
   const result = await provider.generate({
     task: taskFor(agent),
     model: input.model,
+    webSearch: input.webSearch,
     messages: [
       { role: "system", content: AGENT_REGISTRY[agent].responsibility },
       { role: "user", content: `${userText}${context}` },
@@ -190,5 +189,8 @@ export async function runAgent(
     outputTokens,
     costAed: estimateCostAed(result.model, inputTokens, outputTokens),
     gateOutcome: gateOutcomeFor(agent),
+    providerRequestId: result.requestId,
+    sourceCitations: result.sourceCitations,
+    webSearchRequests: result.webSearchRequests,
   };
 }

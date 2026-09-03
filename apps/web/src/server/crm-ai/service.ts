@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import type { AgentRunOutput } from "@hrmny/ai";
 import {
   createActivity,
+  createNote,
   getCompany,
   getContact,
   getDeal,
@@ -16,6 +17,12 @@ import { writeAudit } from "../m1-persistence";
 import { defaultRunAgent, type RunAgent } from "../leadgen/agent-run";
 import { draftOutreach } from "../trpc/leadgen-router";
 import type { OutreachItem } from "../leadgen/store";
+import {
+  completeIntegrationReceipt,
+  failIntegrationReceipt,
+  recordIntegrationReceipt,
+} from "../integrations/inbox";
+import { normalizeResearchEvidence } from "../sales-os/research-evidence";
 
 /**
  * W9 CRM AI helpers. Pure aggregation over the existing CRM repository reads +
@@ -33,6 +40,16 @@ export type CrmAiResult<T = AgentRunOutput["output"]> = {
   agentRun: AgentRunMeta;
 };
 
+export type CompanyKnowledgeBriefResult = {
+  brief: string;
+  noteId: string;
+  sources: Array<{ url: string; title?: string }>;
+  agentRun: AgentRunMeta;
+  providerRequestId: string | null;
+  webSearchRequests: number;
+  duplicate: boolean;
+};
+
 function meta(run: AgentRunOutput): AgentRunMeta {
   return {
     model: run.model,
@@ -45,7 +62,11 @@ function meta(run: AgentRunOutput): AgentRunMeta {
  * policy) instead of throwing — surface it as one PRECONDITION_FAILED shape. */
 function assertNotRefused(run: AgentRunOutput): void {
   const o = run.output;
-  if (typeof o === "object" && o !== null && (o as { refused?: boolean }).refused === true) {
+  if (
+    typeof o === "object" &&
+    o !== null &&
+    (o as { refused?: boolean }).refused === true
+  ) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
       message: (o as { message?: string }).message ?? "Agent run refused",
@@ -86,8 +107,172 @@ function activityContext(rows: ActivityRow[]) {
 
 async function requireDeal(dealId: string): Promise<DealRow> {
   const deal = await getDeal(dealId);
-  if (!deal) throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found" });
+  if (!deal)
+    throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found" });
   return deal;
+}
+
+function readableAgentOutput(output: AgentRunOutput["output"]): string {
+  if (typeof output === "string") return output.trim();
+  for (const key of ["brief", "summary", "text", "message"]) {
+    if (typeof output[key] === "string") return output[key].trim();
+  }
+  return JSON.stringify(output, null, 2);
+}
+
+function verifiedSourceCitations(
+  citations: AgentRunOutput["sourceCitations"],
+): Array<{ url: string; title?: string }> {
+  const seen = new Set<string>();
+  return (citations ?? []).flatMap((citation) => {
+    try {
+      const url = normalizeResearchEvidence(citation.url);
+      if (seen.has(url)) return [];
+      seen.add(url);
+      return [{ url, ...(citation.title ? { title: citation.title } : {}) }];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/**
+ * Run one bounded, user-confirmed web research pass and retain the brief in
+ * the canonical CRM notes. The receipt prevents an automatic retry from
+ * repeating a charge or duplicating the note.
+ */
+export async function companyKnowledgeBrief(input: {
+  dealId: string;
+  requestId: string;
+  confirmWebResearch: true;
+  actorEmployeeId: string;
+  roles: string[];
+  runAgent?: RunAgent;
+}): Promise<CompanyKnowledgeBriefResult> {
+  if (input.confirmWebResearch !== true) {
+    throw new Error("OPENROUTER_WEB_RESEARCH_CONFIRMATION_REQUIRED");
+  }
+  const deal = await requireDeal(input.dealId);
+  if (!deal.companyId) throw new Error("Company missing for deal");
+  const [company, contact, activities, notes] = await Promise.all([
+    getCompany(deal.companyId),
+    deal.primaryContactId ? getContact(deal.primaryContactId) : null,
+    listActivities({ dealId: deal.dealId, limit: 15 }),
+    listNotes({ dealId: deal.dealId }),
+  ]);
+  if (!company) throw new Error("Company missing for deal");
+
+  const receiptPayload = {
+    dealId: deal.dealId,
+    companyId: company.companyId,
+    actorEmployeeId: input.actorEmployeeId,
+    confirmation: "bounded-openrouter-web-research",
+  };
+  const receipt = await recordIntegrationReceipt({
+    provider: "openrouter",
+    externalEventId: `company-brief:${input.actorEmployeeId}:${input.requestId}`,
+    operation: "company.research.brief",
+    rawBody: JSON.stringify(receiptPayload),
+    payload: receiptPayload,
+    status: "processing",
+    ownerEmployeeId: input.actorEmployeeId,
+  });
+  if (receipt.duplicate) {
+    if (receipt.status === "completed" && receipt.result) {
+      return {
+        ...(receipt.result as unknown as Omit<
+          CompanyKnowledgeBriefResult,
+          "duplicate"
+        >),
+        duplicate: true,
+      };
+    }
+    throw new Error("This research request is already being reconciled");
+  }
+
+  try {
+    const run = await (input.runAgent ?? defaultRunAgent)({
+      agent: "research",
+      roles: input.roles,
+      webSearch: true,
+      input: [
+        `Build a concise sales knowledge brief for ${company.name}.`,
+        "Use live web sources and do not invent facts.",
+        "Separate verified facts from reasonable hypotheses.",
+        "Cover: company snapshot, why now, relevant current signals, likely business or marketing pain points, decision-maker context, BUAF (budget/urgency/access/fit), the best hrmny service match, outreach angle, landmines, and one next action.",
+        "hrmny service lines are SMM, PR, campaigns, branding, activations, and content production.",
+        "Keep it skimmable and under 900 words. Do not include private or sensitive personal information.",
+      ].join("\n"),
+      context: {
+        company: {
+          name: company.name,
+          website: company.website,
+          sector: company.sector,
+          market: company.market,
+        },
+        contact: contact
+          ? {
+              name: [contact.firstName, contact.lastName]
+                .filter(Boolean)
+                .join(" "),
+              title: contact.title,
+              linkedinUrl: contact.linkedinUrl,
+            }
+          : null,
+        deal: dealContext(deal),
+        recentActivity: activityContext(activities),
+        existingNotes: notes.slice(0, 5).map((note) => note.body.slice(0, 500)),
+      },
+    });
+    assertNotRefused(run);
+    const brief = readableAgentOutput(run.output).slice(0, 12_000);
+    const sources = verifiedSourceCitations(run.sourceCitations).slice(0, 8);
+    if (!brief || sources.length === 0) {
+      throw new Error(
+        "OpenRouter returned no source-backed brief. Nothing was saved.",
+      );
+    }
+    const sourceList = sources
+      .map(
+        (source, index) =>
+          `[${index + 1}] ${source.title?.trim() || new URL(source.url).hostname} — ${source.url}`,
+      )
+      .join("\n");
+    const note = await createNote({
+      dealId: deal.dealId,
+      companyId: company.companyId,
+      contactId: contact?.contactId,
+      authorEmployeeId: input.actorEmployeeId,
+      body: [
+        `SALES KNOWLEDGE BRIEF — ${company.name}`,
+        `Research request: ${input.requestId}`,
+        "",
+        brief,
+        "",
+        "VERIFIED WEB SOURCES",
+        sourceList,
+      ].join("\n"),
+    });
+    const result: Omit<CompanyKnowledgeBriefResult, "duplicate"> = {
+      brief,
+      noteId: note.crmNoteId,
+      sources,
+      agentRun: meta(run),
+      providerRequestId: run.providerRequestId ?? null,
+      webSearchRequests: run.webSearchRequests ?? 0,
+    };
+    await completeIntegrationReceipt(
+      receipt.receiptId,
+      result as unknown as Record<string, unknown>,
+    );
+    return { ...result, duplicate: false };
+  } catch (error) {
+    await failIntegrationReceipt(
+      receipt.receiptId,
+      error instanceof Error ? error.message : "Research brief failed",
+    ).catch(() => undefined);
+    throw error;
+  }
 }
 
 // ── dealSummary ────────────────────────────────────────────
@@ -109,7 +294,9 @@ export async function dealSummary(input: {
       deal: dealContext(deal),
       contact: contact
         ? {
-            name: [contact.firstName, contact.lastName].filter(Boolean).join(" "),
+            name: [contact.firstName, contact.lastName]
+              .filter(Boolean)
+              .join(" "),
             email: contact.email,
             title: contact.title,
           }
@@ -195,10 +382,18 @@ const TEMPERATURES = ["hot", "warm", "cool", "cold"] as const;
 type Temperature = (typeof TEMPERATURES)[number];
 
 /** Same shape-tolerant extraction as leadgen/pipeline.ts extractScore. */
-function extractScore(output: unknown): { buafScore: number; temperature: Temperature } {
-  const o = (typeof output === "object" && output ? output : {}) as Record<string, unknown>;
+function extractScore(output: unknown): {
+  buafScore: number;
+  temperature: Temperature;
+} {
+  const o = (typeof output === "object" && output ? output : {}) as Record<
+    string,
+    unknown
+  >;
   const buafScore =
-    typeof o.buafScore === "number" && Number.isFinite(o.buafScore) ? o.buafScore : 0;
+    typeof o.buafScore === "number" && Number.isFinite(o.buafScore)
+      ? o.buafScore
+      : 0;
   const temperature = (TEMPERATURES as readonly string[]).includes(
     o.temperature as string,
   )
@@ -217,7 +412,9 @@ export async function rescoreBuaf(input: {
   dealId: string;
   actorEmployeeId?: string | null;
   runAgent?: RunAgent;
-}): Promise<CrmAiResult<{ buafScore: number; temperature: Temperature; deal: DealRow }>> {
+}): Promise<
+  CrmAiResult<{ buafScore: number; temperature: Temperature; deal: DealRow }>
+> {
   const deal = await requireDeal(input.dealId);
   // Same research-agent BUAF path the daily leadgen pipeline uses, on one deal.
   const run = await (input.runAgent ?? defaultRunAgent)({
@@ -234,9 +431,14 @@ export async function rescoreBuaf(input: {
   assertNotRefused(run);
   const { buafScore, temperature } = extractScore(run.output);
 
-  const updated = await updateDeal(input.dealId, { buafTemperature: temperature });
+  const updated = await updateDeal(input.dealId, {
+    buafTemperature: temperature,
+  });
   if (!updated)
-    throw new TRPCError({ code: "NOT_FOUND", message: "Deal missing after rescore" });
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "Deal missing after rescore",
+    });
 
   await writeAudit({
     actorEmployeeId: input.actorEmployeeId ?? null,
@@ -256,7 +458,10 @@ export async function rescoreBuaf(input: {
     metadata: { buafScore, temperature },
   });
 
-  return { output: { buafScore, temperature, deal: updated }, agentRun: meta(run) };
+  return {
+    output: { buafScore, temperature, deal: updated },
+    agentRun: meta(run),
+  };
 }
 
 // ── draftOutreach (delegates to the gated leadgen HITL path) ──
