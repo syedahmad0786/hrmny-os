@@ -24,6 +24,11 @@ import {
   runApolloPeopleSearchQueuedJob,
 } from "@/server/sales-os/apollo-search";
 import { getSalesOsSettings } from "@/server/sales-os/store";
+import {
+  failGoogleChatInteractionJob,
+  GOOGLE_CHAT_INTERACTION_JOB_KIND,
+  runGoogleChatInteractionJob,
+} from "@/server/google-chat";
 
 export const dynamic = "force-dynamic";
 
@@ -268,6 +273,8 @@ export async function GET(request: Request) {
         nextRunAt = recurring
           ? new Date(Date.now() + (ruleRun.scheduleMinutes ?? 15) * 60_000)
           : null;
+      } else if (job.kind === GOOGLE_CHAT_INTERACTION_JOB_KIND) {
+        result = await runGoogleChatInteractionJob(job.payload);
       } else {
         throw new Error(`Unsupported job kind: ${job.kind}`);
       }
@@ -279,6 +286,10 @@ export async function GET(request: Request) {
             ? (nextRunAt ?? new Date(Date.now() + 5 * 60_000))
             : new Date(),
           attempts: recurring ? 0 : job.attempts,
+          payload:
+            job.kind === GOOGLE_CHAT_INTERACTION_JOB_KIND
+              ? {}
+              : (job.payload as Record<string, unknown>),
           lockedAt: null,
           completedAt: recurring ? null : new Date(),
           result,
@@ -290,6 +301,11 @@ export async function GET(request: Request) {
     } catch (error) {
       const retry = Number(job.attempts) < 3;
       const retryDelaySeconds = 5 * 60;
+      if (!retry && job.kind === GOOGLE_CHAT_INTERACTION_JOB_KIND) {
+        await failGoogleChatInteractionJob(job.payload, error).catch(
+          () => undefined,
+        );
+      }
       await db
         .update(scheduledJob)
         .set({
@@ -297,6 +313,10 @@ export async function GET(request: Request) {
           runAt: retry
             ? new Date(Date.now() + retryDelaySeconds * 1_000)
             : new Date(),
+          payload:
+            !retry && job.kind === GOOGLE_CHAT_INTERACTION_JOB_KIND
+              ? {}
+              : (job.payload as Record<string, unknown>),
           lockedAt: null,
           lastError: String(error).slice(0, 2_000),
           updatedAt: new Date(),

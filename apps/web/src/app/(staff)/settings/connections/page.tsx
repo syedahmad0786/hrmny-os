@@ -156,18 +156,51 @@ function OperatingSurfaces() {
   ).replace(/\/$/, "");
   const googleChatUrl = `${appOrigin}/api/integrations/google-chat/events`;
   const qmUrl = process.env.NEXT_PUBLIC_QM_URL?.trim().replace(/\/$/, "");
+  const [googleChatStatus, setGoogleChatStatus] = useState("checking");
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/ready")
+      .then((response) => response.json())
+      .then((body) => {
+        if (!cancelled) {
+          setGoogleChatStatus(
+            body?.surfaces?.googleChat?.status ?? "endpoint_ready",
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setGoogleChatStatus("endpoint_ready");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const googleChatLive = googleChatStatus === "live";
+  const googleChatConfigured = googleChatStatus === "async_configured";
 
   return (
     <section data-testid="operating-surfaces" className="grid gap-4 lg:grid-cols-2">
-      <article className="rounded-xl border border-emerald-300 bg-emerald-50 p-5 text-emerald-950">
+      <article
+        className={`rounded-xl border p-5 ${
+          googleChatLive
+            ? "border-emerald-300 bg-emerald-50 text-emerald-950"
+            : "border-amber-300 bg-amber-50 text-amber-950"
+        }`}
+      >
         <p className="text-xs font-semibold uppercase tracking-[0.16em]">
-          Team chat · endpoint ready
+          Team chat · {googleChatLive
+            ? "live verified"
+            : googleChatConfigured
+              ? "credential present"
+              : "setup required"}
         </p>
         <h2 className="mt-1 font-display text-xl">Google Chat → HRMNY</h2>
         <p className="mt-2 text-sm">
-          Staff messages enter the same HRMNY assistant and keep one conversation
-          per person and Chat space. Google-signed requests and active staff are
-          verified before anything runs.
+          {googleChatLive
+            ? "Staff messages enter the same HRMNY assistant with durable, thread-specific replies. Google-signed requests and active staff are verified before anything runs."
+            : googleChatConfigured
+              ? "A service-account credential is present and the durable worker is built. Run one named-user message canary before treating Google Chat as live."
+              : "The signed endpoint is built, but the Google Chat service account and named-user canary are still required before staff messages work."}
         </p>
         <code className="mt-3 block overflow-x-auto rounded-lg bg-white/70 p-3 text-xs">
           {googleChatUrl}

@@ -59,7 +59,7 @@ export function externalChatThreadId(
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** One durable HRMNY conversation for each employee + external chat space. */
+/** One durable HRMNY conversation for each employee + external chat scope. */
 export async function getOrCreateExternalChatThread(input: {
   employeeId: string;
   externalRef: string;

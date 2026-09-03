@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   runCrmTaskDigest: vi.fn(),
   runLeadgenDailyCron: vi.fn(),
   runReconSweepers: vi.fn(),
+  runGoogleChatInteractionJob: vi.fn(),
+  failGoogleChatInteractionJob: vi.fn(),
 }));
 
 vi.mock("@/server/db", () => ({ getDb: mocks.getDb }));
@@ -69,6 +71,11 @@ vi.mock("@/server/sales-os/apollo-search", () => ({
 }));
 vi.mock("@/server/sales-os/store", () => ({
   getSalesOsSettings: mocks.getSettings,
+}));
+vi.mock("@/server/google-chat", () => ({
+  GOOGLE_CHAT_INTERACTION_JOB_KIND: "google_chat_interaction",
+  runGoogleChatInteractionJob: mocks.runGoogleChatInteractionJob,
+  failGoogleChatInteractionJob: mocks.failGoogleChatInteractionJob,
 }));
 
 import { GET } from "./route";
