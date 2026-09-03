@@ -943,9 +943,12 @@ export default function HuntClientsPage() {
                             : "Add to pipeline · free"}
                       </button>
                       {saved ? (
-                        <Link href={`/crm/deals/${saved.dealId}#ai-assist`}>
-                          Next: build the research brief →
-                        </Link>
+                        <>
+                          <Link href={`/crm/deals/${saved.dealId}`}>
+                            Open this lead in CRM →
+                          </Link>
+                          <span>Next: build the research brief.</span>
+                        </>
                       ) : null}
                       <span
                         className="growth-email-state"
