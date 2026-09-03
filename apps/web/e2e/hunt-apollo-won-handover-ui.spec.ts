@@ -83,12 +83,11 @@ async function ensureApolloDealHandoverNext(page: Page, query: string) {
       .filter({ hasText: voiceSubject }),
   ).toBeVisible({ timeout: 30_000 });
 
-  await page.goto("/crm/quote", { waitUntil: "domcontentloaded" });
-  const quoteDeal = page.getByTestId("quote-deal-select");
-  await expect(quoteDeal.locator(`option[value="${dealId}"]`)).toBeAttached({
-    timeout: 30_000,
+  await page.goto(`/crm/quote?dealId=${dealId}`, {
+    waitUntil: "domcontentloaded",
   });
-  await quoteDeal.selectOption(dealId!);
+  const quoteDeal = page.getByTestId("quote-deal-select");
+  await expect(quoteDeal).toHaveValue(dealId!, { timeout: 30_000 });
   const line = page.getByTestId("quote-line").first();
   await line.getByTestId("quote-line-label").fill("Acceptance campaign");
   await line.getByTestId("quote-line-qty").fill("1");
