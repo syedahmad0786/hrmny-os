@@ -267,7 +267,7 @@ test.describe("Demo funnel", () => {
       timeout: 60_000,
     });
     await expect(
-      page.getByRole("heading", { name: /Client preview/i }),
+      page.getByText("hrmny client workspace", { exact: true }),
     ).toBeVisible({ timeout: 60_000 });
     await expect(page).not.toHaveURL(/token=|\/portal\//);
   });
