@@ -58,6 +58,8 @@ export type LLMGenerateOptions = {
   schema?: ZodTypeAny;
   temperature?: number;
   images?: LLMImageInput[];
+  /** OpenRouter live web grounding, hard-capped to two searches. */
+  webSearch?: boolean;
   /** Optional task hint for mock structured outputs. */
   task?: "invoice_extract" | "outreach_draft" | "reply_intent" | "generic";
 };
@@ -71,6 +73,8 @@ export type LLMGenerateResult = {
   requestId?: string;
   inputTokens?: number;
   outputTokens?: number;
+  sourceCitations?: Array<{ url: string; title?: string }>;
+  webSearchRequests?: number;
 };
 
 /**
@@ -261,9 +265,10 @@ export function createMockProvider(
       const blob = options.messages.map((m) => m.content).join("\n");
       const catalogHasFunnel = /(?:^|\n)-\s*funnel_act\s*:/i.test(blob);
       const sawFunnelObservation = /Observation from funnel_act/i.test(blob);
-      const wantsFunnel = /funnel drafts|advance(?:\s+\w+){0,4}\s+funnel|portal invite|brief.*campaign|campaign.*brief/i.test(
-        userText,
-      );
+      const wantsFunnel =
+        /funnel drafts|advance(?:\s+\w+){0,4}\s+funnel|portal invite|brief.*campaign|campaign.*brief/i.test(
+          userText,
+        );
       if (catalogHasFunnel && wantsFunnel && !sawFunnelObservation) {
         const prompt =
           userText.trim().slice(0, 400) ||
@@ -311,8 +316,7 @@ export function createMockProvider(
       }
       if (sawAgentActObservation) {
         return {
-          text:
-            "Ran the selected agent's allowlisted tools in the current sandbox and summarized the results.",
+          text: "Ran the selected agent's allowlisted tools in the current sandbox and summarized the results.",
           provider: "mock",
           model: options.model ?? defaultModel,
         };
@@ -331,9 +335,12 @@ export function createMockProvider(
         /closed\s*loop|won\s*handover|prospect\s*(?:→|->|to)\s*won/i.test(
           userText,
         );
-      if (catalogHasClosedLoop && wantsClosedLoop && !sawClosedLoopObservation) {
-        const prompt =
-          userText.trim().slice(0, 400) || "Run demo closed loop";
+      if (
+        catalogHasClosedLoop &&
+        wantsClosedLoop &&
+        !sawClosedLoopObservation
+      ) {
+        const prompt = userText.trim().slice(0, 400) || "Run demo closed loop";
         const toolName = /(?:^|\n)-\s*crm_closed_loop\s*:/i.test(blob)
           ? "crm_closed_loop"
           : "crm.closed_loop";
@@ -383,11 +390,7 @@ export function createMockProvider(
         /(?:os[_\s-]?issue|issue\s+(?:the\s+)?(?:os\s+)?invoice|invoice[^\n]{0,40}issue|mark\s+issued)/i.test(
           userText,
         );
-      if (
-        catalogHasFinanceApprove &&
-        wantsApprove &&
-        !sawFinanceApproveObs
-      ) {
+      if (catalogHasFinanceApprove && wantsApprove && !sawFinanceApproveObs) {
         const prompt = userText.trim().slice(0, 400) || "Approve OS invoice";
         const toolName = /(?:^|\n)-\s*finance_os_approve\s*:/i.test(blob)
           ? "finance_os_approve"
@@ -432,8 +435,7 @@ export function createMockProvider(
       }
       if (sawFinanceIssueObs) {
         return {
-          text:
-            "Issued the OS invoice (OS-only when Xero write is disabled).",
+          text: "Issued the OS invoice (OS-only when Xero write is disabled).",
           provider: "mock",
           model: options.model ?? defaultModel,
         };
@@ -456,8 +458,7 @@ export function createMockProvider(
         wantsOutreachApprove &&
         !sawOutreachApproveObs
       ) {
-        const prompt =
-          userText.trim().slice(0, 400) || "Approve OS outreach";
+        const prompt = userText.trim().slice(0, 400) || "Approve OS outreach";
         const toolName = /(?:^|\n)-\s*outreach_os_approve\s*:/i.test(blob)
           ? "outreach_os_approve"
           : "outreach.os_approve";
@@ -476,8 +477,7 @@ export function createMockProvider(
       }
       if (sawOutreachApproveObs) {
         return {
-          text:
-            "Approved the outreach draft — ready for human send (HITL).",
+          text: "Approved the outreach draft — ready for human send (HITL).",
           provider: "mock",
           model: options.model ?? defaultModel,
         };
@@ -549,8 +549,7 @@ export function createMockProvider(
         wantsCampaignApprove &&
         !sawCampaignApproveObs
       ) {
-        const prompt =
-          userText.trim().slice(0, 400) || "Approve OS campaign";
+        const prompt = userText.trim().slice(0, 400) || "Approve OS campaign";
         const toolName = /(?:^|\n)-\s*campaigns_os_approve\s*:/i.test(blob)
           ? "campaigns_os_approve"
           : "campaigns.os_approve";
@@ -599,8 +598,7 @@ export function createMockProvider(
       }
       if (sawCampaignPublishObs) {
         return {
-          text:
-            "Published the campaign in OS (stub mode when LinkedIn is unconnected).",
+          text: "Published the campaign in OS (stub mode when LinkedIn is unconnected).",
           provider: "mock",
           model: options.model ?? defaultModel,
         };
@@ -616,7 +614,9 @@ export function createMockProvider(
 }
 
 function field(userText: string, key: string): string | undefined {
-  return userText.match(new RegExp(`${key}[:=]\\s*([^\\n]+)`, "i"))?.[1]?.trim();
+  return userText
+    .match(new RegExp(`${key}[:=]\\s*([^\\n]+)`, "i"))?.[1]
+    ?.trim();
 }
 
 /** Deterministic outreach draft for mock/eval — never invents a send, HITL only. */
@@ -637,9 +637,18 @@ export function mockOutreachDraft(userText: string) {
 // Values match the frozen ReplyIntentSchema in agent-io.ts (M7 contract).
 const REPLY_INTENT_RULES: Array<[RegExp, string]> = [
   [/unsubscribe|opt\s?out|remove me|stop emailing|take me off/i, "unsubscribe"],
-  [/not interested|no thanks|no thank you|we'?ll pass|not a fit|already have|maybe later|not right now/i, "not_now"],
-  [/interested|sounds good|let'?s (talk|chat|connect)|book|schedule|demo|call me|keen|works for me/i, "interested"],
-  [/\?|how much|pricing|what.*cost|when can|could you|can you|tell me more/i, "question"],
+  [
+    /not interested|no thanks|no thank you|we'?ll pass|not a fit|already have|maybe later|not right now/i,
+    "not_now",
+  ],
+  [
+    /interested|sounds good|let'?s (talk|chat|connect)|book|schedule|demo|call me|keen|works for me/i,
+    "interested",
+  ],
+  [
+    /\?|how much|pricing|what.*cost|when can|could you|can you|tell me more/i,
+    "question",
+  ],
 ];
 
 /** Keyword classifier for mock/eval. ponytail: heuristic map, swap for the live model in prod. */
@@ -718,6 +727,24 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
                   temperature: options.temperature ?? 0.2,
                   max_tokens: 2_048,
                   stream: false,
+                  ...(options.webSearch
+                    ? {
+                        tools: [
+                          {
+                            type: "openrouter:web_search",
+                            parameters: {
+                              engine: "parallel",
+                              mode: "basic",
+                              max_results: 4,
+                              max_total_results: 8,
+                              max_uses: 2,
+                              max_characters: 3_000,
+                            },
+                          },
+                        ],
+                        max_tool_calls: 2,
+                      }
+                    : {}),
                   ...(options.schema
                     ? { response_format: { type: "json_object" } }
                     : {}),
@@ -729,8 +756,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
               raw.choices as Array<Record<string, unknown>> | undefined
             )?.[0];
             const message = choice?.message as
-              | Record<string, unknown>
-              | undefined;
+              Record<string, unknown> | undefined;
             const content =
               typeof message?.content === "string"
                 ? message.content.trim()
@@ -746,6 +772,27 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
               throw new Error("LLM provider returned no text");
             }
             const usage = raw.usage as Record<string, unknown> | undefined;
+            const serverToolUse = usage?.server_tool_use as
+              Record<string, unknown> | undefined;
+            const sourceCitations = (
+              Array.isArray(message?.annotations) ? message.annotations : []
+            ).flatMap((annotation) => {
+              if (!annotation || typeof annotation !== "object") return [];
+              const citation = (annotation as Record<string, unknown>)
+                .url_citation;
+              if (!citation || typeof citation !== "object") return [];
+              const value = citation as Record<string, unknown>;
+              return typeof value.url === "string"
+                ? [
+                    {
+                      url: value.url,
+                      ...(typeof value.title === "string"
+                        ? { title: value.title }
+                        : {}),
+                    },
+                  ]
+                : [];
+            });
             return parseResult(options, {
               text,
               provider: name,
@@ -753,10 +800,12 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
               requestId: typeof raw.id === "string" ? raw.id : undefined,
               inputTokens: Number(usage?.prompt_tokens ?? 0) || undefined,
               outputTokens: Number(usage?.completion_tokens ?? 0) || undefined,
+              sourceCitations,
+              webSearchRequests:
+                Number(serverToolUse?.web_search_requests ?? 0) || undefined,
             });
           } catch (err) {
-            lastError =
-              err instanceof Error ? err : new Error(String(err));
+            lastError = err instanceof Error ? err : new Error(String(err));
             // Try next free route on rate-limit / empty / upstream failure.
             continue;
           }
@@ -852,10 +901,19 @@ export type ModelPrice = {
 export const MODEL_PRICES_AED: Record<string, ModelPrice> = {
   "openai/gpt-4o": { inputPerMTokAed: 9.18, outputPerMTokAed: 36.73 },
   "openai/gpt-4o-mini": { inputPerMTokAed: 0.55, outputPerMTokAed: 2.2 },
-  "anthropic/claude-3.5-sonnet": { inputPerMTokAed: 11.02, outputPerMTokAed: 55.09 },
-  "anthropic/claude-3.5-haiku": { inputPerMTokAed: 2.94, outputPerMTokAed: 14.69 },
+  "anthropic/claude-3.5-sonnet": {
+    inputPerMTokAed: 11.02,
+    outputPerMTokAed: 55.09,
+  },
+  "anthropic/claude-3.5-haiku": {
+    inputPerMTokAed: 2.94,
+    outputPerMTokAed: 14.69,
+  },
   "google/gemini-2.0-flash": { inputPerMTokAed: 0.37, outputPerMTokAed: 1.47 },
-  "meta-llama/llama-3.1-70b-instruct": { inputPerMTokAed: 1.29, outputPerMTokAed: 1.29 },
+  "meta-llama/llama-3.1-70b-instruct": {
+    inputPerMTokAed: 1.29,
+    outputPerMTokAed: 1.29,
+  },
   default: { inputPerMTokAed: 5, outputPerMTokAed: 15 },
 };
 

@@ -15,6 +15,8 @@ export type AgentRunInput = {
   input: string | Record<string, unknown>;
   /** Retrieved memory / deal / client context injected before the draft. */
   context?: Record<string, unknown>;
+  /** Explicit user-triggered, bounded OpenRouter web grounding. */
+  webSearch?: boolean;
   /** Actor roles for sandbox routing (primary privileged-data control). */
   roles?: string[];
   /** Explicit privileged domains this run needs (salaries, margin, etc.). */
@@ -50,6 +52,9 @@ export type AgentRunOutput = {
   /** Cost in AED, charged against the monthly cap in provider.ts. */
   costAed: number;
   gateOutcome: AgentGateOutcome;
+  providerRequestId?: string;
+  sourceCitations?: Array<{ url: string; title?: string }>;
+  webSearchRequests?: number;
 };
 
 /** M8 competitor-research finding — structured into pgvector memory. */

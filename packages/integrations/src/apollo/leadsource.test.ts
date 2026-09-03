@@ -4,6 +4,7 @@ import {
   createLeadSourceAdapter,
   createLeadSourceLive,
   createLeadSourceMock,
+  getApolloCreditUsage,
   mapApolloSearchPerson,
 } from "./leadsource";
 
@@ -150,6 +151,58 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       run_waterfall_email: false,
       run_waterfall_phone: false,
     });
+  });
+
+  it("reads and normalizes Apollo's zero-credit team balance", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          credit_usage_stats: {
+            lead_credit: { limit: 100, consumed: 23, left_over: 77 },
+            direct_dial_credit: { limit: 10, consumed: 2, left_over: 8 },
+          },
+          current_credit_cycle: {
+            start_date: "2026-09-01T00:00:00.000Z",
+            end_date: "2026-10-01T00:00:00.000Z",
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getApolloCreditUsage("test-key")).resolves.toMatchObject({
+      credits: {
+        lead_credit: { limit: 100, consumed: 23, leftOver: 77 },
+        direct_dial_credit: { limit: 10, consumed: 2, leftOver: 8 },
+      },
+      cycle: {
+        startDate: "2026-09-01T00:00:00.000Z",
+        endDate: "2026-10-01T00:00:00.000Z",
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.apollo.io/api/v1/usage_stats/credit_usage_stats",
+      expect.objectContaining({ method: "POST", redirect: "error" }),
+    );
+  });
+
+  it("does not expose Apollo's balance error body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response("synthetic private provider detail", { status: 403 }),
+        ),
+    );
+
+    const error = await getApolloCreditUsage("test-key").catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ApolloProviderRequestError);
+    expect(error).toMatchObject({ httpStatus: 403, retryable: false });
+    expect(String(error)).not.toContain("synthetic private provider detail");
   });
 
   it("maps explicit title and location fields to Apollo's documented filters", async () => {
@@ -337,9 +390,9 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
         allowPaidOperations: false,
       });
 
-      const error = await source
-        .searchLeadsWithReceipt!({ query: "UAE" })
-        .catch((caught: unknown) => caught);
+      const error = await source.searchLeadsWithReceipt!({
+        query: "UAE",
+      }).catch((caught: unknown) => caught);
 
       expect(error).toBeInstanceOf(ApolloProviderRequestError);
       expect(error).toMatchObject({
@@ -360,7 +413,9 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       vi
         .fn()
         .mockRejectedValue(
-          new TypeError("synthetic redirect or network detail must stay private"),
+          new TypeError(
+            "synthetic redirect or network detail must stay private",
+          ),
         ),
     );
     const source = createLeadSourceLive({
@@ -369,9 +424,9 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       allowPaidOperations: false,
     });
 
-    const error = await source
-      .searchLeadsWithReceipt!({ query: "UAE" })
-      .catch((caught: unknown) => caught);
+    const error = await source.searchLeadsWithReceipt!({ query: "UAE" }).catch(
+      (caught: unknown) => caught,
+    );
 
     expect(error).toBeInstanceOf(ApolloProviderRequestError);
     expect(error).toMatchObject({
@@ -415,9 +470,9 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       allowPaidOperations: false,
     });
 
-    const error = await source
-      .searchLeadsWithReceipt!({ query: "UAE" })
-      .catch((caught: unknown) => caught);
+    const error = await source.searchLeadsWithReceipt!({ query: "UAE" }).catch(
+      (caught: unknown) => caught,
+    );
 
     expect(error).toMatchObject({
       httpStatus: 200,
@@ -442,9 +497,9 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       allowPaidOperations: false,
     });
 
-    const error = await source
-      .searchLeadsWithReceipt!({ query: "UAE" })
-      .catch((caught: unknown) => caught);
+    const error = await source.searchLeadsWithReceipt!({ query: "UAE" }).catch(
+      (caught: unknown) => caught,
+    );
 
     expect(error).toMatchObject({
       httpStatus: 200,
@@ -457,12 +512,14 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
   it("dead-letters a malformed person record before mapping candidates", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ people: [{ id: "valid-shape" }, null] }),
-          { status: 200 },
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ people: [{ id: "valid-shape" }, null] }),
+            { status: 200 },
+          ),
         ),
-      ),
     );
     const source = createLeadSourceLive({
       mode: "live",
@@ -470,9 +527,9 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
       allowPaidOperations: false,
     });
 
-    const error = await source
-      .searchLeadsWithReceipt!({ query: "UAE" })
-      .catch((caught: unknown) => caught);
+    const error = await source.searchLeadsWithReceipt!({ query: "UAE" }).catch(
+      (caught: unknown) => caught,
+    );
 
     expect(error).toMatchObject({
       httpStatus: 200,

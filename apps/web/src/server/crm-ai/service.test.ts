@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAgentOverrides, setAgentEnabled } from "@hrmny/ai";
 import { resetCrmMemory } from "../crm/memory";
 import {
@@ -7,11 +7,14 @@ import {
   createDeal,
   getDeal,
   listActivities,
+  listNotes,
 } from "../crm/repository";
+import { resetIntegrationReceiptMemory } from "../integrations/inbox";
 import { listOutreach, resetLeadgenStore } from "../leadgen/store";
 import { createMockRunAgent } from "../leadgen/agent-run";
 import {
   accountSummary,
+  companyKnowledgeBrief,
   dealSummary,
   draftOutreachForDeal,
   nextBestAction,
@@ -37,6 +40,7 @@ describe("crm-ai service (mock provider)", () => {
   beforeEach(() => {
     resetCrmMemory();
     resetLeadgenStore();
+    resetIntegrationReceiptMemory();
   });
   afterEach(() => {
     resetAgentOverrides();
@@ -66,6 +70,46 @@ describe("crm-ai service (mock provider)", () => {
     expect(res.agentRun.model).toMatch(/mock/);
   });
 
+  it("stores one sourced brief for one confirmed research request", async () => {
+    const { deal } = await seed();
+    const runAgent = vi.fn(async () => ({
+      agent: "research" as const,
+      model: "mock-web",
+      output:
+        "Verified company signal.\n\nLikely pain point: launch visibility.",
+      inputTokens: 10,
+      outputTokens: 20,
+      costAed: 0,
+      gateOutcome: "not_applicable" as const,
+      providerRequestId: "provider-request-1",
+      sourceCitations: [
+        { url: "https://www.hrmny.co/work", title: "hrmny work" },
+      ],
+      webSearchRequests: 1,
+    }));
+    const requestId = crypto.randomUUID();
+    const input = {
+      dealId: deal.dealId,
+      requestId,
+      confirmWebResearch: true as const,
+      actorEmployeeId: crypto.randomUUID(),
+      roles: ["staff"],
+      runAgent,
+    };
+
+    const first = await companyKnowledgeBrief(input);
+    const duplicate = await companyKnowledgeBrief(input);
+
+    expect(first).toMatchObject({
+      duplicate: false,
+      providerRequestId: "provider-request-1",
+      webSearchRequests: 1,
+    });
+    expect(duplicate).toMatchObject({ duplicate: true, noteId: first.noteId });
+    expect(runAgent).toHaveBeenCalledTimes(1);
+    expect(await listNotes({ dealId: deal.dealId })).toHaveLength(1);
+  });
+
   it("rescoreBuaf writes the temperature back and records an activity", async () => {
     const { deal } = await seed();
     expect(deal.buafTemperature).toBeNull();
@@ -83,9 +127,9 @@ describe("crm-ai service (mock provider)", () => {
     expect(stored?.buafTemperature).toBe(res.output.temperature);
 
     const activities = await listActivities({ dealId: deal.dealId });
-    expect(
-      activities.some((a) => a.subject?.startsWith("BUAF rescored")),
-    ).toBe(true);
+    expect(activities.some((a) => a.subject?.startsWith("BUAF rescored"))).toBe(
+      true,
+    );
   });
 
   it("rescoreBuaf under the raw mock provider defaults to cold", async () => {

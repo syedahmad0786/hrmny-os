@@ -12,7 +12,7 @@ import { CrmBtn, CrmTag } from "@/components/crm/ui";
  * friendly "AI disabled" notice instead of a raw error.
  */
 
-type ActionKey = "summary" | "next" | "rescore" | "outreach";
+type ActionKey = "research" | "summary" | "next" | "rescore" | "outreach";
 
 type AgentRunMeta = { model: string; tokens: number; costAed: number };
 
@@ -56,6 +56,12 @@ const ACTIONS: Array<{
   hint: string;
   button: string;
 }> = [
+  {
+    key: "research",
+    label: "Build knowledge brief",
+    hint: "Live company research, pain points, hrmny service angle and cited sources. Saved to Notes.",
+    button: "Research",
+  },
   {
     key: "summary",
     label: "Summarize deal",
@@ -105,6 +111,27 @@ export function AiDealPanel({ dealId }: { dealId: string }) {
   }
 
   const handlers: Record<ActionKey, () => void> = {
+    research: () => {
+      const confirmed = window.confirm(
+        "Run live OpenRouter web research? The company and public professional context will be sent to OpenRouter. Search is capped at 2 provider queries (up to about US$0.01 at current pricing). Nothing will be emailed or posted.",
+      );
+      if (!confirmed) return;
+      void run("research", async () => {
+        const r = await utils.client.crmAi.companyKnowledgeBrief.mutate({
+          dealId,
+          requestId: crypto.randomUUID(),
+          confirmWebResearch: true,
+        });
+        void utils.crm.notes.invalidate();
+        return {
+          ok: {
+            kind: "ok",
+            text: `${r.brief}\n\nSaved to this deal with ${r.sources.length} verified source${r.sources.length === 1 ? "" : "s"}.`,
+            meta: r.agentRun,
+          },
+        };
+      });
+    },
     summary: () =>
       void run("summary", async () => {
         const r = await utils.client.crmAi.dealSummary.query({ dealId });
@@ -148,7 +175,7 @@ export function AiDealPanel({ dealId }: { dealId: string }) {
   };
 
   return (
-    <div className="crm-panel">
+    <div id="ai-assist" className="crm-panel">
       <div className="crm-panel-head">
         <div>
           <h3>AI assist</h3>
@@ -170,10 +197,7 @@ export function AiDealPanel({ dealId }: { dealId: string }) {
                       {a.hint}
                     </span>
                   </span>
-                  <CrmBtn
-                    disabled={pending !== null}
-                    onClick={handlers[a.key]}
-                  >
+                  <CrmBtn disabled={pending !== null} onClick={handlers[a.key]}>
                     {isRunning ? "Running…" : a.button}
                   </CrmBtn>
                 </div>

@@ -32,14 +32,18 @@ const tokenProvider: LLMProvider = {
 describe("cost estimation", () => {
   it("prices a known model from the map", () => {
     // 1M in @0.55 + 0.5M out @2.2 = 0.55 + 1.1 = 1.65 AED
-    expect(estimateCostAed("openai/gpt-4o-mini", 1_000_000, 500_000)).toBeCloseTo(1.65, 4);
+    expect(
+      estimateCostAed("openai/gpt-4o-mini", 1_000_000, 500_000),
+    ).toBeCloseTo(1.65, 4);
   });
 
   it("matches by substring, then falls back to default", () => {
     expect(priceForModel("openai/gpt-4o-mini:free")).toEqual(
       priceForModel("openai/gpt-4o-mini"),
     );
-    expect(priceForModel("some/unknown-model")).toEqual(priceForModel("default"));
+    expect(priceForModel("some/unknown-model")).toEqual(
+      priceForModel("default"),
+    );
   });
 
   it("costs 0 when token counts are missing", () => {
@@ -98,7 +102,8 @@ describe("withMetering", () => {
       messages: [
         {
           role: "system",
-          content: "Available tools:\n- funnel_act: Run sandboxed funnel writes",
+          content:
+            "Available tools:\n- funnel_act: Run sandboxed funnel writes",
         },
         {
           role: "user",
@@ -106,7 +111,7 @@ describe("withMetering", () => {
         },
         {
           role: "user",
-          content: "Observation from funnel_act:\n{\"tools\":[]}",
+          content: 'Observation from funnel_act:\n{"tools":[]}',
         },
         {
           role: "user",
@@ -312,9 +317,9 @@ describe("openrouter free-model failover", () => {
     expect(isOpenRouterFreeRoute("stealth/ox-alpha")).toBe(true);
     expect(isOpenRouterFreeRoute("openrouter/free")).toBe(true);
     expect(isOpenRouterFreeRoute("openai/gpt-4o")).toBe(false);
-    expect(() => assertOpenRouterFreeRoute("anthropic/claude-3.5-sonnet")).toThrow(
-      /free allowlist/i,
-    );
+    expect(() =>
+      assertOpenRouterFreeRoute("anthropic/claude-3.5-sonnet"),
+    ).toThrow(/free allowlist/i);
   });
 
   it("runtimeLlmSnapshot reflects env without secrets", () => {
@@ -332,7 +337,9 @@ describe("openrouter free-model failover", () => {
     process.env.OPENROUTER_API_KEY = "sk-test";
     delete process.env.LLM_DEFAULT_MODEL;
     expect(runtimeLlmSnapshot().provider).toBe("openrouter");
-    expect(runtimeLlmSnapshot().defaultModel).toBe(OPENROUTER_FREE_DEFAULT_MODEL);
+    expect(runtimeLlmSnapshot().defaultModel).toBe(
+      OPENROUTER_FREE_DEFAULT_MODEL,
+    );
     expect(runtimeLlmSnapshot().freeOnly).toBe(true);
 
     process.env.LLM_DEFAULT_MODEL = "stealth/ox-alpha";
@@ -352,9 +359,7 @@ describe("openrouter free-model failover", () => {
         JSON.stringify({
           id: "gen-1",
           model: body.model,
-          choices: [
-            { message: { role: "assistant", content: "failover ok" } },
-          ],
+          choices: [{ message: { role: "assistant", content: "failover ok" } }],
           usage: { prompt_tokens: 1, completion_tokens: 2 },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
@@ -375,6 +380,73 @@ describe("openrouter free-model failover", () => {
     });
     expect(result.text).toBe("failover ok");
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    vi.unstubAllGlobals();
+  });
+
+  it("hard-caps OpenRouter web research and preserves source receipts", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            id: "research-1",
+            model: OPENROUTER_FREE_DEFAULT_MODEL,
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "Grounded brief",
+                  annotations: [
+                    {
+                      type: "url_citation",
+                      url_citation: {
+                        url: "https://company.example/news",
+                        title: "Company news",
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 20,
+              server_tool_use: { web_search_requests: 2 },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = createProvider({
+      provider: "openrouter",
+      defaultModel: OPENROUTER_FREE_DEFAULT_MODEL,
+      openRouterApiKey: "sk-test",
+    });
+
+    const result = await provider.generate({
+      messages: [{ role: "user", content: "Research this company" }],
+      webSearch: true,
+    });
+    const request = JSON.parse(
+      String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ) as Record<string, unknown>;
+
+    expect(request).toMatchObject({
+      max_tool_calls: 2,
+      tools: [
+        {
+          type: "openrouter:web_search",
+          parameters: { max_uses: 2, max_total_results: 8 },
+        },
+      ],
+    });
+    expect(result).toMatchObject({
+      requestId: "research-1",
+      webSearchRequests: 2,
+      sourceCitations: [
+        { url: "https://company.example/news", title: "Company news" },
+      ],
+    });
     vi.unstubAllGlobals();
   });
 });

@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { salesgrowth } from "@hrmny/integrations";
+import {
+  ApolloProviderRequestError,
+  getApolloCreditUsage,
+  salesgrowth,
+} from "@hrmny/integrations";
 import { runSalesGrowthImport } from "../crm/salesgrowth-import";
 import { addCredit } from "../sales-os/store";
 import {
@@ -44,7 +48,10 @@ import {
   type SalesOsSettings,
 } from "../sales-os";
 import { getOutreach, listOutreach, patchOutreach } from "../leadgen/store";
-import { ownedIntegrationConnectionStatus } from "../integrations/resolve-keys";
+import {
+  ownedIntegrationConnectionStatus,
+  resolveOwnedIntegrationApiKey,
+} from "../integrations/resolve-keys";
 import { importApolloPersonToCrm } from "../crm/apollo-import";
 import { getContact } from "../crm/repository";
 import {
@@ -136,6 +143,43 @@ export const salesOsRouter = router({
       ...(await ownedIntegrationConnectionStatus("apollo", ctx.employeeId)),
       principalId: ctx.employeeId,
     })),
+    creditBalance: staffProcedure.query(async ({ ctx }) => {
+      const { apiKey } = await resolveOwnedIntegrationApiKey(
+        "apollo",
+        ctx.employeeId,
+        null,
+      );
+      if (!apiKey) {
+        return {
+          state: "not_connected" as const,
+          principalId: ctx.employeeId,
+          message: "Connect Apollo to view the live team credit balance.",
+        };
+      }
+      try {
+        return {
+          state: "live" as const,
+          principalId: ctx.employeeId,
+          ...(await getApolloCreditUsage(apiKey)),
+        };
+      } catch (error) {
+        if (error instanceof ApolloProviderRequestError) {
+          return {
+            state:
+              error.httpStatus === 403
+                ? ("scope_required" as const)
+                : ("unavailable" as const),
+            principalId: ctx.employeeId,
+            message:
+              error.httpStatus === 403
+                ? "This Apollo key needs the credit usage stats permission. Reconnect it with api/v1/usage_stats/credit_usage_stats enabled."
+                : "Apollo could not return the live credit balance right now.",
+            retryable: error.retryable,
+          };
+        }
+        throw error;
+      }
+    }),
     search: salesOperatorProcedure
       .input(
         z
