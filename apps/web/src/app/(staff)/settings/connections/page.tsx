@@ -157,6 +157,7 @@ function OperatingSurfaces() {
   const googleChatUrl = `${appOrigin}/api/integrations/google-chat/events`;
   const qmUrl = process.env.NEXT_PUBLIC_QM_URL?.trim().replace(/\/$/, "");
   const [googleChatStatus, setGoogleChatStatus] = useState("checking");
+  const [gbrainStatus, setGbrainStatus] = useState("checking");
   useEffect(() => {
     let cancelled = false;
     void fetch("/api/ready")
@@ -166,10 +167,12 @@ function OperatingSurfaces() {
           setGoogleChatStatus(
             body?.surfaces?.googleChat?.status ?? "endpoint_ready",
           );
+          setGbrainStatus(body?.surfaces?.gbrain?.status ?? "setup_required");
         }
       })
       .catch(() => {
         if (!cancelled) setGoogleChatStatus("endpoint_ready");
+        if (!cancelled) setGbrainStatus("setup_required");
       });
     return () => {
       cancelled = true;
@@ -177,9 +180,14 @@ function OperatingSurfaces() {
   }, []);
   const googleChatLive = googleChatStatus === "live";
   const googleChatConfigured = googleChatStatus === "async_configured";
+  const gbrainLive = gbrainStatus === "live";
+  const gbrainConfigured = gbrainStatus === "configured";
 
   return (
-    <section data-testid="operating-surfaces" className="grid gap-4 lg:grid-cols-2">
+    <section
+      data-testid="operating-surfaces"
+      className="grid gap-4 xl:grid-cols-3"
+    >
       <article
         className={`rounded-xl border p-5 ${
           googleChatLive
@@ -188,7 +196,8 @@ function OperatingSurfaces() {
         }`}
       >
         <p className="text-xs font-semibold uppercase tracking-[0.16em]">
-          Team chat · {googleChatLive
+          Team chat ·{" "}
+          {googleChatLive
             ? "live verified"
             : googleChatConfigured
               ? "credential present"
@@ -210,6 +219,39 @@ function OperatingSurfaces() {
           className="mt-3 inline-flex min-h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white"
         >
           Open HRMNY Chat
+        </Link>
+      </article>
+
+      <article
+        className={`rounded-xl border p-5 ${
+          gbrainLive
+            ? "border-emerald-300 bg-emerald-50 text-emerald-950"
+            : "border-amber-300 bg-amber-50 text-amber-950"
+        }`}
+      >
+        <p className="text-xs font-semibold uppercase tracking-[0.16em]">
+          Company brain ·{" "}
+          {gbrainLive
+            ? "live verified"
+            : gbrainConfigured
+              ? "credential present"
+              : "setup required"}
+        </p>
+        <h2 className="mt-1 font-display text-xl">
+          Published knowledge → GBrain
+        </h2>
+        <p className="mt-2 text-sm">
+          {gbrainLive
+            ? "A reviewed HRMNY article has crossed the scoped bridge and passed provider read-back. New versions still require their own approval."
+            : gbrainConfigured
+              ? "The scoped bridge is connected. Share one published article from Workplace to complete the live verification."
+              : "Deploy the pinned GBrain service, then add its MCP URL, source-scoped token and source ID. Drafts and operational records never cross this bridge."}
+        </p>
+        <Link
+          href="/workplace"
+          className="mt-3 inline-flex min-h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white"
+        >
+          Open Knowledge Hub
         </Link>
       </article>
 

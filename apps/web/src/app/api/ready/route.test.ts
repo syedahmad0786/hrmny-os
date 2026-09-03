@@ -20,6 +20,7 @@ describe("/api/ready", () => {
     expect(body).toHaveProperty("pgvector");
     expect(body).toHaveProperty("integrationInbox");
     expect(body).toHaveProperty("surfaces.googleChat.eventUrl");
+    expect(body).toHaveProperty("surfaces.gbrain.upstreamRevision");
     expect(body).toHaveProperty("surfaces.qm.plannedUrl");
     expect(body).toHaveProperty("tools");
     expect(body).toHaveProperty("blockers");

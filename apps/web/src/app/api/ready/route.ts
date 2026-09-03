@@ -7,6 +7,11 @@ import { toolConfiguredStatus } from "@/server/integrations/resolve-keys";
 import { buildDemoBlockers, connectionSmoke } from "@/server/ready/smoke";
 import { legacySalesSyntheticRuntimeEnabled } from "@/server/sales-os/legacy-effect-policy";
 import { googleWorkspaceRedirectUri } from "@/server/google-workspace-oauth";
+import {
+  GBRAIN_UPSTREAM_REVISION,
+  GBRAIN_UPSTREAM_VERSION,
+  gbrainConfigured,
+} from "@/server/gbrain";
 import { getWorkOrganizationPolicy } from "@/server/work-governance";
 
 /** Lightweight deploy smoke — no secrets, no business data, no writes. */
@@ -16,6 +21,7 @@ export async function GET() {
   let pgvector = false;
   let integrationInbox = false;
   let googleChatDelivered = false;
+  let gbrainDelivered = false;
   if (db) {
     try {
       await db.execute(sql`select 1`);
@@ -31,15 +37,26 @@ export async function GET() {
       pgvector = Boolean(rows[0]?.pgvector);
       integrationInbox = Boolean(rows[0]?.integration_inbox);
       if (integrationInbox) {
-        const [chat] = await db.execute<{ delivered: boolean }>(sql`
-          select exists(
+        const [delivery] = await db.execute<{
+          google_chat_delivered: boolean;
+          gbrain_delivered: boolean;
+        }>(sql`
+          select
+          exists(
             select 1 from public.integration_inbox
             where provider = 'google-chat'
               and status = 'completed'
               and result ->> 'bridgeStatus' = 'delivered'
-          ) as delivered
+          ) as google_chat_delivered,
+          exists(
+            select 1 from public.integration_inbox
+            where provider = 'gbrain'
+              and status = 'completed'
+              and result ->> 'bridgeStatus' = 'verified'
+          ) as gbrain_delivered
         `);
-        googleChatDelivered = Boolean(chat?.delivered);
+        googleChatDelivered = Boolean(delivery?.google_chat_delivered);
+        gbrainDelivered = Boolean(delivery?.gbrain_delivered);
       }
     } catch {
       database = "down";
@@ -100,6 +117,7 @@ export async function GET() {
     process.env.NEXT_PUBLIC_QM_URL?.trim() ||
     ""
   ).replace(/\/$/, "");
+  const companyBrainConfigured = gbrainConfigured();
 
   const body = {
     ok: database === "up",
@@ -126,6 +144,17 @@ export async function GET() {
               : "endpoint_ready",
         eventUrl: `${appOrigin}/api/integrations/google-chat/events`,
         openUrl: `${appOrigin}/chat`,
+      },
+      gbrain: {
+        status:
+          companyBrainConfigured && gbrainDelivered
+            ? "live"
+            : companyBrainConfigured
+              ? "configured"
+              : "setup_required",
+        openUrl: `${appOrigin}/workplace`,
+        upstreamVersion: GBRAIN_UPSTREAM_VERSION,
+        upstreamRevision: GBRAIN_UPSTREAM_REVISION,
       },
       qm: {
         status: qmUrl ? "configured" : "deployment_ready",

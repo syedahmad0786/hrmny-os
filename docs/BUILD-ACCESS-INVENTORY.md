@@ -41,6 +41,7 @@
 | NeverBounce | neverbounce.com | API key + credits | `NEVERBOUNCE_API_KEY` | `deferred` | Lead-gen |
 | Composio | app.composio.dev | API key + Gmail connect | `COMPOSIO_*` | `deferred` | HITL send |
 | Inngest | app.inngest.com | event + signing keys | `INNGEST_*` | `deferred` | Durable AI pipelines |
+| GBrain | organization-owned dedicated runtime | source-scoped projector client | `GBRAIN_MCP_URL`, `GBRAIN_ACCESS_TOKEN`, `GBRAIN_SOURCE_ID` | `need` | Pinned `v0.48.2.0`; separate DB; writes fenced to `hrmny/knowledge/` |
 | Upstash Redis | console.upstash.com | REST URL + token | `UPSTASH_*` | `deferred` | Cache / rate limits |
 | Sentry | sentry.io | DSN | `SENTRY_DSN` | `deferred` | Monitoring |
 | Bayzat | CSV exports only | HR export access | `BAYZAT_SOURCE=csv` | `have` | Parallel until native minimal HR |
