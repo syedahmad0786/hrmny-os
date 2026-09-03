@@ -15,8 +15,20 @@ describe("synthetic record visibility", () => {
     expect(isSyntheticRecordName("Other Co FZ-LLC")).toBe(true);
     expect(isSyntheticRecordName("M1-PROOF handover")).toBe(true);
     expect(isSyntheticRecordName("Personal 1787286650761")).toBe(true);
+    expect(isSyntheticRecordName("User-only note 1787325183066")).toBe(true);
+    expect(isSyntheticRecordName("Run demo closed loop")).toBe(true);
+    expect(isSyntheticRecordName("UAE hospitality brands")).toBe(true);
+    expect(isSyntheticRecordName("UAE retail brand")).toBe(true);
+    expect(isSyntheticRecordName("Campaign")).toBe(true);
+    expect(isSyntheticRecordName("Acme LLC")).toBe(true);
+    expect(isSyntheticRecordName("Fixture Co")).toBe(true);
+    expect(isSyntheticRecordName("fintechdubai LLC")).toBe(true);
     expect(isSyntheticRecordName("Emaar Hospitality Group")).toBe(false);
+    expect(isSyntheticRecordName("Acme Industrial Partners")).toBe(false);
     expect(hasSyntheticMarker("Normal draft", "apollo+123@example.com")).toBe(
+      true,
+    );
+    expect(hasSyntheticMarker("Normal draft", "hello@democo.example")).toBe(
       true,
     );
   });
