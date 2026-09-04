@@ -666,18 +666,37 @@ function field(userText: string, key: string): string | undefined {
     ?.trim();
 }
 
-/** Deterministic outreach draft for mock/eval — never invents a send, HITL only. */
+/** Deterministic review-only draft for mock/eval and live-provider fallback. */
 export function mockOutreachDraft(userText: string) {
   const firstName = field(userText, "firstName") ?? "there";
   const company = field(userText, "company") ?? "your team";
+  const channel = field(userText, "channel")?.toLowerCase();
+  const followup = /follow-up touch\s+\d+/i.test(userText);
+  if (channel === "linkedin_connect") {
+    return {
+      channel,
+      subject: "LinkedIn connection",
+      body: `Hi ${firstName} — I’ve been following ${company} and would be glad to connect from hrmny here in the UAE.`,
+      cta: "Connect",
+    };
+  }
+  if (channel === "linkedin_followup") {
+    return {
+      channel,
+      subject: "LinkedIn follow-up",
+      body: `Hi ${firstName}, thanks for connecting. hrmny helps UAE teams turn brand priorities into focused campaigns and production-ready creative. I would be glad to prepare two practical ideas for ${company}. Would a concise one-page direction be useful?`,
+      cta: "Open to a short call next week?",
+    };
+  }
   return {
     channel: "email" as const,
-    subject: `Quick idea for ${company}`,
-    body:
-      `Hi ${firstName}, I was looking at ${company} and had one concrete idea ` +
-      `worth 10 minutes. Reply "yes" if useful and I'll send specifics — ` +
-      `no obligation.`,
-    cta: "Open to a quick call next week?",
+    subject: followup ? `Re: An idea for ${company}` : `An idea for ${company}`,
+    body: followup
+      ? `Hi ${firstName},\n\nJust following up with a more concrete next step. hrmny can turn one current priority at ${company} into a one-page creative direction covering the campaign idea, key message, and first production assets, so your team can judge the value before committing time to a call.\n\nIf that would help, I can send the outline for review. Should I prepare it?`
+      : `Hi ${firstName},\n\nI’m reaching out from hrmny, a UAE creative agency. I’ve been looking at ${company} and see an opportunity to turn one of the team’s current brand priorities into a focused campaign idea and production-ready creative, without adding unnecessary review overhead.\n\nOur work spans branding, campaigns, content production, activations, PR, and social. We can prepare a concise one-page direction with two practical concepts tailored to ${company}, giving your team something concrete to react to before any call or commitment.\n\nWould it be useful if I sent that over?`,
+    cta: followup
+      ? "Should I prepare the one-page outline?"
+      : "Would it be useful if I sent that over?",
   };
 }
 
@@ -744,11 +763,16 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
     name,
     async generate(options) {
       const primary = selectedModel(options.model);
-      const signal = AbortSignal.timeout(60_000);
+      const signal = AbortSignal.timeout(
+        options.task === "outreach_draft" ? 45_000 : 60_000,
+      );
       if (name === "openrouter") {
         const chain = [
-          primary,
-          ...OPENROUTER_FREE_FALLBACK_MODELS.filter((m) => m !== primary),
+          ...new Set([
+            ...(options.schema ? ["openrouter/free"] : []),
+            primary,
+            ...OPENROUTER_FREE_FALLBACK_MODELS,
+          ]),
         ];
         let lastError: Error | undefined;
         for (const activeModel of chain) {
@@ -858,6 +882,15 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
             // Try next free route on rate-limit / empty / upstream failure.
             continue;
           }
+        }
+        if (options.task === "outreach_draft") {
+          const object = mockOutreachDraft(extractUserText(options.messages));
+          return {
+            text: JSON.stringify(object),
+            object: options.schema ? options.schema.parse(object) : object,
+            provider: "mock",
+            model: "fallback/outreach-template",
+          };
         }
         throw lastError ?? new Error("LLM provider failed");
       }

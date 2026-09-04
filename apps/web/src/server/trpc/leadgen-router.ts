@@ -266,9 +266,11 @@ export async function draftOutreach(input: {
       agent: "outreach-draft",
       input: [
         `Write exactly one ${outputChannel.replace(/_/g, " ")} message.`,
+        `firstName: ${contact?.firstName?.trim() || "there"}`,
+        `company: ${deal.companyName}`,
         `Sender: ${settings.outreach.senderName}, ${settings.outreach.senderTitle}. Sender company: hrmny, a UAE creative agency.`,
         `Recipient: ${contactName}${contact?.title ? `, ${contact.title}` : ""} at ${deal.companyName}.`,
-        `Channel: ${outputChannel}.`,
+        `Channel: ${outputChannel}`,
         `Hard identity rule: write FROM hrmny TO ${deal.companyName}. Never write as, for, or on behalf of ${deal.companyName}; never describe its services, team, history, or goals as hrmny's.`,
         "Use verified facts only. Do not mention Apollo, BUAF, internal scoring, unverified contact data, or the research process.",
         "Return one JSON object with channel, subject, body, and cta. Body must contain only the final sendable message: no analysis, labels, notes, alternatives, or Markdown headings.",
