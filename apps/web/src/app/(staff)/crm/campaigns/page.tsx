@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { CrmBtn, CrmEmpty, CrmPageHeader, CrmTag } from "@/components/crm/ui";
+import { isSyntheticRecordName } from "@/lib/synthetic-records";
 import { trpc } from "@/lib/trpc";
+import { matchesCampaignLeadView } from "./lead-picker";
 
 const DEFAULT_SUBJECT = "An idea for {{company}}";
 const DEFAULT_BODY =
@@ -17,6 +19,8 @@ export default function SalesCampaignsPage() {
   const [subjectTemplate, setSubjectTemplate] = useState(DEFAULT_SUBJECT);
   const [bodyTemplate, setBodyTemplate] = useState(DEFAULT_BODY);
   const [selected, setSelected] = useState<string[]>([]);
+  const [leadSearch, setLeadSearch] = useState("");
+  const [showTestRecords, setShowTestRecords] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -65,6 +69,14 @@ export default function SalesCampaignsPage() {
     () => (deals.data ?? []).filter((deal) => !deal.closeOutcome),
     [deals.data],
   );
+  const hiddenTestCount = availableDeals.filter((deal) =>
+    isSyntheticRecordName(deal.companyName),
+  ).length;
+  const visibleDeals = useMemo(() => {
+    return availableDeals.filter((deal) =>
+      matchesCampaignLeadView(deal, leadSearch, showTestRecords),
+    );
+  }, [availableDeals, leadSearch, showTestRecords]);
   const busy =
     create.isPending ||
     prepareFirst.isPending ||
@@ -156,8 +168,47 @@ export default function SalesCampaignsPage() {
             <legend className="px-1 text-xs font-semibold">
               Choose leads · {selected.length} selected
             </legend>
+            <label className="crm-field mt-2">
+              <span>Find a lead</span>
+              <input
+                data-testid="campaign-lead-search"
+                className="crm-input"
+                type="search"
+                value={leadSearch}
+                onChange={(event) => setLeadSearch(event.target.value)}
+                placeholder="Company, industry, or source"
+              />
+            </label>
+            {hiddenTestCount ? (
+              <label className="mt-3 flex min-h-11 items-center gap-2 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  data-testid="campaign-show-test-records"
+                  className="size-5"
+                  checked={showTestRecords}
+                  onChange={(event) => {
+                    const show = event.target.checked;
+                    setShowTestRecords(show);
+                    if (!show) {
+                      const testIds = new Set(
+                        availableDeals
+                          .filter((deal) =>
+                            isSyntheticRecordName(deal.companyName),
+                          )
+                          .map((deal) => deal.dealId),
+                      );
+                      setSelected((current) =>
+                        current.filter((id) => !testIds.has(id)),
+                      );
+                    }
+                  }}
+                />
+                {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test
+                record{hiddenTestCount === 1 ? "" : "s"}
+              </label>
+            ) : null}
             <div className="mt-2 grid max-h-64 gap-2 overflow-auto">
-              {availableDeals.map((deal) => (
+              {visibleDeals.map((deal) => (
                 <label
                   key={deal.dealId}
                   className="flex items-start gap-2 rounded-lg bg-[var(--muted-surface-soft)] p-3 text-xs"
@@ -182,6 +233,11 @@ export default function SalesCampaignsPage() {
                   </span>
                 </label>
               ))}
+              {visibleDeals.length === 0 ? (
+                <p className="rounded-lg bg-[var(--muted-surface-soft)] p-3 text-xs text-[var(--muted)]">
+                  No active leads match this view.
+                </p>
+              ) : null}
             </div>
             <CrmBtn
               data-testid="campaign-create"
