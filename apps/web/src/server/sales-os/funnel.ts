@@ -5,6 +5,10 @@ import { listOutreach, type OutreachItem } from "../leadgen/store";
 import { listCompanyResearch, listEmailEvents } from "./store";
 import type { CompanyResearchRow, EmailEventRow } from "./types";
 import type { CompanyRow, CrmNoteRow, DealRow } from "../crm/types";
+import {
+  hasSyntheticMarker,
+  isSyntheticRecordName,
+} from "../../lib/synthetic-records";
 
 export type SalesFunnelFilters = {
   market?: string;
@@ -28,8 +32,23 @@ export function buildSalesFunnel(input: {
   const companyById = new Map(
     input.companies.map((row) => [row.companyId, row]),
   );
+  const businessDeals = input.deals.filter(
+    (deal) => !isSyntheticRecordName(deal.companyName),
+  );
+  const businessDealById = new Map(
+    businessDeals.map((deal) => [deal.dealId, deal]),
+  );
+  const businessOutreach = input.outreach.filter(
+    (item) =>
+      businessDealById.has(item.dealId) &&
+      !hasSyntheticMarker(
+        businessDealById.get(item.dealId)?.companyName,
+        item.recipient,
+        item.subject,
+      ),
+  );
   const outreachByDeal = new Map<string, OutreachItem[]>();
-  for (const item of input.outreach) {
+  for (const item of businessOutreach) {
     outreachByDeal.set(item.dealId, [
       ...(outreachByDeal.get(item.dealId) ?? []),
       item,
@@ -42,7 +61,7 @@ export function buildSalesFunnel(input: {
   const to = filters.dateTo
     ? Date.parse(`${filters.dateTo}T23:59:59.999Z`)
     : null;
-  const deals = input.deals.filter((deal) => {
+  const deals = businessDeals.filter((deal) => {
     const created = Date.parse(deal.createdAt);
     const channels = (outreachByDeal.get(deal.dealId) ?? []).map((item) =>
       item.channel === "email" ? "gmail" : item.channel,
@@ -59,7 +78,7 @@ export function buildSalesFunnel(input: {
     );
   });
   const dealIds = new Set(deals.map((deal) => deal.dealId));
-  const filteredOutreach = input.outreach.filter((item) =>
+  const filteredOutreach = businessOutreach.filter((item) =>
     dealIds.has(item.dealId),
   );
   const outreachById = new Map(filteredOutreach.map((item) => [item.id, item]));
@@ -146,12 +165,12 @@ export function buildSalesFunnel(input: {
   });
 
   const allChannels = new Set(
-    input.outreach.map((item) =>
+    businessOutreach.map((item) =>
       item.channel === "email" ? "gmail" : item.channel,
     ),
   );
   const owners = new Map<string, string>();
-  for (const deal of input.deals) {
+  for (const deal of businessDeals) {
     const id = deal.ownerEmployeeId ?? "unassigned";
     owners.set(
       id,
@@ -184,8 +203,8 @@ export function buildSalesFunnel(input: {
     options: {
       markets: [
         ...new Set(
-          input.companies
-            .map((row) => row.market)
+          businessDeals
+            .map((deal) => companyById.get(deal.companyId ?? "")?.market)
             .filter((value): value is NonNullable<typeof value> =>
               Boolean(value),
             ),
@@ -196,7 +215,7 @@ export function buildSalesFunnel(input: {
         .sort((a, b) => a.label.localeCompare(b.label)),
       channels: [...allChannels].sort(),
       campaigns: [
-        ...new Set(input.deals.map((deal) => deal.leadSourceLane)),
+        ...new Set(businessDeals.map((deal) => deal.leadSourceLane)),
       ].sort(),
     },
     filters,

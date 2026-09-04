@@ -118,4 +118,18 @@ test.describe("Connections Google Workspace OAuth", () => {
       });
     }
   });
+
+  test("mailbox hash scrolls after connection cards render", async ({ page }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    await page.goto("/settings/connections#conn-google_workspace", {
+      waitUntil: "domcontentloaded",
+    });
+    const card = page.getByTestId("conn-card-google_workspace");
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(() =>
+        card.evaluate((element) => element.getBoundingClientRect().top),
+      )
+      .toBeLessThan(160);
+  });
 });
