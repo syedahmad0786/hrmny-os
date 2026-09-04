@@ -18,6 +18,19 @@
 - **This release candidate: 75/100** — suitable for a supervised client pilot after migration, deployment, and live UI verification.
 - **Not claimed:** autonomous outbound, verified Gmail destination delivery, bounce handling, or client UAT.
 
+## Mile 2 closeout delta
+
+The stakeholder mockups were treated as workflow evidence, not a replacement UI. The release candidate now merges their useful operating patterns into the existing CRM:
+
+- Sales opens on actionable **Waiting on me**, **Stalled**, **Moving this week**, and **Closing** queues backed by live CRM records.
+- Pipeline cards show owner, age, next action, due date, and the exact missing gate; movement remains one governed step at a time.
+- Deal pages have the eight-stage strip, structured client needs, a dated/owned next action, advisory AI, and a visible handover path.
+- Outreach is one oldest-first approval queue; replies use the same stage gates and cannot create half-promoted deal state.
+- Scope and pricing use the HRMNY rate card, expose cost/margin only to authorized roles, and fail closed on unconfigured rates or margin/discount violations.
+- Handover requires six server-verified facts before creating Delivery records; the accepted quote is authoritative for the contract and proposed invoice.
+
+Still outside Mile 2 code closeout: a searchable archive/90-day retention state, a client-facing proposal artifact/send flow, provider delivery/bounce receipts, the governed follow-up worker, production deployment proof, and Ayham/Maolham UAT.
+
 ## Scorecard
 
 | Area                       |  Weight |   Live | Release candidate | What the evidence says                                                                                                                 |

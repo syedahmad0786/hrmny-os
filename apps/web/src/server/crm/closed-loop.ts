@@ -8,6 +8,8 @@ import {
   createContact,
   createDeal,
   createActivity,
+  createCrmTask,
+  createNote,
   createQuoteVersion,
   moveDealStage,
   updateDeal,
@@ -140,6 +142,35 @@ export async function runDemoClosedLoopCore(
     contactId = contact.contactId;
     dealId = deal.dealId;
   }
+
+  await createNote({
+    dealId,
+    body: `SALES NEEDS — ${JSON.stringify({
+      objective: "Run the synthetic closed-loop launch",
+      deliverables: "Strategy and launch assets",
+      timing: "This quarter",
+      decisionMaker: "Demo Marketing Lead",
+    })}`,
+    authorEmployeeId: input.actorEmployeeId,
+  });
+  await createCrmTask({
+    dealId,
+    companyId,
+    contactId,
+    title: "Confirm synthetic launch date",
+    dueDate: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10),
+    ownerEmployeeId: input.actorEmployeeId,
+  });
+  await createNote({
+    dealId,
+    body: "HANDOVER:BRAND_ASSETS — Synthetic fixture folder received",
+    authorEmployeeId: input.actorEmployeeId,
+  });
+  await createNote({
+    dealId,
+    body: "HANDOVER:BILLING_DETAILS — Synthetic fixture TRN confirmed",
+    authorEmployeeId: input.actorEmployeeId,
+  });
 
   const stages = [
     "qualify",

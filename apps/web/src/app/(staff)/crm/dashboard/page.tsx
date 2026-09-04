@@ -37,6 +37,14 @@ export default function SalesDashboardPage() {
   const stages = trpc.crm.stages.useQuery(undefined, {
     refetchInterval: 30_000,
   });
+  const tasks = trpc.crm.tasks.list.useQuery(undefined, {
+    refetchInterval: 30_000,
+  });
+  const activities = trpc.crm.activities.list.useQuery(
+    { limit: 200 },
+    { refetchInterval: 30_000 },
+  );
+  const session = trpc.auth.session.useQuery();
   const funnel = trpc.salesOs.funnel.useQuery(
     {
       market: market || undefined,
@@ -70,6 +78,100 @@ export default function SalesDashboardPage() {
         .slice(0, 7),
     [deals.data],
   );
+  const dealById = useMemo(
+    () => new Map((deals.data ?? []).map((deal) => [deal.dealId, deal])),
+    [deals.data],
+  );
+  const actionGroups = useMemo(() => {
+    const employeeId =
+      session.data?.actorType === "staff" ? session.data.employeeId : null;
+    const waiting = (tasks.data ?? [])
+      .filter(
+        (task) =>
+          task.dealId &&
+          task.ownerEmployeeId === employeeId &&
+          task.status !== "done" &&
+          task.status !== "cancelled",
+      )
+      .sort((a, b) => {
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      })
+      .slice(0, 3)
+      .flatMap((task) => {
+        const deal = task.dealId ? dealById.get(task.dealId) : null;
+        return deal && !isSyntheticRecordName(deal.companyName)
+          ? [
+              {
+                id: `task-${task.crmTaskId}`,
+                dealId: deal.dealId,
+                title: deal.companyName,
+                detail: `${task.title}${task.dueDate ? ` · due ${new Date(task.dueDate).toLocaleDateString("en-AE", { day: "numeric", month: "short" })}` : " · date needed"}`,
+              },
+            ]
+          : [];
+      });
+    const stalled = (digest.data?.stalled ?? []).slice(0, 3).map((item) => ({
+      id: `stalled-${item.dealId}`,
+      dealId: item.dealId,
+      title: item.companyName,
+      detail: `${item.daysInStage} days in ${item.stage.replace(/_/g, " ")} · expected max ${item.maxDays}`,
+    }));
+    const weekAgo = Date.now() - 7 * 86_400_000;
+    const seen = new Set<string>();
+    const moving = (activities.data ?? [])
+      .filter(
+        (activity) =>
+          activity.dealId &&
+          activity.type === "stage_change" &&
+          new Date(activity.createdAt).getTime() >= weekAgo,
+      )
+      .flatMap((activity) => {
+        if (!activity.dealId || seen.has(activity.dealId)) return [];
+        seen.add(activity.dealId);
+        const deal = dealById.get(activity.dealId);
+        return deal && !isSyntheticRecordName(deal.companyName)
+          ? [
+              {
+                id: `moving-${activity.dealId}`,
+                dealId: activity.dealId,
+                title: deal.companyName,
+                detail: `${String(deal.stage).replace(/_/g, " ")} · moved ${formatRelative(activity.createdAt)}`,
+              },
+            ]
+          : [];
+      })
+      .slice(0, 3);
+    const closing = (deals.data ?? [])
+      .filter(
+        (deal) =>
+          !deal.closeOutcome &&
+          ["propose", "price_cost", "close"].includes(String(deal.stage)) &&
+          !isSyntheticRecordName(deal.companyName),
+      )
+      .sort((a, b) => Number(b.quoteValue ?? 0) - Number(a.quoteValue ?? 0))
+      .slice(0, 3)
+      .map((deal) => ({
+        id: `closing-${deal.dealId}`,
+        dealId: deal.dealId,
+        title: deal.companyName,
+        detail: `${String(deal.stage).replace(/_/g, " ")} · ${new Intl.NumberFormat("en-AE", { style: "currency", currency: "AED", maximumFractionDigits: 0 }).format(Number(deal.quoteValue ?? 0))}`,
+      }));
+    return [
+      { label: "Waiting on me", items: waiting },
+      { label: "Stalled", items: stalled },
+      { label: "Moving this week", items: moving },
+      { label: "Closing", items: closing },
+    ];
+  }, [
+    activities.data,
+    dealById,
+    deals.data,
+    digest.data?.stalled,
+    session.data,
+    tasks.data,
+  ]);
   const queue = [
     {
       label: "Follow-ups due",
@@ -147,12 +249,69 @@ export default function SalesDashboardPage() {
 
       <section
         className="crm-panel mb-4 overflow-hidden"
+        aria-labelledby="sales-actions-heading"
+        data-testid="sales-action-groups"
+      >
+        <div className="crm-panel-head justify-between py-4">
+          <div>
+            <p className="growth-kicker">Sales</p>
+            <h2
+              id="sales-actions-heading"
+              className="font-display text-[28px] font-semibold tracking-[-0.035em]"
+            >
+              {actionGroups.reduce((sum, group) => sum + group.items.length, 0)}{" "}
+              things need you
+            </h2>
+          </div>
+          <CrmTag kind={digest.isFetching ? "warn" : "success"}>
+            {digest.isFetching ? "Syncing" : "Live"}
+          </CrmTag>
+        </div>
+        <div className="grid gap-px bg-[var(--line)] md:grid-cols-2">
+          {actionGroups.map((group) => (
+            <div key={group.label} className="bg-[var(--paper-2)] p-[18px]">
+              <h3 className="mb-3 text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">
+                {group.label} · {group.items.length}
+              </h3>
+              {group.items.length ? (
+                <ol className="m-0 list-none divide-y divide-[var(--line)] p-0">
+                  {group.items.map((item) => (
+                    <li key={item.id}>
+                      <Link
+                        href={`/crm/deals/${item.dealId}`}
+                        className="grid grid-cols-[minmax(0,1fr)_18px] gap-3 py-3 text-[var(--ink)] hover:text-[var(--ochre-dark)]"
+                      >
+                        <span>
+                          <strong className="block text-xs">
+                            {item.title}
+                          </strong>
+                          <small className="mt-1 block text-[9px] leading-[1.45] text-[var(--muted)]">
+                            {item.detail}
+                          </small>
+                        </span>
+                        <span aria-hidden>→</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="py-3 text-[10px] text-[var(--muted)]">
+                  Nothing here right now.
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section
+        className="crm-panel mb-4 overflow-hidden"
         aria-labelledby="sales-queue-heading"
         data-testid="sales-dashboard-queue"
       >
         <div className="crm-panel-head justify-between py-4">
           <div>
-            <p className="growth-kicker">Do next</p>
+            <p className="growth-kicker">System queues</p>
             <h2
               id="sales-queue-heading"
               className="font-display text-[21px] font-semibold tracking-[-0.025em]"

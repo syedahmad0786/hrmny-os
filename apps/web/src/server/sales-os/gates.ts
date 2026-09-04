@@ -3,6 +3,9 @@ import {
   auditEvent,
   company as companyTable,
   companyResearch as companyResearchTable,
+  contact as contactTable,
+  contactResearch as contactResearchTable,
+  deal as dealTable,
   eq,
   integrationInbox,
   sql,
@@ -406,75 +409,253 @@ export async function decideCompany(
   });
 }
 
+function isContactDecisionReplay(
+  row: {
+    approvalState: string;
+    contactId: string | null;
+    dealId: string | null;
+  },
+  action: "approve" | "reject" | "rework",
+): boolean {
+  const target =
+    action === "approve"
+      ? "approved"
+      : action === "reject"
+        ? "rejected"
+        : "rework";
+  if (row.approvalState === target) {
+    if (action === "approve" && (!row.contactId || !row.dealId)) {
+      throw new Error("CONTACT_APPROVAL_RECONCILIATION_REQUIRED");
+    }
+    return true;
+  }
+  if (
+    row.approvalState === "rework" &&
+    action !== "rework" &&
+    !row.contactId &&
+    !row.dealId
+  ) {
+    return false;
+  }
+  if (row.approvalState !== "found" || row.contactId || row.dealId) {
+    throw new Error("CONTACT_DECISION_ALREADY_FINAL");
+  }
+  return false;
+}
+
 export async function decideContact(
   id: string,
   action: "approve" | "reject" | "rework",
   input: { actorId?: string | null; feedback?: string | null } = {},
 ): Promise<ContactResearchRow> {
-  const row = await getContactResearch(id);
-  if (!row) throw new Error("Contact research not found");
-  const company = await getCompanyResearch(row.companyResearchId);
-  if (!company || company.approvalState !== "approved") {
-    throw new Error("Gate 1 must approve the company first");
-  }
-  if (action === "rework") {
-    const patched = await patchContactResearch(id, {
-      approvalState: "rework",
-      reworkFeedback:
-        (input.feedback ?? "").trim() || "Find someone more senior",
+  const db = getDb();
+  if (db) {
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`contact-decision:${id}`}, 0))`,
+      );
+      const [fresh] = await tx
+        .select()
+        .from(contactResearchTable)
+        .where(eq(contactResearchTable.contactResearchId, id))
+        .limit(1);
+      if (!fresh) throw new Error("Contact research not found");
+      if (isContactDecisionReplay(fresh, action)) return;
+
+      const [freshCompany] = await tx
+        .select()
+        .from(companyResearchTable)
+        .where(
+          eq(companyResearchTable.companyResearchId, fresh.companyResearchId),
+        )
+        .limit(1);
+      if (
+        !freshCompany ||
+        freshCompany.approvalState !== "approved" ||
+        !freshCompany.companyId
+      ) {
+        throw new Error("Gate 1 must approve the company first");
+      }
+
+      if (action !== "approve") {
+        const feedback =
+          action === "rework"
+            ? (input.feedback ?? "").trim() || "Find someone more senior"
+            : null;
+        const [decided] = await tx
+          .update(contactResearchTable)
+          .set({
+            approvalState: action === "reject" ? "rejected" : "rework",
+            reworkFeedback: feedback,
+            updatedAt: new Date(),
+          })
+          .where(eq(contactResearchTable.contactResearchId, id))
+          .returning({ id: contactResearchTable.contactResearchId });
+        if (!decided) throw new Error("Failed to update contact research");
+        await tx.insert(auditEvent).values({
+          actorEmployeeId: input.actorId ?? null,
+          action: `sales.contact.${action === "reject" ? "rejected" : "rework"}`,
+          entityType: "contact_research",
+          entityId: id,
+          before: { approvalState: fresh.approvalState },
+          after: {
+            approvalState: action === "reject" ? "rejected" : "rework",
+            feedback,
+          },
+          reason: feedback ?? "Gate 2 decision",
+        });
+        return;
+      }
+
+      const [firstName, ...rest] = fresh.fullName.trim().split(/\s+/);
+      const [contact] = await tx
+        .insert(contactTable)
+        .values({
+          companyId: freshCompany.companyId,
+          firstName: firstName || fresh.fullName,
+          lastName: rest.length ? rest.join(" ") : null,
+          email: fresh.email,
+          title: fresh.title,
+          linkedinUrl: fresh.linkedinUrl,
+          emailVerified: fresh.emailVerified,
+          isPrimary: true,
+        })
+        .returning({ contactId: contactTable.contactId });
+      if (!contact) throw new Error("Failed to promote approved contact");
+
+      const [deal] = await tx
+        .insert(dealTable)
+        .values({
+          companyId: freshCompany.companyId,
+          primaryContactId: contact.contactId,
+          companyName: freshCompany.name,
+          sector: freshCompany.sector,
+          stage: "discover",
+          leadSourceLane:
+            freshCompany.leadSourceLane as typeof dealTable.$inferInsert.leadSourceLane,
+          buafTemperature:
+            freshCompany.temperature as typeof dealTable.$inferInsert.buafTemperature,
+          buafBudget: freshCompany.buafBudget >= 7,
+          buafUrgency: freshCompany.buafUrgency >= 7,
+          buafAccess: freshCompany.buafAccess >= 7,
+          buafFit: freshCompany.buafFit >= 7,
+          emailVerified: fresh.emailVerified,
+          quoteValue: freshCompany.estimatedValueAed ?? "0.00",
+          internalCost: "0.00",
+          marginPct: "0.00",
+          vendorHandlingFeePct: "20.00",
+        })
+        .returning({ dealId: dealTable.dealId });
+      if (!deal) throw new Error("Failed to create deal for approved contact");
+
+      const [approved] = await tx
+        .update(contactResearchTable)
+        .set({
+          approvalState: "approved",
+          contactId: contact.contactId,
+          dealId: deal.dealId,
+          companyId: freshCompany.companyId,
+          reworkFeedback: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(contactResearchTable.contactResearchId, id))
+        .returning({ id: contactResearchTable.contactResearchId });
+      if (!approved) throw new Error("Failed to approve contact");
+
+      await tx.insert(auditEvent).values({
+        actorEmployeeId: input.actorId ?? null,
+        action: "sales.contact.approved",
+        entityType: "contact_research",
+        entityId: id,
+        before: { approvalState: fresh.approvalState },
+        after: {
+          approvalState: "approved",
+          companyId: freshCompany.companyId,
+          contactId: contact.contactId,
+          dealId: deal.dealId,
+        },
+        reason: "Gate 2 approval promoted the contact and opened its deal",
+      });
     });
-    if (!patched) throw new Error("Failed to update contact research");
-    return patched;
-  }
-  if (action === "reject") {
-    const patched = await patchContactResearch(id, {
-      approvalState: "rejected",
-    });
-    if (!patched) throw new Error("Failed to update contact research");
-    return patched;
-  }
-  if (!company.companyId) {
-    throw new Error("Gate 1 approval must promote a canonical company first");
+    const approved = await getContactResearch(id);
+    if (!approved) throw new Error("Failed to approve contact");
+    return approved;
   }
 
-  const [firstName, ...rest] = row.fullName.trim().split(/\s+/);
-  const contact = await createContact({
-    companyId: company.companyId,
-    firstName: firstName || row.fullName,
-    lastName: rest.length ? rest.join(" ") : null,
-    email: row.email,
-    title: row.title,
-    linkedinUrl: row.linkedinUrl,
-    isPrimary: true,
+  return withCompanyApprovalLock(`contact-decision:${id}`, async () => {
+    const fresh = await getContactResearch(id);
+    if (!fresh) throw new Error("Contact research not found");
+    if (isContactDecisionReplay(fresh, action)) return fresh;
+    const company = await getCompanyResearch(fresh.companyResearchId);
+    if (!company || company.approvalState !== "approved") {
+      throw new Error("Gate 1 must approve the company first");
+    }
+
+    if (action !== "approve") {
+      const feedback =
+        action === "rework"
+          ? (input.feedback ?? "").trim() || "Find someone more senior"
+          : null;
+      const patched = await patchContactResearch(id, {
+        approvalState: action === "reject" ? "rejected" : "rework",
+        reworkFeedback: feedback,
+      });
+      if (!patched) throw new Error("Failed to update contact research");
+      getDemoStore().appendAudit({
+        actorEmployeeId: input.actorId ?? null,
+        action: `sales.contact.${action === "reject" ? "rejected" : "rework"}`,
+        entityType: "contact_research",
+        entityId: id,
+        before: { approvalState: fresh.approvalState },
+        after: { approvalState: patched.approvalState, feedback },
+        reason: feedback ?? "Gate 2 decision",
+      });
+      return patched;
+    }
+    if (!company.companyId) {
+      throw new Error("Gate 1 approval must promote a canonical company first");
+    }
+
+    const [firstName, ...rest] = fresh.fullName.trim().split(/\s+/);
+    const contact = await createContact({
+      companyId: company.companyId,
+      firstName: firstName || fresh.fullName,
+      lastName: rest.length ? rest.join(" ") : null,
+      email: fresh.email,
+      title: fresh.title,
+      linkedinUrl: fresh.linkedinUrl,
+      isPrimary: true,
+    });
+    if (fresh.emailVerified) {
+      await updateContact(contact.contactId, { emailVerified: true });
+    }
+    const deal = await createDeal({
+      companyName: company.name,
+      companyId: company.companyId,
+      primaryContactId: contact.contactId,
+      sector: company.sector,
+      leadSourceLane: company.leadSourceLane,
+    });
+    await updateDeal(deal.dealId, {
+      buafTemperature: company.temperature,
+      buafBudget: company.buafBudget >= 7,
+      buafUrgency: company.buafUrgency >= 7,
+      buafAccess: company.buafAccess >= 7,
+      buafFit: company.buafFit >= 7,
+      emailVerified: fresh.emailVerified,
+      quoteValue:
+        company.estimatedValueAed != null
+          ? String(company.estimatedValueAed)
+          : null,
+    });
+    const patched = await patchContactResearch(id, {
+      approvalState: "approved",
+      contactId: contact.contactId,
+      dealId: deal.dealId,
+      companyId: company.companyId,
+      reworkFeedback: null,
+    });
+    if (!patched) throw new Error("Failed to approve contact");
+    return patched;
   });
-  if (row.emailVerified) {
-    await updateContact(contact.contactId, { emailVerified: true });
-  }
-  const deal = await createDeal({
-    companyName: company.name,
-    companyId: company.companyId,
-    primaryContactId: contact.contactId,
-    sector: company.sector,
-    leadSourceLane: company.leadSourceLane,
-  });
-  await updateDeal(deal.dealId, {
-    buafTemperature: company.temperature,
-    buafBudget: company.buafBudget >= 7,
-    buafUrgency: company.buafUrgency >= 7,
-    buafAccess: company.buafAccess >= 7,
-    buafFit: company.buafFit >= 7,
-    emailVerified: row.emailVerified,
-    quoteValue:
-      company.estimatedValueAed != null
-        ? String(company.estimatedValueAed)
-        : null,
-  });
-  const patched = await patchContactResearch(id, {
-    approvalState: "approved",
-    contactId: contact.contactId,
-    dealId: deal.dealId,
-    companyId: company.companyId,
-  });
-  if (!patched) throw new Error("Failed to approve contact");
-  return patched;
 }

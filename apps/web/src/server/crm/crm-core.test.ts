@@ -7,6 +7,8 @@ import {
   resetLeadgenStore,
 } from "../leadgen/store";
 import { createCaller } from "../trpc/root";
+import { DEFAULT_SALES_OS_SETTINGS } from "../sales-os/sops";
+import { resetSalesOsStore, saveSalesOsSettings } from "../sales-os/store";
 import { toCsv } from "./csv";
 import { resetCrmMemory } from "./memory";
 import {
@@ -56,6 +58,7 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
   beforeEach(() => {
     resetCrmMemory();
     resetLeadgenStore();
+    resetSalesOsStore();
   });
 
   // ── W2 audit completeness ────────────────────────────────
@@ -173,6 +176,91 @@ describe("CRM core (A1): audit, quotes, merge/dedupe, search, csv", () => {
     expect("internalCost" in result.quote).toBe(false);
     expect("marginPct" in result.quote).toBe(false);
     expect(result.quote.lineItems.every((l) => !("unitCost" in l))).toBe(true);
+  });
+
+  it("lets an account manager quote a configured rate-card service without exposing cost", async () => {
+    await saveSalesOsSettings({
+      ...DEFAULT_SALES_OS_SETTINGS,
+      rateCard: [
+        {
+          service: "Social media retainer",
+          unit: "month",
+          unitSell: 28_000,
+          unitCost: 17_000,
+          active: true,
+        },
+      ],
+    });
+    const partner = callerFor("partner");
+    const deal = await partner.crm.deals.create({
+      companyName: "Rate Card Co",
+    });
+    const saved = await callerFor("am").crm.quotes.save({
+      dealId: deal.dealId,
+      lineItems: [
+        {
+          label: "Social media retainer",
+          qty: 3,
+          unitSell: 28_000,
+          unitCost: 0,
+        },
+      ],
+    });
+
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    expect("internalCost" in saved.quote).toBe(false);
+    const visibleToPartner = await partner.crm.quotes.get({
+      id: saved.quote.quoteId,
+    });
+    expect(
+      visibleToPartner && "internalCost" in visibleToPartner
+        ? Number(visibleToPartner.internalCost)
+        : NaN,
+    ).toBe(51_000);
+  });
+
+  it("refuses an account-manager quote when the rate-card cost is not configured", async () => {
+    await saveSalesOsSettings({
+      ...DEFAULT_SALES_OS_SETTINGS,
+      rateCard: [
+        {
+          service: "Social media retainer",
+          unit: "month",
+          unitSell: 28_000,
+          unitCost: 0,
+          active: true,
+        },
+      ],
+    });
+    const deal = await callerFor("partner").crm.deals.create({
+      companyName: "Uncosted Rate Co",
+    });
+    await callerFor("partner").crm.quotes.save({
+      dealId: deal.dealId,
+      lineItems: [
+        {
+          label: "Social media retainer",
+          qty: 1,
+          unitSell: 28_000,
+          unitCost: 0,
+        },
+      ],
+    });
+
+    await expect(
+      callerFor("am").crm.quotes.save({
+        dealId: deal.dealId,
+        lineItems: [
+          {
+            label: "Social media retainer",
+            qty: 1,
+            unitSell: 28_000,
+            unitCost: 0,
+          },
+        ],
+      }),
+    ).rejects.toThrow(/must cost the new line/i);
   });
 
   it("records signed acceptance only for the latest quote and an authorized role", async () => {

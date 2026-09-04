@@ -96,6 +96,18 @@ const salesAdminProcedure = salesRoleProcedure(
 );
 
 const settingsPatch = z.object({
+  rateCard: z
+    .array(
+      z.object({
+        service: z.string().trim().min(1).max(180),
+        unit: z.string().trim().min(1).max(60),
+        unitSell: z.number().min(0),
+        unitCost: z.number().min(0),
+        active: z.boolean(),
+      }),
+    )
+    .max(100)
+    .optional(),
   icp: z
     .object({
       target: z.string().optional(),
@@ -432,11 +444,27 @@ export const salesOsRouter = router({
   }),
 
   settings: router({
-    get: staffProcedure.query(async () => {
+    get: staffProcedure.query(async ({ ctx }) => {
       const settings = await getSalesOsSettings();
       return {
-        settings,
-        defaults: DEFAULT_SALES_OS_SETTINGS,
+        settings: ctx.canViewMargin
+          ? settings
+          : {
+              ...settings,
+              rateCard: settings.rateCard.map((item) => ({
+                ...item,
+                unitCost: 0,
+              })),
+            },
+        defaults: ctx.canViewMargin
+          ? DEFAULT_SALES_OS_SETTINGS
+          : {
+              ...DEFAULT_SALES_OS_SETTINGS,
+              rateCard: DEFAULT_SALES_OS_SETTINGS.rateCard.map((item) => ({
+                ...item,
+                unitCost: 0,
+              })),
+            },
         source: SALES_OS_SOP_SOURCE,
         guidelines: {
           outreach: OUTREACH_GUIDELINES,
@@ -448,9 +476,19 @@ export const salesOsRouter = router({
     save: staffProcedure
       .input(settingsPatch)
       .mutation(async ({ input, ctx }) => {
+        if (
+          input.rateCard &&
+          !ctx.roles.some((role) => SALES_ADMIN_ROLES.has(role))
+        ) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Partner or Director role required to edit the rate card",
+          });
+        }
         const current = await getSalesOsSettings();
         const next: SalesOsSettings = {
           ...current,
+          rateCard: input.rateCard ?? current.rateCard,
           icp: { ...current.icp, ...input.icp },
           caps: { ...current.caps, ...input.caps },
           outreach: { ...current.outreach, ...input.outreach },

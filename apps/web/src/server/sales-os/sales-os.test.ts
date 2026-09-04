@@ -137,6 +137,30 @@ describe("Sales OS SOPs + qualification", () => {
   });
 });
 
+describe("commercial rate card", () => {
+  beforeEach(resetAll);
+
+  it("persists partner rates while hiding internal cost from account managers", async () => {
+    const partner = salesCaller(resolveDevUser("partner"));
+    const rateCard = DEFAULT_SALES_OS_SETTINGS.rateCard.map((item, index) =>
+      index === 0 ? { ...item, unitSell: 28_000, unitCost: 17_000 } : item,
+    );
+
+    await partner.salesOs.settings.save({ rateCard });
+
+    const accountManager = salesCaller(resolveDevUser("am"));
+    const visible = await accountManager.salesOs.settings.get();
+    expect(visible.settings.rateCard[0]).toMatchObject({
+      service: "Social media retainer",
+      unitSell: 28_000,
+      unitCost: 0,
+    });
+    await expect(
+      accountManager.salesOs.settings.save({ rateCard }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
+
 describe("compliance", () => {
   beforeEach(resetAll);
 
@@ -159,7 +183,9 @@ describe("compliance", () => {
       expect(url).toMatch(
         /^https:\/\/hrmny-os\.vercel\.app\/api\/sales-os\/unsubscribe\?token=/,
       );
-      expect(hasValidUnsubscribeLink(`Unsubscribe: ${url}`, "person@example.com")).toBe(true);
+      expect(
+        hasValidUnsubscribeLink(`Unsubscribe: ${url}`, "person@example.com"),
+      ).toBe(true);
       expect(
         hasValidUnsubscribeLink(
           `Unsubscribe: /api/sales-os/unsubscribe?token=${createUnsubscribeToken("person@example.com")}`,
@@ -553,6 +579,94 @@ describe("research → enrich → draft gates", () => {
     );
   });
 
+  it("promotes a Gate 2 contact once under concurrent approval", async () => {
+    const companiesBefore = (await listCompanies()).length;
+    const contactsBefore = (await listContacts()).length;
+    const dealsBefore = (await listDeals()).length;
+    const company = await decideCompany(
+      (await proposeSignal()).proposal.id,
+      "approve",
+    );
+    const contact = (
+      await enrichApprovedCompany(company.id, {
+        leadSource: createLeadSourceMock(),
+        allowSynthetic: true,
+      })
+    ).created[0]!;
+
+    const [first, replay] = await Promise.all([
+      decideContact(contact.id, "approve"),
+      decideContact(contact.id, "approve"),
+    ]);
+
+    expect(replay).toMatchObject({
+      approvalState: "approved",
+      contactId: first.contactId,
+      dealId: first.dealId,
+    });
+    expect(await listCompanies()).toHaveLength(companiesBefore + 1);
+    expect(await listContacts()).toHaveLength(contactsBefore + 1);
+    expect(await listDeals()).toHaveLength(dealsBefore + 1);
+  });
+
+  it("serializes opposite Gate 2 decisions and keeps the winner final", async () => {
+    const contactsBefore = (await listContacts()).length;
+    const dealsBefore = (await listDeals()).length;
+    const company = await decideCompany(
+      (await proposeSignal({ name: "Opposite Gate Fixture" })).proposal.id,
+      "approve",
+    );
+    const contact = (
+      await enrichApprovedCompany(company.id, {
+        leadSource: createLeadSourceMock(),
+        allowSynthetic: true,
+      })
+    ).created[0]!;
+
+    const results = await Promise.allSettled([
+      decideContact(contact.id, "reject"),
+      decideContact(contact.id, "approve"),
+    ]);
+    expect(results[0]!.status).toBe("fulfilled");
+    expect(results[1]!.status).toBe("rejected");
+    expect((results[1] as PromiseRejectedResult).reason).toMatchObject({
+      message: "CONTACT_DECISION_ALREADY_FINAL",
+    });
+    const final = (await listContactResearch()).find(
+      (row) => row.id === contact.id,
+    )!;
+    expect(final.approvalState).toBe("rejected");
+    expect(await listContacts()).toHaveLength(contactsBefore);
+    expect(await listDeals()).toHaveLength(dealsBefore);
+  });
+
+  it("lets a rework contact receive a governed final decision", async () => {
+    const contactsBefore = (await listContacts()).length;
+    const dealsBefore = (await listDeals()).length;
+    const company = await decideCompany(
+      (await proposeSignal({ name: "Rework Gate Fixture" })).proposal.id,
+      "approve",
+    );
+    const contact = (
+      await enrichApprovedCompany(company.id, {
+        leadSource: createLeadSourceMock(),
+        allowSynthetic: true,
+      })
+    ).created[0]!;
+
+    await decideContact(contact.id, "rework", { feedback: "Check seniority" });
+    const approved = await decideContact(contact.id, "approve");
+
+    expect(approved).toMatchObject({
+      approvalState: "approved",
+      reworkFeedback: null,
+    });
+    expect(approved.contactId).toBeTruthy();
+    expect(approved.dealId).toBeTruthy();
+    expect(await listContacts()).toHaveLength(contactsBefore + 1);
+    expect(await listDeals()).toHaveLength(dealsBefore + 1);
+  });
+
   it("refuses to persist synthetic contact discovery on the visible path", async () => {
     const receipt = await proposeSignal({
       requestId: "00000000-0000-4000-8000-000000000212",
@@ -640,8 +754,7 @@ describe("digest, replies, intent CSV, evolve, stale", () => {
       externalId: "shared-mailbox-sent",
       payload: {
         ownerEmployeeId: "70000000-0000-4000-8000-000000000003",
-        senderConnectionAccountId:
-          "70000000-0000-4000-8000-000000000001",
+        senderConnectionAccountId: "70000000-0000-4000-8000-000000000001",
         threadId: "shared-thread",
       },
     });
@@ -653,8 +766,7 @@ describe("digest, replies, intent CSV, evolve, stale", () => {
         externalId: "shared-mailbox-reply",
         threadId: "shared-thread",
         actorEmployeeId: "70000000-0000-4000-8000-000000000002",
-        senderConnectionAccountId:
-          "70000000-0000-4000-8000-000000000001",
+        senderConnectionAccountId: "70000000-0000-4000-8000-000000000001",
       }),
     ).resolves.toMatchObject({
       intent: "interested",

@@ -54,6 +54,7 @@ import {
   legacySalesSyntheticRuntimeEnabled,
 } from "../sales-os/legacy-effect-policy";
 import { listOutreach } from "../leadgen/store";
+import { getSalesOsSettings } from "../sales-os/store";
 import {
   protectedProcedure,
   publicProcedure,
@@ -363,10 +364,34 @@ export const crmDealsRouter = router({
             outreachVoiceViolations(item.body, existing.companyName).length ===
             0,
         );
+      const needsNote = [...(await listNotes({ dealId: existing.dealId }))]
+        .filter((note) => note.body.startsWith("SALES NEEDS —"))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      let needsComplete = false;
+      if (needsNote) {
+        try {
+          const value = JSON.parse(
+            needsNote.body.slice("SALES NEEDS —".length).trim(),
+          ) as Record<string, unknown>;
+          needsComplete = [
+            "objective",
+            "deliverables",
+            "timing",
+            "decisionMaker",
+          ].every(
+            (key) =>
+              typeof value[key] === "string" &&
+              (value[key] as string).trim().length > 0,
+          );
+        } catch {
+          needsComplete = false;
+        }
+      }
       const gateData = {
         ...existing,
         emailVerified: Boolean(contact?.emailVerified),
         voiceCheckPassed,
+        needsComplete,
       };
 
       const gateResult = await transition(
@@ -727,19 +752,33 @@ export const crmQuotesRouter = router({
       // Carry costs forward from the latest version instead of zeroing them.
       let lineItems = input.lineItems;
       if (!ctx.canViewMargin) {
-        const [latest] = await listQuotesByDeal(input.dealId);
+        const [[latest], settings] = await Promise.all([
+          listQuotesByDeal(input.dealId),
+          getSalesOsSettings(),
+        ]);
         const prior = latest?.lineItems ?? [];
         // Label match only — a positional fallback bleeds another line's cost
         // into renamed/new lines. Unmatched lines keep the client's unitCost.
         lineItems = input.lineItems.map((li) => {
           const match = prior.find((p) => p.label === li.label);
-          if (!match) {
+          const pricedPrior = match && match.unitCost > 0 ? match : null;
+          const rate = settings.rateCard.find(
+            (item) =>
+              item.active &&
+              item.unitSell > 0 &&
+              item.unitCost > 0 &&
+              item.service === li.label,
+          );
+          if (!pricedPrior && !rate) {
             throw new TRPCError({
               code: "PRECONDITION_FAILED",
               message: `Finance or Partner must cost the new line “${li.label}” before it can be quoted`,
             });
           }
-          return { ...li, unitCost: match.unitCost };
+          return {
+            ...li,
+            unitCost: pricedPrior?.unitCost ?? rate!.unitCost,
+          };
         });
       }
 

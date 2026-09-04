@@ -10,6 +10,13 @@
  */
 
 export type SalesOsSettings = {
+  rateCard: Array<{
+    service: string;
+    unit: string;
+    unitSell: number;
+    unitCost: number;
+    active: boolean;
+  }>;
   icp: {
     target: string;
     primarySectors: string[];
@@ -88,6 +95,43 @@ export const SALES_OS_SOP_SOURCE = {
 } as const;
 
 export const DEFAULT_SALES_OS_SETTINGS: SalesOsSettings = {
+  rateCard: [
+    {
+      service: "Social media retainer",
+      unit: "month",
+      unitSell: 0,
+      unitCost: 0,
+      active: true,
+    },
+    {
+      service: "Strategic communications retainer",
+      unit: "month",
+      unitSell: 0,
+      unitCost: 0,
+      active: true,
+    },
+    {
+      service: "Brand experience campaign",
+      unit: "project",
+      unitSell: 0,
+      unitCost: 0,
+      active: true,
+    },
+    {
+      service: "Content production",
+      unit: "project",
+      unitSell: 0,
+      unitCost: 0,
+      active: true,
+    },
+    {
+      service: "Music services",
+      unit: "project",
+      unitSell: 0,
+      unitCost: 0,
+      active: true,
+    },
+  ],
   icp: {
     target:
       "Global brands in the UAE + strong local brands with real marketing budgets",

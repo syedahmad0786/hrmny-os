@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DemoReadinessPanel } from "@/components/demo-readiness-panel";
 import { CrmBtn, CrmEmpty, CrmPageHeader, CrmTag } from "@/components/crm/ui";
 import { trpc } from "@/lib/trpc";
@@ -40,6 +40,31 @@ export default function SalesOsSettingsPage() {
   const [json, setJson] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const current = settings.data?.settings;
+  const [rateCardDraft, setRateCardDraft] = useState<
+    Array<{
+      service: string;
+      unit: string;
+      unitSell: number;
+      unitCost: number;
+      active: boolean;
+    }>
+  >([]);
+
+  useEffect(() => {
+    if (current) setRateCardDraft(current.rateCard);
+  }, [current]);
+
+  const updateRateCard = (
+    index: number,
+    patch: Partial<(typeof rateCardDraft)[number]>,
+  ) => {
+    if (!salesAccess.data?.canAdmin) return;
+    setRateCardDraft((items) =>
+      items.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, ...patch } : item,
+      ),
+    );
+  };
 
   return (
     <main data-testid="sales-os-settings" className="growth-settings">
@@ -135,6 +160,110 @@ export default function SalesOsSettingsPage() {
             Pause all outreach
           </label>
         </div>
+      </section>
+
+      <section className="crm-panel mb-4" data-testid="sales-rate-card">
+        <div className="crm-panel-head">
+          <div>
+            <h3>Commercial rate card</h3>
+            <p>
+              Partner-owned service rates. Quotes snapshot these values, so old
+              versions never change when the rate card changes.
+            </p>
+          </div>
+        </div>
+        <div className="crm-table-scroll">
+          <table className="crm-table">
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Unit</th>
+                <th>Client rate</th>
+                <th>Internal cost</th>
+                <th>Active</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rateCardDraft.map((item, index) => (
+                <tr key={`${item.service}-${index}`}>
+                  <td>{item.service}</td>
+                  <td>{item.unit}</td>
+                  <td>
+                    <input
+                      className="crm-input"
+                      type="number"
+                      min={0}
+                      value={item.unitSell}
+                      disabled={!salesAccess.data?.canAdmin}
+                      aria-label={`${item.service} client rate`}
+                      onChange={(event) =>
+                        updateRateCard(index, {
+                          unitSell: Math.max(
+                            0,
+                            Number(event.target.value) || 0,
+                          ),
+                        })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="crm-input"
+                      type="number"
+                      min={0}
+                      value={item.unitCost}
+                      disabled={!salesAccess.data?.canAdmin}
+                      aria-label={`${item.service} internal cost`}
+                      onChange={(event) =>
+                        updateRateCard(index, {
+                          unitCost: Math.max(
+                            0,
+                            Number(event.target.value) || 0,
+                          ),
+                        })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={item.active}
+                      disabled={!salesAccess.data?.canAdmin}
+                      aria-label={`${item.service} active`}
+                      onChange={(event) =>
+                        updateRateCard(index, { active: event.target.checked })
+                      }
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {salesAccess.data?.canAdmin ? (
+          <div className="crm-approval-actions m-4">
+            <CrmBtn
+              variant="primary"
+              disabled={save.isPending || rateCardDraft.length === 0}
+              onClick={() => save.mutate({ rateCard: rateCardDraft })}
+            >
+              {save.isPending ? "Saving…" : "Save rate card"}
+            </CrmBtn>
+          </div>
+        ) : null}
+        {!salesAccess.data?.canAdmin ? (
+          <p className="crm-note m-4">
+            View only. A Partner or Director controls commercial rates.
+          </p>
+        ) : rateCardDraft.some(
+            (item) =>
+              item.active && (item.unitSell === 0 || item.unitCost === 0),
+          ) ? (
+          <p className="crm-note m-4">
+            Set both client rate and internal cost before using a service in a
+            quote. Zero means not commercially configured.
+          </p>
+        ) : null}
       </section>
 
       <details className="growth-settings-detail">

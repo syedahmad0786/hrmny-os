@@ -29,6 +29,7 @@ export default function CrmQuotePage() {
   const session = trpc.auth.session.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
   const stages = trpc.crm.stages.useQuery();
+  const salesSettings = trpc.salesOs.settings.get.useQuery();
   const [dealId, setDealId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -74,6 +75,7 @@ export default function CrmQuotePage() {
 
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
   const [discount, setDiscount] = useState("");
+  const [rateCardService, setRateCardService] = useState("");
   const [evidenceUrl, setEvidenceUrl] = useState("");
   const [seededDeal, setSeededDeal] = useState<string | null>(null);
 
@@ -126,6 +128,9 @@ export default function CrmQuotePage() {
   const subtotal = parsedLines.reduce((s, l) => s + l.qty * l.unitSell, 0);
   const discountNum = Math.min(100, Math.max(0, Number(discount) || 0));
   const discountedTotal = subtotal * (1 - discountNum / 100);
+  const rateCard = (salesSettings.data?.settings.rateCard ?? []).filter(
+    (item) => item.active,
+  );
 
   const saved = save.data?.ok === true ? save.data : null;
   const saveFailed = save.data?.ok === false ? save.data.reason : null;
@@ -148,6 +153,14 @@ export default function CrmQuotePage() {
       : latest && "marginPct" in latest
         ? latest
         : null;
+  const marginShortfall =
+    saved?.marginBelowFloor && saved.floorPct && "internalCost" in saved.quote
+      ? Math.max(
+          0,
+          Number(saved.quote.internalCost) / (1 - saved.floorPct / 100) -
+            Number(saved.quote.quoteValue),
+        )
+      : 0;
 
   const setLine = (i: number, patch: Partial<DraftLine>) =>
     setLines((prev) =>
@@ -229,6 +242,61 @@ export default function CrmQuotePage() {
                     client selector.
                   </p>
                 ) : null}
+              </div>
+
+              <div className="crm-note mb-3 flex flex-wrap items-end gap-2">
+                <label className="crm-field min-w-[240px] flex-1">
+                  <span>Add from HRMNY rate card</span>
+                  <select
+                    className="crm-select"
+                    value={rateCardService}
+                    onChange={(event) => setRateCardService(event.target.value)}
+                  >
+                    <option value="">Choose a configured service</option>
+                    {rateCard.map((item) => (
+                      <option
+                        key={item.service}
+                        value={item.service}
+                        disabled={item.unitSell <= 0 || item.unitCost <= 0}
+                      >
+                        {item.service} · per {item.unit}
+                        {item.unitSell > 0 && item.unitCost > 0
+                          ? ` · ${formatAed(item.unitSell)}`
+                          : " · rate not set"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <CrmBtn
+                  disabled={!rateCardService}
+                  onClick={() => {
+                    const item = rateCard.find(
+                      (candidate) => candidate.service === rateCardService,
+                    );
+                    if (!item || item.unitSell <= 0 || item.unitCost <= 0)
+                      return;
+                    const next = {
+                      label: item.service,
+                      qty: "1",
+                      unitSell: String(item.unitSell),
+                      unitCost: String(item.unitCost),
+                    };
+                    setLines((current) =>
+                      current.length === 1 && !current[0]?.label
+                        ? [next]
+                        : [...current, next],
+                    );
+                    setRateCardService("");
+                  }}
+                >
+                  + Add service
+                </CrmBtn>
+                <Link
+                  href="/crm/settings/sales-os"
+                  className="text-[10px] font-bold underline underline-offset-4"
+                >
+                  Manage rates →
+                </Link>
               </div>
 
               <div className="crm-table-shell">
@@ -411,7 +479,7 @@ export default function CrmQuotePage() {
                     ? ` · escalated to ${saved.escalatedTo.toUpperCase()} for approval`
                     : ""}
                   {saved.marginBelowFloor
-                    ? ` · margin below ${saved.floorPct}% floor (target ${saved.targetPct}%)`
+                    ? ` · cannot be accepted: margin is below the ${saved.floorPct}% floor. Raise client price by ${formatAed(marginShortfall)}, reduce cost, or send the exception to a Partner.`
                     : ""}
                 </div>
               ) : null}

@@ -151,6 +151,34 @@ describe("deal gate transitions", () => {
     }
   });
 
+  it("requires complete client needs before scope → propose", async () => {
+    const audits: unknown[] = [];
+    const entity: EntitySnapshot = {
+      entityType: "deal",
+      entityId: "e0000000-0000-4000-8000-000000000001",
+      state: "scope",
+      data: { needsComplete: false },
+    };
+    const blocked = await transition(
+      am,
+      entity,
+      { to: "propose" },
+      deps(audits),
+    );
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) {
+      expect(blocked.blockedBy?.[0]?.gate).toBe("deal.client_needs");
+    }
+
+    const ready = await transition(
+      am,
+      { ...entity, data: { needsComplete: true } },
+      { to: "propose" },
+      deps(audits),
+    );
+    expect(ready.ok).toBe(true);
+  });
+
   it("margin below floor returns OVERRIDE_REQUIRED; partner override passes", async () => {
     const audits: unknown[] = [];
     const entity: EntitySnapshot = {

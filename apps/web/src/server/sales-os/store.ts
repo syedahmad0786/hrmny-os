@@ -120,6 +120,7 @@ function mergeSettings(raw: unknown): SalesOsSettings {
   return {
     ...DEFAULT_SALES_OS_SETTINGS,
     ...incoming,
+    rateCard: incoming.rateCard ?? DEFAULT_SALES_OS_SETTINGS.rateCard,
     icp: { ...DEFAULT_SALES_OS_SETTINGS.icp, ...incoming.icp },
     sectorRotation: {
       ...DEFAULT_SALES_OS_SETTINGS.sectorRotation,

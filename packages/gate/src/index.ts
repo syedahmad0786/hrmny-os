@@ -17,6 +17,7 @@ export {
   dealBuafGate,
   dealVerifiedEmailGate,
   dealVoiceGate,
+  dealNeedsGate,
   dealMarginFloorGate,
   dealDiscountAuthorityGate,
   dealVendorFeeGate,

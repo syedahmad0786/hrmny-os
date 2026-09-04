@@ -9,6 +9,7 @@ const TABS = [
   { href: "/crm/research", label: "Research" },
   { href: "/crm/outreach", label: "Outreach" },
   { href: "/crm", label: "Pipeline", exact: true },
+  { href: "/crm/handover", label: "Handover" },
   { href: "/crm/contacts", label: "Contacts" },
 ] as const;
 

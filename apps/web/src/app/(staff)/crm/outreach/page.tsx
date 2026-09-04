@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { orderOutreachWorkItems } from "./order";
 import { trpc } from "@/lib/trpc";
 import {
   CrmBtn,
@@ -205,17 +206,15 @@ function OutreachInner() {
           item.subject,
         ),
     );
-    const sortFocus = <T extends { id: string }>(list: T[]) => {
-      if (!focusId) return list;
-      return [...list].sort((a, b) => {
-        if (a.id === focusId) return -1;
-        if (b.id === focusId) return 1;
-        return 0;
-      });
-    };
     return {
-      drafts: sortFocus(all.filter((i) => i.state === "draft")),
-      approved: sortFocus(all.filter((i) => i.state === "approved")),
+      drafts: orderOutreachWorkItems(
+        all.filter((i) => i.state === "draft"),
+        focusId,
+      ),
+      approved: orderOutreachWorkItems(
+        all.filter((i) => i.state === "approved"),
+        focusId,
+      ),
       history: all.filter((i) => i.state === "sent" || i.state === "discarded"),
     };
   }, [items.data, focusId, companyByDeal, showTestRecords]);
@@ -533,9 +532,7 @@ function OutreachInner() {
           <div className="crm-panel-head">
             <div>
               <h3>Awaiting approval</h3>
-              <p>
-                Read the message, then approve, request changes, or discard it.
-              </p>
+              <p>Oldest first. Approve, request changes, or discard it.</p>
             </div>
             <CrmTag kind="warn">{byState.drafts.length} pending</CrmTag>
           </div>
@@ -618,8 +615,8 @@ function OutreachInner() {
             <div>
               <h3>Approved — ready to send</h3>
               <p>
-                Email sends only after a second confirmation. LinkedIn stays
-                manual.
+                Oldest first. Email sends only after a second confirmation.
+                LinkedIn stays manual.
               </p>
             </div>
             <CrmTag kind="success">{byState.approved.length} ready</CrmTag>
