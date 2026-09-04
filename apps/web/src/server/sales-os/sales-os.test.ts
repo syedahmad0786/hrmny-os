@@ -52,6 +52,7 @@ import {
   insertCompanyResearch,
   listCompanyResearch,
   listContactResearch,
+  recordEmailEvent,
   listIntelSignals,
   resetSalesOsStore,
   saveSalesOsSettings,
@@ -544,6 +545,34 @@ describe("digest, replies, intent CSV, evolve, stale", () => {
     const digest = await buildSalesOsDigest();
     expect(digest.researchedWaiting).toBeGreaterThan(0);
     expect(digest.coverage.targetX).toBe(3);
+  });
+
+  it("calculates reply rate from durable Gmail events", async () => {
+    const outreach = await insertOutreach({
+      dealId: "00000000-0000-4000-8000-000000000089",
+      channel: "gmail",
+      recipient: "reply@brand.com",
+      body: "Hi",
+    });
+    await recordEmailEvent({
+      outreachItemId: outreach.id,
+      kind: "sent",
+      externalId: "gmail-sent-1",
+    });
+    await recordEmailEvent({
+      outreachItemId: outreach.id,
+      kind: "replied",
+      externalId: "gmail-reply-1",
+    });
+    await recordEmailEvent({
+      outreachItemId: outreach.id,
+      kind: "replied",
+      externalId: "gmail-reply-2",
+    });
+
+    await expect(buildSalesOsDigest()).resolves.toMatchObject({
+      replyRate: { sent: 1, replied: 1, rate: 1 },
+    });
   });
 
   it("suppresses and closes a deal on unsubscribe", async () => {

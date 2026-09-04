@@ -100,6 +100,12 @@ export default function CrmDealDetailPage() {
     nextStage?.replace(/_/g, " ");
   const contactName = formatContactName(primaryContact.data);
   const email = workEmailState(primaryContact.data, d?.emailVerified);
+  const knowledgeBrief = (notes.data ?? []).find((item) =>
+    item.body.startsWith("SALES KNOWLEDGE BRIEF —"),
+  );
+  const regularNotes = (notes.data ?? []).filter(
+    (item) => !item.body.startsWith("SALES KNOWLEDGE BRIEF —"),
+  );
   const canConfirmWon = Boolean(
     session.data?.roles.some((role) => ["partner", "director"].includes(role)),
   );
@@ -282,7 +288,10 @@ export default function CrmDealDetailPage() {
             <div className="crm-panel-head">
               <div>
                 <h3>Lead qualification</h3>
-                <p>Confirm budget, urgency, decision access, and fit.</p>
+                <p>
+                  Tick only confirmed facts: budget, urgency, decision access,
+                  and service fit.
+                </p>
               </div>
               <CrmTag kind={score && score.done === 4 ? "success" : "warn"}>
                 {score?.label ?? "—"}
@@ -325,6 +334,10 @@ export default function CrmDealDetailPage() {
                     <option value="cool">Cool</option>
                     <option value="cold">Cold</option>
                   </select>
+                  <p className="mt-2 text-[11px] text-[var(--muted)]">
+                    Sales priority. Set it manually, or use Re-score below for
+                    an AI recommendation.
+                  </p>
                 </div>
                 <div className="crm-field">
                   <label>Work email</label>
@@ -368,7 +381,11 @@ export default function CrmDealDetailPage() {
             </div>
           </div>
 
-          <AiDealPanel dealId={id} />
+          <AiDealPanel
+            dealId={id}
+            emailReady={email.label === "Verified"}
+            knowledgeBrief={knowledgeBrief ?? null}
+          />
 
           <div className="crm-panel">
             <div className="crm-panel-head">
@@ -397,13 +414,13 @@ export default function CrmDealDetailPage() {
                 </CrmBtn>
               </div>
               <div className="crm-checklist">
-                {(notes.data ?? []).map((n) => (
+                {regularNotes.map((n) => (
                   <div key={n.crmNoteId} className="crm-check-row">
                     {humanizeCrmBody(n.body)}
                     <span>{formatRelative(n.createdAt)}</span>
                   </div>
                 ))}
-                {(notes.data ?? []).length === 0 ? (
+                {regularNotes.length === 0 ? (
                   <p className="text-[11px] text-[var(--muted)]">
                     No notes yet.
                   </p>

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { requirePermission, router, staffProcedure } from "./trpc";
+import { router, staffProcedure } from "./trpc";
+import { salesOperatorProcedure } from "./sales-os-router";
 import {
   accountSummary,
   companyKnowledgeBrief,
@@ -12,8 +13,8 @@ import {
 /**
  * W9 CRM AI surface (module only — the orchestrator wires this into appRouter
  * as `crmAi`). Read-only summaries are plain staff queries (analytics-router
- * precedent); the two mutations additionally require the `ai:run` permission
- * (ai-policy-router precedent). All output is draft/advisory: draftOutreach
+ * precedent); mutations reuse the same Sales-operator role boundary as Apollo
+ * and outreach. All output is draft/advisory: draftOutreach
  * lands in the same leadgen HITL queue — approve + gate before any send —
  * and rescoreBuaf writes only BUAF fields, audited. Mock-first: with
  * LLM_PROVIDER=mock (or no keys) every procedure works deterministically.
@@ -38,8 +39,7 @@ export const crmAiRouter = router({
     .query(({ input }) => nextBestAction(input)),
 
   /** Source-backed brief stored on the deal; live search is explicitly confirmed. */
-  companyKnowledgeBrief: staffProcedure
-    .use(requirePermission("ai", "run"))
+  companyKnowledgeBrief: salesOperatorProcedure
     .input(
       dealInput.extend({
         requestId: z.string().uuid(),
@@ -55,16 +55,14 @@ export const crmAiRouter = router({
     ),
 
   /** Re-run the research-agent BUAF scoring on one deal; writes temperature back. */
-  rescoreBuaf: staffProcedure
-    .use(requirePermission("ai", "run"))
+  rescoreBuaf: salesOperatorProcedure
     .input(dealInput)
     .mutation(({ input, ctx }) =>
       rescoreBuaf({ ...input, actorEmployeeId: ctx.employeeId }),
     ),
 
   /** Draft outreach for a deal — delegates to the gated leadgen HITL queue. */
-  draftOutreach: staffProcedure
-    .use(requirePermission("ai", "run"))
+  draftOutreach: salesOperatorProcedure
     .input(dealInput)
     .mutation(({ input }) => draftOutreachForDeal(input)),
 });

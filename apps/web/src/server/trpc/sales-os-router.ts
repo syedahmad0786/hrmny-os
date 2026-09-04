@@ -81,7 +81,7 @@ function salesRoleProcedure(allowed: ReadonlySet<string>, message: string) {
   );
 }
 
-const salesOperatorProcedure = salesRoleProcedure(
+export const salesOperatorProcedure = salesRoleProcedure(
   SALES_OPERATOR_ROLES,
   "Sales operator role required",
 );

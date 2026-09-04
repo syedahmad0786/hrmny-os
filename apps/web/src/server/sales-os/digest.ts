@@ -1,6 +1,11 @@
 import { listDeals } from "../crm/repository";
 import { listOutreach } from "../leadgen/store";
-import { getSalesOsSettings, listCompanyResearch, listContactResearch } from "./store";
+import {
+  getSalesOsSettings,
+  listCompanyResearch,
+  listContactResearch,
+  listEmailEvents,
+} from "./store";
 
 export type StallDeal = {
   dealId: string;
@@ -32,19 +37,35 @@ export type SalesOsDigest = {
   };
 };
 
-export async function buildSalesOsDigest(now = new Date()): Promise<SalesOsDigest> {
+export async function buildSalesOsDigest(
+  now = new Date(),
+): Promise<SalesOsDigest> {
   const settings = await getSalesOsSettings();
-  const [companies, contacts, outreach, deals] = await Promise.all([
-    listCompanyResearch({ state: "researched" }),
-    listContactResearch({ state: "found" }),
-    listOutreach(),
-    listDeals(),
-  ]);
+  const [companies, contacts, outreach, deals, emailEvents] = await Promise.all(
+    [
+      listCompanyResearch({ state: "researched" }),
+      listContactResearch({ state: "found" }),
+      listOutreach(),
+      listDeals(),
+      listEmailEvents(),
+    ],
+  );
   const drafts = outreach.filter((o) => o.state === "draft");
   const approved = outreach.filter((o) => o.state === "approved");
-  const sent = outreach.filter((o) => o.state === "sent");
-  const replied = sent.filter((o) =>
-    /replied|accepted/i.test(o.reworkFeedback ?? o.subject ?? ""),
+  const sentEmailIds = new Set(
+    emailEvents
+      .filter((event) => event.kind === "sent" && event.outreachItemId)
+      .map((event) => event.outreachItemId!),
+  );
+  const repliedEmailIds = new Set(
+    emailEvents
+      .filter(
+        (event) =>
+          event.kind === "replied" &&
+          event.outreachItemId &&
+          sentEmailIds.has(event.outreachItemId),
+      )
+      .map((event) => event.outreachItemId!),
   );
   const open = deals.filter((d) => !d.closeOutcome);
   const openValue = open.reduce((sum, d) => sum + Number(d.quoteValue ?? 0), 0);
@@ -68,11 +89,20 @@ export async function buildSalesOsDigest(now = new Date()): Promise<SalesOsDiges
   }
   return {
     date: now.toISOString().slice(0, 10),
-    sectorHint: settings.sectorRotation[
-      (
-        ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const
-      )[now.getUTCDay()]!
-    ],
+    sectorHint:
+      settings.sectorRotation[
+        (
+          [
+            "sunday",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+          ] as const
+        )[now.getUTCDay()]!
+      ],
     researchedWaiting: companies.length,
     contactsWaiting: contacts.length,
     outreachDrafts: drafts.length,
@@ -86,9 +116,9 @@ export async function buildSalesOsDigest(now = new Date()): Promise<SalesOsDiges
       healthy: coverageX >= settings.targets.pipelineCoverageX,
     },
     replyRate: {
-      sent: sent.length,
-      replied: replied.length,
-      rate: sent.length ? replied.length / sent.length : 0,
+      sent: sentEmailIds.size,
+      replied: repliedEmailIds.size,
+      rate: sentEmailIds.size ? repliedEmailIds.size / sentEmailIds.size : 0,
     },
   };
 }
