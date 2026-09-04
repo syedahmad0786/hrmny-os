@@ -1,5 +1,12 @@
-import type { ComposioSendAdapter } from "@hrmny/integrations";
-import { createComposioStub } from "@hrmny/integrations";
+import type {
+  ComposioSendAdapter,
+  GmailProviderReadback,
+} from "@hrmny/integrations";
+import {
+  createComposioStub,
+  GmailProviderReadbackError,
+  verifyGmailProviderReadback,
+} from "@hrmny/integrations";
 import { getGoogleWorkspaceAccessToken } from "../trpc/connections-router";
 
 /**
@@ -8,6 +15,10 @@ import { getGoogleWorkspaceAccessToken } from "../trpc/connections-router";
  */
 export function createGoogleWorkspaceGmailSend(
   employeeId: string,
+  options?: {
+    connectionAccountId?: string;
+    roles?: readonly string[];
+  },
 ): ComposioSendAdapter {
   const stub = createComposioStub();
   return {
@@ -19,7 +30,10 @@ export function createGoogleWorkspaceGmailSend(
       if (input.toolkit === "linkedin") {
         return stub.sendAfterApproval(input);
       }
-      const accessToken = await getGoogleWorkspaceAccessToken(employeeId);
+      const accessToken = await getGoogleWorkspaceAccessToken(
+        employeeId,
+        options,
+      );
       if (!accessToken) {
         return stub.sendAfterApproval(input);
       }
@@ -67,13 +81,59 @@ export function createGoogleWorkspaceGmailSend(
       if (!externalId) {
         throw new Error("Google Workspace Gmail send returned no message id");
       }
+      let readback: GmailProviderReadback;
+      try {
+        readback = await this.readbackAfterSend({
+          externalId,
+          recipient: input.to,
+        });
+      } catch (error) {
+        if (error instanceof GmailProviderReadbackError) throw error;
+        throw new GmailProviderReadbackError(
+          error instanceof Error ? error.message : "Gmail readback failed",
+          externalId,
+          json.threadId,
+        );
+      }
       return {
         sent: true,
         mode: "live",
         externalId,
-        threadId: json.threadId,
+        threadId: readback.threadId,
         channel: "gmail",
+        providerAccepted: true,
+        readbackAt: readback.readbackAt,
+        readbackRecipient: readback.recipient,
       };
+    },
+    async readbackAfterSend(input) {
+      const accessToken = await getGoogleWorkspaceAccessToken(
+        employeeId,
+        options,
+      );
+      if (!accessToken) {
+        throw new Error("Google Workspace connection is unavailable");
+      }
+      const params = new URLSearchParams({ format: "metadata" });
+      params.append("metadataHeaders", "To");
+      const response = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(input.externalId)}?${params}`,
+        { headers: { authorization: `Bearer ${accessToken}` } },
+      );
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new GmailProviderReadbackError(
+          `Google Workspace Gmail readback failed (${response.status}): ${detail.slice(0, 200)}`,
+          input.externalId,
+        );
+      }
+      return verifyGmailProviderReadback({
+        message: (await response.json()) as Parameters<
+          typeof verifyGmailProviderReadback
+        >[0]["message"],
+        externalId: input.externalId,
+        recipient: input.recipient,
+      });
     },
   };
 }

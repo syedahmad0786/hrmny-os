@@ -16,6 +16,7 @@ import { runDueReports } from "@/server/inngest/report-scheduler";
 import { inngestCloudConfigured } from "@/server/inngest/client";
 import { runCrmTaskDigest } from "@/server/reminders/crm-task-digest";
 import { runLeadgenDailyCron } from "@/server/leadgen/daily-cron";
+import { runDueFollowupDrafts } from "@/server/leadgen/followup-scheduler";
 import { runReconSweepers } from "@/server/recon/cron-sweepers";
 import {
   APOLLO_PEOPLE_SEARCH_JOB_KIND,
@@ -342,6 +343,7 @@ export async function GET(request: Request) {
     dueReports,
     crmTaskDigest,
     leadgenDaily,
+    salesFollowupDrafts,
     recon,
   ] = await Promise.all([
     deliverPendingWorkWebhooks(),
@@ -370,6 +372,11 @@ export async function GET(request: Request) {
           ran: false,
           error: String(error).slice(0, 500),
         })),
+    inngestCloudConfigured()
+      ? Promise.resolve({ skipped: "inngest_configured" as const })
+      : runDueFollowupDrafts().catch((error) => ({
+          error: String(error).slice(0, 500),
+        })),
     // Xero mirror, competitor scan, retainer drafts, memory embed backfill.
     // Mock-safe; never fatal to the job run.
     runReconSweepers().catch((error) => ({
@@ -394,6 +401,7 @@ export async function GET(request: Request) {
     dueReports,
     crmTaskDigest,
     leadgenDaily,
+    salesFollowupDrafts,
     recon,
   };
   return Response.json(responseBody, {

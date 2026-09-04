@@ -1,5 +1,13 @@
 import { TRPCError } from "@trpc/server";
-import { and, auditEvent, connectionAccount, eq, or, sql } from "@hrmny/db";
+import {
+  and,
+  auditEvent,
+  connectionAccount,
+  employee,
+  eq,
+  or,
+  sql,
+} from "@hrmny/db";
 import {
   createAsanaViaComposio,
   createComposioLive,
@@ -40,6 +48,12 @@ import {
   disconnectGovernedApiKeyConnection,
   persistGovernedApiKeyConnection,
 } from "../integrations/governed-api-key";
+import {
+  creditUsed,
+  getSalesOsSettings,
+  saveSalesOsSettings,
+} from "../sales-os/store";
+import { writeAudit } from "../m1-persistence";
 
 export { GoogleProfileSchema };
 
@@ -618,12 +632,154 @@ export async function getVerifiedAsanaConnection(
   };
 }
 
+export type SalesSenderMailbox = {
+  connectionAccountId: string;
+  email: string;
+  label: string;
+  ownerEmployeeId: string | null;
+  ownerName: string | null;
+  dailyCap: number;
+  usedToday: number;
+  remainingToday: number;
+  enabled: boolean;
+};
+
+const SALES_SENDER_ROLES = new Set([
+  "partner",
+  "director",
+  "am",
+  "account_manager",
+]);
+
+function validInternalMailbox(value: string | null | undefined): string | null {
+  const email = value?.trim().toLowerCase();
+  return email &&
+    z.string().email().safeParse(email).success &&
+    email.endsWith("@hrmny.co")
+    ? email
+    : null;
+}
+
+export async function listSalesSenderMailboxes(input: {
+  employeeId: string;
+  roles: readonly string[];
+  includeDisabled?: boolean;
+  now?: Date;
+}): Promise<SalesSenderMailbox[]> {
+  if (
+    !input.includeDisabled &&
+    !input.roles.some((role) => SALES_SENDER_ROLES.has(role))
+  ) {
+    return [];
+  }
+  if (!(await isWorkConnectedAppAllowed("google_workspace"))) return [];
+  const settings = await getSalesOsSettings();
+  const policies = settings.outreach.senderMailboxes ?? [];
+  const policyById = new Map(
+    policies.map((policy) => [policy.connectionAccountId, policy]),
+  );
+  const db = getDb();
+  const rows = db
+    ? await db
+        .select({
+          connectionAccountId: connectionAccount.connectionAccountId,
+          email: connectionAccount.externalConnectionId,
+          accountLabel: connectionAccount.label,
+          ownerEmployeeId: connectionAccount.ownerEmployeeId,
+          ownerName: employee.displayName,
+        })
+        .from(connectionAccount)
+        .leftJoin(
+          employee,
+          eq(connectionAccount.ownerEmployeeId, employee.employeeId),
+        )
+        .where(
+          and(
+            eq(connectionAccount.toolkit, "google_workspace"),
+            eq(connectionAccount.scope, "staff"),
+            eq(connectionAccount.status, "connected"),
+            sql`${connectionAccount.secretId} is not null`,
+          ),
+        )
+    : getDemoStore()
+        .connections.filter(
+          (candidate) =>
+            candidate.toolkit === "google_workspace" &&
+            candidate.status === "connected",
+        )
+        .map((candidate) => ({
+          connectionAccountId: candidate.connectionAccountId,
+          email: candidate.externalConnectionId,
+          accountLabel: null,
+          ownerEmployeeId: input.employeeId,
+          ownerName: "You",
+        }));
+  const today = (input.now ?? new Date()).toISOString().slice(0, 10);
+  const mailboxes = await Promise.all(
+    rows.flatMap((row) => {
+      const email = validInternalMailbox(row.email);
+      if (!email) return [];
+      const policy = policyById.get(row.connectionAccountId);
+      const enabled = policy
+        ? policy.enabled
+        : policies.length === 0 && row.ownerEmployeeId === input.employeeId;
+      if (!enabled && !input.includeDisabled) return [];
+      const dailyCap = Math.min(
+        100,
+        Math.max(1, Math.floor(policy?.dailyCap ?? settings.caps.emailPerDay)),
+      );
+      return [
+        creditUsed("email_send", `${today}:${row.connectionAccountId}`).then(
+          (usedToday) => ({
+            connectionAccountId: row.connectionAccountId,
+            email,
+            label:
+              policy?.label?.trim() ||
+              row.accountLabel?.trim() ||
+              row.ownerName?.trim() ||
+              email,
+            ownerEmployeeId: row.ownerEmployeeId,
+            ownerName: row.ownerName,
+            dailyCap,
+            usedToday,
+            remainingToday: Math.max(0, dailyCap - usedToday),
+            enabled,
+          }),
+        ),
+      ];
+    }),
+  );
+  return mailboxes.sort(
+    (a, b) =>
+      Number(b.enabled) - Number(a.enabled) ||
+      Number(b.ownerEmployeeId === input.employeeId) -
+        Number(a.ownerEmployeeId === input.employeeId) ||
+      a.label.localeCompare(b.label),
+  );
+}
+
 export async function getGoogleWorkspaceAccessToken(
   employeeId: string,
+  options?: {
+    connectionAccountId?: string;
+    roles?: readonly string[];
+  },
 ): Promise<string | null> {
   if (!(await isWorkConnectedAppAllowed("google_workspace"))) return null;
   const db = getDb();
   if (!db) return null;
+  const selectedId = options?.connectionAccountId?.trim();
+  if (selectedId) {
+    const allowed = await listSalesSenderMailboxes({
+      employeeId,
+      roles: options?.roles ?? [],
+    });
+    if (
+      !allowed.some((mailbox) => mailbox.connectionAccountId === selectedId)
+    ) {
+      throw new Error("Selected Google Workspace sender is not approved");
+    }
+  }
   // Include `error` rows that still have a vault secret so a transient refresh
   // failure (missing env locally, brief Google outage) can self-heal once
   // credentials work again — without forcing a full OAuth reconnect.
@@ -636,7 +792,9 @@ export async function getGoogleWorkspaceAccessToken(
     .from(connectionAccount)
     .where(
       and(
-        eq(connectionAccount.ownerEmployeeId, employeeId),
+        selectedId
+          ? eq(connectionAccount.connectionAccountId, selectedId)
+          : eq(connectionAccount.ownerEmployeeId, employeeId),
         eq(connectionAccount.toolkit, "google_workspace"),
         eq(connectionAccount.scope, "staff"),
         or(
@@ -754,8 +912,24 @@ export async function getGoogleWorkspaceAccessToken(
 /** The verified internal mailbox shown to Sales and used as the test recipient. */
 export async function getGoogleWorkspaceSenderEmail(
   employeeId: string,
+  options?: {
+    connectionAccountId?: string;
+    roles?: readonly string[];
+  },
 ): Promise<string | null> {
   if (!(await isWorkConnectedAppAllowed("google_workspace"))) return null;
+  const selectedId = options?.connectionAccountId?.trim();
+  if (selectedId) {
+    return (
+      (
+        await listSalesSenderMailboxes({
+          employeeId,
+          roles: options?.roles ?? [],
+        })
+      ).find((mailbox) => mailbox.connectionAccountId === selectedId)?.email ??
+      null
+    );
+  }
   const db = getDb();
   const account = db
     ? (
@@ -778,12 +952,7 @@ export async function getGoogleWorkspaceSenderEmail(
           candidate.toolkit === "google_workspace" &&
           candidate.status === "connected",
       )?.externalConnectionId;
-  const email = account?.trim().toLowerCase();
-  return email &&
-    z.string().email().safeParse(email).success &&
-    email.endsWith("@hrmny.co")
-    ? email
-    : null;
+  return validInternalMailbox(account);
 }
 
 export const connectionsRouter = router({
@@ -797,6 +966,92 @@ export const connectionsRouter = router({
       firstPartyCrmApps: [...FIRST_PARTY_CRM_APPS],
     };
   }),
+
+  salesMailboxes: staffProcedure.query(async ({ ctx }) => {
+    const employeeId = requireEmployeeId(ctx.employeeId);
+    const canManage = Boolean(
+      ctx.user && sessionHas(ctx.user, "admin", "features"),
+    );
+    return {
+      canManage,
+      items: await listSalesSenderMailboxes({
+        employeeId,
+        roles: ctx.roles,
+        includeDisabled: canManage,
+      }),
+    };
+  }),
+
+  setSalesMailboxPolicy: connectionPolicyAdminProcedure
+    .input(
+      z.object({
+        connectionAccountId: z.string().uuid(),
+        enabled: z.boolean(),
+        dailyCap: z.number().int().min(1).max(100),
+        label: z.string().trim().min(1).max(80),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const employeeId = requireEmployeeId(ctx.employeeId);
+      const currentMailboxes = await listSalesSenderMailboxes({
+        employeeId,
+        roles: ctx.roles,
+        includeDisabled: true,
+      });
+      const target = currentMailboxes.find(
+        (mailbox) => mailbox.connectionAccountId === input.connectionAccountId,
+      );
+      if (!target) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Connected internal Google Workspace mailbox not found",
+        });
+      }
+      const settings = await getSalesOsSettings();
+      const seeded = new Map(
+        currentMailboxes.map((mailbox) => [
+          mailbox.connectionAccountId,
+          {
+            connectionAccountId: mailbox.connectionAccountId,
+            label: mailbox.label,
+            dailyCap: mailbox.dailyCap,
+            enabled: mailbox.enabled,
+          },
+        ]),
+      );
+      for (const policy of settings.outreach.senderMailboxes ?? []) {
+        seeded.set(policy.connectionAccountId, policy);
+      }
+      seeded.set(input.connectionAccountId, input);
+      await saveSalesOsSettings(
+        {
+          ...settings,
+          outreach: {
+            ...settings.outreach,
+            senderMailboxes: [...seeded.values()],
+          },
+        },
+        employeeId,
+      );
+      await writeAudit({
+        actorEmployeeId: employeeId,
+        action: "sales.sender.policy.update",
+        entityType: "connection_account",
+        entityId: input.connectionAccountId,
+        before: {
+          enabled: target.enabled,
+          dailyCap: target.dailyCap,
+          label: target.label,
+        },
+        after: {
+          enabled: input.enabled,
+          dailyCap: input.dailyCap,
+          label: input.label,
+        },
+        reason: "Approved Google Workspace sender policy",
+      });
+      return { ok: true as const };
+    }),
 
   reopenApprovedAppPolicy: connectionPolicyAdminProcedure.mutation(
     async ({ ctx }) => healDisabledConnectedAppPolicy(ctx.employeeId),

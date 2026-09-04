@@ -12,6 +12,7 @@ import {
   GOOGLE_CHAT_INTERACTION_EVENT,
   runGoogleChatQueuedJob,
 } from "../google-chat";
+import { runDueFollowupDrafts } from "../leadgen/followup-scheduler";
 
 /** Durable policy gate for the contained once-per-day Sales research proposal. */
 export const leadgenDailyFunction = inngest.createFunction(
@@ -80,9 +81,22 @@ export const googleChatInteractionFunction = inngest.createFunction(
     ),
 );
 
+/** Prepare due follow-ups for review; this worker can never approve or send. */
+export const salesFollowupDraftFunction = inngest.createFunction(
+  {
+    id: "sales-followup-drafts-v1",
+    triggers: [cron("*/15 * * * *")],
+    retries: 2,
+    concurrency: { limit: 1 },
+  },
+  async ({ step }) =>
+    step.run("draft-due-sales-followups", () => runDueFollowupDrafts()),
+);
+
 export const inngestFunctions = [
   leadgenDailyFunction,
   reportSchedulerFunction,
   apolloSearchRetryFunction,
   googleChatInteractionFunction,
+  salesFollowupDraftFunction,
 ] as const;

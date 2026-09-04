@@ -43,6 +43,12 @@ export type SalesOsSettings = {
     senderTitle: string;
     physicalAddress: string;
     unsubscribePath: string;
+    senderMailboxes: Array<{
+      connectionAccountId: string;
+      label: string;
+      dailyCap: number;
+      enabled: boolean;
+    }>;
   };
   buaf: {
     hotMin: number;
@@ -159,6 +165,7 @@ export const DEFAULT_SALES_OS_SETTINGS: SalesOsSettings = {
     senderTitle: "Managing Partner, hrmny",
     physicalAddress: "hrmny, Dubai, United Arab Emirates",
     unsubscribePath: "/api/sales-os/unsubscribe",
+    senderMailboxes: [],
   },
   buaf: {
     hotMin: 33,
@@ -243,7 +250,9 @@ Cold (1–16): do not pursue.
 Lead source lanes: industry_scanning | apollo_intent | relationship_led | tejari | inbound.
 `.trim();
 
-export function weekdayKey(date: Date = new Date()): keyof SalesOsSettings["sectorRotation"] {
+export function weekdayKey(
+  date: Date = new Date(),
+): keyof SalesOsSettings["sectorRotation"] {
   return (
     [
       "sunday",

@@ -17,11 +17,97 @@ export type ComposioSendResult = {
   externalId: string;
   threadId?: string;
   channel: "gmail" | "linkedin";
+  providerAccepted: boolean;
+  readbackAt?: string;
+  readbackRecipient?: string;
 };
+
+export type GmailProviderReadback = {
+  externalId: string;
+  threadId?: string;
+  labelIds: string[];
+  recipient: string;
+  readbackAt: string;
+};
+
+export class GmailProviderReadbackError extends Error {
+  constructor(
+    message: string,
+    readonly externalId: string,
+    readonly threadId?: string,
+  ) {
+    super(message);
+    this.name = "GmailProviderReadbackError";
+  }
+}
+
+type GmailMessageMetadata = {
+  id?: string;
+  threadId?: string;
+  labelIds?: string[];
+  payload?: {
+    headers?: Array<{ name?: string; value?: string }>;
+  };
+};
+
+function headerValue(message: GmailMessageMetadata, name: string): string {
+  return (
+    message.payload?.headers?.find(
+      (header) => header.name?.toLowerCase() === name.toLowerCase(),
+    )?.value ?? ""
+  );
+}
+
+/** Verify the canonical Gmail copy instead of treating POST 200 as delivery. */
+export function verifyGmailProviderReadback(input: {
+  message: GmailMessageMetadata;
+  externalId: string;
+  recipient: string;
+}): GmailProviderReadback {
+  const id = input.message.id?.trim() ?? "";
+  const recipient = input.recipient.trim().toLowerCase();
+  const to = headerValue(input.message, "to").toLowerCase();
+  const labelIds =
+    input.message.labelIds?.map((label) => label.toUpperCase()) ?? [];
+  if (id !== input.externalId) {
+    throw new GmailProviderReadbackError(
+      "Gmail readback returned a different message id",
+      input.externalId,
+      input.message.threadId,
+    );
+  }
+  if (!labelIds.includes("SENT")) {
+    throw new GmailProviderReadbackError(
+      "Gmail readback did not confirm the SENT mailbox label",
+      input.externalId,
+      input.message.threadId,
+    );
+  }
+  if (!recipient || !to.includes(recipient)) {
+    throw new GmailProviderReadbackError(
+      "Gmail readback recipient does not match the approved recipient",
+      input.externalId,
+      input.message.threadId,
+    );
+  }
+  return {
+    externalId: id,
+    threadId: input.message.threadId,
+    labelIds,
+    recipient,
+    readbackAt: new Date().toISOString(),
+  };
+}
 
 export interface ComposioSendAdapter extends ComposioAdapter {
   /** Send after HITL approve — never auto-fires without caller gate. */
   sendAfterApproval(input: ComposioSendInput): Promise<ComposioSendResult>;
+  /** Read-only reconciliation of an already-created Gmail message. */
+  readbackAfterSend(input: {
+    externalId: string;
+    recipient: string;
+    connectionId?: string;
+  }): Promise<GmailProviderReadback>;
 }
 
 export function createComposioStub(): ComposioSendAdapter {
@@ -53,6 +139,7 @@ export function createComposioStub(): ComposioSendAdapter {
           mode: "copy_draft",
           externalId: `stub-li-draft-${seq}`,
           channel: "linkedin",
+          providerAccepted: false,
         };
       }
       // Gmail stub does NOT claim a real send — callers must not durable-mark
@@ -62,7 +149,13 @@ export function createComposioStub(): ComposioSendAdapter {
         mode: "stub",
         externalId: `stub-gmail-${seq}`,
         channel: "gmail",
+        providerAccepted: false,
       };
+    },
+    async readbackAfterSend() {
+      throw new Error(
+        "Gmail readback is unavailable without a live connection",
+      );
     },
   };
 }
@@ -129,6 +222,7 @@ export function createComposioLiveSend(opts: {
           mode: "copy_draft",
           externalId: `live-li-draft-${seq}`,
           channel: "linkedin",
+          providerAccepted: false,
         };
       }
 
@@ -148,16 +242,50 @@ export function createComposioLiveSend(opts: {
       if (!externalId) {
         throw new Error("Gmail send returned no provider message id");
       }
+      let readback: GmailProviderReadback;
+      try {
+        readback = await this.readbackAfterSend({
+          externalId,
+          recipient: input.to,
+          connectionId: input.connectionId,
+        });
+      } catch (error) {
+        if (error instanceof GmailProviderReadbackError) throw error;
+        throw new GmailProviderReadbackError(
+          error instanceof Error ? error.message : "Gmail readback failed",
+          externalId,
+          typeof result.data?.threadId === "string"
+            ? result.data.threadId
+            : undefined,
+        );
+      }
       return {
         sent: true,
         mode: "live",
         externalId,
-        threadId:
-          typeof result.data?.threadId === "string"
-            ? result.data.threadId
-            : undefined,
+        threadId: readback.threadId,
         channel: "gmail",
+        providerAccepted: true,
+        readbackAt: readback.readbackAt,
+        readbackRecipient: readback.recipient,
       };
+    },
+    async readbackAfterSend(input): Promise<GmailProviderReadback> {
+      const result = await opts.client.proxy<GmailMessageMetadata>({
+        connectedAccountId:
+          input.connectionId?.trim() || opts.connectedAccountId,
+        endpoint: `/gmail/v1/users/me/messages/${encodeURIComponent(input.externalId)}`,
+        method: "GET",
+        parameters: [
+          { name: "format", value: "metadata", in: "query" },
+          { name: "metadataHeaders", value: "To", in: "query" },
+        ],
+      });
+      return verifyGmailProviderReadback({
+        message: result.data,
+        externalId: input.externalId,
+        recipient: input.recipient,
+      });
     },
   };
 }
