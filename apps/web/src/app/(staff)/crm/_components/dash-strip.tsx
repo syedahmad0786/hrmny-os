@@ -24,10 +24,14 @@ function Metric({
 }
 
 /** W10 dashboard strip: weighted pipeline, forecast, win/loss — AED, read-only. */
-export function DashStrip() {
-  const pipeline = trpc.crmForecast.pipeline.useQuery();
-  const forecast = trpc.crmForecast.forecast.useQuery({});
-  const winLoss = trpc.crmForecast.winLoss.useQuery({});
+export function DashStrip({
+  refetchInterval,
+}: { refetchInterval?: number } = {}) {
+  const pipeline = trpc.crmForecast.pipeline.useQuery(undefined, {
+    refetchInterval,
+  });
+  const forecast = trpc.crmForecast.forecast.useQuery({}, { refetchInterval });
+  const winLoss = trpc.crmForecast.winLoss.useQuery({}, { refetchInterval });
 
   const error = pipeline.error ?? forecast.error ?? winLoss.error;
   if (error) {

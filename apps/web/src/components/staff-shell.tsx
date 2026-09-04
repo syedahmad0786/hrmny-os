@@ -37,7 +37,7 @@ const PRIMARY_NAV: readonly StaffNavDefinition[] = [
     id: "sales",
     label: "Sales",
     index: "02",
-    destinations: [{ href: "/crm/hunt", feature: "crm.workspace" }],
+    destinations: [{ href: "/crm/dashboard", feature: "crm.workspace" }],
     match: (p: string) =>
       p === "/crm" || p.startsWith("/crm/") || p.startsWith("/sales"),
   },
