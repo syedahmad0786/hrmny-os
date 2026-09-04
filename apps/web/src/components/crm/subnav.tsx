@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
+  { href: "/crm/dashboard", label: "Dashboard" },
   { href: "/crm/hunt", label: "Find clients" },
   { href: "/crm/research", label: "Research" },
   { href: "/crm/outreach", label: "Outreach" },
@@ -30,6 +31,7 @@ export function CrmSubnav() {
           key={tab.href}
           href={tab.href}
           className={isActive(pathname, tab) ? "active" : undefined}
+          aria-current={isActive(pathname, tab) ? "page" : undefined}
         >
           {tab.label}
         </Link>

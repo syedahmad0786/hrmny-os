@@ -91,6 +91,7 @@ export const ROUTES: RouteEntry[] = [
   staff("/crm/activities"),
   staff("/crm/companies"),
   staff("/crm/contacts"),
+  staff("/crm/dashboard"),
   staff("/crm/deals"),
   staff("/crm/deals/[id]", { sample: `/crm/deals/${DEMO_DEAL_ID}` }),
   staff("/crm/inbound"),

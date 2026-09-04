@@ -233,9 +233,16 @@ test.describe("Hunt Apollo prospect UI", () => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByText(restoredCandidate)).toBeVisible({
+    await expect(page.getByTestId("hunt-apollo-results-summary")).toBeVisible({
       timeout: 60_000,
     });
+    await expect(page.getByText(restoredCandidate)).toHaveCount(0);
+    await expect(page.getByTestId("hunt-apollo-results-toggle")).toHaveText(
+      "Review results",
+    );
+    await page.getByTestId("hunt-apollo-results-toggle").click();
+    await expect(page.getByText(restoredCandidate)).toBeVisible();
+    await expect(page.getByTestId("hunt-apollo-view-new")).toContainText("1");
     await expect(page.getByTestId("hunt-apollo-title")).toHaveValue(
       "Marketing Director",
     );
@@ -371,6 +378,10 @@ test.describe("Hunt Apollo prospect UI", () => {
     });
 
     await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("hunt-apollo-results-toggle")).toBeVisible({
+      timeout: 60_000,
+    });
+    await page.getByTestId("hunt-apollo-results-toggle").click();
     await expect(page.getByText(currentCandidate)).toBeVisible({
       timeout: 60_000,
     });
@@ -385,6 +396,10 @@ test.describe("Hunt Apollo prospect UI", () => {
       .click();
     const candidate = page.getByTestId(
       "hunt-apollo-candidate-synthetic-completed-person",
+    );
+    await expect(page.getByTestId("hunt-apollo-view-saved")).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
     await expect(candidate).toHaveClass(/is-saved/);
     await expect(
@@ -439,6 +454,10 @@ test.describe("Hunt Apollo prospect UI", () => {
       )
       .toBe(idempotencyKey);
     await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("hunt-apollo-results-toggle")).toBeVisible({
+      timeout: 60_000,
+    });
+    await page.getByTestId("hunt-apollo-results-toggle").click();
     await expect(page.getByText(currentCandidate)).toBeVisible({
       timeout: 60_000,
     });
@@ -709,6 +728,7 @@ test.describe("Hunt Apollo prospect UI", () => {
 
     const crmNav = page.getByRole("navigation", { name: "Sales sections" });
     await expect(crmNav.locator("summary")).toHaveCount(0);
+    await expect(crmNav.getByRole("link", { name: "Dashboard" })).toBeVisible();
     await expect(crmNav.getByRole("link", { name: "Contacts" })).toBeVisible();
     await expect(
       crmNav.getByRole("link", { name: "Connected tools" }),
