@@ -10,6 +10,7 @@
  */
 
 export type SalesOsSettings = {
+  campaigns: SalesCampaignDefinition[];
   rateCard: Array<{
     service: string;
     unit: string;
@@ -85,6 +86,24 @@ export type SalesOsSettings = {
   retentionMonths: number;
 };
 
+export type SalesCampaignDefinition = {
+  id: string;
+  name: string;
+  status: "draft" | "running" | "paused" | "completed";
+  dealIds: string[];
+  subjectTemplate: string;
+  bodyTemplate: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string | null;
+  receipts: Array<{
+    receiptId: string;
+    kind: "first_touch" | "followup";
+    createdAt: string;
+    summary: string;
+  }>;
+};
+
 export const SALES_OS_SOP_SOURCE = {
   title: "hrmny Sales & Growth System — Complete Documentation",
   version: "3.0",
@@ -95,6 +114,7 @@ export const SALES_OS_SOP_SOURCE = {
 } as const;
 
 export const DEFAULT_SALES_OS_SETTINGS: SalesOsSettings = {
+  campaigns: [],
   rateCard: [
     {
       service: "Social media retainer",

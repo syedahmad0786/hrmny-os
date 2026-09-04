@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveDevUser, sessionCanViewMargin } from "../auth/session";
 import { createCaller } from "./root";
 
-function caller(role: "partner" | "am") {
+function caller(role: "partner" | "am" | "finance") {
   const user = resolveDevUser(role);
   return {
     employeeId: user.employeeId,
@@ -39,5 +39,18 @@ describe("Sales OS principal-bound query state", () => {
     });
     expect(typeof amConnection.configured).toBe("boolean");
     expect(partner.employeeId).not.toBe(am.employeeId);
+  });
+
+  it("keeps campaign mutations inside Sales operator roles", async () => {
+    const finance = caller("finance");
+    await expect(
+      finance.caller.salesOs.campaigns.create({
+        name: "Forbidden finance campaign",
+        dealIds: ["e0000000-0000-4000-8000-000000000001"],
+        subjectTemplate: "An idea for {{company}}",
+        bodyTemplate:
+          "Hi {{firstName}}, this is a sufficiently detailed and company-specific idea for {{company}}.",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

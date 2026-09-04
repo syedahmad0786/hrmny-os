@@ -16,3 +16,4 @@ export * from "./intent-csv";
 export * from "./evolve";
 export * from "./stale";
 export * from "./funnel";
+export * from "./campaigns";

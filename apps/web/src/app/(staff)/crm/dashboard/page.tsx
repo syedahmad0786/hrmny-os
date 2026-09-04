@@ -234,6 +234,9 @@ export default function SalesDashboardPage() {
             <Link className="crm-btn primary" href="/crm/hunt">
               Find new clients
             </Link>
+            <Link className="crm-btn" href="/crm/campaigns">
+              Campaigns
+            </Link>
             <Link className="crm-btn" href="/crm">
               Open pipeline
             </Link>

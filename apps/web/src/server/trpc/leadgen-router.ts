@@ -430,6 +430,14 @@ export async function draftEmailFollowup(input: {
       message: "Choose a sent Gmail message to prepare a follow-up",
     });
   }
+  const { isSuppressed } = await import("../sales-os/store");
+  const suppression = await isSuppressed({ email: source.recipient });
+  if (suppression) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `Suppressed (${suppression.reason}) — cadence stopped`,
+    });
+  }
   const status = (await listEmailFollowups(input.now)).find(
     (item) => item.sourceId === source.id,
   );

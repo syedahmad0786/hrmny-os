@@ -93,6 +93,7 @@ export const ROUTES: RouteEntry[] = [
   staff("/crm"),
   staff("/crm/activities"),
   staff("/crm/companies"),
+  staff("/crm/campaigns"),
   staff("/crm/contacts"),
   staff("/crm/dashboard"),
   staff("/crm/deals"),

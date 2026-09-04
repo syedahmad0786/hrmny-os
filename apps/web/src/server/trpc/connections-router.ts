@@ -51,7 +51,7 @@ import {
 import {
   creditUsed,
   getSalesOsSettings,
-  saveSalesOsSettings,
+  mutateSalesOsSettings,
 } from "../sales-os/store";
 import { writeAudit } from "../m1-persistence";
 
@@ -1046,32 +1046,31 @@ export const connectionsRouter = router({
           message: "Connected internal Google Workspace mailbox not found",
         });
       }
-      const settings = await getSalesOsSettings();
-      const seeded = new Map(
-        currentMailboxes.map((mailbox) => [
-          mailbox.connectionAccountId,
-          {
-            connectionAccountId: mailbox.connectionAccountId,
-            label: mailbox.label,
-            dailyCap: mailbox.dailyCap,
-            enabled: mailbox.enabled,
-          },
-        ]),
-      );
-      for (const policy of settings.outreach.senderMailboxes ?? []) {
-        seeded.set(policy.connectionAccountId, policy);
-      }
-      seeded.set(input.connectionAccountId, input);
-      await saveSalesOsSettings(
-        {
+      await mutateSalesOsSettings((settings) => {
+        const seeded = new Map(
+          currentMailboxes.map((mailbox) => [
+            mailbox.connectionAccountId,
+            {
+              connectionAccountId: mailbox.connectionAccountId,
+              label: mailbox.label,
+              dailyCap: mailbox.dailyCap,
+              enabled: mailbox.enabled,
+            },
+          ]),
+        );
+        for (const policy of settings.outreach.senderMailboxes ?? []) {
+          seeded.set(policy.connectionAccountId, policy);
+        }
+        seeded.set(input.connectionAccountId, input);
+        const next = {
           ...settings,
           outreach: {
             ...settings.outreach,
             senderMailboxes: [...seeded.values()],
           },
-        },
-        employeeId,
-      );
+        };
+        return { settings: next, result: next };
+      }, employeeId);
       await writeAudit({
         actorEmployeeId: employeeId,
         action: "sales.sender.policy.update",

@@ -223,6 +223,31 @@ export async function honorUnsubscribe(input: {
       reason: "unsubscribe",
       source: input.source ?? "reply-intent",
     });
+    const normalizedEmail = email.trim().toLowerCase();
+    const latestSent = (await listOutreach())
+      .filter(
+        (item) =>
+          item.state === "sent" &&
+          isEmailChannel(item.channel) &&
+          item.recipient.trim().toLowerCase() === normalizedEmail,
+      )
+      .sort((a, b) => (b.sentAt ?? "").localeCompare(a.sentAt ?? ""))[0];
+    if (latestSent) {
+      const alreadyRecorded = (await listEmailEvents()).some(
+        (event) =>
+          event.kind === "unsubscribed" &&
+          event.outreachItemId === latestSent.id,
+      );
+      if (!alreadyRecorded) {
+        await recordEmailEvent({
+          outreachItemId: latestSent.id,
+          contactId: latestSent.contactId,
+          kind: "unsubscribed",
+          provider: input.source ?? "sales-os",
+          payload: { recipient: normalizedEmail },
+        });
+      }
+    }
   }
   let dealClosed = false;
   if (input.dealId) {

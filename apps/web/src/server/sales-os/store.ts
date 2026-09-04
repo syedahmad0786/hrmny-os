@@ -65,6 +65,7 @@ const memory: Memory = {
 };
 
 const memoryResearchLocks = new Map<string, Promise<void>>();
+let memorySettingsMutation: Promise<void> = Promise.resolve();
 
 export function resetSalesOsStore(): void {
   memory.settings = structuredClone(DEFAULT_SALES_OS_SETTINGS);
@@ -77,6 +78,7 @@ export function resetSalesOsStore(): void {
   memory.credits = [];
   memory.researchReceipts.clear();
   memoryResearchLocks.clear();
+  memorySettingsMutation = Promise.resolve();
 }
 
 async function withMemoryResearchLock<T>(
@@ -121,6 +123,7 @@ function mergeSettings(raw: unknown): SalesOsSettings {
     ...DEFAULT_SALES_OS_SETTINGS,
     ...incoming,
     rateCard: incoming.rateCard ?? DEFAULT_SALES_OS_SETTINGS.rateCard,
+    campaigns: Array.isArray(incoming.campaigns) ? incoming.campaigns : [],
     icp: { ...DEFAULT_SALES_OS_SETTINGS.icp, ...incoming.icp },
     sectorRotation: {
       ...DEFAULT_SALES_OS_SETTINGS.sectorRotation,
@@ -184,6 +187,68 @@ export async function saveSalesOsSettings(
       return merged;
     },
   );
+}
+
+/**
+ * Atomically read-modify-write the shared Sales OS settings document.
+ * Campaigns intentionally reuse this existing durable model, so every
+ * production mutation that can overlap with campaigns must use this seam.
+ */
+export async function mutateSalesOsSettings<T>(
+  mutate: (current: SalesOsSettings) =>
+    | Promise<{ settings: SalesOsSettings; result: T }>
+    | {
+        settings: SalesOsSettings;
+        result: T;
+      },
+  updatedBy?: string | null,
+): Promise<T> {
+  const db = getDb();
+  if (db) {
+    return db.transaction(async (tx) => {
+      await tx
+        .insert(salesOsSettings)
+        .values({
+          salesOsSettingsId: "default",
+          settings: DEFAULT_SALES_OS_SETTINGS as unknown as Record<
+            string,
+            unknown
+          >,
+          updatedAt: new Date(),
+          updatedBy: updatedBy ?? null,
+        })
+        .onConflictDoNothing({ target: salesOsSettings.salesOsSettingsId });
+      const rows = await tx.execute<{ settings: Record<string, unknown> }>(sql`
+        select settings
+        from public.sales_os_settings
+        where sales_os_settings_id = 'default'
+        for update
+      `);
+      const current = mergeSettings(rows[0]?.settings);
+      const outcome = await mutate(structuredClone(current));
+      const next = mergeSettings(outcome.settings);
+      await tx
+        .update(salesOsSettings)
+        .set({
+          settings: next as unknown as Record<string, unknown>,
+          updatedAt: new Date(),
+          updatedBy: updatedBy ?? null,
+        })
+        .where(eq(salesOsSettings.salesOsSettingsId, "default"));
+      return outcome.result;
+    });
+  }
+
+  const run = memorySettingsMutation.then(async () => {
+    const outcome = await mutate(structuredClone(memory.settings));
+    memory.settings = mergeSettings(outcome.settings);
+    return outcome.result;
+  });
+  memorySettingsMutation = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 function mapCompany(
