@@ -57,6 +57,7 @@ import { getContact } from "../crm/repository";
 import {
   completeIntegrationReceipt,
   failIntegrationReceipt,
+  findIntegrationReceiptByDealId,
   getIntegrationReceipt,
   recordIntegrationReceipt,
 } from "../integrations/inbox";
@@ -270,6 +271,19 @@ export const salesOsRouter = router({
           }),
         );
         return rows.flatMap((row) => (row ? [row] : []));
+      }),
+    candidateForDeal: salesOperatorProcedure
+      .input(z.object({ dealId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        const receipt = await findIntegrationReceiptByDealId({
+          provider: "apollo",
+          operation: "people.search.save_candidate",
+          dealId: input.dealId,
+        });
+        const candidate = apolloCandidateInput
+          .omit({ email: true })
+          .safeParse(receipt?.payload);
+        return candidate.success ? candidate.data : null;
       }),
     saveCandidate: salesOperatorProcedure
       .input(

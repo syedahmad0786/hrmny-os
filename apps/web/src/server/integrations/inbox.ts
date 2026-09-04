@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { eq, integrationInbox, sql } from "@hrmny/db";
+import { and, desc, eq, integrationInbox, sql } from "@hrmny/db";
 import { getDb } from "../db";
 
 export type IntegrationReceiptInput = {
@@ -279,6 +279,79 @@ export async function getIntegrationReceipt(
         lastError: row.lastError,
       }
     : null;
+}
+
+/** Find the durable provider receipt that created a CRM deal. */
+export async function findIntegrationReceiptByDealId(input: {
+  provider: string;
+  operation: string;
+  dealId: string;
+}): Promise<IntegrationReceipt | null> {
+  const provider = input.provider.trim().toLowerCase();
+  const operation = input.operation.trim();
+  const dealId = input.dealId.trim();
+  if (!provider || !operation || !dealId) return null;
+
+  const db = getDb();
+  if (!db) {
+    const row = [...memoryReceipts.values()]
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.provider === provider &&
+          candidate.operation === operation &&
+          candidate.status === "completed" &&
+          candidate.result?.dealId === dealId,
+      );
+    return row
+      ? {
+          receiptId: row.receiptId,
+          duplicate: false,
+          status: row.status,
+          operation: row.operation,
+          payload: row.payload,
+          payloadHash: row.payloadHash,
+          attempts: row.attempts,
+          stateVersion: row.stateVersion,
+          attemptToken: row.attemptToken,
+          attemptLeaseExpiresAt: row.attemptLeaseExpiresAt,
+          ownerEmployeeId: row.ownerEmployeeId,
+          credentialConnectionAccountId: row.credentialConnectionAccountId,
+          result: row.result ?? null,
+          lastError: row.lastError ?? null,
+        }
+      : null;
+  }
+
+  const [row] = await db
+    .select({
+      receiptId: integrationInbox.integrationInboxId,
+      status: integrationInbox.status,
+      operation: integrationInbox.operation,
+      payload: integrationInbox.payload,
+      payloadHash: integrationInbox.payloadHash,
+      attempts: integrationInbox.attempts,
+      stateVersion: integrationInbox.stateVersion,
+      attemptToken: integrationInbox.attemptToken,
+      attemptLeaseExpiresAt: integrationInbox.attemptLeaseExpiresAt,
+      ownerEmployeeId: integrationInbox.ownerEmployeeId,
+      credentialConnectionAccountId:
+        integrationInbox.credentialConnectionAccountId,
+      result: integrationInbox.result,
+      lastError: integrationInbox.lastError,
+    })
+    .from(integrationInbox)
+    .where(
+      and(
+        eq(integrationInbox.provider, provider),
+        eq(integrationInbox.operation, operation),
+        eq(integrationInbox.status, "completed"),
+        sql`${integrationInbox.result} ->> 'dealId' = ${dealId}`,
+      ),
+    )
+    .orderBy(desc(integrationInbox.receivedAt))
+    .limit(1);
+  return row ? { ...row, duplicate: false } : null;
 }
 
 export async function completeIntegrationReceipt(

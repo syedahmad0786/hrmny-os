@@ -43,6 +43,7 @@ function OutreachInner() {
   const items = trpc.leadgen.outreach.list.useQuery();
   const followups = trpc.leadgen.outreach.followups.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
+  const connections = trpc.connections.list.useQuery();
   const client = trpc.clients.get.useQuery(
     { id: clientIdFromQuery },
     { enabled: Boolean(clientIdFromQuery) && !focusIdFromQuery },
@@ -60,6 +61,7 @@ function OutreachInner() {
 
   const [gateError, setGateError] = useState<string | null>(null);
   const [sendNote, setSendNote] = useState<string | null>(null);
+  const [feedbackId, setFeedbackId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [draftDealId, setDraftDealId] = useState("");
   const [draftSubject, setDraftSubject] = useState("");
@@ -70,7 +72,11 @@ function OutreachInner() {
   const [showTestRecords, setShowTestRecords] = useState(false);
 
   const invalidate = () => void utils.leadgen.outreach.invalidate();
-  const onErr = (e: { message: string }) => setGateError(e.message);
+  const onErr = (e: { message: string }) => {
+    setFeedbackId(null);
+    setSendNote(null);
+    setGateError(e.message);
+  };
 
   const approve = trpc.leadgen.outreach.approve.useMutation({
     onSuccess: invalidate,
@@ -150,6 +156,15 @@ function OutreachInner() {
     for (const d of deals.data ?? []) m.set(d.dealId, d.companyName);
     return m;
   }, [deals.data]);
+  const workspaceConnection = connections.data?.find(
+    (connection) => connection.toolkit === "google_workspace",
+  );
+  const senderAccount =
+    workspaceConnection?.status === "connected" &&
+    workspaceConnection.allowed &&
+    workspaceConnection.hasSecret
+      ? workspaceConnection.externalConnectionId
+      : null;
 
   const byState = useMemo(() => {
     const all = (items.data ?? []).filter(
@@ -205,6 +220,13 @@ function OutreachInner() {
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [focusId, byState.drafts, byState.approved]);
 
+  useEffect(() => {
+    if (!gateError && !sendNote) return;
+    document
+      .getElementById("outreach-action-feedback")
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [gateError, sendNote]);
+
   function surface(r: GateOutcome, verb: string) {
     if (r.ok) {
       setGateError(null);
@@ -215,6 +237,7 @@ function OutreachInner() {
           );
         } else {
           const parts = [
+            senderAccount ? `from ${senderAccount}` : null,
             r.sendMode ? `mode=${r.sendMode}` : null,
             r.externalId ? `id=${r.externalId}` : null,
           ].filter(Boolean);
@@ -244,11 +267,15 @@ function OutreachInner() {
   }
 
   async function run(id: string, verb: string, fn: () => Promise<GateOutcome>) {
+    setFeedbackId(id);
+    setGateError(null);
+    setSendNote(null);
     setBusyId(id);
     try {
       surface(await fn(), verb);
-    } catch {
-      // thrown tRPC errors already surfaced via onError
+    } catch (error) {
+      setFeedbackId(id);
+      setGateError(error instanceof Error ? error.message : `${verb} failed`);
     } finally {
       setBusyId(null);
     }
@@ -299,6 +326,42 @@ function OutreachInner() {
       {item.acceptedAt ? (
         <p className="text-xs text-[var(--muted)]">Connection accepted</p>
       ) : null}
+      {!isLinkedIn(item.channel) && item.state === "approved" ? (
+        <div
+          className="crm-note mt-2 text-[11px]"
+          data-testid="outreach-sender-account"
+        >
+          {senderAccount ? (
+            <>
+              <strong>Will send from {senderAccount}</strong> via Google
+              Workspace Gmail.{" "}
+              <Link
+                href="/settings/connections#conn-google_workspace"
+                className="font-bold underline"
+              >
+                Change sender
+              </Link>
+            </>
+          ) : connections.isLoading ? (
+            "Checking the Gmail sender…"
+          ) : (
+            <>
+              <strong>No Google Workspace sender is ready.</strong>{" "}
+              <Link
+                href="/settings/connections#conn-google_workspace"
+                className="font-bold underline"
+              >
+                Connect a sender
+              </Link>
+            </>
+          )}
+        </div>
+      ) : null}
+      {feedbackId === item.id && gateError ? (
+        <div className="crm-note mt-2" role="alert">
+          <CrmTag kind="danger">Not sent</CrmTag> {gateError}
+        </div>
+      ) : null}
       <div className="crm-approval-actions">{actions}</div>
     </article>
   );
@@ -338,12 +401,12 @@ function OutreachInner() {
       ) : null}
 
       {gateError ? (
-        <div className="crm-note" role="alert">
+        <div id="outreach-action-feedback" className="crm-note" role="alert">
           <CrmTag kind="danger">Blocked</CrmTag> {gateError}
         </div>
       ) : null}
       {sendNote ? (
-        <div className="crm-note" role="status">
+        <div id="outreach-action-feedback" className="crm-note" role="status">
           <CrmTag kind="success">Send</CrmTag> {sendNote}
         </div>
       ) : null}
@@ -558,14 +621,22 @@ function OutreachInner() {
                     <>
                       <CrmBtn
                         variant="primary"
-                        disabled={busyId !== null}
-                        onClick={() =>
+                        disabled={
+                          busyId !== null ||
+                          connections.isLoading ||
+                          !senderAccount
+                        }
+                        onClick={() => {
+                          const confirmed = window.confirm(
+                            `Send this email now?\n\nFrom: ${senderAccount ?? "No sender connected"}\nTo: ${item.recipient}\nSubject: ${item.subject ?? "(no subject)"}\n\nThis creates a real external email.`,
+                          );
+                          if (!confirmed) return;
                           void run(item.id, "Send", () =>
                             send.mutateAsync({ id: item.id }),
-                          )
-                        }
+                          );
+                        }}
                       >
-                        Send via Gmail
+                        {busyId === item.id ? "Sending…" : "Send via Gmail"}
                       </CrmBtn>
                       <CrmBtn
                         disabled={busyId !== null}

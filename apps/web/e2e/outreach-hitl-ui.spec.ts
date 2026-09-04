@@ -76,5 +76,8 @@ test.describe("Outreach HITL UI", () => {
     await expect(
       approvedRow.getByRole("button", { name: /Send via Gmail/i }),
     ).toBeVisible();
+    await expect(
+      approvedRow.getByTestId("outreach-sender-account"),
+    ).toBeVisible();
   });
 });

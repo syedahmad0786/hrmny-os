@@ -43,9 +43,12 @@ test("a saved lead brief survives reload and guides the email step", async ({
     "Verified signal for the sales team.",
   );
 
-  await page.getByRole("button", { name: "Create draft" }).click();
+  await page.getByRole("button", { name: "Find email" }).click();
   await expect(page.getByText("Action blocked")).toBeVisible();
   await expect(
-    page.getByText(/Unlock and verify this lead's work email first/i),
+    page.getByText(/no reusable Apollo person receipt/i),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /Find the work email in Apollo/i }),
   ).toBeVisible();
 });

@@ -48,21 +48,8 @@ async function resolveComposioSend(
   if (!employeeId) {
     return createComposioStub();
   }
-  if (process.env.COMPOSIO_API_KEY?.trim()) {
-    try {
-      const verified = await getVerifiedWorkAppConnection(employeeId, "gmail", {
-        roles,
-      });
-      if (verified) {
-        return createComposioLiveSend({
-          client: verified.client,
-          connectedAccountId: verified.account.id,
-        });
-      }
-    } catch {
-      /* fall through to Google Workspace */
-    }
-  }
+  // Sales shows the named Workspace mailbox before confirmation, so use that
+  // same mailbox whenever it is connected. Composio remains the fallback.
   try {
     const { createGoogleWorkspaceGmailSend } =
       await import("../leadgen/google-workspace-send");
@@ -83,6 +70,21 @@ async function resolveComposioSend(
         code: "PRECONDITION_FAILED",
         message: `${message}. Reconnect Google Workspace under Settings → Connections.`,
       });
+    }
+  }
+  if (process.env.COMPOSIO_API_KEY?.trim()) {
+    try {
+      const verified = await getVerifiedWorkAppConnection(employeeId, "gmail", {
+        roles,
+      });
+      if (verified) {
+        return createComposioLiveSend({
+          client: verified.client,
+          connectedAccountId: verified.account.id,
+        });
+      }
+    } catch {
+      /* fall through to the fail-closed production guard */
     }
   }
   // In supabase (prod) mode never pretend a send succeeded without a live

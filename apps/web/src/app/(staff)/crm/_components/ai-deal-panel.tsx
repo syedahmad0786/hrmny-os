@@ -119,9 +119,53 @@ export function AiDealPanel({
 }) {
   const utils = trpc.useUtils();
   const [pending, setPending] = useState<ActionKey | null>(null);
+  const [reviewApolloUnlock, setReviewApolloUnlock] = useState(false);
+  const [unlockResult, setUnlockResult] = useState<{
+    kind: "success" | "error";
+    message: string;
+  } | null>(null);
   const [results, setResults] = useState<
     Partial<Record<ActionKey, ActionResult>>
   >({});
+  const apolloCandidate = trpc.salesOs.apollo.candidateForDeal.useQuery(
+    { dealId },
+    { enabled: !emailReady, retry: false },
+  );
+  const apolloConnection = trpc.salesOs.apollo.connection.useQuery(undefined, {
+    enabled: !emailReady,
+    retry: false,
+  });
+  const enrichExact = trpc.salesOs.apollo.enrichOne.useMutation({
+    onSuccess: (payload) => {
+      setReviewApolloUnlock(false);
+      const email = payload.crm?.email;
+      const verified = payload.crm?.emailVerified === true;
+      setUnlockResult({
+        kind: verified ? "success" : "error",
+        message: verified
+          ? `${email} was unlocked and verified. You can create the email draft now.`
+          : `${payload.reason ?? "Apollo did not return a verified work email."} ${payload.creditsRecorded} credit was recorded.`,
+      });
+      void utils.crm.invalidate();
+      void utils.salesOs.apollo.candidateForDeal.invalidate({ dealId });
+    },
+    onError: (error) => {
+      setReviewApolloUnlock(false);
+      setUnlockResult({ kind: "error", message: error.message });
+    },
+  });
+  const approveExact = trpc.salesOs.apollo.approveExact.useMutation({
+    onSuccess: (approval, variables) =>
+      enrichExact.mutate({
+        candidate: variables.candidate,
+        confirmCreditUse: true,
+        approvalReceiptId: approval.approvalReceiptId,
+      }),
+    onError: (error) => {
+      setReviewApolloUnlock(false);
+      setUnlockResult({ kind: "error", message: error.message });
+    },
+  });
 
   async function run(
     key: ActionKey,
@@ -200,14 +244,19 @@ export function AiDealPanel({
         return;
       }
       if (!emailReady) {
-        setResults((state) => ({
-          ...state,
-          outreach: {
-            kind: "blocked",
-            message:
-              "Unlock and verify this lead's work email first. Research can still run now.",
-          },
-        }));
+        if (apolloCandidate.data) {
+          setReviewApolloUnlock(true);
+          setUnlockResult(null);
+        } else {
+          setResults((state) => ({
+            ...state,
+            outreach: {
+              kind: "blocked",
+              message:
+                "This lead has no reusable Apollo person receipt. Find the person in Apollo, then return here to draft the email.",
+            },
+          }));
+        }
         return;
       }
       void run("outreach", async () => {
@@ -284,9 +333,99 @@ export function AiDealPanel({
                         ? "Refresh research"
                         : a.key === "outreach" && !knowledgeBrief
                           ? "Research first"
-                          : a.button}
+                          : a.key === "outreach" && !emailReady
+                            ? apolloCandidate.isLoading
+                              ? "Checking Apollo…"
+                              : apolloCandidate.data
+                                ? "Unlock with Apollo"
+                                : "Find email"
+                            : a.button}
                   </CrmBtn>
                 </div>
+                {a.key === "outreach" && reviewApolloUnlock ? (
+                  <div className="crm-note mt-2" role="status">
+                    {apolloCandidate.data ? (
+                      <>
+                        <CrmTag kind="warn">Apollo credit check</CrmTag>
+                        <p className="mt-2 text-[11px] text-[var(--muted)]">
+                          Unlock{" "}
+                          {apolloCandidate.data.fullName ?? "this person"}
+                          {apolloCandidate.data.title
+                            ? `, ${apolloCandidate.data.title}`
+                            : ""}{" "}
+                          at{" "}
+                          {apolloCandidate.data.companyName ?? "this company"}.
+                          Apollo may use up to 1 work-email credit. Phone,
+                          personal email, and waterfall lookups stay off.
+                        </p>
+                        {!apolloConnection.data?.configured ? (
+                          <p className="mt-2 text-[11px] text-[var(--danger)]">
+                            Apollo is not connected for your account.{" "}
+                            <Link
+                              href="/settings/connections#conn-apollo"
+                              className="underline"
+                            >
+                              Connect Apollo
+                            </Link>
+                          </p>
+                        ) : null}
+                        <div className="crm-approval-actions mt-2">
+                          <CrmBtn
+                            variant="primary"
+                            data-testid="deal-apollo-unlock-confirm"
+                            disabled={
+                              !apolloConnection.data?.configured ||
+                              approveExact.isPending ||
+                              enrichExact.isPending
+                            }
+                            onClick={() =>
+                              approveExact.mutate({
+                                candidate: apolloCandidate.data!,
+                                confirmCreditUse: true,
+                              })
+                            }
+                          >
+                            {approveExact.isPending || enrichExact.isPending
+                              ? "Unlocking…"
+                              : "Confirm unlock · up to 1 credit"}
+                          </CrmBtn>
+                          <CrmBtn
+                            disabled={
+                              approveExact.isPending || enrichExact.isPending
+                            }
+                            onClick={() => setReviewApolloUnlock(false)}
+                          >
+                            Cancel
+                          </CrmBtn>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-[var(--muted)]">
+                        The original Apollo person is unavailable.{" "}
+                        <Link
+                          href="/crm/hunt#apollo-people-search"
+                          className="font-bold underline"
+                        >
+                          Find the work email in Apollo →
+                        </Link>
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+                {a.key === "outreach" && unlockResult ? (
+                  <div className="crm-note mt-2" role="status">
+                    <CrmTag
+                      kind={
+                        unlockResult.kind === "success" ? "success" : "danger"
+                      }
+                    >
+                      {unlockResult.kind === "success"
+                        ? "Email ready"
+                        : "Unlock failed"}
+                    </CrmTag>{" "}
+                    {unlockResult.message}
+                  </div>
+                ) : null}
                 {result ? (
                   <div className="mt-2 rounded-xl border border-[var(--line)] bg-white/70 p-3">
                     {result.kind === "blocked" ? (
@@ -295,6 +434,14 @@ export function AiDealPanel({
                         <p className="mt-2 text-[11px] text-[var(--muted)]">
                           {result.message}
                         </p>
+                        {a.key === "outreach" && !emailReady ? (
+                          <Link
+                            href="/crm/hunt#apollo-people-search"
+                            className="mt-2 inline-block text-[11px] font-bold text-[var(--ochre-dark)] underline"
+                          >
+                            Find the work email in Apollo →
+                          </Link>
+                        ) : null}
                       </>
                     ) : result.kind === "error" ? (
                       <>
