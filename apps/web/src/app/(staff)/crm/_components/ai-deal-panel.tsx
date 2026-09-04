@@ -5,6 +5,7 @@ import { useState } from "react";
 import { TRPCClientError } from "@trpc/client";
 import { trpc } from "@/lib/trpc";
 import { CrmBtn, CrmTag } from "@/components/crm/ui";
+import { formatRelative } from "@/components/crm/format";
 
 /**
  * W9 deal-detail AI panel. Every action is advisory — "AI proposes; the gate
@@ -17,9 +18,15 @@ type ActionKey = "research" | "summary" | "next" | "rescore" | "outreach";
 type AgentRunMeta = { model: string; tokens: number; costAed: number };
 
 type ActionResult =
-  | { kind: "ok"; text: string; meta: AgentRunMeta; outreachLink?: boolean }
-  | { kind: "disabled"; message: string }
+  | { kind: "ok"; text: string; meta: AgentRunMeta; outreachId?: string }
+  | { kind: "blocked"; message: string }
   | { kind: "error"; message: string };
+
+type KnowledgeBrief = {
+  crmNoteId: string;
+  body: string;
+  createdAt: string;
+};
 
 /** Agent output is `string | Record<string, unknown>` — pull a readable line. */
 function outputText(output: unknown): string {
@@ -40,8 +47,14 @@ function toFailure(err: unknown): ActionResult {
     err.data?.code === "PRECONDITION_FAILED"
   ) {
     return {
-      kind: "disabled",
+      kind: "blocked",
       message: err.message || "AI runs are currently disabled by policy.",
+    };
+  }
+  if (err instanceof TRPCClientError && err.data?.code === "FORBIDDEN") {
+    return {
+      kind: "blocked",
+      message: "Your account does not have Sales operator access.",
     };
   }
   return {
@@ -63,6 +76,12 @@ const ACTIONS: Array<{
     button: "Research",
   },
   {
+    key: "outreach",
+    label: "Create email draft",
+    hint: "Uses the saved brief. Review and approve it before Gmail can send.",
+    button: "Create draft",
+  },
+  {
     key: "summary",
     label: "Summarize deal",
     hint: "Timeline digest from deal, contact, activities and notes.",
@@ -80,15 +99,24 @@ const ACTIONS: Array<{
     hint: "Re-runs the research agent; writes temperature back, audited.",
     button: "Re-score",
   },
-  {
-    key: "outreach",
-    label: "Draft outreach",
-    hint: "Drafts land in the HITL queue — nothing sends without approval.",
-    button: "Draft",
-  },
 ];
 
-export function AiDealPanel({ dealId }: { dealId: string }) {
+function briefBody(body: string) {
+  const lines = body.split("\n");
+  if (lines[0]?.startsWith("SALES KNOWLEDGE BRIEF —")) lines.shift();
+  if (lines[0]?.startsWith("Research request:")) lines.shift();
+  return lines.join("\n").trim();
+}
+
+export function AiDealPanel({
+  dealId,
+  emailReady,
+  knowledgeBrief,
+}: {
+  dealId: string;
+  emailReady: boolean;
+  knowledgeBrief: KnowledgeBrief | null;
+}) {
   const utils = trpc.useUtils();
   const [pending, setPending] = useState<ActionKey | null>(null);
   const [results, setResults] = useState<
@@ -126,7 +154,7 @@ export function AiDealPanel({ dealId }: { dealId: string }) {
         return {
           ok: {
             kind: "ok",
-            text: `${r.brief}\n\nSaved to this deal with ${r.sources.length} verified source${r.sources.length === 1 ? "" : "s"}.`,
+            text: `Knowledge brief saved below with ${r.sources.length} verified source${r.sources.length === 1 ? "" : "s"}.`,
             meta: r.agentRun,
           },
         };
@@ -159,7 +187,18 @@ export function AiDealPanel({ dealId }: { dealId: string }) {
           },
         };
       }),
-    outreach: () =>
+    outreach: () => {
+      if (!emailReady) {
+        setResults((state) => ({
+          ...state,
+          outreach: {
+            kind: "blocked",
+            message:
+              "Unlock and verify this lead's work email first. Research can still run now.",
+          },
+        }));
+        return;
+      }
       void run("outreach", async () => {
         const r = await utils.client.crmAi.draftOutreach.mutate({ dealId });
         const subject = r.output.subject ? ` — "${r.output.subject}"` : "";
@@ -168,10 +207,11 @@ export function AiDealPanel({ dealId }: { dealId: string }) {
             kind: "ok",
             text: `Draft ${r.output.channel} to ${r.output.recipient}${subject} is waiting in the outreach approval queue.`,
             meta: r.agentRun,
-            outreachLink: true,
+            outreachId: r.output.id,
           },
         };
-      }),
+      });
+    },
   };
 
   return (
@@ -184,6 +224,35 @@ export function AiDealPanel({ dealId }: { dealId: string }) {
         <CrmTag kind="info">Advisory</CrmTag>
       </div>
       <div className="crm-panel-body">
+        <div className="crm-note mb-3" data-testid="deal-sales-path">
+          <strong>Sales path:</strong> 1. Research company → 2. Create email
+          draft → 3. Review and approve → 4. Send via Gmail → 5. Monitor reply
+          in the pipeline.
+        </div>
+        {knowledgeBrief ? (
+          <article
+            className="mb-3 rounded-xl border border-[var(--line)] bg-white/70 p-4"
+            data-testid="deal-knowledge-brief"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                <strong className="block">Saved knowledge brief</strong>
+                <small className="text-[var(--muted)]">
+                  Saved {formatRelative(knowledgeBrief.createdAt)}
+                </small>
+              </span>
+              <CrmTag kind="success">Ready</CrmTag>
+            </div>
+            <p className="mt-3 whitespace-pre-wrap text-[12px]">
+              {briefBody(knowledgeBrief.body)}
+            </p>
+          </article>
+        ) : (
+          <div className="crm-note mb-3">
+            No knowledge brief yet. Select Research to build and save one for
+            this lead.
+          </div>
+        )}
         <div className="crm-checklist">
           {ACTIONS.map((a) => {
             const result = results[a.key];
@@ -198,17 +267,20 @@ export function AiDealPanel({ dealId }: { dealId: string }) {
                     </span>
                   </span>
                   <CrmBtn disabled={pending !== null} onClick={handlers[a.key]}>
-                    {isRunning ? "Running…" : a.button}
+                    {isRunning
+                      ? "Running…"
+                      : a.key === "research" && knowledgeBrief
+                        ? "Refresh research"
+                        : a.button}
                   </CrmBtn>
                 </div>
                 {result ? (
                   <div className="mt-2 rounded-xl border border-[var(--line)] bg-white/70 p-3">
-                    {result.kind === "disabled" ? (
+                    {result.kind === "blocked" ? (
                       <>
-                        <CrmTag kind="warn">AI disabled</CrmTag>
+                        <CrmTag kind="warn">Action blocked</CrmTag>
                         <p className="mt-2 text-[11px] text-[var(--muted)]">
-                          {result.message} Ask an admin to re-enable AI runs in
-                          the AI policy settings.
+                          {result.message}
                         </p>
                       </>
                     ) : result.kind === "error" ? (
@@ -223,9 +295,9 @@ export function AiDealPanel({ dealId }: { dealId: string }) {
                         <p className="whitespace-pre-wrap text-[12px]">
                           {result.text}
                         </p>
-                        {result.outreachLink ? (
+                        {result.outreachId ? (
                           <Link
-                            href="/crm/outreach"
+                            href={`/crm/outreach?id=${result.outreachId}`}
                             className="mt-2 inline-block text-[11px] font-bold text-[var(--ochre-dark)]"
                           >
                             Review in outreach queue →
