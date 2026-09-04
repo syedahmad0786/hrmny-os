@@ -43,6 +43,8 @@ describe("createComposioLiveSend", () => {
       subject: "Hello",
       body: "Demo outreach after HITL",
       messageId: "<hrmny-outreach-test@hrmny.co>",
+      threadId: "thread-live-1",
+      inReplyTo: "<client-reply@example.com>",
     });
     expect(res.mode).toBe("live");
     expect(res.sent).toBe(true);
@@ -55,9 +57,16 @@ describe("createComposioLiveSend", () => {
     expect(arg.endpoint).toBe("/gmail/v1/users/me/messages/send");
     expect(arg.method).toBe("POST");
     expect(arg.body && "raw" in arg.body).toBe(true);
+    expect(arg.body).toMatchObject({ threadId: "thread-live-1" });
     const raw = String(arg.body?.raw);
     expect(Buffer.from(raw, "base64url").toString("utf8")).toContain(
       "Message-ID: <hrmny-outreach-test@hrmny.co>",
+    );
+    expect(Buffer.from(raw, "base64url").toString("utf8")).toContain(
+      "In-Reply-To: <client-reply@example.com>",
+    );
+    expect(Buffer.from(raw, "base64url").toString("utf8")).toContain(
+      "References: <client-reply@example.com>",
     );
     expect(vi.mocked(proxy).mock.calls[1]![0]).toMatchObject({
       endpoint: "/gmail/v1/users/me/messages/msg-live-1",
@@ -148,5 +157,38 @@ describe("createComposioLiveSend", () => {
       name: "GmailProviderReadbackError",
       externalId: "msg-live-2",
     });
+  });
+
+  it("keeps a reply uncertain when readback returns a different Gmail thread", async () => {
+    const proxy = vi.fn(async (input: { method?: string }) => ({
+      status: 200,
+      data:
+        input.method === "GET"
+          ? {
+              id: "msg-thread-mismatch",
+              threadId: "wrong-thread",
+              labelIds: ["SENT"],
+              payload: {
+                headers: [{ name: "To", value: "lead@example.com" }],
+              },
+            }
+          : { id: "msg-thread-mismatch", threadId: "wrong-thread" },
+      headers: {},
+    })) as unknown as ComposioLiveClient["proxy"];
+    const adapter = createComposioLiveSend({
+      client: { proxy },
+      connectedAccountId: "conn-1",
+    });
+
+    await expect(
+      adapter.sendAfterApproval({
+        toolkit: "gmail",
+        to: "lead@example.com",
+        subject: "Re: Hello",
+        body: "Approved reply",
+        threadId: "expected-thread",
+        inReplyTo: "<client-reply@example.com>",
+      }),
+    ).rejects.toThrow(/thread does not match/i);
   });
 });

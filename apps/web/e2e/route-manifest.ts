@@ -100,6 +100,7 @@ export const ROUTES: RouteEntry[] = [
   staff("/crm/deals/[id]", { sample: `/crm/deals/${DEMO_DEAL_ID}` }),
   staff("/crm/handover"),
   staff("/crm/inbound"),
+  staff("/crm/inbox"),
   staff("/crm/hunt"),
   staff("/crm/outreach"),
   staff("/crm/research"),

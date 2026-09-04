@@ -4,6 +4,7 @@ import { createLeadSourceMock } from "@hrmny/integrations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetCrmMemory } from "../crm/memory";
 import {
+  createContact,
   createDeal,
   getDeal,
   listCompanies,
@@ -11,6 +12,7 @@ import {
   listDeals,
   listNotes,
   moveDealStage,
+  updateContact,
 } from "../crm/repository";
 import { getDemoStore } from "../demo-store";
 import {
@@ -737,9 +739,20 @@ describe("digest, replies, intent CSV, evolve, stale", () => {
   });
 
   it("maps a shared-mailbox reply by connection instead of the acting rep", async () => {
-    const deal = await createDeal({ companyName: "Shared Mailbox Brand" });
+    const contact = await createContact({
+      firstName: "Shared",
+      lastName: "Buyer",
+      email: "buyer@brand.test",
+      isPrimary: true,
+    });
+    await updateContact(contact.contactId, { emailVerified: true });
+    const deal = await createDeal({
+      companyName: "Shared Mailbox Brand",
+      primaryContactId: contact.contactId,
+    });
     const outreach = await insertOutreach({
       dealId: deal.dealId,
+      contactId: contact.contactId,
       channel: "gmail",
       recipient: "buyer@brand.test",
       body: "Hi",
@@ -779,9 +792,20 @@ describe("digest, replies, intent CSV, evolve, stale", () => {
   });
 
   it("discards queued follow-ups as soon as a reply arrives", async () => {
-    const deal = await createDeal({ companyName: "Reply Stops Cadence Brand" });
+    const contact = await createContact({
+      firstName: "Cadence",
+      lastName: "Buyer",
+      email: "buyer@brand.test",
+      isPrimary: true,
+    });
+    await updateContact(contact.contactId, { emailVerified: true });
+    const deal = await createDeal({
+      companyName: "Reply Stops Cadence Brand",
+      primaryContactId: contact.contactId,
+    });
     const sent = await insertOutreach({
       dealId: deal.dealId,
+      contactId: contact.contactId,
       channel: "gmail",
       recipient: "buyer@brand.test",
       body: "First touch",

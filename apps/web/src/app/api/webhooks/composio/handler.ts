@@ -31,6 +31,17 @@ const asObject = (value: unknown): Record<string, unknown> =>
 const text = (...values: unknown[]): string =>
   String(values.find((value) => typeof value === "string") ?? "").trim();
 
+function gmailHeader(value: unknown, name: string): string {
+  if (Array.isArray(value)) {
+    const found = value
+      .map(asObject)
+      .find((header) => text(header.name).toLowerCase() === name.toLowerCase());
+    return text(found?.value);
+  }
+  const headers = asObject(value);
+  return text(headers[name], headers[name.toLowerCase()]);
+}
+
 function senderEmail(value: string): string | null {
   const match = value.match(/<?([^\s<>]+@[^\s<>]+\.[^\s<>]+)>?/);
   return match?.[1]?.toLowerCase() ?? null;
@@ -55,7 +66,16 @@ async function handleTrigger(
     metadata.connectedAccountId,
   );
   const data = asObject(body.data);
+  const gmailPayload = asObject(data.payload);
   const messageId = text(data.id, data.message_id, data.messageId);
+  const rfcMessageId = text(
+    data.rfc_message_id,
+    data.rfcMessageId,
+    data.message_id_header,
+    data.messageIdHeader,
+    gmailHeader(data.headers, "Message-ID"),
+    gmailHeader(gmailPayload.headers, "Message-ID"),
+  );
   const threadId = text(data.thread_id, data.threadId);
   const fromEmail = senderEmail(
     text(data.sender, data.from, data.from_email, data.fromEmail),
@@ -125,6 +145,7 @@ async function handleTrigger(
         threadId: threadId || undefined,
         recipientEmail: recipientEmail ?? undefined,
         actorEmployeeId: employeeId,
+        senderConnectionAccountId: connectedAccountId,
       },
     );
     return {
@@ -137,9 +158,12 @@ async function handleTrigger(
   const result = await deps.ingestReply({
     fromEmail,
     body: bodyText,
+    subject,
     externalId: messageId,
     threadId: threadId || undefined,
+    rfcMessageId: rfcMessageId || undefined,
     actorEmployeeId: employeeId,
+    senderConnectionAccountId: connectedAccountId,
   });
   return { handled: "gmail_reply", messageId, result } as const;
 }

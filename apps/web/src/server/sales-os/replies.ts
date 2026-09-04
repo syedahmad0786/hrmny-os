@@ -1,6 +1,12 @@
 import type { ReplyIntent } from "@hrmny/ai";
 import { CRM_PIPELINE_STAGES } from "@hrmny/db";
-import { getContact, getDeal, updateDeal } from "../crm/repository";
+import {
+  createActivity,
+  getContact,
+  getDeal,
+  listActivities,
+  updateDeal,
+} from "../crm/repository";
 import { applyReplyIntent, intentToTransition } from "../leadgen/reply-intent";
 import { getOutreach, listOutreach, patchOutreach } from "../leadgen/store";
 import { domainOf, isEmailChannel, suppressTarget } from "./compliance";
@@ -329,8 +335,10 @@ export async function ingestGmailReply(input: {
   dealId?: string;
   fromEmail: string;
   body: string;
+  subject?: string;
   externalId?: string;
   threadId?: string;
+  rfcMessageId?: string;
   actorEmployeeId?: string | null;
   senderConnectionAccountId?: string | null;
 }) {
@@ -361,39 +369,67 @@ export async function ingestGmailReply(input: {
   const explicitItem = input.outreachItemId
     ? await getOutreach(input.outreachItemId)
     : null;
-  const candidates = (await listOutreach()).filter(
-    (item) =>
-      isEmailChannel(item.channel) &&
-      item.state === "sent" &&
-      item.recipient.toLowerCase() === input.fromEmail.toLowerCase(),
-  );
   const duplicateItem = duplicate?.outreachItemId
     ? await getOutreach(duplicate.outreachItemId)
     : null;
-  const item =
-    explicitItem ??
+  const resolvedItem =
     duplicateItem ??
     (threadEvent?.outreachItemId
       ? await getOutreach(threadEvent.outreachItemId)
       : null) ??
-    candidates.find((candidate) =>
-      sentEvents.some(
-        (event) => event.outreachItemId === candidate.id && owned(event),
-      ),
-    ) ??
+    (!input.threadId ? explicitItem : null) ??
     null;
-  const ownerEvent = item
-    ? sentEvents.find((event) => event.outreachItemId === item.id)
+  const resolvedDeal = resolvedItem ? await getDeal(resolvedItem.dealId) : null;
+  const resolvedContactId =
+    resolvedItem?.contactId ?? resolvedDeal?.primaryContactId ?? null;
+  const resolvedContact = resolvedContactId
+    ? await getContact(resolvedContactId)
     : null;
-  if (item && ownerEvent && !owned(ownerEvent)) {
-    throw new Error("Gmail reply owner does not match the outreach sender");
-  }
+  const ownerEvent = resolvedItem
+    ? sentEvents.find(
+        (event) =>
+          event.outreachItemId === resolvedItem.id &&
+          owned(event) &&
+          (!input.threadId || event.payload.threadId === input.threadId),
+      )
+    : null;
+  const normalizedFrom = input.fromEmail.trim().toLowerCase();
+  const senderMismatch = Boolean(
+    resolvedItem &&
+    (resolvedItem.recipient.trim().toLowerCase() !== normalizedFrom ||
+      resolvedContact?.email?.trim().toLowerCase() !== normalizedFrom),
+  );
+  const requestMismatch = Boolean(
+    resolvedItem &&
+    ((input.outreachItemId && input.outreachItemId !== resolvedItem.id) ||
+      (input.dealId && input.dealId !== resolvedItem.dealId)),
+  );
+  const verifiedAssociation = Boolean(
+    resolvedItem &&
+    resolvedItem.state === "sent" &&
+    isEmailChannel(resolvedItem.channel) &&
+    ownerEvent &&
+    resolvedContact?.emailVerified &&
+    !senderMismatch &&
+    !requestMismatch,
+  );
+  const item = verifiedAssociation ? resolvedItem : null;
+  const associationRejected = resolvedItem
+    ? senderMismatch
+      ? "sender_mismatch"
+      : verifiedAssociation
+        ? null
+        : "unverified_association"
+    : input.dealId || input.outreachItemId || input.threadId
+      ? "unverified_association"
+      : null;
 
   const itemId = item?.id ?? null;
-  const dealId = input.dealId ?? item?.dealId ?? null;
+  const dealId = item?.dealId ?? null;
   const classified = heuristicIntent(input.body);
-  if (!duplicate) {
-    await recordEmailEvent({
+  const recorded =
+    duplicate ??
+    (await recordEmailEvent({
       outreachItemId: itemId,
       contactId: item?.contactId,
       kind: "replied",
@@ -402,8 +438,12 @@ export async function ingestGmailReply(input: {
       payload: {
         from: input.fromEmail,
         body: input.body.slice(0, 2000),
+        subject: input.subject?.slice(0, 500),
         intent: classified,
+        ...(associationRejected ? { associationRejected } : {}),
+        ...(dealId ? { dealId } : {}),
         ...(input.threadId ? { threadId: input.threadId } : {}),
+        ...(input.rfcMessageId ? { rfcMessageId: input.rfcMessageId } : {}),
         ...(input.actorEmployeeId
           ? { ownerEmployeeId: input.actorEmployeeId }
           : {}),
@@ -411,7 +451,35 @@ export async function ingestGmailReply(input: {
           ? { senderConnectionAccountId: input.senderConnectionAccountId }
           : {}),
       },
-    });
+    }));
+  if (dealId) {
+    const deal = await getDeal(dealId);
+    if (deal) {
+      const activityExists = (await listActivities({ dealId })).some(
+        (activity) => activity.metadata.emailEventId === recorded.id,
+      );
+      if (!activityExists) {
+        await createActivity({
+          type: "email",
+          subject: input.subject
+            ? `Reply received: ${input.subject.slice(0, 500)}`
+            : "Email reply received",
+          body: input.body.slice(0, 2_000),
+          companyId: deal.companyId,
+          contactId: item?.contactId ?? deal.primaryContactId,
+          dealId,
+          actorEmployeeId: input.actorEmployeeId,
+          metadata: {
+            direction: "inbound",
+            provider: "gmail",
+            emailEventId: recorded.id,
+            externalId: input.externalId ?? null,
+            threadId: input.threadId ?? null,
+            intent: classified,
+          },
+        });
+      }
+    }
   }
   if (!dealId) {
     return {

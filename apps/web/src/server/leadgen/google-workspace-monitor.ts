@@ -63,9 +63,7 @@ type MonitorDeps = {
   ingestDelivery: (
     input: Parameters<typeof ingestGmailDeliveryEvent>[0],
   ) => Promise<unknown>;
-  health: (
-    ...args: Parameters<typeof emitHealthSignal>
-  ) => Promise<unknown>;
+  health: (...args: Parameters<typeof emitHealthSignal>) => Promise<unknown>;
   fetchImpl: typeof fetch;
 };
 
@@ -284,9 +282,15 @@ export async function runGoogleWorkspaceOutreachMonitor(
           );
           const fromEmail = emailAddress(header(message, "From"));
           const subject = header(message, "Subject")?.slice(0, 500);
+          const rfcMessageId = header(message, "Message-ID")?.slice(0, 1_000);
           const body = messageBody(message);
           let handled = "ignored";
-          if (!labels.has("SENT") && !labels.has("DRAFT") && fromEmail && body) {
+          if (
+            !labels.has("SENT") &&
+            !labels.has("DRAFT") &&
+            fromEmail &&
+            body
+          ) {
             const deliveryKind = classifyGmailDeliveryNotice({
               from: fromEmail,
               subject,
@@ -308,9 +312,11 @@ export async function runGoogleWorkspaceOutreachMonitor(
             } else if (message.threadId && threadIds.has(message.threadId)) {
               await deps.ingestReply({
                 fromEmail,
+                subject,
                 body,
                 externalId: message.id,
                 threadId: message.threadId,
+                rfcMessageId,
                 actorEmployeeId: account.ownerEmployeeId,
                 senderConnectionAccountId: account.connectionAccountId,
               });

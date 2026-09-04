@@ -140,6 +140,7 @@ describe("Composio webhook route", () => {
       data: {
         id: "reply-1",
         thread_id: "thread-1",
+        headers: [{ name: "Message-ID", value: "<reply-1@example.com>" }],
         sender: "Sara <sara@acme.example>",
         message_text: "Interested — let's schedule a call.",
         label_ids: ["INBOX"],
@@ -164,6 +165,15 @@ describe("Composio webhook route", () => {
     });
     expect(verifyAccountOwner).toHaveBeenCalledTimes(1);
     expect(await listEmailEvents({ kind: "replied" })).toHaveLength(1);
+    await expect(listEmailEvents({ kind: "replied" })).resolves.toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          threadId: "thread-1",
+          rfcMessageId: "<reply-1@example.com>",
+          senderConnectionAccountId: "conn-1",
+        }),
+      }),
+    ]);
   });
 
   it("fails closed when the signed event names another Gmail owner", async () => {

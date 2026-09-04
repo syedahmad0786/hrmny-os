@@ -9,6 +9,7 @@ const TABS = [
   { href: "/crm/research", label: "Research" },
   { href: "/crm/campaigns", label: "Campaigns" },
   { href: "/crm/outreach", label: "Outreach" },
+  { href: "/crm/inbox", label: "Inbox" },
   { href: "/crm", label: "Pipeline", exact: true },
   { href: "/crm/handover", label: "Handover" },
   { href: "/crm/contacts", label: "Contacts" },
