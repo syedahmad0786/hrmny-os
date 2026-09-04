@@ -8,7 +8,7 @@ const PROPOSE_DEAL_ID = "e0000000-0000-4000-8000-000000000005";
 async function ensureDealHandoverNext(page: Page) {
   page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
   await page.goto(`/crm/deals/${PROPOSE_DEAL_ID}`, {
-    waitUntil: "domcontentloaded",
+    waitUntil: "commit",
   });
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
     timeout: 60_000,

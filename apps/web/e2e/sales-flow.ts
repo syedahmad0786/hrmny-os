@@ -17,7 +17,7 @@ export async function advanceDealOnce(page: Page) {
 
 async function seedClientNeeds(page: Page) {
   const save = page.getByTestId("deal-needs-save");
-  if (!(await save.isVisible())) return;
+  await expect(save).toBeVisible({ timeout: 60_000 });
   const values = [
     ["deal-need-objective", "Launch the approved client campaign"],
     ["deal-need-deliverables", "Campaign strategy and production assets"],
@@ -31,6 +31,20 @@ async function seedClientNeeds(page: Page) {
   await save.click();
   await expect(page.getByRole("status")).toContainText(
     "Client needs snapshot saved",
+  );
+}
+
+async function seedNextAction(page: Page) {
+  const save = page.getByTestId("deal-next-action-save");
+  await expect(save).toBeVisible({ timeout: 60_000 });
+  const title = page.getByTestId("deal-next-action-title");
+  const dueDate = page.getByTestId("deal-next-action-date");
+  if ((await title.inputValue()) && (await dueDate.inputValue())) return;
+  await title.fill("Synthetic handover key date");
+  await dueDate.fill("2099-12-31");
+  await save.click();
+  await expect(page.getByRole("status")).toContainText(
+    /Next action (created|updated)/,
   );
 }
 
@@ -56,6 +70,9 @@ async function seedHandoverEvidence(page: Page) {
     await page.getByRole("button", { name: "Save billing evidence" }).click();
   }
   await page.goto(dealUrl, { waitUntil: "commit" });
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
+    timeout: 60_000,
+  });
 }
 
 export async function advanceDealToClose(
@@ -63,11 +80,14 @@ export async function advanceDealToClose(
   options: { seedHandoverEvidence?: boolean } = {},
 ) {
   await seedClientNeeds(page);
+  await seedNextAction(page);
   const ready = page
     .getByTestId("deal-mark-won")
     .or(page.getByTestId("deal-handover"))
     .or(page.getByTestId("deal-handover-next"));
+  const advance = page.getByTestId("deal-advance");
   for (let i = 0; i < 8; i++) {
+    await expect(ready.or(advance)).toBeVisible({ timeout: 60_000 });
     if (await ready.isVisible()) {
       if (options.seedHandoverEvidence !== false) {
         await seedHandoverEvidence(page);

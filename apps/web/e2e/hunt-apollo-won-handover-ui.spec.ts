@@ -106,7 +106,7 @@ async function ensureApolloDealHandoverNext(page: Page, query: string) {
     page.getByText(/Signed agreement recorded for v\d+/i),
   ).toBeVisible({ timeout: 30_000 });
 
-  await page.goto(`/crm/deals/${dealId}`, { waitUntil: "domcontentloaded" });
+  await page.goto(`/crm/deals/${dealId}`, { waitUntil: "commit" });
   await advanceDealToClose(page);
   await page.getByTestId("deal-mark-won").click();
   await expect(
@@ -199,7 +199,7 @@ test.describe("Hunt Apollo → won → handover continuity", () => {
     expect(clientHref).toMatch(/\/clients\//);
     expect(creativeHref).toMatch(/taskId=/);
 
-    await page.goto(dealHref!, { waitUntil: "domcontentloaded" });
+    await page.goto(dealHref!, { waitUntil: "commit" });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
       timeout: 60_000,
     });

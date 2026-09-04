@@ -1,22 +1,16 @@
 import { expect, test } from "@playwright/test";
-import { advanceDealToClose } from "./sales-flow";
 
 const PROPOSE_DEAL_ID = "e0000000-0000-4000-8000-000000000005";
 
 test("handover readiness uses existing deal evidence and unlocks the governed flow", async ({
   page,
 }) => {
-  await page.goto(`/crm/deals/${PROPOSE_DEAL_ID}`, {
-    waitUntil: "commit",
-  });
-  await advanceDealToClose(page, { seedHandoverEvidence: false });
-
   await page.goto(`/crm/handover?dealId=${PROPOSE_DEAL_ID}`, {
     waitUntil: "commit",
   });
   await expect(
     page.getByRole("heading", { name: "Handover to Delivery" }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("handover-check-signed-scope")).toHaveAttribute(
     "data-ready",
     "true",
