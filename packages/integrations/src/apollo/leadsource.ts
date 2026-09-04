@@ -453,8 +453,14 @@ export function createLeadSourceLive(
           body: JSON.stringify({
             q_keywords: criteria.query,
             person_titles: criteria.titles,
-            include_similar_titles: criteria.titles?.length ? true : undefined,
+            include_similar_titles: criteria.titles?.length
+              ? (criteria.includeSimilarTitles ?? true)
+              : undefined,
             person_locations: criteria.locations,
+            person_seniorities: criteria.seniorities,
+            organization_locations: criteria.organizationLocations,
+            contact_email_status: criteria.emailStatuses,
+            currently_using_any_of_technology_uids: criteria.technologyIds,
             organization_num_employees_ranges:
               criteria.employeeCountMin != null ||
               criteria.employeeCountMax != null

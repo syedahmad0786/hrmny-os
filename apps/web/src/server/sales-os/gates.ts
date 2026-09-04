@@ -7,6 +7,7 @@ import {
   integrationInbox,
   sql,
 } from "@hrmny/db";
+import type { CrmMarket } from "@/lib/crm-markets";
 import {
   createCompany,
   createContact,
@@ -189,7 +190,7 @@ async function approveCompanyProposal(
             .values({
               name: fresh.name,
               sector: fresh.sector,
-              market: fresh.market as "UAE" | "KSA" | "Both" | null,
+              market: fresh.market as CrmMarket | null,
               website: fresh.website,
               notes: fresh.whyThis,
             })

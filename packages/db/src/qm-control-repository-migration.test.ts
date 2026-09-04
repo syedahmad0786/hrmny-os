@@ -16,13 +16,14 @@ const journal = JSON.parse(
 ) as { entries: Array<{ idx: number; tag: string }> };
 
 describe("0077 QM control repository migration", () => {
-  it("is the additive journal head after the preserved Apollo migrations", () => {
+  it("remains ordered after Apollo and before the additive market migration", () => {
     expect(
-      journal.entries.slice(-3).map(({ idx, tag }) => ({ idx, tag })),
+      journal.entries.slice(-4).map(({ idx, tag }) => ({ idx, tag })),
     ).toEqual([
       { idx: 74, tag: "0075_apollo_search_fencing" },
       { idx: 75, tag: "0076_apollo_people_search_serialization" },
       { idx: 76, tag: "0077_qm_control_repository" },
+      { idx: 77, tag: "0078_gcc_markets" },
     ]);
   });
 

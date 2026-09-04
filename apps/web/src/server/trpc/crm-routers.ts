@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { CRM_MARKETS } from "@/lib/crm-markets";
 import {
   bootstrapGateRegistry,
   computeQuoteMetrics,
@@ -94,7 +95,7 @@ async function auditMutation(
   });
 }
 
-const marketSchema = z.enum(["UAE", "KSA", "Both"]);
+const marketSchema = z.enum(CRM_MARKETS);
 const leadLaneSchema = z.enum([
   "industry_scanning",
   "apollo_intent",

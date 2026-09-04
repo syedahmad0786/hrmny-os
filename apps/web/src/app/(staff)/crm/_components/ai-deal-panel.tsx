@@ -290,23 +290,24 @@ export function AiDealPanel({
           in the pipeline.
         </div>
         {knowledgeBrief ? (
-          <article
+          <details
             className="mb-3 rounded-xl border border-[var(--line)] bg-white/70 p-4"
             data-testid="deal-knowledge-brief"
           >
-            <div className="flex items-center justify-between gap-3">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
               <span>
                 <strong className="block">Saved knowledge brief</strong>
                 <small className="text-[var(--muted)]">
-                  Saved {formatRelative(knowledgeBrief.createdAt)}
+                  Saved {formatRelative(knowledgeBrief.createdAt)} · Open full
+                  brief
                 </small>
               </span>
               <CrmTag kind="success">Ready</CrmTag>
-            </div>
+            </summary>
             <p className="mt-3 whitespace-pre-wrap text-[12px]">
               {briefBody(knowledgeBrief.body)}
             </p>
-          </article>
+          </details>
         ) : (
           <div className="crm-note mb-3">
             No knowledge brief yet. Select Research to build and save one for

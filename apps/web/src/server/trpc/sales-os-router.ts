@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CRM_MARKETS } from "@/lib/crm-markets";
 import { TRPCError } from "@trpc/server";
 import {
   ApolloProviderRequestError,
@@ -9,6 +10,8 @@ import { runSalesGrowthImport } from "../crm/salesgrowth-import";
 import { addCredit } from "../sales-os/store";
 import {
   applyEvolve,
+  APOLLO_EMAIL_STATUSES,
+  APOLLO_PERSON_SENIORITIES,
   applySalesOsReplyIntent,
   approveApolloExactPerson,
   assertLinkedInAssistAllowed,
@@ -192,11 +195,47 @@ export const salesOsRouter = router({
               .min(1)
               .max(8)
               .optional(),
+            locations: z
+              .array(z.string().trim().min(2).max(120))
+              .max(6)
+              .optional(),
+            organizationLocations: z
+              .array(z.string().trim().min(2).max(120))
+              .max(6)
+              .optional(),
+            seniorities: z
+              .array(z.enum(APOLLO_PERSON_SENIORITIES))
+              .max(11)
+              .optional(),
+            emailStatuses: z
+              .array(z.enum(APOLLO_EMAIL_STATUSES))
+              .max(4)
+              .optional(),
+            technologyIds: z
+              .array(
+                z
+                  .string()
+                  .trim()
+                  .regex(/^[a-z0-9_]+$/)
+                  .max(80),
+              )
+              .max(10)
+              .optional(),
+            includeSimilarTitles: z.boolean().optional(),
+            employeeCountMin: z.number().int().min(1).max(1_000_000).optional(),
+            employeeCountMax: z.number().int().min(1).max(1_000_000).optional(),
             perPage: z.number().int().min(1).max(10).optional(),
           })
           .refine(
             (input) => Boolean(input.query) || Boolean(input.titles?.length),
             "Provide at least one job title or keyword",
+          )
+          .refine(
+            (input) =>
+              input.employeeCountMin == null ||
+              input.employeeCountMax == null ||
+              input.employeeCountMin <= input.employeeCountMax,
+            "Company size minimum cannot exceed maximum",
           ),
       )
       .mutation(async ({ input, ctx }) => {
@@ -287,7 +326,10 @@ export const salesOsRouter = router({
       }),
     saveCandidate: salesOperatorProcedure
       .input(
-        z.object({ candidate: apolloCandidateInput.omit({ email: true }) }),
+        z.object({
+          candidate: apolloCandidateInput.omit({ email: true }),
+          market: z.enum(CRM_MARKETS).default("UAE"),
+        }),
       )
       .mutation(async ({ input, ctx }) => {
         const receipt = await recordIntegrationReceipt({
@@ -300,7 +342,11 @@ export const salesOsRouter = router({
           }),
           status: "processing",
           ownerEmployeeId: ctx.employeeId,
-          payload: { ...input.candidate, paidDetailsUnlocked: false },
+          payload: {
+            ...input.candidate,
+            market: input.market,
+            paidDetailsUnlocked: false,
+          },
         });
         if (receipt.duplicate) {
           const result = receipt.result;
@@ -335,6 +381,7 @@ export const salesOsRouter = router({
               raw: { freeSearch: true },
             },
             receiptId: receipt.receiptId,
+            market: input.market,
             ownerEmployeeId: ctx.employeeId,
           });
           const result = {
@@ -445,6 +492,7 @@ export const salesOsRouter = router({
         z.object({
           requestId: z.string().uuid(),
           name: z.string().trim().min(2).max(180),
+          market: z.enum(CRM_MARKETS).default("UAE"),
           sector: z.string().trim().max(180).optional(),
           whyThis: z.string().trim().min(8).max(2_000),
           website: z.string().trim().url().max(500).optional(),

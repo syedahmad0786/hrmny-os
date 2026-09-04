@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">HRMNY sales system independent scorecard</title>
+  <desc id="desc">The live baseline scores 64 out of 100 and the release candidate scores 75. Targeting, Gmail test safety, unsubscribe links, tracking accuracy, result organization and research readability improve. Delivery and bounce proof, scheduled follow-up execution and funnel analytics remain.</desc>
+  <rect width="1200" height="760" rx="32" fill="#f7f2e8"/>
+  <rect x="34" y="34" width="1132" height="692" rx="24" fill="#fffdf8" stroke="#d9cfbd" stroke-width="2"/>
+  <text x="74" y="92" fill="#182c31" font-family="Inter,Arial,sans-serif" font-size="34" font-weight="700">HRMNY Sales System</text>
+  <text x="74" y="128" fill="#617176" font-family="Inter,Arial,sans-serif" font-size="19">Independent review · 4 September 2026</text>
+
+  <g font-family="Inter,Arial,sans-serif">
+    <rect x="74" y="166" width="486" height="132" rx="18" fill="#fff6e4" stroke="#e7c779"/>
+    <text x="102" y="204" fill="#7b5a0b" font-size="17" font-weight="700">LIVE BASELINE</text>
+    <text x="102" y="264" fill="#182c31" font-size="58" font-weight="750">64<tspan font-size="25" fill="#617176"> / 100</tspan></text>
+    <text x="330" y="258" fill="#7b5a0b" font-size="18" font-weight="600">Functional foundations</text>
+    <text x="330" y="282" fill="#617176" font-size="15">Supervised internal use</text>
+
+    <rect x="584" y="166" width="542" height="132" rx="18" fill="#e8f6ef" stroke="#73b493"/>
+    <text x="612" y="204" fill="#216846" font-size="17" font-weight="700">RELEASE CANDIDATE</text>
+    <text x="612" y="264" fill="#182c31" font-size="58" font-weight="750">75<tspan font-size="25" fill="#617176"> / 100</tspan></text>
+    <text x="840" y="258" fill="#216846" font-size="18" font-weight="600">Human-operable</text>
+    <text x="840" y="282" fill="#617176" font-size="15">Supervised pilot after verification</text>
+
+    <text x="74" y="346" fill="#182c31" font-size="20" font-weight="700">Workflow at a glance</text>
+    <line x1="116" y1="402" x2="1080" y2="402" stroke="#d6ddd8" stroke-width="6" stroke-linecap="round"/>
+    <g text-anchor="middle" font-size="14" font-weight="650" fill="#34484d">
+      <circle cx="116" cy="402" r="18" fill="#38a169"/><text x="116" y="440">Find</text>
+      <circle cx="237" cy="402" r="18" fill="#38a169"/><text x="237" y="440">Save</text>
+      <circle cx="358" cy="402" r="18" fill="#38a169"/><text x="358" y="440">Qualify</text>
+      <circle cx="479" cy="402" r="18" fill="#38a169"/><text x="479" y="440">Research</text>
+      <circle cx="600" cy="402" r="18" fill="#38a169"/><text x="600" y="440">Draft</text>
+      <circle cx="721" cy="402" r="18" fill="#38a169"/><text x="721" y="440">Approve</text>
+      <circle cx="842" cy="402" r="18" fill="#38a169"/><text x="842" y="440">Self-test</text>
+      <circle cx="963" cy="402" r="18" fill="#d9a62e"/><text x="963" y="440">Real send</text>
+      <circle cx="1080" cy="402" r="18" fill="#d34f4f"/><text x="1080" y="440">Auto follow-up</text>
+    </g>
+
+    <rect x="74" y="486" width="532" height="190" rx="18" fill="#eff8f3"/>
+    <text x="102" y="522" fill="#216846" font-size="18" font-weight="700">FIXED IN THIS RELEASE</text>
+    <g fill="#34484d" font-size="16">
+      <text x="102" y="556">✓ Advanced Apollo targeting + GCC markets</text>
+      <text x="102" y="586">✓ Safe “send test to myself” Gmail path</text>
+      <text x="102" y="616">✓ Absolute unsubscribe links + honest tracking</text>
+      <text x="102" y="646">✓ Organized results + calmer research view</text>
+    </g>
+
+    <rect x="630" y="486" width="496" height="190" rx="18" fill="#fff0ef"/>
+    <text x="658" y="522" fill="#9b3434" font-size="18" font-weight="700">STILL REQUIRED FOR 85+</text>
+    <g fill="#34484d" font-size="16">
+      <text x="658" y="556">! Gmail destination + thread readback proof</text>
+      <text x="658" y="586">! Delivery, bounce and complaint events</text>
+      <text x="658" y="616">! Governed scheduled follow-up worker</text>
+      <text x="658" y="646">! Funnel, market and campaign analytics</text>
+    </g>
+  </g>
+</svg>

@@ -557,7 +557,7 @@ describe("Apollo queue PostgreSQL proof", () => {
       actorEmployeeId: ACTOR,
       criteria: {
         query: "legacy orphan",
-        locations: ["United Arab Emirates"],
+        organizationLocations: ["United Arab Emirates"],
         page: 1,
         perPage: 8,
       },

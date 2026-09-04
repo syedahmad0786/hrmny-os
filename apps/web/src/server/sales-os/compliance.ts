@@ -71,8 +71,21 @@ export function verifyUnsubscribeToken(
 }
 
 export function buildUnsubscribeUrl(path: string, email: string): string {
-  const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}token=${encodeURIComponent(createUnsubscribeToken(email))}`;
+  const configured =
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.VERCEL_URL?.trim() ||
+    (process.env.NODE_ENV === "production"
+      ? "https://hrmny-os.vercel.app"
+      : "http://localhost:3000");
+  const origin = new URL(
+    /^https?:\/\//i.test(configured) ? configured : `https://${configured}`,
+  ).origin;
+  const url = new URL(path, `${origin}/`);
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("Unsubscribe URL must use HTTP or HTTPS");
+  }
+  url.searchParams.set("token", createUnsubscribeToken(email));
+  return url.toString();
 }
 
 export function hasValidUnsubscribeLink(body: string, email: string): boolean {

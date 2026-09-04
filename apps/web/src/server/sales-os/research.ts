@@ -6,11 +6,13 @@ import {
   insertResearchProposalWithSignal,
   type ResearchProposalReceipt,
 } from "./store";
+import type { CrmMarket } from "@/lib/crm-markets";
 
 export type ResearchProposalInput = {
   requestId: string;
   actorEmployeeId?: string | null;
   name: string;
+  market?: CrmMarket;
   sector?: string;
   whyThis: string;
   website?: string;
@@ -60,6 +62,7 @@ export async function ingestManualResearch(
   const canonicalPayload = JSON.stringify({
     actorEmployeeId: input.actorEmployeeId ?? null,
     name,
+    market: input.market ?? "UAE",
     sector,
     whyThis,
     website,
@@ -79,7 +82,7 @@ export async function ingestManualResearch(
       companyId: null,
       name,
       sector,
-      market: "UAE",
+      market: input.market ?? "UAE",
       website,
       whyThis,
       evidence,

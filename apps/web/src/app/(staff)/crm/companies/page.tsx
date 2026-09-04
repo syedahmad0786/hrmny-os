@@ -20,6 +20,7 @@ import {
 } from "@/components/crm/format";
 import { CsvActions } from "../_components/csv-actions";
 import { MergeDuplicates } from "../_components/merge-dedupe";
+import { CRM_MARKETS, type CrmMarket } from "@/lib/crm-markets";
 
 function CompaniesInner() {
   const utils = trpc.useUtils();
@@ -84,25 +85,25 @@ function CompaniesInner() {
         description="One account record from first prospecting touch through active client."
         actions={
           <>
-          <CsvActions kind="companies" />
-          <CrmBtn
-            variant="primary"
-            disabled={create.isPending || !name.trim()}
-            onClick={() =>
-              void create
-                .mutateAsync({
-                  name: name.trim(),
-                  sector: sector.trim() || null,
-                  market: market === "all" ? "UAE" : (market as "UAE" | "KSA" | "Both"),
-                })
-                .then(() => {
-                  setName("");
-                  setSector("");
-                })
-            }
-          >
-            ＋ Add company
-          </CrmBtn>
+            <CsvActions kind="companies" />
+            <CrmBtn
+              variant="primary"
+              disabled={create.isPending || !name.trim()}
+              onClick={() =>
+                void create
+                  .mutateAsync({
+                    name: name.trim(),
+                    sector: sector.trim() || null,
+                    market: market === "all" ? "UAE" : (market as CrmMarket),
+                  })
+                  .then(() => {
+                    setName("");
+                    setSector("");
+                  })
+              }
+            >
+              ＋ Add company
+            </CrmBtn>
           </>
         }
       />
@@ -124,10 +125,10 @@ function CompaniesInner() {
           onChange={(e) => setSector(e.target.value)}
         />
         <select value={market} onChange={(e) => setMarket(e.target.value)}>
-          <option value="all">UAE + KSA</option>
-          <option value="UAE">UAE</option>
-          <option value="KSA">KSA</option>
-          <option value="Both">Both</option>
+          <option value="all">All markets</option>
+          {CRM_MARKETS.map((value) => (
+            <option key={value}>{value}</option>
+          ))}
         </select>
       </CrmFilterBar>
 
@@ -136,9 +137,14 @@ function CompaniesInner() {
       {companies.isLoading ? (
         <CrmEmpty title="Loading companies…" />
       ) : rows.length === 0 ? (
-        <CrmEmpty title="No companies yet" hint="Add a company to anchor contacts and deals." />
+        <CrmEmpty
+          title="No companies yet"
+          hint="Add a company to anchor contacts and deals."
+        />
       ) : (
-        <CrmTableShell foot={`${rows.length} company records · CRM and active clients`}>
+        <CrmTableShell
+          foot={`${rows.length} company records · CRM and active clients`}
+        >
           <table className="crm-table">
             <thead>
               <tr>

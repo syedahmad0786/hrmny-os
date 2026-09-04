@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { CrmBtn, CrmEmpty, CrmTag } from "@/components/crm/ui";
+import { CRM_MARKETS } from "@/lib/crm-markets";
 
 function newSignalForm() {
   return {
     requestId: crypto.randomUUID(),
     name: "",
+    market: "UAE" as (typeof CRM_MARKETS)[number],
     sector: "",
     whyThis: "",
     website: "",
@@ -106,6 +108,7 @@ export function ResearchConsole() {
               .mutateAsync({
                 requestId: signal.requestId,
                 name: signal.name,
+                market: signal.market,
                 sector: signal.sector || undefined,
                 whyThis: signal.whyThis,
                 website: signal.website || undefined,
@@ -153,6 +156,25 @@ export function ResearchConsole() {
                   }))
                 }
               />
+            </label>
+            <label className="crm-field">
+              Market
+              <select
+                className="crm-select"
+                value={signal.market}
+                onChange={(event) =>
+                  setSignal((current) => ({
+                    ...current,
+                    market: event.target.value as typeof current.market,
+                  }))
+                }
+              >
+                {CRM_MARKETS.filter((market) => market !== "Both").map(
+                  (market) => (
+                    <option key={market}>{market}</option>
+                  ),
+                )}
+              </select>
             </label>
             <label className="crm-field">
               Sector
@@ -303,7 +325,7 @@ export function ResearchConsole() {
                         decideCompany.mutate({
                           id: c.id,
                           action: "rework",
-                          feedback: feedback || "Tighten the UAE angle",
+                          feedback: feedback || "Tighten the market angle",
                         })
                       }
                     >
@@ -338,7 +360,10 @@ export function ResearchConsole() {
                 {access.data?.canOperate &&
                 c.temperature !== "cool" &&
                 c.temperature !== "cold" ? (
-                  <Link className="crm-btn primary" href="/crm/hunt#apollo-people-search">
+                  <Link
+                    className="crm-btn primary"
+                    href="/crm/hunt#apollo-people-search"
+                  >
                     Open governed People Search
                   </Link>
                 ) : (

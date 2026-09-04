@@ -540,6 +540,13 @@
       "when": 1788322190000,
       "tag": "0077_qm_control_repository",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1788498000000,
+      "tag": "0078_gcc_markets",
+      "breakpoints": true
     }
   ]
 }

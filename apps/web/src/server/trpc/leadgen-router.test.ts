@@ -23,13 +23,18 @@ import {
   draftOutreach,
   listEmailFollowups,
   sendOutreach,
+  sendOutreachTest,
 } from "./leadgen-router";
 import { createCaller } from "./root";
 import {
   getIntegrationReceipt,
   resetIntegrationReceiptMemory,
 } from "../integrations/inbox";
-import { recordEmailEvent, resetSalesOsStore } from "../sales-os/store";
+import {
+  listEmailEvents,
+  recordEmailEvent,
+  resetSalesOsStore,
+} from "../sales-os/store";
 
 const staff: ActorContext = {
   employeeId: "emp-1",
@@ -294,6 +299,88 @@ describe("outreach HITL gate flow", () => {
     expect(final.state).toBe("sent");
     expect(final.sentAt).toBeTruthy();
     expect(final.externalId).toBeTruthy();
+  });
+
+  it("sends an idempotent internal test without contacting the client or advancing outreach", async () => {
+    const deal = await seedDeal();
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      subject: "Client subject",
+      body: COMPLIANT_BODY,
+    });
+    await approveOutreach({ id: item.id, actor: staff, audit, emit });
+    const sendAfterApproval = vi.fn(
+      async (
+        _input: Parameters<ComposioSendAdapter["sendAfterApproval"]>[0],
+      ) => ({
+        sent: true as const,
+        mode: "live" as const,
+        externalId: "gmail-test-message-1",
+        threadId: "gmail-test-thread-1",
+        channel: "gmail" as const,
+      }),
+    );
+    const composio = {
+      ...createComposioStub(),
+      sendAfterApproval,
+    } satisfies ComposioSendAdapter;
+    const idempotencyKey = "79000000-0000-4000-8000-000000000001";
+
+    const first = await sendOutreachTest({
+      id: item.id,
+      idempotencyKey,
+      actor: staff,
+      composio,
+      testRecipient: "developer@hrmny.co",
+    });
+    const replay = await sendOutreachTest({
+      id: item.id,
+      idempotencyKey,
+      actor: staff,
+      composio,
+      testRecipient: "developer@hrmny.co",
+    });
+
+    expect(first).toMatchObject({
+      sent: true,
+      duplicate: false,
+      recipient: "developer@hrmny.co",
+      outreachState: "approved",
+    });
+    expect(replay).toMatchObject({ sent: true, duplicate: true });
+    expect(sendAfterApproval).toHaveBeenCalledOnce();
+    expect(sendAfterApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "developer@hrmny.co",
+        subject: expect.stringMatching(/^\[TEST — NOT SENT TO CLIENT\]/),
+        body: expect.stringContaining(
+          "Original intended recipient: sara@acme.example",
+        ),
+      }),
+    );
+    expect(sendAfterApproval.mock.calls[0]![0].body).not.toMatch(
+      /\/api\/sales-os\/unsubscribe|[?&]token=/i,
+    );
+    expect((await getOutreach(item.id))?.state).toBe("approved");
+    expect(await listEmailEvents({ kind: "sent" })).toHaveLength(0);
+    await expect(
+      getIntegrationReceipt("gmail", `outreach-test-send:${idempotencyKey}`),
+    ).resolves.toMatchObject({
+      status: "completed",
+      operation: "messages.send.test",
+      result: { bridgeStatus: "test_sent" },
+    });
+
+    await expect(
+      sendOutreachTest({
+        id: item.id,
+        idempotencyKey: "79000000-0000-4000-8000-000000000002",
+        actor: staff,
+        composio,
+        testRecipient: "real-client@example.com",
+      }),
+    ).rejects.toThrow(/@hrmny\.co/i);
+    expect(sendAfterApproval).toHaveBeenCalledOnce();
   });
 
   it("turns a sent email into one reply-aware follow-up draft", async () => {

@@ -98,6 +98,21 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect(search).toBeDisabled({ timeout: 60_000 });
     await expect(search).toHaveText(/Connect Apollo to search/i);
     await expect(page.getByTestId("hunt-apollo-results")).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: "UAE" })).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "KSA" })).not.toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: "Oman" }),
+    ).not.toBeChecked();
+    await page.locator("summary").filter({ hasText: "Advanced filters" }).click();
+    await expect(page.getByTestId("hunt-apollo-location-basis")).toHaveValue(
+      "company",
+    );
+    await expect(page.getByTestId("hunt-apollo-company-size")).toHaveValue(
+      "any",
+    );
+    await expect(page.getByTestId("hunt-apollo-email-status")).toHaveValue(
+      "any",
+    );
   });
 
   test("ignores a global Apollo key when this employee has no connection", async ({

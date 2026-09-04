@@ -35,13 +35,15 @@ test("a saved lead brief survives reload and guides the email step", async ({
     .getByRole("button", { name: "Save" })
     .click();
 
-  await expect(page.getByTestId("deal-knowledge-brief")).toContainText(
-    "Verified signal for the sales team.",
-  );
+  const brief = page.getByTestId("deal-knowledge-brief");
+  await expect(brief).not.toHaveAttribute("open", "");
+  await brief.getByText("Saved knowledge brief").click();
+  await expect(brief).toHaveAttribute("open", "");
+  await expect(brief).toContainText("Verified signal for the sales team.");
   await page.reload({ waitUntil: "commit" });
-  await expect(page.getByTestId("deal-knowledge-brief")).toContainText(
-    "Verified signal for the sales team.",
-  );
+  await expect(brief).not.toHaveAttribute("open", "");
+  await brief.getByText("Saved knowledge brief").click();
+  await expect(brief).toContainText("Verified signal for the sales team.");
 
   await page.getByRole("button", { name: "Find email" }).click();
   await expect(page.getByText("Action blocked")).toBeVisible();

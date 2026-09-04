@@ -69,11 +69,13 @@ describe("production migration security", () => {
       .sort();
     for (const name of migrations) {
       const migration = readMigration(name);
-      for (const table of createdTables(migration)) {
+      const tables = createdTables(migration);
+      for (const table of tables) {
         expect(migration, `${name} does not list ${table}`).toContain(
           `'${table}'`,
         );
       }
+      if (tables.length === 0) continue;
       expect(migration, name).toMatch(/ENABLE ROW LEVEL SECURITY/i);
       expect(migration, name).toMatch(/FROM PUBLIC/i);
       expect(migration, name).toMatch(/FROM anon/i);

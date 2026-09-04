@@ -19,8 +19,15 @@ export type LeadSearchCriteria = {
   query?: string;
   titles?: string[];
   industries?: string[];
-  /** ISO country codes or vendor location strings. */
+  /** Where the person lives; use organizationLocations for target markets. */
   locations?: string[];
+  /** Headquarters market of the person's current employer. */
+  organizationLocations?: string[];
+  seniorities?: string[];
+  emailStatuses?: string[];
+  /** Apollo technology UIDs, for example `shopify` or `wordpress_org`. */
+  technologyIds?: string[];
+  includeSimilarTitles?: boolean;
   employeeCountMin?: number;
   employeeCountMax?: number;
   page?: number;
