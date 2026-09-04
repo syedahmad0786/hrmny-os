@@ -39,6 +39,7 @@ import {
   updateIntegrationReceiptProgress,
 } from "../integrations/inbox";
 import { OUTREACH_GUIDELINES } from "../sales-os/sops";
+import { buildEmailFollowupStatuses } from "../sales-os/followups";
 
 async function resolveComposioSend(
   employeeId: string | null | undefined,
@@ -199,6 +200,8 @@ export async function draftOutreach(input: {
   body?: string;
   subject?: string;
   runAgent?: RunAgent;
+  cadenceTouch?: number;
+  previousMessage?: { subject: string | null; body: string };
 }): Promise<OutreachItem> {
   const deal = await getDeal(input.dealId);
   if (!deal) throw new Error(`Deal not found: ${input.dealId}`);
@@ -270,6 +273,13 @@ export async function draftOutreach(input: {
         "Use verified facts only. Do not mention Apollo, BUAF, internal scoring, unverified contact data, or the research process.",
         "Return one JSON object with channel, subject, body, and cta. Body must contain only the final sendable message: no analysis, labels, notes, alternatives, or Markdown headings.",
         OUTREACH_GUIDELINES,
+        ...(input.previousMessage
+          ? [
+              `This is follow-up touch ${input.cadenceTouch ?? 2}. Keep it concise (80–120 words), add new value, and do not repeat the first email.`,
+              `Keep the existing email thread subject. Previous subject: ${input.previousMessage.subject ?? "(no subject)"}.`,
+              `Previous message:\n${input.previousMessage.body.slice(0, 4_000)}`,
+            ]
+          : []),
       ].join("\n"),
       context: {
         dealId: input.dealId,
@@ -292,7 +302,9 @@ export async function draftOutreach(input: {
           typeof out.message === "string" ? out.message : "Agent run refused",
       });
     }
-    subject = typeof out.subject === "string" ? out.subject : subject;
+    if (!input.subject && typeof out.subject === "string") {
+      subject = out.subject;
+    }
     body =
       typeof out.body === "string"
         ? out.body.trim()
@@ -332,6 +344,95 @@ export async function draftOutreach(input: {
     body: body ?? "",
     contactId: contact?.contactId ?? null,
     linkedinUrl: contact?.linkedinUrl ?? null,
+    cadenceTouch: input.cadenceTouch,
+  });
+}
+
+export async function listEmailFollowups(now = new Date()) {
+  const { getSalesOsSettings, listEmailEvents } =
+    await import("../sales-os/store");
+  const [settings, outreach, emailEvents] = await Promise.all([
+    getSalesOsSettings(),
+    listOutreach(),
+    listEmailEvents(),
+  ]);
+  return buildEmailFollowupStatuses({
+    outreach,
+    emailEvents,
+    cadenceTouches: settings.outreach.cadenceTouches,
+    cadenceDays: settings.outreach.cadenceDays,
+    now,
+  });
+}
+
+export async function draftEmailFollowup(input: {
+  id: string;
+  runAgent?: RunAgent;
+}): Promise<OutreachItem> {
+  const source = await getOutreach(input.id);
+  if (!source || !["gmail", "email"].includes(source.channel.toLowerCase())) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Choose a sent Gmail message to prepare a follow-up",
+    });
+  }
+  const status = (await listEmailFollowups()).find(
+    (item) => item.sourceId === source.id,
+  );
+  if (!status) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Send the first approved email before preparing a follow-up",
+    });
+  }
+  if (status.state === "queued" && status.queuedItemId) {
+    const queued = await getOutreach(status.queuedItemId);
+    if (queued) return queued;
+  }
+  if (status.state === "replied" || status.state === "stopped") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: status.reason,
+    });
+  }
+  if (status.state === "complete" || !status.nextTouch) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: status.reason,
+    });
+  }
+
+  const deal = await getDeal(source.dealId);
+  if (!deal) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Deal not found" });
+  }
+  const contact = deal.primaryContactId
+    ? await getContact(deal.primaryContactId)
+    : null;
+  if (
+    !contact?.emailVerified ||
+    contact.email?.trim().toLowerCase() !==
+      source.recipient.trim().toLowerCase()
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "The verified primary contact no longer matches this email thread. Review the deal before following up.",
+    });
+  }
+
+  const subject = source.subject?.trim()
+    ? source.subject.trim().toLowerCase().startsWith("re:")
+      ? source.subject.trim()
+      : `Re: ${source.subject.trim()}`
+    : `Following up with ${deal.companyName}`;
+  return draftOutreach({
+    dealId: source.dealId,
+    channel: "gmail",
+    subject,
+    cadenceTouch: status.nextTouch,
+    previousMessage: { subject: source.subject, body: source.body },
+    runAgent: input.runAgent,
   });
 }
 
@@ -657,6 +758,8 @@ const outreachRouter = router({
     .input(z.object({ id: z.string() }))
     .query(({ input }) => getOutreach(input.id)),
 
+  followups: staffProcedure.query(() => listEmailFollowups()),
+
   draft: staffProcedure
     .input(
       z.object({
@@ -667,6 +770,10 @@ const outreachRouter = router({
       }),
     )
     .mutation(({ input }) => draftOutreach(input)),
+
+  draftFollowup: staffProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ input }) => draftEmailFollowup(input)),
 
   approve: staffProcedure
     .input(z.object({ id: z.string() }))

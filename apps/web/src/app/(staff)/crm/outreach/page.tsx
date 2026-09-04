@@ -40,6 +40,7 @@ function OutreachInner() {
   const focusIdFromQuery = searchParams.get("id")?.trim() || "";
   const clientIdFromQuery = searchParams.get("clientId")?.trim() || "";
   const items = trpc.leadgen.outreach.list.useQuery();
+  const followups = trpc.leadgen.outreach.followups.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
   const client = trpc.clients.get.useQuery(
     { id: clientIdFromQuery },
@@ -87,6 +88,16 @@ function OutreachInner() {
       setGateError(null);
       setDraftSubject("");
       setDraftBody("");
+      invalidate();
+    },
+    onError: onErr,
+  });
+  const draftFollowup = trpc.leadgen.outreach.draftFollowup.useMutation({
+    onSuccess: (item) => {
+      setGateError(null);
+      setSendNote(
+        `Follow-up touch ${item.cadenceTouch} drafted — review it before approval.`,
+      );
       invalidate();
     },
     onError: onErr,
@@ -165,6 +176,20 @@ function OutreachInner() {
     };
   }, [items.data, focusId, companyByDeal, showTestRecords]);
 
+  const visibleFollowups = useMemo(
+    () =>
+      (followups.data ?? []).filter(
+        (item) =>
+          showTestRecords ||
+          !hasSyntheticMarker(companyByDeal.get(item.dealId), item.recipient),
+      ),
+    [companyByDeal, followups.data, showTestRecords],
+  );
+  const followupBySource = useMemo(
+    () => new Map(visibleFollowups.map((item) => [item.sourceId, item])),
+    [visibleFollowups],
+  );
+
   const hiddenTestCount = (items.data ?? []).filter((item) =>
     hasSyntheticMarker(
       companyByDeal.get(item.dealId),
@@ -223,6 +248,17 @@ function OutreachInner() {
       surface(await fn(), verb);
     } catch {
       // thrown tRPC errors already surfaced via onError
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function prepareFollowup(id: string) {
+    setBusyId(id);
+    try {
+      await draftFollowup.mutateAsync({ id });
+    } catch {
+      // The mutation surfaces a human-readable reason via onError.
     } finally {
       setBusyId(null);
     }
@@ -310,6 +346,47 @@ function OutreachInner() {
           <CrmTag kind="success">Send</CrmTag> {sendNote}
         </div>
       ) : null}
+
+      <section
+        className="crm-panel mt-4"
+        data-testid="outreach-cadence-monitor"
+      >
+        <div className="crm-panel-head">
+          <div>
+            <h3>Follow-up monitor</h3>
+            <p>
+              {visibleFollowups.filter((item) => item.state === "due").length}{" "}
+              due ·{" "}
+              {
+                visibleFollowups.filter((item) => item.state === "waiting")
+                  .length
+              }{" "}
+              scheduled ·{" "}
+              {
+                visibleFollowups.filter((item) => item.state === "queued")
+                  .length
+              }{" "}
+              awaiting review
+            </p>
+          </div>
+          <CrmTag
+            kind={
+              visibleFollowups.some((item) => item.state === "due")
+                ? "warn"
+                : "success"
+            }
+          >
+            {visibleFollowups.some((item) => item.state === "due")
+              ? "Action due"
+              : "Up to date"}
+          </CrmTag>
+        </div>
+        <div className="crm-panel-body text-xs text-[var(--muted)]">
+          A reply, unsubscribe, complaint, or bounce stops the cadence. Every
+          follow-up is a new draft and still needs review, approval, and a
+          separate Gmail send.
+        </div>
+      </section>
 
       <section className="crm-split mt-4">
         <div className="crm-panel">
@@ -671,43 +748,67 @@ function OutreachInner() {
                   <td colSpan={7}>No sent or discarded outreach yet.</td>
                 </tr>
               ) : (
-                byState.history.map((item) => (
-                  <tr key={item.id}>
-                    <td>
-                      <strong>{companyByDeal.get(item.dealId) ?? "—"}</strong>
-                    </td>
-                    <td>{item.channel}</td>
-                    <td>{item.recipient || "—"}</td>
-                    <td>{item.subject ?? "—"}</td>
-                    <td>
-                      <CrmTag
-                        kind={item.state === "sent" ? "success" : "danger"}
-                      >
-                        {item.state}
-                        {item.acceptedAt ? " · accepted" : ""}
-                      </CrmTag>
-                    </td>
-                    <td>{formatRelative(item.updatedAt)}</td>
-                    <td>
-                      {item.channel === "linkedin_connect" &&
-                      item.state === "sent" &&
-                      !item.acceptedAt ? (
-                        <CrmBtn
-                          data-testid="outreach-mark-accepted-history"
-                          disabled={busyId !== null}
-                          onClick={() =>
-                            void run(item.id, "Accepted", async () => {
-                              await markAccepted.mutateAsync({ id: item.id });
-                              return { ok: true };
-                            })
-                          }
+                byState.history.map((item) => {
+                  const followup = followupBySource.get(item.id);
+                  return (
+                    <tr key={item.id}>
+                      <td>
+                        <strong>{companyByDeal.get(item.dealId) ?? "—"}</strong>
+                      </td>
+                      <td>{item.channel}</td>
+                      <td>{item.recipient || "—"}</td>
+                      <td>{item.subject ?? "—"}</td>
+                      <td>
+                        <CrmTag
+                          kind={item.state === "sent" ? "success" : "danger"}
                         >
-                          Mark accepted
-                        </CrmBtn>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))
+                          {item.state}
+                          {item.acceptedAt ? " · accepted" : ""}
+                        </CrmTag>
+                        {followup ? (
+                          <p className="mt-1 text-[10px] text-[var(--muted)]">
+                            {followup.reason}
+                            {followup.dueAt
+                              ? ` · ${new Date(followup.dueAt).toLocaleDateString()}`
+                              : ""}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td>{formatRelative(item.updatedAt)}</td>
+                      <td>
+                        {item.channel === "linkedin_connect" &&
+                        item.state === "sent" &&
+                        !item.acceptedAt ? (
+                          <CrmBtn
+                            data-testid="outreach-mark-accepted-history"
+                            disabled={busyId !== null}
+                            onClick={() =>
+                              void run(item.id, "Accepted", async () => {
+                                await markAccepted.mutateAsync({ id: item.id });
+                                return { ok: true };
+                              })
+                            }
+                          >
+                            Mark accepted
+                          </CrmBtn>
+                        ) : null}
+                        {followup &&
+                        (followup.state === "due" ||
+                          followup.state === "waiting") ? (
+                          <CrmBtn
+                            data-testid="outreach-draft-followup"
+                            disabled={busyId !== null}
+                            onClick={() => void prepareFollowup(item.id)}
+                          >
+                            {followup.state === "due"
+                              ? `Draft touch ${followup.nextTouch}`
+                              : `Prepare touch ${followup.nextTouch}`}
+                          </CrmBtn>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

@@ -92,6 +92,9 @@ export async function GET() {
     googleOAuth: has("GOOGLE_OAUTH_CLIENT_ID") ? "configured" : "missing",
     xero,
     resend: resendMode,
+    salesUnsubscribe: has("SALES_UNSUBSCRIBE_SECRET")
+      ? "configured"
+      : "missing",
     dam:
       has("NEXT_PUBLIC_SUPABASE_URL") &&
       (process.env.DAM_STORAGE ?? "memory").toLowerCase() === "supabase"

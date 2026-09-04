@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   MonthlyCapExceededError,
   createMockProvider,
@@ -380,6 +381,60 @@ describe("openrouter free-model failover", () => {
     });
     expect(result.text).toBe("failover ok");
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    vi.unstubAllGlobals();
+  });
+
+  it("extracts schema-valid JSON from reasoning prose and requests response healing", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          id: "structured-1",
+          model: OPENROUTER_FREE_DEFAULT_MODEL,
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: null,
+                reasoning:
+                  'We need to return the draft.\n```json\n{"channel":"email","subject":"Hello","body":"Hi Sam","cta":"Reply yes"}\n```',
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = createProvider({
+      provider: "openrouter",
+      defaultModel: OPENROUTER_FREE_DEFAULT_MODEL,
+      openRouterApiKey: "sk-test",
+    });
+
+    const result = await provider.generate({
+      messages: [{ role: "user", content: "Draft an email" }],
+      schema: z.object({
+        channel: z.literal("email"),
+        subject: z.string(),
+        body: z.string(),
+        cta: z.string(),
+      }),
+    });
+    const request = JSON.parse(
+      String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ) as Record<string, unknown>;
+
+    expect(result.object).toEqual({
+      channel: "email",
+      subject: "Hello",
+      body: "Hi Sam",
+      cta: "Reply yes",
+    });
+    expect(request).toMatchObject({
+      response_format: { type: "json_object" },
+      plugins: [{ id: "response-healing" }],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
 

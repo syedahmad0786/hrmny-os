@@ -6,6 +6,7 @@ import {
   listContactResearch,
   listEmailEvents,
 } from "./store";
+import { buildEmailFollowupStatuses } from "./followups";
 
 export type StallDeal = {
   dealId: string;
@@ -34,6 +35,11 @@ export type SalesOsDigest = {
     sent: number;
     replied: number;
     rate: number;
+  };
+  followUps: {
+    due: number;
+    scheduled: number;
+    awaitingReview: number;
   };
 };
 
@@ -67,6 +73,13 @@ export async function buildSalesOsDigest(
       )
       .map((event) => event.outreachItemId!),
   );
+  const followUps = buildEmailFollowupStatuses({
+    outreach,
+    emailEvents,
+    cadenceTouches: settings.outreach.cadenceTouches,
+    cadenceDays: settings.outreach.cadenceDays,
+    now,
+  });
   const open = deals.filter((d) => !d.closeOutcome);
   const openValue = open.reduce((sum, d) => sum + Number(d.quoteValue ?? 0), 0);
   const monthlyTarget = settings.targets.h1BookedAed / 6;
@@ -119,6 +132,12 @@ export async function buildSalesOsDigest(
       sent: sentEmailIds.size,
       replied: repliedEmailIds.size,
       rate: sentEmailIds.size ? repliedEmailIds.size / sentEmailIds.size : 0,
+    },
+    followUps: {
+      due: followUps.filter((item) => item.state === "due").length,
+      scheduled: followUps.filter((item) => item.state === "waiting").length,
+      awaitingReview: followUps.filter((item) => item.state === "queued")
+        .length,
     },
   };
 }

@@ -155,7 +155,8 @@ export default function CrmDealsPage() {
                 {digest.data.coverage.targetX}× H1 · {visibleStalled.length}{" "}
                 stalled · Email replies {digest.data.replyRate.replied}/
                 {digest.data.replyRate.sent} (
-                {Math.round(digest.data.replyRate.rate * 100)}%)
+                {Math.round(digest.data.replyRate.rate * 100)}%) · Follow-ups
+                due {digest.data.followUps.due}
               </p>
             </div>
             <CrmTag kind={digest.data.coverage.healthy ? "success" : "warn"}>

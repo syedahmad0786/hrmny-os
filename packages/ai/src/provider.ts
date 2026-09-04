@@ -180,6 +180,53 @@ function openRouterMessages(options: LLMGenerateOptions) {
   );
 }
 
+function parseStructuredText(schema: ZodTypeAny, text: string): unknown {
+  const trimmed = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+  const candidates = [trimmed];
+
+  for (let start = 0; start < trimmed.length; start++) {
+    const opening = trimmed[start];
+    if (opening !== "{" && opening !== "[") continue;
+    const stack: string[] = [];
+    let quoted = false;
+    let escaped = false;
+    for (let index = start; index < trimmed.length; index++) {
+      const char = trimmed[index]!;
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') quoted = false;
+        continue;
+      }
+      if (char === '"') quoted = true;
+      else if (char === "{" || char === "[") stack.push(char);
+      else if (char === "}" || char === "]") {
+        const expected = char === "}" ? "{" : "[";
+        if (stack.pop() !== expected) break;
+        if (stack.length === 0) {
+          candidates.push(trimmed.slice(start, index + 1));
+          break;
+        }
+      }
+    }
+  }
+
+  let lastError: unknown;
+  for (const candidate of new Set(candidates)) {
+    try {
+      return schema.parse(JSON.parse(candidate));
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("LLM provider returned invalid structured output");
+}
+
 function anthropicMessages(options: LLMGenerateOptions) {
   const messages = options.messages.filter(
     (message) => message.role !== "system",
@@ -670,11 +717,10 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
     result: Omit<LLMGenerateResult, "object">,
   ): LLMGenerateResult => {
     if (!options.schema) return result;
-    const json = result.text
-      .trim()
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```$/, "");
-    return { ...result, object: options.schema.parse(JSON.parse(json)) };
+    return {
+      ...result,
+      object: parseStructuredText(options.schema, result.text),
+    };
   };
   const responseText = async (response: Response) => {
     const declared = Number(response.headers.get("content-length") ?? 0);
@@ -746,7 +792,10 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
                       }
                     : {}),
                   ...(options.schema
-                    ? { response_format: { type: "json_object" } }
+                    ? {
+                        response_format: { type: "json_object" },
+                        plugins: [{ id: "response-healing" }],
+                      }
                     : {}),
                 }),
               },
