@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { sql } from "@hrmny/db";
 import { describe, expect, it } from "vitest";
 import { getDb } from "../db";
+import { getSalesOsSettings, mutateSalesOsSettings } from "./store";
 
 type WorkerResult =
   { ok: true; value: Record<string, unknown> } | { ok: false; error: string };
@@ -11,15 +12,21 @@ type WorkerResult =
 const workerPath = fileURLToPath(
   new URL("../../test/sales-research-postgres-worker.ts", import.meta.url),
 );
+const settingsWorkerPath = fileURLToPath(
+  new URL("../../test/sales-settings-postgres-worker.ts", import.meta.url),
+);
 const runId = randomUUID();
 const prefix = `CI Sales Runtime ${runId}`;
 
-function runWorker(input: Record<string, unknown>): Promise<WorkerResult> {
+function runWorker(
+  input: Record<string, unknown>,
+  path = workerPath,
+): Promise<WorkerResult> {
   const encoded = Buffer.from(JSON.stringify(input)).toString("base64url");
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      ["--import", "tsx", workerPath, encoded],
+      ["--import", "tsx", path, encoded],
       {
         cwd: process.cwd(),
         env: process.env,
@@ -68,6 +75,36 @@ async function counts(name: string, requestId: string) {
 }
 
 describe("Sales research proposal PostgreSQL runtime", () => {
+  it("serializes Sales settings mutations across PostgreSQL clients", async () => {
+    await mutateSalesOsSettings((settings) => {
+      const next = {
+        ...settings,
+        caps: {
+          ...settings.caps,
+          emailPerDay: 20,
+          companiesPerResearchRun: 5,
+        },
+      };
+      return { settings: next, result: next };
+    });
+
+    const results = await Promise.all([
+      runWorker(
+        { field: "emailPerDay", value: 31, delayMs: 250 },
+        settingsWorkerPath,
+      ),
+      runWorker(
+        { field: "companiesPerResearchRun", value: 4, delayMs: 250 },
+        settingsWorkerPath,
+      ),
+    ]);
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect((await getSalesOsSettings()).caps).toMatchObject({
+      emailPerDay: 31,
+      companiesPerResearchRun: 4,
+    });
+  });
+
   it("claims one durable proposal under concurrent exact replay", async () => {
     const name = `${prefix} Replay`;
     const requestId = `ci-postgres-replay-${runId}`;
