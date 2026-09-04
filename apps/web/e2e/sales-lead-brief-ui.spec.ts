@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("a saved lead brief survives reload and guides the email step", async ({
   page,
 }) => {
-  const company = `E2E Brief ${Date.now()}`;
+  const company = `Brief Proof ${Date.now()}`;
   await page.goto("/crm/deals", { waitUntil: "commit" });
   await expect(page.getByRole("heading", { name: "Deals" })).toBeVisible({
     timeout: 60_000,
