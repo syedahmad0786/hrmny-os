@@ -103,7 +103,7 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect(
       page.getByRole("checkbox", { name: "Oman" }),
     ).not.toBeChecked();
-    await page.getByText("Advanced filters", { exact: true }).click();
+    await page.locator("summary").filter({ hasText: "Advanced filters" }).click();
     await expect(page.getByTestId("hunt-apollo-location-basis")).toHaveValue(
       "company",
     );
