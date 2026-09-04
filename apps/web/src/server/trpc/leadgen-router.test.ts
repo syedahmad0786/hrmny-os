@@ -83,6 +83,7 @@ async function seedDeal(verified = true) {
     companyId: company.companyId,
     firstName: "Sara",
     email: "sara@acme.example",
+    linkedinUrl: "https://www.linkedin.com/in/sara-acme",
   });
   const deal = await createDeal({
     companyName: "Acme LLC",
@@ -111,6 +112,63 @@ describe("outreach HITL gate flow", () => {
     expect(item.body).toContain("Hello there");
     expect(item.body).toContain("— hrmny outreach —");
     expect(item.body).toContain("?token=");
+  });
+
+  it("grounds generated outreach as hrmny speaking to the prospect", async () => {
+    const deal = await seedDeal();
+    let prompt = "";
+    const runAgent: RunAgent = async (input) => {
+      prompt = String(input.input);
+      return {
+        agent: input.agent,
+        model: "test",
+        output: {
+          channel: "linkedin_connect",
+          subject: "LinkedIn connection",
+          body:
+            "Hi Sara — I’m Ayham from hrmny. I noticed Acme LLC’s UAE growth and would be glad to connect.",
+          cta: "Would be glad to connect.",
+        },
+        inputTokens: 0,
+        outputTokens: 0,
+        costAed: 0,
+        gateOutcome: "pending",
+      };
+    };
+
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      channel: "linkedin_connect",
+      runAgent,
+    });
+
+    expect(prompt).toContain("Sender company: hrmny");
+    expect(prompt).toContain("write FROM hrmny TO Acme LLC");
+    expect(prompt).toContain("Recipient: Sara at Acme LLC");
+    expect(item.recipient).toBe("https://www.linkedin.com/in/sara-acme");
+    expect(item.body).toContain("I’m Ayham from hrmny");
+    expect(item.body.length).toBeLessThanOrEqual(300);
+  });
+
+  it("does not call AI for a lead with no usable outreach destination", async () => {
+    const deal = await seedDeal(false);
+    await updateContact(deal.primaryContactId!, {
+      email: null,
+      linkedinUrl: null,
+    });
+    const runAgent = vi.fn<RunAgent>();
+
+    await expect(
+      draftOutreach({ dealId: deal.dealId, runAgent }),
+    ).rejects.toThrow(/unlock and verify/i);
+    await expect(
+      draftOutreach({
+        dealId: deal.dealId,
+        channel: "linkedin_connect",
+        runAgent,
+      }),
+    ).rejects.toThrow(/no LinkedIn profile URL/i);
+    expect(runAgent).not.toHaveBeenCalled();
   });
 
   it("replaces a legacy email unsubscribe query before approval", async () => {

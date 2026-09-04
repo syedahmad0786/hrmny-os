@@ -24,6 +24,7 @@ import {
   type LLMProvider,
   type MeteringOptions,
 } from "./provider";
+import { OutreachDraftSchema } from "./evals/golden";
 import {
   decideLlmSandbox,
   providerForSandbox,
@@ -173,6 +174,7 @@ export async function runAgent(
     task: taskFor(agent),
     model: input.model,
     webSearch: input.webSearch,
+    schema: agent === "outreach-draft" ? OutreachDraftSchema : undefined,
     messages: [
       { role: "system", content: AGENT_REGISTRY[agent].responsibility },
       { role: "user", content: `${userText}${context}` },
