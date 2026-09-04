@@ -56,7 +56,10 @@ const staff = (route: string, extra: Partial<RouteEntry> = {}): RouteEntry => ({
   roles: ["staff"],
   ...extra,
 });
-const portal = (route: string, extra: Partial<RouteEntry> = {}): RouteEntry => ({
+const portal = (
+  route: string,
+  extra: Partial<RouteEntry> = {},
+): RouteEntry => ({
   route,
   actor: "portal",
   sample: route,
@@ -94,6 +97,7 @@ export const ROUTES: RouteEntry[] = [
   staff("/crm/dashboard"),
   staff("/crm/deals"),
   staff("/crm/deals/[id]", { sample: `/crm/deals/${DEMO_DEAL_ID}` }),
+  staff("/crm/handover"),
   staff("/crm/inbound"),
   staff("/crm/hunt"),
   staff("/crm/outreach"),
@@ -188,7 +192,7 @@ export function routeToRegex(route: string): RegExp {
 export function matchesManifest(path: string): boolean {
   let p = path.split(/[?#]/)[0] ?? path;
   if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
-  if (p === "" ) p = "/";
+  if (p === "") p = "/";
   if (p === "/") return true;
   if (p.startsWith("/api/")) return true; // API routes live in the app tree as route.ts
   if (STATIC_ROUTES.has(p)) return true;

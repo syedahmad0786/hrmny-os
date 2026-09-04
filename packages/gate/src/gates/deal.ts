@@ -131,14 +131,15 @@ export const dealBuafGate: GateFn = async ({ entity, request }) => {
   return null;
 };
 
-/** G2: engage→scope requires verified email (Apollo→Hunter). */
+/** G2: engage→scope requires a verified work email. */
 export const dealVerifiedEmailGate: GateFn = async ({ entity, request }) => {
   if (!(entity.state === "engage" && request.to === "scope")) return null;
   const verified = boolField(entity.data, "emailVerified", "email_verified");
   if (!verified) {
     return {
       gate: "deal.verified_email",
-      reason: "Email not verified via Apollo→Hunter waterfall — GATE_BLOCKED",
+      reason:
+        "Verify or unlock this contact’s work email before moving to Define needs.",
     };
   }
   return null;
@@ -156,6 +157,19 @@ export const dealVoiceGate: GateFn = async ({ entity, request }) => {
     return {
       gate: "deal.voice",
       reason: "Voice check not passed — run deals.voiceCheck before scope",
+    };
+  }
+  return null;
+};
+
+/** scope→propose requires the four client-needs fields used by the quote. */
+export const dealNeedsGate: GateFn = async ({ entity, request }) => {
+  if (!(entity.state === "scope" && request.to === "propose")) return null;
+  if (!boolField(entity.data, "needsComplete", "needs_complete")) {
+    return {
+      gate: "deal.client_needs",
+      reason:
+        "Add the objective, deliverables, timing, and decision maker before preparing a proposal.",
     };
   }
   return null;

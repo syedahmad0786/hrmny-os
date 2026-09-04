@@ -8,14 +8,246 @@ import { buildHandoverNextLinks } from "./handover-next";
 import {
   getDeal,
   getContact,
+  listCrmTasks,
+  listNotes,
   listActivities,
   listQuotesByDeal,
   updateDeal,
   moveDealStage,
 } from "./repository";
-import type { DealRow } from "./types";
+import type { CrmQuoteRow, DealRow, QuoteLineItem } from "./types";
 
 export type CloseOutcome = "won" | "lost" | "postponed_on_hold";
+
+type HandoverFailure = {
+  ok: false;
+  reason: string;
+  code?: string;
+  /** Required records already present when the handover stopped. */
+  completed?: string[];
+  /** Required effects that still need a successful retry. */
+  requiredFailures?: string[];
+};
+
+type ScopeLine = {
+  label: string;
+  quantity: number;
+  unitPrice: number;
+  internalCost: number;
+  isVendor: boolean;
+};
+
+type AcceptedScope = {
+  scopeId: string;
+  sourceQuoteId: string;
+  deliverableCount: number;
+};
+
+const BRAND_PREFIX = "HANDOVER:BRAND_ASSETS —";
+const BILLING_PREFIX = "HANDOVER:BILLING_DETAILS —";
+
+function sameMoney(
+  left: string | number | null,
+  right: string | number | null,
+) {
+  return Math.abs(Number(left ?? 0) - Number(right ?? 0)) < 0.005;
+}
+
+async function handoverReadiness(
+  deal: DealRow,
+  quote: CrmQuoteRow | null,
+): Promise<{ completed: string[]; requiredFailures: string[] }> {
+  const [contact, tasks, notes] = await Promise.all([
+    deal.primaryContactId ? getContact(deal.primaryContactId) : null,
+    listCrmTasks({ dealId: deal.dealId }),
+    listNotes({ dealId: deal.dealId }),
+  ]);
+  const checks = [
+    ["scope.accepted_quote", Boolean(quote)],
+    ["scope.agreed_price", Number(quote?.quoteValue ?? 0) > 0],
+    ["contact.primary", Boolean(contact)],
+    [
+      "task.key_date",
+      tasks.some(
+        (task) =>
+          task.status !== "done" &&
+          task.status !== "cancelled" &&
+          Boolean(task.dueDate),
+      ),
+    ],
+    [
+      "evidence.brand_assets",
+      notes.some(
+        (note) =>
+          note.body.startsWith(BRAND_PREFIX) &&
+          note.body.slice(BRAND_PREFIX.length).trim().length > 0,
+      ),
+    ],
+    [
+      "evidence.billing_details",
+      notes.some(
+        (note) =>
+          note.body.startsWith(BILLING_PREFIX) &&
+          note.body.slice(BILLING_PREFIX.length).trim().length > 0,
+      ),
+    ],
+  ] as const;
+  return {
+    completed: checks.filter(([, ready]) => ready).map(([key]) => key),
+    requiredFailures: checks.filter(([, ready]) => !ready).map(([key]) => key),
+  };
+}
+
+function acceptedQuoteForHandover(quotes: CrmQuoteRow[]): CrmQuoteRow | null {
+  return (
+    quotes.find(
+      (quote) => quote.status === "accepted" && quote.lineItems.length > 0,
+    ) ?? null
+  );
+}
+
+function scopeLines(lineItems: QuoteLineItem[]): ScopeLine[] {
+  return lineItems.map((line) => ({
+    label: line.label.trim(),
+    quantity: line.qty ?? 1,
+    unitPrice: line.unitSell,
+    internalCost: line.unitCost,
+    isVendor: Boolean(line.isVendor),
+  }));
+}
+
+function lineSignature(line: {
+  label: string;
+  quantity: number | string;
+  unitPrice: number | string;
+  internalCost: number | string;
+}) {
+  return [
+    line.label.trim(),
+    Number(line.quantity).toFixed(2),
+    Number(line.unitPrice).toFixed(2),
+    Number(line.internalCost).toFixed(2),
+  ].join("\u0000");
+}
+
+function sameScopeLines(
+  expected: ScopeLine[],
+  actual: Array<{
+    label: string;
+    quantity: number | string;
+    unitPrice: number | string;
+    internalCost: number | string;
+  }>,
+) {
+  const expectedSignatures = expected.map(lineSignature).sort();
+  const actualSignatures = actual.map(lineSignature).sort();
+  return (
+    expectedSignatures.length === actualSignatures.length &&
+    expectedSignatures.every(
+      (signature, index) => signature === actualSignatures[index],
+    )
+  );
+}
+
+function handoverIncomplete(
+  completed: string[],
+  requiredFailures: string[],
+  reason = "Handover required records are incomplete",
+): HandoverFailure {
+  return {
+    ok: false,
+    reason,
+    code: "HANDOVER_INCOMPLETE",
+    completed: [...completed],
+    requiredFailures,
+  };
+}
+
+/**
+ * Promote one accepted quote version into the existing scope tables. The
+ * accepted quote id is the replay key; an advisory lock prevents two handover
+ * requests from creating the same scope concurrently.
+ */
+async function ensureDurableAcceptedScope(input: {
+  db: NonNullable<ReturnType<typeof getDb>>;
+  clientId: string;
+  dealId: string;
+  quote: CrmQuoteRow;
+}): Promise<AcceptedScope> {
+  const lines = scopeLines(input.quote.lineItems);
+  const receipt = `CRM quote receipt ${input.quote.quoteId}`;
+  return input.db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`crm-handover-scope:${input.quote.quoteId}`}, 0))`,
+    );
+    const existing = await tx.execute<{ scopeId: string }>(sql`
+      select scope_id as "scopeId"
+      from public.scope
+      where deal_id = ${input.dealId}::uuid
+        and terms = ${receipt}
+      limit 1
+    `);
+    let scopeId = existing[0]?.scopeId ?? null;
+    if (!scopeId) {
+      const inserted = await tx.execute<{ scopeId: string }>(sql`
+        insert into public.scope (
+          client_id, deal_id, title, value, terms, period_start, status,
+          margin_at_sale_pct
+        ) values (
+          ${input.clientId}::uuid,
+          ${input.dealId}::uuid,
+          ${`Accepted scope v${input.quote.version}`},
+          ${input.quote.quoteValue},
+          ${receipt},
+          current_date,
+          'active'::scope_status_enum,
+          ${input.quote.marginPct}
+        )
+        returning scope_id as "scopeId"
+      `);
+      scopeId = inserted[0]?.scopeId ?? null;
+      if (!scopeId) throw new Error("Accepted scope insert returned no id");
+      for (const line of lines) {
+        await tx.execute(sql`
+          insert into public.scope_deliverable_line (
+            scope_id, label, quantity, unit_price, internal_cost
+          ) values (
+            ${scopeId}::uuid,
+            ${line.label},
+            ${line.quantity},
+            ${line.unitPrice},
+            ${line.internalCost}
+          )
+        `);
+      }
+    }
+    const stored = await tx.execute<{
+      label: string;
+      quantity: string;
+      unitPrice: string;
+      internalCost: string;
+    }>(sql`
+      select
+        label,
+        quantity::text as quantity,
+        unit_price::text as "unitPrice",
+        internal_cost::text as "internalCost"
+      from public.scope_deliverable_line
+      where scope_id = ${scopeId}::uuid
+      order by created_at, scope_deliverable_line_id
+    `);
+    if (!sameScopeLines(lines, stored)) {
+      throw new Error(
+        "Stored scope deliverables do not match the accepted quote receipt",
+      );
+    }
+    return {
+      scopeId,
+      sourceQuoteId: input.quote.quoteId,
+      deliverableCount: stored.length,
+    };
+  });
+}
 
 /**
  * Mark a durable CRM deal closed with an outcome. For won, stage becomes `close`
@@ -135,6 +367,10 @@ export type HandoverPackResult = {
     packId: string;
     dealId: string;
     clientId: string;
+    scopeId: string;
+    sourceQuoteId: string;
+    scopeDeliverableCount: number;
+    invoice: { invoiceId: string; status: "proposed" };
     fired: string[];
     createdAt: string;
   };
@@ -147,9 +383,14 @@ export type HandoverPackResult = {
     contractValue: string;
     lifecycleStatus: string;
   };
+  /** Accepted quote promoted into the durable delivery scope tables. */
+  scopeId: string;
+  sourceQuoteId: string;
+  scopeDeliverableCount: number;
   task: Awaited<ReturnType<typeof seedClientCreativeTask>> | null;
-  /** First OS invoice seeded from the won deal quote (sales → billing continuity). */
+  /** First internal OS invoice proposal. This does not mean posted to Xero. */
   invoiceId: string | null;
+  invoiceStatus: "proposed" | null;
   onboardingPhases: number;
   /** Content calendar seeded for Account / Creative continuity. */
   calendarId: string | null;
@@ -188,7 +429,7 @@ export type HandoverPackResult = {
 async function memoryHandoverPack(input: {
   dealId: string;
   actorEmployeeId?: string | null;
-}): Promise<HandoverPackResult | { ok: false; reason: string; code?: string }> {
+}): Promise<HandoverPackResult | HandoverFailure> {
   const deal = await getDeal(input.dealId);
   if (!deal) return { ok: false, reason: "Deal not found" };
   if (deal.closeOutcome !== "won") {
@@ -206,6 +447,18 @@ async function memoryHandoverPack(input: {
       reason: `Unexpected stage ${deal.stage}`,
       code: "GATE_BLOCKED",
     };
+  }
+
+  const acceptedQuote = acceptedQuoteForHandover(
+    await listQuotesByDeal(input.dealId),
+  );
+  const readiness = await handoverReadiness(deal, acceptedQuote);
+  if (!acceptedQuote || readiness.requiredFailures.length > 0) {
+    return handoverIncomplete(
+      readiness.completed,
+      readiness.requiredFailures,
+      "Complete all six handover facts before creating Delivery records",
+    );
   }
 
   const fired: string[] = [];
@@ -240,9 +493,9 @@ async function memoryHandoverPack(input: {
       emailVerified: deal.emailVerified,
       contactEmail,
       voiceCheckPassed: false,
-      quoteValue: deal.quoteValue ?? "0",
-      internalCost: deal.internalCost ?? "0",
-      marginPct: deal.marginPct ?? "0",
+      quoteValue: acceptedQuote.quoteValue,
+      internalCost: acceptedQuote.internalCost,
+      marginPct: acceptedQuote.marginPct,
       discountPct: deal.discountPct ?? "0",
       discountApprovalTier: null,
       vendorHandlingFeePct: deal.vendorHandlingFeePct ?? "0",
@@ -252,29 +505,77 @@ async function memoryHandoverPack(input: {
       commercialMode: "project",
     });
   fired.push(existing ? "client.exists" : "client.create");
+  if (!sameMoney(demoClient.contractValue, acceptedQuote.quoteValue)) {
+    return handoverIncomplete(
+      fired,
+      ["client.contract_value"],
+      "Existing client contract value does not match the accepted quote",
+    );
+  }
+
+  const receipt = `CRM quote receipt ${acceptedQuote.quoteId}`;
+  const acceptedLines = scopeLines(acceptedQuote.lineItems);
+  let memoryScope = [...store.scopes.values()].find(
+    (scope) => scope.dealId === input.dealId && scope.terms === receipt,
+  );
+  if (!memoryScope) {
+    memoryScope = {
+      scopeId: crypto.randomUUID(),
+      clientId: demoClient.clientId,
+      dealId: input.dealId,
+      title: `Accepted scope v${acceptedQuote.version}`,
+      value: acceptedQuote.quoteValue,
+      terms: receipt,
+      periodStart: new Date().toISOString().slice(0, 10),
+      periodEnd: null,
+      status: "active",
+      marginAtSalePct: acceptedQuote.marginPct,
+      lines: acceptedLines.map((line) => ({
+        label: line.label,
+        qty: line.quantity,
+        unitSell: line.unitPrice,
+        unitCost: line.internalCost,
+        isVendor: line.isVendor,
+      })),
+    };
+    store.scopes.set(memoryScope.scopeId, memoryScope);
+    fired.push("scope.create");
+  } else {
+    fired.push("scope.exists");
+  }
+  if (
+    memoryScope.clientId !== demoClient.clientId ||
+    !sameScopeLines(
+      acceptedLines,
+      memoryScope.lines.map((line) => ({
+        label: line.label,
+        quantity: line.qty,
+        unitPrice: line.unitSell,
+        internalCost: line.unitCost,
+      })),
+    )
+  ) {
+    return handoverIncomplete(
+      fired,
+      ["scope.deliverables"],
+      "Stored scope deliverables do not match the accepted quote receipt",
+    );
+  }
+  fired.push("scope.deliverables_ready");
   fired.push("onboarding.seed");
 
   const phases = store.onboarding.get(demoClient.clientId) ?? [];
   const creative = store.seedWonCreativeTask({
     clientId: demoClient.clientId,
-    title: `${demoClient.name} — first creative cutdown`,
+    title: `${demoClient.name} — ${acceptedLines[0]!.label}`,
     ownerEmployeeId: input.actorEmployeeId ?? null,
   });
-  fired.push("creative.task_seed");
+  if (creative) fired.push("creative.task_seed");
   if (phases.length === 0 || !creative) {
-    return {
-      ok: false,
-      reason: "Handover core records are incomplete",
-      code: "HANDOVER_INCOMPLETE",
-    };
-  }
-  if (needsStageAdvance) {
-    const moved = await moveDealStage({
-      dealId: input.dealId,
-      to: "handover_pack",
-      actorEmployeeId: input.actorEmployeeId,
-    });
-    if (!moved.ok) return { ok: false, reason: moved.reason };
+    return handoverIncomplete(fired, [
+      ...(phases.length === 0 ? ["onboarding.phases"] : []),
+      ...(!creative ? ["delivery.initial_task"] : []),
+    ]);
   }
 
   let calendarId: string | null;
@@ -358,12 +659,17 @@ async function memoryHandoverPack(input: {
         inv.period === period,
     );
     if (existing) {
+      if (!sameMoney(existing.amount, acceptedQuote.quoteValue)) {
+        return handoverIncomplete(
+          fired,
+          ["invoice.amount"],
+          "Existing first invoice does not match the accepted quote",
+        );
+      }
       invoiceId = existing.invoiceId;
       fired.push("invoice.exists");
     } else {
-      const amountNum = Number(
-        demoClient.contractValue || deal.quoteValue || 0,
-      );
+      const amountNum = Number(acceptedQuote.quoteValue);
       const amount = Number.isFinite(amountNum) ? amountNum : 0;
       invoiceId = crypto.randomUUID();
       store.invoices.set(invoiceId, {
@@ -395,6 +701,21 @@ async function memoryHandoverPack(input: {
   } catch {
     invoiceId = null;
     fired.push("invoice.failed");
+  }
+  if (!invoiceId) {
+    return handoverIncomplete(fired, ["invoice.proposal"]);
+  }
+
+  if (needsStageAdvance) {
+    const moved = await moveDealStage({
+      dealId: input.dealId,
+      to: "handover_pack",
+      actorEmployeeId: input.actorEmployeeId,
+    });
+    if (!moved.ok) {
+      return handoverIncomplete(fired, ["deal.handover_stage"], moved.reason);
+    }
+    fired.push("deal.handover_stage");
   }
 
   let outreachId: string | null;
@@ -513,12 +834,20 @@ async function memoryHandoverPack(input: {
       packId: crypto.randomUUID(),
       dealId: input.dealId,
       clientId: client.clientId,
+      scopeId: memoryScope.scopeId,
+      sourceQuoteId: acceptedQuote.quoteId,
+      scopeDeliverableCount: memoryScope.lines.length,
+      invoice: { invoiceId, status: "proposed" },
       fired,
       createdAt: new Date().toISOString(),
     },
     client,
+    scopeId: memoryScope.scopeId,
+    sourceQuoteId: acceptedQuote.quoteId,
+    scopeDeliverableCount: memoryScope.lines.length,
     task,
     invoiceId,
+    invoiceStatus: "proposed",
     onboardingPhases: phases.length,
     calendarId,
     portalInvite,
@@ -538,7 +867,7 @@ async function memoryHandoverPack(input: {
 export async function durableHandoverPack(input: {
   dealId: string;
   actorEmployeeId?: string | null;
-}): Promise<HandoverPackResult | { ok: false; reason: string; code?: string }> {
+}): Promise<HandoverPackResult | HandoverFailure> {
   const db = getDb();
   if (!db) {
     return memoryHandoverPack(input);
@@ -561,6 +890,18 @@ export async function durableHandoverPack(input: {
       reason: `Unexpected stage ${deal.stage}`,
       code: "GATE_BLOCKED",
     };
+  }
+
+  const acceptedQuote = acceptedQuoteForHandover(
+    await listQuotesByDeal(input.dealId),
+  );
+  const readiness = await handoverReadiness(deal, acceptedQuote);
+  if (!acceptedQuote || readiness.requiredFailures.length > 0) {
+    return handoverIncomplete(
+      readiness.completed,
+      readiness.requiredFailures,
+      "Complete all six handover facts before creating Delivery records",
+    );
   }
 
   const existing = await db.execute<{
@@ -586,7 +927,7 @@ export async function durableHandoverPack(input: {
   const fired: string[] = [];
 
   if (!client) {
-    const contractValue = deal.quoteValue ?? "0";
+    const contractValue = acceptedQuote.quoteValue;
     const rows = await db.execute<{
       clientId: string;
       dealId: string;
@@ -620,32 +961,49 @@ export async function durableHandoverPack(input: {
   } else {
     fired.push("client.exists");
   }
+  if (!sameMoney(client.contractValue, acceptedQuote.quoteValue)) {
+    return handoverIncomplete(
+      fired,
+      ["client.contract_value"],
+      "Existing client contract value does not match the accepted quote",
+    );
+  }
+
+  let acceptedScope: AcceptedScope;
+  try {
+    acceptedScope = await ensureDurableAcceptedScope({
+      db,
+      clientId: client.clientId,
+      dealId: input.dealId,
+      quote: acceptedQuote,
+    });
+    fired.push("scope.ready", "scope.deliverables_ready");
+  } catch (error) {
+    return handoverIncomplete(
+      fired,
+      ["scope.deliverables"],
+      error instanceof Error
+        ? error.message
+        : "Accepted quote could not be promoted to delivery scope",
+    );
+  }
 
   const phases = await ensureClientOnboarding(client.clientId);
   fired.push("onboarding.seed");
 
   const task = await seedClientCreativeTask({
     clientId: client.clientId,
-    title: `${client.name} — first creative cutdown`,
+    title: `${client.name} — ${acceptedQuote.lineItems[0]!.label.trim()}`,
     taskType: "social_cutdowns",
     status: "qc",
     ownerEmployeeId: input.actorEmployeeId ?? null,
   });
   if (task) fired.push("creative.task_seed");
   if (phases.length === 0 || !task) {
-    return {
-      ok: false,
-      reason: "Handover core records are incomplete",
-      code: "HANDOVER_INCOMPLETE",
-    };
-  }
-  if (needsStageAdvance) {
-    const moved = await moveDealStage({
-      dealId: input.dealId,
-      to: "handover_pack",
-      actorEmployeeId: input.actorEmployeeId,
-    });
-    if (!moved.ok) return { ok: false, reason: moved.reason };
+    return handoverIncomplete(fired, [
+      ...(phases.length === 0 ? ["onboarding.phases"] : []),
+      ...(!task ? ["delivery.initial_task"] : []),
+    ]);
   }
 
   let campaignItemId: string | null = null;
@@ -689,10 +1047,17 @@ export async function durableHandoverPack(input: {
       billingKind: "first",
     });
     if (existingFirst[0]) {
+      if (!sameMoney(existingFirst[0].amount, acceptedQuote.quoteValue)) {
+        return handoverIncomplete(
+          fired,
+          ["invoice.amount"],
+          "Existing first invoice does not match the accepted quote",
+        );
+      }
       invoiceId = existingFirst[0].invoiceId;
       fired.push("invoice.exists");
     } else {
-      const amountNum = Number(client.contractValue || deal.quoteValue || 0);
+      const amountNum = Number(acceptedQuote.quoteValue);
       const amount = Number.isFinite(amountNum) ? amountNum : 0;
       const seeded = await insertOsInvoice({
         clientId: client.clientId,
@@ -718,6 +1083,21 @@ export async function durableHandoverPack(input: {
     }
   } catch {
     fired.push("invoice.failed");
+  }
+  if (!invoiceId) {
+    return handoverIncomplete(fired, ["invoice.proposal"]);
+  }
+
+  if (needsStageAdvance) {
+    const moved = await moveDealStage({
+      dealId: input.dealId,
+      to: "handover_pack",
+      actorEmployeeId: input.actorEmployeeId,
+    });
+    if (!moved.ok) {
+      return handoverIncomplete(fired, ["deal.handover_stage"], moved.reason);
+    }
+    fired.push("deal.handover_stage");
   }
 
   if (needsStageAdvance) {
@@ -847,12 +1227,20 @@ export async function durableHandoverPack(input: {
       packId,
       dealId: input.dealId,
       clientId: client.clientId,
+      scopeId: acceptedScope.scopeId,
+      sourceQuoteId: acceptedScope.sourceQuoteId,
+      scopeDeliverableCount: acceptedScope.deliverableCount,
+      invoice: { invoiceId, status: "proposed" },
       fired,
       createdAt: new Date().toISOString(),
     },
     client,
+    scopeId: acceptedScope.scopeId,
+    sourceQuoteId: acceptedScope.sourceQuoteId,
+    scopeDeliverableCount: acceptedScope.deliverableCount,
     task,
     invoiceId,
+    invoiceStatus: "proposed",
     onboardingPhases: phases.length,
     calendarId,
     portalInvite,

@@ -15,8 +15,6 @@ import {
   formatContactName,
   formatAed,
   formatLane,
-  formatRelative,
-  initials,
   tagKindForTemp,
   workEmailState,
 } from "@/components/crm/format";
@@ -29,6 +27,9 @@ export default function CrmPipelinePage() {
   const stages = trpc.crm.stages.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
   const contacts = trpc.crm.contacts.list.useQuery();
+  const tasks = trpc.crm.tasks.list.useQuery();
+  const activities = trpc.crm.activities.list.useQuery({ limit: 200 });
+  const session = trpc.auth.session.useQuery();
   const health = trpc.crm.health.useQuery();
   const create = trpc.crm.deals.create.useMutation({
     onSuccess: () => void utils.crm.deals.invalidate(),
@@ -44,7 +45,7 @@ export default function CrmPipelinePage() {
   const [showTestRecords, setShowTestRecords] = useState(false);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
-  const [moveError, setMoveError] = useState<string | null>(null);
+  const [moveErrors, setMoveErrors] = useState<Record<string, string>>({});
   const contactById = useMemo(
     () =>
       new Map(
@@ -61,18 +62,60 @@ export default function CrmPipelinePage() {
     try {
       const res = await move.mutateAsync({ id, to });
       if (!res.ok) {
-        setMoveError(
-          res.blockedBy?.map((b) => `${b.gate}: ${b.reason}`).join(" · ") ??
+        setMoveErrors((current) => ({
+          ...current,
+          [id]:
+            res.blockedBy?.map((b) => b.reason).join(" · ") ??
             res.reason ??
-            "Move blocked",
-        );
+            "Complete the missing requirement first.",
+        }));
       } else {
-        setMoveError(null);
+        setMoveErrors((current) => {
+          const next = { ...current };
+          delete next[id];
+          return next;
+        });
       }
     } catch (err) {
-      setMoveError(err instanceof Error ? err.message : "Move failed");
+      setMoveErrors((current) => ({
+        ...current,
+        [id]: err instanceof Error ? err.message : "Move failed",
+      }));
     }
   };
+
+  const nextTaskByDeal = useMemo(() => {
+    const rows = (tasks.data ?? [])
+      .filter(
+        (task) =>
+          task.dealId && task.status !== "done" && task.status !== "cancelled",
+      )
+      .sort((a, b) => {
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      });
+    const byDeal = new Map<string, (typeof rows)[number]>();
+    rows.forEach((task) => {
+      if (task.dealId && !byDeal.has(task.dealId))
+        byDeal.set(task.dealId, task);
+    });
+    return byDeal;
+  }, [tasks.data]);
+
+  const stageEnteredAtByDeal = useMemo(() => {
+    const byDeal = new Map<string, string>();
+    (activities.data ?? []).forEach((activity) => {
+      if (
+        activity.dealId &&
+        activity.type === "stage_change" &&
+        !byDeal.has(activity.dealId)
+      ) {
+        byDeal.set(activity.dealId, activity.createdAt);
+      }
+    });
+    return byDeal;
+  }, [activities.data]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -189,18 +232,6 @@ export default function CrmPipelinePage() {
 
       <DashStrip />
 
-      {moveError ? (
-        <div
-          className="crm-note mb-4 flex items-center justify-between gap-3"
-          role="alert"
-        >
-          <span>Stage move blocked — {moveError}</span>
-          <CrmBtn variant="ghost" onClick={() => setMoveError(null)}>
-            Dismiss
-          </CrmBtn>
-        </div>
-      ) : null}
-
       {deals.isLoading ? (
         <CrmEmpty title="Loading pipeline…" />
       ) : (
@@ -240,10 +271,28 @@ export default function CrmPipelinePage() {
                       : undefined;
                     const leadName = formatContactName(contact);
                     const email = workEmailState(contact, d.emailVerified);
+                    const stageIndex = stageList.findIndex(
+                      (item) => item.key === d.stage,
+                    );
+                    const nextStage = stageList[stageIndex + 1];
+                    const nextTask = nextTaskByDeal.get(d.dealId);
+                    const stageEnteredAt =
+                      stageEnteredAtByDeal.get(d.dealId) ?? d.createdAt;
+                    const daysInStage = Math.max(
+                      0,
+                      Math.floor(
+                        (Date.now() - new Date(stageEnteredAt).getTime()) /
+                          86_400_000,
+                      ),
+                    );
+                    const taskOwner = nextTask?.ownerEmployeeId
+                      ? nextTask.ownerEmployeeId === session.data?.employeeId
+                        ? "You"
+                        : "Assigned"
+                      : "Unassigned";
                     return (
-                      <Link
+                      <article
                         key={d.dealId}
-                        href={`/crm/deals/${d.dealId}`}
                         className="crm-deal-card"
                         draggable
                         onDragStart={(e) => {
@@ -252,63 +301,73 @@ export default function CrmPipelinePage() {
                           e.dataTransfer.effectAllowed = "move";
                         }}
                       >
-                        <div className="crm-deal-top">
-                          <span className={`crm-temp-dot ${tempVal ?? ""}`} />
-                          {tempVal ? (
-                            <CrmTag kind={tagKindForTemp(tempVal)}>
-                              {tempVal}
-                            </CrmTag>
-                          ) : (
-                            <CrmTag kind="info">No priority</CrmTag>
-                          )}
-                          <CrmTag kind={email.kind}>{email.label}</CrmTag>
-                        </div>
-                        <h4>{leadName ?? "Lead name unavailable"}</h4>
-                        <span className="company">{d.companyName}</span>
-                        {contact?.title || d.sector ? (
-                          <span className="company">
-                            {[contact?.title, d.sector]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </span>
+                        <Link
+                          href={`/crm/deals/${d.dealId}`}
+                          className="block text-inherit no-underline"
+                        >
+                          <div className="crm-deal-top">
+                            <span className={`crm-temp-dot ${tempVal ?? ""}`} />
+                            {tempVal ? (
+                              <CrmTag kind={tagKindForTemp(tempVal)}>
+                                {tempVal}
+                              </CrmTag>
+                            ) : (
+                              <CrmTag kind="info">No priority</CrmTag>
+                            )}
+                            <CrmTag kind={email.kind}>{email.label}</CrmTag>
+                          </div>
+                          <h4>{leadName ?? "Lead name unavailable"}</h4>
+                          <span className="company">{d.companyName}</span>
+                          {contact?.title || d.sector ? (
+                            <span className="company">
+                              {[contact?.title, d.sector]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                          ) : null}
+                          <div className="crm-deal-value">
+                            {formatAed(d.quoteValue)}
+                          </div>
+                          <div className="crm-deal-meta">
+                            <span>{formatLane(d.leadSourceLane)}</span>
+                            <span>{daysInStage}d in stage</span>
+                          </div>
+                          <div className="mt-2 border-t border-[var(--line)] pt-2 text-[10px] leading-5">
+                            <strong className="block text-[var(--ink)]">
+                              Next: {nextTask?.title ?? "Set a next action"}
+                            </strong>
+                            <span className="text-[var(--muted)]">
+                              {taskOwner}
+                              {nextTask?.dueDate
+                                ? ` · ${new Date(nextTask.dueDate).toLocaleDateString("en-AE", { day: "numeric", month: "short" })}`
+                                : " · No date"}
+                            </span>
+                          </div>
+                        </Link>
+                        {moveErrors[d.dealId] ? (
+                          <p className="crm-note mt-2" role="alert">
+                            Cannot move: {moveErrors[d.dealId]}
+                          </p>
                         ) : null}
-                        <div className="crm-deal-value">
-                          {formatAed(d.quoteValue)}
-                        </div>
-                        <div className="crm-deal-meta">
-                          <span>{formatLane(d.leadSourceLane)}</span>
-                          <span className="crm-initials">
-                            {initials(d.ownerEmployeeId ? "AM" : "CH")}
-                          </span>
-                        </div>
-                        <div
-                          className="crm-deal-meta"
-                          style={{ border: 0, paddingTop: 7 }}
-                        >
-                          <span>Updated {formatRelative(d.updatedAt)}</span>
-                          <span>Open →</span>
-                        </div>
-                        <select
-                          aria-label={`Move ${d.companyName} to stage`}
-                          className="mt-1.5 min-h-11 w-full rounded-md border border-[var(--line)] bg-[var(--paper-2)] px-2 py-1 text-xs text-[var(--muted)]"
-                          value={d.stage}
-                          disabled={move.isPending}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }}
-                          onChange={(e) => {
-                            e.preventDefault();
-                            void handleMove(d.dealId, e.target.value);
-                          }}
-                        >
-                          {stageList.map((s) => (
-                            <option key={s.key} value={s.key}>
-                              {s.label}
-                            </option>
-                          ))}
-                        </select>
-                      </Link>
+                        {nextStage ? (
+                          <CrmBtn
+                            variant="primary"
+                            disabled={move.isPending}
+                            onClick={() =>
+                              void handleMove(d.dealId, nextStage.key)
+                            }
+                          >
+                            Move to {nextStage.label} →
+                          </CrmBtn>
+                        ) : (
+                          <Link
+                            href={`/crm/deals/${d.dealId}`}
+                            className="crm-btn"
+                          >
+                            Open handover →
+                          </Link>
+                        )}
+                      </article>
                     );
                   })}
                   {col.length === 0 ? (

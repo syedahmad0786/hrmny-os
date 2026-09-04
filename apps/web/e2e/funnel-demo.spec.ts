@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 
+const DEMO_DELIVERY_TASK_ID = "b1000000-0000-4000-8000-0000000000a4";
+
 /**
  * Demo funnel — prospecting → sales → onboarding → creative → portal.
  * Uses x-dev-role (requires AUTH_MODE=dev + ALLOW_DEV_AUTH in CI prod server).
@@ -237,9 +239,7 @@ test.describe("Demo funnel", () => {
     await expect(portalCta).toBeEnabled();
   });
 
-  test("delivery opens a read-only staff client preview", async ({
-    page,
-  }) => {
+  test("delivery opens a read-only staff client preview", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/delivery", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: /Delivery/i })).toBeVisible({
@@ -258,7 +258,7 @@ test.describe("Demo funnel", () => {
       })
       .toBeGreaterThan(1);
 
-    await taskSelect.selectOption({ index: 1 });
+    await taskSelect.selectOption(DEMO_DELIVERY_TASK_ID);
     const portalCta = page.getByTestId("delivery-client-portal");
     await expect(portalCta).toBeEnabled();
     await portalCta.click();

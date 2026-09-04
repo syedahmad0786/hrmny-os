@@ -96,7 +96,10 @@ function dealEntity(deal: DemoDeal): EntitySnapshot {
     entityType: "deal",
     entityId: deal.dealId,
     state: deal.stage,
-    data: { ...deal },
+    // This retired synthetic router has no client-needs editor. Its fixed demo
+    // fixture represents a completed discovery brief; the canonical CRM route
+    // derives this flag from the latest durable SALES NEEDS snapshot.
+    data: { ...deal, needsComplete: true },
   };
 }
 

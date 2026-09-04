@@ -25,6 +25,19 @@ const NEXT: Record<string, string> = {
   close: "handover_pack",
 };
 
+const NEXT_GATE: Record<string, string> = {
+  discover: "Review the lead and decide whether it is worth pursuing.",
+  qualify: "Confirm Fit and at least three of the four BUAF checks.",
+  engage:
+    "Verify the work email and approve the first outreach before defining needs.",
+  scope: "Capture what the client needs before preparing a proposal.",
+  propose: "Build the scope and client pricing before agreeing commercials.",
+  price_cost:
+    "Meet the 25% margin floor and get any required discount approval.",
+  close: "Record the outcome. Won deals can then move to client onboarding.",
+  handover_pack: "Open the client record and continue onboarding in Delivery.",
+};
+
 function humanizeCrmBody(body: string): string {
   return body.startsWith("Apollo person reconciled. {")
     ? "Apollo contact added to this deal. No phone, personal email, or waterfall lookup was used."
@@ -71,6 +84,12 @@ export default function CrmDealDetailPage() {
   const addNote = trpc.crm.notes.create.useMutation({
     onSuccess: () => void utils.crm.notes.invalidate(),
   });
+  const createTask = trpc.crm.tasks.create.useMutation({
+    onSuccess: () => void utils.crm.tasks.invalidate(),
+  });
+  const updateTask = trpc.crm.tasks.update.useMutation({
+    onSuccess: () => void utils.crm.tasks.invalidate(),
+  });
 
   const d = deal.data;
   const [budget, setBudget] = useState(false);
@@ -79,6 +98,12 @@ export default function CrmDealDetailPage() {
   const [fit, setFit] = useState(false);
   const [temp, setTemp] = useState<"hot" | "warm" | "cool" | "cold" | "">("");
   const [note, setNote] = useState("");
+  const [nextActionTitle, setNextActionTitle] = useState("");
+  const [nextActionDate, setNextActionDate] = useState("");
+  const [needObjective, setNeedObjective] = useState("");
+  const [needDeliverables, setNeedDeliverables] = useState("");
+  const [needTiming, setNeedTiming] = useState("");
+  const [needDecisionMaker, setNeedDecisionMaker] = useState("");
   const [actionStatus, setActionStatus] = useState<string | null>(null);
 
   useEffect(() => {
@@ -91,6 +116,20 @@ export default function CrmDealDetailPage() {
   }, [d]);
 
   const score = useMemo(() => (d ? buafScore(d) : null), [d]);
+  const nextTask = useMemo(
+    () =>
+      [...(tasks.data ?? [])]
+        .filter((task) => task.status !== "done" && task.status !== "cancelled")
+        .sort((a, b) => {
+          if (a.dueDate !== b.dueDate) {
+            if (!a.dueDate) return 1;
+            if (!b.dueDate) return -1;
+            return a.dueDate.localeCompare(b.dueDate);
+          }
+          return a.createdAt.localeCompare(b.createdAt);
+        })[0],
+    [tasks.data],
+  );
   const nextStage = d?.stage ? NEXT[String(d.stage)] : undefined;
   const stageLabel =
     stages.data?.find((stage) => stage.key === d?.stage)?.label ??
@@ -103,12 +142,57 @@ export default function CrmDealDetailPage() {
   const knowledgeBrief = (notes.data ?? []).find((item) =>
     item.body.startsWith("SALES KNOWLEDGE BRIEF —"),
   );
+  const needsNote = [...(notes.data ?? [])]
+    .filter((item) => item.body.startsWith("SALES NEEDS —"))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const savedNeeds = useMemo(() => {
+    if (!needsNote) return null;
+    try {
+      const value = JSON.parse(
+        needsNote.body.slice("SALES NEEDS —".length).trim(),
+      ) as Record<string, unknown>;
+      return {
+        objective: typeof value.objective === "string" ? value.objective : "",
+        deliverables:
+          typeof value.deliverables === "string" ? value.deliverables : "",
+        timing: typeof value.timing === "string" ? value.timing : "",
+        decisionMaker:
+          typeof value.decisionMaker === "string" ? value.decisionMaker : "",
+      };
+    } catch {
+      return null;
+    }
+  }, [needsNote]);
   const regularNotes = (notes.data ?? []).filter(
-    (item) => !item.body.startsWith("SALES KNOWLEDGE BRIEF —"),
+    (item) =>
+      !item.body.startsWith("SALES KNOWLEDGE BRIEF —") &&
+      !item.body.startsWith("SALES NEEDS —"),
+  );
+  const needsComplete = Boolean(
+    savedNeeds && Object.values(savedNeeds).every((value) => value.trim()),
   );
   const canConfirmWon = Boolean(
     session.data?.roles.some((role) => ["partner", "director"].includes(role)),
   );
+
+  useEffect(() => {
+    if (tasks.isLoading) return;
+    setNextActionTitle(nextTask?.title ?? "");
+    setNextActionDate(nextTask?.dueDate?.slice(0, 10) ?? "");
+  }, [
+    nextTask?.crmTaskId,
+    nextTask?.title,
+    nextTask?.dueDate,
+    tasks.isLoading,
+  ]);
+
+  useEffect(() => {
+    if (notes.isLoading) return;
+    setNeedObjective(savedNeeds?.objective ?? "");
+    setNeedDeliverables(savedNeeds?.deliverables ?? "");
+    setNeedTiming(savedNeeds?.timing ?? "");
+    setNeedDecisionMaker(savedNeeds?.decisionMaker ?? "");
+  }, [notes.isLoading, savedNeeds]);
 
   if (deal.isLoading) {
     return <CrmEmpty title="Loading deal…" />;
@@ -184,6 +268,7 @@ export default function CrmDealDetailPage() {
             (d.stage === "close" || d.stage === "handover_pack") ? (
               <CrmBtn
                 variant="primary"
+                id="handover"
                 data-testid="deal-handover"
                 disabled={handover.isPending}
                 onClick={async () => {
@@ -275,6 +360,62 @@ export default function CrmDealDetailPage() {
           </>
         }
       />
+
+      <section className="crm-panel mb-4" data-testid="deal-stage-strip">
+        <div className="crm-panel-head">
+          <div>
+            <h3>Deal progress</h3>
+            <p>One path from new lead to client onboarding.</p>
+          </div>
+          <CrmTag kind="ochre">Current: {stageLabel}</CrmTag>
+        </div>
+        <div className="crm-panel-body">
+          <ol className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
+            {(stages.data ?? []).map((stage, index) => {
+              const current = stage.key === d.stage;
+              const currentIndex = (stages.data ?? []).findIndex(
+                (item) => item.key === d.stage,
+              );
+              const complete = currentIndex >= 0 && index < currentIndex;
+              return (
+                <li
+                  key={stage.key}
+                  data-testid="deal-stage"
+                  data-stage={stage.key}
+                  data-current={current ? "true" : "false"}
+                  aria-current={current ? "step" : undefined}
+                  className={`rounded-lg border px-3 py-2 text-[10px] font-bold uppercase tracking-wide ${
+                    current
+                      ? "border-[var(--ink)] bg-[var(--ink)] text-white"
+                      : complete
+                        ? "border-[var(--ochre)] bg-[var(--paper)] text-[var(--ochre-dark)]"
+                        : "border-[var(--line)] bg-white text-[var(--muted)]"
+                  }`}
+                >
+                  <span className="mb-1 block text-[9px] opacity-70">
+                    {complete ? "✓" : String(index + 1).padStart(2, "0")}
+                  </span>
+                  {stage.label}
+                </li>
+              );
+            })}
+          </ol>
+          <div
+            className="crm-note mt-3 flex flex-wrap items-center justify-between gap-3"
+            data-testid="deal-next-gate"
+          >
+            <span>
+              <strong>
+                {nextStageLabel
+                  ? `To move to ${nextStageLabel}: `
+                  : "What happens next: "}
+              </strong>
+              {NEXT_GATE[String(d.stage)] ??
+                "Review this deal and choose the next action."}
+            </span>
+          </div>
+        </div>
+      </section>
 
       {actionStatus ? (
         <div className="crm-note mb-4" role="status" aria-live="polite">
@@ -381,6 +522,104 @@ export default function CrmDealDetailPage() {
             </div>
           </div>
 
+          <div className="crm-panel" data-testid="deal-needs">
+            <div className="crm-panel-head">
+              <div>
+                <h3>What the client needs</h3>
+                <p>
+                  This snapshot becomes the proposal source. Saving a change
+                  keeps the earlier version in the audit trail.
+                </p>
+              </div>
+              <CrmTag kind={needsComplete ? "success" : "warn"}>
+                {needsComplete
+                  ? "Ready for proposal"
+                  : savedNeeds
+                    ? "Complete all four fields"
+                    : "Needed before proposal"}
+              </CrmTag>
+            </div>
+            <div className="crm-panel-body">
+              <div className="crm-form-grid">
+                <div className="crm-field wide">
+                  <label htmlFor="deal-need-objective">Objective</label>
+                  <input
+                    id="deal-need-objective"
+                    data-testid="deal-need-objective"
+                    value={needObjective}
+                    placeholder="What outcome does the client want?"
+                    onChange={(event) => setNeedObjective(event.target.value)}
+                  />
+                </div>
+                <div className="crm-field wide">
+                  <label htmlFor="deal-need-deliverables">Deliverables</label>
+                  <textarea
+                    id="deal-need-deliverables"
+                    data-testid="deal-need-deliverables"
+                    value={needDeliverables}
+                    placeholder="The concrete work HRMNY will deliver"
+                    onChange={(event) =>
+                      setNeedDeliverables(event.target.value)
+                    }
+                  />
+                </div>
+                <div className="crm-field">
+                  <label htmlFor="deal-need-timing">Timing</label>
+                  <input
+                    id="deal-need-timing"
+                    data-testid="deal-need-timing"
+                    value={needTiming}
+                    placeholder="Example: Live by 1 November"
+                    onChange={(event) => setNeedTiming(event.target.value)}
+                  />
+                </div>
+                <div className="crm-field">
+                  <label htmlFor="deal-need-decision-maker">
+                    Decision maker
+                  </label>
+                  <input
+                    id="deal-need-decision-maker"
+                    data-testid="deal-need-decision-maker"
+                    value={needDecisionMaker}
+                    placeholder={contactName ?? "Name and role"}
+                    onChange={(event) =>
+                      setNeedDecisionMaker(event.target.value)
+                    }
+                  />
+                </div>
+              </div>
+              <div className="crm-approval-actions">
+                <CrmBtn
+                  variant="primary"
+                  data-testid="deal-needs-save"
+                  disabled={
+                    addNote.isPending ||
+                    ![
+                      needObjective,
+                      needDeliverables,
+                      needTiming,
+                      needDecisionMaker,
+                    ].some((value) => value.trim())
+                  }
+                  onClick={async () => {
+                    await addNote.mutateAsync({
+                      dealId: id,
+                      body: `SALES NEEDS — ${JSON.stringify({
+                        objective: needObjective.trim(),
+                        deliverables: needDeliverables.trim(),
+                        timing: needTiming.trim(),
+                        decisionMaker: needDecisionMaker.trim(),
+                      })}`,
+                    });
+                    setActionStatus("Client needs snapshot saved.");
+                  }}
+                >
+                  Save client needs
+                </CrmBtn>
+              </div>
+            </div>
+          </div>
+
           <AiDealPanel
             dealId={id}
             emailReady={email.label === "Verified"}
@@ -431,6 +670,96 @@ export default function CrmDealDetailPage() {
         </div>
 
         <aside className="space-y-4">
+          <div className="crm-panel" data-testid="deal-next-action">
+            <div className="crm-panel-head">
+              <div>
+                <h3>Next action</h3>
+                <p>
+                  {nextTask
+                    ? "The earliest open sales task for this deal."
+                    : "Set one clear action so this deal does not stall."}
+                </p>
+              </div>
+              <CrmTag kind={nextTask ? "info" : "warn"}>
+                {nextTask ? nextTask.status.replace(/_/g, " ") : "Not set"}
+              </CrmTag>
+            </div>
+            <div className="crm-panel-body">
+              <div className="crm-form-grid">
+                <div className="crm-field wide">
+                  <label htmlFor="deal-next-action-title">Action</label>
+                  <input
+                    id="deal-next-action-title"
+                    data-testid="deal-next-action-title"
+                    value={nextActionTitle}
+                    placeholder="Example: Follow up with the decision maker"
+                    onChange={(event) => setNextActionTitle(event.target.value)}
+                  />
+                </div>
+                <div className="crm-field">
+                  <label htmlFor="deal-next-action-date">Due date</label>
+                  <input
+                    id="deal-next-action-date"
+                    data-testid="deal-next-action-date"
+                    type="date"
+                    value={nextActionDate}
+                    onChange={(event) => setNextActionDate(event.target.value)}
+                  />
+                </div>
+                <div className="crm-field">
+                  <label>Owner</label>
+                  <div className="crm-note">
+                    {nextTask?.ownerEmployeeId === session.data?.employeeId
+                      ? "You"
+                      : nextTask?.ownerEmployeeId
+                        ? "A teammate — saving assigns it to you"
+                        : "You when saved"}
+                  </div>
+                </div>
+              </div>
+              <div className="crm-approval-actions">
+                <CrmBtn
+                  variant="primary"
+                  data-testid="deal-next-action-save"
+                  disabled={
+                    !nextActionTitle.trim() ||
+                    !session.data?.employeeId ||
+                    createTask.isPending ||
+                    updateTask.isPending
+                  }
+                  onClick={async () => {
+                    if (!session.data?.employeeId) return;
+                    const taskInput = {
+                      title: nextActionTitle.trim(),
+                      dueDate: nextActionDate || null,
+                      ownerEmployeeId: session.data.employeeId,
+                    };
+                    if (nextTask) {
+                      await updateTask.mutateAsync({
+                        id: nextTask.crmTaskId,
+                        ...taskInput,
+                      });
+                    } else {
+                      await createTask.mutateAsync({
+                        ...taskInput,
+                        dealId: id,
+                        companyId: d.companyId,
+                        contactId: d.primaryContactId,
+                      });
+                    }
+                    setActionStatus(
+                      nextTask
+                        ? "Next action updated and assigned to you."
+                        : "Next action created and assigned to you.",
+                    );
+                  }}
+                >
+                  {nextTask ? "Save next action" : "Create next action"}
+                </CrmBtn>
+              </div>
+            </div>
+          </div>
+
           <div className="crm-panel">
             <div className="crm-panel-head">
               <div>

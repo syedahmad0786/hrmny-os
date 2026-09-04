@@ -4,11 +4,23 @@ test("Sales opens on one synchronized operating dashboard", async ({
   page,
 }) => {
   await page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
-  await page.goto("/crm/dashboard", { waitUntil: "domcontentloaded" });
+  await page.goto("/crm/dashboard", { waitUntil: "commit" });
 
   await expect(
     page.getByRole("heading", { name: "Sales command center" }),
   ).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("sales-action-groups")).toContainText(
+    "Waiting on me",
+  );
+  await expect(page.getByTestId("sales-action-groups")).toContainText(
+    "Stalled",
+  );
+  await expect(page.getByTestId("sales-action-groups")).toContainText(
+    "Moving this week",
+  );
+  await expect(page.getByTestId("sales-action-groups")).toContainText(
+    "Closing",
+  );
   await expect(page.getByTestId("sales-dashboard-queue")).toContainText(
     "Follow-ups due",
   );

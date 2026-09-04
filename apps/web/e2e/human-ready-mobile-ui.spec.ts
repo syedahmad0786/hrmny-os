@@ -49,7 +49,7 @@ test("primary CRM actions stay usable on a phone", async ({ page }) => {
   );
   await expectMobileReady(
     page,
-    page.locator('select[aria-label^="Move "]').first(),
+    page.getByRole("button", { name: /^Move to / }).first(),
   );
 
   for (const route of ["/clients", "/delivery"]) {
