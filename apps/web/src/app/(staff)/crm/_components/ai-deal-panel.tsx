@@ -188,6 +188,17 @@ export function AiDealPanel({
         };
       }),
     outreach: () => {
+      if (!knowledgeBrief) {
+        setResults((state) => ({
+          ...state,
+          outreach: {
+            kind: "blocked",
+            message:
+              "Build the knowledge brief first. Research is saved here before AI can draft outreach.",
+          },
+        }));
+        return;
+      }
       if (!emailReady) {
         setResults((state) => ({
           ...state,
@@ -271,7 +282,9 @@ export function AiDealPanel({
                       ? "Running…"
                       : a.key === "research" && knowledgeBrief
                         ? "Refresh research"
-                        : a.button}
+                        : a.key === "outreach" && !knowledgeBrief
+                          ? "Research first"
+                          : a.button}
                   </CrmBtn>
                 </div>
                 {result ? (

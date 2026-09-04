@@ -575,6 +575,25 @@ describe("digest, replies, intent CSV, evolve, stale", () => {
     });
   });
 
+  it("keeps synthetic follow-ups out of business monitoring", async () => {
+    const deal = await createDeal({ companyName: "Inbound Proof 123" });
+    const outreach = await insertOutreach({
+      dealId: deal.dealId,
+      channel: "gmail",
+      recipient: "fixture@example.com",
+      body: "Hi",
+    });
+    const { patchOutreach } = await import("../leadgen/store");
+    await patchOutreach(outreach.id, {
+      state: "sent",
+      sentAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await expect(
+      buildSalesOsDigest(new Date("2026-02-01T00:00:00.000Z")),
+    ).resolves.toMatchObject({ followUps: { due: 0 } });
+  });
+
   it("suppresses and closes a deal on unsubscribe", async () => {
     const deal = await createDeal({
       companyName: "Unsubscribe Co",

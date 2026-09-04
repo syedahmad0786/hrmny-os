@@ -487,6 +487,60 @@ describe("openrouter free-model failover", () => {
     vi.unstubAllGlobals();
   });
 
+  it("rejects unsupported agency proof and falls back to review-safe copy", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: JSON.stringify({
+                    channel: "email",
+                    subject: "A proven idea for Acme Retail",
+                    body: "Hi Sara, we helped a competing retailer increase engagement by 35%.",
+                    cta: "Open to a call?",
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = createProvider({
+      provider: "openrouter",
+      defaultModel: OPENROUTER_FREE_DEFAULT_MODEL,
+      openRouterApiKey: "sk-test",
+    });
+
+    const result = await provider.generate({
+      task: "outreach_draft",
+      messages: [
+        {
+          role: "user",
+          content: "firstName: Sara\ncompany: Acme Retail\nchannel: email",
+        },
+      ],
+      schema: z.object({
+        channel: z.literal("email"),
+        subject: z.string(),
+        body: z.string(),
+        cta: z.string(),
+      }),
+    });
+
+    expect(result).toMatchObject({
+      provider: "mock",
+      model: "fallback/outreach-template",
+    });
+    expect(JSON.stringify(result.object)).not.toMatch(/35%|we helped/i);
+    expect(fetchMock.mock.calls).toHaveLength(4);
+    vi.unstubAllGlobals();
+  });
+
   it("hard-caps OpenRouter web research and preserves source receipts", async () => {
     const fetchMock = vi.fn(
       async (_url: string, _init?: RequestInit) =>

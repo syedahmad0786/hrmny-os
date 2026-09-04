@@ -700,6 +700,26 @@ export function mockOutreachDraft(userText: string) {
   };
 }
 
+function assertReviewSafeOutreachDraft(object: unknown): void {
+  if (!object || typeof object !== "object") return;
+  const value = object as Record<string, unknown>;
+  const copy = [value.subject, value.body]
+    .filter((part): part is string => typeof part === "string")
+    .join("\n");
+  if (
+    /\b\d+(?:[.,]\d+)?\s*(?:%|percent\b|x\b|times\b)|(?:AED|USD|EUR|GBP|\$|€|£)\s*\d|\b\d+(?:[.,]\d+)?\s*(?:AED|USD|EUR|GBP)\b/i.test(
+      copy,
+    ) ||
+    /\b(?:we|hrmny|our (?:team|work|campaigns?))\s+(?:have\s+)?(?:helped|increased|grew|boosted|drove|delivered|achieved|generated|improved|lifted|reduced)\b|\b(?:case stud(?:y|ies)|award[- ]winning|trusted by|our clients include|we work(?:ed)? with)\b/i.test(
+      copy,
+    )
+  ) {
+    throw new Error(
+      "Outreach draft contained unsupported performance proof; use the review-only fallback",
+    );
+  }
+}
+
 // Values match the frozen ReplyIntentSchema in agent-io.ts (M7 contract).
 const REPLY_INTENT_RULES: Array<[RegExp, string]> = [
   [/unsubscribe|opt\s?out|remove me|stop emailing|take me off/i, "unsubscribe"],
@@ -736,9 +756,13 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
     result: Omit<LLMGenerateResult, "object">,
   ): LLMGenerateResult => {
     if (!options.schema) return result;
+    const object = parseStructuredText(options.schema, result.text);
+    if (options.task === "outreach_draft") {
+      assertReviewSafeOutreachDraft(object);
+    }
     return {
       ...result,
-      object: parseStructuredText(options.schema, result.text),
+      object,
     };
   };
   const responseText = async (response: Response) => {

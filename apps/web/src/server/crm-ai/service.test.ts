@@ -5,6 +5,7 @@ import {
   createCompany,
   createContact,
   createDeal,
+  createNote,
   getDeal,
   listActivities,
   listNotes,
@@ -36,6 +37,13 @@ async function seed() {
   });
   await updateContact(contact.contactId, { emailVerified: true });
   return { company, contact, deal };
+}
+
+async function seedKnowledgeBrief(dealId: string) {
+  await createNote({
+    dealId,
+    body: "SALES KNOWLEDGE BRIEF — Acme LLC\nVerified signal: Acme is growing in the UAE.",
+  });
 }
 
 describe("crm-ai service (mock provider)", () => {
@@ -143,6 +151,7 @@ describe("crm-ai service (mock provider)", () => {
 
   it("draftOutreach lands a draft in the leadgen HITL queue", async () => {
     const { deal } = await seed();
+    await seedKnowledgeBrief(deal.dealId);
     const res = await draftOutreachForDeal({ dealId: deal.dealId });
     expect(res.output.state).toBe("draft");
     expect(res.output.recipient).toBe("sara@acme.example");
@@ -195,6 +204,7 @@ describe("crm-ai service (mock provider)", () => {
 
   it("draftOutreach refuses when outreach-draft is disabled — no draft inserted", async () => {
     const { deal } = await seed();
+    await seedKnowledgeBrief(deal.dealId);
     setAgentEnabled("outreach-draft", false);
     await expect(draftOutreachForDeal({ dealId: deal.dealId })).rejects.toThrow(
       /disabled by the kill switch/,

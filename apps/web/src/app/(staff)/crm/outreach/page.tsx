@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
@@ -591,7 +592,7 @@ function OutreachInner() {
             <div>
               <h3>New draft</h3>
               <p>
-                Leave the body empty to let the outreach-draft agent write it
+                AI first-touch drafts require the lead's saved knowledge brief
               </p>
             </div>
           </div>
@@ -672,6 +673,14 @@ function OutreachInner() {
                   value={draftBody}
                   onChange={(e) => setDraftBody(e.target.value)}
                 />
+                {draftDealId && !draftBody.trim() ? (
+                  <Link
+                    href={`/crm/deals/${draftDealId}#ai-assist`}
+                    className="text-[11px] font-bold text-[var(--ochre-dark)]"
+                  >
+                    Review or build this lead's research first →
+                  </Link>
+                ) : null}
               </div>
               <div className="crm-field wide">
                 <CrmBtn
