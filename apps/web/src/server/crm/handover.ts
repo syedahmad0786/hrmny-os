@@ -99,10 +99,11 @@ async function handoverReadiness(
 }
 
 function acceptedQuoteForHandover(quotes: CrmQuoteRow[]): CrmQuoteRow | null {
-  const latest = quotes[0];
-  return latest?.status === "accepted" && latest.lineItems.length > 0
-    ? latest
-    : null;
+  return (
+    quotes.find(
+      (quote) => quote.status === "accepted" && quote.lineItems.length > 0,
+    ) ?? null
+  );
 }
 
 function scopeLines(lineItems: QuoteLineItem[]): ScopeLine[] {

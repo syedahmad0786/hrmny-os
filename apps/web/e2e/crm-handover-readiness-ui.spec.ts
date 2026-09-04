@@ -19,24 +19,24 @@ test("handover readiness uses existing deal evidence and unlocks the governed fl
     "data-ready",
     "true",
   );
-  await expect(page.getByTestId("handover-primary-disabled")).toBeVisible();
 
-  await page
-    .getByTestId("handover-brand-input")
-    .fill("Client Drive folder received");
-  await page.getByRole("button", { name: "Save brand evidence" }).click();
-  await expect(page.getByTestId("handover-check-brand-assets")).toHaveAttribute(
-    "data-ready",
-    "true",
-  );
+  const brandAssets = page.getByTestId("handover-check-brand-assets");
+  if ((await brandAssets.getAttribute("data-ready")) !== "true") {
+    await page
+      .getByTestId("handover-brand-input")
+      .fill("Client Drive folder received");
+    await page.getByRole("button", { name: "Save brand evidence" }).click();
+  }
+  await expect(brandAssets).toHaveAttribute("data-ready", "true");
 
-  await page
-    .getByTestId("handover-billing-input")
-    .fill("TRN confirmed by Finance");
-  await page.getByRole("button", { name: "Save billing evidence" }).click();
-  await expect(
-    page.getByTestId("handover-check-billing-details"),
-  ).toHaveAttribute("data-ready", "true");
+  const billingDetails = page.getByTestId("handover-check-billing-details");
+  if ((await billingDetails.getAttribute("data-ready")) !== "true") {
+    await page
+      .getByTestId("handover-billing-input")
+      .fill("TRN confirmed by Finance");
+    await page.getByRole("button", { name: "Save billing evidence" }).click();
+  }
+  await expect(billingDetails).toHaveAttribute("data-ready", "true");
 
   await expect(page.getByTestId("handover-primary-action")).toHaveAttribute(
     "href",

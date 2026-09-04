@@ -4,7 +4,7 @@ import { resetCampaignMemory } from "../campaigns/memory";
 import { listCampaigns } from "../campaigns/repository";
 import { durableHandoverPack } from "./handover";
 import { getCrmMemory, resetCrmMemory } from "./memory";
-import { createNote } from "./repository";
+import { createNote, createQuoteVersion } from "./repository";
 
 const WON_DEAL_ID = "e0000000-0000-4000-8000-000000000005";
 
@@ -36,6 +36,22 @@ describe("memory CRM handover", () => {
     await seedHandoverEvidence();
     const portalTokensBefore = getDemoStore().portalMagicTokens.size;
     const first = await durableHandoverPack({ dealId: WON_DEAL_ID });
+    await createQuoteVersion({
+      dealId: WON_DEAL_ID,
+      lineItems: [
+        {
+          label: "Unaccepted later revision",
+          qty: 1,
+          unitSell: 90_000,
+          unitCost: 50_000,
+          isVendor: false,
+        },
+      ],
+      quoteValue: "90000",
+      internalCost: "50000",
+      marginPct: "44.4",
+      status: "draft",
+    });
     const replay = await durableHandoverPack({ dealId: WON_DEAL_ID });
 
     expect(first.ok).toBe(true);
