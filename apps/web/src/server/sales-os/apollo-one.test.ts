@@ -160,7 +160,7 @@ describe("Apollo exact-person enrichment", () => {
     expect(JSON.parse(String(request.body))).toMatchObject({
       person_titles: ["Marketing Director"],
       include_similar_titles: true,
-      person_locations: ["United Arab Emirates"],
+      organization_locations: ["United Arab Emirates"],
     });
   });
 

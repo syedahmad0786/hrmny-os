@@ -65,6 +65,14 @@ async function queueSearch(input: {
   idempotencyKey: string;
   query?: string;
   titles?: string[];
+  locations?: string[];
+  organizationLocations?: string[];
+  seniorities?: string[];
+  emailStatuses?: string[];
+  technologyIds?: string[];
+  includeSimilarTitles?: boolean;
+  employeeCountMin?: number;
+  employeeCountMax?: number;
   perPage?: number;
   source: LeadSourceAdapter;
 }) {
@@ -75,6 +83,14 @@ async function queueSearch(input: {
       actorEmployeeId: ACTOR,
       query: input.query,
       titles: input.titles,
+      locations: input.locations,
+      organizationLocations: input.organizationLocations,
+      seniorities: input.seniorities,
+      emailStatuses: input.emailStatuses,
+      technologyIds: input.technologyIds,
+      includeSimilarTitles: input.includeSimilarTitles,
+      employeeCountMin: input.employeeCountMin,
+      employeeCountMax: input.employeeCountMax,
       perPage: input.perPage,
     },
     {
@@ -177,6 +193,13 @@ describe("durable Apollo zero-credit search bridge", () => {
         "Marketing Director",
       ],
       perPage: 5,
+      organizationLocations: ["Saudi Arabia", "Oman", "Saudi Arabia"],
+      seniorities: ["vp", "director", "vp"],
+      emailStatuses: ["verified"],
+      technologyIds: ["shopify", "wordpress_org"],
+      includeSimilarTitles: false,
+      employeeCountMin: 11,
+      employeeCountMax: 500,
       source,
     });
 
@@ -185,7 +208,13 @@ describe("durable Apollo zero-credit search bridge", () => {
     expect(source.searchLeadsWithReceipt).toHaveBeenCalledWith({
       query: "creative UAE",
       titles: ["Founder", "Marketing Director"],
-      locations: ["United Arab Emirates"],
+      organizationLocations: ["Oman", "Saudi Arabia"],
+      seniorities: ["director", "vp"],
+      emailStatuses: ["verified"],
+      technologyIds: ["shopify", "wordpress_org"],
+      includeSimilarTitles: false,
+      employeeCountMin: 11,
+      employeeCountMax: 500,
       page: 1,
       perPage: 5,
     });
@@ -203,7 +232,7 @@ describe("durable Apollo zero-credit search bridge", () => {
     await runScheduledApolloPeopleSearch(queued, workerDeps(source));
 
     expect(source.searchLeadsWithReceipt).toHaveBeenCalledWith({
-      locations: ["United Arab Emirates"],
+      organizationLocations: ["United Arab Emirates"],
       page: 1,
       perPage: 8,
     });

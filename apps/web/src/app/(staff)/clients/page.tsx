@@ -7,6 +7,7 @@ import { OnboardingReadyBanner } from "@/components/onboarding-ready-banner";
 import { trpc } from "@/lib/trpc";
 import { deliveryRhythmFor } from "@/lib/delivery-rhythm";
 import { isSyntheticRecordName } from "@/lib/synthetic-records";
+import { CRM_MARKETS, type CrmMarket } from "@/lib/crm-markets";
 
 type ClientRow = {
   clientId: string;
@@ -24,7 +25,7 @@ export default function ClientsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showTestRecords, setShowTestRecords] = useState(false);
   const [name, setName] = useState("");
-  const [market, setMarket] = useState<"UAE" | "KSA" | "Both">("UAE");
+  const [market, setMarket] = useState<CrmMarket>("UAE");
   const [engagementType, setEngagementType] = useState<"project" | "retainer">(
     "project",
   );
@@ -155,9 +156,9 @@ export default function ClientsPage() {
             value={market}
             onChange={(event) => setMarket(event.target.value as typeof market)}
           >
-            <option value="UAE">UAE</option>
-            <option value="KSA">KSA</option>
-            <option value="Both">Both</option>
+            {CRM_MARKETS.map((value) => (
+              <option key={value}>{value}</option>
+            ))}
           </select>
           <select
             aria-label="Engagement type"

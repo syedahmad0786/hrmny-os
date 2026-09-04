@@ -1,12 +1,11 @@
-import type {
-  CrmPipelineStage,
-} from "@hrmny/db";
+import type { CrmPipelineStage } from "@hrmny/db";
+import type { CrmMarket } from "@/lib/crm-markets";
 
 export type CompanyRow = {
   companyId: string;
   name: string;
   sector: string | null;
-  market: "UAE" | "KSA" | "Both" | null;
+  market: CrmMarket | null;
   website: string | null;
   linkedinUrl: string | null;
   notes: string | null;

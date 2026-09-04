@@ -209,7 +209,7 @@ export async function getCompany(id: string): Promise<CompanyRow | null> {
 export async function createCompany(input: {
   name: string;
   sector?: string | null;
-  market?: "UAE" | "KSA" | "Both" | null;
+  market?: CompanyRow["market"];
   website?: string | null;
   linkedinUrl?: string | null;
   notes?: string | null;
@@ -253,7 +253,7 @@ export async function updateCompany(
   input: Partial<{
     name: string;
     sector: string | null;
-    market: "UAE" | "KSA" | "Both" | null;
+    market: CompanyRow["market"];
     website: string | null;
     linkedinUrl: string | null;
     notes: string | null;

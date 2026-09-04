@@ -1,36 +1,22 @@
-export type ResearchApprovalState =
-  | "researched"
-  | "approved"
-  | "rejected"
-  | "rework";
+import type { CrmMarket } from "@/lib/crm-markets";
 
-export type ContactResearchState =
-  | "found"
-  | "approved"
-  | "rejected"
-  | "rework";
+export type ResearchApprovalState =
+  "researched" | "approved" | "rejected" | "rework";
+
+export type ContactResearchState = "found" | "approved" | "rejected" | "rework";
 
 export type SuppressionReason =
-  | "unsubscribe"
-  | "bounce"
-  | "complaint"
-  | "dnc"
-  | "no_go";
+  "unsubscribe" | "bounce" | "complaint" | "dnc" | "no_go";
 
 export type EmailEventKind =
-  | "sent"
-  | "delivered"
-  | "bounced"
-  | "complained"
-  | "replied"
-  | "unsubscribed";
+  "sent" | "delivered" | "bounced" | "complained" | "replied" | "unsubscribed";
 
 export type CompanyResearchRow = {
   id: string;
   companyId: string | null;
   name: string;
   sector: string | null;
-  market: "UAE" | "KSA" | "Both" | null;
+  market: CrmMarket | null;
   website: string | null;
   whyThis: string;
   evidence: string | null;

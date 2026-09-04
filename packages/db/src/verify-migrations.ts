@@ -36,7 +36,7 @@ const journal = JSON.parse(
 ) as { entries: Array<{ tag: string }> };
 const apolloPriorHead = "0075_apollo_search_fencing";
 const apolloHead = "0076_apollo_people_search_serialization";
-const head = "0077_qm_control_repository";
+const head = "0078_gcc_markets";
 assert.equal(
   journal.entries.at(-1)?.tag,
   head,
@@ -81,6 +81,18 @@ async function prepareSupabaseDatabase(connection: Sql): Promise<void> {
 }
 
 async function assertCurrentHead(connection: Sql): Promise<void> {
+  const [markets] = await connection<Array<{ values: string[] }>>`
+    select array_agg(value.enumlabel order by value.enumsortorder) as values
+    from pg_enum value
+    join pg_type type on type.oid = value.enumtypid
+    where type.typname = 'market_enum'
+  `;
+  assert.deepEqual(
+    markets?.values,
+    ["UAE", "KSA", "Both", "Oman", "Qatar", "Kuwait", "Bahrain", "GCC"],
+    "GCC market enum expansion is not installed.",
+  );
+
   const [priorBridge] = await connection<Array<{ ok: boolean }>>`
     select
       to_regclass('public.portal_session_grant') is not null

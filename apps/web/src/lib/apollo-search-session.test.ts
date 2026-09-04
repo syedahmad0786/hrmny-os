@@ -24,6 +24,13 @@ const pending: PendingApolloSearch = {
   idempotencyKey: "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1",
   query: "hospitality",
   titles: ["Marketing Director"],
+  organizationLocations: ["Oman", "Saudi Arabia"],
+  seniorities: ["director", "vp"],
+  emailStatuses: ["verified"],
+  technologyIds: ["shopify"],
+  includeSimilarTitles: false,
+  employeeCountMin: 11,
+  employeeCountMax: 500,
   perPage: 8,
 };
 
@@ -60,6 +67,22 @@ describe("Apollo pending-search browser scope", () => {
 
     expect(restorePendingApolloSearch(storage, partnerId)).toBeNull();
     expect(storage.getItem(APOLLO_SEARCH_SESSION_KEY)).toBeNull();
+  });
+
+  it("rejects an invalid company-size range from browser storage", () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      APOLLO_SEARCH_SESSION_KEY,
+      JSON.stringify({
+        ...pending,
+        principalId: partnerId,
+        version: 2,
+        employeeCountMin: 500,
+        employeeCountMax: 11,
+      }),
+    );
+
+    expect(restorePendingApolloSearch(storage, partnerId)).toBeNull();
   });
 
   it("cannot let an old completion clear another request or principal", () => {

@@ -11,14 +11,10 @@ export async function flagStaleEmails(now = new Date()): Promise<number> {
   let flagged = 0;
   for (const item of sent) {
     if (!item.sentAt) continue;
-    if (now.getTime() - new Date(item.sentAt).getTime() < SEVEN_DAYS_MS) continue;
+    if (now.getTime() - new Date(item.sentAt).getTime() < SEVEN_DAYS_MS)
+      continue;
     if (item.reworkFeedback === "no_response") continue;
     await patchOutreach(item.id, { reworkFeedback: "no_response" });
-    await recordEmailEvent({
-      outreachItemId: item.id,
-      kind: "delivered",
-      payload: { stale: true },
-    });
     flagged += 1;
   }
   return flagged;

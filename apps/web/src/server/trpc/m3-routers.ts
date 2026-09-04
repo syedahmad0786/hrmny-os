@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "@hrmny/db";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { CRM_MARKETS } from "@/lib/crm-markets";
 import { createApolloAdapter, createHunterAdapter } from "@hrmny/integrations";
 import {
   bootstrapGateRegistry,
@@ -824,7 +825,7 @@ export const clientsRouter = router({
               "closed",
             ])
             .optional(),
-          market: z.enum(["UAE", "KSA", "Both"]).optional(),
+          market: z.enum(CRM_MARKETS).optional(),
         })
         .optional(),
     )
@@ -930,7 +931,7 @@ export const clientsRouter = router({
       z.object({
         dealId: z.string().uuid().optional(),
         name: z.string().trim().min(2).max(200),
-        market: z.enum(["UAE", "KSA", "Both"]).default("UAE"),
+        market: z.enum(CRM_MARKETS).default("UAE"),
         engagementType: z.enum(["retainer", "project"]).default("project"),
         contractValue: z.coerce
           .number()

@@ -2,10 +2,33 @@ export const APOLLO_SEARCH_SESSION_KEY = "hrmny.apollo-search.pending.v2";
 export const LEGACY_APOLLO_SEARCH_SESSION_KEY =
   "hrmny.apollo-search.pending.v1";
 
+export type ApolloSearchSeniority =
+  | "owner"
+  | "founder"
+  | "c_suite"
+  | "partner"
+  | "vp"
+  | "head"
+  | "director"
+  | "manager"
+  | "senior"
+  | "entry"
+  | "intern";
+export type ApolloSearchEmailStatus =
+  "verified" | "unverified" | "likely to engage" | "unavailable";
+
 export type PendingApolloSearch = {
   idempotencyKey: string;
   query?: string;
   titles: string[];
+  locations?: string[];
+  organizationLocations?: string[];
+  seniorities?: ApolloSearchSeniority[];
+  emailStatuses?: ApolloSearchEmailStatus[];
+  technologyIds?: string[];
+  includeSimilarTitles?: boolean;
+  employeeCountMin?: number;
+  employeeCountMax?: number;
   perPage: number;
 };
 
@@ -23,6 +46,33 @@ type SessionStorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function validStringList(
+  value: unknown,
+  maxItems: number,
+  maxLength: number,
+): boolean {
+  return (
+    value === undefined ||
+    (Array.isArray(value) &&
+      value.length <= maxItems &&
+      value.every(
+        (item) =>
+          typeof item === "string" &&
+          item.length >= 1 &&
+          item.length <= maxLength,
+      ))
+  );
+}
+
+function validEmployeeCount(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (Number.isInteger(value) &&
+      Number(value) >= 1 &&
+      Number(value) <= 1_000_000)
+  );
+}
 
 function parseStoredPendingSearch(
   raw: string,
@@ -48,7 +98,19 @@ function parseStoredPendingSearch(
       (value.query !== undefined &&
         (typeof value.query !== "string" ||
           value.query.length < 2 ||
-          value.query.length > 160))
+          value.query.length > 160)) ||
+      !validStringList(value.locations, 6, 120) ||
+      !validStringList(value.organizationLocations, 6, 120) ||
+      !validStringList(value.seniorities, 11, 20) ||
+      !validStringList(value.emailStatuses, 4, 30) ||
+      !validStringList(value.technologyIds, 10, 80) ||
+      (value.includeSimilarTitles !== undefined &&
+        typeof value.includeSimilarTitles !== "boolean") ||
+      !validEmployeeCount(value.employeeCountMin) ||
+      !validEmployeeCount(value.employeeCountMax) ||
+      (value.employeeCountMin !== undefined &&
+        value.employeeCountMax !== undefined &&
+        value.employeeCountMin > value.employeeCountMax)
     ) {
       return null;
     }
@@ -83,6 +145,16 @@ export function restorePendingApolloSearch(
     idempotencyKey: stored.idempotencyKey,
     query: stored.query,
     titles: [...stored.titles],
+    locations: stored.locations ? [...stored.locations] : undefined,
+    organizationLocations: stored.organizationLocations
+      ? [...stored.organizationLocations]
+      : undefined,
+    seniorities: stored.seniorities ? [...stored.seniorities] : undefined,
+    emailStatuses: stored.emailStatuses ? [...stored.emailStatuses] : undefined,
+    technologyIds: stored.technologyIds ? [...stored.technologyIds] : undefined,
+    includeSimilarTitles: stored.includeSimilarTitles,
+    employeeCountMin: stored.employeeCountMin,
+    employeeCountMax: stored.employeeCountMax,
     perPage: stored.perPage,
   };
 }

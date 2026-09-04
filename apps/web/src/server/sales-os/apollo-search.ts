@@ -42,6 +42,25 @@ export const APOLLO_PEOPLE_SEARCH_OPERATION = "people.search.zero-credit";
 export const APOLLO_PEOPLE_SEARCH_JOB_KIND = "apollo_people_search";
 export { APOLLO_PROVIDER_CONCURRENCY_KEY } from "../integrations/apollo-provider-slot";
 export const APOLLO_PEOPLE_SEARCH_MAX_ATTEMPTS = 3;
+export const APOLLO_PERSON_SENIORITIES = [
+  "owner",
+  "founder",
+  "c_suite",
+  "partner",
+  "vp",
+  "head",
+  "director",
+  "manager",
+  "senior",
+  "entry",
+  "intern",
+] as const;
+export const APOLLO_EMAIL_STATUSES = [
+  "verified",
+  "unverified",
+  "likely to engage",
+  "unavailable",
+] as const;
 const APOLLO_PROVIDER_BUSY_RETRY_MS = 5_000;
 const APOLLO_PROVIDER_LEASE_MS = 10 * 60_000;
 
@@ -86,15 +105,23 @@ export type ApolloPeopleSearchSnapshot = {
     idempotencyKey: string;
     query?: string;
     titles: string[];
+    locations?: string[];
+    organizationLocations?: string[];
+    seniorities?: Array<(typeof APOLLO_PERSON_SENIORITIES)[number]>;
+    emailStatuses?: Array<(typeof APOLLO_EMAIL_STATUSES)[number]>;
+    technologyIds?: string[];
+    includeSimilarTitles?: boolean;
+    employeeCountMin?: number;
+    employeeCountMax?: number;
     perPage: number;
   };
   result: ApolloPeopleSearchResult;
 };
 
-type NormalizedSearchCriteria = Required<
-  Pick<LeadSearchCriteria, "locations" | "page" | "perPage">
-> &
-  Pick<LeadSearchCriteria, "query" | "titles">;
+type NormalizedSearchCriteria = LeadSearchCriteria & {
+  page: number;
+  perPage: number;
+};
 
 export type ApolloPeopleSearchRetryPayload = {
   receiptId: string;
@@ -111,7 +138,25 @@ const StoredApolloPeopleSearchPayloadSchema = z.object({
   criteria: z.object({
     query: z.string().min(1).max(160).optional(),
     titles: z.array(z.string().min(1).max(120)).max(8).optional(),
-    locations: z.tuple([z.literal("United Arab Emirates")]),
+    locations: z.array(z.string().min(2).max(120)).max(6).optional(),
+    organizationLocations: z
+      .array(z.string().min(2).max(120))
+      .max(6)
+      .optional(),
+    seniorities: z.array(z.enum(APOLLO_PERSON_SENIORITIES)).max(11).optional(),
+    emailStatuses: z.array(z.enum(APOLLO_EMAIL_STATUSES)).max(4).optional(),
+    technologyIds: z
+      .array(
+        z
+          .string()
+          .regex(/^[a-z0-9_]+$/)
+          .max(80),
+      )
+      .max(10)
+      .optional(),
+    includeSimilarTitles: z.boolean().optional(),
+    employeeCountMin: z.number().int().min(1).max(1_000_000).optional(),
+    employeeCountMax: z.number().int().min(1).max(1_000_000).optional(),
     page: z.literal(1),
     perPage: z.number().int().min(1).max(10),
   }),
@@ -201,19 +246,43 @@ class ApolloSearchAuthorizationRevokedError extends Error {
   }
 }
 
+function normalizeStrings(values: string[] | undefined): string[] | undefined {
+  const normalized = Array.from(
+    new Set((values ?? []).map((value) => value.trim()).filter(Boolean)),
+  ).sort();
+  return normalized.length ? normalized : undefined;
+}
+
 function normalizedCriteria(input: {
   query?: string;
   titles?: string[];
+  locations?: string[];
+  organizationLocations?: string[];
+  seniorities?: string[];
+  emailStatuses?: string[];
+  technologyIds?: string[];
+  includeSimilarTitles?: boolean;
+  employeeCountMin?: number;
+  employeeCountMax?: number;
   perPage?: number;
 }): NormalizedSearchCriteria {
   const query = input.query?.trim() || undefined;
-  const titles = Array.from(
-    new Set((input.titles ?? []).map((title) => title.trim()).filter(Boolean)),
-  ).sort();
+  const titles = normalizeStrings(input.titles);
+  const locations = normalizeStrings(input.locations);
+  const organizationLocations = normalizeStrings(input.organizationLocations);
   return {
     query,
-    titles: titles.length ? titles : undefined,
-    locations: ["United Arab Emirates"],
+    titles,
+    locations,
+    organizationLocations:
+      organizationLocations ??
+      (locations ? undefined : ["United Arab Emirates"]),
+    seniorities: normalizeStrings(input.seniorities),
+    emailStatuses: normalizeStrings(input.emailStatuses),
+    technologyIds: normalizeStrings(input.technologyIds),
+    includeSimilarTitles: input.includeSimilarTitles,
+    employeeCountMin: input.employeeCountMin,
+    employeeCountMax: input.employeeCountMax,
     page: 1,
     perPage: Math.min(Math.max(input.perPage ?? 8, 1), 10),
   };
@@ -983,6 +1052,14 @@ export async function searchApolloPeopleFree(
     idempotencyKey: string;
     query?: string;
     titles?: string[];
+    locations?: string[];
+    organizationLocations?: string[];
+    seniorities?: string[];
+    emailStatuses?: string[];
+    technologyIds?: string[];
+    includeSimilarTitles?: boolean;
+    employeeCountMin?: number;
+    employeeCountMax?: number;
     perPage?: number;
     actorEmployeeId?: string | null;
   },
@@ -1188,6 +1265,14 @@ export async function getLatestApolloPeopleSearch(input: {
       idempotencyKey: row.idempotencyKey,
       query: stored.data.criteria.query,
       titles: stored.data.criteria.titles ?? [],
+      locations: stored.data.criteria.locations,
+      organizationLocations: stored.data.criteria.organizationLocations,
+      seniorities: stored.data.criteria.seniorities,
+      emailStatuses: stored.data.criteria.emailStatuses,
+      technologyIds: stored.data.criteria.technologyIds,
+      includeSimilarTitles: stored.data.criteria.includeSimilarTitles,
+      employeeCountMin: stored.data.criteria.employeeCountMin,
+      employeeCountMax: stored.data.criteria.employeeCountMax,
       perPage: stored.data.criteria.perPage,
     },
     result: resultFromReceipt(

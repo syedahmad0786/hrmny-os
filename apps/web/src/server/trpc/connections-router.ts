@@ -751,6 +751,41 @@ export async function getGoogleWorkspaceAccessToken(
   return refreshed.access_token;
 }
 
+/** The verified internal mailbox shown to Sales and used as the test recipient. */
+export async function getGoogleWorkspaceSenderEmail(
+  employeeId: string,
+): Promise<string | null> {
+  if (!(await isWorkConnectedAppAllowed("google_workspace"))) return null;
+  const db = getDb();
+  const account = db
+    ? (
+        await db
+          .select({ email: connectionAccount.externalConnectionId })
+          .from(connectionAccount)
+          .where(
+            and(
+              eq(connectionAccount.ownerEmployeeId, employeeId),
+              eq(connectionAccount.toolkit, "google_workspace"),
+              eq(connectionAccount.scope, "staff"),
+              eq(connectionAccount.status, "connected"),
+              sql`${connectionAccount.secretId} is not null`,
+            ),
+          )
+          .limit(1)
+      )[0]?.email
+    : getDemoStore().connections.find(
+        (candidate) =>
+          candidate.toolkit === "google_workspace" &&
+          candidate.status === "connected",
+      )?.externalConnectionId;
+  const email = account?.trim().toLowerCase();
+  return email &&
+    z.string().email().safeParse(email).success &&
+    email.endsWith("@hrmny.co")
+    ? email
+    : null;
+}
+
 export const connectionsRouter = router({
   organizationPolicy: staffProcedure.query(async ({ ctx }) => {
     const policy = await getWorkOrganizationPolicy();

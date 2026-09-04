@@ -86,6 +86,9 @@ function OutreachInner() {
     onSuccess: invalidate,
     onError: onErr,
   });
+  const sendTest = trpc.leadgen.outreach.sendTest.useMutation({
+    onError: onErr,
+  });
   const discard = trpc.leadgen.outreach.discard.useMutation({
     onSuccess: invalidate,
     onError: onErr,
@@ -285,6 +288,26 @@ function OutreachInner() {
     setBusyId(id);
     try {
       await draftFollowup.mutateAsync({ id });
+    } catch {
+      // The mutation surfaces a human-readable reason via onError.
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function sendInternalTest(id: string) {
+    setFeedbackId(id);
+    setGateError(null);
+    setSendNote(null);
+    setBusyId(id);
+    try {
+      const result = await sendTest.mutateAsync({
+        id,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      setSendNote(
+        `Test delivered to ${result.recipient} · client was not contacted · outreach remains approved.`,
+      );
     } catch {
       // The mutation surfaces a human-readable reason via onError.
     } finally {
@@ -619,6 +642,24 @@ function OutreachInner() {
                     </>
                   ) : (
                     <>
+                      <CrmBtn
+                        data-testid="outreach-send-test"
+                        disabled={
+                          busyId !== null ||
+                          connections.isLoading ||
+                          !senderAccount
+                        }
+                        onClick={() => {
+                          const confirmed = window.confirm(
+                            `Send an INTERNAL TEST only?\n\nFrom: ${senderAccount ?? "No sender connected"}\nTo: ${senderAccount ?? "No sender connected"}\nOriginal client: ${item.recipient}\n\nThe client will not be contacted and this outreach will stay approved.`,
+                          );
+                          if (confirmed) void sendInternalTest(item.id);
+                        }}
+                      >
+                        {busyId === item.id
+                          ? "Sending test…"
+                          : "Send test to myself"}
+                      </CrmBtn>
                       <CrmBtn
                         variant="primary"
                         disabled={

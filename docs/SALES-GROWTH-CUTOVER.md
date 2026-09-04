@@ -27,7 +27,8 @@ The detailed company/contact/deal/admin objects remain available under the CRM *
 
 - Operation: `POST https://api.apollo.io/api/v1/mixed_people/api_search`.
 - Apollo documents People API Search as 0 credits and says it does not return email or phone data.
-- HRMNY sends the visible Job title as `person_titles`, fixes the market to `person_locations=["United Arab Emirates"]`, enables similar title matches, and sends the optional company/industry phrase only as documented `q_keywords`. It bounds results to 10, returns normalized fields to the browser, and does not write CRM state.
+- HRMNY exposes documented People Search controls for multiple titles, similar-title matching, person location, company-HQ location, seniority, employee range, email availability, and technology IDs. UAE, KSA, Oman, Qatar, Kuwait, Bahrain, and GCC presets translate into Apollo's documented location fields. The optional company/industry phrase remains `q_keywords`; it is not mislabeled as a strict industry selector.
+- A search result records the exact normalized criteria and target market in its durable receipt. Saving a candidate reuses that receipt so an Oman/KSA/GCC search cannot silently create a UAE company. Free search remains bounded, returns normalized fields to the browser, and does not itself write CRM state.
 - The current People Search reference does not document `organization_industries`; the Apollo adapter refuses that unsupported mapping instead of guessing a vendor field.
 
 ### One approved connection proof
@@ -43,6 +44,8 @@ The detailed company/contact/deal/admin objects remain available under the CRM *
 ## Outreach boundary
 
 - Email remains two steps: **Approve draft** then an independently authorized Gmail send.
+- **Send test to myself** is a separate path: the server resolves the signed-in operator's connected `@hrmny.co` Gmail identity and sends only there. It records an immutable test receipt and never marks the prospect outreach as sent, advances cadence, or creates a follow-up.
+- Every generated message receives an absolute HTTPS unsubscribe URL. A relative production unsubscribe path is refused at the shared message builder.
 - LinkedIn remains copy/open/mark-sent assistance. Do not connect browser automation, unofficial MCP senders, sequences, or autonomous outreach.
 - Suppression, unsubscribe, no-go sectors, and the global pause switch apply before any send.
 - This release does not authorize an email, LinkedIn message, campaign, invoice, publication, or ad spend.
@@ -77,4 +80,6 @@ Authenticated free-read and UX acceptance passed on production merge `5d441bae14
 9. **UX:** the Sales Growth loop, primary nav, compact settings, and default-hidden Chat test records pass authenticated desktop and narrow-viewport checks.
 10. **User acceptance:** Ayham/Maolham approval is recorded separately; a green deployment is not inferred as client acceptance.
 
-Official evidence: [Apollo People API Search](https://docs.apollo.io/reference/people-api-search), [Apollo People Enrichment](https://docs.apollo.io/reference/people-enrichment), and the [Apollo REST OpenAPI](https://docs.apollo.io/openapi/apollo-rest-api.json).
+The 0078 market migration only appends enum labels. Its reviewed runner locks the canonical database identity, main commit SHA, SQL hash, prior journal/enum state, and post-migration readback. If application delivery is rolled back, the unused labels are inert; no customer rows need rewriting.
+
+Official evidence: [Apollo People API Search](https://docs.apollo.io/reference/people-api-search), [Apollo People Enrichment](https://docs.apollo.io/reference/people-enrichment), the [Apollo REST OpenAPI](https://docs.apollo.io/openapi/apollo-rest-api.json), [Gmail users.messages.send](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send), and [Gmail users.getProfile](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/getProfile).

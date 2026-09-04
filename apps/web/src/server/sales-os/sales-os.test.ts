@@ -28,6 +28,7 @@ import {
   assertEmailSendAllowed,
   assertLinkedInAssistAllowed,
   buildComplianceFooter,
+  buildUnsubscribeUrl,
   ensureFooter,
   FOOTER_MARKER,
   weekKey,
@@ -52,6 +53,7 @@ import {
   insertCompanyResearch,
   listCompanyResearch,
   listContactResearch,
+  listEmailEvents,
   recordEmailEvent,
   listIntelSignals,
   resetSalesOsStore,
@@ -140,6 +142,22 @@ describe("compliance", () => {
     expect(body).toContain("unsubscribe");
     expect(ensureFooter(body)).toBe(body);
     expect(buildComplianceFooter().split("\n").length).toBeGreaterThan(3);
+  });
+
+  it("builds a recipient-bound absolute unsubscribe URL", () => {
+    const previous = process.env.NEXT_PUBLIC_APP_URL;
+    process.env.NEXT_PUBLIC_APP_URL = "https://hrmny-os.vercel.app";
+    try {
+      const url = buildUnsubscribeUrl(
+        "/api/sales-os/unsubscribe",
+        "person@example.com",
+      );
+      expect(url).toMatch(
+        /^https:\/\/hrmny-os\.vercel\.app\/api\/sales-os\/unsubscribe\?token=/,
+      );
+    } finally {
+      process.env.NEXT_PUBLIC_APP_URL = previous;
+    }
   });
 
   it("blocks send to suppressed addresses and honors the daily cap", async () => {
@@ -679,6 +697,7 @@ describe("digest, replies, intent CSV, evolve, stale", () => {
     });
     expect(await flagStaleEmails()).toBe(1);
     expect((await listOutreach())[0]?.reworkFeedback).toBe("no_response");
+    expect(await listEmailEvents({ kind: "delivered" })).toHaveLength(0);
   });
 });
 
@@ -752,8 +771,14 @@ describe("Sales research authorization", () => {
       companyName: "Northstar Hospitality",
       companyDomain: "northstar.example",
     };
-    const first = await partner.salesOs.apollo.saveCandidate({ candidate });
-    const replay = await partner.salesOs.apollo.saveCandidate({ candidate });
+    const first = await partner.salesOs.apollo.saveCandidate({
+      candidate,
+      market: "Oman",
+    });
+    const replay = await partner.salesOs.apollo.saveCandidate({
+      candidate,
+      market: "Oman",
+    });
     expect(first.duplicate).toBe(false);
     expect(replay).toMatchObject({
       dealId: first.dealId,
@@ -775,6 +800,11 @@ describe("Sales research authorization", () => {
     ]);
     const savedDeal = await getDeal(first.dealId);
     expect(savedDeal?.primaryContactId).toBe(first.contactId);
+    expect(
+      (await listCompanies()).find(
+        (company) => company.companyId === first.companyId,
+      )?.market,
+    ).toBe("Oman");
     expect(await listContacts({ companyId: first.companyId })).toEqual([
       expect.objectContaining({
         contactId: first.contactId,
@@ -789,7 +819,7 @@ describe("Sales research authorization", () => {
     ).toHaveLength(1);
     expect(await listNotes({ dealId: first.dealId })).toEqual([
       expect.objectContaining({
-        body: "Added Mina Lead (Marketing Director) from Apollo to Northstar Hospitality. No email was unlocked. No phone, personal email, or waterfall lookup was used.",
+        body: "Added Mina Lead (Marketing Director) from Apollo to Northstar Hospitality. No email was unlocked. Target market: Oman. No phone, personal email, or waterfall lookup was used.",
       }),
     ]);
     expect(await creditUsed("apollo_contact")).toBe(0);

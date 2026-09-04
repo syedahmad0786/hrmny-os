@@ -13,9 +13,12 @@ import {
   persistPendingApolloSearch,
   restorePendingApolloSearch,
   type ActiveApolloSearch,
+  type ApolloSearchEmailStatus,
+  type ApolloSearchSeniority,
   type PendingApolloSearch,
 } from "@/lib/apollo-search-session";
 import { formatReadyLlmLine, type ReadySmoke } from "@/lib/ready-smoke";
+import type { CrmMarket } from "@/lib/crm-markets";
 import {
   apolloCancellationNote,
   apolloSearchStatusNote,
@@ -55,6 +58,69 @@ type SavedCandidate = {
 
 type CandidateView = "new" | "saved" | "all";
 
+const GCC_MARKETS = [
+  ["United Arab Emirates", "UAE"],
+  ["Saudi Arabia", "KSA"],
+  ["Oman", "Oman"],
+  ["Qatar", "Qatar"],
+  ["Kuwait", "Kuwait"],
+  ["Bahrain", "Bahrain"],
+] as const;
+const SENIORITY_OPTIONS = [
+  ["owner", "Owner"],
+  ["founder", "Founder"],
+  ["c_suite", "C-suite"],
+  ["partner", "Partner"],
+  ["vp", "VP"],
+  ["head", "Head"],
+  ["director", "Director"],
+  ["manager", "Manager"],
+] as const;
+const DEFAULT_MARKETS = ["United Arab Emirates"];
+
+function splitSearchValues(value: string, max: number): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(/[,\n]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, max);
+}
+
+function sameList(left?: string[], right?: string[]) {
+  return (left ?? []).join("\n") === (right ?? []).join("\n");
+}
+
+function companySizeValue(search: PendingApolloSearch): string {
+  return search.employeeCountMin == null && search.employeeCountMax == null
+    ? "any"
+    : `${search.employeeCountMin ?? 1},${search.employeeCountMax ?? 1000000}`;
+}
+
+function crmMarketForSearch(search: PendingApolloSearch | null): CrmMarket {
+  const locations =
+    search?.organizationLocations ?? search?.locations ?? DEFAULT_MARKETS;
+  const markets = Array.from(
+    new Set(
+      locations.flatMap((location) => {
+        const match = GCC_MARKETS.find(([provider]) => provider === location);
+        return match ? [match[1]] : [];
+      }),
+    ),
+  );
+  if (markets.length === 1) return markets[0]!;
+  if (
+    markets.length === 2 &&
+    markets.includes("UAE") &&
+    markets.includes("KSA")
+  ) {
+    return "Both";
+  }
+  return "GCC";
+}
+
 function searchStatusNote(payload: SearchBridgeResult): string {
   return apolloSearchStatusNote({
     ...payload,
@@ -86,7 +152,15 @@ function samePendingSearch(
   return (
     left.query === right.query &&
     left.perPage === right.perPage &&
-    left.titles.join("\n") === right.titles.join("\n")
+    sameList(left.titles, right.titles) &&
+    sameList(left.locations, right.locations) &&
+    sameList(left.organizationLocations, right.organizationLocations) &&
+    sameList(left.seniorities, right.seniorities) &&
+    sameList(left.emailStatuses, right.emailStatuses) &&
+    sameList(left.technologyIds, right.technologyIds) &&
+    left.includeSimilarTitles === right.includeSimilarTitles &&
+    left.employeeCountMin === right.employeeCountMin &&
+    left.employeeCountMax === right.employeeCountMax
   );
 }
 
@@ -108,6 +182,17 @@ export default function HuntClientsPage() {
   const [searchNote, setSearchNote] = useState<string | null>(null);
   const [title, setTitle] = useState("Marketing Director");
   const [query, setQuery] = useState("");
+  const [markets, setMarkets] = useState<string[]>(DEFAULT_MARKETS);
+  const [locationBasis, setLocationBasis] = useState<"company" | "person">(
+    "company",
+  );
+  const [seniorities, setSeniorities] = useState<ApolloSearchSeniority[]>([]);
+  const [companySize, setCompanySize] = useState("any");
+  const [emailStatus, setEmailStatus] = useState<
+    ApolloSearchEmailStatus | "any"
+  >("any");
+  const [technologyIds, setTechnologyIds] = useState("");
+  const [includeSimilarTitles, setIncludeSimilarTitles] = useState(true);
   const [syntheticCompany, setSyntheticCompany] = useState("");
   const [apolloSearchRequestId, setApolloSearchRequestId] = useState<
     string | null
@@ -172,6 +257,13 @@ export default function HuntClientsPage() {
     setSearchNote(null);
     setTitle("Marketing Director");
     setQuery("");
+    setMarkets(DEFAULT_MARKETS);
+    setLocationBasis("company");
+    setSeniorities([]);
+    setCompanySize("any");
+    setEmailStatus("any");
+    setTechnologyIds("");
+    setIncludeSimilarTitles(true);
     setSyntheticCompany("");
     setPendingApolloSearch(null);
     setApolloSearchRequestId(null);
@@ -203,8 +295,17 @@ export default function HuntClientsPage() {
       };
       setPendingApolloSearch(restored);
       setApolloSearchRequestId(restored.idempotencyKey);
-      setTitle(restored.titles[0] ?? "Marketing Director");
+      setTitle(restored.titles.join(", ") || "Marketing Director");
       setQuery(restored.query ?? "");
+      setMarkets(
+        restored.organizationLocations ?? restored.locations ?? DEFAULT_MARKETS,
+      );
+      setLocationBasis(restored.locations?.length ? "person" : "company");
+      setSeniorities(restored.seniorities ?? []);
+      setCompanySize(companySizeValue(restored));
+      setEmailStatus(restored.emailStatuses?.[0] ?? "any");
+      setTechnologyIds(restored.technologyIds?.join(", ") ?? "");
+      setIncludeSimilarTitles(restored.includeSimilarTitles ?? true);
       setSearchNote(
         "Restored the pending Apollo receipt; checking its status.",
       );
@@ -289,8 +390,19 @@ export default function HuntClientsPage() {
     };
     setPendingApolloSearch(snapshot.search);
     setApolloSearchRequestId(snapshot.search.idempotencyKey);
-    setTitle(snapshot.search.titles[0] ?? "Marketing Director");
+    setTitle(snapshot.search.titles.join(", ") || "Marketing Director");
     setQuery(snapshot.search.query ?? "");
+    setMarkets(
+      snapshot.search.organizationLocations ??
+        snapshot.search.locations ??
+        DEFAULT_MARKETS,
+    );
+    setLocationBasis(snapshot.search.locations?.length ? "person" : "company");
+    setSeniorities(snapshot.search.seniorities ?? []);
+    setCompanySize(companySizeValue(snapshot.search));
+    setEmailStatus(snapshot.search.emailStatuses?.[0] ?? "any");
+    setTechnologyIds(snapshot.search.technologyIds?.join(", ") ?? "");
+    setIncludeSimilarTitles(snapshot.search.includeSimilarTitles ?? true);
     setApolloSearchResult(snapshot.result);
     setSearchNote(
       `${SERVER_RESTORE_NOTE} ${searchStatusNote(snapshot.result)}`,
@@ -748,9 +860,9 @@ export default function HuntClientsPage() {
             <span className="growth-cost-badge">0 credits</span>
           </div>
           <p className="growth-panel-copy">
-            Search by role and company or industry. This step never unlocks an
-            email address and uses no Apollo credits. Review a person before
-            requesting any paid details.
+            Choose the market, role, seniority, company size, and other useful
+            fit signals. This step never unlocks an email address and uses no
+            Apollo credits. Review a person before requesting paid details.
           </p>
           {salesAccessReady && !salesAccess.data.canOperate ? (
             <p className="growth-status" role="status">
@@ -771,9 +883,39 @@ export default function HuntClientsPage() {
               setSearchNote(null);
               setApolloSearchResult(null);
               setCandidateView("new");
+              const selectedMarkets = [...markets].sort();
+              const [employeeCountMin, employeeCountMax] =
+                companySize === "any"
+                  ? [undefined, undefined]
+                  : companySize.split(",").map(Number);
+              const normalizedTechnologyIds = splitSearchValues(
+                technologyIds,
+                10,
+              )
+                .map((value) =>
+                  value
+                    .toLowerCase()
+                    .replace(/[.\s-]+/g, "_")
+                    .replace(/[^a-z0-9_]/g, ""),
+                )
+                .filter(Boolean);
               const request = {
-                titles: [title.trim()],
+                titles: splitSearchValues(title, 8),
                 query: query.trim() || undefined,
+                ...(locationBasis === "company"
+                  ? { organizationLocations: selectedMarkets }
+                  : { locations: selectedMarkets }),
+                seniorities: seniorities.length
+                  ? [...seniorities].sort()
+                  : undefined,
+                emailStatuses:
+                  emailStatus === "any" ? undefined : [emailStatus],
+                technologyIds: normalizedTechnologyIds.length
+                  ? normalizedTechnologyIds
+                  : undefined,
+                includeSimilarTitles,
+                employeeCountMin,
+                employeeCountMax,
                 perPage: 8,
               };
               const idempotencyKey =
@@ -792,7 +934,7 @@ export default function HuntClientsPage() {
           >
             <div className="growth-search-fields">
               <label htmlFor="apollo-title">
-                Job title
+                Decision-maker job titles
                 <input
                   id="apollo-title"
                   data-testid="hunt-apollo-title"
@@ -801,9 +943,10 @@ export default function HuntClientsPage() {
                   }
                   value={isUiPrincipalCurrent ? title : "Marketing Director"}
                   onChange={(event) => setTitle(event.target.value)}
-                  placeholder="e.g. Marketing Director"
+                  placeholder="e.g. Marketing Director, Head of Brand"
                   minLength={2}
                 />
+                <span>Separate several titles with commas.</span>
               </label>
               <label htmlFor="apollo-query">
                 Company or industry keyword <span>optional</span>
@@ -819,9 +962,162 @@ export default function HuntClientsPage() {
                 />
               </label>
             </div>
+            <fieldset className="growth-market-filter">
+              <legend>Target market</legend>
+              <div className="growth-filter-chips">
+                {GCC_MARKETS.map(([value, label]) => (
+                  <label key={value}>
+                    <input
+                      type="checkbox"
+                      checked={markets.includes(value)}
+                      disabled={
+                        !canOperateApollo ||
+                        !apolloConnected ||
+                        apolloSearchActive
+                      }
+                      onChange={(event) =>
+                        setMarkets((current) =>
+                          event.target.checked
+                            ? [...current, value]
+                            : current.filter((market) => market !== value),
+                        )
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <small>
+                UAE is the default. Select KSA, Oman, or any GCC combination.
+              </small>
+            </fieldset>
+            <details className="growth-search-advanced">
+              <summary>
+                Advanced filters
+                <span>seniority · company size · email · technology</span>
+              </summary>
+              <div className="growth-advanced-grid">
+                <label htmlFor="apollo-location-basis">
+                  Market applies to
+                  <select
+                    id="apollo-location-basis"
+                    data-testid="hunt-apollo-location-basis"
+                    value={locationBasis}
+                    disabled={apolloSearchActive}
+                    onChange={(event) =>
+                      setLocationBasis(
+                        event.target.value === "person" ? "person" : "company",
+                      )
+                    }
+                  >
+                    <option value="company">Company headquarters</option>
+                    <option value="person">Decision-maker location</option>
+                  </select>
+                  <span>Company HQ is best for market expansion.</span>
+                </label>
+                <label htmlFor="apollo-company-size">
+                  Company size
+                  <select
+                    id="apollo-company-size"
+                    data-testid="hunt-apollo-company-size"
+                    value={companySize}
+                    disabled={apolloSearchActive}
+                    onChange={(event) => setCompanySize(event.target.value)}
+                  >
+                    <option value="any">Any size</option>
+                    <option value="1,10">1–10 employees</option>
+                    <option value="11,50">11–50 employees</option>
+                    <option value="51,200">51–200 employees</option>
+                    <option value="201,500">201–500 employees</option>
+                    <option value="501,1000">501–1,000 employees</option>
+                    <option value="1001,5000">1,001–5,000 employees</option>
+                    <option value="5001,1000000">5,001+ employees</option>
+                  </select>
+                </label>
+                <label htmlFor="apollo-email-status">
+                  Work-email availability
+                  <select
+                    id="apollo-email-status"
+                    data-testid="hunt-apollo-email-status"
+                    value={emailStatus}
+                    disabled={apolloSearchActive}
+                    onChange={(event) =>
+                      setEmailStatus(
+                        event.target.value as ApolloSearchEmailStatus | "any",
+                      )
+                    }
+                  >
+                    <option value="any">Any status</option>
+                    <option value="verified">Verified</option>
+                    <option value="likely to engage">Likely to engage</option>
+                    <option value="unverified">Unverified</option>
+                    <option value="unavailable">Unavailable</option>
+                  </select>
+                  <span>
+                    This filters candidates; it does not unlock emails.
+                  </span>
+                </label>
+                <label htmlFor="apollo-technologies">
+                  Company technology <span>optional</span>
+                  <input
+                    id="apollo-technologies"
+                    data-testid="hunt-apollo-technologies"
+                    value={technologyIds}
+                    disabled={apolloSearchActive}
+                    onChange={(event) => setTechnologyIds(event.target.value)}
+                    placeholder="e.g. shopify, wordpress_org"
+                  />
+                </label>
+                <fieldset className="growth-seniority-filter">
+                  <legend>Seniority</legend>
+                  <div className="growth-filter-chips">
+                    {SENIORITY_OPTIONS.map(([value, label]) => (
+                      <label key={value}>
+                        <input
+                          type="checkbox"
+                          checked={seniorities.includes(value)}
+                          disabled={apolloSearchActive}
+                          onChange={(event) =>
+                            setSeniorities((current) =>
+                              event.target.checked
+                                ? [...current, value as ApolloSearchSeniority]
+                                : current.filter((item) => item !== value),
+                            )
+                          }
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <label className="growth-check-row">
+                  <input
+                    type="checkbox"
+                    checked={includeSimilarTitles}
+                    disabled={apolloSearchActive}
+                    onChange={(event) =>
+                      setIncludeSimilarTitles(event.target.checked)
+                    }
+                  />
+                  Include similar job titles
+                </label>
+              </div>
+            </details>
             <div className="growth-search-actions">
               <p>
-                Market <strong>United Arab Emirates</strong>
+                Market{" "}
+                <strong>
+                  {markets.length
+                    ? markets
+                        .map(
+                          (market) =>
+                            GCC_MARKETS.find(
+                              ([value]) => value === market,
+                            )?.[1] ?? market,
+                        )
+                        .join(" + ")
+                    : "Select at least one"}
+                </strong>
               </p>
               <button
                 type="submit"
@@ -831,7 +1127,8 @@ export default function HuntClientsPage() {
                   !apolloConnected ||
                   freeSearchPending ||
                   apolloSearchActive ||
-                  title.trim().length < 2
+                  splitSearchValues(title, 8).length === 0 ||
+                  markets.length === 0
                 }
               >
                 {freeSearchPending
@@ -1018,6 +1315,8 @@ export default function HuntClientsPage() {
                                 }
                                 onClick={() =>
                                   saveCandidate.mutate({
+                                    market:
+                                      crmMarketForSearch(pendingApolloSearch),
                                     candidate: {
                                       externalId: candidate.externalId,
                                       fullName: candidate.fullName,

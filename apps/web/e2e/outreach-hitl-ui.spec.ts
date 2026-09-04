@@ -77,7 +77,15 @@ test.describe("Outreach HITL UI", () => {
       approvedRow.getByRole("button", { name: /Send via Gmail/i }),
     ).toBeVisible();
     await expect(
+      approvedRow.getByRole("button", { name: /Send test to myself/i }),
+    ).toBeVisible();
+    await expect(
       approvedRow.getByTestId("outreach-sender-account"),
     ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    ).toBe(true);
   });
 });

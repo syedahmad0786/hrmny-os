@@ -13,6 +13,7 @@ import {
 } from "@/components/crm/ui";
 import { formatLane } from "@/components/crm/format";
 import { ProspectingReadyBanner } from "@/components/prospecting-ready-banner";
+import { CRM_MARKETS, type CrmMarket } from "@/lib/crm-markets";
 
 export default function CrmInboundPage() {
   const router = useRouter();
@@ -31,7 +32,7 @@ export default function CrmInboundPage() {
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [sector, setSector] = useState("Retail");
-  const [market, setMarket] = useState<"UAE" | "KSA" | "Both">("UAE");
+  const [market, setMarket] = useState<CrmMarket>("UAE");
   const [message, setMessage] = useState("");
   const [useExistingCompany, setUseExistingCompany] = useState(true);
   const [useExistingContact, setUseExistingContact] = useState(true);
@@ -265,13 +266,11 @@ export default function CrmInboundPage() {
                   className="crm-select"
                   data-testid="inbound-market"
                   value={market}
-                  onChange={(e) =>
-                    setMarket(e.target.value as "UAE" | "KSA" | "Both")
-                  }
+                  onChange={(e) => setMarket(e.target.value as CrmMarket)}
                 >
-                  <option>UAE</option>
-                  <option>KSA</option>
-                  <option>Both</option>
+                  {CRM_MARKETS.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
                 </select>
               </div>
               <div className="crm-field wide">

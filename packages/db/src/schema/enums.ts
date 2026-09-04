@@ -48,7 +48,16 @@ export const clientLifecycleEnum = pgEnum("client_lifecycle_enum", [
   "closed",
 ]);
 
-export const marketEnum = pgEnum("market_enum", ["UAE", "KSA", "Both"]);
+export const marketEnum = pgEnum("market_enum", [
+  "UAE",
+  "KSA",
+  "Both",
+  "Oman",
+  "Qatar",
+  "Kuwait",
+  "Bahrain",
+  "GCC",
+]);
 
 export const engagementTypeEnum = pgEnum("engagement_type_enum", [
   "retainer",

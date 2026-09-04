@@ -205,7 +205,7 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
     expect(String(error)).not.toContain("synthetic private provider detail");
   });
 
-  it("maps explicit title and location fields to Apollo's documented filters", async () => {
+  it("maps decision-maker and company filters to Apollo's documented fields", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
@@ -220,7 +220,13 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
 
     await source.searchLeads({
       titles: ["Marketing Director"],
-      locations: ["United Arab Emirates"],
+      organizationLocations: ["United Arab Emirates", "Saudi Arabia"],
+      seniorities: ["director", "vp"],
+      emailStatuses: ["verified", "likely to engage"],
+      technologyIds: ["shopify"],
+      employeeCountMin: 11,
+      employeeCountMax: 500,
+      includeSimilarTitles: false,
       page: 1,
       perPage: 8,
     });
@@ -228,8 +234,12 @@ describe("LeadSourceAdapter (Apollo-shaped)", () => {
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(JSON.parse(String(request.body))).toEqual({
       person_titles: ["Marketing Director"],
-      include_similar_titles: true,
-      person_locations: ["United Arab Emirates"],
+      include_similar_titles: false,
+      person_seniorities: ["director", "vp"],
+      organization_locations: ["United Arab Emirates", "Saudi Arabia"],
+      contact_email_status: ["verified", "likely to engage"],
+      currently_using_any_of_technology_uids: ["shopify"],
+      organization_num_employees_ranges: ["11,500"],
       page: 1,
       per_page: 8,
     });

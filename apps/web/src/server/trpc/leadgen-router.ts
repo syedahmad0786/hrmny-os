@@ -31,7 +31,10 @@ import {
   listCompetitorFindings,
 } from "../leadgen/competitor-scan";
 import { router, staffProcedure } from "./trpc";
-import { getVerifiedWorkAppConnection } from "./connections-router";
+import {
+  getGoogleWorkspaceSenderEmail,
+  getVerifiedWorkAppConnection,
+} from "./connections-router";
 import {
   completeIntegrationReceipt,
   recordIntegrationReceipt,
@@ -502,6 +505,170 @@ export async function discardOutreach(input: {
   );
 }
 
+function testEmailBody(item: OutreachItem): string {
+  const preview = item.body.replace(
+    /^(?:Unsubscribe:|To stop hearing from us:)\s+\S+$/gim,
+    "Unsubscribe link hidden in this internal test.",
+  );
+  return [
+    "HRMNY INTERNAL TEST — this email was not sent to the client.",
+    `Original intended recipient: ${item.recipient}`,
+    "",
+    "--- MESSAGE PREVIEW ---",
+    preview,
+  ].join("\n");
+}
+
+/** Send an approved email to the operator's own @hrmny.co mailbox only. */
+export async function sendOutreachTest(input: {
+  id: string;
+  idempotencyKey: string;
+  actor: ActorContext;
+  composio?: ComposioSendAdapter;
+  /** Test-only dependency; the tRPC route always resolves this server-side. */
+  testRecipient?: string;
+}) {
+  const item = await getOutreach(input.id);
+  if (!item) throw new Error(`Outreach not found: ${input.id}`);
+  const { isEmailChannel } = await import("../sales-os/compliance");
+  if (!authorizeStaff(input.actor) || item.state !== "approved") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Approve the email draft before sending an internal test.",
+    });
+  }
+  if (!isEmailChannel(item.channel)) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Internal test sending is available for Gmail drafts only.",
+    });
+  }
+  const recipient = (
+    input.testRecipient ??
+    (await getGoogleWorkspaceSenderEmail(input.actor.employeeId))
+  )
+    ?.trim()
+    .toLowerCase();
+  if (
+    !recipient ||
+    !z.string().email().safeParse(recipient).success ||
+    !recipient.endsWith("@hrmny.co")
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "Connect your @hrmny.co Google Workspace mailbox before sending a test.",
+    });
+  }
+
+  const subject = `[TEST — NOT SENT TO CLIENT] ${item.subject ?? "(no subject)"}`;
+  const body = testEmailBody(item);
+  const messageId = `<hrmny-outreach-test-${input.idempotencyKey}@hrmny.co>`;
+  const receipt = await recordIntegrationReceipt({
+    provider: "gmail",
+    externalEventId: `outreach-test-send:${input.idempotencyKey}`,
+    operation: "messages.send.test",
+    rawBody: JSON.stringify({
+      outreachItemId: item.id,
+      recipient,
+      subject,
+      body,
+      messageId,
+    }),
+    status: "processing",
+    result: { bridgeStatus: "sending_test" },
+    ownerEmployeeId: input.actor.employeeId,
+    payload: {
+      outreachItemId: item.id,
+      recipient,
+      intendedRecipient: item.recipient,
+      messageId,
+    },
+  });
+  if (receipt.duplicate) {
+    if (
+      receipt.status === "completed" &&
+      typeof receipt.result?.externalId === "string"
+    ) {
+      return {
+        sent: true as const,
+        duplicate: true as const,
+        recipient,
+        receiptId: receipt.receiptId,
+        externalId: receipt.result.externalId,
+        threadId:
+          typeof receipt.result.threadId === "string"
+            ? receipt.result.threadId
+            : undefined,
+        outreachState: item.state,
+      };
+    }
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "The test-send outcome is uncertain. Check your own Inbox and Sent Mail before trying again.",
+    });
+  }
+
+  let providerAttempted = false;
+  let mode: string | undefined;
+  try {
+    const composio =
+      input.composio ??
+      (await resolveComposioSend(input.actor.employeeId, input.actor.roles));
+    providerAttempted = true;
+    const sent = await composio.sendAfterApproval({
+      toolkit: "gmail",
+      to: recipient,
+      subject,
+      body,
+      messageId,
+    });
+    mode = sent.mode;
+    if (!sent.sent || sent.mode !== "live") {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "Gmail test send is not live. Reconnect Google Workspace.",
+      });
+    }
+    await completeIntegrationReceipt(receipt.receiptId, {
+      bridgeStatus: "test_sent",
+      outreachItemId: item.id,
+      recipient,
+      intendedRecipient: item.recipient,
+      externalId: sent.externalId,
+      ...(sent.threadId ? { threadId: sent.threadId } : {}),
+      messageId,
+      sendMode: sent.mode,
+    });
+    return {
+      sent: true as const,
+      duplicate: false as const,
+      recipient,
+      receiptId: receipt.receiptId,
+      externalId: sent.externalId,
+      threadId: sent.threadId,
+      outreachState: item.state,
+    };
+  } catch (error) {
+    const definitelyNotSent = !providerAttempted || mode === "stub";
+    await updateIntegrationReceiptProgress(receipt.receiptId, {
+      status: definitelyNotSent ? "failed" : "processing",
+      result: {
+        bridgeStatus: definitelyNotSent
+          ? "test_not_sent"
+          : "test_reconcile_required",
+        outreachItemId: item.id,
+        recipient,
+        messageId,
+      },
+      lastError:
+        error instanceof Error ? error.message : "Gmail test send failed",
+    }).catch(() => undefined);
+    throw error;
+  }
+}
+
 export async function sendOutreach(input: {
   id: string;
   actor: ActorContext;
@@ -799,6 +966,20 @@ const outreachRouter = router({
     .mutation(({ input, ctx }) =>
       sendOutreach({
         id: input.id,
+        actor: actorFromCtx(ctx),
+      }),
+    ),
+
+  sendTest: staffProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        idempotencyKey: z.string().uuid(),
+      }),
+    )
+    .mutation(({ input, ctx }) =>
+      sendOutreachTest({
+        ...input,
         actor: actorFromCtx(ctx),
       }),
     ),

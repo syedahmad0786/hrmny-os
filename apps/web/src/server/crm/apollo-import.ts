@@ -17,6 +17,7 @@ import type {
   LeadCandidate,
 } from "@hrmny/integrations";
 import { assertLegacySalesSyntheticRuntime } from "../sales-os/legacy-effect-policy";
+import type { CrmMarket } from "@/lib/crm-markets";
 
 export type ApolloCompanyHit = Record<string, unknown>;
 
@@ -98,6 +99,7 @@ export type ApolloPersonImportResult = {
 export async function importApolloPersonToCrm(input: {
   person: LeadCandidate;
   receiptId: string;
+  market?: CrmMarket;
   ownerEmployeeId?: string | null;
   existingContactId?: string | null;
   existingDealId?: string | null;
@@ -117,7 +119,7 @@ export async function importApolloPersonToCrm(input: {
   if (!company) {
     company = await createCompany({
       name: companyName,
-      market: "UAE",
+      market: input.market ?? "UAE",
       website: domain ? `https://${domain}` : null,
       notes: "Created from a reviewed Apollo person receipt.",
     });
@@ -214,7 +216,7 @@ export async function importApolloPersonToCrm(input: {
     companyId: company.companyId,
     contactId: contact.contactId,
     authorEmployeeId: input.ownerEmployeeId ?? null,
-    body: `Added ${contactName}${contactTitle} from Apollo to ${company.name}. ${emailSummary} No phone, personal email, or waterfall lookup was used.`,
+    body: `Added ${contactName}${contactTitle} from Apollo to ${company.name}. ${emailSummary}${input.market && input.market !== "UAE" ? ` Target market: ${input.market}.` : ""} No phone, personal email, or waterfall lookup was used.`,
   });
 
   return {
