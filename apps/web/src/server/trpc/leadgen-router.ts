@@ -38,6 +38,7 @@ import {
   transitionIntegrationReceiptProgress,
   updateIntegrationReceiptProgress,
 } from "../integrations/inbox";
+import { OUTREACH_GUIDELINES } from "../sales-os/sops";
 
 async function resolveComposioSend(
   employeeId: string | null | undefined,
@@ -218,25 +219,65 @@ export async function draftOutreach(input: {
   } = await import("../sales-os/compliance");
   const { getSalesOsSettings } = await import("../sales-os/store");
   const settings = await getSalesOsSettings();
+  const outputChannel = isEmailChannel(channel)
+    ? "email"
+    : channel === "linkedin_followup"
+      ? "linkedin_followup"
+      : "linkedin_connect";
+  if (
+    !input.body &&
+    isEmailChannel(channel) &&
+    (!contact?.email || !contact.emailVerified)
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "Unlock and verify this lead's work email before creating an email draft. No AI call was made.",
+    });
+  }
+  if (isLinkedInChannel(channel) && !contact?.linkedinUrl) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "This lead has no LinkedIn profile URL yet. Enrich the exact person or add a verified profile before drafting.",
+    });
+  }
   const recipient = isLinkedInChannel(channel)
     ? (contact?.linkedinUrl ?? contact?.email ?? "")
     : (contact?.email ?? "");
 
-  let subject = input.subject ?? "Quick idea for your team";
+  let subject =
+    input.subject ??
+    (isLinkedInChannel(channel)
+      ? outputChannel === "linkedin_followup"
+        ? "LinkedIn follow-up"
+        : "LinkedIn connection"
+      : `An idea for ${deal.companyName}`);
   let body = input.body;
   if (!body) {
     const runAgent = input.runAgent ?? defaultRunAgent;
+    const contactName = contact
+      ? [contact.firstName, contact.lastName].filter(Boolean).join(" ")
+      : "the prospect";
     const run = await runAgent({
       agent: "outreach-draft",
-      input: {
+      input: [
+        `Write exactly one ${outputChannel.replace(/_/g, " ")} message.`,
+        `Sender: ${settings.outreach.senderName}, ${settings.outreach.senderTitle}. Sender company: hrmny, a UAE creative agency.`,
+        `Recipient: ${contactName}${contact?.title ? `, ${contact.title}` : ""} at ${deal.companyName}.`,
+        `Channel: ${outputChannel}.`,
+        `Hard identity rule: write FROM hrmny TO ${deal.companyName}. Never write as, for, or on behalf of ${deal.companyName}; never describe its services, team, history, or goals as hrmny's.`,
+        "Use verified facts only. Do not mention Apollo, BUAF, internal scoring, unverified contact data, or the research process.",
+        "Return one JSON object with channel, subject, body, and cta. Body must contain only the final sendable message: no analysis, labels, notes, alternatives, or Markdown headings.",
+        OUTREACH_GUIDELINES,
+      ].join("\n"),
+      context: {
         dealId: input.dealId,
-        company: deal.companyName,
-        sopVoice: settings.outreach.voice,
-        channel,
+        voice: settings.outreach.voice,
+        ...(knowledgeBrief
+          ? { knowledgeBrief: knowledgeBrief.body.slice(0, 10_000) }
+          : {}),
       },
-      context: knowledgeBrief
-        ? { knowledgeBrief: knowledgeBrief.body.slice(0, 10_000) }
-        : undefined,
     });
     const out = (
       typeof run.output === "object" && run.output ? run.output : {}
@@ -254,10 +295,19 @@ export async function draftOutreach(input: {
     subject = typeof out.subject === "string" ? out.subject : subject;
     body =
       typeof out.body === "string"
-        ? out.body
+        ? out.body.trim()
         : typeof run.output === "string"
-          ? run.output
+          ? run.output.trim()
           : JSON.stringify(run.output);
+    if (
+      outputChannel === "linkedin_connect" &&
+      body.length > settings.outreach.linkedinConnectMaxChars
+    ) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `The LinkedIn connection draft exceeded ${settings.outreach.linkedinConnectMaxChars} characters. Nothing was queued.`,
+      });
+    }
   }
 
   if (isEmailChannel(channel) && body) {

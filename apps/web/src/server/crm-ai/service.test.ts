@@ -8,6 +8,7 @@ import {
   getDeal,
   listActivities,
   listNotes,
+  updateContact,
 } from "../crm/repository";
 import { resetIntegrationReceiptMemory } from "../integrations/inbox";
 import { listOutreach, resetLeadgenStore } from "../leadgen/store";
@@ -33,6 +34,7 @@ async function seed() {
     companyId: company.companyId,
     primaryContactId: contact.contactId,
   });
+  await updateContact(contact.contactId, { emailVerified: true });
   return { company, contact, deal };
 }
 

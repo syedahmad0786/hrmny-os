@@ -82,7 +82,7 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
     id: "outreach-draft",
     displayName: "Outreach draft",
     responsibility:
-      "Draft email/LinkedIn copy from deal + memory. LinkedIn = copy-only. Email send = HITL.",
+      "Draft exactly one requested message from hrmny to the named prospect using verified deal context. Never impersonate the prospect or describe their business as hrmny's. LinkedIn is copy-only; email send requires HITL.",
     producesDrafts: true,
     requiresHitlBeforeSend: true,
     allowedTools: ["memory.retrieve", "composio.draft", "linkedin.copy"],

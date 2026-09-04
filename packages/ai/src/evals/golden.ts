@@ -9,7 +9,7 @@ import type { LLMProvider } from "../provider";
  */
 
 export const OutreachDraftSchema = z.object({
-  channel: z.literal("email"),
+  channel: z.enum(["email", "linkedin_connect", "linkedin_followup"]),
   subject: z.string().min(1),
   body: z.string().min(1),
   cta: z.string().min(1),
