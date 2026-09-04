@@ -431,10 +431,59 @@ describe("openrouter free-model failover", () => {
       cta: "Reply yes",
     });
     expect(request).toMatchObject({
+      model: "openrouter/free",
       response_format: { type: "json_object" },
       plugins: [{ id: "response-healing" }],
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("uses a review-only local outreach draft when every free route fails", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            { message: { role: "assistant", content: "[incomplete output" } },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = createProvider({
+      provider: "openrouter",
+      defaultModel: OPENROUTER_FREE_DEFAULT_MODEL,
+      openRouterApiKey: "sk-test",
+    });
+
+    const result = await provider.generate({
+      task: "outreach_draft",
+      messages: [
+        {
+          role: "user",
+          content: "firstName: Sara\ncompany: Acme Retail\nchannel: email",
+        },
+      ],
+      schema: z.object({
+        channel: z.literal("email"),
+        subject: z.string(),
+        body: z.string(),
+        cta: z.string(),
+      }),
+    });
+
+    expect(result).toMatchObject({
+      provider: "mock",
+      model: "fallback/outreach-template",
+      object: {
+        channel: "email",
+        subject: "An idea for Acme Retail",
+      },
+    });
+    expect(JSON.stringify(result.object)).toContain("Sara");
+    expect(JSON.stringify(result.object)).toContain("Acme Retail");
+    expect(fetchMock.mock.calls).toHaveLength(4);
     vi.unstubAllGlobals();
   });
 
