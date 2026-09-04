@@ -19,6 +19,7 @@ const CLIENT_FUNNEL_REVIEW_STARTER =
   "Review this client's funnel status, blockers, and next handoff";
 
 const STARTERS = [
+  "Show the operations picture and highest-risk work queues",
   "Summarize open pipeline deals that need a next action",
   "What delivery tasks are blocked on QC?",
   "Draft a warm outreach opener for a Dubai hospitality lead",

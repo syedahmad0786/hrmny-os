@@ -10,8 +10,15 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { nextLinksFromToolResults } from "../../lib/agent-next-links";
 import { getDb } from "../db";
+import { featureEnabled } from "../features";
 import { searchMemory } from "../ai/memory-db";
 import { isPortalDecisionIntent } from "../ai/agent-tools";
+import {
+  composioAiConnectedApps,
+  searchComposioConnectedData,
+} from "../composio-connected-data-ai";
+import { getVerifiedWorkAppConnection } from "./connections-router";
+import { getDemoWork } from "./work-management-router";
 import { staffProcedure, router } from "./trpc";
 
 type ThreadRow = {
@@ -38,8 +45,213 @@ type MessageRow = {
 const memThreads = new Map<string, ThreadRow>();
 const memMessages = new Map<string, MessageRow[]>();
 
+type OperationsQueue = {
+  projectId: string;
+  name: string;
+  ownerName: string | null;
+  sourcePlatform: string;
+  openTasks: number;
+  overdueTasks: number;
+  unassignedTasks: number;
+};
+
 function nowIso() {
   return new Date().toISOString();
+}
+
+export async function readWorkOperations(scope: {
+  employeeId: string;
+  clientId?: string | null;
+  roles?: readonly string[];
+}) {
+  const enabled = await featureEnabled("work.projects", {
+    userId: scope.employeeId,
+    clientId: scope.clientId,
+    roles: scope.roles,
+  });
+  if (!enabled) return { error: "work_projects_not_enabled" };
+
+  const db = getDb();
+  if (!db) {
+    const store = getDemoWork();
+    const projects = [...store.projects.values()].filter(
+      (project) =>
+        project.projectKind !== "personal" &&
+        (!scope.clientId || project.clientId === scope.clientId),
+    );
+    const projectIds = new Set(projects.map((project) => project.projectId));
+    const items = [...store.items.values()].filter(
+      (item) => projectIds.has(item.projectId) && !item.completedAt,
+    );
+    const queues: OperationsQueue[] = projects
+      .map((project) => {
+        const projectItems = items.filter(
+          (item) => item.projectId === project.projectId,
+        );
+        return {
+          projectId: project.projectId,
+          name: project.name,
+          ownerName: project.ownerName ?? null,
+          sourcePlatform: project.sourcePlatform,
+          openTasks: projectItems.length,
+          overdueTasks: projectItems.filter(
+            (item) => item.dueAt && new Date(item.dueAt) < new Date(),
+          ).length,
+          unassignedTasks: projectItems.filter(
+            (item) => !item.assigneeEmployeeId,
+          ).length,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.overdueTasks - a.overdueTasks ||
+          b.unassignedTasks - a.unassignedTasks ||
+          b.openTasks - a.openTasks,
+      )
+      .slice(0, 10);
+    return {
+      source: "demo",
+      freshness: null,
+      totals: {
+        projects: projects.length,
+        openTasks: items.length,
+        overdueTasks: items.filter(
+          (item) => item.dueAt && new Date(item.dueAt) < new Date(),
+        ).length,
+        unassignedTasks: items.filter((item) => !item.assigneeEmployeeId)
+          .length,
+      },
+      queues,
+      nextLinks: [
+        { href: "/work", label: "Open Work" },
+        { href: "/work/planning", label: "Review workload" },
+        { href: "/settings/asana-migration", label: "Asana sync" },
+      ],
+    };
+  }
+
+  const rows = await db.execute<
+    OperationsQueue & { totalProjects: number }
+  >(sql`
+    with visible_projects as (
+      select distinct project.work_project_id, project.name,
+        project.owner_employee_id, project.source_platform
+      from public.work_project project
+      left join public.work_project_member member
+        on member.work_project_id = project.work_project_id
+        and member.employee_id = ${scope.employeeId}::uuid
+      left join public.work_team_project team_project
+        on team_project.work_project_id = project.work_project_id
+      left join public.work_team_member team_member
+        on team_member.work_team_id = team_project.work_team_id
+        and team_member.employee_id = ${scope.employeeId}::uuid
+      where project.archived_at is null
+        and project.project_kind = 'standard'
+        and (${scope.clientId ?? null}::uuid is null
+          or project.client_id = ${scope.clientId ?? null}::uuid)
+        and (
+          project.privacy = 'organization'
+          or project.created_by_employee_id = ${scope.employeeId}::uuid
+          or project.owner_employee_id = ${scope.employeeId}::uuid
+          or member.employee_id is not null
+          or team_member.employee_id is not null
+        )
+    ), queue as (
+      select project.work_project_id as "projectId", project.name,
+        owner.display_name as "ownerName",
+        project.source_platform as "sourcePlatform",
+        count(distinct item.work_item_id) filter (
+          where item.completed_at is null
+        )::int as "openTasks",
+        count(distinct item.work_item_id) filter (
+          where item.completed_at is null and item.due_at < now()
+        )::int as "overdueTasks",
+        count(distinct item.work_item_id) filter (
+          where item.completed_at is null and item.assignee_employee_id is null
+        )::int as "unassignedTasks"
+      from visible_projects project
+      left join public.employee owner
+        on owner.employee_id = project.owner_employee_id
+      left join public.work_project_item membership
+        on membership.work_project_id = project.work_project_id
+      left join public.work_item item
+        on item.work_item_id = membership.work_item_id
+        and item.archived_at is null
+      group by project.work_project_id, project.name, owner.display_name,
+        project.source_platform
+    )
+    select queue.*, count(*) over ()::int as "totalProjects"
+    from queue
+    order by "overdueTasks" desc, "unassignedTasks" desc, "openTasks" desc,
+      lower(name)
+    limit 10
+  `);
+  const [totals] = await db.execute<{
+    openTasks: number;
+    overdueTasks: number;
+    unassignedTasks: number;
+  }>(sql`
+    with visible_projects as (
+      select distinct project.work_project_id
+      from public.work_project project
+      left join public.work_project_member member
+        on member.work_project_id = project.work_project_id
+        and member.employee_id = ${scope.employeeId}::uuid
+      left join public.work_team_project team_project
+        on team_project.work_project_id = project.work_project_id
+      left join public.work_team_member team_member
+        on team_member.work_team_id = team_project.work_team_id
+        and team_member.employee_id = ${scope.employeeId}::uuid
+      where project.archived_at is null and project.project_kind = 'standard'
+        and (${scope.clientId ?? null}::uuid is null
+          or project.client_id = ${scope.clientId ?? null}::uuid)
+        and (project.privacy = 'organization'
+          or project.created_by_employee_id = ${scope.employeeId}::uuid
+          or project.owner_employee_id = ${scope.employeeId}::uuid
+          or member.employee_id is not null or team_member.employee_id is not null)
+    ), visible_items as (
+      select distinct item.work_item_id, item.due_at,
+        item.assignee_employee_id
+      from visible_projects project
+      join public.work_project_item membership
+        on membership.work_project_id = project.work_project_id
+      join public.work_item item on item.work_item_id = membership.work_item_id
+      where item.archived_at is null and item.completed_at is null
+    )
+    select count(*)::int as "openTasks",
+      count(*) filter (where due_at < now())::int as "overdueTasks",
+      count(*) filter (where assignee_employee_id is null)::int as "unassignedTasks"
+    from visible_items
+  `);
+  const [freshness] = await db.execute<{
+    status: string | null;
+    lastSyncedAt: string | null;
+    lastError: string | null;
+  }>(sql`
+    select status, last_synced_at::text as "lastSyncedAt",
+      last_error as "lastError"
+    from public.asana_sync_state
+    order by last_synced_at desc nulls last, updated_at desc
+    limit 1
+  `);
+  return {
+    source: rows.some((row) => row.sourcePlatform === "asana")
+      ? "asana_via_work"
+      : "work",
+    freshness: freshness ?? null,
+    totals: {
+      projects: rows[0]?.totalProjects ?? 0,
+      openTasks: totals?.openTasks ?? 0,
+      overdueTasks: totals?.overdueTasks ?? 0,
+      unassignedTasks: totals?.unassignedTasks ?? 0,
+    },
+    queues: rows.map(({ totalProjects: _totalProjects, ...queue }) => queue),
+    nextLinks: [
+      { href: "/work", label: "Open Work" },
+      { href: "/work/planning", label: "Review workload" },
+      { href: "/settings/asana-migration", label: "Asana sync" },
+    ],
+  };
 }
 
 export function externalChatThreadId(
@@ -129,6 +341,7 @@ export async function getOrCreateExternalChatThread(input: {
 export function buildChatDefaultTools(scope: {
   employeeId: string;
   clientId?: string | null;
+  roles?: readonly string[];
   immutableUserPrompt?: string;
 }): HarnessTool[] {
   const tools: HarnessTool[] = [
@@ -150,6 +363,50 @@ export function buildChatDefaultTools(scope: {
             content: h.content.slice(0, 500),
             score: h.score,
           })),
+        };
+      },
+    },
+    {
+      name: "operations_read",
+      description:
+        "Read the current Work operating picture: visible projects, open work, overdue work, unassigned work, source freshness, and highest-risk queues",
+      run: async () => readWorkOperations(scope),
+    },
+    {
+      name: "connected_search",
+      description:
+        "Read up to five relevant results from each approved, employee-connected Composio work app; never changes external data",
+      run: async (args) => {
+        const query = String(args.query ?? args.prompt ?? "")
+          .trim()
+          .slice(0, 2_000);
+        if (!query) return { error: "query_required" };
+        const sources = await Promise.allSettled(
+          composioAiConnectedApps.map(async (definition) => {
+            const verified = await getVerifiedWorkAppConnection(
+              scope.employeeId,
+              definition.app,
+              { clientId: scope.clientId, roles: scope.roles ?? [] },
+            );
+            return verified
+              ? searchComposioConnectedData({
+                  client: verified.client,
+                  connectedAccountId: verified.account.id,
+                  app: definition.app,
+                  query,
+                })
+              : [];
+          }),
+        );
+        const results = sources.flatMap((result) =>
+          result.status === "fulfilled" ? result.value : [],
+        );
+        return {
+          results,
+          connectedSources: results.length,
+          nextLinks: [
+            { href: "/settings/connections", label: "Manage connections" },
+          ],
         };
       },
     },
@@ -535,6 +792,8 @@ export function buildChatDefaultTools(scope: {
   ) {
     const readOnly = new Set([
       "search_memory",
+      "operations_read",
+      "connected_search",
       "crm_read",
       "delivery_read",
       "outreach_read",
@@ -548,6 +807,7 @@ export function buildChatDefaultTools(scope: {
 function defaultTools(scope: {
   employeeId: string;
   clientId?: string | null;
+  roles?: readonly string[];
   immutableUserPrompt?: string;
 }): HarnessTool[] {
   return buildChatDefaultTools(scope);
@@ -831,6 +1091,7 @@ export const chatRouter = router({
         ...defaultTools({
           employeeId,
           clientId: thread.clientId,
+          roles: ctx.roles,
           immutableUserPrompt: input.content,
         }),
       ];
