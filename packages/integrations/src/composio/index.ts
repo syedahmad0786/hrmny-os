@@ -9,6 +9,10 @@ export type ComposioSendInput = {
   body: string;
   connectionId?: string;
   messageId?: string;
+  /** Existing Gmail thread for an operator-approved reply. */
+  threadId?: string;
+  /** RFC 5322 Message-ID of the inbound message, when the webhook supplied it. */
+  inReplyTo?: string;
 };
 
 export type ComposioSendResult = {
@@ -165,17 +169,22 @@ function buildGmailRawMessage(input: {
   subject?: string;
   body: string;
   messageId?: string;
+  inReplyTo?: string;
 }): string {
   const subject = (input.subject ?? "(no subject)")
     .replace(/[\r\n]+/g, " ")
     .trim()
     .slice(0, 200);
   const encodedSubject = Buffer.from(subject, "utf8").toString("base64");
+  const inReplyTo = input.inReplyTo?.replace(/[\r\n]+/g, "").trim();
   const message = [
     `To: ${input.to.trim()}`,
     `Subject: =?UTF-8?B?${encodedSubject}?=`,
     ...(input.messageId
       ? [`Message-ID: ${input.messageId.replace(/[\r\n]+/g, "")}`]
+      : []),
+    ...(inReplyTo
+      ? [`In-Reply-To: ${inReplyTo}`, `References: ${inReplyTo}`]
       : []),
     "MIME-Version: 1.0",
     'Content-Type: text/plain; charset="UTF-8"',
@@ -235,7 +244,7 @@ export function createComposioLiveSend(opts: {
           input.connectionId?.trim() || opts.connectedAccountId,
         endpoint: "/gmail/v1/users/me/messages/send",
         method: "POST",
-        body: { raw },
+        body: { raw, ...(input.threadId ? { threadId: input.threadId } : {}) },
       });
       const externalId =
         typeof result.data?.id === "string" ? result.data.id.trim() : "";

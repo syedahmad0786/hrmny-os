@@ -752,8 +752,12 @@ export const salesOsRouter = router({
         z.object({
           fromEmail: z.string().email(),
           body: z.string().min(1),
+          subject: z.string().max(500).optional(),
           dealId: z.string().uuid().optional(),
           outreachItemId: z.string().optional(),
+          externalId: z.string().max(1_000).optional(),
+          threadId: z.string().max(1_000).optional(),
+          rfcMessageId: z.string().max(1_000).optional(),
         }),
       )
       .mutation(({ input, ctx }) =>

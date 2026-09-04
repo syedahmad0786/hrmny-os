@@ -56,6 +56,12 @@ async function handleTrigger(
   );
   const data = asObject(body.data);
   const messageId = text(data.id, data.message_id, data.messageId);
+  const rfcMessageId = text(
+    data.rfc_message_id,
+    data.rfcMessageId,
+    data.message_id_header,
+    data.messageIdHeader,
+  );
   const threadId = text(data.thread_id, data.threadId);
   const fromEmail = senderEmail(
     text(data.sender, data.from, data.from_email, data.fromEmail),
@@ -137,8 +143,10 @@ async function handleTrigger(
   const result = await deps.ingestReply({
     fromEmail,
     body: bodyText,
+    subject,
     externalId: messageId,
     threadId: threadId || undefined,
+    rfcMessageId: rfcMessageId || undefined,
     actorEmployeeId: employeeId,
   });
   return { handled: "gmail_reply", messageId, result } as const;

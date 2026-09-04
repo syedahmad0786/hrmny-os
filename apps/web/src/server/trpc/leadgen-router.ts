@@ -46,6 +46,10 @@ import {
 } from "../integrations/inbox";
 import { OUTREACH_GUIDELINES } from "../sales-os/sops";
 import { buildEmailFollowupStatuses } from "../sales-os/followups";
+import {
+  getSalesConversation,
+  listSalesConversations,
+} from "../sales-os/conversations";
 
 async function resolveComposioSend(
   employeeId: string | null | undefined,
@@ -786,6 +790,65 @@ export async function sendOutreachTest(input: {
   }
 }
 
+function normalizedThreadSubject(value: string | null | undefined): string {
+  return (value ?? "")
+    .replace(/^\s*(?:re|fw|fwd)\s*:\s*/i, "")
+    .trim()
+    .toLowerCase();
+}
+
+/** Resolve an approved reply back to provider evidence, never from client input. */
+export async function resolveGmailReplyContext(
+  item: OutreachItem,
+): Promise<{ threadId: string; inReplyTo?: string } | null> {
+  const { listEmailEvents } = await import("../sales-os/store");
+  const [events, allOutreach] = await Promise.all([
+    listEmailEvents({ kind: "replied" }),
+    listOutreach(),
+  ]);
+  const outreachById = new Map(allOutreach.map((row) => [row.id, row]));
+  const recipient = item.recipient.trim().toLowerCase();
+  const subject = normalizedThreadSubject(item.subject);
+  const matches = events
+    .filter((event) => {
+      const linked = event.outreachItemId
+        ? outreachById.get(event.outreachItemId)
+        : null;
+      const eventDealId =
+        typeof event.payload.dealId === "string"
+          ? event.payload.dealId
+          : linked?.dealId;
+      const from =
+        typeof event.payload.from === "string"
+          ? event.payload.from.trim().toLowerCase()
+          : linked?.recipient.trim().toLowerCase();
+      const eventSubject = normalizedThreadSubject(
+        typeof event.payload.subject === "string"
+          ? event.payload.subject
+          : linked?.subject,
+      );
+      return (
+        eventDealId === item.dealId &&
+        from === recipient &&
+        (!subject || !eventSubject || subject === eventSubject) &&
+        typeof event.payload.threadId === "string" &&
+        Boolean(event.payload.threadId.trim())
+      );
+    })
+    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  const latest = matches[0];
+  if (!latest) return null;
+  const inReplyTo =
+    typeof latest.payload.rfcMessageId === "string" &&
+    latest.payload.rfcMessageId.trim()
+      ? latest.payload.rfcMessageId.trim()
+      : undefined;
+  return {
+    threadId: String(latest.payload.threadId).trim(),
+    ...(inReplyTo ? { inReplyTo } : {}),
+  };
+}
+
 export async function sendOutreach(input: {
   id: string;
   actor: ActorContext;
@@ -866,6 +929,8 @@ export async function sendOutreach(input: {
   let readbackAt: string | undefined;
   const toolkit =
     item.channel === "linkedin" ? ("linkedin" as const) : ("gmail" as const);
+  const replyContext =
+    toolkit === "gmail" ? await resolveGmailReplyContext(item) : null;
 
   try {
     const result = await transition(
@@ -994,6 +1059,8 @@ export async function sendOutreach(input: {
                 subject: item.subject ?? undefined,
                 body: item.body,
                 messageId,
+                threadId: replyContext?.threadId,
+                inReplyTo: replyContext?.inReplyTo,
               });
               externalId = res.externalId;
               threadId = res.threadId;
@@ -1094,6 +1161,10 @@ export async function sendOutreach(input: {
                 readbackAt,
                 senderConnectionAccountId: sender?.connectionAccountId,
                 senderEmail: sender?.email,
+                dealId: item.dealId,
+                recipient: item.recipient,
+                subject: item.subject,
+                body: item.body.slice(0, 2_000),
                 ...(threadId ? { threadId } : {}),
               },
             });
@@ -1157,6 +1228,88 @@ const outreachRouter = router({
     .query(({ input }) => getOutreach(input.id)),
 
   followups: staffProcedure.query(() => listEmailFollowups()),
+
+  conversations: staffProcedure.query(({ ctx }) => {
+    if (!authorizeStaff(actorFromCtx(ctx))) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Only Sales operators may view Gmail conversations.",
+      });
+    }
+    return listSalesConversations();
+  }),
+
+  draftReply: staffProcedure
+    .input(
+      z.object({
+        conversationId: z.string().min(1).max(1_000),
+        body: z.string().trim().min(1).max(20_000).optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const actor = actorFromCtx(ctx);
+      if (!authorizeStaff(actor)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only Sales operators may draft replies.",
+        });
+      }
+      const conversation = await getSalesConversation(input.conversationId);
+      if (!conversation) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Conversation not found.",
+        });
+      }
+      if (!conversation.dealId || !conversation.contactEmail) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "Associate this reply with a CRM deal and verified contact before drafting.",
+        });
+      }
+      if (conversation.replyDraftId) {
+        const existing = await getOutreach(conversation.replyDraftId);
+        if (existing) return existing;
+      }
+      const deal = await getDeal(conversation.dealId);
+      const contact = deal?.primaryContactId
+        ? await getContact(deal.primaryContactId)
+        : null;
+      if (
+        !deal ||
+        !contact?.email ||
+        contact.email.trim().toLowerCase() !==
+          conversation.contactEmail.trim().toLowerCase()
+      ) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "The reply sender no longer matches the deal's primary contact. Review the CRM association first.",
+        });
+      }
+      const prior = [...conversation.messages]
+        .reverse()
+        .find((message) => message.direction === "outbound");
+      return draftOutreach({
+        dealId: conversation.dealId,
+        channel: "gmail",
+        subject: conversation.subject
+          ? conversation.subject.startsWith("Re:")
+            ? conversation.subject
+            : `Re: ${conversation.subject}`
+          : "Re: Our conversation",
+        body: input.body,
+        cadenceTouch: Math.max(
+          2,
+          (await listOutreach({ dealId: conversation.dealId })).length + 1,
+        ),
+        previousMessage: {
+          subject: prior?.subject ?? conversation.subject,
+          body: conversation.latestInboundBody,
+        },
+      });
+    }),
 
   draft: staffProcedure
     .input(

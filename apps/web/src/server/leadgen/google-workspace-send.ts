@@ -43,11 +43,15 @@ export function createGoogleWorkspaceGmailSend(
         .trim()
         .slice(0, 200);
       const encodedSubject = Buffer.from(subject, "utf8").toString("base64");
+      const inReplyTo = input.inReplyTo?.replace(/[\r\n]+/g, "").trim();
       const message = [
         `To: ${input.to.trim()}`,
         `Subject: =?UTF-8?B?${encodedSubject}?=`,
         ...(input.messageId
           ? [`Message-ID: ${input.messageId.replace(/[\r\n]+/g, "")}`]
+          : []),
+        ...(inReplyTo
+          ? [`In-Reply-To: ${inReplyTo}`, `References: ${inReplyTo}`]
           : []),
         "MIME-Version: 1.0",
         'Content-Type: text/plain; charset="UTF-8"',
@@ -65,6 +69,7 @@ export function createGoogleWorkspaceGmailSend(
           },
           body: JSON.stringify({
             raw: Buffer.from(message, "utf8").toString("base64url"),
+            ...(input.threadId ? { threadId: input.threadId } : {}),
           }),
         },
       );

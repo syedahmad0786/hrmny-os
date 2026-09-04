@@ -1,6 +1,12 @@
 import type { ReplyIntent } from "@hrmny/ai";
 import { CRM_PIPELINE_STAGES } from "@hrmny/db";
-import { getContact, getDeal, updateDeal } from "../crm/repository";
+import {
+  createActivity,
+  getContact,
+  getDeal,
+  listActivities,
+  updateDeal,
+} from "../crm/repository";
 import { applyReplyIntent, intentToTransition } from "../leadgen/reply-intent";
 import { getOutreach, listOutreach, patchOutreach } from "../leadgen/store";
 import { domainOf, isEmailChannel, suppressTarget } from "./compliance";
@@ -329,8 +335,10 @@ export async function ingestGmailReply(input: {
   dealId?: string;
   fromEmail: string;
   body: string;
+  subject?: string;
   externalId?: string;
   threadId?: string;
+  rfcMessageId?: string;
   actorEmployeeId?: string | null;
   senderConnectionAccountId?: string | null;
 }) {
@@ -392,8 +400,9 @@ export async function ingestGmailReply(input: {
   const itemId = item?.id ?? null;
   const dealId = input.dealId ?? item?.dealId ?? null;
   const classified = heuristicIntent(input.body);
-  if (!duplicate) {
-    await recordEmailEvent({
+  const recorded =
+    duplicate ??
+    (await recordEmailEvent({
       outreachItemId: itemId,
       contactId: item?.contactId,
       kind: "replied",
@@ -402,8 +411,11 @@ export async function ingestGmailReply(input: {
       payload: {
         from: input.fromEmail,
         body: input.body.slice(0, 2000),
+        subject: input.subject?.slice(0, 500),
         intent: classified,
+        ...(dealId ? { dealId } : {}),
         ...(input.threadId ? { threadId: input.threadId } : {}),
+        ...(input.rfcMessageId ? { rfcMessageId: input.rfcMessageId } : {}),
         ...(input.actorEmployeeId
           ? { ownerEmployeeId: input.actorEmployeeId }
           : {}),
@@ -411,7 +423,35 @@ export async function ingestGmailReply(input: {
           ? { senderConnectionAccountId: input.senderConnectionAccountId }
           : {}),
       },
-    });
+    }));
+  if (dealId) {
+    const deal = await getDeal(dealId);
+    if (deal) {
+      const activityExists = (await listActivities({ dealId })).some(
+        (activity) => activity.metadata.emailEventId === recorded.id,
+      );
+      if (!activityExists) {
+        await createActivity({
+          type: "email",
+          subject: input.subject
+            ? `Reply received: ${input.subject.slice(0, 500)}`
+            : "Email reply received",
+          body: input.body.slice(0, 2_000),
+          companyId: deal.companyId,
+          contactId: item?.contactId ?? deal.primaryContactId,
+          dealId,
+          actorEmployeeId: input.actorEmployeeId,
+          metadata: {
+            direction: "inbound",
+            provider: "gmail",
+            emailEventId: recorded.id,
+            externalId: input.externalId ?? null,
+            threadId: input.threadId ?? null,
+            intent: classified,
+          },
+        });
+      }
+    }
   }
   if (!dealId) {
     return {
