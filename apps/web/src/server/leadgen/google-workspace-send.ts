@@ -8,6 +8,7 @@ import {
   verifyGmailProviderReadback,
 } from "@hrmny/integrations";
 import { getGoogleWorkspaceAccessToken } from "../trpc/connections-router";
+import { formatGoogleWorkspaceGmailError } from "@/lib/google-workspace-error";
 
 /**
  * HITL Gmail send via staff Google Workspace OAuth (gmail.send scope).
@@ -70,7 +71,7 @@ export function createGoogleWorkspaceGmailSend(
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
         throw new Error(
-          `Google Workspace Gmail send failed (${response.status}): ${detail.slice(0, 200)}`,
+          formatGoogleWorkspaceGmailError(response.status, detail),
         );
       }
       const json = (await response.json()) as {
@@ -123,7 +124,7 @@ export function createGoogleWorkspaceGmailSend(
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
         throw new GmailProviderReadbackError(
-          `Google Workspace Gmail readback failed (${response.status}): ${detail.slice(0, 200)}`,
+          formatGoogleWorkspaceGmailError(response.status, detail),
           input.externalId,
         );
       }

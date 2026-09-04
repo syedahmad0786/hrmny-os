@@ -18,6 +18,7 @@ import {
   hasSyntheticMarker,
   isSyntheticRecordName,
 } from "@/lib/synthetic-records";
+import { googleWorkspaceGmailApiEnableUrl } from "@/lib/google-workspace-error";
 
 /** Serialized shape of a @hrmny/gate TransitionResult refusal. */
 type GateOutcome =
@@ -477,7 +478,17 @@ function OutreachInner() {
 
       {gateError ? (
         <div id="outreach-action-feedback" className="crm-note" role="alert">
-          <CrmTag kind="danger">Blocked</CrmTag> {gateError}
+          <CrmTag kind="danger">Blocked</CrmTag> {gateError}{" "}
+          {googleWorkspaceGmailApiEnableUrl(gateError) ? (
+            <a
+              href={googleWorkspaceGmailApiEnableUrl(gateError)!}
+              target="_blank"
+              rel="noreferrer"
+              className="font-bold underline"
+            >
+              Enable Gmail API →
+            </a>
+          ) : null}
         </div>
       ) : null}
       {sendNote ? (
