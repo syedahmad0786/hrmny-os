@@ -89,12 +89,17 @@ export function buildUnsubscribeUrl(path: string, email: string): string {
 }
 
 export function hasValidUnsubscribeLink(body: string, email: string): boolean {
-  const token = body.match(/[?&]token=([^\s&]+)/)?.[1];
-  if (!token) return false;
+  const link = body.match(
+    /(?:Unsubscribe:|To stop hearing from us:)\s+(https?:\/\/\S+)/i,
+  )?.[1];
+  if (!link) return false;
   try {
+    const url = new URL(link);
+    const token = url.searchParams.get("token");
     return (
-      verifyUnsubscribeToken(decodeURIComponent(token)) ===
-      email.trim().toLowerCase()
+      token !== null &&
+      url.origin === new URL(buildUnsubscribeUrl("/", email)).origin &&
+      verifyUnsubscribeToken(token) === email.trim().toLowerCase()
     );
   } catch {
     return false;

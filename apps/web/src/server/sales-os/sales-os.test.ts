@@ -29,8 +29,10 @@ import {
   assertLinkedInAssistAllowed,
   buildComplianceFooter,
   buildUnsubscribeUrl,
+  createUnsubscribeToken,
   ensureFooter,
   FOOTER_MARKER,
+  hasValidUnsubscribeLink,
   weekKey,
 } from "./compliance";
 import { ingestManualResearch, type ResearchProposalInput } from "./research";
@@ -155,6 +157,13 @@ describe("compliance", () => {
       expect(url).toMatch(
         /^https:\/\/hrmny-os\.vercel\.app\/api\/sales-os\/unsubscribe\?token=/,
       );
+      expect(hasValidUnsubscribeLink(`Unsubscribe: ${url}`, "person@example.com")).toBe(true);
+      expect(
+        hasValidUnsubscribeLink(
+          `Unsubscribe: /api/sales-os/unsubscribe?token=${createUnsubscribeToken("person@example.com")}`,
+          "person@example.com",
+        ),
+      ).toBe(false);
     } finally {
       process.env.NEXT_PUBLIC_APP_URL = previous;
     }
