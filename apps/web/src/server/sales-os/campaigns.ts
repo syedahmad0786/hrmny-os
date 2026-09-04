@@ -6,6 +6,8 @@ import { listOutreach } from "../leadgen/store";
 import {
   completeIntegrationReceipt,
   recordIntegrationReceipt,
+  transitionIntegrationReceiptProgress,
+  updateIntegrationReceiptProgress,
 } from "../integrations/inbox";
 import { runDueFollowupDrafts } from "../leadgen/followup-scheduler";
 import {
@@ -423,8 +425,31 @@ export async function runSalesCampaignFirstTouch(input: {
       });
       continue;
     }
+    const memberPayload = { campaignId: campaign.id, dealId, cadenceTouch: 1 };
+    const memberReceipt = await recordIntegrationReceipt({
+      provider: "hrmny",
+      externalEventId: `campaign-first-touch:${campaign.id}:${dealId}`,
+      operation: "sales.campaign.first_touch.member.prepare",
+      rawBody: JSON.stringify(memberPayload),
+      payload: memberPayload,
+      status: "processing",
+      result: { bridgeStatus: "preparing_draft" },
+      ownerEmployeeId: input.actorEmployeeId ?? null,
+    });
+    let claimed = !memberReceipt.duplicate;
+    if (memberReceipt.duplicate && memberReceipt.status === "failed") {
+      claimed = await transitionIntegrationReceiptProgress(
+        memberReceipt.receiptId,
+        { status: "failed", stateVersion: memberReceipt.stateVersion },
+        { status: "processing", result: { bridgeStatus: "preparing_draft" } },
+      );
+    }
+    if (!claimed) {
+      existing += 1;
+      continue;
+    }
     try {
-      await draftOutreach({
+      const draft = await draftOutreach({
         dealId,
         channel: "gmail",
         subject,
@@ -432,8 +457,18 @@ export async function runSalesCampaignFirstTouch(input: {
         runAgent: input.runAgent,
         cadenceTouch: 1,
       });
+      await completeIntegrationReceipt(memberReceipt.receiptId, {
+        bridgeStatus: "draft_ready_for_human_review",
+        outreachItemId: draft.id,
+        ...memberPayload,
+      });
       drafted += 1;
     } catch (error) {
+      await updateIntegrationReceiptProgress(memberReceipt.receiptId, {
+        status: "failed",
+        result: { bridgeStatus: "draft_failed", ...memberPayload },
+        lastError: error instanceof Error ? error.message : "Draft failed",
+      }).catch(() => undefined);
       blocked.push({
         dealId,
         reason: error instanceof Error ? error.message : "Draft failed",

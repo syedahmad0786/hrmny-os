@@ -11,6 +11,7 @@ import {
 import { resetIntegrationReceiptMemory } from "../integrations/inbox";
 import {
   getSalesOsSettings,
+  addSuppression,
   mutateSalesOsSettings,
   recordEmailEvent,
   resetSalesOsStore,
@@ -152,6 +153,31 @@ describe("Sales campaign execution", () => {
     });
   });
 
+  it("deduplicates concurrent first-touch runs with different run ids", async () => {
+    const campaign = await createSalesCampaign(campaignInput);
+    const runs = await Promise.all([
+      runSalesCampaignFirstTouch({
+        campaignId: campaign.id,
+        runId: "71000000-0000-4000-8000-000000000021",
+      }),
+      runSalesCampaignFirstTouch({
+        campaignId: campaign.id,
+        runId: "71000000-0000-4000-8000-000000000022",
+      }),
+    ]);
+
+    expect(
+      runs.reduce(
+        (total, run) => total + ("drafted" in run ? run.drafted : 0),
+        0,
+      ),
+    ).toBe(1);
+    expect(
+      runs.every((run) => !("providerSends" in run) || run.providerSends === 0),
+    ).toBe(true);
+    expect(await listOutreach({ dealId: DEAL_ID })).toHaveLength(1);
+  });
+
   it("prepares due follow-ups as drafts and never approves or sends", async () => {
     const campaign = await createSalesCampaign(campaignInput);
     await setSalesCampaignStatus({
@@ -262,4 +288,39 @@ describe("Sales campaign execution", () => {
       expect(await listOutreach({ dealId: DEAL_ID })).toHaveLength(1);
     },
   );
+
+  it("does not draft a follow-up for a directly suppressed recipient", async () => {
+    const campaign = await createSalesCampaign(campaignInput);
+    await setSalesCampaignStatus({
+      campaignId: campaign.id,
+      status: "running",
+    });
+    const first = await insertOutreach({
+      dealId: DEAL_ID,
+      channel: "gmail",
+      recipient: RECIPIENT,
+      contactId: CONTACT_ID,
+      subject: "A focused idea",
+      body: "A specific creative campaign idea for JW Marriott Marquis Dubai from hrmny.",
+      cadenceTouch: 1,
+    });
+    await patchOutreach(first.id, {
+      state: "sent",
+      sentAt: new Date(Date.now() - 6 * 86_400_000).toISOString(),
+      externalId: "synthetic-direct-suppression",
+    });
+    await addSuppression({
+      email: RECIPIENT,
+      reason: "dnc",
+      source: "campaign-test",
+    });
+
+    const run = await runSalesCampaignFollowups({
+      campaignId: campaign.id,
+      runId: "71000000-0000-4000-8000-000000000023",
+      runAgent: followupAgent,
+    });
+    expect(run).toMatchObject({ drafted: 0, failed: 1, providerSends: 0 });
+    expect(await listOutreach({ dealId: DEAL_ID })).toHaveLength(1);
+  });
 });
