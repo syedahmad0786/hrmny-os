@@ -18,7 +18,9 @@ import { resolveDevUser, sessionCanViewMargin } from "../auth/session";
 import {
   approveOutreach,
   discardOutreach,
+  draftEmailFollowup,
   draftOutreach,
+  listEmailFollowups,
   sendOutreach,
 } from "./leadgen-router";
 import { createCaller } from "./root";
@@ -26,6 +28,7 @@ import {
   getIntegrationReceipt,
   resetIntegrationReceiptMemory,
 } from "../integrations/inbox";
+import { recordEmailEvent, resetSalesOsStore } from "../sales-os/store";
 
 const staff: ActorContext = {
   employeeId: "emp-1",
@@ -98,6 +101,7 @@ describe("outreach HITL gate flow", () => {
   beforeEach(() => {
     resetCrmMemory();
     resetLeadgenStore();
+    resetSalesOsStore();
     resetIntegrationReceiptMemory();
   });
 
@@ -125,8 +129,7 @@ describe("outreach HITL gate flow", () => {
         output: {
           channel: "linkedin_connect",
           subject: "LinkedIn connection",
-          body:
-            "Hi Sara — I’m Ayham from hrmny. I noticed Acme LLC’s UAE growth and would be glad to connect.",
+          body: "Hi Sara — I’m Ayham from hrmny. I noticed Acme LLC’s UAE growth and would be glad to connect.",
           cta: "Would be glad to connect.",
         },
         inputTokens: 0,
@@ -266,6 +269,67 @@ describe("outreach HITL gate flow", () => {
     expect(final.state).toBe("sent");
     expect(final.sentAt).toBeTruthy();
     expect(final.externalId).toBeTruthy();
+  });
+
+  it("turns a sent email into one reply-aware follow-up draft", async () => {
+    const deal = await seedDeal();
+    const first = await draftOutreach({
+      dealId: deal.dealId,
+      subject: "A UAE launch idea",
+      body: COMPLIANT_BODY,
+    });
+    await approveOutreach({ id: first.id, actor: staff, audit, emit });
+    await sendOutreach({
+      id: first.id,
+      actor: staff,
+      composio: countingLiveComposio(),
+      audit,
+      emit,
+    });
+
+    let prompt = "";
+    const runAgent: RunAgent = async (input) => {
+      prompt = String(input.input);
+      return {
+        agent: input.agent,
+        model: "test",
+        output: {
+          channel: "email",
+          subject: "Model must not replace the thread subject",
+          body: "Hi Sara — one useful follow-up for Acme LLC: we mapped a compact UAE launch concept that can move from creative direction to market-ready assets without adding review overhead. If that is timely, I can share the one-page outline before a short call.",
+          cta: "May I send the outline?",
+        },
+        inputTokens: 0,
+        outputTokens: 0,
+        costAed: 0,
+        gateOutcome: "pending",
+      };
+    };
+
+    const followup = await draftEmailFollowup({ id: first.id, runAgent });
+    expect(followup).toMatchObject({
+      state: "draft",
+      cadenceTouch: 2,
+      subject: "Re: A UAE launch idea",
+      recipient: "sara@acme.example",
+    });
+    expect(prompt).toContain("follow-up touch 2");
+    await expect(
+      draftEmailFollowup({ id: first.id, runAgent }),
+    ).resolves.toMatchObject({ id: followup.id });
+
+    await recordEmailEvent({
+      outreachItemId: first.id,
+      contactId: first.contactId,
+      kind: "replied",
+      externalId: "gmail-reply-followup-stop",
+    });
+    await expect(listEmailFollowups()).resolves.toEqual([
+      expect.objectContaining({ sourceId: first.id, state: "replied" }),
+    ]);
+    await expect(
+      draftEmailFollowup({ id: first.id, runAgent }),
+    ).rejects.toThrow(/reply received/i);
   });
 
   it("reconciles a completed send receipt without sending Gmail twice", async () => {

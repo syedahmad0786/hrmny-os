@@ -396,7 +396,7 @@ export default function CrmDealDetailPage() {
             </div>
             <div className="crm-panel-body">
               <div className="crm-composer">
-                <input
+                <textarea
                   placeholder="Add a note…"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
