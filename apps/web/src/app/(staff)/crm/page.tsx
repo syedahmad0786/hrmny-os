@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import {
   CrmBtn,
@@ -21,16 +21,30 @@ import {
 import { DemoReadinessPanel } from "@/components/demo-readiness-panel";
 import { DashStrip } from "./_components/dash-strip";
 import { isSyntheticRecordName } from "@/lib/synthetic-records";
+import { CRM_MARKETS } from "@/lib/crm-markets";
+import {
+  DEFAULT_PIPELINE_FILTERS,
+  isArchived,
+  parseSavedPipelineViews,
+  retentionLabel,
+  type PipelineFilters,
+  type PipelineRecordView,
+  type SavedPipelineView,
+} from "./pipeline-views";
+
+const SAVED_VIEWS_KEY = "hrmny.crm.pipeline-views.v1";
 
 export default function CrmPipelinePage() {
   const utils = trpc.useUtils();
   const stages = trpc.crm.stages.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
+  const companies = trpc.crm.companies.list.useQuery();
   const contacts = trpc.crm.contacts.list.useQuery();
   const tasks = trpc.crm.tasks.list.useQuery();
   const activities = trpc.crm.activities.list.useQuery({ limit: 200 });
   const session = trpc.auth.session.useQuery();
   const health = trpc.crm.health.useQuery();
+  const funnel = trpc.salesOs.funnel.useQuery();
   const create = trpc.crm.deals.create.useMutation({
     onSuccess: () => void utils.crm.deals.invalidate(),
   });
@@ -39,8 +53,14 @@ export default function CrmPipelinePage() {
   });
 
   const [search, setSearch] = useState("");
-  const [lane, setLane] = useState("all");
+  const [source, setSource] = useState("all");
   const [temp, setTemp] = useState("all");
+  const [market, setMarket] = useState("all");
+  const [owner, setOwner] = useState("all");
+  const [records, setRecords] = useState<PipelineRecordView>("active");
+  const [savedViews, setSavedViews] = useState<SavedPipelineView[]>([]);
+  const [savedViewId, setSavedViewId] = useState("");
+  const [savedViewName, setSavedViewName] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [showTestRecords, setShowTestRecords] = useState(false);
   const [dragOver, setDragOver] = useState<string | null>(null);
@@ -53,6 +73,40 @@ export default function CrmPipelinePage() {
       ),
     [contacts.data],
   );
+  const companyById = useMemo(
+    () =>
+      new Map(
+        (companies.data ?? []).map((company) => [company.companyId, company]),
+      ),
+    [companies.data],
+  );
+
+  useEffect(() => {
+    setSavedViews(
+      parseSavedPipelineViews(window.localStorage.getItem(SAVED_VIEWS_KEY)),
+    );
+  }, []);
+
+  const currentFilters = (): PipelineFilters => ({
+    search,
+    source,
+    temperature: temp,
+    market,
+    owner,
+    records,
+  });
+  const applyFilters = (filters: PipelineFilters) => {
+    setSearch(filters.search);
+    setSource(filters.source);
+    setTemp(filters.temperature);
+    setMarket(filters.market);
+    setOwner(filters.owner);
+    setRecords(filters.records);
+  };
+  const persistViews = (views: SavedPipelineView[]) => {
+    setSavedViews(views);
+    window.localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views));
+  };
 
   /** Move a deal; surface gate rejections (moveStage returns ok:false, it
    * does not throw). No optimistic update, so a blocked move never moves the
@@ -122,8 +176,26 @@ export default function CrmPipelinePage() {
     return (deals.data ?? []).filter((d) => {
       if (!showTestRecords && isSyntheticRecordName(d.companyName))
         return false;
-      if (lane !== "all" && d.leadSourceLane !== lane) return false;
+      if (records === "active" && d.closeOutcome) return false;
+      if (
+        records === "retention" &&
+        (!d.closeOutcome || isArchived(d.updatedAt))
+      )
+        return false;
+      if (
+        records === "archive" &&
+        (!d.closeOutcome || !isArchived(d.updatedAt))
+      )
+        return false;
+      if (source !== "all" && d.leadSourceLane !== source) return false;
       if (temp !== "all" && (d.buafTemperature ?? "") !== temp) return false;
+      if (
+        market !== "all" &&
+        companyById.get(d.companyId ?? "")?.market !== market
+      )
+        return false;
+      if (owner !== "all" && (d.ownerEmployeeId ?? "unassigned") !== owner)
+        return false;
       if (!q) return true;
       const leadName = formatContactName(
         d.primaryContactId ? contactById.get(d.primaryContactId) : null,
@@ -135,13 +207,50 @@ export default function CrmPipelinePage() {
         formatLane(d.leadSourceLane).toLowerCase().includes(q)
       );
     });
-  }, [contactById, deals.data, search, lane, temp, showTestRecords]);
+  }, [
+    companyById,
+    contactById,
+    deals.data,
+    market,
+    owner,
+    records,
+    search,
+    showTestRecords,
+    source,
+    temp,
+  ]);
 
   const hiddenTestCount = (deals.data ?? []).filter((deal) =>
     isSyntheticRecordName(deal.companyName),
   ).length;
 
   const stageList = stages.data ?? [];
+  const sourceOptions = Array.from(
+    new Set([
+      ...Object.keys(LANE_LABELS),
+      ...(funnel.data?.options.campaigns ?? []),
+    ]),
+  );
+  const loadError = deals.error ?? stages.error ?? companies.error;
+  const resetFilters = () => {
+    applyFilters(DEFAULT_PIPELINE_FILTERS);
+    setSavedViewId("");
+  };
+  const saveCurrentView = () => {
+    const name = savedViewName.trim();
+    if (!name) return;
+    const existing = savedViews.find(
+      (view) => view.name.toLowerCase() === name.toLowerCase(),
+    );
+    const view: SavedPipelineView = {
+      id: existing?.id ?? crypto.randomUUID(),
+      name,
+      filters: currentFilters(),
+    };
+    persistViews([...savedViews.filter((item) => item.id !== view.id), view]);
+    setSavedViewId(view.id);
+    setSavedViewName("");
+  };
 
   return (
     <main>
@@ -184,25 +293,67 @@ export default function CrmPipelinePage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <input
-          placeholder="New company name"
-          value={companyName}
-          onChange={(e) => setCompanyName(e.target.value)}
-        />
-        <select value={lane} onChange={(e) => setLane(e.target.value)}>
-          <option value="all">All lanes</option>
-          {Object.entries(LANE_LABELS).map(([key, label]) => (
-            <option key={key} value={key}>
-              {label}
+        <select
+          aria-label="Record view"
+          value={records}
+          onChange={(e) => setRecords(e.target.value as PipelineRecordView)}
+        >
+          <option value="active">Active pipeline</option>
+          <option value="retention">Closed — first 90 days</option>
+          <option value="archive">Archive — 90+ days</option>
+          <option value="all">All records</option>
+        </select>
+        <select
+          aria-label="Campaign or source"
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+        >
+          <option value="all">All campaigns / sources</option>
+          {sourceOptions.map((value) => (
+            <option key={value} value={value}>
+              {formatLane(value)}
             </option>
           ))}
         </select>
-        <select value={temp} onChange={(e) => setTemp(e.target.value)}>
+        <select
+          aria-label="Temperature"
+          value={temp}
+          onChange={(e) => setTemp(e.target.value)}
+        >
           <option value="all">All temperatures</option>
           <option value="hot">Hot</option>
           <option value="warm">Warm</option>
           <option value="cool">Cool</option>
           <option value="cold">Cold</option>
+        </select>
+        <select
+          aria-label="Market"
+          value={market}
+          onChange={(e) => setMarket(e.target.value)}
+        >
+          <option value="all">All markets</option>
+          {CRM_MARKETS.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Owner"
+          value={owner}
+          onChange={(e) => setOwner(e.target.value)}
+        >
+          <option value="all">All owners</option>
+          {(funnel.data?.options.owners ?? []).map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+          {funnel.isLoading ? (
+            <option disabled>Loading owners…</option>
+          ) : funnel.isError ? (
+            <option disabled>Owner options unavailable</option>
+          ) : null}
         </select>
         <div className="crm-view-switch">
           <Link href="/crm" className="active">
@@ -211,6 +362,72 @@ export default function CrmPipelinePage() {
           <Link href="/crm/deals">List</Link>
         </div>
       </CrmFilterBar>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-[var(--line)] bg-white p-3">
+        <label className="crm-field min-w-[190px]">
+          <span>Personal saved view</span>
+          <select
+            data-testid="pipeline-saved-view"
+            value={savedViewId}
+            onChange={(event) => {
+              const id = event.target.value;
+              setSavedViewId(id);
+              const view = savedViews.find((item) => item.id === id);
+              if (view) applyFilters(view.filters);
+            }}
+          >
+            <option value="">Choose a saved view</option>
+            {savedViews.map((view) => (
+              <option key={view.id} value={view.id}>
+                {view.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="crm-field min-w-[190px]">
+          <span>Save current filters as</span>
+          <input
+            data-testid="pipeline-view-name"
+            placeholder="e.g. My UAE prospects"
+            value={savedViewName}
+            onChange={(event) => setSavedViewName(event.target.value)}
+          />
+        </label>
+        <CrmBtn
+          data-testid="pipeline-save-view"
+          disabled={!savedViewName.trim()}
+          onClick={saveCurrentView}
+        >
+          Save view
+        </CrmBtn>
+        <CrmBtn onClick={resetFilters}>Clear filters</CrmBtn>
+        {savedViewId ? (
+          <CrmBtn
+            onClick={() => {
+              persistViews(
+                savedViews.filter((view) => view.id !== savedViewId),
+              );
+              resetFilters();
+            }}
+          >
+            Delete saved view
+          </CrmBtn>
+        ) : null}
+        <span className="text-[10px] text-[var(--muted)]">
+          Saved in this browser, for you only.
+        </span>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-end gap-2">
+        <label className="crm-field min-w-[220px]">
+          <span>New company</span>
+          <input
+            placeholder="Company name"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+          />
+        </label>
+      </div>
 
       {hiddenTestCount ? (
         <label className="mb-3 flex min-h-11 w-fit items-center gap-2 text-xs text-muted">
@@ -227,13 +444,34 @@ export default function CrmPipelinePage() {
 
       <p className="mb-3 text-[11px] text-[var(--muted)]">
         {health.isError ? "Pipeline unavailable" : "Pipeline up to date"} ·{" "}
-        {filtered.length} active deal{filtered.length === 1 ? "" : "s"}
+        {filtered.length} visible record{filtered.length === 1 ? "" : "s"}
+        {records === "retention"
+          ? " · Closed records stay here for 90 days after their latest update."
+          : records === "archive"
+            ? " · Closed records move here after 90 days; nothing is deleted."
+            : ""}
       </p>
 
       <DashStrip />
 
-      {deals.isLoading ? (
+      {deals.isLoading || stages.isLoading || companies.isLoading ? (
         <CrmEmpty title="Loading pipeline…" />
+      ) : loadError ? (
+        <CrmEmpty
+          title="Pipeline could not load"
+          hint={`${loadError.message} Refresh the page or try again shortly.`}
+        />
+      ) : filtered.length === 0 ? (
+        <CrmEmpty
+          title={
+            records === "archive"
+              ? "No closed deals match this archive view"
+              : records === "retention"
+                ? "No recently closed deals match this view"
+                : "No deals match these filters"
+          }
+          hint="Clear the filters or choose another saved view."
+        />
       ) : (
         <div className="crm-board-wrap">
           <div className="crm-board">
@@ -307,6 +545,11 @@ export default function CrmPipelinePage() {
                         >
                           <div className="crm-deal-top">
                             <span className={`crm-temp-dot ${tempVal ?? ""}`} />
+                            {d.closeOutcome ? (
+                              <CrmTag kind="info">
+                                {d.closeOutcome.replace(/_/g, " ")}
+                              </CrmTag>
+                            ) : null}
                             {tempVal ? (
                               <CrmTag kind={tagKindForTemp(tempVal)}>
                                 {tempVal}
@@ -332,6 +575,11 @@ export default function CrmPipelinePage() {
                             <span>{formatLane(d.leadSourceLane)}</span>
                             <span>{daysInStage}d in stage</span>
                           </div>
+                          {d.closeOutcome ? (
+                            <div className="mt-2 text-[10px] text-[var(--muted)]">
+                              {retentionLabel(d.updatedAt)}
+                            </div>
+                          ) : null}
                           <div className="mt-2 border-t border-[var(--line)] pt-2 text-[10px] leading-5">
                             <strong className="block text-[var(--ink)]">
                               Next: {nextTask?.title ?? "Set a next action"}
@@ -349,7 +597,14 @@ export default function CrmPipelinePage() {
                             Cannot move: {moveErrors[d.dealId]}
                           </p>
                         ) : null}
-                        {nextStage ? (
+                        {d.closeOutcome ? (
+                          <Link
+                            href={`/crm/deals/${d.dealId}`}
+                            className="crm-btn"
+                          >
+                            Open retained record →
+                          </Link>
+                        ) : nextStage ? (
                           <CrmBtn
                             variant="primary"
                             disabled={move.isPending}
