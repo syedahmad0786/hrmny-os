@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   completeIntegrationReceipt,
   failIntegrationReceipt,
+  findIntegrationReceiptByDealId,
   getIntegrationReceipt,
   hashIntegrationPayload,
   recordIntegrationReceipt,
@@ -71,6 +72,29 @@ describe("integration inbox", () => {
       receiptId: claimed.receiptId,
       status: "completed",
       result: { matched: true, contactId: "contact-1" },
+    });
+  });
+
+  it("finds the saved provider candidate that created a deal", async () => {
+    await recordIntegrationReceipt({
+      provider: "apollo",
+      externalEventId: "free-save:employee:person-1",
+      operation: "people.search.save_candidate",
+      rawBody: '{"externalId":"person-1"}',
+      payload: { externalId: "person-1", fullName: "Sana Example" },
+      completed: true,
+      result: { dealId: "deal-1", contactId: "contact-1" },
+    });
+
+    await expect(
+      findIntegrationReceiptByDealId({
+        provider: "apollo",
+        operation: "people.search.save_candidate",
+        dealId: "deal-1",
+      }),
+    ).resolves.toMatchObject({
+      status: "completed",
+      payload: { externalId: "person-1", fullName: "Sana Example" },
     });
   });
 

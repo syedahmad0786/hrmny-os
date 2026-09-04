@@ -171,6 +171,24 @@ describe("compliance", () => {
     if (!capped.ok) expect(capped.code).toBe("DAILY_CAP");
   });
 
+  it("blocks unsupported agency proof claims at send time", async () => {
+    const blocked = await assertEmailSendAllowed({
+      email: "sana@tracehospitality.ae",
+      emailVerified: true,
+      companyName: "Trace Hospitality",
+      body: [
+        "Hi Sana,",
+        "Trace Hospitality appears to be expanding in Abu Dhabi.",
+        "Our proven track record in hospitality can support that growth.",
+      ].join("\n\n"),
+    });
+
+    expect(blocked).toMatchObject({
+      ok: false,
+      code: "VOICE_CHECK_FAILED",
+    });
+  });
+
   it("blocks LinkedIn assists after the weekly cap", async () => {
     await saveSalesOsSettings({
       ...(await getSalesOsSettings()),

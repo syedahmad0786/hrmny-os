@@ -147,6 +147,9 @@ export function outreachVoiceViolations(
   if (/guaranteed results/i.test(copy)) {
     violations.push("Remove the guaranteed-results claim");
   }
+  if (/\b(?:our )?proven track record\b/i.test(copy)) {
+    violations.push("Remove the unsupported proven-track-record claim");
+  }
   if (
     companyName?.trim() &&
     !copy.toLowerCase().includes(companyName.trim().toLowerCase())
