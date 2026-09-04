@@ -421,23 +421,24 @@ export default function ConnectionsPage() {
         text: `Xero connect failed: ${params.get("reason") ?? "unknown"}`,
       });
     }
-    if (gw || xero === "connected" || xero === "error") {
-      const id =
-        gw != null
-          ? "conn-google_workspace"
-          : xero != null
-            ? "conn-xero"
-            : null;
-      if (id) {
-        window.setTimeout(() => {
-          document.getElementById(id)?.scrollIntoView({
-            behavior: "smooth",
-            block: "start",
-          });
-        }, 200);
-      }
-    }
   }, []);
+
+  useEffect(() => {
+    if (list.isLoading) return;
+    const params = new URLSearchParams(window.location.search);
+    const id =
+      window.location.hash.slice(1) ||
+      (params.get("gw") != null
+        ? "conn-google_workspace"
+        : params.get("xero") != null
+          ? "conn-xero"
+          : null);
+    if (!id) return;
+    document.getElementById(id)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, [list.isLoading]);
 
   async function connectGoogleWorkspace() {
     const result = await startGoogleWorkspaceOAuth.mutateAsync({

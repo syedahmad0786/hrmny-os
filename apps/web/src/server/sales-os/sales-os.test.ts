@@ -10,6 +10,7 @@ import {
   listContacts,
   listDeals,
   listNotes,
+  moveDealStage,
 } from "../crm/repository";
 import { getDemoStore } from "../demo-store";
 import {
@@ -43,7 +44,7 @@ import {
   failsSpecificityTest,
 } from "./drafts";
 import { buildSalesOsDigest } from "./digest";
-import { applySalesOsReplyIntent } from "./replies";
+import { applySalesOsReplyIntent, ingestGmailReply } from "./replies";
 import { parseIntentCsv, processIntentLeads } from "./intent-csv";
 import { proposeEvolve, applyEvolve } from "./evolve";
 import { flagStaleEmails } from "./stale";
@@ -65,6 +66,7 @@ import {
   resetLeadgenStore,
   insertOutreach,
   listOutreach,
+  patchOutreach,
 } from "../leadgen/store";
 import { resetIntegrationReceiptMemory } from "../integrations/inbox";
 import type { RunAgent } from "../leadgen/agent-run";
@@ -618,6 +620,105 @@ describe("digest, replies, intent CSV, evolve, stale", () => {
     await expect(buildSalesOsDigest()).resolves.toMatchObject({
       replyRate: { sent: 1, replied: 1, rate: 1 },
     });
+  });
+
+  it("maps a shared-mailbox reply by connection instead of the acting rep", async () => {
+    const deal = await createDeal({ companyName: "Shared Mailbox Brand" });
+    const outreach = await insertOutreach({
+      dealId: deal.dealId,
+      channel: "gmail",
+      recipient: "buyer@brand.test",
+      body: "Hi",
+    });
+    await patchOutreach(outreach.id, {
+      state: "sent",
+      sentAt: "2026-09-04T00:00:00.000Z",
+    });
+    await recordEmailEvent({
+      outreachItemId: outreach.id,
+      kind: "sent",
+      externalId: "shared-mailbox-sent",
+      payload: {
+        ownerEmployeeId: "70000000-0000-4000-8000-000000000003",
+        senderConnectionAccountId:
+          "70000000-0000-4000-8000-000000000001",
+        threadId: "shared-thread",
+      },
+    });
+
+    await expect(
+      ingestGmailReply({
+        fromEmail: "buyer@brand.test",
+        body: "Interested — let's meet.",
+        externalId: "shared-mailbox-reply",
+        threadId: "shared-thread",
+        actorEmployeeId: "70000000-0000-4000-8000-000000000002",
+        senderConnectionAccountId:
+          "70000000-0000-4000-8000-000000000001",
+      }),
+    ).resolves.toMatchObject({
+      intent: "interested",
+      applied: true,
+      duplicate: false,
+    });
+    expect(
+      (await listEmailEvents({ kind: "replied" }))[0]?.outreachItemId,
+    ).toBe(outreach.id);
+  });
+
+  it("discards queued follow-ups as soon as a reply arrives", async () => {
+    const deal = await createDeal({ companyName: "Reply Stops Cadence Brand" });
+    const sent = await insertOutreach({
+      dealId: deal.dealId,
+      channel: "gmail",
+      recipient: "buyer@brand.test",
+      body: "First touch",
+    });
+    const followup = await insertOutreach({
+      dealId: deal.dealId,
+      channel: "gmail",
+      recipient: "buyer@brand.test",
+      body: "Follow-up",
+    });
+    await patchOutreach(sent.id, {
+      state: "sent",
+      sentAt: "2026-09-04T00:00:00.000Z",
+    });
+    await patchOutreach(followup.id, { state: "approved" });
+    await recordEmailEvent({
+      outreachItemId: sent.id,
+      kind: "sent",
+      externalId: "reply-stop-sent",
+      payload: { threadId: "reply-stop-thread" },
+    });
+    await recordEmailEvent({
+      outreachItemId: sent.id,
+      kind: "replied",
+      externalId: "reply-stop-reply",
+      payload: { intent: "question", threadId: "reply-stop-thread" },
+    });
+    await moveDealStage({ dealId: deal.dealId, to: "propose" });
+
+    await expect(
+      ingestGmailReply({
+        fromEmail: "buyer@brand.test",
+        body: "Thanks, I have a question?",
+        externalId: "reply-stop-reply",
+        threadId: "reply-stop-thread",
+      }),
+    ).resolves.toMatchObject({
+      applied: true,
+      duplicate: true,
+      discardedFollowups: 1,
+    });
+    expect(await listOutreach({ state: "approved" })).toHaveLength(0);
+    expect((await getDeal(deal.dealId))?.stage).toBe("propose");
+    expect(await listOutreach({ state: "discarded" })).toEqual([
+      expect.objectContaining({
+        id: followup.id,
+        reworkFeedback: "Reply received; follow-up stopped",
+      }),
+    ]);
   });
 
   it("keeps synthetic follow-ups out of business monitoring", async () => {

@@ -17,6 +17,7 @@ import { inngestCloudConfigured } from "@/server/inngest/client";
 import { runCrmTaskDigest } from "@/server/reminders/crm-task-digest";
 import { runLeadgenDailyCron } from "@/server/leadgen/daily-cron";
 import { runDueFollowupDrafts } from "@/server/leadgen/followup-scheduler";
+import { runGoogleWorkspaceOutreachMonitor } from "@/server/leadgen/google-workspace-monitor";
 import { runReconSweepers } from "@/server/recon/cron-sweepers";
 import {
   APOLLO_PEOPLE_SEARCH_JOB_KIND,
@@ -337,6 +338,12 @@ export async function GET(request: Request) {
       delayedJobs: Number(lag!.count),
     });
   }
+  const useInngest = inngestCloudConfigured();
+  const googleWorkspaceInbox = useInngest
+    ? { skipped: "inngest_configured" as const }
+    : await runGoogleWorkspaceOutreachMonitor().catch((error) => ({
+        error: String(error).slice(0, 500),
+      }));
   const [
     workWebhooks,
     expiredAiRuns,
@@ -350,7 +357,7 @@ export async function GET(request: Request) {
     cleanupExpiredWorkAiRuns(),
     // Scheduled reports: interval-based due-check filters to what should send
     // this tick (mock Resend until RESEND_MODE=live). Never fatal to the job run.
-    inngestCloudConfigured()
+    useInngest
       ? Promise.resolve({ skipped: "inngest_configured" as const })
       : runDueReports().catch((error) => ({
           error: String(error).slice(0, 500),
@@ -363,7 +370,7 @@ export async function GET(request: Request) {
     })),
     // Daily Sales research gate. It fails closed before provider/CRM work
     // until the audited policy and proposal-only runtime are both present.
-    inngestCloudConfigured()
+    useInngest
       ? Promise.resolve({
           ran: false,
           skipped: "inngest_configured" as const,
@@ -372,11 +379,13 @@ export async function GET(request: Request) {
           ran: false,
           error: String(error).slice(0, 500),
         })),
-    inngestCloudConfigured()
+    useInngest
       ? Promise.resolve({ skipped: "inngest_configured" as const })
-      : runDueFollowupDrafts().catch((error) => ({
-          error: String(error).slice(0, 500),
-        })),
+      : "error" in googleWorkspaceInbox
+        ? Promise.resolve({ skipped: "gmail_monitor_failed" as const })
+        : runDueFollowupDrafts().catch((error) => ({
+            error: String(error).slice(0, 500),
+          })),
     // Xero mirror, competitor scan, retainer drafts, memory embed backfill.
     // Mock-safe; never fatal to the job run.
     runReconSweepers().catch((error) => ({
@@ -401,6 +410,7 @@ export async function GET(request: Request) {
     dueReports,
     crmTaskDigest,
     leadgenDaily,
+    googleWorkspaceInbox,
     salesFollowupDrafts,
     recon,
   };

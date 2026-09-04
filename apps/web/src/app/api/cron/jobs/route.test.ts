@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   runDueReports: vi.fn(),
   runCrmTaskDigest: vi.fn(),
   runLeadgenDailyCron: vi.fn(),
+  runGoogleWorkspaceMonitor: vi.fn(),
+  runFollowupDrafts: vi.fn(),
   runReconSweepers: vi.fn(),
   runGoogleChatInteractionJob: vi.fn(),
   failGoogleChatInteractionJob: vi.fn(),
@@ -59,6 +61,12 @@ vi.mock("@/server/reminders/crm-task-digest", () => ({
 }));
 vi.mock("@/server/leadgen/daily-cron", () => ({
   runLeadgenDailyCron: mocks.runLeadgenDailyCron,
+}));
+vi.mock("@/server/leadgen/google-workspace-monitor", () => ({
+  runGoogleWorkspaceOutreachMonitor: mocks.runGoogleWorkspaceMonitor,
+}));
+vi.mock("@/server/leadgen/followup-scheduler", () => ({
+  runDueFollowupDrafts: mocks.runFollowupDrafts,
 }));
 vi.mock("@/server/recon/cron-sweepers", () => ({
   runReconSweepers: mocks.runReconSweepers,
@@ -113,6 +121,10 @@ describe("cron Apollo retention ordering", () => {
     mocks.runDueReports.mockReset().mockResolvedValue({ sent: 0 });
     mocks.runCrmTaskDigest.mockReset().mockResolvedValue({ posted: false });
     mocks.runLeadgenDailyCron.mockReset().mockResolvedValue({ ran: false });
+    mocks.runGoogleWorkspaceMonitor
+      .mockReset()
+      .mockResolvedValue({ processed: 0 });
+    mocks.runFollowupDrafts.mockReset().mockResolvedValue({ drafted: 0 });
     mocks.runReconSweepers.mockReset().mockResolvedValue({ swept: 0 });
   });
 

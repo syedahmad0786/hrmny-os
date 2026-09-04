@@ -758,18 +758,57 @@ export async function listSalesSenderMailboxes(input: {
   );
 }
 
+export type GoogleWorkspaceMonitorAccount = {
+  connectionAccountId: string;
+  ownerEmployeeId: string;
+};
+
+/** Connected staff mailboxes stay monitored even after outbound is disabled. */
+export async function listGoogleWorkspaceMonitorAccounts(): Promise<
+  GoogleWorkspaceMonitorAccount[]
+> {
+  if (!(await isWorkConnectedAppAllowed("google_workspace"))) return [];
+  const db = getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      connectionAccountId: connectionAccount.connectionAccountId,
+      ownerEmployeeId: connectionAccount.ownerEmployeeId,
+    })
+    .from(connectionAccount)
+    .where(
+      and(
+        eq(connectionAccount.toolkit, "google_workspace"),
+        eq(connectionAccount.scope, "staff"),
+        or(
+          eq(connectionAccount.status, "connected"),
+          eq(connectionAccount.status, "error"),
+        ),
+        sql`${connectionAccount.ownerEmployeeId} is not null`,
+        sql`${connectionAccount.secretId} is not null`,
+      ),
+    );
+  return rows.flatMap((row) =>
+    row.ownerEmployeeId
+      ? [{ ...row, ownerEmployeeId: row.ownerEmployeeId }]
+      : [],
+  );
+}
+
 export async function getGoogleWorkspaceAccessToken(
   employeeId: string,
   options?: {
     connectionAccountId?: string;
     roles?: readonly string[];
+    /** Server-only inbound processing must keep honoring replies to old sends. */
+    forInboundMonitor?: boolean;
   },
 ): Promise<string | null> {
   if (!(await isWorkConnectedAppAllowed("google_workspace"))) return null;
   const db = getDb();
   if (!db) return null;
   const selectedId = options?.connectionAccountId?.trim();
-  if (selectedId) {
+  if (selectedId && !options?.forInboundMonitor) {
     const allowed = await listSalesSenderMailboxes({
       employeeId,
       roles: options?.roles ?? [],

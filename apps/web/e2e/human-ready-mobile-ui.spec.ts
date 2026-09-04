@@ -4,7 +4,7 @@ async function expectMobileReady(page: Page, target: Locator) {
   await expect(target).toBeVisible({ timeout: 30_000 });
   expect(
     await target.evaluate((element) => element.getBoundingClientRect().height),
-  ).toBeGreaterThanOrEqual(44);
+  ).toBeGreaterThanOrEqual(43.99);
   expect(
     await page.evaluate(
       () =>

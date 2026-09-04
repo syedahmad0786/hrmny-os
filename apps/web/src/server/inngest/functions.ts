@@ -13,6 +13,7 @@ import {
   runGoogleChatQueuedJob,
 } from "../google-chat";
 import { runDueFollowupDrafts } from "../leadgen/followup-scheduler";
+import { runGoogleWorkspaceOutreachMonitor } from "../leadgen/google-workspace-monitor";
 
 /** Durable policy gate for the contained once-per-day Sales research proposal. */
 export const leadgenDailyFunction = inngest.createFunction(
@@ -89,8 +90,15 @@ export const salesFollowupDraftFunction = inngest.createFunction(
     retries: 2,
     concurrency: { limit: 1 },
   },
-  async ({ step }) =>
-    step.run("draft-due-sales-followups", () => runDueFollowupDrafts()),
+  async ({ step }) => {
+    const gmailInbound = await step.run("monitor-google-workspace-inbox", () =>
+      runGoogleWorkspaceOutreachMonitor(),
+    );
+    const followupDrafts = await step.run("draft-due-sales-followups", () =>
+      runDueFollowupDrafts(),
+    );
+    return { gmailInbound, followupDrafts };
+  },
 );
 
 export const inngestFunctions = [
