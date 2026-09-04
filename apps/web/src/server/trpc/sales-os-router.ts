@@ -16,6 +16,7 @@ import {
   approveApolloExactPerson,
   assertLinkedInAssistAllowed,
   buildSalesOsDigest,
+  createSalesCampaign,
   decideCompany,
   decideContact,
   DEFAULT_SALES_OS_SETTINGS,
@@ -31,6 +32,7 @@ import {
   ingestGmailReply,
   ingestManualResearch,
   listCompanyResearch,
+  listSalesCampaigns,
   listContactResearch,
   listEvolveProposals,
   listIntelSignals,
@@ -44,7 +46,10 @@ import {
   revokeApolloPeopleSearch,
   searchApolloPeopleFree,
   SALES_OS_SOP_SOURCE,
-  saveSalesOsSettings,
+  mutateSalesOsSettings,
+  runSalesCampaignFirstTouch,
+  runSalesCampaignFollowups,
+  setSalesCampaignStatus,
   sectorForDate,
   suppressTarget,
   consumeApolloExactApproval,
@@ -485,16 +490,75 @@ export const salesOsRouter = router({
             message: "Partner or Director role required to edit the rate card",
           });
         }
-        const current = await getSalesOsSettings();
-        const next: SalesOsSettings = {
-          ...current,
-          rateCard: input.rateCard ?? current.rateCard,
-          icp: { ...current.icp, ...input.icp },
-          caps: { ...current.caps, ...input.caps },
-          outreach: { ...current.outreach, ...input.outreach },
-        };
-        return saveSalesOsSettings(next, ctx.employeeId);
+        return mutateSalesOsSettings((current) => {
+          const next: SalesOsSettings = {
+            ...current,
+            rateCard: input.rateCard ?? current.rateCard,
+            icp: { ...current.icp, ...input.icp },
+            caps: { ...current.caps, ...input.caps },
+            outreach: { ...current.outreach, ...input.outreach },
+          };
+          return { settings: next, result: next };
+        }, ctx.employeeId);
       }),
+  }),
+
+  campaigns: router({
+    list: staffProcedure.query(() => listSalesCampaigns()),
+    create: salesOperatorProcedure
+      .input(
+        z.object({
+          name: z.string().trim().min(2).max(120),
+          dealIds: z.array(z.string().uuid()).min(1).max(100),
+          subjectTemplate: z.string().trim().min(2).max(240),
+          bodyTemplate: z
+            .string()
+            .trim()
+            .min(40)
+            .max(5_000)
+            .refine(
+              (body) => body.includes("{{company}}"),
+              "Include {{company}} so every draft is company-specific",
+            ),
+        }),
+      )
+      .mutation(({ input, ctx }) =>
+        createSalesCampaign({ ...input, actorEmployeeId: ctx.employeeId }),
+      ),
+    prepareFirstTouch: salesOperatorProcedure
+      .input(
+        z.object({
+          campaignId: z.string().uuid(),
+          runId: z.string().uuid(),
+        }),
+      )
+      .mutation(({ input, ctx }) =>
+        runSalesCampaignFirstTouch({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+        }),
+      ),
+    prepareFollowups: salesOperatorProcedure
+      .input(
+        z.object({
+          campaignId: z.string().uuid(),
+          runId: z.string().uuid(),
+        }),
+      )
+      .mutation(({ input, ctx }) =>
+        runSalesCampaignFollowups({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+        }),
+      ),
+    setStatus: salesOperatorProcedure
+      .input(
+        z.object({
+          campaignId: z.string().uuid(),
+          status: z.enum(["running", "paused", "completed"]),
+        }),
+      )
+      .mutation(({ input }) => setSalesCampaignStatus(input)),
   }),
 
   research: router({

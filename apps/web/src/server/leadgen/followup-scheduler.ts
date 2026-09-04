@@ -12,10 +12,16 @@ export async function runDueFollowupDrafts(input?: {
   now?: Date;
   limit?: number;
   runAgent?: RunAgent;
+  dealIds?: string[];
 }) {
   const now = input?.now ?? new Date();
   const due = (await listEmailFollowups(now))
-    .filter((item) => item.state === "due" && item.nextTouch)
+    .filter(
+      (item) =>
+        item.state === "due" &&
+        item.nextTouch &&
+        (!input?.dealIds || input.dealIds.includes(item.dealId)),
+    )
     .slice(0, Math.min(50, Math.max(1, input?.limit ?? 20)));
   let drafted = 0;
   let replayed = 0;

@@ -447,6 +447,11 @@ function OutreachInner() {
       <CrmPageHeader
         title="Outreach"
         description="Review every draft before anything is sent. Approving a draft and sending it are always two separate decisions."
+        actions={
+          <Link href="/crm/campaigns" className="crm-btn">
+            Campaigns
+          </Link>
+        }
       />
 
       <details className="mt-4 rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm text-muted">
