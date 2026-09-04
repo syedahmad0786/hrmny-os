@@ -45,6 +45,16 @@ test.describe("Sales campaign draft-only execution", () => {
     await expect(
       page.getByText("Campaign controls never send client email."),
     ).toBeVisible();
+    await expect(page.getByTestId(`campaign-deal-${dealId}`)).toHaveCount(0);
+    await page.getByTestId("campaign-show-test-records").check();
+    await page.getByTestId("campaign-lead-search").fill(companyName);
+    await expect(page.getByTestId(`campaign-deal-${dealId}`)).toBeVisible();
+    await page.getByTestId(`campaign-deal-${dealId}`).check();
+    await expect(page.getByText("Choose leads · 1 selected")).toBeVisible();
+    await page.getByTestId("campaign-show-test-records").uncheck();
+    await expect(page.getByTestId(`campaign-deal-${dealId}`)).toHaveCount(0);
+    await expect(page.getByText("Choose leads · 0 selected")).toBeVisible();
+    await page.getByTestId("campaign-show-test-records").check();
 
     const name = `E2E draft-only campaign ${suffix}`;
     await page.getByTestId("campaign-name").fill(name);
