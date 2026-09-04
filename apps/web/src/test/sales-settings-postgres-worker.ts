@@ -1,3 +1,5 @@
+export {};
+
 function finish(code: number, payload: Record<string, unknown>) {
   const stream = code === 0 ? process.stdout : process.stderr;
   stream.write(`${JSON.stringify(payload)}\n`, () => process.exit(code));
