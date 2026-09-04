@@ -474,6 +474,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
     session.data?.roles ?? [],
     availableNavigation,
   );
+  const moreActive = navigation.more.some((item) => item.match(pathname));
   const renderNavItem = (item: ResolvedNavItem) => {
     const active = item.match(pathname);
     return (
@@ -591,6 +592,21 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         <p className="desk-nav-label">Operate</p>
         <nav className="desk-nav" aria-label="Primary">
           {navigation.primary.map(renderNavItem)}
+          {navigation.more.length ? (
+            <details className="desk-nav-more" open={moreActive || undefined}>
+              <summary
+                className={`desk-nav-btn desk-nav-more-toggle${moreActive ? " active" : ""}`}
+                data-testid="staff-more-toggle"
+              >
+                <span className="desk-nav-index">+</span>
+                <span>More</span>
+                <span aria-hidden>⌄</span>
+              </summary>
+              <div className="desk-nav-more-list">
+                {navigation.more.map(renderNavItem)}
+              </div>
+            </details>
+          ) : null}
         </nav>
         <div className="desk-sidebar-foot">
           <div className="desk-side-meta">
