@@ -30,9 +30,31 @@ describe("chat harness funnel_act", () => {
       clientId: CLIENT_ID,
     });
     expect(tools.map((tool) => tool.name).sort()).toEqual(
-      ["search_memory", "crm_read", "delivery_read", "outreach_read", "now"].sort(),
+      [
+        "search_memory",
+        "operations_read",
+        "connected_search",
+        "crm_read",
+        "delivery_read",
+        "outreach_read",
+        "now",
+      ].sort(),
     );
     expect(tools.some((tool) => tool.name === "funnel_act")).toBe(false);
+  });
+
+  it("reads the visible Work operating picture without changing it", async () => {
+    const tool = buildChatDefaultTools({ employeeId: EMPLOYEE_ID }).find(
+      (candidate) => candidate.name === "operations_read",
+    );
+    const result = (await tool!.run({})) as {
+      totals: { projects: number; openTasks: number };
+      queues: Array<{ name: string }>;
+      nextLinks: Array<{ href: string }>;
+    };
+    expect(result.totals).toMatchObject({ projects: 1, openTasks: 1 });
+    expect(result.queues[0]?.name).toBe("Asana migration pilot");
+    expect(result.nextLinks.some((link) => link.href === "/work")).toBe(true);
   });
 
   it("exposes crm_closed_loop only for org chat (no client sandbox)", async () => {
@@ -104,8 +126,9 @@ describe("chat harness funnel_act", () => {
         data?: { invoiceId?: string };
       }>;
     };
-    const invoiceId = loopResult.tools?.find((r) => r.tool === "crm.closed_loop")
-      ?.data?.invoiceId;
+    const invoiceId = loopResult.tools?.find(
+      (r) => r.tool === "crm.closed_loop",
+    )?.data?.invoiceId;
     expect(invoiceId).toBeTruthy();
 
     const approveTool = tools.find((t) => t.name === "finance_os_approve");
@@ -132,7 +155,9 @@ describe("chat harness funnel_act", () => {
         data?: { status?: string; xeroWrite?: boolean };
       }>;
     };
-    const issued = issueResult.tools?.find((r) => r.tool === "finance.os_issue");
+    const issued = issueResult.tools?.find(
+      (r) => r.tool === "finance.os_issue",
+    );
     expect(issued?.ok).toBe(true);
     expect(issued?.data?.status).toBe("issued");
     expect(issued?.data?.xeroWrite).toBe(false);
@@ -327,7 +352,15 @@ describe("chat harness funnel_act", () => {
       immutableUserPrompt: "Mark the client-review deliverable approved",
     });
     expect(tools.map((tool) => tool.name).sort()).toEqual(
-      ["search_memory", "crm_read", "delivery_read", "outreach_read", "now"].sort(),
+      [
+        "search_memory",
+        "operations_read",
+        "connected_search",
+        "crm_read",
+        "delivery_read",
+        "outreach_read",
+        "now",
+      ].sort(),
     );
     // A model-proposed benign/effectful rewrite has no runnable funnel or
     // custom-agent tool because tool exposure was decided from the user turn.
