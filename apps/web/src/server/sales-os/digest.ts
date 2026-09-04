@@ -1,6 +1,10 @@
 import { listDeals } from "../crm/repository";
 import { listOutreach } from "../leadgen/store";
 import {
+  hasSyntheticMarker,
+  isSyntheticRecordName,
+} from "../../lib/synthetic-records";
+import {
   getSalesOsSettings,
   listCompanyResearch,
   listContactResearch,
@@ -56,15 +60,31 @@ export async function buildSalesOsDigest(
       listEmailEvents(),
     ],
   );
-  const drafts = outreach.filter((o) => o.state === "draft");
-  const approved = outreach.filter((o) => o.state === "approved");
+  const companyByDeal = new Map(
+    deals.map((deal) => [deal.dealId, deal.companyName]),
+  );
+  const businessOutreach = outreach.filter(
+    (item) =>
+      !hasSyntheticMarker(
+        companyByDeal.get(item.dealId),
+        item.recipient,
+        item.subject,
+      ),
+  );
+  const businessOutreachIds = new Set(businessOutreach.map((item) => item.id));
+  const businessEmailEvents = emailEvents.filter(
+    (event) =>
+      !event.outreachItemId || businessOutreachIds.has(event.outreachItemId),
+  );
+  const drafts = businessOutreach.filter((o) => o.state === "draft");
+  const approved = businessOutreach.filter((o) => o.state === "approved");
   const sentEmailIds = new Set(
-    emailEvents
+    businessEmailEvents
       .filter((event) => event.kind === "sent" && event.outreachItemId)
       .map((event) => event.outreachItemId!),
   );
   const repliedEmailIds = new Set(
-    emailEvents
+    businessEmailEvents
       .filter(
         (event) =>
           event.kind === "replied" &&
@@ -74,13 +94,15 @@ export async function buildSalesOsDigest(
       .map((event) => event.outreachItemId!),
   );
   const followUps = buildEmailFollowupStatuses({
-    outreach,
-    emailEvents,
+    outreach: businessOutreach,
+    emailEvents: businessEmailEvents,
     cadenceTouches: settings.outreach.cadenceTouches,
     cadenceDays: settings.outreach.cadenceDays,
     now,
   });
-  const open = deals.filter((d) => !d.closeOutcome);
+  const open = deals.filter(
+    (d) => !d.closeOutcome && !isSyntheticRecordName(d.companyName),
+  );
   const openValue = open.reduce((sum, d) => sum + Number(d.quoteValue ?? 0), 0);
   const monthlyTarget = settings.targets.h1BookedAed / 6;
   const coverageX = monthlyTarget > 0 ? openValue / monthlyTarget : 0;

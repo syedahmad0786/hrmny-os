@@ -212,6 +212,14 @@ export async function draftOutreach(input: {
   const knowledgeBrief = (await listNotes({ dealId: deal.dealId })).find(
     (note) => note.body.startsWith("SALES KNOWLEDGE BRIEF —"),
   );
+  const suppliedBody = input.body?.trim() || undefined;
+  if (!suppliedBody && !input.previousMessage && !knowledgeBrief) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "Build and save this lead's knowledge brief before asking AI to create a first-touch draft. Open the deal and select Research. No AI call was made.",
+    });
+  }
   const channel = input.channel ?? "gmail";
   const {
     isEmailChannel,
@@ -256,7 +264,7 @@ export async function draftOutreach(input: {
         ? "LinkedIn follow-up"
         : "LinkedIn connection"
       : `An idea for ${deal.companyName}`);
-  let body = input.body;
+  let body = suppliedBody;
   if (!body) {
     const runAgent = input.runAgent ?? defaultRunAgent;
     const contactName = contact
@@ -272,7 +280,8 @@ export async function draftOutreach(input: {
         `Recipient: ${contactName}${contact?.title ? `, ${contact.title}` : ""} at ${deal.companyName}.`,
         `Channel: ${outputChannel}`,
         `Hard identity rule: write FROM hrmny TO ${deal.companyName}. Never write as, for, or on behalf of ${deal.companyName}; never describe its services, team, history, or goals as hrmny's.`,
-        "Use verified facts only. Do not mention Apollo, BUAF, internal scoring, unverified contact data, or the research process.",
+        "Use only prospect-specific facts supplied in the saved brief or previous message. Do not claim hrmny client results, case studies, percentages, awards, or named clients because no agency proof library is supplied.",
+        "Do not mention Apollo, BUAF, internal scoring, unverified contact data, or the research process.",
         "Return one JSON object with channel, subject, body, and cta. Body must contain only the final sendable message: no analysis, labels, notes, alternatives, or Markdown headings.",
         OUTREACH_GUIDELINES,
         ...(input.previousMessage

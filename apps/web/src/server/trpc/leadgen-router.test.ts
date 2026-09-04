@@ -10,6 +10,7 @@ import { resetCrmMemory } from "../crm/memory";
 import {
   createCompany,
   createContact,
+  createNote,
   createDeal,
   updateContact,
 } from "../crm/repository";
@@ -97,6 +98,13 @@ async function seedDeal(verified = true) {
   return deal;
 }
 
+async function seedKnowledgeBrief(dealId: string) {
+  await createNote({
+    dealId,
+    body: "SALES KNOWLEDGE BRIEF — Acme LLC\nVerified signal: Acme is growing in the UAE.",
+  });
+}
+
 describe("outreach HITL gate flow", () => {
   beforeEach(() => {
     resetCrmMemory();
@@ -120,6 +128,7 @@ describe("outreach HITL gate flow", () => {
 
   it("grounds generated outreach as hrmny speaking to the prospect", async () => {
     const deal = await seedDeal();
+    await seedKnowledgeBrief(deal.dealId);
     let prompt = "";
     const runAgent: RunAgent = async (input) => {
       prompt = String(input.input);
@@ -155,6 +164,7 @@ describe("outreach HITL gate flow", () => {
 
   it("does not call AI for a lead with no usable outreach destination", async () => {
     const deal = await seedDeal(false);
+    await seedKnowledgeBrief(deal.dealId);
     await updateContact(deal.primaryContactId!, {
       email: null,
       linkedinUrl: null,
@@ -172,6 +182,20 @@ describe("outreach HITL gate flow", () => {
       }),
     ).rejects.toThrow(/no LinkedIn profile URL/i);
     expect(runAgent).not.toHaveBeenCalled();
+  });
+
+  it("requires saved research before a generated first-touch draft", async () => {
+    const deal = await seedDeal();
+    const runAgent = vi.fn<RunAgent>();
+
+    await expect(
+      draftOutreach({ dealId: deal.dealId, runAgent }),
+    ).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringMatching(/knowledge brief/i),
+    });
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(await listOutreach()).toHaveLength(0);
   });
 
   it("replaces a legacy email unsubscribe query before approval", async () => {
@@ -194,6 +218,7 @@ describe("outreach HITL gate flow", () => {
 
   it("REFUSES an empty-body draft when the agent is disabled — nothing inserted", async () => {
     const deal = await seedDeal();
+    await seedKnowledgeBrief(deal.dealId);
     const refusingAgent: RunAgent = async (input) => ({
       agent: input.agent,
       model: "disabled",
