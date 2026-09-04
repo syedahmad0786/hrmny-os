@@ -5,18 +5,24 @@ import {
   recordIntegrationReceipt,
   transitionIntegrationReceiptProgress,
 } from "@/server/integrations/inbox";
-import { ingestGmailReply } from "@/server/sales-os/replies";
+import {
+  classifyGmailDeliveryNotice,
+  ingestGmailDeliveryEvent,
+  ingestGmailReply,
+} from "@/server/sales-os/replies";
 import { verifyComposioAccountOwner } from "@/server/trpc/connections-router";
 import { verifyComposioSignature } from "./verify";
 
 type ComposioWebhookDeps = {
   verifyAccountOwner: typeof verifyComposioAccountOwner;
   ingestReply: typeof ingestGmailReply;
+  ingestDeliveryEvent?: typeof ingestGmailDeliveryEvent;
 };
 
 const defaultDeps: ComposioWebhookDeps = {
   verifyAccountOwner: verifyComposioAccountOwner,
   ingestReply: ingestGmailReply,
+  ingestDeliveryEvent: ingestGmailDeliveryEvent,
 };
 
 const asObject = (value: unknown): Record<string, unknown> =>
@@ -55,6 +61,23 @@ async function handleTrigger(
     text(data.sender, data.from, data.from_email, data.fromEmail),
   );
   const bodyText = text(data.message_text, data.text, data.body);
+  const subject = text(data.subject, data.message_subject, data.messageSubject);
+  const eventType = text(
+    data.event_type,
+    data.eventType,
+    data.category,
+    metadata.event_type,
+    metadata.eventType,
+  );
+  const recipientEmail = senderEmail(
+    text(
+      data.recipient,
+      data.recipient_email,
+      data.recipientEmail,
+      data.original_recipient,
+      data.originalRecipient,
+    ),
+  );
   const labelIds = Array.isArray(data.label_ids)
     ? data.label_ids.map(String)
     : Array.isArray(data.labelIds)
@@ -83,6 +106,32 @@ async function handleTrigger(
     }))
   ) {
     throw new Error("Composio Gmail account owner mismatch");
+  }
+
+  const deliveryKind = classifyGmailDeliveryNotice({
+    from: fromEmail,
+    subject,
+    body: bodyText,
+    eventType,
+  });
+  if (deliveryKind) {
+    const result = await (deps.ingestDeliveryEvent ?? ingestGmailDeliveryEvent)(
+      {
+        kind: deliveryKind,
+        fromEmail,
+        subject,
+        body: bodyText,
+        externalId: messageId,
+        threadId: threadId || undefined,
+        recipientEmail: recipientEmail ?? undefined,
+        actorEmployeeId: employeeId,
+      },
+    );
+    return {
+      handled: deliveryKind === "bounced" ? "gmail_bounce" : "gmail_complaint",
+      messageId,
+      result,
+    } as const;
   }
 
   const result = await deps.ingestReply({

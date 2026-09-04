@@ -191,4 +191,77 @@ describe("Composio webhook route", () => {
     });
     expect(await listEmailEvents({ kind: "replied" })).toHaveLength(0);
   });
+
+  it("records a Gmail bounce, suppresses the recipient, and discards its queued follow-up", async () => {
+    const ownerEmployeeId = "11111111-1111-1111-1111-111111111111";
+    const company = await createCompany({ name: "Bounce Co" });
+    const contact = await createContact({
+      companyId: company.companyId,
+      firstName: "Nora",
+      email: "nora@bounce.example",
+    });
+    const deal = await createDeal({
+      companyName: company.name,
+      companyId: company.companyId,
+      primaryContactId: contact.contactId,
+    });
+    const sent = await insertOutreach({
+      dealId: deal.dealId,
+      channel: "gmail",
+      recipient: "nora@bounce.example",
+      body: "First message",
+      contactId: contact.contactId,
+    });
+    await patchOutreach(sent.id, {
+      state: "sent",
+      externalId: "sent-bounce-1",
+      sentAt: new Date().toISOString(),
+    });
+    const queued = await insertOutreach({
+      dealId: deal.dealId,
+      channel: "gmail",
+      recipient: "nora@bounce.example",
+      body: "Follow-up",
+      contactId: contact.contactId,
+      cadenceTouch: 2,
+    });
+    await recordEmailEvent({
+      outreachItemId: sent.id,
+      contactId: contact.contactId,
+      kind: "sent",
+      externalId: "sent-bounce-1",
+      payload: { ownerEmployeeId, threadId: "thread-bounce-1" },
+    });
+    const body = JSON.stringify({
+      type: "composio.trigger.message",
+      metadata: {
+        trigger_slug: "GMAIL_NEW_GMAIL_MESSAGE",
+        user_id: ownerEmployeeId,
+        connected_account_id: "conn-1",
+      },
+      data: {
+        id: "bounce-1",
+        thread_id: "thread-bounce-1",
+        sender: "Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
+        subject: "Delivery Status Notification (Failure)",
+        message_text:
+          "Your message was not delivered. Final-Recipient: rfc822; nora@bounce.example",
+        label_ids: ["INBOX"],
+      },
+    });
+    const response = await handleComposioPost(request("bounce-hook-1", body), {
+      verifyAccountOwner: async () => true,
+      ingestReply: ingestGmailReply,
+    });
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      handled: "gmail_bounce",
+      result: { applied: true, discardedFollowups: 1 },
+    });
+    expect(await listEmailEvents({ kind: "bounced" })).toHaveLength(1);
+    await expect(
+      (await import("@/server/leadgen/store")).getOutreach(queued.id),
+    ).resolves.toMatchObject({ state: "discarded" });
+  });
 });

@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActorContext, AuditWriter, EmitHook } from "@hrmny/gate";
 import type { ComposioSendAdapter } from "@hrmny/integrations";
 import { createComposioStub } from "@hrmny/integrations";
-import type { RunAgent } from "../leadgen/agent-run";
+import { createMockRunAgent, type RunAgent } from "../leadgen/agent-run";
+import { runDueFollowupDrafts } from "../leadgen/followup-scheduler";
 import { resetCrmMemory } from "../crm/memory";
 import {
   createCompany,
@@ -73,6 +74,7 @@ function countingLiveComposio(): ComposioSendAdapter & { sends: number } {
           mode: "copy_draft" as const,
           externalId: `test-li-${++seq}`,
           channel: "linkedin" as const,
+          providerAccepted: false,
         };
       }
       return {
@@ -80,6 +82,9 @@ function countingLiveComposio(): ComposioSendAdapter & { sends: number } {
         mode: "live" as const,
         externalId: `test-gmail-${++seq}`,
         channel: "gmail" as const,
+        providerAccepted: true,
+        readbackAt: new Date().toISOString(),
+        readbackRecipient: input.to,
       };
     },
   };
@@ -318,6 +323,9 @@ describe("outreach HITL gate flow", () => {
         externalId: "gmail-test-message-1",
         threadId: "gmail-test-thread-1",
         channel: "gmail" as const,
+        providerAccepted: true,
+        readbackAt: new Date().toISOString(),
+        readbackRecipient: "developer@hrmny.co",
       }),
     );
     const composio = {
@@ -368,7 +376,7 @@ describe("outreach HITL gate flow", () => {
     ).resolves.toMatchObject({
       status: "completed",
       operation: "messages.send.test",
-      result: { bridgeStatus: "test_sent" },
+      result: { bridgeStatus: "test_provider_accepted" },
     });
 
     await expect(
@@ -442,6 +450,40 @@ describe("outreach HITL gate flow", () => {
     await expect(
       draftEmailFollowup({ id: first.id, runAgent }),
     ).rejects.toThrow(/reply received/i);
+  });
+
+  it("schedules one due follow-up as a draft and never approves or sends it", async () => {
+    const deal = await seedDeal();
+    const first = await draftOutreach({
+      dealId: deal.dealId,
+      subject: "A UAE launch idea",
+      body: COMPLIANT_BODY,
+    });
+    await approveOutreach({ id: first.id, actor: staff, audit, emit });
+    await sendOutreach({
+      id: first.id,
+      actor: staff,
+      composio: countingLiveComposio(),
+      audit,
+      emit,
+    });
+    const { patchOutreach } = await import("../leadgen/store");
+    await patchOutreach(first.id, {
+      sentAt: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+    });
+
+    await expect(
+      runDueFollowupDrafts({ runAgent: createMockRunAgent() }),
+    ).resolves.toMatchObject({ considered: 1, drafted: 1, failed: 0 });
+    await expect(
+      runDueFollowupDrafts({ runAgent: createMockRunAgent() }),
+    ).resolves.toMatchObject({ considered: 0, drafted: 0 });
+    const sequence = await listOutreach({ dealId: deal.dealId });
+    expect(sequence).toHaveLength(2);
+    expect(sequence.find((item) => item.id !== first.id)).toMatchObject({
+      state: "draft",
+      cadenceTouch: 2,
+    });
   });
 
   it("reconciles a completed send receipt without sending Gmail twice", async () => {

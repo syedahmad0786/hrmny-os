@@ -25,6 +25,7 @@ import {
   getLatestApolloPeopleSearch,
   getApolloPeopleSearchStatus,
   getResearchReceiptSignalIdsByProposal,
+  getSalesFunnel,
   getSalesOsSettings,
   honorUnsubscribe,
   ingestGmailReply,
@@ -592,6 +593,27 @@ export const salesOsRouter = router({
   }),
 
   digest: staffProcedure.query(() => buildSalesOsDigest()),
+
+  funnel: staffProcedure
+    .input(
+      z
+        .object({
+          market: z.enum(CRM_MARKETS).optional(),
+          owner: z.string().trim().min(1).optional(),
+          channel: z.string().trim().min(1).optional(),
+          campaign: z.string().trim().min(1).optional(),
+          dateFrom: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/)
+            .optional(),
+          dateTo: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/)
+            .optional(),
+        })
+        .optional(),
+    )
+    .query(({ input }) => getSalesFunnel(input)),
 
   intentCsv: salesOperatorProcedure
     .input(z.object({ csv: z.string().min(3) }))

@@ -304,6 +304,13 @@ export default function ConnectionsPage() {
   const utils = trpc.useUtils();
   const [personalToolsOpen, setPersonalToolsOpen] = useState(false);
   const list = trpc.connections.list.useQuery();
+  const salesMailboxes = trpc.connections.salesMailboxes.useQuery();
+  const [mailboxEdits, setMailboxEdits] = useState<
+    Record<string, { label: string; dailyCap: number; enabled: boolean }>
+  >({});
+  const saveMailbox = trpc.connections.setSalesMailboxPolicy.useMutation({
+    onSuccess: () => void utils.connections.salesMailboxes.invalidate(),
+  });
   const asanaStatus = trpc.connections.asanaStatus.useQuery(undefined, {
     retry: false,
   });
@@ -349,6 +356,7 @@ export default function ConnectionsPage() {
         utils.connections.list.invalidate(),
         utils.connections.workApps.invalidate(),
         utils.connections.asanaStatus.invalidate(),
+        utils.connections.salesMailboxes.invalidate(),
       ]),
   });
   const startWorkApp = trpc.connections.startWorkAppLink.useMutation({
@@ -736,6 +744,135 @@ export default function ConnectionsPage() {
           );
         })}
       </div>
+
+      <section
+        className="rounded-xl border border-sand bg-white/75 p-5"
+        data-testid="sales-sender-mailboxes"
+      >
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
+          Sales email senders
+        </p>
+        <h2 className="mt-1 font-display text-xl">
+          Approved Google Workspace mailboxes
+        </h2>
+        <p className="mt-1 text-sm text-muted">
+          Sales chooses one approved sender before every Gmail send. Each
+          mailbox has its own atomic daily attempt cap.
+        </p>
+        {salesMailboxes.isLoading ? (
+          <p className="mt-4 text-sm text-muted">Loading mailboxes…</p>
+        ) : salesMailboxes.data?.items.length ? (
+          <div className="mt-4 grid gap-3">
+            {salesMailboxes.data.items.map((mailbox) => {
+              const edit = mailboxEdits[mailbox.connectionAccountId] ?? {
+                label: mailbox.label,
+                dailyCap: mailbox.dailyCap,
+                enabled: mailbox.enabled,
+              };
+              return (
+                <div
+                  key={mailbox.connectionAccountId}
+                  className="grid gap-3 rounded-lg border border-sand p-4 lg:grid-cols-[minmax(180px,1fr)_minmax(160px,0.8fr)_120px_auto] lg:items-end"
+                >
+                  <div>
+                    <strong className="block text-sm">{mailbox.email}</strong>
+                    <span className="text-xs text-muted">
+                      {mailbox.usedToday} used · {mailbox.remainingToday} left
+                      today
+                    </span>
+                  </div>
+                  <label className="text-xs font-medium">
+                    Display name
+                    <input
+                      className="mt-1 w-full rounded border border-sand bg-white px-3 py-2 text-sm"
+                      value={edit.label}
+                      disabled={!salesMailboxes.data.canManage}
+                      onChange={(event) =>
+                        setMailboxEdits((current) => ({
+                          ...current,
+                          [mailbox.connectionAccountId]: {
+                            ...edit,
+                            label: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="text-xs font-medium">
+                    Daily cap
+                    <input
+                      className="mt-1 w-full rounded border border-sand bg-white px-3 py-2 text-sm"
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={edit.dailyCap}
+                      disabled={!salesMailboxes.data.canManage}
+                      onChange={(event) =>
+                        setMailboxEdits((current) => ({
+                          ...current,
+                          [mailbox.connectionAccountId]: {
+                            ...edit,
+                            dailyCap: Number(event.target.value),
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-xs font-medium">
+                      <input
+                        type="checkbox"
+                        checked={edit.enabled}
+                        disabled={!salesMailboxes.data.canManage}
+                        onChange={(event) =>
+                          setMailboxEdits((current) => ({
+                            ...current,
+                            [mailbox.connectionAccountId]: {
+                              ...edit,
+                              enabled: event.target.checked,
+                            },
+                          }))
+                        }
+                      />
+                      Approved
+                    </label>
+                    {salesMailboxes.data.canManage ? (
+                      <Button
+                        type="button"
+                        disabled={
+                          saveMailbox.isPending ||
+                          !edit.label.trim() ||
+                          edit.dailyCap < 1 ||
+                          edit.dailyCap > 100
+                        }
+                        onClick={() =>
+                          saveMailbox.mutate({
+                            connectionAccountId: mailbox.connectionAccountId,
+                            label: edit.label.trim(),
+                            dailyCap: edit.dailyCap,
+                            enabled: edit.enabled,
+                          })
+                        }
+                      >
+                        Save
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+            Connect an internal @hrmny.co Google Workspace account first.
+          </p>
+        )}
+        {saveMailbox.error ? (
+          <p className="mt-3 text-sm text-red-700" role="alert">
+            {saveMailbox.error.message}
+          </p>
+        ) : null}
+      </section>
 
       <details
         className="rounded-xl border border-sand bg-white/70 p-5"

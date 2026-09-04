@@ -20,7 +20,15 @@ import {
 
 /** Serialized shape of a @hrmny/gate TransitionResult refusal. */
 type GateOutcome =
-  | { ok: true; sendMode?: string; externalId?: string; copyDraft?: boolean }
+  | {
+      ok: true;
+      sendMode?: string;
+      externalId?: string;
+      copyDraft?: boolean;
+      providerAccepted?: boolean;
+      readbackAt?: string;
+      senderEmail?: string;
+    }
   | {
       ok: false;
       code?: string;
@@ -43,7 +51,7 @@ function OutreachInner() {
   const items = trpc.leadgen.outreach.list.useQuery();
   const followups = trpc.leadgen.outreach.followups.useQuery();
   const deals = trpc.crm.deals.list.useQuery();
-  const connections = trpc.connections.list.useQuery();
+  const mailboxes = trpc.connections.salesMailboxes.useQuery();
   const client = trpc.clients.get.useQuery(
     { id: clientIdFromQuery },
     { enabled: Boolean(clientIdFromQuery) && !focusIdFromQuery },
@@ -70,8 +78,15 @@ function OutreachInner() {
   const [reworkFeedback, setReworkFeedback] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showTestRecords, setShowTestRecords] = useState(false);
+  const [senderConnectionAccountId, setSenderConnectionAccountId] =
+    useState("");
 
-  const invalidate = () => void utils.leadgen.outreach.invalidate();
+  const invalidate = () => {
+    void utils.leadgen.outreach.invalidate();
+    void utils.connections.salesMailboxes.invalidate();
+    void utils.salesOs.digest.invalidate();
+    void utils.salesOs.funnel.invalidate();
+  };
   const onErr = (e: { message: string }) => {
     setFeedbackId(null);
     setSendNote(null);
@@ -159,15 +174,25 @@ function OutreachInner() {
     for (const d of deals.data ?? []) m.set(d.dealId, d.companyName);
     return m;
   }, [deals.data]);
-  const workspaceConnection = connections.data?.find(
-    (connection) => connection.toolkit === "google_workspace",
+  const availableMailboxes = useMemo(
+    () => (mailboxes.data?.items ?? []).filter((mailbox) => mailbox.enabled),
+    [mailboxes.data],
   );
-  const senderAccount =
-    workspaceConnection?.status === "connected" &&
-    workspaceConnection.allowed &&
-    workspaceConnection.hasSecret
-      ? workspaceConnection.externalConnectionId
-      : null;
+  const selectedSender = availableMailboxes.find(
+    (mailbox) => mailbox.connectionAccountId === senderConnectionAccountId,
+  );
+  const senderAccount = selectedSender?.email ?? null;
+
+  useEffect(() => {
+    if (
+      availableMailboxes.length &&
+      !availableMailboxes.some(
+        (mailbox) => mailbox.connectionAccountId === senderConnectionAccountId,
+      )
+    ) {
+      setSenderConnectionAccountId(availableMailboxes[0]!.connectionAccountId);
+    }
+  }, [availableMailboxes, senderConnectionAccountId]);
 
   const byState = useMemo(() => {
     const all = (items.data ?? []).filter(
@@ -240,11 +265,17 @@ function OutreachInner() {
           );
         } else {
           const parts = [
-            senderAccount ? `from ${senderAccount}` : null,
+            r.senderEmail || senderAccount
+              ? `from ${r.senderEmail ?? senderAccount}`
+              : null,
             r.sendMode ? `mode=${r.sendMode}` : null,
             r.externalId ? `id=${r.externalId}` : null,
           ].filter(Boolean);
-          setSendNote(parts.length ? `Sent · ${parts.join(" · ")}` : "Sent");
+          setSendNote(
+            parts.length
+              ? `Gmail accepted and read back · ${parts.join(" · ")}`
+              : "Gmail accepted and read back",
+          );
         }
       } else if (verb === "Mark sent") {
         setSendNote(
@@ -304,9 +335,10 @@ function OutreachInner() {
       const result = await sendTest.mutateAsync({
         id,
         idempotencyKey: crypto.randomUUID(),
+        senderConnectionAccountId,
       });
       setSendNote(
-        `Test delivered to ${result.recipient} · client was not contacted · outreach remains approved.`,
+        `Gmail accepted and read back the internal test to ${result.recipient} · client was not contacted · outreach remains approved.`,
       );
     } catch {
       // The mutation surfaces a human-readable reason via onError.
@@ -356,16 +388,37 @@ function OutreachInner() {
         >
           {senderAccount ? (
             <>
-              <strong>Will send from {senderAccount}</strong> via Google
-              Workspace Gmail.{" "}
+              <label className="crm-field mb-2">
+                <span>Send from</span>
+                <select
+                  className="crm-input"
+                  value={senderConnectionAccountId}
+                  onChange={(event) =>
+                    setSenderConnectionAccountId(event.target.value)
+                  }
+                >
+                  {availableMailboxes.map((mailbox) => (
+                    <option
+                      key={mailbox.connectionAccountId}
+                      value={mailbox.connectionAccountId}
+                    >
+                      {mailbox.label} · {mailbox.email} ·{" "}
+                      {mailbox.remainingToday}/{mailbox.dailyCap} left today
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <strong>{senderAccount}</strong> will send via Google Workspace
+              Gmail. Gmail acceptance is verified by reading the exact message
+              back from Sent Mail; delivery is monitored separately.{" "}
               <Link
                 href="/settings/connections#conn-google_workspace"
                 className="font-bold underline"
               >
-                Change sender
+                Manage senders
               </Link>
             </>
-          ) : connections.isLoading ? (
+          ) : mailboxes.isLoading ? (
             "Checking the Gmail sender…"
           ) : (
             <>
@@ -646,7 +699,7 @@ function OutreachInner() {
                         data-testid="outreach-send-test"
                         disabled={
                           busyId !== null ||
-                          connections.isLoading ||
+                          mailboxes.isLoading ||
                           !senderAccount
                         }
                         onClick={() => {
@@ -664,8 +717,9 @@ function OutreachInner() {
                         variant="primary"
                         disabled={
                           busyId !== null ||
-                          connections.isLoading ||
-                          !senderAccount
+                          mailboxes.isLoading ||
+                          !senderAccount ||
+                          (selectedSender?.remainingToday ?? 0) < 1
                         }
                         onClick={() => {
                           const confirmed = window.confirm(
@@ -673,7 +727,10 @@ function OutreachInner() {
                           );
                           if (!confirmed) return;
                           void run(item.id, "Send", () =>
-                            send.mutateAsync({ id: item.id }),
+                            send.mutateAsync({
+                              id: item.id,
+                              senderConnectionAccountId,
+                            }),
                           );
                         }}
                       >

@@ -12,6 +12,7 @@ import {
 import {
   createComposioLiveSend,
   createComposioStub,
+  GmailProviderReadbackError,
   type ComposioSendAdapter,
 } from "@hrmny/integrations";
 import { ReplyIntentSchema } from "@hrmny/ai";
@@ -34,6 +35,8 @@ import { router, staffProcedure } from "./trpc";
 import {
   getGoogleWorkspaceSenderEmail,
   getVerifiedWorkAppConnection,
+  listSalesSenderMailboxes,
+  type SalesSenderMailbox,
 } from "./connections-router";
 import {
   completeIntegrationReceipt,
@@ -47,6 +50,7 @@ import { buildEmailFollowupStatuses } from "../sales-os/followups";
 async function resolveComposioSend(
   employeeId: string | null | undefined,
   roles: readonly string[],
+  senderConnectionAccountId?: string,
 ): Promise<ComposioSendAdapter> {
   if (!employeeId) {
     return createComposioStub();
@@ -58,9 +62,20 @@ async function resolveComposioSend(
       await import("../leadgen/google-workspace-send");
     const { getGoogleWorkspaceAccessToken } =
       await import("./connections-router");
-    const token = await getGoogleWorkspaceAccessToken(employeeId);
-    if (token) return createGoogleWorkspaceGmailSend(employeeId);
+    const options = {
+      connectionAccountId: senderConnectionAccountId,
+      roles,
+    };
+    const token = await getGoogleWorkspaceAccessToken(employeeId, options);
+    if (token) return createGoogleWorkspaceGmailSend(employeeId, options);
+    if (senderConnectionAccountId) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "The selected Google Workspace sender must be reconnected.",
+      });
+    }
   } catch (err) {
+    if (senderConnectionAccountId || err instanceof TRPCError) throw err;
     // A Workspace vault row that cannot refresh must not silently stub —
     // that hides reconnect-needed failures behind a fake "sent".
     const message = err instanceof Error ? err.message : String(err);
@@ -100,6 +115,28 @@ async function resolveComposioSend(
     });
   }
   return createComposioStub();
+}
+
+async function resolveSalesSender(
+  actor: ActorContext,
+  connectionAccountId?: string,
+): Promise<SalesSenderMailbox | null> {
+  const mailboxes = await listSalesSenderMailboxes({
+    employeeId: actor.employeeId,
+    roles: actor.roles,
+  });
+  const sender = connectionAccountId
+    ? mailboxes.find(
+        (mailbox) => mailbox.connectionAccountId === connectionAccountId,
+      )
+    : mailboxes[0];
+  if (connectionAccountId && !sender) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "The selected Google Workspace sender is not approved.",
+    });
+  }
+  return sender ?? null;
 }
 /**
  * M8 outreach HITL + lead-gen surface (importable module — orchestrator wires
@@ -383,6 +420,7 @@ export async function listEmailFollowups(now = new Date()) {
 
 export async function draftEmailFollowup(input: {
   id: string;
+  now?: Date;
   runAgent?: RunAgent;
 }): Promise<OutreachItem> {
   const source = await getOutreach(input.id);
@@ -392,7 +430,7 @@ export async function draftEmailFollowup(input: {
       message: "Choose a sent Gmail message to prepare a follow-up",
     });
   }
-  const status = (await listEmailFollowups()).find(
+  const status = (await listEmailFollowups(input.now)).find(
     (item) => item.sourceId === source.id,
   );
   if (!status) {
@@ -525,6 +563,7 @@ export async function sendOutreachTest(input: {
   idempotencyKey: string;
   actor: ActorContext;
   composio?: ComposioSendAdapter;
+  senderConnectionAccountId?: string;
   /** Test-only dependency; the tRPC route always resolves this server-side. */
   testRecipient?: string;
 }) {
@@ -543,9 +582,16 @@ export async function sendOutreachTest(input: {
       message: "Internal test sending is available for Gmail drafts only.",
     });
   }
+  const sender = input.testRecipient
+    ? null
+    : await resolveSalesSender(input.actor, input.senderConnectionAccountId);
   const recipient = (
     input.testRecipient ??
-    (await getGoogleWorkspaceSenderEmail(input.actor.employeeId))
+    sender?.email ??
+    (await getGoogleWorkspaceSenderEmail(input.actor.employeeId, {
+      connectionAccountId: input.senderConnectionAccountId,
+      roles: input.actor.roles,
+    }))
   )
     ?.trim()
     .toLowerCase();
@@ -574,6 +620,8 @@ export async function sendOutreachTest(input: {
       subject,
       body,
       messageId,
+      senderConnectionAccountId: sender?.connectionAccountId,
+      senderEmail: sender?.email ?? recipient,
     }),
     status: "processing",
     result: { bridgeStatus: "sending_test" },
@@ -583,23 +631,67 @@ export async function sendOutreachTest(input: {
       recipient,
       intendedRecipient: item.recipient,
       messageId,
+      senderConnectionAccountId: sender?.connectionAccountId,
+      senderEmail: sender?.email ?? recipient,
     },
   });
   if (receipt.duplicate) {
+    const priorResult = receipt.result ?? {};
     if (
       receipt.status === "completed" &&
-      typeof receipt.result?.externalId === "string"
+      priorResult.providerAccepted === true &&
+      typeof priorResult.externalId === "string"
     ) {
       return {
         sent: true as const,
         duplicate: true as const,
         recipient,
         receiptId: receipt.receiptId,
-        externalId: receipt.result.externalId,
+        externalId: priorResult.externalId,
         threadId:
-          typeof receipt.result.threadId === "string"
-            ? receipt.result.threadId
+          typeof priorResult.threadId === "string"
+            ? priorResult.threadId
             : undefined,
+        readbackAt:
+          typeof priorResult.readbackAt === "string"
+            ? priorResult.readbackAt
+            : undefined,
+        outreachState: item.state,
+      };
+    }
+    if (
+      (receipt.status === "processing" || receipt.status === "completed") &&
+      priorResult.providerAccepted !== true &&
+      typeof priorResult.externalId === "string"
+    ) {
+      const composio =
+        input.composio ??
+        (await resolveComposioSend(
+          input.actor.employeeId,
+          input.actor.roles,
+          sender?.connectionAccountId,
+        ));
+      const readback = await composio.readbackAfterSend({
+        externalId: priorResult.externalId,
+        recipient,
+      });
+      await completeIntegrationReceipt(receipt.receiptId, {
+        ...priorResult,
+        bridgeStatus: "test_provider_accepted",
+        providerAccepted: true,
+        externalId: readback.externalId,
+        ...(readback.threadId ? { threadId: readback.threadId } : {}),
+        readbackAt: readback.readbackAt,
+        readbackRecipient: readback.recipient,
+      });
+      return {
+        sent: true as const,
+        duplicate: true as const,
+        recipient,
+        receiptId: receipt.receiptId,
+        externalId: readback.externalId,
+        threadId: readback.threadId,
+        readbackAt: readback.readbackAt,
         outreachState: item.state,
       };
     }
@@ -615,7 +707,11 @@ export async function sendOutreachTest(input: {
   try {
     const composio =
       input.composio ??
-      (await resolveComposioSend(input.actor.employeeId, input.actor.roles));
+      (await resolveComposioSend(
+        input.actor.employeeId,
+        input.actor.roles,
+        sender?.connectionAccountId,
+      ));
     providerAttempted = true;
     const sent = await composio.sendAfterApproval({
       toolkit: "gmail",
@@ -625,14 +721,16 @@ export async function sendOutreachTest(input: {
       messageId,
     });
     mode = sent.mode;
-    if (!sent.sent || sent.mode !== "live") {
+    if (!sent.sent || sent.mode !== "live" || !sent.providerAccepted) {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
-        message: "Gmail test send is not live. Reconnect Google Workspace.",
+        message:
+          "Gmail did not confirm the test message in Sent Mail. Reconnect Google Workspace.",
       });
     }
     await completeIntegrationReceipt(receipt.receiptId, {
-      bridgeStatus: "test_sent",
+      bridgeStatus: "test_provider_accepted",
+      providerAccepted: true,
       outreachItemId: item.id,
       recipient,
       intendedRecipient: item.recipient,
@@ -640,6 +738,10 @@ export async function sendOutreachTest(input: {
       ...(sent.threadId ? { threadId: sent.threadId } : {}),
       messageId,
       sendMode: sent.mode,
+      readbackAt: sent.readbackAt,
+      readbackRecipient: sent.readbackRecipient,
+      senderConnectionAccountId: sender?.connectionAccountId,
+      senderEmail: sender?.email ?? recipient,
     });
     return {
       sent: true as const,
@@ -648,6 +750,7 @@ export async function sendOutreachTest(input: {
       receiptId: receipt.receiptId,
       externalId: sent.externalId,
       threadId: sent.threadId,
+      readbackAt: sent.readbackAt,
       outreachState: item.state,
     };
   } catch (error) {
@@ -661,6 +764,12 @@ export async function sendOutreachTest(input: {
         outreachItemId: item.id,
         recipient,
         messageId,
+        ...(error instanceof GmailProviderReadbackError
+          ? {
+              externalId: error.externalId,
+              ...(error.threadId ? { threadId: error.threadId } : {}),
+            }
+          : {}),
       },
       lastError:
         error instanceof Error ? error.message : "Gmail test send failed",
@@ -673,6 +782,7 @@ export async function sendOutreach(input: {
   id: string;
   actor: ActorContext;
   composio?: ComposioSendAdapter;
+  senderConnectionAccountId?: string;
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<
@@ -680,6 +790,9 @@ export async function sendOutreach(input: {
     externalId?: string;
     threadId?: string;
     sendMode?: string;
+    providerAccepted?: boolean;
+    readbackAt?: string;
+    senderEmail?: string;
     /** Present when LinkedIn (or other) copy-draft completed without flipping to sent. */
     copyDraft?: boolean;
   }
@@ -727,12 +840,22 @@ export async function sendOutreach(input: {
       item.body = nextBody;
     }
   }
+  const sender =
+    input.composio && !input.senderConnectionAccountId
+      ? null
+      : await resolveSalesSender(input.actor, input.senderConnectionAccountId);
   const composio =
     input.composio ??
-    (await resolveComposioSend(input.actor.employeeId, input.actor.roles));
+    (await resolveComposioSend(
+      input.actor.employeeId,
+      input.actor.roles,
+      sender?.connectionAccountId,
+    ));
   let externalId: string | undefined;
   let threadId: string | undefined;
   let sendMode: string | undefined;
+  let providerAccepted = false;
+  let readbackAt: string | undefined;
   const toolkit =
     item.channel === "linkedin" ? ("linkedin" as const) : ("gmail" as const);
 
@@ -753,6 +876,8 @@ export async function sendOutreach(input: {
             subject: item.subject,
             body: item.body,
             messageId,
+            senderConnectionAccountId: sender?.connectionAccountId,
+            senderEmail: sender?.email,
           });
           const receipt = await recordIntegrationReceipt({
             provider: "gmail",
@@ -762,10 +887,13 @@ export async function sendOutreach(input: {
             status: "processing",
             result: { bridgeStatus: "sending" },
             ownerEmployeeId: input.actor.employeeId,
+            credentialConnectionAccountId: sender?.connectionAccountId ?? null,
             payload: {
               outreachItemId: item.id,
               recipient: item.recipient,
               messageId,
+              senderConnectionAccountId: sender?.connectionAccountId,
+              senderEmail: sender?.email,
             },
           });
 
@@ -789,24 +917,69 @@ export async function sendOutreach(input: {
           }
 
           if (!shouldSend) {
-            if (
-              receipt.status !== "completed" ||
-              typeof receipt.result?.externalId !== "string"
-            ) {
+            const receiptResult = receipt.result ?? {};
+            const receiptExternalId =
+              typeof receiptResult.externalId === "string"
+                ? receiptResult.externalId
+                : undefined;
+            if (!receiptExternalId) {
               throw new TRPCError({
                 code: "PRECONDITION_FAILED",
                 message:
                   "A previous Gmail attempt has an uncertain outcome. Check Sent Mail before taking another action; HRMNY will not send it twice.",
               });
             }
-            externalId = receipt.result.externalId;
+            externalId = receiptExternalId;
             threadId =
-              typeof receipt.result.threadId === "string"
-                ? receipt.result.threadId
+              typeof receiptResult.threadId === "string"
+                ? receiptResult.threadId
                 : undefined;
             sendMode = "live";
+            providerAccepted = receiptResult.providerAccepted === true;
+            readbackAt =
+              typeof receiptResult.readbackAt === "string"
+                ? receiptResult.readbackAt
+                : undefined;
+            if (!providerAccepted) {
+              const readback = await composio.readbackAfterSend({
+                externalId,
+                recipient: item.recipient,
+              });
+              threadId = readback.threadId ?? threadId;
+              readbackAt = readback.readbackAt;
+              providerAccepted = true;
+              await completeIntegrationReceipt(receipt.receiptId, {
+                ...receiptResult,
+                bridgeStatus: "provider_accepted",
+                providerAccepted: true,
+                externalId,
+                ...(threadId ? { threadId } : {}),
+                readbackAt,
+                readbackRecipient: readback.recipient,
+              });
+            }
           } else {
+            let providerAttempted = false;
             try {
+              if (sender) {
+                const { reserveCreditWithinCap } =
+                  await import("../sales-os/store");
+                const period = `${new Date().toISOString().slice(0, 10)}:${sender.connectionAccountId}`;
+                if (
+                  !(await reserveCreditWithinCap(
+                    "email_send",
+                    sender.dailyCap,
+                    1,
+                    period,
+                  ))
+                ) {
+                  throw new TRPCError({
+                    code: "PRECONDITION_FAILED",
+                    message: `${sender.label} has reached its ${sender.dailyCap}-email daily cap.`,
+                  });
+                }
+              }
+              providerAttempted = true;
               const res = await composio.sendAfterApproval({
                 toolkit,
                 to: item.recipient,
@@ -817,6 +990,8 @@ export async function sendOutreach(input: {
               externalId = res.externalId;
               threadId = res.threadId;
               sendMode = res.mode;
+              providerAccepted = res.providerAccepted;
+              readbackAt = res.readbackAt;
 
               if (res.mode === "copy_draft") {
                 throw Object.assign(new Error("COPY_DRAFT"), {
@@ -825,7 +1000,7 @@ export async function sendOutreach(input: {
                   sendMode: res.mode,
                 });
               }
-              if (!res.sent || res.mode !== "live") {
+              if (!res.sent || res.mode !== "live" || !res.providerAccepted) {
                 throw new TRPCError({
                   code: "PRECONDITION_FAILED",
                   message:
@@ -835,14 +1010,21 @@ export async function sendOutreach(input: {
                 });
               }
               await completeIntegrationReceipt(receipt.receiptId, {
+                bridgeStatus: "provider_accepted",
+                providerAccepted: true,
                 outreachItemId: item.id,
                 externalId,
                 ...(threadId ? { threadId } : {}),
                 messageId,
                 sendMode,
+                readbackAt,
+                readbackRecipient: res.readbackRecipient,
+                senderConnectionAccountId: sender?.connectionAccountId,
+                senderEmail: sender?.email,
               });
             } catch (error) {
-              const definitelyNotSent = sendMode === "stub";
+              const definitelyNotSent =
+                !providerAttempted || sendMode === "stub";
               await updateIntegrationReceiptProgress(receipt.receiptId, {
                 status: definitelyNotSent ? "failed" : "processing",
                 result: {
@@ -851,6 +1033,21 @@ export async function sendOutreach(input: {
                     : "reconcile_required",
                   outreachItemId: item.id,
                   messageId,
+                  senderConnectionAccountId: sender?.connectionAccountId,
+                  senderEmail: sender?.email,
+                  ...(externalId
+                    ? {
+                        externalId,
+                        ...(threadId ? { threadId } : {}),
+                      }
+                    : error instanceof GmailProviderReadbackError
+                      ? {
+                          externalId: error.externalId,
+                          ...(error.threadId
+                            ? { threadId: error.threadId }
+                            : {}),
+                        }
+                      : {}),
                 },
                 lastError:
                   error instanceof Error ? error.message : "Gmail send failed",
@@ -884,6 +1081,11 @@ export async function sendOutreach(input: {
               externalId: externalId ?? null,
               payload: {
                 ownerEmployeeId: input.actor.employeeId,
+                evidenceState: "provider_accepted",
+                providerAccepted: true,
+                readbackAt,
+                senderConnectionAccountId: sender?.connectionAccountId,
+                senderEmail: sender?.email,
                 ...(threadId ? { threadId } : {}),
               },
             });
@@ -895,7 +1097,15 @@ export async function sendOutreach(input: {
       },
     );
 
-    return { ...result, externalId, threadId, sendMode };
+    return {
+      ...result,
+      externalId,
+      threadId,
+      sendMode,
+      providerAccepted,
+      readbackAt,
+      senderEmail: sender?.email,
+    };
   } catch (err) {
     if (
       err &&
@@ -962,10 +1172,15 @@ const outreachRouter = router({
     ),
 
   send: staffProcedure
-    .input(z.object({ id: z.string() }))
+    .input(
+      z.object({
+        id: z.string(),
+        senderConnectionAccountId: z.string().uuid().optional(),
+      }),
+    )
     .mutation(({ input, ctx }) =>
       sendOutreach({
-        id: input.id,
+        ...input,
         actor: actorFromCtx(ctx),
       }),
     ),
@@ -975,6 +1190,7 @@ const outreachRouter = router({
       z.object({
         id: z.string().uuid(),
         idempotencyKey: z.string().uuid(),
+        senderConnectionAccountId: z.string().uuid().optional(),
       }),
     )
     .mutation(({ input, ctx }) =>

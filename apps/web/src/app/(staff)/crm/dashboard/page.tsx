@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { DashStrip } from "../_components/dash-strip";
 import {
   CompanyCell,
@@ -16,8 +16,15 @@ import {
 } from "@/components/crm/format";
 import { isSyntheticRecordName } from "@/lib/synthetic-records";
 import { trpc } from "@/lib/trpc";
+import type { CrmMarket } from "@/lib/crm-markets";
 
 export default function SalesDashboardPage() {
+  const [market, setMarket] = useState<CrmMarket | "">("");
+  const [owner, setOwner] = useState("");
+  const [channel, setChannel] = useState("");
+  const [campaign, setCampaign] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const digest = trpc.salesOs.digest.useQuery(undefined, {
     refetchInterval: 30_000,
   });
@@ -30,6 +37,17 @@ export default function SalesDashboardPage() {
   const stages = trpc.crm.stages.useQuery(undefined, {
     refetchInterval: 30_000,
   });
+  const funnel = trpc.salesOs.funnel.useQuery(
+    {
+      market: market || undefined,
+      owner: owner || undefined,
+      channel: channel || undefined,
+      campaign: campaign || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+    },
+    { refetchInterval: 30_000 },
+  );
 
   const contactById = useMemo(
     () =>
@@ -199,6 +217,166 @@ export default function SalesDashboardPage() {
             </div>
           ))}
         </dl>
+      </section>
+
+      <section
+        className="crm-panel mb-4 overflow-hidden"
+        aria-labelledby="sales-funnel-heading"
+        data-testid="sales-funnel"
+      >
+        <div className="crm-panel-head block py-4">
+          <p className="growth-kicker">Conversion funnel</p>
+          <h2
+            id="sales-funnel-heading"
+            className="font-display text-[21px] font-semibold tracking-[-0.025em]"
+          >
+            From lead to won
+          </h2>
+          <p className="mt-1 text-[10px] text-[var(--muted)]">
+            Filter the same live CRM, research, outreach and email-event
+            records.
+          </p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <label className="crm-field">
+              <span>Market</span>
+              <select
+                className="crm-input"
+                value={market}
+                onChange={(event) =>
+                  setMarket(event.target.value as CrmMarket | "")
+                }
+              >
+                <option value="">All markets</option>
+                {funnel.data?.options.markets.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="crm-field">
+              <span>Owner</span>
+              <select
+                className="crm-input"
+                value={owner}
+                onChange={(event) => setOwner(event.target.value)}
+              >
+                <option value="">All owners</option>
+                {funnel.data?.options.owners.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="crm-field">
+              <span>Channel</span>
+              <select
+                className="crm-input"
+                value={channel}
+                onChange={(event) => setChannel(event.target.value)}
+              >
+                <option value="">All channels</option>
+                {funnel.data?.options.channels.map((value) => (
+                  <option key={value} value={value}>
+                    {value.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="crm-field">
+              <span>Campaign / source</span>
+              <select
+                className="crm-input"
+                value={campaign}
+                onChange={(event) => setCampaign(event.target.value)}
+              >
+                <option value="">All sources</option>
+                {funnel.data?.options.campaigns.map((value) => (
+                  <option key={value} value={value}>
+                    {value.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="crm-field">
+              <span>Created from</span>
+              <input
+                className="crm-input"
+                type="date"
+                value={dateFrom}
+                onChange={(event) => setDateFrom(event.target.value)}
+              />
+            </label>
+            <label className="crm-field">
+              <span>Created to</span>
+              <input
+                className="crm-input"
+                type="date"
+                value={dateTo}
+                onChange={(event) => setDateTo(event.target.value)}
+              />
+            </label>
+          </div>
+        </div>
+        {funnel.error ? (
+          <p className="crm-note m-4" role="alert">
+            Funnel unavailable: {funnel.error.message}
+          </p>
+        ) : (
+          <div className="grid gap-6 p-[18px] lg:grid-cols-[minmax(0,1.5fr)_minmax(220px,0.7fr)]">
+            <ol className="m-0 grid list-none gap-3 p-0">
+              {(funnel.data?.steps ?? []).map((item, index) => (
+                <li
+                  key={item.key}
+                  className="grid grid-cols-[24px_minmax(0,1fr)_46px] items-center gap-3"
+                >
+                  <span className="font-mono text-[9px] font-bold text-[var(--ochre-dark)]">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <div>
+                    <div className="mb-1 flex justify-between gap-3 text-[10px]">
+                      <strong>{item.label}</strong>
+                      <span>{item.percentOfLeads}%</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-[var(--muted-surface-soft)]">
+                      <div
+                        className="h-full rounded-full bg-[var(--ochre)]"
+                        style={{ width: `${item.percentOfLeads}%` }}
+                      />
+                    </div>
+                  </div>
+                  <strong className="text-right font-display text-xl">
+                    {item.count}
+                  </strong>
+                </li>
+              ))}
+            </ol>
+            <div className="rounded-xl bg-[var(--muted-surface-soft)] p-4">
+              <p className="growth-kicker">Email evidence</p>
+              <dl className="mt-3 grid grid-cols-2 gap-3">
+                {[
+                  ["Gmail accepted", funnel.data?.evidence.providerAccepted],
+                  ["Replies", funnel.data?.evidence.replied],
+                  ["Bounces", funnel.data?.evidence.bounced],
+                  ["Complaints", funnel.data?.evidence.complained],
+                ].map(([label, value]) => (
+                  <div key={String(label)}>
+                    <dt className="text-[9px] text-[var(--muted)]">{label}</dt>
+                    <dd className="mt-1 font-display text-2xl font-semibold">
+                      {value ?? "…"}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-4 text-[9px] leading-[1.5] text-[var(--muted)]">
+                Gmail accepted means the exact message was read back from Sent
+                Mail. It is not proof of delivery; bounces, complaints and
+                replies are tracked separately.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       <section aria-labelledby="revenue-heading">

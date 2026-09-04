@@ -1,0 +1,108 @@
+schema_version: 1
+client_key: client-uae-creative-01
+project_key: hrmny-os
+project_name: HRMNY OS
+goal: Complete the production sales operating system from lead discovery through research, approved outreach, provider verification, reply and suppression tracking, draft-only follow-ups, and segmented funnel reporting.
+input_mode: existing-system-change
+product_context:
+  users:
+    - HRMNY partner
+    - HRMNY director
+    - account manager
+    - sales operator
+  actors:
+    - authenticated HRMNY employee
+    - approved Google Workspace sender
+    - Apollo
+    - OpenRouter
+    - Google Workspace Gmail
+    - Inngest or n8n worker
+  jobs_to_be_done:
+    - find and save qualified companies and people
+    - research and approve a decision-ready knowledge brief
+    - draft and approve personalized outreach
+    - send a safe internal test before any client outreach
+    - send only the exact human-approved message from an approved mailbox
+    - monitor provider acceptance, replies, bounces, complaints, and suppression
+    - prepare due follow-ups as drafts without sending them automatically
+    - understand funnel conversion by market, owner, channel, campaign, and date
+  functional_requirements:
+    - reuse the canonical Supabase sales records and existing approval workflow
+    - select an approved internal Google Workspace sender and enforce its daily cap
+    - verify every Gmail send by provider readback before marking it accepted
+    - ingest replies, bounces, and complaints idempotently and stop suppressed cadences
+    - schedule draft-only follow-up preparation with immutable receipts
+    - expose synchronized segmented funnel analytics
+  non_functional_requirements:
+    safety: No automatic outbound send, paid enrichment, or LinkedIn automation
+    reliability: Idempotent provider actions with explicit uncertain and reconciliation states
+    usability: Plain-language status and next action for a sales operator
+    auditability: Immutable receipts distinguish approval, provider acceptance, delivery evidence, and destination verification
+  acceptance_criteria:
+    - no follow-up worker can send an email without a new human approval
+    - an approved Gmail send is not marked provider accepted until messages.get confirms the same message and recipient
+    - a bounce or complaint suppresses the recipient and stops queued follow-ups
+    - each send uses an enabled internal mailbox and cannot exceed its daily cap
+    - funnel metrics can be filtered by market, owner, channel, campaign, and date
+    - synthetic tests cover the nontrivial scheduling, cap, readback, and suppression branches
+  exclusions:
+    - live client outreach during build verification
+    - consuming Apollo credits during build verification
+    - automatic LinkedIn messaging
+    - QM deployment
+  assumptions:
+    - current HRMNY production Supabase and Vercel deployment remain canonical
+    - connected Google Workspace accounts are internal hrmny.co identities
+environments:
+  - development
+  - test
+  - production
+systems_of_record:
+  - domain: sales leads, companies, deals, research, outreach, approvals, events, suppression, and receipts
+    owner: Supabase PostgreSQL
+  - domain: connected account metadata and approved sender policy
+    owner: Supabase PostgreSQL connection_account
+data_classification: confidential-client-and-prospect-data
+allowed_external_effects:
+  - read-only-discovery
+  - local-code-writes
+  - synthetic-tests
+  - approved-deployment
+stack:
+  frontend: [Next.js, React]
+  backend: [Next.js route handlers, tRPC]
+  runtime: [Node.js, TypeScript]
+  database: [Supabase PostgreSQL, Drizzle ORM]
+  hosting: [Vercel]
+  authentication: [Supabase Auth]
+  analytics: [canonical PostgreSQL sales events]
+  automation: [Inngest, n8n]
+  external_platforms: [Apollo, OpenRouter, Google Workspace Gmail, Composio]
+  observability: [integration_inbox receipts, audit_event, integration_health_signal]
+agent_targets: [codex]
+connection_defaults:
+  environment: production
+  public_base_urls:
+    development: http://localhost:3000
+    production: https://hrmny-os.vercel.app
+  secret_store:
+    type: Supabase Vault and deployment environment
+    authorized_scope: HRMNY production metadata only; never secret values
+    discovery: declared-names-and-metadata-only
+bridge_bindings: []
+route_bindings: {}
+credential_bindings: []
+approval_policy:
+  development_synthetic_writes: agent-executes-and-verifies
+  external_writes: exact-preview-and-human-approval
+  production_and_real_data: exact-preview-and-human-approval-for-each-outbound-message
+  destructive_actions: separate-explicit-approval
+  spend: separate-explicit-approval
+execution_policy:
+  mode: agent-executed
+  max_parallel_agents: 1
+  development_resource_creation: authorized-for-this-sales-completion
+  synthetic_testing: agent-executes-and-verifies
+  real_data: read-only-unless-exact-action-is-human-approved
+  production: code-migration-and-deployment-authorized-no-live-outreach
+  destructive_actions: separate-explicit-approval

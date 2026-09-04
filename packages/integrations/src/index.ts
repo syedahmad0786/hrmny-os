@@ -4,9 +4,12 @@ export * as salesgrowth from "./salesgrowth";
 export {
   createComposioStub,
   createComposioLiveSend,
+  GmailProviderReadbackError,
+  verifyGmailProviderReadback,
   type ComposioSendAdapter,
   type ComposioSendInput,
   type ComposioSendResult,
+  type GmailProviderReadback,
 } from "./composio";
 export {
   createComposioLive,
