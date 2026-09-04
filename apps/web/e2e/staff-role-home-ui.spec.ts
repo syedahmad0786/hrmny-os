@@ -71,19 +71,25 @@ for (const journey of ROLE_JOURNEYS) {
   });
 }
 
-test("role navigation exposes focused areas without a More drawer", async ({
+test("More is keyboard-operable and identifies a hidden active area", async ({
   page,
 }) => {
   await page.setExtraHTTPHeaders({ "x-dev-role": "am" });
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  const nav = page.getByRole("navigation", { name: "Primary" });
+  const details = page.locator("details.desk-nav-more");
+  const toggle = page.getByTestId("staff-more-toggle");
 
-  await expect(nav.getByRole("link", { name: "Sales" })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "My work" })).toBeVisible();
-  await expect(page.locator("details.desk-nav-more")).toHaveCount(0);
-  await expect(
-    page.getByRole("link", { name: "Connections", exact: true }),
-  ).toBeVisible();
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(details).toHaveAttribute("open", "");
+  await expect(details.getByRole("link", { name: "Reports" })).toBeVisible();
+
+  await page.goto("/dashboards", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("staff-more-toggle")).toHaveClass(/active/);
+  await expect(page.locator("details.desk-nav-more")).toHaveAttribute(
+    "open",
+    "",
+  );
 });
 
 test("role home remains usable at a mobile viewport", async ({ page }) => {
@@ -93,12 +99,10 @@ test("role home remains usable at a mobile viewport", async ({ page }) => {
 
   await expect(page.getByTestId("role-primary-action")).toBeVisible();
   await expect(page.getByTestId("next-owned-work")).toBeVisible();
+  await page.getByTestId("staff-more-toggle").click();
   await expect(
-    page
-      .getByRole("navigation", { name: "Primary" })
-      .getByRole("link", { name: "People" }),
+    page.locator("details.desk-nav-more").getByRole("link", { name: "Sales" }),
   ).toBeVisible();
-  await expect(page.locator("details.desk-nav-more")).toHaveCount(0);
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);
