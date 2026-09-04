@@ -61,6 +61,7 @@ async function seedHandoverEvidence(page: Page) {
       .getByTestId("handover-brand-input")
       .fill("Synthetic test brand folder received");
     await page.getByRole("button", { name: "Save brand evidence" }).click();
+    await expect(brand).toHaveAttribute("data-ready", "true");
   }
   const billing = page.getByTestId("handover-check-billing-details");
   if ((await billing.getAttribute("data-ready")) !== "true") {
@@ -68,6 +69,7 @@ async function seedHandoverEvidence(page: Page) {
       .getByTestId("handover-billing-input")
       .fill("Synthetic test TRN confirmed");
     await page.getByRole("button", { name: "Save billing evidence" }).click();
+    await expect(billing).toHaveAttribute("data-ready", "true");
   }
   await page.goto(dealUrl, { waitUntil: "commit" });
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible({
