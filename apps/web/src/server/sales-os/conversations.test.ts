@@ -14,17 +14,24 @@ import {
   listActivities,
   updateContact,
 } from "../crm/repository";
-import { resetIntegrationReceiptMemory } from "../integrations/inbox";
+import {
+  getIntegrationReceipt,
+  resetIntegrationReceiptMemory,
+} from "../integrations/inbox";
 import {
   insertOutreach,
+  getOutreach,
   listOutreach,
   patchOutreach,
   resetLeadgenStore,
 } from "../leadgen/store";
 import { createCaller } from "../trpc/root";
-import { sendOutreach } from "../trpc/leadgen-router";
+import {
+  createBoundGmailReplyDraft,
+  sendOutreach,
+} from "../trpc/leadgen-router";
 import { ingestGmailReply } from "./replies";
-import { recordEmailEvent, resetSalesOsStore } from "./store";
+import { listEmailEvents, recordEmailEvent, resetSalesOsStore } from "./store";
 import { listSalesConversations } from "./conversations";
 
 const MAILBOX_ID = "70000000-0000-4000-8000-000000000001";
@@ -154,6 +161,18 @@ describe("Sales Gmail conversations", () => {
     expect(first.state).toBe("draft");
     expect(first.subject).toBe("Re: Winter campaign idea");
     expect(second.id).toBe(first.id);
+    await expect(
+      getIntegrationReceipt("gmail", `outreach-reply-draft:${first.id}`),
+    ).resolves.toMatchObject({
+      status: "completed",
+      payload: {
+        inboundEmailEventId: conversation!.latestInboundEventId,
+        inboundExternalId: "gmail-reply-draft-proof",
+        threadId: "gmail-thread-proof",
+        inReplyTo: "<gmail-client-reply-proof@example.com>",
+        senderConnectionAccountId: MAILBOX_ID,
+      },
+    });
     const all = await listOutreach();
     expect(all.filter((item) => item.state === "draft")).toHaveLength(1);
     expect(all.filter((item) => item.state === "approved")).toHaveLength(0);
@@ -306,6 +325,57 @@ describe("Sales Gmail conversations", () => {
     expect((await getDeal(deal.dealId))?.stage).toBe(beforeStage);
   });
 
+  it("ignores manual deal and outreach claims without verified matching sent evidence", async () => {
+    const { deal, outreach } = await fixture();
+    const unrelated = await createDeal({ companyName: "Unrelated Target" });
+    const beforeStage = unrelated.stage;
+    const user = resolveDevUser("partner");
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: sessionCanViewMargin(user),
+    });
+
+    const result = await caller.salesOs.replies.ingest({
+      fromEmail: "attacker@unmatched.test",
+      body: "Interested — move this arbitrary deal.",
+      externalId: "manual-spoofed-deal-association",
+      dealId: unrelated.dealId,
+      outreachItemId: outreach.id,
+    });
+
+    expect(result).toMatchObject({ applied: false });
+    await expect(
+      caller.salesOs.replies.ingest({
+        fromEmail: "sana@inbox-proof.test",
+        body: "Interested — move the unrelated deal by id only.",
+        externalId: "manual-spoofed-deal-only",
+        dealId: unrelated.dealId,
+      }),
+    ).resolves.toMatchObject({ applied: false });
+    const event = (await listEmailEvents({ kind: "replied" })).find(
+      (item) => item.externalId === "manual-spoofed-deal-association",
+    );
+    expect(event).toMatchObject({ outreachItemId: null, contactId: null });
+    expect(event?.payload).toMatchObject({
+      associationRejected: "sender_mismatch",
+    });
+    expect(event?.payload).not.toHaveProperty("dealId");
+    const dealOnlyEvent = (await listEmailEvents({ kind: "replied" })).find(
+      (item) => item.externalId === "manual-spoofed-deal-only",
+    );
+    expect(dealOnlyEvent).toMatchObject({
+      outreachItemId: null,
+      contactId: null,
+      payload: { associationRejected: "unverified_association" },
+    });
+    expect(dealOnlyEvent?.payload).not.toHaveProperty("dealId");
+    const { getDeal } = await import("../crm/repository");
+    expect((await getDeal(unrelated.dealId))?.stage).toBe(beforeStage);
+    expect((await getDeal(deal.dealId))?.stage).toBe(deal.stage);
+  });
+
   it("refuses to turn a reply into a new Gmail thread when Message-ID is absent", async () => {
     await fixture();
     await ingestGmailReply({
@@ -333,6 +403,143 @@ describe("Sales Gmail conversations", () => {
     ).rejects.toThrow(
       /missing its provider thread, Message-ID, or receiving mailbox/i,
     );
+    expect(sendAfterApproval).not.toHaveBeenCalled();
+  });
+
+  it("keeps a draft unsendable when its provider binding cannot complete", async () => {
+    await fixture();
+    await ingestGmailReply({
+      fromEmail: "sana@inbox-proof.test",
+      subject: "Re: Winter campaign idea",
+      body: "Please send the final agenda.",
+      externalId: "gmail-reply-binding-failure",
+      threadId: "gmail-thread-proof",
+      rfcMessageId: "<gmail-binding-failure@example.com>",
+      senderConnectionAccountId: MAILBOX_ID,
+    });
+    const [conversation] = await listSalesConversations();
+    const user = resolveDevUser("partner");
+    const replyId = "78000000-0000-4000-8000-000000000099";
+
+    await expect(
+      createBoundGmailReplyDraft(
+        {
+          dealId: conversation!.dealId!,
+          recipient: conversation!.contactEmail!,
+          conversationId: conversation!.id,
+          inboundEmailEventId: conversation!.latestInboundEventId,
+          inboundExternalId: conversation!.latestInboundExternalId!,
+          threadId: conversation!.threadId!,
+          inReplyTo: conversation!.latestInboundMessageId!,
+          senderConnectionAccountId: conversation!.senderConnectionAccountId!,
+          actorEmployeeId: user.employeeId,
+          subject: conversation!.subject!,
+          body: "I will send the final agenda today.",
+          cadenceTouch: 2,
+          previousMessage: {
+            subject: conversation!.subject,
+            body: conversation!.latestInboundBody,
+          },
+        },
+        {
+          newId: () => replyId,
+          completeReceipt: async () => {
+            throw new Error("simulated binding completion failure");
+          },
+        },
+      ),
+    ).rejects.toThrow(/simulated binding completion failure/i);
+
+    const draft = await getOutreach(replyId);
+    expect(draft).toMatchObject({ id: replyId, state: "draft" });
+    await expect(
+      getIntegrationReceipt("gmail", `outreach-reply-draft:${replyId}`),
+    ).resolves.toMatchObject({
+      status: "processing",
+      operation: "messages.reply.draft",
+    });
+
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: sessionCanViewMargin(user),
+    });
+    await caller.leadgen.outreach.approve({ id: replyId });
+    const sendAfterApproval = vi.fn();
+    const composio = {
+      ...createComposioStub(),
+      sendAfterApproval,
+    } satisfies ComposioSendAdapter;
+    await expect(
+      sendOutreach({
+        id: replyId,
+        actor: {
+          employeeId: user.employeeId,
+          roles: user.roles,
+          permissions: user.permissions,
+        },
+        composio,
+      }),
+    ).rejects.toThrow(/invalid provider binding/i);
+    expect(sendAfterApproval).not.toHaveBeenCalled();
+  });
+
+  it("refuses a completed binding that does not match the immutable inbound event", async () => {
+    await fixture();
+    await ingestGmailReply({
+      fromEmail: "sana@inbox-proof.test",
+      subject: "Re: Winter campaign idea",
+      body: "Can we confirm Tuesday?",
+      externalId: "gmail-reply-immutable-proof",
+      threadId: "gmail-thread-proof",
+      rfcMessageId: "<gmail-immutable-proof@example.com>",
+      senderConnectionAccountId: MAILBOX_ID,
+    });
+    const [conversation] = await listSalesConversations();
+    const user = resolveDevUser("partner");
+    const draft = await createBoundGmailReplyDraft({
+      dealId: conversation!.dealId!,
+      recipient: conversation!.contactEmail!,
+      conversationId: conversation!.id,
+      inboundEmailEventId: conversation!.latestInboundEventId,
+      inboundExternalId: "different-provider-event-id",
+      threadId: conversation!.threadId!,
+      inReplyTo: conversation!.latestInboundMessageId!,
+      senderConnectionAccountId: conversation!.senderConnectionAccountId!,
+      actorEmployeeId: user.employeeId,
+      subject: conversation!.subject!,
+      body: "Tuesday is confirmed.",
+      cadenceTouch: 2,
+      previousMessage: {
+        subject: conversation!.subject,
+        body: conversation!.latestInboundBody,
+      },
+    });
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: sessionCanViewMargin(user),
+    });
+    await caller.leadgen.outreach.approve({ id: draft.id });
+    const sendAfterApproval = vi.fn();
+    const composio = {
+      ...createComposioStub(),
+      sendAfterApproval,
+    } satisfies ComposioSendAdapter;
+
+    await expect(
+      sendOutreach({
+        id: draft.id,
+        actor: {
+          employeeId: user.employeeId,
+          roles: user.roles,
+          permissions: user.permissions,
+        },
+        composio,
+      }),
+    ).rejects.toThrow(/no longer matches its inbound provider event/i);
     expect(sendAfterApproval).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import {
   bootstrapGateRegistry,
@@ -253,6 +254,7 @@ async function recipientBoundEmailBody(item: OutreachItem): Promise<string> {
 // ── plain, testable operations ─────────────────────────────
 
 export async function draftOutreach(input: {
+  id?: string;
   dealId: string;
   channel?: string;
   /** Provide copy directly, or let the outreach-draft agent generate it. */
@@ -407,6 +409,7 @@ export async function draftOutreach(input: {
   }
 
   return insertOutreach({
+    id: input.id,
     dealId: input.dealId,
     channel,
     recipient,
@@ -843,15 +846,58 @@ export async function resolveGmailReplyContext(item: OutreachItem): Promise<{
     receipt.payload.inReplyTo.trim()
       ? receipt.payload.inReplyTo.trim()
       : undefined;
+  const inboundEmailEventId =
+    typeof receipt.payload.inboundEmailEventId === "string" &&
+    receipt.payload.inboundEmailEventId.trim()
+      ? receipt.payload.inboundEmailEventId.trim()
+      : undefined;
+  const inboundExternalId =
+    typeof receipt.payload.inboundExternalId === "string" &&
+    receipt.payload.inboundExternalId.trim()
+      ? receipt.payload.inboundExternalId.trim()
+      : undefined;
   const senderConnectionAccountId =
     typeof receipt.payload.senderConnectionAccountId === "string" &&
     receipt.payload.senderConnectionAccountId.trim()
       ? receipt.payload.senderConnectionAccountId.trim()
       : undefined;
+  if (
+    !inboundEmailEventId ||
+    !inboundExternalId ||
+    !inReplyTo ||
+    !senderConnectionAccountId
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "This Gmail reply binding is missing immutable provider evidence. Re-sync the conversation before sending; nothing was sent.",
+    });
+  }
+  const { listEmailEvents } = await import("../sales-os/store");
+  const inbound = (await listEmailEvents({ kind: "replied" })).find(
+    (event) => event.id === inboundEmailEventId,
+  );
+  if (
+    !inbound ||
+    inbound.provider !== "gmail" ||
+    inbound.externalId !== inboundExternalId ||
+    inbound.payload.threadId !== threadId ||
+    inbound.payload.rfcMessageId !== inReplyTo ||
+    inbound.payload.senderConnectionAccountId !== senderConnectionAccountId ||
+    (typeof inbound.payload.from === "string"
+      ? inbound.payload.from.trim().toLowerCase()
+      : "") !== item.recipient.trim().toLowerCase()
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "This Gmail reply binding no longer matches its inbound provider event. Re-sync the conversation before sending; nothing was sent.",
+    });
+  }
   return {
     threadId,
-    ...(inReplyTo ? { inReplyTo } : {}),
-    ...(senderConnectionAccountId ? { senderConnectionAccountId } : {}),
+    inReplyTo,
+    senderConnectionAccountId,
   };
 }
 
@@ -1269,6 +1315,80 @@ export async function sendOutreach(input: {
 
 // ── tRPC surface ───────────────────────────────────────────
 
+export async function createBoundGmailReplyDraft(
+  input: {
+    dealId: string;
+    recipient: string;
+    conversationId: string;
+    inboundEmailEventId: string;
+    inboundExternalId: string;
+    threadId: string;
+    inReplyTo: string;
+    senderConnectionAccountId: string;
+    actorEmployeeId: string;
+    subject: string;
+    body?: string;
+    cadenceTouch: number;
+    previousMessage: { subject: string | null; body: string };
+  },
+  deps: {
+    recordReceipt?: typeof recordIntegrationReceipt;
+    completeReceipt?: typeof completeIntegrationReceipt;
+    createDraft?: typeof draftOutreach;
+    newId?: () => string;
+  } = {},
+): Promise<OutreachItem> {
+  const outreachItemId = (deps.newId ?? randomUUID)();
+  const binding = {
+    outreachItemId,
+    dealId: input.dealId,
+    recipient: input.recipient.trim().toLowerCase(),
+    conversationId: input.conversationId,
+    inboundEmailEventId: input.inboundEmailEventId,
+    inboundExternalId: input.inboundExternalId,
+    threadId: input.threadId,
+    inReplyTo: input.inReplyTo,
+    senderConnectionAccountId: input.senderConnectionAccountId,
+  };
+  const receipt = await (deps.recordReceipt ?? recordIntegrationReceipt)({
+    provider: "gmail",
+    externalEventId: `outreach-reply-draft:${outreachItemId}`,
+    operation: "messages.reply.draft",
+    rawBody: JSON.stringify(binding),
+    status: "processing",
+    payload: binding,
+    result: { state: "binding_reserved", outreachItemId },
+    ownerEmployeeId: input.actorEmployeeId,
+  });
+  if (receipt.duplicate) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "A reply binding already exists for this draft id.",
+    });
+  }
+
+  const draft = await (deps.createDraft ?? draftOutreach)({
+    id: outreachItemId,
+    dealId: input.dealId,
+    channel: "gmail",
+    subject: input.subject,
+    body: input.body,
+    cadenceTouch: input.cadenceTouch,
+    previousMessage: input.previousMessage,
+  });
+  if (draft.id !== outreachItemId) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Reply draft id did not match its reserved provider binding.",
+    });
+  }
+  await (deps.completeReceipt ?? completeIntegrationReceipt)(
+    receipt.receiptId,
+    { state: "draft", outreachItemId: draft.id },
+  );
+  return draft;
+}
+
 const outreachRouter = router({
   list: staffProcedure
     .input(
@@ -1328,6 +1448,8 @@ const outreachRouter = router({
       }
       if (
         !conversation.threadId ||
+        !conversation.latestInboundEventId ||
+        !conversation.latestInboundExternalId ||
         !conversation.latestInboundMessageId ||
         !conversation.senderConnectionAccountId
       ) {
@@ -1360,9 +1482,16 @@ const outreachRouter = router({
       const prior = [...conversation.messages]
         .reverse()
         .find((message) => message.direction === "outbound");
-      const draft = await draftOutreach({
+      return createBoundGmailReplyDraft({
         dealId: conversation.dealId,
-        channel: "gmail",
+        recipient: conversation.contactEmail,
+        conversationId: conversation.id,
+        inboundEmailEventId: conversation.latestInboundEventId,
+        inboundExternalId: conversation.latestInboundExternalId,
+        threadId: conversation.threadId,
+        inReplyTo: conversation.latestInboundMessageId,
+        senderConnectionAccountId: conversation.senderConnectionAccountId,
+        actorEmployeeId: actor.employeeId,
         subject: conversation.subject
           ? conversation.subject.startsWith("Re:")
             ? conversation.subject
@@ -1378,27 +1507,6 @@ const outreachRouter = router({
           body: conversation.latestInboundBody,
         },
       });
-      const binding = {
-        outreachItemId: draft.id,
-        dealId: conversation.dealId,
-        recipient: conversation.contactEmail.trim().toLowerCase(),
-        conversationId: conversation.id,
-        threadId: conversation.threadId,
-        inReplyTo: conversation.latestInboundMessageId,
-        senderConnectionAccountId: conversation.senderConnectionAccountId,
-      };
-      await recordIntegrationReceipt({
-        provider: "gmail",
-        externalEventId: `outreach-reply-draft:${draft.id}`,
-        operation: "messages.reply.draft",
-        rawBody: JSON.stringify(binding),
-        status: "completed",
-        completed: true,
-        payload: binding,
-        result: { state: "draft", outreachItemId: draft.id },
-        ownerEmployeeId: actor.employeeId,
-      });
-      return draft;
     }),
 
   draft: staffProcedure

@@ -29,6 +29,8 @@ export type SalesConversation = {
   lastMessageAt: string;
   latestInboundBody: string;
   latestInboundAt: string;
+  latestInboundEventId: string;
+  latestInboundExternalId: string | null;
   latestInboundMessageId: string | null;
   replyDraftId: string | null;
   messages: SalesConversationMessage[];
@@ -182,6 +184,8 @@ export async function listSalesConversations(): Promise<SalesConversation[]> {
       lastMessageAt: ordered[ordered.length - 1]!.occurredAt,
       latestInboundBody,
       latestInboundAt: lastInbound.occurredAt,
+      latestInboundEventId: lastInbound.id,
+      latestInboundExternalId: lastInbound.externalId,
       latestInboundMessageId: text(lastInbound.payload.rfcMessageId),
       replyDraftId: activeDraft?.id ?? null,
       messages: ordered.map((event) => {

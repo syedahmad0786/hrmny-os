@@ -174,6 +174,7 @@ function mapOutreach(r: typeof outreachItems.$inferSelect): OutreachItem {
 }
 
 export async function insertOutreach(input: {
+  id?: string;
   dealId: string;
   channel: string;
   recipient: string;
@@ -189,6 +190,7 @@ export async function insertOutreach(input: {
       const [row] = await db
         .insert(outreachItems)
         .values({
+          ...(input.id ? { outreachItemId: input.id } : {}),
           dealId: input.dealId,
           channel: input.channel,
           state: "draft",
@@ -206,7 +208,7 @@ export async function insertOutreach(input: {
     () => {
       const now = new Date().toISOString();
       const item: OutreachItem = {
-        id: randomUUID(),
+        id: input.id ?? randomUUID(),
         dealId: input.dealId,
         channel: input.channel,
         state: "draft",

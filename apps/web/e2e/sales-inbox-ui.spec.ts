@@ -62,6 +62,8 @@ test("Gmail reply appears in Sales inbox and hands off an approval-gated draft",
                 lastMessageAt: "2026-09-04T10:00:00.000Z",
                 latestInboundBody: body,
                 latestInboundAt: "2026-09-04T10:00:00.000Z",
+                latestInboundEventId: "gmail-event-inbound",
+                latestInboundExternalId: `gmail-e2e-reply-${suffix}`,
                 latestInboundMessageId: "<gmail-e2e-reply@example.com>",
                 replyDraftId: drafted ? draftId : null,
                 messages: [
