@@ -83,9 +83,9 @@ describe("Work governance", () => {
     }
     expect((await getWorkOrganizationPolicy()).appPolicy).toBe("disabled");
     const rows = await caller("partner").connections.list();
-    expect(rows.find((row) => row.toolkit === "google_workspace")?.allowed).toBe(
-      true,
-    );
+    expect(
+      rows.find((row) => row.toolkit === "google_workspace")?.allowed,
+    ).toBe(true);
     expect(rows.find((row) => row.toolkit === "apollo")?.allowed).toBe(true);
     expect(rows.map((row) => row.toolkit)).not.toContain("hunter");
     expect(await isWorkConnectedAppAllowed("hunter")).toBe(true);
@@ -220,6 +220,12 @@ describe("Work governance", () => {
           toolkit: { slug: "slack" },
           user_id: employee.employeeId,
         },
+        {
+          id: "ca_employee_slack_second",
+          status: "ACTIVE",
+          toolkit: { slug: "slack" },
+          user_id: employee.employeeId,
+        },
       ];
       await expect(
         getVerifiedWorkAppConnection(employee.employeeId, "slack", {
@@ -228,6 +234,15 @@ describe("Work governance", () => {
         }),
       ).resolves.toMatchObject({
         account: { id: "ca_employee_slack" },
+      });
+      await expect(
+        getVerifiedWorkAppConnection(employee.employeeId, "slack", {
+          clientId: null,
+          roles: employee.roles,
+          connectedAccountId: "ca_employee_slack_second",
+        }),
+      ).resolves.toMatchObject({
+        account: { id: "ca_employee_slack_second" },
       });
     } finally {
       vi.unstubAllGlobals();

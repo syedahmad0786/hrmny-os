@@ -67,6 +67,7 @@ export function verifyGmailProviderReadback(input: {
   message: GmailMessageMetadata;
   externalId: string;
   recipient: string;
+  expectedThreadId?: string;
 }): GmailProviderReadback {
   const id = input.message.id?.trim() ?? "";
   const recipient = input.recipient.trim().toLowerCase();
@@ -94,6 +95,16 @@ export function verifyGmailProviderReadback(input: {
       input.message.threadId,
     );
   }
+  if (
+    input.expectedThreadId &&
+    input.message.threadId?.trim() !== input.expectedThreadId.trim()
+  ) {
+    throw new GmailProviderReadbackError(
+      "Gmail readback thread does not match the approved reply thread",
+      input.externalId,
+      input.message.threadId,
+    );
+  }
   return {
     externalId: id,
     threadId: input.message.threadId,
@@ -111,6 +122,7 @@ export interface ComposioSendAdapter extends ComposioAdapter {
     externalId: string;
     recipient: string;
     connectionId?: string;
+    expectedThreadId?: string;
   }): Promise<GmailProviderReadback>;
 }
 
@@ -257,6 +269,7 @@ export function createComposioLiveSend(opts: {
           externalId,
           recipient: input.to,
           connectionId: input.connectionId,
+          expectedThreadId: input.threadId,
         });
       } catch (error) {
         if (error instanceof GmailProviderReadbackError) throw error;
@@ -294,6 +307,7 @@ export function createComposioLiveSend(opts: {
         message: result.data,
         externalId: input.externalId,
         recipient: input.recipient,
+        expectedThreadId: input.expectedThreadId,
       });
     },
   };

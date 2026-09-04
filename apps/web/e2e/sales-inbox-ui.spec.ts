@@ -53,6 +53,8 @@ test("Gmail reply appears in Sales inbox and hands off an approval-gated draft",
                 dealId: "e0000000-0000-4000-8000-000000000001",
                 contactId: "12000000-0000-4000-8000-000000000001",
                 outreachItemId: "77000000-0000-4000-8000-000000000001",
+                senderConnectionAccountId:
+                  "70000000-0000-4000-8000-000000000001",
                 companyName: "JW Marriott Marquis Dubai",
                 contactName: "Layla Hassan",
                 contactEmail: "layla.hassan@example-jwmm.ae",
@@ -60,6 +62,7 @@ test("Gmail reply appears in Sales inbox and hands off an approval-gated draft",
                 lastMessageAt: "2026-09-04T10:00:00.000Z",
                 latestInboundBody: body,
                 latestInboundAt: "2026-09-04T10:00:00.000Z",
+                latestInboundMessageId: "<gmail-e2e-reply@example.com>",
                 replyDraftId: drafted ? draftId : null,
                 messages: [
                   {

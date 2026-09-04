@@ -92,6 +92,7 @@ export function createGoogleWorkspaceGmailSend(
         readback = await this.readbackAfterSend({
           externalId,
           recipient: input.to,
+          expectedThreadId: input.threadId,
         });
       } catch (error) {
         if (error instanceof GmailProviderReadbackError) throw error;
@@ -139,6 +140,7 @@ export function createGoogleWorkspaceGmailSend(
         >[0]["message"],
         externalId: input.externalId,
         recipient: input.recipient,
+        expectedThreadId: input.expectedThreadId,
       });
     },
   };

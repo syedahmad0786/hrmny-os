@@ -27,6 +27,8 @@ import { ingestGmailReply } from "./replies";
 import { recordEmailEvent, resetSalesOsStore } from "./store";
 import { listSalesConversations } from "./conversations";
 
+const MAILBOX_ID = "70000000-0000-4000-8000-000000000001";
+
 describe("Sales Gmail conversations", () => {
   beforeEach(() => {
     resetCrmMemory();
@@ -76,6 +78,7 @@ describe("Sales Gmail conversations", () => {
         subject: outreach.subject,
         body: outreach.body,
         senderEmail: "sales@hrmny.co",
+        senderConnectionAccountId: MAILBOX_ID,
       },
     });
     return { company, contact, deal, outreach };
@@ -89,6 +92,8 @@ describe("Sales Gmail conversations", () => {
       body: "Interested. Can we meet on Tuesday?",
       externalId: "gmail-reply-proof",
       threadId: "gmail-thread-proof",
+      rfcMessageId: "<gmail-reply-proof@example.com>",
+      senderConnectionAccountId: MAILBOX_ID,
     };
     await ingestGmailReply(reply);
     await ingestGmailReply(reply);
@@ -126,6 +131,7 @@ describe("Sales Gmail conversations", () => {
       externalId: "gmail-reply-draft-proof",
       threadId: "gmail-thread-proof",
       rfcMessageId: "<gmail-client-reply-proof@example.com>",
+      senderConnectionAccountId: MAILBOX_ID,
     });
     const [conversation] = await listSalesConversations();
     const user = resolveDevUser("partner");
@@ -151,6 +157,35 @@ describe("Sales Gmail conversations", () => {
     const all = await listOutreach();
     expect(all.filter((item) => item.state === "draft")).toHaveLength(1);
     expect(all.filter((item) => item.state === "approved")).toHaveLength(0);
+
+    await recordEmailEvent({
+      contactId: conversation!.contactId,
+      kind: "replied",
+      provider: "gmail",
+      externalId: "gmail-competing-same-subject-reply",
+      payload: {
+        dealId: conversation!.dealId,
+        from: conversation!.contactEmail,
+        subject: conversation!.subject,
+        threadId: "gmail-newer-competing-thread",
+        rfcMessageId: "<gmail-newer-competing-reply@example.com>",
+        senderConnectionAccountId: MAILBOX_ID,
+      },
+    });
+    const refreshed = await listSalesConversations();
+    const originalConversation = refreshed.find(
+      (item) => item.threadId === "gmail-thread-proof",
+    );
+    const competingConversation = refreshed.find(
+      (item) => item.threadId === "gmail-newer-competing-thread",
+    );
+    expect(originalConversation?.replyDraftId).toBe(first.id);
+    expect(competingConversation?.replyDraftId).toBeNull();
+    const competingDraft = await caller.leadgen.outreach.draftReply({
+      conversationId: competingConversation!.id,
+      body: "This reply belongs only to the later Gmail thread.",
+    });
+    expect(competingDraft.id).not.toBe(first.id);
 
     await caller.leadgen.outreach.approve({ id: first.id });
     const sendAfterApproval = vi.fn(
@@ -200,5 +235,104 @@ describe("Sales Gmail conversations", () => {
     await expect(caller.leadgen.outreach.conversations()).rejects.toThrow(
       /only sales operators/i,
     );
+  });
+
+  it("keeps the same Gmail thread in separate mailbox conversations", async () => {
+    const secondMailboxId = "70000000-0000-4000-8000-000000000002";
+    await recordEmailEvent({
+      kind: "replied",
+      provider: "gmail",
+      externalId: "gmail-shared-thread-mailbox-one",
+      payload: {
+        from: "one@example.test",
+        body: "Reply in mailbox one",
+        threadId: "gmail-shared-thread",
+        rfcMessageId: "<one@example.test>",
+        senderConnectionAccountId: MAILBOX_ID,
+      },
+    });
+    await recordEmailEvent({
+      kind: "replied",
+      provider: "gmail",
+      externalId: "gmail-shared-thread-mailbox-two",
+      payload: {
+        from: "two@example.test",
+        body: "Reply in mailbox two",
+        threadId: "gmail-shared-thread",
+        rfcMessageId: "<two@example.test>",
+        senderConnectionAccountId: secondMailboxId,
+      },
+    });
+
+    const conversations = await listSalesConversations();
+    expect(conversations).toHaveLength(2);
+    expect(
+      conversations.map(
+        (conversation) => conversation.senderConnectionAccountId,
+      ),
+    ).toEqual(expect.arrayContaining([MAILBOX_ID, secondMailboxId]));
+    expect(
+      new Set(conversations.map((conversation) => conversation.id)).size,
+    ).toBe(2);
+  });
+
+  it("leaves a known-thread sender mismatch unassociated and does not mutate the deal", async () => {
+    const { deal } = await fixture();
+    const beforeStage = deal.stage;
+    const result = await ingestGmailReply({
+      fromEmail: "different-person@inbox-proof.test",
+      subject: "Re: Winter campaign idea",
+      body: "Interested — please move this deal forward.",
+      externalId: "gmail-known-thread-wrong-sender",
+      threadId: "gmail-thread-proof",
+      rfcMessageId: "<wrong-sender@example.com>",
+      senderConnectionAccountId: MAILBOX_ID,
+    });
+
+    expect(result).toMatchObject({ applied: false });
+    expect((await listSalesConversations())[0]).toMatchObject({
+      dealId: null,
+      contactId: null,
+      outreachItemId: null,
+      companyName: "Unmatched reply",
+    });
+    expect(
+      (await listActivities({ dealId: deal.dealId })).some(
+        (activity) =>
+          activity.metadata.externalId === "gmail-known-thread-wrong-sender",
+      ),
+    ).toBe(false);
+    const { getDeal } = await import("../crm/repository");
+    expect((await getDeal(deal.dealId))?.stage).toBe(beforeStage);
+  });
+
+  it("refuses to turn a reply into a new Gmail thread when Message-ID is absent", async () => {
+    await fixture();
+    await ingestGmailReply({
+      fromEmail: "sana@inbox-proof.test",
+      subject: "Re: Winter campaign idea",
+      body: "Thanks for the details.",
+      externalId: "gmail-reply-without-rfc-id",
+      threadId: "gmail-thread-proof",
+      senderConnectionAccountId: MAILBOX_ID,
+    });
+    const [conversation] = await listSalesConversations();
+    const user = resolveDevUser("partner");
+    const caller = createCaller({
+      user,
+      employeeId: user.employeeId,
+      roles: user.roles,
+      canViewMargin: sessionCanViewMargin(user),
+    });
+    const sendAfterApproval = vi.fn();
+    await expect(
+      caller.leadgen.outreach.draftReply({
+        conversationId: conversation!.id,
+        body: "Inbox Proof Hospitality can review the agenda before Tuesday.",
+      }),
+    ).rejects.toThrow(
+      /missing its provider thread, Message-ID, or receiving mailbox/i,
+    );
+    expect(sendAfterApproval).not.toHaveBeenCalled();
   });
 });

@@ -378,7 +378,7 @@ export async function ingestGmailReply(input: {
   const duplicateItem = duplicate?.outreachItemId
     ? await getOutreach(duplicate.outreachItemId)
     : null;
-  const item =
+  const resolvedItem =
     explicitItem ??
     duplicateItem ??
     (threadEvent?.outreachItemId
@@ -390,6 +390,12 @@ export async function ingestGmailReply(input: {
       ),
     ) ??
     null;
+  const senderMismatch = Boolean(
+    resolvedItem &&
+    resolvedItem.recipient.trim().toLowerCase() !==
+      input.fromEmail.trim().toLowerCase(),
+  );
+  const item = senderMismatch ? null : resolvedItem;
   const ownerEvent = item
     ? sentEvents.find((event) => event.outreachItemId === item.id)
     : null;
@@ -398,7 +404,7 @@ export async function ingestGmailReply(input: {
   }
 
   const itemId = item?.id ?? null;
-  const dealId = input.dealId ?? item?.dealId ?? null;
+  const dealId = senderMismatch ? null : (input.dealId ?? item?.dealId ?? null);
   const classified = heuristicIntent(input.body);
   const recorded =
     duplicate ??
@@ -413,6 +419,7 @@ export async function ingestGmailReply(input: {
         body: input.body.slice(0, 2000),
         subject: input.subject?.slice(0, 500),
         intent: classified,
+        ...(senderMismatch ? { associationRejected: "sender_mismatch" } : {}),
         ...(dealId ? { dealId } : {}),
         ...(input.threadId ? { threadId: input.threadId } : {}),
         ...(input.rfcMessageId ? { rfcMessageId: input.rfcMessageId } : {}),

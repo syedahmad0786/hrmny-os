@@ -1,5 +1,6 @@
 import { listCompanies, listContacts, listDeals } from "../crm/repository";
 import { listOutreach, type OutreachItem } from "../leadgen/store";
+import { getIntegrationReceipt } from "../integrations/inbox";
 import { listEmailEvents } from "./store";
 import type { EmailEventRow } from "./types";
 
@@ -20,6 +21,7 @@ export type SalesConversation = {
   dealId: string | null;
   contactId: string | null;
   outreachItemId: string | null;
+  senderConnectionAccountId: string | null;
   companyName: string;
   contactName: string;
   contactEmail: string | null;
@@ -27,6 +29,7 @@ export type SalesConversation = {
   lastMessageAt: string;
   latestInboundBody: string;
   latestInboundAt: string;
+  latestInboundMessageId: string | null;
   replyDraftId: string | null;
   messages: SalesConversationMessage[];
 };
@@ -36,6 +39,14 @@ const text = (value: unknown): string | null =>
 
 function eventThreadId(event: EmailEventRow): string | null {
   return text(event.payload.threadId);
+}
+
+function eventMailbox(event: EmailEventRow): string {
+  return (
+    text(event.payload.senderConnectionAccountId) ??
+    text(event.payload.ownerEmployeeId) ??
+    "unassigned"
+  );
 }
 
 function messageBody(event: EmailEventRow, outreach?: OutreachItem): string {
@@ -64,27 +75,51 @@ export async function listSalesConversations(): Promise<SalesConversation[]> {
   const companyById = new Map(
     companies.map((company) => [company.companyId, company]),
   );
+  const replyDraftByConversationId = new Map<string, OutreachItem>();
+  await Promise.all(
+    outreach
+      .filter((item) => item.state === "draft")
+      .map(async (item) => {
+        const receipt = await getIntegrationReceipt(
+          "gmail",
+          `outreach-reply-draft:${item.id}`,
+        );
+        const conversationId = text(receipt?.payload?.conversationId);
+        if (
+          receipt?.status === "completed" &&
+          receipt.operation === "messages.reply.draft" &&
+          receipt.payload?.outreachItemId === item.id &&
+          conversationId
+        ) {
+          replyDraftByConversationId.set(conversationId, item);
+        }
+      }),
+  );
 
   const threadByOutreach = new Map<string, string>();
   for (const event of gmailEvents) {
     const threadId = eventThreadId(event);
     if (event.outreachItemId && threadId) {
-      threadByOutreach.set(event.outreachItemId, threadId);
+      threadByOutreach.set(
+        `${eventMailbox(event)}:${event.outreachItemId}`,
+        threadId,
+      );
     }
   }
 
   const grouped = new Map<string, EmailEventRow[]>();
   for (const event of gmailEvents) {
+    const mailbox = eventMailbox(event);
     const threadId =
       eventThreadId(event) ??
       (event.outreachItemId
-        ? threadByOutreach.get(event.outreachItemId)
+        ? threadByOutreach.get(`${mailbox}:${event.outreachItemId}`)
         : null);
     const key = threadId
-      ? `thread:${threadId}`
+      ? `mailbox:${mailbox}:thread:${threadId}`
       : event.outreachItemId
-        ? `outreach:${event.outreachItemId}`
-        : `event:${event.id}`;
+        ? `mailbox:${mailbox}:outreach:${event.outreachItemId}`
+        : `mailbox:${mailbox}:event:${event.id}`;
     const bucket = grouped.get(key) ?? [];
     bucket.push(event);
     grouped.set(key, bucket);
@@ -108,14 +143,17 @@ export async function listSalesConversations(): Promise<SalesConversation[]> {
             : undefined,
         )
         .find(Boolean) ?? undefined;
-    const dealId =
-      text(lastInbound.payload.dealId) ?? linkedOutreach?.dealId ?? null;
+    const associationRejected = text(lastInbound.payload.associationRejected);
+    const dealId = associationRejected
+      ? null
+      : (text(lastInbound.payload.dealId) ?? linkedOutreach?.dealId ?? null);
     const deal = dealId ? dealById.get(dealId) : undefined;
-    const contactId =
-      lastInbound.contactId ??
-      linkedOutreach?.contactId ??
-      deal?.primaryContactId ??
-      null;
+    const contactId = associationRejected
+      ? null
+      : (lastInbound.contactId ??
+        linkedOutreach?.contactId ??
+        deal?.primaryContactId ??
+        null);
     const contact = contactId ? contactById.get(contactId) : undefined;
     const company = deal?.companyId
       ? companyById.get(deal.companyId)
@@ -124,25 +162,17 @@ export async function listSalesConversations(): Promise<SalesConversation[]> {
     const subject =
       text(lastInbound.payload.subject) ?? linkedOutreach?.subject ?? null;
     const latestInboundBody = messageBody(lastInbound, linkedOutreach);
-    const activeDraft = outreach.find(
-      (item) =>
-        item.dealId === dealId &&
-        item.state === "draft" &&
-        item.createdAt >= lastInbound.occurredAt &&
-        (!subject ||
-          !item.subject ||
-          item.subject.replace(/^\s*re\s*:\s*/i, "").toLowerCase() ===
-            subject.replace(/^\s*re\s*:\s*/i, "").toLowerCase()) &&
-        item.recipient.trim().toLowerCase() ===
-          (inboundFrom ?? contact?.email ?? "").trim().toLowerCase(),
-    );
+    const activeDraft = replyDraftByConversationId.get(id);
 
     conversations.push({
       id,
       threadId: eventThreadId(lastInbound),
       dealId,
       contactId,
-      outreachItemId: linkedOutreach?.id ?? null,
+      outreachItemId: associationRejected ? null : (linkedOutreach?.id ?? null),
+      senderConnectionAccountId: text(
+        lastInbound.payload.senderConnectionAccountId,
+      ),
       companyName: deal?.companyName ?? company?.name ?? "Unmatched reply",
       contactName: contact
         ? [contact.firstName, contact.lastName].filter(Boolean).join(" ")
@@ -152,6 +182,7 @@ export async function listSalesConversations(): Promise<SalesConversation[]> {
       lastMessageAt: ordered[ordered.length - 1]!.occurredAt,
       latestInboundBody,
       latestInboundAt: lastInbound.occurredAt,
+      latestInboundMessageId: text(lastInbound.payload.rfcMessageId),
       replyDraftId: activeDraft?.id ?? null,
       messages: ordered.map((event) => {
         const item = event.outreachItemId

@@ -40,6 +40,7 @@ import {
 } from "./connections-router";
 import {
   completeIntegrationReceipt,
+  getIntegrationReceipt,
   recordIntegrationReceipt,
   transitionIntegrationReceiptProgress,
   updateIntegrationReceiptProgress,
@@ -55,49 +56,53 @@ async function resolveComposioSend(
   employeeId: string | null | undefined,
   roles: readonly string[],
   senderConnectionAccountId?: string,
+  boundComposioAccountId?: string,
 ): Promise<ComposioSendAdapter> {
   if (!employeeId) {
     return createComposioStub();
   }
   // Sales shows the named Workspace mailbox before confirmation, so use that
   // same mailbox whenever it is connected. Composio remains the fallback.
-  try {
-    const { createGoogleWorkspaceGmailSend } =
-      await import("../leadgen/google-workspace-send");
-    const { getGoogleWorkspaceAccessToken } =
-      await import("./connections-router");
-    const options = {
-      connectionAccountId: senderConnectionAccountId,
-      roles,
-    };
-    const token = await getGoogleWorkspaceAccessToken(employeeId, options);
-    if (token) return createGoogleWorkspaceGmailSend(employeeId, options);
-    if (senderConnectionAccountId) {
-      throw new TRPCError({
-        code: "PRECONDITION_FAILED",
-        message: "The selected Google Workspace sender must be reconnected.",
-      });
-    }
-  } catch (err) {
-    if (senderConnectionAccountId || err instanceof TRPCError) throw err;
-    // A Workspace vault row that cannot refresh must not silently stub —
-    // that hides reconnect-needed failures behind a fake "sent".
-    const message = err instanceof Error ? err.message : String(err);
-    if (
-      message.includes("Google token refresh failed") ||
-      message.includes("Google OAuth client credentials") ||
-      message.includes("secret is unavailable")
-    ) {
-      throw new TRPCError({
-        code: "PRECONDITION_FAILED",
-        message: `${message}. Reconnect Google Workspace under Settings → Connections.`,
-      });
+  if (!boundComposioAccountId) {
+    try {
+      const { createGoogleWorkspaceGmailSend } =
+        await import("../leadgen/google-workspace-send");
+      const { getGoogleWorkspaceAccessToken } =
+        await import("./connections-router");
+      const options = {
+        connectionAccountId: senderConnectionAccountId,
+        roles,
+      };
+      const token = await getGoogleWorkspaceAccessToken(employeeId, options);
+      if (token) return createGoogleWorkspaceGmailSend(employeeId, options);
+      if (senderConnectionAccountId) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "The selected Google Workspace sender must be reconnected.",
+        });
+      }
+    } catch (err) {
+      if (senderConnectionAccountId || err instanceof TRPCError) throw err;
+      // A Workspace vault row that cannot refresh must not silently stub —
+      // that hides reconnect-needed failures behind a fake "sent".
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        message.includes("Google token refresh failed") ||
+        message.includes("Google OAuth client credentials") ||
+        message.includes("secret is unavailable")
+      ) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `${message}. Reconnect Google Workspace under Settings → Connections.`,
+        });
+      }
     }
   }
   if (process.env.COMPOSIO_API_KEY?.trim()) {
     try {
       const verified = await getVerifiedWorkAppConnection(employeeId, "gmail", {
         roles,
+        connectedAccountId: boundComposioAccountId,
       });
       if (verified) {
         return createComposioLiveSend({
@@ -105,7 +110,15 @@ async function resolveComposioSend(
           connectedAccountId: verified.account.id,
         });
       }
-    } catch {
+      if (boundComposioAccountId) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "The Gmail mailbox that received this conversation is no longer connected. Reconnect that mailbox before replying.",
+        });
+      }
+    } catch (error) {
+      if (error instanceof TRPCError) throw error;
       /* fall through to the fail-closed production guard */
     }
   }
@@ -790,62 +803,55 @@ export async function sendOutreachTest(input: {
   }
 }
 
-function normalizedThreadSubject(value: string | null | undefined): string {
-  return (value ?? "")
-    .replace(/^\s*(?:re|fw|fwd)\s*:\s*/i, "")
-    .trim()
-    .toLowerCase();
-}
-
 /** Resolve an approved reply back to provider evidence, never from client input. */
-export async function resolveGmailReplyContext(
-  item: OutreachItem,
-): Promise<{ threadId: string; inReplyTo?: string } | null> {
-  const { listEmailEvents } = await import("../sales-os/store");
-  const [events, allOutreach] = await Promise.all([
-    listEmailEvents({ kind: "replied" }),
-    listOutreach(),
-  ]);
-  const outreachById = new Map(allOutreach.map((row) => [row.id, row]));
-  const recipient = item.recipient.trim().toLowerCase();
-  const subject = normalizedThreadSubject(item.subject);
-  const matches = events
-    .filter((event) => {
-      const linked = event.outreachItemId
-        ? outreachById.get(event.outreachItemId)
-        : null;
-      const eventDealId =
-        typeof event.payload.dealId === "string"
-          ? event.payload.dealId
-          : linked?.dealId;
-      const from =
-        typeof event.payload.from === "string"
-          ? event.payload.from.trim().toLowerCase()
-          : linked?.recipient.trim().toLowerCase();
-      const eventSubject = normalizedThreadSubject(
-        typeof event.payload.subject === "string"
-          ? event.payload.subject
-          : linked?.subject,
-      );
-      return (
-        eventDealId === item.dealId &&
-        from === recipient &&
-        (!subject || !eventSubject || subject === eventSubject) &&
-        typeof event.payload.threadId === "string" &&
-        Boolean(event.payload.threadId.trim())
-      );
-    })
-    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
-  const latest = matches[0];
-  if (!latest) return null;
+export async function resolveGmailReplyContext(item: OutreachItem): Promise<{
+  threadId: string;
+  inReplyTo?: string;
+  senderConnectionAccountId?: string;
+} | null> {
+  const receipt = await getIntegrationReceipt(
+    "gmail",
+    `outreach-reply-draft:${item.id}`,
+  );
+  if (!receipt) return null;
+  if (
+    receipt.status !== "completed" ||
+    receipt.operation !== "messages.reply.draft" ||
+    receipt.payload?.outreachItemId !== item.id ||
+    receipt.payload?.dealId !== item.dealId ||
+    receipt.payload?.recipient !== item.recipient.trim().toLowerCase()
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "This Gmail reply has an invalid provider binding. Recreate the reply draft from Sales inbox; nothing was sent.",
+    });
+  }
+  const threadId =
+    typeof receipt.payload.threadId === "string"
+      ? receipt.payload.threadId.trim()
+      : undefined;
+  if (!threadId) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "This Gmail reply is missing its original provider thread. Re-sync the conversation before sending; nothing was sent.",
+    });
+  }
   const inReplyTo =
-    typeof latest.payload.rfcMessageId === "string" &&
-    latest.payload.rfcMessageId.trim()
-      ? latest.payload.rfcMessageId.trim()
+    typeof receipt.payload.inReplyTo === "string" &&
+    receipt.payload.inReplyTo.trim()
+      ? receipt.payload.inReplyTo.trim()
+      : undefined;
+  const senderConnectionAccountId =
+    typeof receipt.payload.senderConnectionAccountId === "string" &&
+    receipt.payload.senderConnectionAccountId.trim()
+      ? receipt.payload.senderConnectionAccountId.trim()
       : undefined;
   return {
-    threadId: String(latest.payload.threadId).trim(),
+    threadId,
     ...(inReplyTo ? { inReplyTo } : {}),
+    ...(senderConnectionAccountId ? { senderConnectionAccountId } : {}),
   };
 }
 
@@ -881,6 +887,33 @@ export async function sendOutreach(input: {
       copyDraft: true,
     };
   }
+  const toolkit = "gmail" as const;
+  const replyContext = await resolveGmailReplyContext(item);
+  if (replyContext && !replyContext.inReplyTo) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "This Gmail reply is missing the provider Message-ID required for a true threaded response. Re-sync the conversation before sending; nothing was sent.",
+    });
+  }
+  if (replyContext && !replyContext.senderConnectionAccountId) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "This Gmail reply is not bound to its original sender mailbox. Re-sync the conversation before sending; nothing was sent.",
+    });
+  }
+  if (
+    replyContext?.senderConnectionAccountId &&
+    input.senderConnectionAccountId &&
+    input.senderConnectionAccountId !== replyContext.senderConnectionAccountId
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "Replies must use the same connected Gmail mailbox that received the conversation.",
+    });
+  }
   if (
     isEmailChannel(item.channel) &&
     item.state === "approved" &&
@@ -911,26 +944,46 @@ export async function sendOutreach(input: {
       item.body = nextBody;
     }
   }
-  const sender =
-    input.composio && !input.senderConnectionAccountId
-      ? null
-      : await resolveSalesSender(input.actor, input.senderConnectionAccountId);
+  const requiredSenderConnectionAccountId =
+    replyContext?.senderConnectionAccountId ?? input.senderConnectionAccountId;
+  let sender: SalesSenderMailbox | null = null;
+  let boundComposioAccountId: string | undefined;
+  if (!input.composio) {
+    if (replyContext?.senderConnectionAccountId) {
+      sender =
+        (
+          await listSalesSenderMailboxes({
+            employeeId: input.actor.employeeId,
+            roles: input.actor.roles,
+          })
+        ).find(
+          (mailbox) =>
+            mailbox.connectionAccountId ===
+            replyContext.senderConnectionAccountId,
+        ) ?? null;
+      if (!sender) {
+        boundComposioAccountId = replyContext.senderConnectionAccountId;
+      }
+    } else {
+      sender = await resolveSalesSender(
+        input.actor,
+        requiredSenderConnectionAccountId,
+      );
+    }
+  }
   const composio =
     input.composio ??
     (await resolveComposioSend(
       input.actor.employeeId,
       input.actor.roles,
       sender?.connectionAccountId,
+      boundComposioAccountId,
     ));
   let externalId: string | undefined;
   let threadId: string | undefined;
   let sendMode: string | undefined;
   let providerAccepted = false;
   let readbackAt: string | undefined;
-  const toolkit =
-    item.channel === "linkedin" ? ("linkedin" as const) : ("gmail" as const);
-  const replyContext =
-    toolkit === "gmail" ? await resolveGmailReplyContext(item) : null;
 
   try {
     const result = await transition(
@@ -949,7 +1002,9 @@ export async function sendOutreach(input: {
             subject: item.subject,
             body: item.body,
             messageId,
-            senderConnectionAccountId: sender?.connectionAccountId,
+            threadId: replyContext?.threadId,
+            inReplyTo: replyContext?.inReplyTo,
+            senderConnectionAccountId: requiredSenderConnectionAccountId,
             senderEmail: sender?.email,
           });
           const receipt = await recordIntegrationReceipt({
@@ -965,7 +1020,9 @@ export async function sendOutreach(input: {
               outreachItemId: item.id,
               recipient: item.recipient,
               messageId,
-              senderConnectionAccountId: sender?.connectionAccountId,
+              threadId: replyContext?.threadId,
+              inReplyTo: replyContext?.inReplyTo,
+              senderConnectionAccountId: requiredSenderConnectionAccountId,
               senderEmail: sender?.email,
             },
           });
@@ -1017,6 +1074,7 @@ export async function sendOutreach(input: {
               const readback = await composio.readbackAfterSend({
                 externalId,
                 recipient: item.recipient,
+                expectedThreadId: replyContext?.threadId,
               });
               threadId = readback.threadId ?? threadId;
               readbackAt = readback.readbackAt;
@@ -1094,7 +1152,7 @@ export async function sendOutreach(input: {
                 sendMode,
                 readbackAt,
                 readbackRecipient: res.readbackRecipient,
-                senderConnectionAccountId: sender?.connectionAccountId,
+                senderConnectionAccountId: requiredSenderConnectionAccountId,
                 senderEmail: sender?.email,
               });
             } catch (error) {
@@ -1108,7 +1166,7 @@ export async function sendOutreach(input: {
                     : "reconcile_required",
                   outreachItemId: item.id,
                   messageId,
-                  senderConnectionAccountId: sender?.connectionAccountId,
+                  senderConnectionAccountId: requiredSenderConnectionAccountId,
                   senderEmail: sender?.email,
                   ...(externalId
                     ? {
@@ -1159,7 +1217,7 @@ export async function sendOutreach(input: {
                 evidenceState: "provider_accepted",
                 providerAccepted: true,
                 readbackAt,
-                senderConnectionAccountId: sender?.connectionAccountId,
+                senderConnectionAccountId: requiredSenderConnectionAccountId,
                 senderEmail: sender?.email,
                 dealId: item.dealId,
                 recipient: item.recipient,
@@ -1268,6 +1326,17 @@ const outreachRouter = router({
             "Associate this reply with a CRM deal and verified contact before drafting.",
         });
       }
+      if (
+        !conversation.threadId ||
+        !conversation.latestInboundMessageId ||
+        !conversation.senderConnectionAccountId
+      ) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "This Gmail conversation is missing its provider thread, Message-ID, or receiving mailbox. Re-sync it before drafting a reply.",
+        });
+      }
       if (conversation.replyDraftId) {
         const existing = await getOutreach(conversation.replyDraftId);
         if (existing) return existing;
@@ -1291,7 +1360,7 @@ const outreachRouter = router({
       const prior = [...conversation.messages]
         .reverse()
         .find((message) => message.direction === "outbound");
-      return draftOutreach({
+      const draft = await draftOutreach({
         dealId: conversation.dealId,
         channel: "gmail",
         subject: conversation.subject
@@ -1309,6 +1378,27 @@ const outreachRouter = router({
           body: conversation.latestInboundBody,
         },
       });
+      const binding = {
+        outreachItemId: draft.id,
+        dealId: conversation.dealId,
+        recipient: conversation.contactEmail.trim().toLowerCase(),
+        conversationId: conversation.id,
+        threadId: conversation.threadId,
+        inReplyTo: conversation.latestInboundMessageId,
+        senderConnectionAccountId: conversation.senderConnectionAccountId,
+      };
+      await recordIntegrationReceipt({
+        provider: "gmail",
+        externalEventId: `outreach-reply-draft:${draft.id}`,
+        operation: "messages.reply.draft",
+        rawBody: JSON.stringify(binding),
+        status: "completed",
+        completed: true,
+        payload: binding,
+        result: { state: "draft", outreachItemId: draft.id },
+        ownerEmployeeId: actor.employeeId,
+      });
+      return draft;
     }),
 
   draft: staffProcedure

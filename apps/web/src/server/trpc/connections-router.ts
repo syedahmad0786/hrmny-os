@@ -568,7 +568,11 @@ export type VerifiedWorkAppConnection = {
 export async function getVerifiedWorkAppConnection(
   employeeId: string,
   toolkit: WorkAppToolkit,
-  ctx: { clientId?: string | null; roles: readonly string[] },
+  ctx: {
+    clientId?: string | null;
+    roles: readonly string[];
+    connectedAccountId?: string;
+  },
 ): Promise<VerifiedWorkAppConnection | null> {
   const definition = WORK_APP_CATALOG.find(
     (candidate) => candidate.toolkit === toolkit,
@@ -593,6 +597,7 @@ export async function getVerifiedWorkAppConnection(
     (candidate) =>
       candidate.user_id === employeeId &&
       candidate.toolkit.slug === toolkit &&
+      (!ctx.connectedAccountId || candidate.id === ctx.connectedAccountId) &&
       !candidate.is_disabled &&
       ACTIVE_COMPOSIO_STATUSES.has(candidate.status.toUpperCase()),
   );

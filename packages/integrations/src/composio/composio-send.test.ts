@@ -158,4 +158,37 @@ describe("createComposioLiveSend", () => {
       externalId: "msg-live-2",
     });
   });
+
+  it("keeps a reply uncertain when readback returns a different Gmail thread", async () => {
+    const proxy = vi.fn(async (input: { method?: string }) => ({
+      status: 200,
+      data:
+        input.method === "GET"
+          ? {
+              id: "msg-thread-mismatch",
+              threadId: "wrong-thread",
+              labelIds: ["SENT"],
+              payload: {
+                headers: [{ name: "To", value: "lead@example.com" }],
+              },
+            }
+          : { id: "msg-thread-mismatch", threadId: "wrong-thread" },
+      headers: {},
+    })) as unknown as ComposioLiveClient["proxy"];
+    const adapter = createComposioLiveSend({
+      client: { proxy },
+      connectedAccountId: "conn-1",
+    });
+
+    await expect(
+      adapter.sendAfterApproval({
+        toolkit: "gmail",
+        to: "lead@example.com",
+        subject: "Re: Hello",
+        body: "Approved reply",
+        threadId: "expected-thread",
+        inReplyTo: "<client-reply@example.com>",
+      }),
+    ).rejects.toThrow(/thread does not match/i);
+  });
 });
