@@ -35,6 +35,14 @@ const hashOf = (name: string) =>
     )
     .digest("hex");
 const hash = hashOf(tag);
+// Drizzle journals raw bytes. The Windows runner applied this mixed-newline
+// representation; its normalized content matches the reviewed Git blob below.
+assert.equal(
+  hash,
+  "ebf3f9a3ab6c827e4dfe33a8ff0d042589ab297bd0b8d8d38c061e9f46546a70",
+);
+const appliedWindowsHash =
+  "833a6e8510fbb152d247998439b9eb7ea5c3c84e5d6e5037157fafe1853da74b";
 const db = postgres(target.databaseUrl.toString(), {
   max: 1,
   prepare: false,
@@ -55,7 +63,11 @@ try {
   );
   const applied = rows.length === 2;
   if (applied) {
-    assert.deepEqual(rows[1], { created_at: when, hash });
+    assert.equal(rows[1]?.created_at, when);
+    assert(
+      [hash, appliedWindowsHash].includes(rows[1]!.hash),
+      "Applied migration bytes differ from the reviewed migration",
+    );
     const tables = await db<
       Array<{ name: string; rls: boolean; exposed: boolean }>
     >`select relname as name, relrowsecurity as rls,

@@ -530,6 +530,7 @@ export async function getDeal(id: string): Promise<DealRow | null> {
 
 export async function createDeal(input: {
   companyName: string;
+  opportunityName?: string | null;
   companyId?: string | null;
   primaryContactId?: string | null;
   sector?: string | null;
@@ -555,6 +556,7 @@ export async function createDeal(input: {
           companyId: input.companyId ?? null,
           primaryContactId: input.primaryContactId ?? null,
           companyName,
+          opportunityName: input.opportunityName ?? null,
           sector: input.sector ?? null,
           stage: "discover",
           leadSourceLane: lane as typeof deal.$inferInsert.leadSourceLane,
@@ -579,6 +581,7 @@ export async function createDeal(input: {
         companyId: input.companyId ?? null,
         primaryContactId: input.primaryContactId ?? null,
         companyName,
+        opportunityName: input.opportunityName ?? null,
         sector: input.sector ?? null,
         stage: "discover",
         closeOutcome: null,

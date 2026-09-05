@@ -158,6 +158,14 @@ export function CrmRecordDetail({ kind }: { kind: "contacts" | "companies" }) {
             >
               Owner and workbook
             </Link>
+            {companyId ? (
+              <Link
+                className="crm-btn"
+                href={`/crm/intelligence?companyId=${companyId}`}
+              >
+                Research and history
+              </Link>
+            ) : null}
             <CrmBtn
               variant="primary"
               disabled={createDeal.isPending || !companyId}

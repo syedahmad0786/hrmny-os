@@ -299,4 +299,21 @@ describe("CRM workbook acceptance", () => {
         .companyId,
     ).toBe(a.companyId);
   });
+  it("keeps distinct opportunity names connected to the same company", async () => {
+    const company = await createCompany({ name: "Cedar Group" });
+    const first = await caller().crm.deals.create({
+      companyName: company.name,
+      companyId: company.companyId,
+      opportunityName: "Brand launch",
+    });
+    const second = await caller().crm.deals.create({
+      companyName: company.name,
+      companyId: company.companyId,
+      opportunityName: "Social retainer",
+    });
+    expect(first.opportunityName).toBe("Brand launch");
+    expect(second.opportunityName).toBe("Social retainer");
+    expect(first.companyId).toBe(second.companyId);
+    expect(first.dealId).not.toBe(second.dealId);
+  });
 });

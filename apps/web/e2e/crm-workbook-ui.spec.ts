@@ -65,6 +65,9 @@ test("workbook records, saved views, follow-ups and Excel export work together",
   await page
     .getByRole("button", { name: "Add follow-up", exact: true })
     .click();
+  await expect(
+    page.getByRole("link", { name: `Call Cedar ${stamp}`, exact: true }),
+  ).toBeVisible();
   await page.goto("/crm/followups", { waitUntil: "commit" });
   await page.getByPlaceholder("Search follow-ups").fill(`Call Cedar ${stamp}`);
   await expect(

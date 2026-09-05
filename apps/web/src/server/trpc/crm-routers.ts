@@ -284,6 +284,13 @@ export const crmDealsRouter = router({
     .input(
       z.object({
         companyName: z.string().min(1),
+        opportunityName: z
+          .string()
+          .trim()
+          .min(1)
+          .max(200)
+          .nullable()
+          .optional(),
         companyId: z.string().uuid().nullable().optional(),
         primaryContactId: z.string().uuid().nullable().optional(),
         sector: z.string().nullable().optional(),

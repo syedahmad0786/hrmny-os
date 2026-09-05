@@ -870,6 +870,7 @@ function WorkbookCreate({
         else
           deals.mutate({
             companyName: rows.find((r) => r.id === companyId)?.name ?? name,
+            opportunityName: companyId ? name : null,
             companyId: companyId || null,
             leadSourceLane: "relationship_led",
           });
