@@ -1,3 +1,7 @@
+import {
+  recordManualLinkedInSend,
+  recordLinkedInAcceptance,
+} from "../sales-os/linkedin-assist";
 import { z } from "zod";
 import { CRM_MARKETS } from "@/lib/crm-markets";
 import { TRPCError } from "@trpc/server";
@@ -7,14 +11,12 @@ import {
   salesgrowth,
 } from "@hrmny/integrations";
 import { runSalesGrowthImport } from "../crm/salesgrowth-import";
-import { addCredit } from "../sales-os/store";
 import {
   applyEvolve,
   APOLLO_EMAIL_STATUSES,
   APOLLO_PERSON_SENIORITIES,
   applySalesOsReplyIntent,
   approveApolloExactPerson,
-  assertLinkedInAssistAllowed,
   buildSalesOsDigest,
   createSalesCampaign,
   decideCompany,
@@ -53,17 +55,16 @@ import {
   sectorForDate,
   suppressTarget,
   consumeApolloExactApproval,
-  weekKey,
   type SalesOsSettings,
 } from "../sales-os";
-import { getOutreach, listOutreach, patchOutreach } from "../leadgen/store";
+import { patchOutreach } from "../leadgen/store";
 import { requireVisibleOutreach } from "../leadgen/email-access";
 import {
   ownedIntegrationConnectionStatus,
   resolveOwnedIntegrationApiKey,
 } from "../integrations/resolve-keys";
 import { importApolloPersonToCrm } from "../crm/apollo-import";
-import { getContact } from "../crm/repository";
+import { getContact, listActivities } from "../crm/repository";
 import {
   completeIntegrationReceipt,
   failIntegrationReceipt,
@@ -72,6 +73,16 @@ import {
   recordIntegrationReceipt,
 } from "../integrations/inbox";
 import { middleware, router, staffProcedure } from "./trpc";
+import {
+  discoverSalesOpportunities,
+  discoveryInput,
+  discoveryCandidate,
+} from "../sales-os/discovery";
+import { listEmployeeOperationReceipts } from "../integrations/inbox";
+import {
+  companySalesContext,
+  prepareSalesMeeting,
+} from "../sales-os/workspace";
 
 const SALES_OPERATOR_ROLES = new Set([
   "partner",
@@ -84,10 +95,15 @@ const SALES_ADMIN_ROLES = new Set(["partner", "director"]);
 function salesRoleProcedure(allowed: ReadonlySet<string>, message: string) {
   return staffProcedure.use(
     middleware(({ ctx, next }) => {
+      if (!ctx.employeeId)
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "An employee identity is required",
+        });
       if (!ctx.roles.some((role) => allowed.has(role))) {
         throw new TRPCError({ code: "FORBIDDEN", message });
       }
-      return next({ ctx });
+      return next({ ctx: { ...ctx, employeeId: ctx.employeeId } });
     }),
   );
 }
@@ -563,6 +579,30 @@ export const salesOsRouter = router({
   }),
 
   research: router({
+    discover: salesOperatorProcedure
+      .input(discoveryInput)
+      .mutation(({ input, ctx }) =>
+        discoverSalesOpportunities({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+          roles: ctx.roles,
+        }),
+      ),
+    importSources: salesOperatorProcedure
+      .input(
+        discoveryInput.extend({
+          candidates: z.array(discoveryCandidate).min(1).max(100),
+        }),
+      )
+      .mutation(({ input, ctx }) =>
+        discoverSalesOpportunities(
+          { ...input, actorEmployeeId: ctx.employeeId, roles: ctx.roles },
+          { candidates: input.candidates },
+        ),
+      ),
+    history: salesOperatorProcedure.query(({ ctx }) =>
+      listEmployeeOperationReceipts(ctx.employeeId, "sales.discovery"),
+    ),
     list: staffProcedure
       .input(
         z
@@ -769,66 +809,16 @@ export const salesOsRouter = router({
   }),
 
   linkedin: router({
-    markSent: staffProcedure
+    markSent: salesOperatorProcedure
       .input(z.object({ id: z.string() }))
-      .mutation(async ({ input }) => {
-        const item = await getOutreach(input.id);
-        if (!item)
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Outreach not found",
-          });
-        if (!item.channel.startsWith("linkedin")) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Assisted send is LinkedIn-only",
-          });
-        }
-        if (item.state !== "approved") {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "Approve the draft before marking sent",
-          });
-        }
-        if (item.channel === "linkedin_followup") {
-          const connect = (await listOutreach({ dealId: item.dealId })).find(
-            (o) => o.channel === "linkedin_connect" && o.acceptedAt,
-          );
-          if (!connect) {
-            throw new TRPCError({
-              code: "PRECONDITION_FAILED",
-              message:
-                "Mark the connection Accepted before sending the follow-up",
-            });
-          }
-        }
-        const cap = await assertLinkedInAssistAllowed();
-        if (!cap.ok) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: cap.reason,
-          });
-        }
-        await addCredit("linkedin_assist", 1, weekKey());
-        return patchOutreach(input.id, {
-          state: "sent",
-          sentAt: new Date().toISOString(),
-        });
-      }),
-    markAccepted: staffProcedure
+      .mutation(({ input, ctx }) =>
+        recordManualLinkedInSend(input.id, ctx.employeeId),
+      ),
+    markAccepted: salesOperatorProcedure
       .input(z.object({ id: z.string() }))
-      .mutation(async ({ input }) => {
-        const item = await getOutreach(input.id);
-        if (!item || item.channel !== "linkedin_connect") {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Not a connection item",
-          });
-        }
-        return patchOutreach(input.id, {
-          acceptedAt: new Date().toISOString(),
-        });
-      }),
+      .mutation(({ input, ctx }) =>
+        recordLinkedInAcceptance(input.id, ctx.employeeId),
+      ),
     markSkipped: staffProcedure
       .input(z.object({ id: z.string() }))
       .mutation(async ({ input, ctx }) => {
@@ -854,18 +844,60 @@ export const salesOsRouter = router({
     .input(z.object({ companyId: z.string().uuid().optional() }).optional())
     .query(({ input }) => listIntelSignals(input?.companyId)),
 
-  importSalesGrowth: staffProcedure
+  workspace: router({
+    history: salesOperatorProcedure
+      .input(z.object({ search: z.string().trim().max(180).default("") }))
+      .query(({ input, ctx }) =>
+        listActivities({
+          search: input.search,
+          limit: 50,
+          viewerEmployeeId: ctx.employeeId,
+        }),
+      ),
+    company: salesOperatorProcedure
+      .input(z.object({ companyId: z.string().uuid() }))
+      .query(({ input, ctx }) =>
+        companySalesContext(input.companyId, ctx.employeeId),
+      ),
+    prepareMeeting: salesOperatorProcedure
+      .input(
+        z.object({
+          companyId: z.string().uuid(),
+          requestId: z.string().uuid(),
+          goal: z.string().trim().max(1000),
+        }),
+      )
+      .mutation(({ input, ctx }) =>
+        prepareSalesMeeting({
+          ...input,
+          actorEmployeeId: ctx.employeeId,
+          roles: ctx.roles,
+        }),
+      ),
+    briefs: salesOperatorProcedure.query(({ ctx }) =>
+      listEmployeeOperationReceipts(ctx.employeeId, "sales.meeting"),
+    ),
+  }),
+
+  importSalesGrowth: salesAdminProcedure
     .input(
       z.object({
         data: z.unknown(),
         apply: z.boolean().optional(),
+        privateHistoryEmployeeIds: z
+          .array(z.string().uuid())
+          .max(10)
+          .default([]),
       }),
     )
     .mutation(({ input }) => {
       const parsed = salesgrowth.parseSalesGrowthExport
         ? salesgrowth.parseSalesGrowthExport(input.data)
         : (input.data as Parameters<typeof runSalesGrowthImport>[0]);
-      return runSalesGrowthImport(parsed, { apply: input.apply ?? false });
+      return runSalesGrowthImport(parsed, {
+        apply: input.apply ?? false,
+        privateAuthorizedEmployeeIds: input.privateHistoryEmployeeIds,
+      });
     }),
 
   outreach: router({

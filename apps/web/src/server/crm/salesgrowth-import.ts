@@ -1,6 +1,13 @@
-import { deal, eq, importLineage, salesgrowthImportStaging } from "@hrmny/db";
+import {
+  deal,
+  eq,
+  importLineage,
+  salesgrowthImportStaging,
+  sql,
+  type Db,
+} from "@hrmny/db";
 import { salesgrowth } from "@hrmny/integrations";
-import { getDb } from "../db";
+import { getDb, withDatabaseScope } from "../db";
 import {
   createActivity,
   createCompany,
@@ -19,7 +26,10 @@ const SYSTEM = salesgrowth.SALESGROWTH_SOURCE_SYSTEM;
 
 /** Load the CRM dedupe snapshot + prior salesgrowth lineage (re-run idempotency). */
 async function loadExistingCrm(): Promise<ExistingCrm> {
-  const [companies, contacts] = await Promise.all([listCompanies(), listContacts()]);
+  const [companies, contacts] = await Promise.all([
+    listCompanies(),
+    listContacts(),
+  ]);
   const imported = new Map<string, string>();
   const db = getDb();
   if (db) {
@@ -31,7 +41,8 @@ async function loadExistingCrm(): Promise<ExistingCrm> {
       })
       .from(importLineage)
       .where(eq(importLineage.sourceSystem, SYSTEM));
-    for (const r of rows) imported.set(`${r.sourceTable}#${r.sourceId}`, r.targetId);
+    for (const r of rows)
+      imported.set(`${r.sourceTable}#${r.sourceId}`, r.targetId);
   }
   return {
     companies: companies.map((c) => ({
@@ -119,23 +130,27 @@ function makeWriter(): CrmWriter {
     },
     async recordStaging(rows) {
       if (!db || rows.length === 0) return;
-      for (const r of rows) {
-        await db
-          .insert(salesgrowthImportStaging)
-          .values({
+      await db
+        .insert(salesgrowthImportStaging)
+        .values(
+          rows.map((r) => ({
             sourceTable: r.sourceTable,
             sourceId: r.sourceId,
             raw: r.raw,
             checksum: r.checksum,
-          })
-          .onConflictDoUpdate({
-            target: [
-              salesgrowthImportStaging.sourceTable,
-              salesgrowthImportStaging.sourceId,
-            ],
-            set: { raw: r.raw, checksum: r.checksum, importedAt: new Date() },
-          });
-      }
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [
+            salesgrowthImportStaging.sourceTable,
+            salesgrowthImportStaging.sourceId,
+          ],
+          set: {
+            raw: sql`excluded.raw`,
+            checksum: sql`excluded.checksum`,
+            importedAt: new Date(),
+          },
+        });
     },
   };
 }
@@ -144,6 +159,7 @@ export interface SalesGrowthImportResult {
   plan: salesgrowth.ImportPlan;
   report: salesgrowth.ReconciliationReport;
   applied: boolean;
+  heldPrivate: number;
 }
 
 /**
@@ -153,13 +169,124 @@ export interface SalesGrowthImportResult {
  */
 export async function runSalesGrowthImport(
   data: SalesGrowthExport,
-  opts: { apply?: boolean } = {},
+  opts: { apply?: boolean; privateAuthorizedEmployeeIds?: string[] } = {},
 ): Promise<SalesGrowthImportResult> {
-  const existing = await loadExistingCrm();
-  const plan = salesgrowth.planImport(data, existing);
-  if (!opts.apply) {
-    return { plan, report: salesgrowth.reconcile(plan), applied: false };
-  }
-  const { report } = await salesgrowth.applyImport(plan, makeWriter(), existing.imported);
-  return { plan, report, applied: true };
+  const work = async (): Promise<SalesGrowthImportResult> => {
+    const existing = await loadExistingCrm();
+    const plan = salesgrowth.planImport(data, existing);
+    // Historical research is context, not a newly won sale or a current forecast.
+    const historicalDeals = plan.deals.map((row) => ({
+      ...row,
+      targetTable: "activity" as const,
+      input: row.input
+        ? {
+            type: "note" as const,
+            subject: `Historical opportunity: ${String(row.raw.deal_name ?? row.input.companyName)}`,
+            body: `Outcome: ${row.raw.outcome ?? "unknown"} · year: ${row.raw.year ?? "unknown"}\nValue AED: ${row.input.quoteValue ?? "unconfirmed"}\n${row.input.lostReason ?? ""}`,
+            companyRef: row.input.companyRef,
+            contactRef: row.input.primaryContactRef,
+            dealRef: null,
+            occurredAt: null,
+            metadata: {
+              source: "salesgrowth",
+              sourceTable: "intel_deals",
+              visibility: "private",
+              ownerEmployeeId: null,
+              historicalYear: row.raw.year ?? null,
+            },
+          }
+        : undefined,
+    }));
+    plan.deals = [];
+    for (const row of plan.activities)
+      if (row.input) {
+        row.input.dealRef = null;
+        if (row.sourceTable !== "intel_person_roles")
+          row.input.metadata.visibility = "private";
+      }
+    const companyNotes = plan.companies.flatMap((row) => {
+      const body =
+        row.input?.notes ??
+        (typeof row.raw.notes === "string"
+          ? row.raw.notes
+          : typeof row.raw.why_this === "string"
+            ? row.raw.why_this
+            : null);
+      if (!body?.trim()) return [];
+      const name =
+        row.input?.name ??
+        String(row.raw.company ?? row.raw.canonical_name ?? "Company");
+      if (row.input) row.input.notes = null;
+      const ref = `legacy_company_notes#${row.sourceTable}:${row.sourceId}`;
+      const prior = existing.imported.get(ref);
+      return [
+        {
+          ...row,
+          sourceTable: "legacy_company_notes",
+          sourceId: `${row.sourceTable}:${row.sourceId}`,
+          ref,
+          targetTable: "activity" as const,
+          action: prior ? ("skip" as const) : ("create" as const),
+          ...(prior
+            ? {
+                skipReason: "already_imported" as const,
+                resolvesTo: `existing:${prior}`,
+              }
+            : {}),
+          input: {
+            type: "note" as const,
+            subject: `Historical context: ${name}`,
+            body,
+            companyRef: row.ref,
+            contactRef: null,
+            dealRef: null,
+            occurredAt: null,
+            metadata: {
+              source: "salesgrowth",
+              visibility: "private",
+              ownerEmployeeId: null,
+            },
+          },
+        },
+      ];
+    });
+    plan.activities.push(...historicalDeals, ...companyNotes);
+    const isPrivate = (row: salesgrowth.ImportPlan["activities"][number]) =>
+      row.input?.metadata.visibility === "private" ||
+      row.sourceTable !== "intel_person_roles";
+    const heldPrivate = opts.privateAuthorizedEmployeeIds?.length
+      ? 0
+      : plan.activities.filter(isPrivate).length;
+    plan.activities = plan.activities.filter(
+      (row) => !isPrivate(row) || opts.privateAuthorizedEmployeeIds?.length,
+    );
+    for (const row of plan.activities)
+      if (isPrivate(row) && row.input)
+        row.input.metadata = {
+          ...row.input.metadata,
+          visibility: "private",
+          authorizedEmployeeIds: opts.privateAuthorizedEmployeeIds,
+        };
+    if (!opts.apply)
+      return {
+        plan,
+        report: salesgrowth.reconcile(plan),
+        applied: false,
+        heldPrivate,
+      };
+    const { report } = await salesgrowth.applyImport(
+      plan,
+      makeWriter(),
+      existing.imported,
+    );
+    return { plan, report, applied: true, heldPrivate };
+  };
+  const db = getDb();
+  if (!opts.apply || !db) return work();
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext('salesgrowth-import'))`,
+    );
+    return withDatabaseScope(tx as unknown as Db, work);
+  });
 }

@@ -92,6 +92,20 @@ export interface SgIntelSignal {
 }
 
 /** JSON intermediate produced by `exportSalesGrowthDb` / accepted by the transform. */
+export interface SgIntelRole {
+  id: number;
+  person_id: number;
+  company_id: number;
+  title: string | null;
+  is_current: number;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string | null;
+}
+export interface SgIntelHistory {
+  id: number;
+  [key: string]: unknown;
+}
 export interface SalesGrowthExport {
   companies: SgCompany[];
   contacts: SgContact[];
@@ -100,6 +114,11 @@ export interface SalesGrowthExport {
   intel_deals: SgIntelDeal[];
   outreach: SgOutreach[];
   intel_signals: SgIntelSignal[];
+  intel_person_roles?: SgIntelRole[];
+  intel_relationships?: SgIntelHistory[];
+  intel_communications?: SgIntelHistory[];
+  intel_proposals?: SgIntelHistory[];
+  asana_pipeline?: SgIntelHistory[];
 }
 
 // ── Target CRM shapes ───────────────────────────────────────────────────────
@@ -108,12 +127,7 @@ export interface SalesGrowthExport {
 
 export type CrmMarket = "UAE" | "KSA" | "Both";
 export type CrmActivityType =
-  | "note"
-  | "call"
-  | "meeting"
-  | "email"
-  | "outreach"
-  | "system";
+  "note" | "call" | "meeting" | "email" | "outreach" | "system";
 export type CrmDealStage =
   | "discover"
   | "qualify"
@@ -125,10 +139,7 @@ export type CrmDealStage =
   | "handover_pack";
 export type CrmCloseOutcome = "won" | "lost" | "postponed_on_hold";
 export type CrmLeadSourceLane =
-  | "industry_scanning"
-  | "apollo_intent"
-  | "relationship_led"
-  | "tejari";
+  "industry_scanning" | "apollo_intent" | "relationship_led" | "tejari";
 
 /** A planned insert's FK, pointing at another planned/existing source row. */
 export type SourceRef = string; // `${sourceTable}#${sourceId}`

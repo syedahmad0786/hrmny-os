@@ -93,8 +93,8 @@ export async function processIntentLeads(
       continue;
     }
     const why = row.intent
-      ? `Apollo intent signal: ${row.intent}`
-      : "Apollo intent export — company showing marketing-services intent in UAE.";
+      ? `Company-level intent reported in imported export: ${row.intent}. Verify topic and observation date; this does not establish an individual's intent.`
+      : "Imported company without a specified intent topic. Buying intent is unverified.";
     const verdict = qualifyCompany(
       {
         name: row.company,

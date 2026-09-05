@@ -17,6 +17,8 @@ export type AgentRunInput = {
   context?: Record<string, unknown>;
   /** Explicit user-triggered, bounded OpenRouter web grounding. */
   webSearch?: boolean;
+  /** Private employee context: cost ledger retains metrics, never content. */
+  privateContext?: boolean;
   /** Actor roles for sandbox routing (primary privileged-data control). */
   roles?: string[];
   /** Explicit privileged domains this run needs (salaries, margin, etc.). */

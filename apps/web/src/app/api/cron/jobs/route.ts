@@ -33,6 +33,7 @@ import {
 } from "@/server/google-chat";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const HealthJobSchema = z.object({
   signalKey: z.string().min(1).max(120),

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { linkedinProfileUrl } from "@/lib/linkedin-profile";
 import { randomUUID } from "node:crypto";
 import { outreachReadiness } from "../leadgen/readiness";
 import { GmailSenderIdentityError } from "../leadgen/google-mailbox-identities";
@@ -267,6 +268,7 @@ export async function draftOutreach(input: {
   /** Provide copy directly, or let the outreach-draft agent generate it. */
   body?: string;
   subject?: string;
+  linkedinUrl?: string;
   runAgent?: RunAgent;
   cadenceTouch?: number;
   previousMessage?: { subject: string | null; body: string };
@@ -314,15 +316,18 @@ export async function draftOutreach(input: {
         "Unlock and verify this lead's work email before creating an email draft. No AI call was made.",
     });
   }
-  if (isLinkedInChannel(channel) && !contact?.linkedinUrl) {
+  const profileUrl = linkedinProfileUrl(
+    input.linkedinUrl ?? contact?.linkedinUrl,
+  );
+  if (isLinkedInChannel(channel) && !profileUrl) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
       message:
-        "This lead has no LinkedIn profile URL yet. Enrich the exact person or add a verified profile before drafting.",
+        "This lead has no LinkedIn profile URL in a supported format. Paste a verified HTTPS public /in/ profile URL in the draft form.",
     });
   }
   const recipient = isLinkedInChannel(channel)
-    ? (contact?.linkedinUrl ?? contact?.email ?? "")
+    ? profileUrl!
     : (contact?.email ?? "");
 
   let subject =
@@ -423,7 +428,7 @@ export async function draftOutreach(input: {
     subject,
     body: body ?? "",
     contactId: contact?.contactId ?? null,
-    linkedinUrl: contact?.linkedinUrl ?? null,
+    linkedinUrl: profileUrl,
     cadenceTouch: input.cadenceTouch,
   });
 }
@@ -1586,6 +1591,7 @@ const outreachRouter = router({
         channel: z.string().optional(),
         subject: z.string().optional(),
         body: z.string().optional(),
+        linkedinUrl: z.string().trim().max(1000).optional(),
       }),
     )
     .mutation(({ input }) => draftOutreach(input)),

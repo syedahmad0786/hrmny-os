@@ -45,7 +45,15 @@ export async function exportSalesGrowthDb(opts: {
   }
   const db = new DatabaseSync(opts.dbPath, { readOnly: true });
   try {
-    const read = <T>(sql: string): T[] => db.prepare(sql).all() as unknown as T[];
+    const read = <T>(sql: string): T[] =>
+      db.prepare(sql).all() as unknown as T[];
+    const tables = new Set(
+      read<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table'",
+      ).map((row) => row.name),
+    );
+    const optional = <T>(table: string): T[] =>
+      tables.has(table) ? read<T>(`SELECT * FROM ${table}`) : [];
     return {
       companies: read(QUERIES.companies),
       contacts: read(QUERIES.contacts),
@@ -54,6 +62,11 @@ export async function exportSalesGrowthDb(opts: {
       intel_deals: read(QUERIES.intel_deals),
       outreach: read(QUERIES.outreach),
       intel_signals: read(QUERIES.intel_signals),
+      intel_person_roles: optional("intel_person_roles"),
+      intel_relationships: optional("intel_relationships"),
+      intel_communications: optional("intel_communications"),
+      intel_proposals: optional("intel_proposals"),
+      asana_pipeline: optional("asana_pipeline"),
     };
   } finally {
     db.close();
@@ -71,6 +84,11 @@ const exportSchema = z.object({
   intel_deals: rowArray,
   outreach: rowArray,
   intel_signals: rowArray,
+  intel_person_roles: rowArray,
+  intel_relationships: rowArray,
+  intel_communications: rowArray,
+  intel_proposals: rowArray,
+  asana_pipeline: rowArray,
 });
 
 export function parseSalesGrowthExport(input: unknown): SalesGrowthExport {

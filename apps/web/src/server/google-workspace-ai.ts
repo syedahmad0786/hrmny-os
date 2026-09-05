@@ -116,6 +116,7 @@ async function googleRequest(
   fetchImpl: typeof fetch,
 ) {
   const response = await fetchImpl(url, {
+    signal: AbortSignal.timeout(20000),
     ...init,
     headers: {
       authorization: `Bearer ${accessToken}`,
@@ -309,7 +310,7 @@ async function searchGoogleCalendar(input: {
   );
 }
 
-export async function searchGoogleWorkspace(input: {
+export async function searchGoogleWorkspaceWithCoverage(input: {
   accessToken: string;
   query: string;
   fetchImpl?: typeof fetch;
@@ -320,9 +321,23 @@ export async function searchGoogleWorkspace(input: {
     searchGmail({ ...input, fetchImpl }),
     searchGoogleCalendar({ ...input, fetchImpl }),
   ]);
-  return results.flatMap((result) =>
+  const sources = results.flatMap((result) =>
     result.status === "fulfilled" ? result.value : [],
   );
+  return {
+    sources,
+    coverage: results.map((result, index) => ({
+      source: ["Drive", "Gmail", "Calendar"][index]!,
+      status: result.status === "fulfilled" ? "searched" : "unavailable",
+      count: result.status === "fulfilled" ? result.value.length : 0,
+    })),
+  };
+}
+
+export async function searchGoogleWorkspace(
+  input: Parameters<typeof searchGoogleWorkspaceWithCoverage>[0],
+) {
+  return (await searchGoogleWorkspaceWithCoverage(input)).sources;
 }
 
 export async function createGoogleWorkspaceFile(input: {

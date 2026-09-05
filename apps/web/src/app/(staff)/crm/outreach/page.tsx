@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { linkedinProfileUrl } from "@/lib/linkedin-profile";
 import { useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { orderOutreachWorkItems } from "./order";
@@ -80,6 +81,7 @@ function OutreachInner() {
   const [draftSubject, setDraftSubject] = useState("");
   const [draftBody, setDraftBody] = useState("");
   const [draftChannel, setDraftChannel] = useState("gmail");
+  const [draftLinkedInUrl, setDraftLinkedInUrl] = useState("");
   const [reworkFeedback, setReworkFeedback] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showTestRecords, setShowTestRecords] = useState(false);
@@ -127,6 +129,7 @@ function OutreachInner() {
       setGateError(null);
       setDraftSubject("");
       setDraftBody("");
+      setDraftLinkedInUrl("");
       invalidate();
     },
     onError: onErr,
@@ -166,12 +169,18 @@ function OutreachInner() {
   }
 
   function linkedInHref(item: NonNullable<typeof items.data>[number]) {
-    const raw = item.linkedinUrl ?? item.recipient;
-    if (raw.startsWith("http")) return raw;
-    return "https://www.linkedin.com/";
+    return linkedinProfileUrl(item.linkedinUrl ?? item.recipient);
   }
 
   async function copyBody(item: NonNullable<typeof items.data>[number]) {
+    const profile = linkedInHref(item);
+    if (!profile) {
+      setGateError(
+        "Create a new LinkedIn draft below with the person's verified public profile URL.",
+      );
+      return;
+    }
+    window.open(profile, "_blank", "noopener,noreferrer");
     try {
       await navigator.clipboard.writeText(item.body);
       setCopiedId(item.id);
@@ -738,7 +747,8 @@ function OutreachInner() {
               <h3>Approved messages</h3>
               <p>
                 Oldest first. Email sends only after a second confirmation.
-                LinkedIn stays manual.
+                LinkedIn opens the public profile; paste and send there.
+                Recorded sends are your confirmation, not delivery verification.
               </p>
             </div>
             <CrmTag kind="info">{byState.approved.length} approved</CrmTag>
@@ -763,16 +773,19 @@ function OutreachInner() {
                         disabled={busyId !== null}
                         onClick={() => void copyBody(item)}
                       >
-                        {copiedId === item.id ? "Copied" : "Copy"}
+                        {copiedId === item.id
+                          ? "Copied · open profile"
+                          : "Copy & open profile"}
                       </CrmBtn>
                       <a
                         className="crm-btn"
                         data-testid="outreach-open-linkedin"
-                        href={linkedInHref(item)}
+                        href={linkedInHref(item) ?? undefined}
+                        aria-disabled={!linkedInHref(item)}
                         target="_blank"
                         rel="noreferrer"
                       >
-                        Open LinkedIn
+                        Open profile
                       </a>
                       <CrmBtn
                         data-testid="outreach-mark-sent"
@@ -784,7 +797,7 @@ function OutreachInner() {
                           })
                         }
                       >
-                        Mark sent
+                        I sent this in LinkedIn
                       </CrmBtn>
                       {item.channel === "linkedin_connect" ? (
                         <CrmBtn
@@ -906,6 +919,9 @@ function OutreachInner() {
                   channel: draftChannel,
                   subject: draftSubject.trim() || undefined,
                   body: draftBody.trim() || undefined,
+                  linkedinUrl: isLinkedIn(draftChannel)
+                    ? draftLinkedInUrl.trim() || undefined
+                    : undefined,
                 });
               }}
             >
@@ -947,6 +963,23 @@ function OutreachInner() {
                   </option>
                 </select>
               </div>
+              {isLinkedIn(draftChannel) ? (
+                <label className="crm-field wide">
+                  LinkedIn public profile URL (optional if already saved)
+                  <input
+                    className="crm-input"
+                    type="url"
+                    value={draftLinkedInUrl}
+                    maxLength={1000}
+                    onChange={(e) => setDraftLinkedInUrl(e.target.value)}
+                    placeholder="https://www.linkedin.com/in/person"
+                  />
+                  <span className="text-xs">
+                    Verify that this profile belongs to the selected lead. This
+                    creates a reviewable draft; it does not contact anyone.
+                  </span>
+                </label>
+              ) : null}
               <div className="crm-field">
                 <label>Subject (optional)</label>
                 <input
