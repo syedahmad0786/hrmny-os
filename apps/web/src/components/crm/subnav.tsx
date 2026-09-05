@@ -5,6 +5,10 @@ import { usePathname } from "next/navigation";
 
 const TABS = [
   { href: "/crm/dashboard", label: "Dashboard" },
+  { href: "/crm/leads", label: "Leads" },
+  { href: "/crm/contacts", label: "Contacts" },
+  { href: "/crm/companies", label: "Companies" },
+  { href: "/crm/workbook", label: "Workbook" },
   { href: "/crm/hunt", label: "Find clients" },
   { href: "/crm/research", label: "Research" },
   { href: "/crm/campaigns", label: "Campaigns" },
@@ -14,7 +18,7 @@ const TABS = [
 ] as const;
 const MORE_TABS = [
   { href: "/crm/intelligence", label: "Company intelligence" },
-  { href: "/crm/contacts", label: "Contacts" },
+  { href: "/crm/followups", label: "Follow-ups" },
   { href: "/crm/handover", label: "Won deal handover" },
   { href: "/crm/settings/sales-os", label: "Sales settings" },
 ] as const;

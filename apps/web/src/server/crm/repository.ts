@@ -20,6 +20,8 @@ import {
   type Db,
 } from "@hrmny/db";
 import { getDb } from "../db";
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 import { listContactEdges } from "../leadgen/store";
 import { getCrmMemory, newId } from "./memory";
 import type {
@@ -40,6 +42,7 @@ function iso(d: Date | string | null | undefined): string {
 
 function mapCompany(r: typeof company.$inferSelect): CompanyRow {
   return {
+    ownerEmployeeId: r.ownerEmployeeId,
     companyId: r.companyId,
     name: r.name,
     sector: r.sector,
@@ -54,6 +57,7 @@ function mapCompany(r: typeof company.$inferSelect): CompanyRow {
 
 function mapContact(r: typeof contact.$inferSelect): ContactRow {
   return {
+    ownerEmployeeId: r.ownerEmployeeId,
     contactId: r.contactId,
     companyId: r.companyId,
     firstName: r.firstName,
@@ -257,6 +261,7 @@ export async function createCompany(input: {
 export async function updateCompany(
   id: string,
   input: Partial<{
+    ownerEmployeeId: string | null;
     name: string;
     sector: string | null;
     market: CompanyRow["market"];
@@ -298,7 +303,7 @@ export async function listContacts(q?: {
   companyId?: string;
   search?: string;
 }): Promise<ContactRow[]> {
-  return withDb(
+  const rows = await withDb(
     async (db) => {
       let rows = await db.select().from(contact).orderBy(contact.firstName);
       if (q?.companyId) {
@@ -331,6 +336,44 @@ export async function listContacts(q?: {
       return rows;
     },
   );
+  const interactions = await lastContactInteractions();
+  return rows.map((row) => ({
+    ...row,
+    lastInteractionAt: interactions.get(row.contactId) ?? null,
+  }));
+}
+
+/** Shared interaction dates only. Private archive events do not disclose activity through aggregates. */
+async function lastContactInteractions(): Promise<Map<string, string>> {
+  const db = getDb();
+  if (db) {
+    const rows = await db.execute<{
+      contactId: string;
+      occurredAt: Date | string;
+    }>(sql`
+      select contact_id as "contactId", max(occurred_at) as "occurredAt"
+      from public.activity where contact_id is not null
+      and type::text in ('call', 'meeting', 'email', 'outreach')
+      and coalesce(metadata->>'visibility', '') <> 'private'
+      and coalesce(metadata->>'state', 'sent') not in ('draft', 'approved', 'rejected', 'failed')
+      group by contact_id`);
+    return new Map(rows.map((row) => [row.contactId, iso(row.occurredAt)]));
+  }
+  const latest = new Map<string, string>();
+  for (const row of getCrmMemory().activities.values()) {
+    if (
+      !row.contactId ||
+      !["call", "meeting", "email", "outreach"].includes(row.type) ||
+      row.metadata.visibility === "private" ||
+      ["draft", "approved", "rejected", "failed"].includes(
+        String(row.metadata.state),
+      )
+    )
+      continue;
+    if ((latest.get(row.contactId) ?? "") < row.occurredAt)
+      latest.set(row.contactId, row.occurredAt);
+  }
+  return latest;
 }
 
 export async function getContact(id: string): Promise<ContactRow | null> {
@@ -399,6 +442,7 @@ export async function createContact(input: {
 export async function updateContact(
   id: string,
   input: Partial<{
+    ownerEmployeeId: string | null;
     companyId: string | null;
     firstName: string;
     lastName: string | null;
@@ -410,6 +454,16 @@ export async function updateContact(
     isPrimary: boolean;
   }>,
 ): Promise<ContactRow | null> {
+  // Verification belongs to the exact address, never to the person after an address edit.
+  // Trusted enrichment can supply fresh verification; the public edit schema cannot.
+  if (input.email !== undefined && input.emailVerified === undefined) {
+    const before = await getContact(id);
+    if (
+      before &&
+      before.email?.trim().toLowerCase() !== input.email?.trim().toLowerCase()
+    )
+      input = { ...input, emailVerified: false };
+  }
   return withDb(
     async (db) => {
       const [row] = await db
@@ -944,6 +998,47 @@ export async function createCrmTask(input: {
   dealId?: string | null;
   ownerEmployeeId?: string | null;
 }): Promise<CrmTaskRow> {
+  if (input.dueDate && !z.string().date().safeParse(input.dueDate).success)
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Enter a valid follow-up date.",
+    });
+  if (input.dealId) {
+    const linkedDeal = await getDeal(input.dealId);
+    if (!linkedDeal)
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "The linked opportunity does not exist.",
+      });
+    if (
+      input.companyId &&
+      linkedDeal.companyId &&
+      input.companyId !== linkedDeal.companyId
+    )
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "The follow-up company must match its opportunity.",
+      });
+    input = { ...input, companyId: input.companyId ?? linkedDeal.companyId };
+  }
+  if (input.contactId) {
+    const linkedContact = await getContact(input.contactId);
+    if (!linkedContact)
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "The linked contact does not exist.",
+      });
+    if (
+      input.companyId &&
+      linkedContact.companyId &&
+      input.companyId !== linkedContact.companyId
+    )
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "The follow-up company must match its contact.",
+      });
+    input = { ...input, companyId: input.companyId ?? linkedContact.companyId };
+  }
   return withDb(
     async (db) => {
       const [row] = await db

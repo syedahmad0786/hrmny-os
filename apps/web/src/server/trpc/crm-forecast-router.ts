@@ -1,6 +1,9 @@
 import { z } from "zod";
+import { sql } from "@hrmny/db";
+import { getDb } from "../db";
+import { getCrmMemory } from "../crm/memory";
 import { router, staffProcedure } from "./trpc";
-import { listActivities, listDeals } from "../crm/repository";
+import { listDeals } from "../crm/repository";
 import {
   computeForecast,
   computePipeline,
@@ -21,9 +24,23 @@ import { isSyntheticDeal } from "../../lib/synthetic-records";
 async function stageChangeEvents(
   operationalDealIds: ReadonlySet<string>,
 ): Promise<StageChangeEvent[]> {
-  // ponytail: single bounded fetch (last 1000 activities), no pagination —
-  // paginate when the activity table outgrows this window.
-  const rows = await listActivities({ limit: 1000 });
+  if (!operationalDealIds.size) return [];
+  const db = getDb();
+  if (db)
+    return Array.from(
+      await db.execute<StageChangeEvent>(sql`
+    select metadata->>'from' as "from", metadata->>'to' as "to", count(*)::int as count
+    from public.activity where type = 'stage_change'
+    and deal_id in (${sql.join(
+      [...operationalDealIds].map((id) => sql`${id}::uuid`),
+      sql`, `,
+    )})
+    and coalesce(metadata->>'visibility', '') <> 'private'
+    group by metadata->>'from', metadata->>'to'`),
+    );
+  const rows = [...getCrmMemory().activities.values()].filter(
+    (row) => row.metadata.visibility !== "private",
+  );
   const events: StageChangeEvent[] = [];
   for (const a of rows) {
     if (

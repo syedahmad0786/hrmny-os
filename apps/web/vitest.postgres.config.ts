@@ -6,6 +6,7 @@ export default defineConfig({
     environment: "node",
     include: [
       "src/server/crm/handover.postgres-proof.ts",
+      "src/server/crm/workbook.postgres-proof.ts",
       "src/server/leadgen/google-mailbox.postgres-proof.ts",
       "src/server/sales-os/sales-research.postgres-proof.ts",
       "src/server/sales-os/replacement.postgres-proof.ts",

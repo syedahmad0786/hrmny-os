@@ -1,4 +1,36 @@
 /* Sales uses the existing HRMNY palette and native disclosure controls. */
+.crm-workbook { display: grid; gap: 16px; min-width: 0; }
+.workbook-health { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.workbook-health button { padding: 18px; background: var(--paper-2); border: 1px solid var(--sand); border-radius: 12px; text-align: left; color: var(--muted); font-size: 13px; }
+.workbook-health strong { display: block; color: var(--ink); font-size: 26px; margin-bottom: 6px; }
+.workbook-tabs, .workbook-tools, .workbook-actions, .workbook-selection, .workbook-pagination { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.workbook-tabs { border-bottom: 1px solid var(--line); }
+.workbook-tabs button { min-height: 44px; padding: 10px 16px; border-bottom: 3px solid transparent; }
+.workbook-tabs button[aria-pressed=true] { border-color: var(--ochre); color: var(--ochre-dark); font-weight: 600; }
+.workbook-tools { padding: 12px 0; }
+.workbook-tools label, .workbook-dialog label, .crm-record-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.workbook-tools :is(input:not([type=checkbox]), select), .workbook-dialog :is(input, select), .crm-record-form :is(input, select, textarea) { border: 1px solid var(--sand); background: var(--paper-2); border-radius: 8px; padding: 10px; min-height: 44px; color: var(--ink); max-width: 100%; }
+.workbook-tools summary, .workbook-import summary { cursor: pointer; min-height: 44px; padding: 12px; border: 1px solid var(--sand); border-radius: 8px; font-size: 13px; }
+.workbook-tools details { position: relative; }
+.workbook-column-picker, .workbook-export { padding: 16px; display: grid; gap: 10px; background: var(--paper-2); border: 1px solid var(--sand); border-radius: 10px; position: absolute; z-index: 20; right: 0; min-width: 230px; max-height: 400px; overflow: auto; box-shadow: 0 8px 24px #0001; }
+.workbook-column-picker label, .workbook-tools .workbook-check { display: flex; gap: 8px; align-items: center; min-height: 32px; }
+.workbook-table th button { text-align: left; min-height: 40px; white-space: nowrap; }
+.workbook-record-link { font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.workbook-issue { display: block; max-width: 250px; white-space: normal; color: var(--ochre-dark); margin-top: 5px; }
+.workbook-selection, .workbook-create { background: var(--ochre-soft, #f8f3e8); padding: 16px; border-radius: 10px; }
+.workbook-dialog { background: var(--paper-2); color: var(--ink); border: 1px solid var(--sand); border-radius: 14px; padding: 24px; width: min(540px, 94vw); max-height: 85vh; overflow: auto; }
+.workbook-dialog::backdrop { background: #10182066; }
+.workbook-dialog form { display: grid; gap: 18px; }
+.workbook-dialog h2 { font-size: 20px; font-weight: 600; }
+.workbook-dialog ul { font-size: 13px; max-height: 120px; overflow: auto; }
+.workbook-pagination { justify-content: end; }
+.crm-record-form { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 20px; border: 1px solid var(--sand); border-radius: 12px; background: var(--paper-2); }
+.crm-record-section { padding: 20px; border: 1px solid var(--sand); border-radius: 12px; background: var(--paper-2); }
+.crm-record-section h2 { font-size: 20px; font-weight: 600; margin-bottom: 14px; }
+.crm-record-section li { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.crm-record-section a { color: var(--ochre-dark); text-decoration: underline; text-underline-offset: 3px; }
+.crm-record-section small { color: var(--muted); }
+@media (max-width: 760px) { .workbook-health { grid-template-columns: repeat(2, minmax(0, 1fr)); } .crm-record-form { grid-template-columns: 1fr; } .workbook-tools label { flex: 1 1 150px; } .workbook-tabs { gap: 0; } .workbook-tabs button { flex: 1 1 30%; } }
 .sales-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
