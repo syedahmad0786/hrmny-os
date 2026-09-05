@@ -30,11 +30,11 @@ try {
   if (applied) assert.deepEqual(rows[1], {created_at: when, hash});
   const indexes = await db<Array<{indexname: string; indexdef: string}>>`
     select indexname, indexdef from pg_indexes where schemaname='public' and tablename='connection_account'
-      and indexname in ('connection_account_staff_toolkit_uniq', 'connection_account_staff_provider_uniq', 'connection_account_google_mailbox_uniq')
+      and indexname in ('connection_account_staff_toolkit_uniq', 'connection_account_owner_toolkit_scope_uniq', 'connection_account_staff_provider_uniq', 'connection_account_google_mailbox_uniq')
   `;
-  assert.equal(indexes.length, applied ? 2 : 1, "Connection uniqueness and journal disagree.");
+  assert.equal(indexes.length, 2, "Connection uniqueness and journal disagree.");
   if (applied) {
-    assert(!indexes.some(row => row.indexname === "connection_account_staff_toolkit_uniq"));
+    assert(!indexes.some(row => ["connection_account_staff_toolkit_uniq", "connection_account_owner_toolkit_scope_uniq"].includes(row.indexname)));
     for (const name of ["connection_account_staff_provider_uniq", "connection_account_google_mailbox_uniq"]) {
       const definition = indexes.find(row => row.indexname === name)?.indexdef ?? "";
       assert.match(definition, /CREATE UNIQUE INDEX/);
@@ -44,7 +44,7 @@ try {
       if (name.endsWith("mailbox_uniq")) assert.match(definition, /lower\(btrim\(COALESCE\(external_connection_id/i);
       else assert.match(definition, /NOT/);
     }
-  } else assert.equal(indexes[0]?.indexname, "connection_account_staff_toolkit_uniq");
+  } else assert.deepEqual(indexes.map(row => row.indexname).sort(), ["connection_account_owner_toolkit_scope_uniq", "connection_account_staff_toolkit_uniq"]);
   if (phase === "verify") assert(applied, "0080 is not applied.");
   console.log(JSON.stringify({ phase, projectRef: target.projectRef, state: applied ? "0080" : "0079", hash, migrationsToApply: applied ? 0 : 1 }));
 } finally { await db.end({timeout: 5}); }
