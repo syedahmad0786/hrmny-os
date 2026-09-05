@@ -2079,6 +2079,23 @@ export const connectionsRouter = router({
       });
     }),
 
+  completeGoogleWorkspaceOAuth: staffProcedure
+    .input(
+      z.object({
+        code: z.string().min(1).max(4096),
+        state: z.string().min(1).max(4096),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireAllowedApp("google_workspace");
+      const { completeGoogleWorkspaceOAuth } =
+        await import("../google-workspace-oauth");
+      return completeGoogleWorkspaceOAuth({
+        ...input,
+        actorEmployeeId: requireEmployeeId(ctx.employeeId),
+      });
+    }),
+
   disconnect: staffProcedure
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ input, ctx }) => {

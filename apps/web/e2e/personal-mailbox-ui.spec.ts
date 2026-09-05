@@ -1,5 +1,49 @@
 import { expect, test } from "@playwright/test";
 
+test("mailbox OAuth completion consumes its callback once and removes the code from the URL", async ({
+  page,
+}) => {
+  let completions = 0;
+  await page.route(
+    "**/api/trpc/*completeGoogleWorkspaceOAuth*",
+    async (route) => {
+      completions += 1;
+      const response = {
+        result: {
+          data: {
+            json: {
+              account: "owner@private.test",
+              connectionAccountId: "aa000000-0000-4000-8000-000000000001",
+            },
+          },
+        },
+      };
+      await route.fulfill({
+        json:
+          new URL(route.request().url()).searchParams.get("batch") === "1"
+            ? [response]
+            : response,
+      });
+    },
+  );
+  await page.goto(
+    "/settings/connections#gw=complete&code=synthetic-code&state=synthetic-state",
+  );
+  await expect(
+    page.getByText(
+      "Google Workspace connected: owner@private.test. Your mailbox is private to you.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  expect(page.url()).not.toContain("synthetic-code");
+  expect(page.url()).not.toContain("synthetic-state");
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Connections", exact: true }),
+  ).toBeVisible();
+  expect(completions).toBe(1);
+});
+
 test("personal mail switches accounts and folders without carrying an old message forward", async ({
   page,
 }) => {
