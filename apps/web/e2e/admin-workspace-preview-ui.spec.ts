@@ -17,7 +17,7 @@ test("admin can enter an employee view, navigate back and return to self", async
     "Account management",
   );
   await page.goto("/work/my-tasks");
-  await expect(page.locator("fieldset.desk-preview-content")).toBeDisabled();
+  await expect(page.getByPlaceholder("Filter my tasks")).toBeDisabled();
   await page.goto("/crm/inbox");
   await expect(
     page.getByRole("heading", {
