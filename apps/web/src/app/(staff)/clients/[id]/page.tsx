@@ -48,13 +48,25 @@ export default function ClientOnboardingPage() {
     onSuccess: () => void utils.clients.invalidate(),
   });
   const upsert = trpc.clients.immersion.upsert.useMutation({
-    onSuccess: () => void utils.clients.invalidate(),
+    onSuccess: async () => {
+      await utils.clients.invalidate();
+      setDraft(null);
+    },
   });
   const reviewHref = trpc.clients.portalUsers.reviewHref.useMutation();
 
-  const [usp, setUsp] = useState("");
-  const [audience, setAudience] = useState("");
-  const [objective, setObjective] = useState("");
+  const [draft, setDraft] = useState<{
+    clientId: string;
+    usp?: string;
+    audience?: string;
+    objective?: string;
+  } | null>(null);
+  const currentDraft = draft?.clientId === id ? draft : null;
+  const savedImmersion = immersion.data?.[0];
+  const usp = currentDraft?.usp ?? savedImmersion?.usp ?? "";
+  const audience = currentDraft?.audience ?? savedImmersion?.audience ?? "";
+  const objective =
+    currentDraft?.objective ?? savedImmersion?.objectivePriority ?? "";
   const [portalMsg, setPortalMsg] = useState<string | null>(null);
 
   const creativeTaskId = useMemo(() => {
@@ -148,9 +160,11 @@ export default function ClientOnboardingPage() {
         </h1>
         <p className="text-muted">
           Client workspace · Delivery, people and next actions · Renewal{" "}
-          {client.data && "renewalDate" in client.data
+          {client.data &&
+          "renewalDate" in client.data &&
+          client.data.renewalDate
             ? String(client.data.renewalDate)
-            : "—"}
+            : "not recorded"}
         </p>
         <OnboardingReadyBanner testIdPrefix="client-onboarding" />
         <nav
@@ -321,7 +335,10 @@ export default function ClientOnboardingPage() {
             <input
               className="mt-1 w-full rounded border border-sand px-3 py-2"
               value={usp}
-              onChange={(e) => setUsp(e.target.value)}
+              disabled={immersion.isPending || upsert.isPending}
+              onChange={(e) =>
+                setDraft({ ...currentDraft, clientId: id, usp: e.target.value })
+              }
             />
           </label>
           <label>
@@ -329,7 +346,14 @@ export default function ClientOnboardingPage() {
             <input
               className="mt-1 w-full rounded border border-sand px-3 py-2"
               value={audience}
-              onChange={(e) => setAudience(e.target.value)}
+              disabled={immersion.isPending || upsert.isPending}
+              onChange={(e) =>
+                setDraft({
+                  ...currentDraft,
+                  clientId: id,
+                  audience: e.target.value,
+                })
+              }
             />
           </label>
           <label>
@@ -337,33 +361,53 @@ export default function ClientOnboardingPage() {
             <input
               className="mt-1 w-full rounded border border-sand px-3 py-2"
               value={objective}
-              onChange={(e) => setObjective(e.target.value)}
+              disabled={immersion.isPending || upsert.isPending}
+              onChange={(e) =>
+                setDraft({
+                  ...currentDraft,
+                  clientId: id,
+                  objective: e.target.value,
+                })
+              }
             />
           </label>
           <Button
             type="button"
+            disabled={
+              immersion.isPending ||
+              immersion.isError ||
+              upsert.isPending ||
+              !usp.trim() ||
+              !audience.trim() ||
+              !objective.trim()
+            }
             onClick={() =>
-              void upsert.mutateAsync({
+              upsert.mutate({
                 clientId: id,
                 usp,
                 audience,
                 objectivePriority: objective,
-                swot: {
-                  strengths: "Brand trust",
-                  weaknesses: "Manual ops",
-                  opportunities: "KSA",
-                  threats: "Agency churn",
-                },
                 complete: true,
               })
             }
           >
-            Save & complete immersion
+            {upsert.isPending ? "Saving…" : "Save & complete immersion"}
           </Button>
         </div>
-        <pre className="mt-3 overflow-x-auto text-xs">
-          {JSON.stringify(immersion.data ?? [], null, 2)}
-        </pre>
+        {immersion.error || upsert.error ? (
+          <p role="alert" className="mt-3 text-sm text-red-700">
+            {immersion.error?.message ?? upsert.error?.message}
+          </p>
+        ) : upsert.isSuccess ? (
+          <p role="status" className="mt-3 text-sm">
+            Immersion saved.
+          </p>
+        ) : savedImmersion?.completedAt ? (
+          <p className="mt-3 text-sm text-muted">
+            Completed{" "}
+            {new Date(savedImmersion.completedAt).toLocaleDateString()}
+          </p>
+        ) : null}
       </section>
     </main>
   );
