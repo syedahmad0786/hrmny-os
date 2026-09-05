@@ -51,12 +51,14 @@ export default function SalesDashboardPage() {
     { refetchInterval: 30_000 },
   );
   const session = trpc.auth.session.useQuery();
+  const preview = Boolean(session.data?.workspacePreview);
   const connections = trpc.connections.list.useQuery(undefined, {
+    enabled: !preview,
     refetchInterval: 30_000,
   });
   const conversations = trpc.leadgen.outreach.conversations.useQuery(
     undefined,
-    { refetchInterval: 30_000 },
+    { enabled: !preview, refetchInterval: 30_000 },
   );
   const funnel = trpc.salesOs.funnel.useQuery(
     {
@@ -486,57 +488,70 @@ export default function SalesDashboardPage() {
             </Link>
           </section>
           <section className="crm-panel p-5" data-testid="sales-connections">
-            <h2 className="font-display text-lg font-semibold">
-              Your sales tools
-            </h2>
-            {connections.error ? (
-              <p role="alert">
-                Connection status unavailable. Open setup to retry.
+            {preview ? (
+              <p className="text-sm">
+                Mailbox activity and connected accounts are private to this
+                employee.
               </p>
             ) : (
-              ["google_workspace", "apollo"].map((toolkit) => {
-                const item = connections.data?.find(
-                  (tool) => tool.toolkit === toolkit,
-                );
-                return (
-                  <Link
-                    key={toolkit}
-                    href={`/settings/connections?view=sales#conn-${toolkit}`}
-                    className="sales-tool-row"
-                  >
-                    <span>
-                      <strong>
-                        {toolkit === "apollo" ? "Apollo" : "Google Workspace"}
-                      </strong>
-                      <small>
-                        {toolkit === "apollo"
-                          ? "Find decision-makers"
-                          : "Send email and track replies"}
-                      </small>
-                    </span>
-                    <CrmTag
-                      kind={item?.status === "connected" ? "success" : "warn"}
-                    >
-                      {connections.isLoading
-                        ? "Checking"
-                        : item?.status === "connected"
-                          ? "Connected"
-                          : "Set up"}
-                    </CrmTag>
-                  </Link>
-                );
-              })
+              <>
+                <h2 className="font-display text-lg font-semibold">
+                  Your sales tools
+                </h2>
+                {connections.error ? (
+                  <p role="alert">
+                    Connection status unavailable. Open setup to retry.
+                  </p>
+                ) : (
+                  ["google_workspace", "apollo"].map((toolkit) => {
+                    const item = connections.data?.find(
+                      (tool) => tool.toolkit === toolkit,
+                    );
+                    return (
+                      <Link
+                        key={toolkit}
+                        href={`/settings/connections?view=sales#conn-${toolkit}`}
+                        className="sales-tool-row"
+                      >
+                        <span>
+                          <strong>
+                            {toolkit === "apollo"
+                              ? "Apollo"
+                              : "Google Workspace"}
+                          </strong>
+                          <small>
+                            {toolkit === "apollo"
+                              ? "Find decision-makers"
+                              : "Send email and track replies"}
+                          </small>
+                        </span>
+                        <CrmTag
+                          kind={
+                            item?.status === "connected" ? "success" : "warn"
+                          }
+                        >
+                          {connections.isLoading
+                            ? "Checking"
+                            : item?.status === "connected"
+                              ? "Connected"
+                              : "Set up"}
+                        </CrmTag>
+                      </Link>
+                    );
+                  })
+                )}
+                <Link
+                  className="crm-btn mt-3"
+                  href="/settings/connections?view=sales"
+                >
+                  Manage connections
+                </Link>
+                <p className="mt-3 text-xs text-[var(--muted)]">
+                  Use existing contacts or CSV to start. Apollo enrichment uses
+                  credits; review the cost before importing.
+                </p>
+              </>
             )}
-            <Link
-              className="crm-btn mt-3"
-              href="/settings/connections?view=sales"
-            >
-              Manage connections
-            </Link>
-            <p className="mt-3 text-xs text-[var(--muted)]">
-              Use existing contacts or CSV to start. Apollo enrichment uses
-              credits; review the cost before importing.
-            </p>
           </section>
           <section className="crm-panel p-5">
             <h2 className="font-display text-lg font-semibold">
@@ -665,7 +680,9 @@ export default function SalesDashboardPage() {
                   </small>
                 </span>
                 <b className="min-w-[34px] text-right font-display text-[26px] font-semibold leading-none">
-                  {item.count ?? "…"}
+                  {preview && item.href.startsWith("/crm/outreach")
+                    ? "Private"
+                    : (item.count ?? "…")}
                 </b>
                 <span aria-hidden>→</span>
               </Link>
@@ -697,7 +714,7 @@ export default function SalesDashboardPage() {
                 {label}
               </dt>
               <dd className="mt-2 font-display text-2xl font-semibold leading-none">
-                {value ?? "…"}
+                {preview ? "Private" : (value ?? "…")}
               </dd>
             </div>
           ))}

@@ -42,7 +42,10 @@ function DeliveryBoardPageInner() {
   const clientIdFromQuery = searchParams.get("clientId")?.trim() || "";
   const board = trpc.dashboards.delivery.useQuery();
   const clients = trpc.clients.list.useQuery();
-  const agents = trpc.aiAdmin.customAgents.list.useQuery();
+  const session = trpc.auth.session.useQuery();
+  const agents = trpc.aiAdmin.customAgents.list.useQuery(undefined, {
+    enabled: !session.data?.workspacePreview,
+  });
   const runAgent = trpc.aiAdmin.customAgents.run.useMutation();
   const reviewHref = trpc.clients.portalUsers.reviewHref.useMutation();
   const reset = trpc.m4.reset.useMutation({

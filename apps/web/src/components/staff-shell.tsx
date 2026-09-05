@@ -3,7 +3,13 @@
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
-import { setDevRole, getDevRole, trpc } from "@/lib/trpc";
+import {
+  setDevRole,
+  getDevRole,
+  trpc,
+  getWorkspacePreview,
+  setWorkspacePreview,
+} from "@/lib/trpc";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { initials } from "@/components/crm/format";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
@@ -11,6 +17,10 @@ import { featureForPathname } from "@/features/catalog";
 import { PwaRegister } from "@/components/pwa-register";
 import { isSyntheticRecordName } from "@/lib/synthetic-records";
 import { rankStaffNavigation, type StaffNavId } from "@/lib/staff-workspace";
+import {
+  WORKSPACE_PREVIEW_PAGES,
+  workspaceBackFallback,
+} from "@/lib/workspace-preview";
 
 type StaffCapability = "canAdminFeatures" | "canAdminWork" | "canViewAudit";
 
@@ -187,6 +197,27 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   const completingGoogle = useRef(false);
   const utils = trpc.useUtils();
   const session = trpc.auth.session.useQuery();
+  const preview = session.data?.workspacePreview;
+  const accountMenu = useRef<HTMLDetailsElement>(null);
+  const localHistory = useRef<string[]>([]);
+  const previewUsers = trpc.auth.workspaceUsers.useQuery(undefined, {
+    enabled: session.data?.canPreviewWorkspace === true,
+    retry: false,
+  });
+  useEffect(() => {
+    if (localHistory.current.at(-1) !== pathname)
+      localHistory.current.push(pathname);
+    if (accountMenu.current) accountMenu.current.open = false;
+  }, [pathname]);
+  function onBack() {
+    localHistory.current.pop();
+    router.push(localHistory.current.pop() ?? workspaceBackFallback(pathname));
+  }
+  function switchWorkspace(employeeId: string | null) {
+    setWorkspacePreview(employeeId);
+    // A full navigation drops all cached data and in-flight requests from the previous identity.
+    window.location.assign("/");
+  }
   const enabledFeatures = useMemo(
     () => new Set(session.data?.enabledFeatureKeys ?? []),
     [session.data?.enabledFeatureKeys],
@@ -342,6 +373,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (
       !session.data?.employeeId ||
+      session.data.workspacePreview ||
       completingGoogle.current ||
       localStorage.getItem("hrmny-google-workspace-connect") !== "pending"
     ) {
@@ -411,9 +443,15 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
         );
         router.replace("/settings/connections");
       });
-  }, [router, saveGoogleWorkspace, session.data?.employeeId]);
+  }, [
+    router,
+    saveGoogleWorkspace,
+    session.data?.employeeId,
+    session.data?.workspacePreview,
+  ]);
 
   async function onRoleChange(next: string) {
+    setWorkspacePreview(null);
     setDevRole(next);
     setRole(next);
     await queryClient.cancelQueries();
@@ -422,6 +460,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   }
 
   async function onSignOut() {
+    setWorkspacePreview(null);
     await getSupabaseBrowserClient()?.auth.signOut();
     await queryClient.cancelQueries();
     await queryClient.resetQueries();
@@ -429,6 +468,7 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   }
 
   async function onRecoverSession() {
+    setWorkspacePreview(null);
     await getSupabaseBrowserClient()?.auth.signOut({ scope: "local" });
     await queryClient.cancelQueries();
     await queryClient.resetQueries();
@@ -503,7 +543,16 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   if (session.isError) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-3 text-sm text-muted">
-        <p>Could not reach the server.</p>
+        <p>
+          {getWorkspacePreview()
+            ? "This employee view is unavailable."
+            : "Could not reach the server."}
+        </p>
+        {getWorkspacePreview() ? (
+          <button className="crm-btn" onClick={() => switchWorkspace(null)}>
+            Return to my workspace
+          </button>
+        ) : null}
         <button
           type="button"
           className="rounded border border-sand bg-white px-4 py-2 text-ink"
@@ -624,6 +673,15 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
 
       <div className="desk-workspace">
         <header className="desk-topbar">
+          <button
+            type="button"
+            className="desk-topbar-link desk-back"
+            onClick={onBack}
+            aria-label="Go back"
+            data-testid="workspace-back"
+          >
+            ← Back
+          </button>
           <Link href="/work/search" className="desk-search-trigger">
             <span className="desk-search-icon" aria-hidden>
               ⌕
@@ -634,22 +692,17 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
             <kbd>Ctrl K</kbd>
           </Link>
           <div className="desk-top-actions">
-            {enabledFeatures.has("integrations.connections") ? (
-              <Link href="/settings/connections" className="desk-topbar-link">
-                Connections
-              </Link>
-            ) : null}
-            {enabledFeatures.has("os.notifications") ? (
+            {!preview && enabledFeatures.has("os.notifications") ? (
               <Link
                 href="/notifications"
-                className="desk-icon-btn"
+                className="desk-topbar-link"
                 aria-label="Open notifications"
                 title="Notifications"
               >
-                <span aria-hidden>●</span>
+                Notifications
               </Link>
             ) : null}
-            {(users.data ?? []).length > 0 ? (
+            {!preview && (users.data ?? []).length > 0 ? (
               <div className="desk-devbox">
                 <label htmlFor="persona">Dev only</label>
                 <select
@@ -665,54 +718,108 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
                 </select>
               </div>
             ) : null}
-            {session.data?.canPreviewClient &&
-            enabledFeatures.has("portal.client") ? (
-              <Link
-                href={
-                  pathname.startsWith("/client-preview")
-                    ? "/clients"
-                    : "/client-preview"
-                }
-                className="desk-topbar-primary"
+            <details className="desk-account-menu" ref={accountMenu}>
+              <summary
+                className="desk-account-toggle"
+                data-testid="account-menu"
               >
-                {pathname.startsWith("/client-preview")
-                  ? "← Staff admin"
-                  : "Client view"}
-              </Link>
-            ) : null}
-            {session.data?.canViewAudit &&
-            enabledFeatures.has("admin.audit") ? (
-              <Link
-                href="/admin/audit"
-                className="desk-icon-btn"
-                aria-label="Open audit activity"
-                title="Audit activity"
-              >
-                A°
-              </Link>
-            ) : null}
-            {session.data?.authMode === "supabase" &&
-            session.data.employeeId ? (
-              <button
-                type="button"
-                className="desk-avatar"
-                onClick={() => void onSignOut()}
-                aria-label={`Sign out ${session.data.displayName ?? "account"}`}
-                title="Sign out"
-              >
-                {avatar}
-              </button>
-            ) : (
-              <span
-                className="desk-avatar"
-                title={session.data?.displayName ?? "Partner"}
-                aria-hidden
-              >
-                {avatar}
-              </span>
-            )}
+                <span className="desk-avatar" aria-hidden>
+                  {avatar}
+                </span>{" "}
+                Account
+              </summary>
+              <div className="desk-account-panel">
+                <strong>
+                  {preview?.viewerName ?? session.data?.displayName}
+                </strong>
+                {session.data?.canPreviewWorkspace ? (
+                  <div className="desk-workspace-picker">
+                    <label htmlFor="workspace-employee">
+                      View employee workspace
+                    </label>
+                    <select
+                      id="workspace-employee"
+                      data-testid="workspace-employee"
+                      value={preview?.employeeId ?? ""}
+                      onChange={(event) =>
+                        switchWorkspace(event.target.value || null)
+                      }
+                    >
+                      <option value="">My workspace</option>
+                      {(previewUsers.data ?? []).map((person) => (
+                        <option
+                          key={person.employeeId}
+                          value={person.employeeId}
+                        >
+                          {person.displayName}
+                        </option>
+                      ))}
+                    </select>
+                    <small>
+                      {previewUsers.error
+                        ? "Employee list unavailable. Reopen this page to retry."
+                        : "Read-only dashboards and work. Private mail and connections stay protected."}
+                    </small>
+                  </div>
+                ) : null}
+                {preview ? (
+                  <button onClick={() => switchWorkspace(null)}>
+                    Return to my workspace
+                  </button>
+                ) : (
+                  <>
+                    {enabledFeatures.has("integrations.connections") ? (
+                      <Link href="/settings/connections">
+                        Connected tools
+                        <small>
+                          Manage your Google account and other integrations
+                        </small>
+                      </Link>
+                    ) : null}
+                    {session.data?.canPreviewClient &&
+                    enabledFeatures.has("portal.client") ? (
+                      <Link href="/client-preview" aria-label="Client view">
+                        Preview client portal
+                        <small>See the client-facing experience</small>
+                      </Link>
+                    ) : null}
+                    {session.data?.canViewAudit &&
+                    enabledFeatures.has("admin.audit") ? (
+                      <Link
+                        href="/admin/audit"
+                        aria-label="Open audit activity"
+                      >
+                        Audit log
+                        <small>Review recorded actions and admin views</small>
+                      </Link>
+                    ) : null}
+                  </>
+                )}
+                {session.data?.authMode === "supabase" ? (
+                  <button onClick={() => void onSignOut()}>Sign out</button>
+                ) : null}
+              </div>
+            </details>
           </div>
         </header>
+        {preview ? (
+          <aside
+            className="desk-preview-banner"
+            role="status"
+            data-testid="workspace-preview-banner"
+          >
+            <div>
+              <strong>Viewing {preview.displayName}&apos;s workspace</strong>
+              <small>
+                Read-only · Private mail, chats, AI history and connections are
+                excluded.
+              </small>
+            </div>
+            <button className="crm-btn" onClick={() => switchWorkspace(null)}>
+              Return to my workspace
+            </button>
+          </aside>
+        ) : null}
         <div
           key={session.data?.employeeId ?? "anonymous"}
           className="desk-content"
@@ -727,8 +834,27 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
               {connectionMessage}
             </p>
           ) : null}
-          {pageEnabled ? (
-            children
+          {preview && !WORKSPACE_PREVIEW_PAGES.has(pathname) ? (
+            <main className="crm-panel p-6">
+              <h1 className="font-display text-2xl">
+                This area is outside employee preview
+              </h1>
+              <p className="my-3">
+                Use Today, Sales dashboard, Pipeline, My work, Clients, Delivery
+                or Reports to review this person&apos;s operational workspace.
+              </p>
+              <button className="crm-btn" onClick={() => router.push("/")}>
+                Back to their dashboard
+              </button>
+            </main>
+          ) : pageEnabled ? (
+            preview ? (
+              <fieldset disabled className="desk-preview-content">
+                {children}
+              </fieldset>
+            ) : (
+              children
+            )
           ) : (
             <main className="rounded-lg border border-sand bg-white/70 p-6">
               <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted">
