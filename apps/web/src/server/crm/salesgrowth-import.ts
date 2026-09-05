@@ -130,23 +130,27 @@ function makeWriter(): CrmWriter {
     },
     async recordStaging(rows) {
       if (!db || rows.length === 0) return;
-      for (const r of rows) {
-        await db
-          .insert(salesgrowthImportStaging)
-          .values({
+      await db
+        .insert(salesgrowthImportStaging)
+        .values(
+          rows.map((r) => ({
             sourceTable: r.sourceTable,
             sourceId: r.sourceId,
             raw: r.raw,
             checksum: r.checksum,
-          })
-          .onConflictDoUpdate({
-            target: [
-              salesgrowthImportStaging.sourceTable,
-              salesgrowthImportStaging.sourceId,
-            ],
-            set: { raw: r.raw, checksum: r.checksum, importedAt: new Date() },
-          });
-      }
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [
+            salesgrowthImportStaging.sourceTable,
+            salesgrowthImportStaging.sourceId,
+          ],
+          set: {
+            raw: sql`excluded.raw`,
+            checksum: sql`excluded.checksum`,
+            importedAt: new Date(),
+          },
+        });
     },
   };
 }
