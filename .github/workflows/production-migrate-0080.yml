@@ -1,0 +1,99 @@
+name: HRMNY production migration 0080
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Audit or verify is read-only; apply updates mailbox uniqueness without changing connection rows
+        required: true
+        default: audit
+        type: choice
+        options:
+          - audit
+          - verify
+          - apply
+      project_ref:
+        description: Canonical Supabase project ref
+        required: true
+        type: string
+      confirmation:
+        description: Type APPLY MIGRATION 0080 MULTIPLE GOOGLE MAILBOXES TO HRMNY PRODUCTION
+        required: false
+        type: string
+      reviewed_sha:
+        description: Exact reviewed main commit SHA to execute
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hrmny-production-database-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Guard, append 0080, and read back
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: Production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Trust the reviewed Supabase certificate authority
+        shell: bash
+        run: |
+          cert="$GITHUB_WORKSPACE/.github/certificates/supabase-prod-ca-2021.crt"
+          cert_hash="$(sha256sum "$cert")"
+          test "${cert_hash%% *}" = "700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7"
+          echo "NODE_EXTRA_CA_CERTS=$cert" >> "$GITHUB_ENV"
+      - name: Refuse non-main or unreviewed code
+        shell: bash
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$REVIEWED_SHA"
+          test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Upgrade the runner connection to certificate-verified TLS
+        shell: bash
+        env:
+          HRMNY_PRODUCTION_DATABASE_URL_RAW: ${{ secrets.HRMNY_PRODUCTION_DATABASE_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from "node:fs";
+
+          const raw = process.env.HRMNY_PRODUCTION_DATABASE_URL_RAW?.trim();
+          if (!raw) throw new Error("Production database URL is missing.");
+          const url = new URL(raw);
+          const modes = url.searchParams.getAll("sslmode").map((mode) => mode.toLowerCase());
+          if (modes.length > 1 || (modes[0] && !["require", "verify-full"].includes(modes[0]))) {
+            throw new Error("Production database TLS mode cannot be upgraded safely.");
+          }
+          url.searchParams.set("sslmode", "verify-full");
+          appendFileSync(process.env.GITHUB_ENV, `HRMNY_PRODUCTION_DATABASE_URL=${url.toString()}\n`);
+          NODE
+      - name: Read-only exact preflight
+        if: inputs.operation != 'verify'
+        env:
+          PRODUCTION_MIGRATION_PHASE: ${{ inputs.operation == 'apply' && 'preflight' || 'audit' }}
+          HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
+          HRMNY_PRODUCTION_MIGRATION_CONFIRMATION: ${{ inputs.confirmation }}
+        run: pnpm --filter @hrmny/db exec tsx src/production-migration-0080-guard.ts
+      - name: Append reviewed migration 0080
+        if: inputs.operation == 'apply'
+        run: DIRECT_URL="$HRMNY_PRODUCTION_DATABASE_URL" pnpm --filter @hrmny/db migrate
+      - name: Read back exact journal and connection uniqueness indexes
+        if: inputs.operation != 'audit'
+        env:
+          PRODUCTION_MIGRATION_PHASE: verify
+          HRMNY_PRODUCTION_PROJECT_REF: ${{ inputs.project_ref }}
+        run: pnpm --filter @hrmny/db exec tsx src/production-migration-0080-guard.ts
