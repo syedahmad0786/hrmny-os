@@ -9,6 +9,11 @@ import {
 } from "@hrmny/integrations";
 import { getGoogleWorkspaceAccessToken } from "../trpc/connections-router";
 import { formatGoogleWorkspaceGmailError } from "@/lib/google-workspace-error";
+import {
+  listGmailIdentities,
+  GmailSenderIdentityError,
+} from "./google-mailbox-identities";
+import { z } from "zod";
 
 /**
  * HITL Gmail send via staff Google Workspace OAuth (gmail.send scope).
@@ -38,6 +43,27 @@ export function createGoogleWorkspaceGmailSend(
       if (!accessToken) {
         return stub.sendAfterApproval(input);
       }
+      const fromEmail = input.fromEmail
+        ? z.string().email().parse(input.fromEmail).toLowerCase()
+        : null;
+      if (fromEmail) {
+        try {
+          if (
+            !(await listGmailIdentities(accessToken)).some(
+              (identity) => identity.email === fromEmail,
+            )
+          )
+            throw new Error(
+              "This sender address is not a verified alias of the selected mailbox.",
+            );
+        } catch (error) {
+          throw new GmailSenderIdentityError(
+            error instanceof Error
+              ? error.message
+              : "Sender verification failed; nothing was sent.",
+          );
+        }
+      }
       const subject = (input.subject ?? "(no subject)")
         .replace(/[\r\n]+/g, " ")
         .trim()
@@ -45,6 +71,7 @@ export function createGoogleWorkspaceGmailSend(
       const encodedSubject = Buffer.from(subject, "utf8").toString("base64");
       const inReplyTo = input.inReplyTo?.replace(/[\r\n]+/g, "").trim();
       const message = [
+        ...(fromEmail ? [`From: ${fromEmail}`] : []),
         `To: ${input.to.trim()}`,
         `Subject: =?UTF-8?B?${encodedSubject}?=`,
         ...(input.messageId
@@ -93,6 +120,7 @@ export function createGoogleWorkspaceGmailSend(
           externalId,
           recipient: input.to,
           expectedThreadId: input.threadId,
+          expectedFromEmail: fromEmail ?? undefined,
         });
       } catch (error) {
         if (error instanceof GmailProviderReadbackError) throw error;
@@ -123,6 +151,7 @@ export function createGoogleWorkspaceGmailSend(
       }
       const params = new URLSearchParams({ format: "metadata" });
       params.append("metadataHeaders", "To");
+      params.append("metadataHeaders", "From");
       const response = await fetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(input.externalId)}?${params}`,
         { headers: { authorization: `Bearer ${accessToken}` } },
@@ -141,6 +170,7 @@ export function createGoogleWorkspaceGmailSend(
         externalId: input.externalId,
         recipient: input.recipient,
         expectedThreadId: input.expectedThreadId,
+        expectedFromEmail: input.expectedFromEmail,
       });
     },
   };

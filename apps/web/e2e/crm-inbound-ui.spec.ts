@@ -38,7 +38,7 @@ test.describe("CRM inbound Capture UI", () => {
       timeout: 30_000,
     });
     await expect(page.getByRole("heading", { level: 1 })).toContainText(
-      "E2E Lead",
+      company,
       { timeout: 60_000 },
     );
     await expect(page.locator("body")).toContainText(company);

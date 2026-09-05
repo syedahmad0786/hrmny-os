@@ -1062,17 +1062,17 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 .crm-page-header h1 {
   margin: 0;
   font:
-    600 clamp(28px, 3vw, 42px) / 1 var(--font-display),
+    600 clamp(25px, 2vw, 30px) / 1.2 var(--font-display),
     Syne,
     sans-serif;
-  letter-spacing: -0.045em;
+  letter-spacing: -0.02em;
 }
 
 .crm-page-header p {
   max-width: 640px;
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.65;
 }
 
@@ -1082,11 +1082,11 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
   gap: 8px;
   margin: 0 0 12px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0;
   line-height: 1;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .crm-eyebrow::before {
@@ -1105,7 +1105,7 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 
 .crm-btn {
   display: inline-flex;
-  min-height: 38px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -1115,7 +1115,7 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
   background: var(--paper-2);
   color: var(--ink);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.025em;
   transition:
@@ -1201,7 +1201,7 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
   border-radius: 99px;
   background: var(--sand);
   color: var(--ink-2);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
   text-transform: capitalize;

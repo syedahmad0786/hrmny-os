@@ -37,6 +37,7 @@ async function ensureApolloDealHandoverNext(page: Page, query: string) {
     timeout: 60_000,
   });
 
+  const companyName = await page.getByRole("heading", { level: 1 }).innerText();
   for (const id of [
     "deal-buaf-budget",
     "deal-buaf-urgency",
@@ -64,11 +65,11 @@ async function ensureApolloDealHandoverNext(page: Page, query: string) {
   await page
     .getByTestId("outreach-draft-body")
     .fill(
-      `Hello ${query} team, I noticed your growth priorities and would value a short conversation about a relevant campaign idea.`,
+      `Hello ${companyName} team, I noticed your growth priorities and would value a short conversation about a relevant campaign idea.`,
     );
   await page.getByTestId("outreach-draft-create").click();
   const showTestDrafts = page.getByRole("checkbox", {
-    name: /Show \d+ test drafts?/i,
+    name: /Show test records/i,
   });
   await expect(showTestDrafts).toBeVisible({ timeout: 30_000 });
   await showTestDrafts.check();

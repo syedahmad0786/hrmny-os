@@ -14,10 +14,7 @@ import {
 } from "@/components/crm/ui";
 import { formatRelative } from "@/components/crm/format";
 import { HitlReadyBanner } from "@/components/hitl-ready-banner";
-import {
-  hasSyntheticMarker,
-  isSyntheticRecordName,
-} from "@/lib/synthetic-records";
+import { hasSyntheticMarker, isSyntheticDeal } from "@/lib/synthetic-records";
 import { googleWorkspaceGmailApiEnableUrl } from "@/lib/google-workspace-error";
 
 /** Serialized shape of a @hrmny/gate TransitionResult refusal. */
@@ -88,6 +85,15 @@ function OutreachInner() {
   const [showTestRecords, setShowTestRecords] = useState(false);
   const [senderConnectionAccountId, setSenderConnectionAccountId] =
     useState("");
+
+  const [fromEmail, setFromEmail] = useState("");
+  const identities = trpc.connections.gmailIdentities.useQuery(
+    { connectionAccountId: senderConnectionAccountId },
+    { enabled: Boolean(senderConnectionAccountId), staleTime: 60000 },
+  );
+  useEffect(() => {
+    setFromEmail("");
+  }, [senderConnectionAccountId]);
 
   const invalidate = () => {
     void utils.leadgen.outreach.invalidate();
@@ -205,13 +211,14 @@ function OutreachInner() {
   const byState = useMemo(() => {
     const all = (items.data ?? []).filter(
       (item) =>
-        showTestRecords ||
-        item.id === focusId ||
-        !hasSyntheticMarker(
-          companyByDeal.get(item.dealId),
-          item.recipient,
-          item.subject,
-        ),
+        (!focusId || item.id === focusId) &&
+        (showTestRecords ||
+          item.id === focusId ||
+          !hasSyntheticMarker(
+            companyByDeal.get(item.dealId),
+            item.recipient,
+            item.subject,
+          )),
     );
     return {
       drafts: orderOutreachWorkItems(
@@ -341,6 +348,7 @@ function OutreachInner() {
       const result = await sendTest.mutateAsync({
         id,
         idempotencyKey: crypto.randomUUID(),
+        fromEmail: fromEmail || undefined,
         senderConnectionAccountId,
       });
       setSendNote(
@@ -414,9 +422,33 @@ function OutreachInner() {
                   ))}
                 </select>
               </label>
-              <strong>{senderAccount}</strong> will send via Google Workspace
-              Gmail. Gmail acceptance is verified by reading the exact message
-              back from Sent Mail; delivery is monitored separately.{" "}
+              <label className="crm-field mb-2">
+                <span>Sender address</span>
+                <select
+                  className="crm-input"
+                  value={fromEmail}
+                  onChange={(event) => setFromEmail(event.target.value)}
+                >
+                  <option value="">{senderAccount} (mailbox address)</option>
+                  {(identities.data ?? [])
+                    .filter((identity) => identity.email !== senderAccount)
+                    .map((identity) => (
+                      <option key={identity.email} value={identity.email}>
+                        {identity.name ? `${identity.name} · ` : ""}
+                        {identity.email}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {identities.error ? (
+                <p role="status">
+                  {identities.error.message} Your primary mailbox remains
+                  selected.
+                </p>
+              ) : null}
+              <strong>{fromEmail || senderAccount}</strong> will send via Google
+              Workspace Gmail. Gmail acceptance is verified by reading the exact
+              message back from Sent Mail; delivery is monitored separately.{" "}
               <Link
                 href="/settings/connections#conn-google_workspace"
                 className="font-bold underline"
@@ -538,15 +570,14 @@ function OutreachInner() {
         </div>
       </details>
 
-      {hiddenTestCount ? (
+      {hiddenTestCount || (deals.data ?? []).some(isSyntheticDeal) ? (
         <label className="mt-3 flex w-fit items-center gap-2 text-xs text-muted">
           <input
             type="checkbox"
             checked={showTestRecords}
             onChange={(event) => setShowTestRecords(event.target.checked)}
           />
-          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test draft
-          {hiddenTestCount === 1 ? "" : "s"}
+          Show test records ({hiddenTestCount} drafts)
         </label>
       ) : null}
 
@@ -704,13 +735,13 @@ function OutreachInner() {
         <aside className="crm-panel outreach-approved-panel">
           <div className="crm-panel-head">
             <div>
-              <h3>Approved — ready to send</h3>
+              <h3>Approved messages</h3>
               <p>
                 Oldest first. Email sends only after a second confirmation.
                 LinkedIn stays manual.
               </p>
             </div>
-            <CrmTag kind="success">{byState.approved.length} ready</CrmTag>
+            <CrmTag kind="info">{byState.approved.length} approved</CrmTag>
           </div>
           <div className="crm-panel-body crm-approval-stack">
             {items.isLoading ? (
@@ -792,7 +823,7 @@ function OutreachInner() {
                         }
                         onClick={() => {
                           const confirmed = window.confirm(
-                            `Send an INTERNAL TEST only?\n\nFrom: ${senderAccount ?? "No sender connected"}\nTo: ${senderAccount ?? "No sender connected"}\nOriginal client: ${item.recipient}\n\nThe client will not be contacted and this outreach will stay approved.`,
+                            `Send an INTERNAL TEST only?\n\nFrom: ${fromEmail || senderAccount || "No sender connected"}\nTo: ${senderAccount ?? "No sender connected"}\nOriginal client: ${item.recipient}\n\nThe client will not be contacted and this outreach will stay approved.`,
                           );
                           if (confirmed) void sendInternalTest(item.id);
                         }}
@@ -805,25 +836,32 @@ function OutreachInner() {
                         variant="primary"
                         disabled={
                           busyId !== null ||
+                          !item.readiness?.ready ||
                           mailboxes.isLoading ||
                           !senderAccount ||
                           (selectedSender?.remainingToday ?? 0) < 1
                         }
                         onClick={() => {
                           const confirmed = window.confirm(
-                            `Send this email now?\n\nFrom: ${senderAccount ?? "No sender connected"}\nTo: ${item.recipient}\nSubject: ${item.subject ?? "(no subject)"}\n\nThis creates a real external email.`,
+                            `Send this email now?\n\nFrom: ${fromEmail || senderAccount || "No sender connected"}\nTo: ${item.recipient}\nSubject: ${item.subject ?? "(no subject)"}\n\nThis creates a real external email.`,
                           );
                           if (!confirmed) return;
                           void run(item.id, "Send", () =>
                             send.mutateAsync({
                               id: item.id,
                               senderConnectionAccountId,
+                              fromEmail: fromEmail || undefined,
                             }),
                           );
                         }}
                       >
                         {busyId === item.id ? "Sending…" : "Send via Gmail"}
                       </CrmBtn>
+                      {item.readiness && !item.readiness.ready ? (
+                        <p className="crm-note" role="status">
+                          {item.readiness.reason}
+                        </p>
+                      ) : null}
                       <CrmBtn
                         disabled={busyId !== null}
                         onClick={() =>
@@ -884,11 +922,7 @@ function OutreachInner() {
                     {deals.isLoading ? "Loading deals…" : "Select a deal"}
                   </option>
                   {(deals.data ?? [])
-                    .filter(
-                      (deal) =>
-                        showTestRecords ||
-                        !isSyntheticRecordName(deal.companyName),
-                    )
+                    .filter((deal) => showTestRecords || !isSyntheticDeal(deal))
                     .map((d) => (
                       <option key={d.dealId} value={d.dealId}>
                         {d.companyName} · {String(d.stage).replace(/_/g, " ")}

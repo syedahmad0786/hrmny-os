@@ -20,6 +20,14 @@ describe("Apollo + Hunter mock adapters", () => {
     expect(person?.source).toBe("apollo_mock");
   });
 
+  it("keeps separate synthetic companies on separate reserved domains", async () => {
+    const apollo = createApolloMock();
+    const first = await apollo.searchCompanies("Acceptance Alpha");
+    const second = await apollo.searchCompanies("Acceptance Beta");
+    expect(first[0]?.domain).not.toBe(second[0]?.domain);
+    expect(first[0]?.domain).toMatch(/\.example$/);
+  });
+
   it("Hunter mock verifies deliverable emails", async () => {
     const hunter = createHunterMock();
     const ok = await hunter.verifyEmail("alex@democo.example");

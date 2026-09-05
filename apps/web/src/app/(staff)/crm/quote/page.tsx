@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { isSyntheticRecordName } from "@/lib/synthetic-records";
+import { isSyntheticDeal } from "@/lib/synthetic-records";
 import { CrmBtn, CrmEmpty, CrmPageHeader, CrmTag } from "@/components/crm/ui";
 import { formatAed, formatRelative } from "@/components/crm/format";
 
@@ -41,8 +41,7 @@ export default function CrmQuotePage() {
 
   const allDeals = deals.data ?? [];
   const dealList = allDeals.filter(
-    (deal) =>
-      deal.dealId === dealId || !isSyntheticRecordName(deal.companyName),
+    (deal) => deal.dealId === dealId || !isSyntheticDeal(deal),
   );
   const hiddenTestCount = allDeals.length - dealList.length;
   const selected =

@@ -19,9 +19,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         style={
           {
             ["--font-display" as string]:
-              '"Aptos Display", "Segoe UI Variable Display", "Arial Narrow", sans-serif',
+              '"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif',
             ["--font-body" as string]:
-              'Montserrat, Aptos, "Segoe UI Variable Text", "Segoe UI", sans-serif',
+              '"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif',
           } as React.CSSProperties
         }
       >

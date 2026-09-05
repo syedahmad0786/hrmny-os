@@ -8,7 +8,7 @@ import {
   computeWinLoss,
   type StageChangeEvent,
 } from "../analytics/crm-forecast";
-import { isSyntheticRecordName } from "../../lib/synthetic-records";
+import { isSyntheticDeal } from "../../lib/synthetic-records";
 
 /**
  * W10 CRM forecast & reporting — READ-ONLY: every procedure is a query over
@@ -41,9 +41,7 @@ async function stageChangeEvents(
 }
 
 async function operationalDeals() {
-  return (await listDeals()).filter(
-    (deal) => !isSyntheticRecordName(deal.companyName),
-  );
+  return (await listDeals()).filter((deal) => !isSyntheticDeal(deal));
 }
 
 export const crmForecastRouter = router({

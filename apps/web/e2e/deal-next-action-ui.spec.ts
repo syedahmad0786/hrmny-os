@@ -53,9 +53,7 @@ test("deal detail shows the eight-stage path and saves its next action", async (
   await title.fill(actionTitle);
   await dueDate.fill("2099-12-31");
   await page.getByTestId("deal-next-action-save").click();
-  await expect(page.getByRole("status")).toContainText(
-    "Next action created and assigned to you.",
-  );
+  await expect(page.getByRole("status")).toContainText("Next action created.");
 
   const needs = {
     "deal-need-objective": "Launch a winter positioning campaign",

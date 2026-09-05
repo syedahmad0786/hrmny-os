@@ -160,7 +160,7 @@ export async function GET() {
         upstreamRevision: GBRAIN_UPSTREAM_REVISION,
       },
       qm: {
-        status: qmUrl ? "configured" : "deployment_ready",
+        status: qmUrl ? "configured" : "setup_required",
         publicUrl: qmUrl || null,
         plannedUrl: "https://hrmny-qm-portal.fly.dev",
       },

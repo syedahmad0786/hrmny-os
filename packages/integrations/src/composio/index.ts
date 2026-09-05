@@ -6,6 +6,8 @@ export type ComposioSendInput = {
   toolkit: "gmail" | "linkedin";
   to: string;
   subject?: string;
+  /** Provider-verified Gmail send-as address, selected by the operator. */
+  fromEmail?: string;
   body: string;
   connectionId?: string;
   messageId?: string;
@@ -68,6 +70,7 @@ export function verifyGmailProviderReadback(input: {
   externalId: string;
   recipient: string;
   expectedThreadId?: string;
+  expectedFromEmail?: string;
 }): GmailProviderReadback {
   const id = input.message.id?.trim() ?? "";
   const recipient = input.recipient.trim().toLowerCase();
@@ -105,6 +108,17 @@ export function verifyGmailProviderReadback(input: {
       input.message.threadId,
     );
   }
+  const from = headerValue(input.message, "from").trim().toLowerCase();
+  const fromAddress = (from.match(/<([^>]+)>/)?.[1] ?? from).trim();
+  if (
+    input.expectedFromEmail &&
+    fromAddress !== input.expectedFromEmail.toLowerCase()
+  )
+    throw new GmailProviderReadbackError(
+      "Gmail readback sender does not match the selected address",
+      input.externalId,
+      input.message.threadId,
+    );
   return {
     externalId: id,
     threadId: input.message.threadId,
@@ -123,6 +137,7 @@ export interface ComposioSendAdapter extends ComposioAdapter {
     recipient: string;
     connectionId?: string;
     expectedThreadId?: string;
+    expectedFromEmail?: string;
   }): Promise<GmailProviderReadback>;
 }
 

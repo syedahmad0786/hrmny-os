@@ -694,7 +694,7 @@ export const salesOsRouter = router({
       ),
   }),
 
-  digest: staffProcedure.query(() => buildSalesOsDigest()),
+  digest: salesOperatorProcedure.query(() => buildSalesOsDigest()),
 
   funnel: staffProcedure
     .input(

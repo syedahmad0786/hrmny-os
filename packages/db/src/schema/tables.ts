@@ -300,6 +300,14 @@ export const contact = pgTable("contact", {
 /** 4. deal */
 export const deal = pgTable("deal", {
   dealId: uuid("deal_id").defaultRandom().primaryKey(),
+  recordClass: text("record_class").default("operational").notNull(),
+  classificationReason: text("classification_reason"),
+  opportunityName: text("opportunity_name"),
+  expectedCloseDate: date("expected_close_date"),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  stageEnteredAt: timestamp("stage_entered_at", {
+    withTimezone: true,
+  }).defaultNow(),
   companyId: uuid("company_id").references(() => company.companyId),
   primaryContactId: uuid("primary_contact_id").references(
     () => contact.contactId,

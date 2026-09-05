@@ -2,7 +2,10 @@ import { sql } from "@hrmny/db";
 import { ensureClientOnboarding } from "../clients/onboarding";
 import { getDb } from "../db";
 import { persistMemoryChunk } from "../ai/memory-db";
-import { seedClientCreativeTask } from "../tasks/delivery-tasks";
+import {
+  seedClientCreativeTask,
+  listDeliveryTasks,
+} from "../tasks/delivery-tasks";
 import { resolveTaxRegistration } from "../finance/tax-registration";
 import { buildHandoverNextLinks } from "./handover-next";
 import {
@@ -991,13 +994,18 @@ export async function durableHandoverPack(input: {
   const phases = await ensureClientOnboarding(client.clientId);
   fired.push("onboarding.seed");
 
-  const task = await seedClientCreativeTask({
-    clientId: client.clientId,
-    title: `${client.name} — ${acceptedQuote.lineItems[0]!.label.trim()}`,
-    taskType: "social_cutdowns",
-    status: "qc",
-    ownerEmployeeId: input.actorEmployeeId ?? null,
-  });
+  const taskTitle = `${client.name} — ${acceptedQuote.lineItems[0]!.label.trim()}`;
+  const task =
+    (await listDeliveryTasks({ clientId: client.clientId })).find(
+      (item) => item.title === taskTitle,
+    ) ??
+    (await seedClientCreativeTask({
+      clientId: client.clientId,
+      title: taskTitle,
+      taskType: "scope_delivery",
+      status: "briefing",
+      ownerEmployeeId: input.actorEmployeeId ?? null,
+    }));
   if (task) fired.push("creative.task_seed");
   if (phases.length === 0 || !task) {
     return handoverIncomplete(fired, [
@@ -1006,34 +1014,8 @@ export async function durableHandoverPack(input: {
     ]);
   }
 
-  let campaignItemId: string | null = null;
-  try {
-    const { createCampaignDraft, listCampaigns } =
-      await import("../campaigns/repository");
-    const existingCampaign = (
-      await listCampaigns({
-        clientId: client.clientId,
-      })
-    ).find((campaign) => campaign.body.kind === "won_handover_seed");
-    const draft =
-      existingCampaign ??
-      (await createCampaignDraft({
-        title: `${client.name} — launch LinkedIn teaser`,
-        channel: "linkedin",
-        scheduledFor: new Date().toISOString().slice(0, 10),
-        clientId: client.clientId,
-        body: {
-          copy: `Excited to partner with ${client.name} on creative that converts across the UAE.`,
-          kind: "won_handover_seed",
-        },
-      }));
-    campaignItemId = draft.campaignItemId;
-    fired.push(
-      existingCampaign ? "campaign.draft_exists" : "campaign.draft_seed",
-    );
-  } catch {
-    fired.push("campaign.draft_failed");
-  }
+  const campaignItemId: string | null = null;
+  fired.push("campaign.not_requested");
 
   let invoiceId: string | null = null;
   try {
@@ -1123,73 +1105,11 @@ export async function durableHandoverPack(input: {
     fired.push("memory.handover_exists");
   }
 
-  let calendarId: string | null = null;
-  try {
-    const {
-      createDeliveryCalendar,
-      addDeliveryCalendarSlot,
-      listDeliveryCalendars,
-    } = await import("../tasks/delivery-calendars");
-    const month = new Date().toISOString().slice(0, 7);
-    const [existingCalendar] = await listDeliveryCalendars({
-      clientId: client.clientId,
-      month,
-    });
-    const calendar =
-      existingCalendar ??
-      (await createDeliveryCalendar({
-        clientId: client.clientId,
-        month,
-        focusPoints: ["Launch reel", "Product stills"],
-      }));
-    calendarId = calendar?.calendarId ?? null;
-    if (calendar) {
-      fired.push(existingCalendar ? "calendar.exists" : "calendar.seed");
-      if (
-        task?.taskId &&
-        !calendar.slots.some((slot) => slot.taskId === task.taskId)
-      ) {
-        await addDeliveryCalendarSlot({
-          calendarId: calendar.calendarId,
-          slotDate: `${month}-15`,
-          slotLabel: "Studio shoot",
-          taskId: task.taskId,
-          position: 1,
-        });
-        fired.push("calendar.slot");
-      }
-    } else {
-      fired.push("calendar.failed");
-    }
-  } catch {
-    fired.push("calendar.failed");
-  }
-
+  // Scheduling, public announcements and further prospecting are separate decisions.
+  const calendarId: string | null = null;
+  const outreachId: string | null = null;
   const portalInvite: HandoverPackResult["portalInvite"] = null;
-  fired.push("portal.invite_pending_approval");
-
-  let outreachId: string | null = null;
-  try {
-    const { listOutreach } = await import("../leadgen/store");
-    const existingOutreach = await listOutreach({ dealId: input.dealId });
-    const reuse = existingOutreach[0];
-    if (reuse) {
-      outreachId = reuse.id;
-      fired.push("outreach.exists");
-    } else {
-      const { draftOutreach } = await import("../trpc/leadgen-router");
-      const outreach = await draftOutreach({
-        dealId: input.dealId,
-        channel: "gmail",
-        subject: `Creative Harmony × ${deal.companyName}`,
-        body: `Hi — following up on ${deal.companyName}. We'd love to share a short creative retainer concept for the UAE market. Shall we book 20 minutes?`,
-      });
-      outreachId = outreach.id;
-      fired.push("outreach.draft");
-    }
-  } catch {
-    fired.push("outreach.failed");
-  }
+  fired.push("calendar.awaiting_schedule", "portal.invite_pending_approval");
 
   if (needsStageAdvance) {
     try {

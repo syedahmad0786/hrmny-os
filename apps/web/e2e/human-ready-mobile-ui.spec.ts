@@ -52,6 +52,7 @@ test("primary CRM actions stay usable on a phone", async ({ page }) => {
     page,
     page.locator('.crm-subnav a[href="/crm/contacts"]'),
   );
+  await page.getByRole("checkbox", { name: /Show .*test records?/i }).check();
   await expectMobileReady(
     page,
     page.getByRole("button", { name: /^Move to / }).first(),

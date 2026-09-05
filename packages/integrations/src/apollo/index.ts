@@ -27,7 +27,13 @@ export function createApolloMock(): ApolloAdapter {
       return [
         {
           name: query || "Demo Co LLC",
-          domain: "democo.example",
+          domain: `${
+            query
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .slice(0, 63)
+              .replace(/^-|-$/g, "") || "democo"
+          }.example`,
           industry: "Retail",
           source: "apollo_mock",
         },

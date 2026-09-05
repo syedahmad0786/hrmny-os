@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { setDevRole, getDevRole, trpc } from "@/lib/trpc";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -142,7 +143,7 @@ const PRIMARY_NAV: readonly StaffNavDefinition[] = [
   },
   {
     id: "settings",
-    label: "Connections",
+    label: "Settings",
     index: "11",
     destinations: [
       {
@@ -175,6 +176,7 @@ type ResolvedNavItem = {
 };
 
 export function StaffShell({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const pathname = usePathname();
   const router = useRouter();
   const [role, setRole] = useState("partner");
@@ -414,19 +416,22 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
   async function onRoleChange(next: string) {
     setDevRole(next);
     setRole(next);
-    await utils.invalidate();
+    await queryClient.cancelQueries();
+    await queryClient.resetQueries();
     router.refresh();
   }
 
   async function onSignOut() {
     await getSupabaseBrowserClient()?.auth.signOut();
-    await utils.invalidate();
+    await queryClient.cancelQueries();
+    await queryClient.resetQueries();
     router.replace("/login");
   }
 
   async function onRecoverSession() {
     await getSupabaseBrowserClient()?.auth.signOut({ scope: "local" });
-    await utils.invalidate();
+    await queryClient.cancelQueries();
+    await queryClient.resetQueries();
     router.replace("/login");
   }
 
@@ -708,7 +713,12 @@ export function StaffShell({ children }: { children: React.ReactNode }) {
             )}
           </div>
         </header>
-        <div className="desk-content" id="staff-main" tabIndex={-1}>
+        <div
+          key={session.data?.employeeId ?? "anonymous"}
+          className="desk-content"
+          id="staff-main"
+          tabIndex={-1}
+        >
           {connectionMessage ? (
             <p
               className="mb-4 rounded border border-sand bg-white/70 p-3 text-sm"

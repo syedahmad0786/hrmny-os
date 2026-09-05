@@ -14,7 +14,7 @@ async function ensureDealHandoverNext(page: Page) {
     timeout: 60_000,
   });
   await expect(page.getByRole("heading", { level: 1 })).toContainText(
-    /Layla Hassan/i,
+    /JW Marriott Marquis Dubai/i,
   );
   await expect(page.locator("main")).toContainText(/JW Marriott/i);
 

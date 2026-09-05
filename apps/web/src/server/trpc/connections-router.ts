@@ -77,56 +77,56 @@ export const CONNECTION_CATALOG = [
     label: "Google Workspace",
     authType: "oauth",
     ready: true,
-    note: "Required for HITL Gmail. Dedicated OAuth writes tokens to Vault using the same Google client that refreshes them. Heal cannot restore a revoked token — use Reconnect.",
+    note: "Send reviewed sales emails and receive replies. Connect the work mailbox you want clients to hear from.",
   },
   {
     toolkit: "apollo",
     label: "Apollo",
     authType: "api_key",
     ready: true,
-    note: "When connected, Sales Growth uses this key for 0-credit discovery. One-person enrichment remains receipt- and confirmation-gated.",
+    note: "Find prospects without search credits. Review the cost before unlocking a person's contact details.",
   },
   {
     toolkit: "n8n",
     label: "n8n",
     authType: "api_key",
     ready: true,
-    note: "hrmny Cloud API key — paste to leave mock without redeploy.",
+    note: "Connect HRMNY's existing workflows. Each workflow must be tested before it is activated.",
   },
   {
     toolkit: "bayzat",
     label: "Bayzat",
     authType: "api_key",
     ready: true,
-    note: "API key storage is ready; CSV remains the fallback.",
+    note: "Connect employee data when your Bayzat plan supports it, or start with a CSV import.",
   },
   {
     toolkit: "asana",
     label: "Asana",
     authType: "managed",
     ready: true,
-    note: "Verified through the connected Composio project before any migration runs.",
+    note: "Review your projects and import selected work with its original source links.",
   },
   {
     toolkit: "canva",
     label: "Canva",
     authType: "oauth",
     ready: true,
-    note: "Connect via Composio-managed OAuth; design list is live when connected.",
+    note: "Browse your designs and attach selected assets to client work.",
   },
   {
     toolkit: "linkedin",
     label: "LinkedIn",
     authType: "oauth",
     ready: true,
-    note: "Connect via Composio-managed OAuth; campaign publish is HITL when connected.",
+    note: "Use supported publishing tools. Personal outreach stays manual with copy-ready drafts.",
   },
   {
     toolkit: "xero",
     label: "Xero",
     authType: "oauth",
     ready: true,
-    note: "Read/mirror only — connect via OAuth; OS never writes unless XERO_WRITE_ENABLED=true.",
+    note: "View accounting records from Xero. Accounting changes remain in Xero until writing is separately enabled.",
   },
 ] as const;
 
@@ -656,13 +656,9 @@ const SALES_SENDER_ROLES = new Set([
   "account_manager",
 ]);
 
-function validInternalMailbox(value: string | null | undefined): string | null {
+function validMailbox(value: string | null | undefined): string | null {
   const email = value?.trim().toLowerCase();
-  return email &&
-    z.string().email().safeParse(email).success &&
-    email.endsWith("@hrmny.co")
-    ? email
-    : null;
+  return email && z.string().email().safeParse(email).success ? email : null;
 }
 
 export async function listSalesSenderMailboxes(input: {
@@ -722,7 +718,7 @@ export async function listSalesSenderMailboxes(input: {
   const today = (input.now ?? new Date()).toISOString().slice(0, 10);
   const mailboxes = await Promise.all(
     rows.flatMap((row) => {
-      const email = validInternalMailbox(row.email);
+      const email = validMailbox(row.email);
       if (!email) return [];
       const policy = policyById.get(row.connectionAccountId);
       const enabled = policy
@@ -996,10 +992,102 @@ export async function getGoogleWorkspaceSenderEmail(
           candidate.toolkit === "google_workspace" &&
           candidate.status === "connected",
       )?.externalConnectionId;
-  return validInternalMailbox(account);
+  return validMailbox(account);
+}
+
+async function ownMailboxToken(employeeId: string, id: string) {
+  const db = getDb();
+  const rows = db
+    ? await db
+        .select({ id: connectionAccount.connectionAccountId })
+        .from(connectionAccount)
+        .where(
+          and(
+            eq(connectionAccount.connectionAccountId, id),
+            eq(connectionAccount.ownerEmployeeId, employeeId),
+            eq(connectionAccount.toolkit, "google_workspace"),
+            eq(connectionAccount.scope, "staff"),
+          ),
+        )
+        .limit(1)
+    : [];
+  if (!rows.length)
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "Only the mailbox owner can open its private inbox and sent mail.",
+    });
+  const token = await getGoogleWorkspaceAccessToken(employeeId, {
+    connectionAccountId: id,
+    forInboundMonitor: true,
+  });
+  if (!token)
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Reconnect this mailbox to read its messages.",
+    });
+  return token;
 }
 
 export const connectionsRouter = router({
+  myMailboxes: staffProcedure.query(async ({ ctx }) => {
+    const db = getDb();
+    if (!db) return [];
+    return db
+      .select({
+        connectionAccountId: connectionAccount.connectionAccountId,
+        email: connectionAccount.externalConnectionId,
+        status: connectionAccount.status,
+        lastError: connectionAccount.lastError,
+      })
+      .from(connectionAccount)
+      .where(
+        and(
+          eq(
+            connectionAccount.ownerEmployeeId,
+            requireEmployeeId(ctx.employeeId),
+          ),
+          eq(connectionAccount.toolkit, "google_workspace"),
+          eq(connectionAccount.scope, "staff"),
+        ),
+      );
+  }),
+  mailboxPage: staffProcedure
+    .input(
+      z.object({
+        connectionAccountId: z.string().uuid(),
+        folder: z.enum(["INBOX", "SENT"]),
+        pageToken: z.string().max(4096).optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const token = await ownMailboxToken(
+        requireEmployeeId(ctx.employeeId),
+        input.connectionAccountId,
+      );
+      const { listGoogleMailboxPage } =
+        await import("../leadgen/google-mailbox");
+      return listGoogleMailboxPage(token, input.folder, input.pageToken);
+    }),
+  mailboxMessage: staffProcedure
+    .input(
+      z.object({
+        connectionAccountId: z.string().uuid(),
+        id: z
+          .string()
+          .regex(/^[a-zA-Z0-9_-]+$/)
+          .max(200),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const token = await ownMailboxToken(
+        requireEmployeeId(ctx.employeeId),
+        input.connectionAccountId,
+      );
+      const { readGoogleMailboxMessage } =
+        await import("../leadgen/google-mailbox");
+      return readGoogleMailboxMessage(token, input.id);
+    }),
   organizationPolicy: staffProcedure.query(async ({ ctx }) => {
     const policy = await getWorkOrganizationPolicy();
     return {
@@ -1010,6 +1098,23 @@ export const connectionsRouter = router({
       firstPartyCrmApps: [...FIRST_PARTY_CRM_APPS],
     };
   }),
+
+  gmailIdentities: staffProcedure
+    .input(z.object({ connectionAccountId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      const token = await getGoogleWorkspaceAccessToken(
+        requireEmployeeId(ctx.employeeId),
+        { connectionAccountId: input.connectionAccountId, roles: ctx.roles },
+      );
+      if (!token)
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Reconnect this Google mailbox to see its sender addresses.",
+        });
+      const { listGmailIdentities } =
+        await import("../leadgen/google-mailbox-identities");
+      return listGmailIdentities(token);
+    }),
 
   salesMailboxes: staffProcedure.query(async ({ ctx }) => {
     const employeeId = requireEmployeeId(ctx.employeeId);
@@ -1048,7 +1153,7 @@ export const connectionsRouter = router({
       if (!target) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Connected internal Google Workspace mailbox not found",
+          message: "Connected Google mailbox not found",
         });
       }
       await mutateSalesOsSettings((settings) => {
@@ -1813,7 +1918,7 @@ export const connectionsRouter = router({
       if (!parsed.success) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Connect an @hrmny.co Google Workspace account",
+          message: "Connect a Google account with a verified email address",
         });
       }
       const saved = await persistGoogleWorkspaceTokens({

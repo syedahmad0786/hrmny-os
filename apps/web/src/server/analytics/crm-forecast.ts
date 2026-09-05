@@ -17,6 +17,8 @@ export type ForecastDeal = {
   lostReason: string | null;
   quoteValue: string | null;
   updatedAt: string;
+  closedAt?: string | null;
+  expectedCloseDate?: string | null;
 };
 
 /** stage_change audit-trail event (activity.metadata from moveDealStage). */
@@ -107,7 +109,9 @@ export function computeForecast(
   const cutoff = daysAgoIso(now, horizonDays);
 
   const won = deals.filter(
-    (d) => d.closeOutcome === "won" && d.updatedAt >= cutoff,
+    (d) =>
+      d.closeOutcome === "won" &&
+      (d.closedAt === undefined ? d.updatedAt : (d.closedAt ?? "")) >= cutoff,
   );
   const wonValue = won.reduce((s, d) => s + value(d), 0);
   const runRatePerDay = wonValue / horizonDays;
@@ -143,7 +147,7 @@ export function computeWinLoss(
   const closed = deals.filter(
     (d) =>
       (d.closeOutcome === "won" || d.closeOutcome === "lost") &&
-      d.updatedAt >= cutoff,
+      (d.closedAt === undefined ? d.updatedAt : (d.closedAt ?? "")) >= cutoff,
   );
   const won = closed.filter((d) => d.closeOutcome === "won").length;
   const lost = closed.length - won;
@@ -227,7 +231,8 @@ export function computeStageConversion(
     ).length;
   const stages = CRM_PIPELINE_STAGES.map((stage, i) => {
     const entered = atOrBeyond(i);
-    const advanced = i + 1 < CRM_PIPELINE_STAGES.length ? atOrBeyond(i + 1) : entered;
+    const advanced =
+      i + 1 < CRM_PIPELINE_STAGES.length ? atOrBeyond(i + 1) : entered;
     return {
       stage,
       entered,

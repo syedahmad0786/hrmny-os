@@ -1,5 +1,27 @@
 import { isPrunableTestAgentSlug } from "./test-agent-slugs";
 
+/** Seed identity, not the real company's name, identifies these retained fixtures. */
+export const CRM_SEED_DEAL_IDS = new Set([
+  "e0000000-0000-4000-8000-000000000001",
+  "e0000000-0000-4000-8000-000000000002",
+  "e0000000-0000-4000-8000-000000000003",
+  "e0000000-0000-4000-8000-000000000004",
+  "e0000000-0000-4000-8000-000000000005",
+]);
+
+export function isSyntheticDeal(record: {
+  dealId?: string;
+  companyName: string;
+  recordClass?: string | null;
+}): boolean {
+  return (
+    record.recordClass === "synthetic" ||
+    record.recordClass === "quarantined" ||
+    CRM_SEED_DEAL_IDS.has(record.dealId ?? "") ||
+    isSyntheticRecordName(record.companyName)
+  );
+}
+
 const SYNTHETIC_NAME_PATTERNS = [
   /^e2e\b/i,
   /^live proof\b/i,
