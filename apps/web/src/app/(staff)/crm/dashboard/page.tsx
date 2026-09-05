@@ -315,7 +315,7 @@ export default function SalesDashboardPage() {
                   ? "Loading your sales work…"
                   : workError
                     ? "Some sales work could not load."
-                    : `${attention.length} items to move forward`}
+                    : `${attention.length} item${attention.length === 1 ? "" : "s"} to move forward`}
               </p>
             </div>
             <button
