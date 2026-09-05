@@ -23,6 +23,7 @@ import {
   recordIntegrationReceipt,
 } from "../integrations/inbox";
 import { normalizeResearchEvidence } from "../sales-os/research-evidence";
+import { listIntelSignals } from "../sales-os/store";
 
 /**
  * W9 CRM AI helpers. Pure aggregation over the existing CRM repository reads +
@@ -154,11 +155,12 @@ export async function companyKnowledgeBrief(input: {
   }
   const deal = await requireDeal(input.dealId);
   if (!deal.companyId) throw new Error("Company missing for deal");
-  const [company, contact, activities, notes] = await Promise.all([
+  const [company, contact, activities, notes, signals] = await Promise.all([
     getCompany(deal.companyId),
     deal.primaryContactId ? getContact(deal.primaryContactId) : null,
     listActivities({ dealId: deal.dealId, limit: 15 }),
     listNotes({ dealId: deal.dealId }),
+    listIntelSignals(deal.companyId),
   ]);
   if (!company) throw new Error("Company missing for deal");
 
@@ -221,6 +223,7 @@ export async function companyKnowledgeBrief(input: {
           : null,
         deal: dealContext(deal),
         recentActivity: activityContext(activities),
+        reviewedSignals: signals.slice(0, 10),
         existingNotes: notes.slice(0, 5).map((note) => note.body.slice(0, 500)),
       },
     });

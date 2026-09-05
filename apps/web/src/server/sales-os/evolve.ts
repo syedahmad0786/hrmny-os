@@ -21,10 +21,13 @@ export async function proposeEvolve(focus = "weekly"): Promise<{
   const approved = researched.filter(
     (r) => r.approvalState === "approved",
   ).length;
-  const approvalRate = researched.length ? approved / researched.length : 0;
+  const decided = researched.filter(
+    (row) => row.approvalState !== "researched",
+  );
+  const approvalRate = decided.length ? approved / decided.length : 0;
   const proposed: Partial<SalesOsSettings> = {};
   const notes: string[] = [];
-  if (approvalRate < 0.4 && researched.length >= 3) {
+  if (approvalRate < 0.4 && decided.length >= 3) {
     proposed.caps = {
       ...settings.caps,
       companiesPerResearchRun: Math.max(
@@ -36,6 +39,24 @@ export async function proposeEvolve(focus = "weekly"): Promise<{
       `Approval rate ${Math.round(approvalRate * 100)}% — tighten daily research volume.`,
     );
   }
+  const feedback = researched.filter((row) => row.reworkFeedback).slice(0, 8);
+  if (feedback.length)
+    notes.push(
+      `Research feedback carried into future searches: ${feedback.map((row) => `${row.name}: ${row.reworkFeedback}`).join("; ")}`,
+    );
+  const sectors = new Map<string, { reviewed: number; accepted: number }>();
+  for (const row of decided) {
+    const key = row.sector || "Unclassified";
+    const bucket = sectors.get(key) ?? { reviewed: 0, accepted: 0 };
+    bucket.reviewed++;
+    if (row.approvalState === "approved") bucket.accepted++;
+    sectors.set(key, bucket);
+  }
+  for (const [sector, counts] of sectors)
+    if (counts.reviewed >= 3)
+      notes.push(
+        `${sector}: ${counts.accepted}/${counts.reviewed} accepted. Review sources and targeting before changing the ICP.`,
+      );
   const lostUnsub = wins.filter((w) => /unsub/i.test(w.note)).length;
   if (lostUnsub > 0) {
     proposed.caps = {

@@ -688,3 +688,41 @@ export async function completeIntegrationReceiptIfProcessing(
 export function resetIntegrationReceiptMemory(): void {
   memoryReceipts.clear();
 }
+
+/** Employee-bound work history; never expose another owner's payload or result. */
+export async function listEmployeeOperationReceipts(
+  employeeId: string,
+  operation: string,
+) {
+  const db = getDb();
+  if (!db)
+    return [...memoryReceipts.values()]
+      .filter(
+        (row) =>
+          row.ownerEmployeeId === employeeId && row.operation === operation,
+      )
+      .reverse()
+      .slice(0, 20)
+      .map((row) => ({
+        id: row.receiptId,
+        status: row.status,
+        result: row.result ?? null,
+        error: row.lastError ?? null,
+      }));
+  return db
+    .select({
+      id: integrationInbox.integrationInboxId,
+      status: integrationInbox.status,
+      result: integrationInbox.result,
+      error: integrationInbox.lastError,
+    })
+    .from(integrationInbox)
+    .where(
+      and(
+        eq(integrationInbox.ownerEmployeeId, employeeId),
+        eq(integrationInbox.operation, operation),
+      ),
+    )
+    .orderBy(desc(integrationInbox.createdAt))
+    .limit(20);
+}

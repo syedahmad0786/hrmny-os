@@ -672,19 +672,46 @@ export async function moveDealStage(input: {
 
 // ── Activities ─────────────────────────────────────────────
 
+function canReadPrivateActivity(
+  metadata: Record<string, unknown>,
+  employeeId?: string,
+): boolean {
+  return (
+    !!employeeId &&
+    (metadata.ownerEmployeeId === employeeId ||
+      (Array.isArray(metadata.authorizedEmployeeIds) &&
+        metadata.authorizedEmployeeIds.includes(employeeId)))
+  );
+}
+
 export async function listActivities(q?: {
+  search?: string;
   dealId?: string;
   companyId?: string;
   contactId?: string;
   limit?: number;
+  /** Set only from the authenticated server context. Private archives fail closed. */
+  viewerEmployeeId?: string;
 }): Promise<ActivityRow[]> {
   const limit = q?.limit ?? 50;
   const rows = await withDb(
     async (db) => {
-      const conditions = [];
+      const conditions = [
+        sql`(coalesce(${activity.metadata}->>'visibility', '') <> 'private'
+        or (${q?.viewerEmployeeId ?? null}::text is not null and
+          (${activity.metadata}->>'ownerEmployeeId' = ${q?.viewerEmployeeId ?? null}
+           or ${activity.metadata}->'authorizedEmployeeIds' ? ${q?.viewerEmployeeId ?? ""})))`,
+      ];
       if (q?.dealId) conditions.push(eq(activity.dealId, q.dealId));
       if (q?.companyId) conditions.push(eq(activity.companyId, q.companyId));
       if (q?.contactId) conditions.push(eq(activity.contactId, q.contactId));
+      if (q?.search)
+        conditions.push(
+          or(
+            ilike(activity.subject, `%${q.search}%`),
+            ilike(activity.body, `%${q.search}%`),
+          )!,
+        );
       const rows = await db
         .select()
         .from(activity)
@@ -694,10 +721,20 @@ export async function listActivities(q?: {
       return rows.map(mapActivity);
     },
     () => {
-      let rows = [...getCrmMemory().activities.values()];
+      let rows = [...getCrmMemory().activities.values()].filter(
+        (row) =>
+          row.metadata.visibility !== "private" ||
+          canReadPrivateActivity(row.metadata, q?.viewerEmployeeId),
+      );
       if (q?.dealId) rows = rows.filter((a) => a.dealId === q.dealId);
       if (q?.companyId) rows = rows.filter((a) => a.companyId === q.companyId);
       if (q?.contactId) rows = rows.filter((a) => a.contactId === q.contactId);
+      if (q?.search) {
+        const term = q.search.toLowerCase();
+        rows = rows.filter((row) =>
+          `${row.subject ?? ""} ${row.body ?? ""}`.toLowerCase().includes(term),
+        );
+      }
       return rows
         .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
         .slice(0, limit);
@@ -705,20 +742,27 @@ export async function listActivities(q?: {
   );
   // Old imports/replies may contain full emails. Shared timelines and AI summaries
   // receive status only; the original message remains in the private mailbox.
-  return rows.map((row) =>
-    row.type === "email"
-      ? {
-          ...row,
-          subject: "Email activity",
-          body: "Message content is available in the owner's private inbox.",
-          metadata: {
-            direction: row.metadata.direction,
-            provider: row.metadata.provider,
-            emailEventId: row.metadata.emailEventId,
-          },
-        }
-      : row,
-  );
+  return rows
+    .filter(
+      (row) =>
+        row.metadata.visibility !== "private" ||
+        canReadPrivateActivity(row.metadata, q?.viewerEmployeeId),
+    )
+    .map((row) =>
+      row.type === "email" &&
+      !canReadPrivateActivity(row.metadata, q?.viewerEmployeeId)
+        ? {
+            ...row,
+            subject: "Email activity",
+            body: "Message content is available in the owner's private inbox.",
+            metadata: {
+              direction: row.metadata.direction,
+              provider: row.metadata.provider,
+              emailEventId: row.metadata.emailEventId,
+            },
+          }
+        : row,
+    );
 }
 
 export async function createActivity(input: {

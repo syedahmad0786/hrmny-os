@@ -1644,14 +1644,12 @@ export const leadsRouter = router({
   tejari: router({
     scan: protectedProcedure
       .input(z.object({ filter: z.string().optional() }).optional())
-      .mutation(({ input }) => {
-        return [
-          {
-            title: `Tejari RFP stub ${input?.filter ?? "open"}`,
-            lane: "tejari",
-            status: "queued",
-          },
-        ];
+      .mutation(() => {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "Use Sales → Research → Open tenders & RFPs, or import an authorized tender source. No authenticated Tejari feed is connected.",
+        });
       }),
   }),
 

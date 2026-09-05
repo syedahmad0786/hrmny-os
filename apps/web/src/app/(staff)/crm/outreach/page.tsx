@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { linkedinProfileUrl } from "@/lib/linkedin-profile";
 import { useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { orderOutreachWorkItems } from "./order";
@@ -166,12 +167,18 @@ function OutreachInner() {
   }
 
   function linkedInHref(item: NonNullable<typeof items.data>[number]) {
-    const raw = item.linkedinUrl ?? item.recipient;
-    if (raw.startsWith("http")) return raw;
-    return "https://www.linkedin.com/";
+    return linkedinProfileUrl(item.linkedinUrl ?? item.recipient);
   }
 
   async function copyBody(item: NonNullable<typeof items.data>[number]) {
+    const profile = linkedInHref(item);
+    if (!profile) {
+      setGateError(
+        "Add the person's LinkedIn public profile URL to this draft first.",
+      );
+      return;
+    }
+    window.open(profile, "_blank", "noopener,noreferrer");
     try {
       await navigator.clipboard.writeText(item.body);
       setCopiedId(item.id);
@@ -738,7 +745,8 @@ function OutreachInner() {
               <h3>Approved messages</h3>
               <p>
                 Oldest first. Email sends only after a second confirmation.
-                LinkedIn stays manual.
+                LinkedIn opens the public profile; paste and send there.
+                Recorded sends are your confirmation, not delivery verification.
               </p>
             </div>
             <CrmTag kind="info">{byState.approved.length} approved</CrmTag>
@@ -763,16 +771,19 @@ function OutreachInner() {
                         disabled={busyId !== null}
                         onClick={() => void copyBody(item)}
                       >
-                        {copiedId === item.id ? "Copied" : "Copy"}
+                        {copiedId === item.id
+                          ? "Copied · open profile"
+                          : "Copy & open profile"}
                       </CrmBtn>
                       <a
                         className="crm-btn"
                         data-testid="outreach-open-linkedin"
-                        href={linkedInHref(item)}
+                        href={linkedInHref(item) ?? undefined}
+                        aria-disabled={!linkedInHref(item)}
                         target="_blank"
                         rel="noreferrer"
                       >
-                        Open LinkedIn
+                        Open profile
                       </a>
                       <CrmBtn
                         data-testid="outreach-mark-sent"
@@ -784,7 +795,7 @@ function OutreachInner() {
                           })
                         }
                       >
-                        Mark sent
+                        I sent this in LinkedIn
                       </CrmBtn>
                       {item.channel === "linkedin_connect" ? (
                         <CrmBtn

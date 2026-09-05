@@ -3,6 +3,8 @@ import { appRouter } from "@/server/trpc/root";
 import { createContext } from "@/server/trpc/trpc";
 import { materializeResponse } from "@/server/http/materialize-response";
 
+export const maxDuration = 300;
+
 const handler = async (req: Request) => {
   const response = await fetchRequestHandler({
     endpoint: "/api/trpc",

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { CrmBtn, CrmEmpty, CrmTag } from "@/components/crm/ui";
 import { CRM_MARKETS } from "@/lib/crm-markets";
+import { DiscoveryPanel } from "./discovery-panel";
 
 function newSignalForm() {
   return {
@@ -61,6 +62,7 @@ export function ResearchConsole() {
 
   return (
     <section className="mt-6" data-testid="sales-os-research-console">
+      <DiscoveryPanel />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-lg font-semibold">Research gates</h2>
@@ -278,10 +280,14 @@ export function ResearchConsole() {
                   <div className="flex items-center justify-between gap-2">
                     <strong>{c.name}</strong>
                     <CrmTag kind={c.temperature === "hot" ? "danger" : "info"}>
-                      {c.temperature} · {c.buafTotal}
+                      Fit estimate: {c.temperature} · {c.buafTotal}/40
                     </CrmTag>
                   </div>
-                  <p className="text-sm">{c.whyThis}</p>
+                  <p className="whitespace-pre-wrap text-sm">{c.whyThis}</p>
+                  <p className="mt-2 text-xs text-[var(--muted)]">
+                    Heuristic score. Confirm source, budget, urgency and access
+                    during review.
+                  </p>
                   {c.evidenceAccepted && c.receiptAccepted && c.evidence ? (
                     <Link
                       className="text-sm underline"
@@ -363,7 +369,7 @@ export function ResearchConsole() {
                 c.temperature !== "cold" ? (
                   <Link
                     className="crm-btn primary"
-                    href="/crm/hunt#apollo-people-search"
+                    href={`/crm/hunt?q=${encodeURIComponent(c.name)}#apollo-people-search`}
                   >
                     Open governed People Search
                   </Link>

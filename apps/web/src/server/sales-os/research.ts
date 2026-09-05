@@ -22,6 +22,7 @@ export type ResearchProposalInput = {
   employeesGlobal?: number;
   employeesMena?: number;
   leadSourceLane?: string;
+  signalDate?: string;
 };
 
 /**
@@ -72,6 +73,7 @@ export async function ingestManualResearch(
     employeesGlobal: input.employeesGlobal ?? null,
     employeesMena: input.employeesMena ?? null,
     leadSourceLane,
+    signalDate: input.signalDate ?? null,
   });
 
   return insertResearchProposalWithSignal({
@@ -105,7 +107,7 @@ export async function ingestManualResearch(
       contactId: null,
       signalType: "research_proposal",
       source: `research-proposal:${leadSourceLane}`,
-      signalDate: new Date().toISOString().slice(0, 10),
+      signalDate: input.signalDate ?? new Date().toISOString().slice(0, 10),
       summary: `${name}: ${whyThis}`,
       evidenceUrl: evidence,
     },

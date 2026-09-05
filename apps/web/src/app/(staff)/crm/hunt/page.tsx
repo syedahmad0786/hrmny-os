@@ -256,7 +256,9 @@ export default function HuntClientsPage() {
     setResult(null);
     setSearchNote(null);
     setTitle("Marketing Director");
-    setQuery("");
+    setQuery(
+      new URLSearchParams(window.location.search).get("q")?.slice(0, 300) ?? "",
+    );
     setMarkets(DEFAULT_MARKETS);
     setLocationBasis("company");
     setSeniorities([]);
@@ -296,7 +298,11 @@ export default function HuntClientsPage() {
       setPendingApolloSearch(restored);
       setApolloSearchRequestId(restored.idempotencyKey);
       setTitle(restored.titles.join(", ") || "Marketing Director");
-      setQuery(restored.query ?? "");
+      setQuery(
+        new URLSearchParams(window.location.search).get("q")?.slice(0, 300) ??
+          restored.query ??
+          "",
+      );
       setMarkets(
         restored.organizationLocations ?? restored.locations ?? DEFAULT_MARKETS,
       );
@@ -391,7 +397,11 @@ export default function HuntClientsPage() {
     setPendingApolloSearch(snapshot.search);
     setApolloSearchRequestId(snapshot.search.idempotencyKey);
     setTitle(snapshot.search.titles.join(", ") || "Marketing Director");
-    setQuery(snapshot.search.query ?? "");
+    setQuery(
+      new URLSearchParams(window.location.search).get("q")?.slice(0, 300) ??
+        snapshot.search.query ??
+        "",
+    );
     setMarkets(
       snapshot.search.organizationLocations ??
         snapshot.search.locations ??

@@ -56,7 +56,10 @@ export type LeadgenDailyCronResult = {
 export type LeadgenDailyCronDeps = {
   readPolicy?: () => Promise<AutonomyPolicy>;
   recordSignal?: typeof recordHealthSignal;
-  runProposals?: typeof proposeDailyResearch;
+  runProposals?: (
+    actorEmployeeId: string,
+    now: Date,
+  ) => Promise<{ pending: boolean; proposed: number; receiptId: string }>;
 };
 
 async function recordRefusal(

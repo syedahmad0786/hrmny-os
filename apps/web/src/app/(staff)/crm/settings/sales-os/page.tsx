@@ -31,13 +31,20 @@ export default function SalesOsSettingsPage() {
   const reject = trpc.salesOs.evolve.reject.useMutation({
     onSuccess: () => void utils.salesOs.evolve.invalidate(),
   });
-  const importSalesGrowth = trpc.salesOs.importSalesGrowth.useMutation();
+  const importSalesGrowth = trpc.salesOs.importSalesGrowth.useMutation({
+    onError: (error) => setNote(error.message),
+  });
   const importIntent = trpc.salesOs.intentCsv.useMutation({
     onError: (error) => setNote(error.message),
   });
   const [dnc, setDnc] = useState("");
   const [csv, setCsv] = useState("");
   const [json, setJson] = useState("");
+  const [privateHistoryEmployeeIds, setPrivateHistoryEmployeeIds] = useState<
+    string[]
+  >([]);
+  const [reviewedImport, setReviewedImport] = useState("");
+  const importEmployees = trpc.work.members.listEmployees.useQuery();
   const [note, setNote] = useState<string | null>(null);
   const current = settings.data?.settings;
   const [rateCardDraft, setRateCardDraft] = useState<
@@ -421,7 +428,9 @@ export default function SalesOsSettingsPage() {
               </div>
               <div className="crm-panel-body">
                 <p>
-                  Dry-run first. Lineage keeps accepted re-imports idempotent.
+                  Review the preview before applying. Communications and
+                  proposal history are private to the employees selected below.
+                  With no selection, private rows stay held.
                 </p>
                 <textarea
                   className="crm-textarea"
@@ -430,18 +439,58 @@ export default function SalesOsSettingsPage() {
                   onChange={(event) => setJson(event.target.value)}
                   placeholder='{"companies":[],"contacts":[]}'
                 />
+                <fieldset className="my-3">
+                  <legend>Authorized private archive readers</legend>
+                  {importEmployees.data?.map((person) => (
+                    <label
+                      key={person.employeeId}
+                      className="mr-4 inline-flex items-center gap-2"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={privateHistoryEmployeeIds.includes(
+                          person.employeeId,
+                        )}
+                        onChange={(event) =>
+                          setPrivateHistoryEmployeeIds((current) =>
+                            event.target.checked
+                              ? [...current, person.employeeId]
+                              : current.filter(
+                                  (id) => id !== person.employeeId,
+                                ),
+                          )
+                        }
+                      />
+                      {person.displayLabel}
+                    </label>
+                  ))}
+                </fieldset>
                 <div className="crm-approval-actions mt-2">
                   <CrmBtn
+                    disabled={
+                      importSalesGrowth.isPending || !salesAccess.data?.canAdmin
+                    }
                     onClick={() => {
                       try {
                         const data = JSON.parse(json);
                         importSalesGrowth
-                          .mutateAsync({ data, apply: false })
-                          .then((response) =>
+                          .mutateAsync({
+                            data,
+                            apply: false,
+                            privateHistoryEmployeeIds,
+                          })
+                          .then((response) => {
+                            setReviewedImport(
+                              JSON.stringify({
+                                json,
+                                privateHistoryEmployeeIds,
+                              }),
+                            );
                             setNote(
-                              `Dry run: imported ${response.report.totals.imported} / skipped ${response.report.totals.skipped}`,
-                            ),
-                          );
+                              `Preview: ${response.report.totals.imported} to import / ${response.report.totals.skipped} skipped / ${response.heldPrivate} private rows held`,
+                            );
+                          })
+                          .catch(() => undefined);
                       } catch (error) {
                         setNote(
                           error instanceof Error
@@ -455,14 +504,24 @@ export default function SalesOsSettingsPage() {
                   </CrmBtn>
                   <CrmBtn
                     variant="primary"
+                    disabled={
+                      importSalesGrowth.isPending ||
+                      !salesAccess.data?.canAdmin ||
+                      reviewedImport !==
+                        JSON.stringify({ json, privateHistoryEmployeeIds })
+                    }
                     onClick={() => {
                       try {
                         const data = JSON.parse(json);
                         importSalesGrowth
-                          .mutateAsync({ data, apply: true })
+                          .mutateAsync({
+                            data,
+                            apply: true,
+                            privateHistoryEmployeeIds,
+                          })
                           .then((response) =>
                             setNote(
-                              `Applied: imported ${response.report.totals.imported} / skipped ${response.report.totals.skipped}`,
+                              `Applied: imported ${response.report.totals.imported} / skipped ${response.report.totals.skipped} / private held ${response.heldPrivate}`,
                             ),
                           );
                       } catch (error) {
@@ -484,6 +543,10 @@ export default function SalesOsSettingsPage() {
             Supabase PostgreSQL remains the CRM source of truth. Legacy exports
             are imported with dry-run and lineage; legacy projects are not
             deleted by this screen.
+          </p>
+          <p>
+            Commercial rates: awaiting review until an authorized owner approves
+            the rate card. Historical packages are reference material only.
           </p>
           <p>
             Source contract: {settings.data?.source.title ?? "Sales Growth SOP"}

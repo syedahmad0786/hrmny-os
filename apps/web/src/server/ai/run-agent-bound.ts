@@ -21,16 +21,22 @@ export async function persistAgentRun(
       ) values (
         ${output.agent},
         ${output.model},
-        ${JSON.stringify({
-          input: input.input,
-          context: input.context ?? null,
-          roles: input.roles ?? [],
-          webSearch: input.webSearch ?? false,
-        })}::jsonb,
         ${JSON.stringify(
-          typeof output.output === "string"
-            ? { text: output.output }
-            : output.output,
+          input.privateContext
+            ? { privateContext: true }
+            : {
+                input: input.input,
+                context: input.context ?? null,
+                roles: input.roles ?? [],
+                webSearch: input.webSearch ?? false,
+              },
+        )}::jsonb,
+        ${JSON.stringify(
+          input.privateContext
+            ? { privateContext: true }
+            : typeof output.output === "string"
+              ? { text: output.output }
+              : output.output,
         )}::jsonb,
         ${output.inputTokens},
         ${output.outputTokens},
@@ -45,7 +51,16 @@ export async function persistAgentRun(
 
 /** Canonical app binding: run + durable cost ledger. */
 export const boundRunAgent: RunAgent = async (input) => {
-  const output = await runAgent(input);
+  const output = await runAgent(input, {
+    getMonthlySpendAed: async () => {
+      const db = getDb();
+      if (!db) return 0;
+      const [row] = await db.execute<{ spend: number }>(
+        sql`select coalesce(sum(cost_aed), 0)::float8 as spend from public.agent_runs where created_at >= date_trunc('month', now())`,
+      );
+      return Number(row?.spend ?? 0);
+    },
+  });
   await persistAgentRun(input, output);
   return output;
 };
