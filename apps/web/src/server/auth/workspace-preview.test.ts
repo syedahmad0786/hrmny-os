@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCaller } from "../trpc/root";
 import { getDemoStore } from "../demo-store";
 import { resolveDevUser, sessionCanViewMargin } from "./session";
+import { defaultWorkbookConfig } from "@/lib/crm-workbook";
 
 function caller(role: string, target?: string) {
   const user = resolveDevUser(role);
@@ -80,6 +81,20 @@ describe("admin workspace preview", () => {
 
   it("blocks writes and private APIs before their resolvers run", async () => {
     const preview = caller("partner", resolveDevUser("am").employeeId);
+    expect((await preview.crm.workbook.snapshot()).rows).toBeDefined();
+    await expect(
+      preview.crm.workbook.export({
+        config: defaultWorkbookConfig("contacts"),
+        allTabs: false,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      preview.crm.workbook.saveView({
+        name: "Unauthorized change",
+        config: defaultWorkbookConfig("contacts"),
+        visibility: "personal",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(
       preview.work.personal.quickAdd({ title: "Must not exist" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });

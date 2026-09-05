@@ -1,4 +1,8 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { readFileSync } from "node:fs";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,9 +14,12 @@ import { SECURITY_HEADERS } from "../security-headers";
 
 const LISTEN_HOST = "127.0.0.1";
 const LISTEN_PORT = Number(process.env.HRMNY_E2E_BRIDGE_PORT ?? "3500");
-const NEXT_ORIGIN = process.env.HRMNY_E2E_NEXT_ORIGIN ?? "http://127.0.0.1:3100";
+const NEXT_ORIGIN =
+  process.env.HRMNY_E2E_NEXT_ORIGIN ?? "http://127.0.0.1:3100";
 const STATIC_ROOT = fileURLToPath(new URL("../.next/static/", import.meta.url));
-const HTML_ROOT = fileURLToPath(new URL("../.next/server/app/", import.meta.url));
+const HTML_ROOT = fileURLToPath(
+  new URL("../.next/server/app/", import.meta.url),
+);
 const CLIENT_TEMPLATE_ID = "c1000000-0000-4000-8000-0000000000a4";
 const DEAL_TEMPLATE_ID = "e0000000-0000-4000-8000-000000000001";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
@@ -71,22 +78,31 @@ function routeArtifact(url: URL, extension: "html" | "rsc") {
 
   const clientMatch = /^\/clients\/([0-9a-f-]{36})\/?$/i.exec(url.pathname);
   const dealMatch = /^\/crm\/deals\/([0-9a-f-]{36})\/?$/i.exec(url.pathname);
+  const recordMatch = /^\/crm\/(companies|contacts)\/([0-9a-f-]{36})\/?$/i.exec(
+    url.pathname,
+  );
+  const recordTemplateId =
+    recordMatch?.[1] === "companies"
+      ? "11000000-0000-4000-8000-000000000001"
+      : "12000000-0000-4000-8000-000000000001";
   const templateRoute = clientMatch
     ? `clients\\${CLIENT_TEMPLATE_ID}`
     : dealMatch
       ? `crm\\deals\\${DEAL_TEMPLATE_ID}`
-      : null;
+      : recordMatch
+        ? `crm\\${recordMatch[1]}\\${recordTemplateId}`
+        : null;
   const templateId = clientMatch
     ? CLIENT_TEMPLATE_ID
     : dealMatch
       ? DEAL_TEMPLATE_ID
-      : null;
-  const actualId = clientMatch?.[1] ?? dealMatch?.[1] ?? null;
+      : recordMatch
+        ? recordTemplateId
+        : null;
+  const actualId =
+    clientMatch?.[1] ?? dealMatch?.[1] ?? recordMatch?.[2] ?? null;
   if (!templateRoute || !templateId || !actualId) return null;
-  const template = resolve(
-    HTML_ROOT,
-    `${templateRoute}.${extension}`,
-  );
+  const template = resolve(HTML_ROOT, `${templateRoute}.${extension}`);
   try {
     const rewritten = readFileSync(template, "utf8").replaceAll(
       templateId,
@@ -151,9 +167,11 @@ async function writeFetchResponse(res: ServerResponse, response: Response) {
     }
   }
 
-  const getSetCookie = (response.headers as Headers & {
-    getSetCookie?: () => string[];
-  }).getSetCookie;
+  const getSetCookie = (
+    response.headers as Headers & {
+      getSetCookie?: () => string[];
+    }
+  ).getSetCookie;
   const cookies = getSetCookie?.call(response.headers) ?? [];
   if (cookies.length > 0) res.setHeader("set-cookie", cookies);
 
@@ -162,14 +180,21 @@ async function writeFetchResponse(res: ServerResponse, response: Response) {
   res.end(body);
 }
 
-async function serveNextStatic(req: IncomingMessage, res: ServerResponse, url: URL) {
+async function serveNextStatic(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+) {
   const encodedPath = url.pathname.slice("/_next/static/".length);
   const target = resolve(STATIC_ROOT, decodeURIComponent(encodedPath));
   const relativePath = relative(STATIC_ROOT, target);
   if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
     await writeFetchResponse(
       res,
-      Response.json({ status: "error", code: "INVALID_STATIC_PATH" }, { status: 400 }),
+      Response.json(
+        { status: "error", code: "INVALID_STATIC_PATH" },
+        { status: 400 },
+      ),
     );
     return;
   }
@@ -183,7 +208,8 @@ async function serveNextStatic(req: IncomingMessage, res: ServerResponse, url: U
     res.setHeader("connection", "close");
     res.setHeader(
       "content-type",
-      CONTENT_TYPES[extname(target).toLowerCase()] ?? "application/octet-stream",
+      CONTENT_TYPES[extname(target).toLowerCase()] ??
+        "application/octet-stream",
     );
     res.setHeader("cache-control", "public, max-age=31536000, immutable");
     res.setHeader("content-length", String(body.byteLength));
@@ -262,7 +288,11 @@ async function handleTrpc(req: IncomingMessage, res: ServerResponse, url: URL) {
   await writeFetchResponse(res, response);
 }
 
-async function proxyToNext(req: IncomingMessage, res: ServerResponse, url: URL) {
+async function proxyToNext(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+) {
   const body = await requestBody(req);
   const headers = requestHeaders(req);
   headers.set("accept-encoding", "identity");

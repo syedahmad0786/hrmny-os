@@ -2,6 +2,7 @@ import type { CrmPipelineStage } from "@hrmny/db";
 import type { CrmMarket } from "@/lib/crm-markets";
 
 export type CompanyRow = {
+  ownerEmployeeId?: string | null;
   companyId: string;
   name: string;
   sector: string | null;
@@ -14,6 +15,8 @@ export type CompanyRow = {
 };
 
 export type ContactRow = {
+  ownerEmployeeId?: string | null;
+  lastInteractionAt?: string | null;
   contactId: string;
   companyId: string | null;
   firstName: string;

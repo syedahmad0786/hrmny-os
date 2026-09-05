@@ -1,14 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { CrmBtn, CrmPageHeader } from "@/components/crm/ui";
 
-export default function CompanyIntelligencePage() {
+function CompanyIntelligence() {
+  const params = useSearchParams();
   const utils = trpc.useUtils();
   const companies = trpc.crm.companies.list.useQuery();
   const [companyId, setCompanyId] = useState("");
+  useEffect(() => {
+    setCompanyId(params.get("companyId") ?? "");
+  }, [params]);
   const [query, setQuery] = useState("");
   const [goal, setGoal] = useState("");
   const [archiveSearch, setArchiveSearch] = useState("");
@@ -313,5 +318,13 @@ export default function CompanyIntelligencePage() {
         </div>
       </section>
     </>
+  );
+}
+
+export default function CompanyIntelligencePage() {
+  return (
+    <Suspense fallback={<p>Loading company intelligence…</p>}>
+      <CompanyIntelligence />
+    </Suspense>
   );
 }

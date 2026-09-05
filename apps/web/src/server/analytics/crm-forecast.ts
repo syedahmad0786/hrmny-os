@@ -22,7 +22,7 @@ export type ForecastDeal = {
 };
 
 /** stage_change audit-trail event (activity.metadata from moveDealStage). */
-export type StageChangeEvent = { from: string; to: string };
+export type StageChangeEvent = { from: string; to: string; count?: number };
 
 /**
  * Stage → probability-of-eventual-win weights used for weighted pipeline value.
@@ -210,14 +210,15 @@ export function computeStageConversion(
   if (valid.length > 0) {
     const stages = CRM_PIPELINE_STAGES.map((stage) => {
       const exits = valid.filter((e) => e.from === stage);
-      const advanced = exits.filter(
-        (e) => stageIndex(e.to) > stageIndex(e.from),
-      ).length;
+      const count = exits.reduce((sum, event) => sum + (event.count ?? 1), 0);
+      const advanced = exits
+        .filter((e) => stageIndex(e.to) > stageIndex(e.from))
+        .reduce((sum, event) => sum + (event.count ?? 1), 0);
       return {
         stage,
-        entered: exits.length,
+        entered: count,
         advanced,
-        rate: exits.length === 0 ? null : round2(advanced / exits.length),
+        rate: count === 0 ? null : round2(advanced / count),
       };
     });
     return { method: "audit_trail", stages };

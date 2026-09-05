@@ -6,6 +6,7 @@ import { trpc } from "@/lib/trpc";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { OnboardingReadyBanner } from "@/components/onboarding-ready-banner";
+import { ClientOverview } from "@/components/crm/client-overview";
 
 export default function ClientOnboardingPage() {
   const params = useParams<{ id: string }>();
@@ -146,8 +147,7 @@ export default function ClientOnboardingPage() {
           {client.data?.name ?? "Client"}
         </h1>
         <p className="text-muted">
-          {dealId ? "Won in Sales · " : ""}Onboarding 7-phase · Immersion form ·
-          renewal{" "}
+          Client workspace · Delivery, people and next actions · Renewal{" "}
           {client.data && "renewalDate" in client.data
             ? String(client.data.renewalDate)
             : "—"}
@@ -254,6 +254,7 @@ export default function ClientOnboardingPage() {
         ) : null}
       </div>
 
+      <ClientOverview clientId={id} dealId={dealId} />
       <section
         id="onboarding"
         className="rounded-lg border border-sand bg-white/70 p-4"

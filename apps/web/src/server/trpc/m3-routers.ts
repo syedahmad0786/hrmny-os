@@ -21,6 +21,19 @@ import {
 } from "../demo-store";
 import { getDb } from "../db";
 import {
+  createCompany,
+  createDeal,
+  getDeal,
+  listCompanies,
+} from "../crm/repository";
+import { getCrmMemory } from "../crm/memory";
+import {
+  asanaRosterSchema,
+  clientSourceProjects,
+  importAsanaRoster,
+  planAsanaRoster,
+} from "../clients/asana-roster";
+import {
   ensureClientOnboarding,
   getClientOnboarding,
   signoffOnboardingPhase,
@@ -813,6 +826,29 @@ export const scopesRouter = router({
 });
 
 export const clientsRouter = router({
+  sourceProjects: staffProcedure
+    .input(z.object({ clientId: z.string().uuid().optional() }).optional())
+    .query(({ input }) => clientSourceProjects(input?.clientId)),
+  previewAsanaRoster: staffProcedure
+    .input(asanaRosterSchema)
+    .mutation(({ ctx, input }) => {
+      if (!ctx.roles.some((r) => r === "partner" || r === "director"))
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Partner or director access required",
+        });
+      return planAsanaRoster(input);
+    }),
+  importAsanaRoster: staffProcedure
+    .input(asanaRosterSchema)
+    .mutation(({ ctx, input }) => {
+      if (!ctx.roles.some((r) => r === "partner" || r === "director"))
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Partner or director access required",
+        });
+      return importAsanaRoster(ctx.employeeId!, input);
+    }),
   month1: month1Router,
   list: staffProcedure
     .input(
@@ -934,6 +970,7 @@ export const clientsRouter = router({
       z.object({
         dealId: z.string().uuid().optional(),
         name: z.string().trim().min(2).max(200),
+        companyId: z.string().uuid().optional(),
         market: z.enum(CRM_MARKETS).default("UAE"),
         engagementType: z.enum(["retainer", "project"]).default("project"),
         contractValue: z.coerce
@@ -970,11 +1007,28 @@ export const clientsRouter = router({
               });
             }
           } else {
-            const companies = await tx.execute<{ companyId: string }>(sql`
-              insert into public.company (name, market)
-              values (${input.name}, ${input.market}::market_enum)
-              returning company_id as "companyId"
-            `);
+            const existingCompanies = await tx.execute<{
+              companyId: string;
+            }>(sql`
+              select company_id as "companyId" from public.company where
+              ${input.companyId ? sql`company_id = ${input.companyId}::uuid` : sql`lower(trim(name)) = lower(trim(${input.name}))`}
+              limit 2`);
+            if (input.companyId && !existingCompanies.length)
+              throw new TRPCError({
+                code: "NOT_FOUND",
+                message: "The selected company does not exist.",
+              });
+            if (existingCompanies.length > 1)
+              throw new TRPCError({
+                code: "CONFLICT",
+                message:
+                  "Several companies have that name. Select the existing company to use.",
+              });
+            const companies = existingCompanies.length
+              ? existingCompanies
+              : await tx.execute<{ companyId: string }>(sql`
+              insert into public.company (name, market) values (${input.name}, ${input.market}::market_enum)
+              returning company_id as "companyId"`);
             const deals = await tx.execute<{ dealId: string }>(sql`
               insert into public.deal (
                 company_id, company_name, stage, close_outcome,
@@ -1026,10 +1080,52 @@ export const clientsRouter = router({
         return client;
       }
       const store = getDemoStore();
-      const deal = input.dealId
-        ? store.deals.get(input.dealId)
-        : { ...store.deal, dealId: randomUUID() };
-      if (!deal) throw new Error("NOT_FOUND");
+      let crmDeal = input.dealId ? await getDeal(input.dealId) : null;
+      if (input.dealId) {
+        if (!crmDeal || crmDeal.closeOutcome !== "won")
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "The selected deal must be won before creating a client",
+          });
+        const existing = [...store.clients.values()].find(
+          (c) => c.dealId === input.dealId,
+        );
+        if (existing) return existing;
+      } else {
+        const matches = (await listCompanies()).filter((c) =>
+          input.companyId
+            ? c.companyId === input.companyId
+            : c.name.trim().toLowerCase() === input.name.toLowerCase(),
+        );
+        if (input.companyId && !matches.length)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "The selected company does not exist.",
+          });
+        if (matches.length > 1)
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "Several companies have that name. Select the existing company to use.",
+          });
+        const company =
+          matches[0] ??
+          (await createCompany({ name: input.name, market: input.market }));
+        crmDeal = await createDeal({
+          companyId: company.companyId,
+          companyName: input.name,
+          leadSourceLane: "relationship_led",
+          ownerEmployeeId: ctx.employeeId,
+        });
+        getCrmMemory().deals.set(crmDeal.dealId, {
+          ...crmDeal,
+          stage: "close",
+          closeOutcome: "won",
+          closedAt: null,
+          quoteValue: input.contractValue.toFixed(2),
+        });
+      }
+      const deal = { ...store.deal, dealId: crmDeal!.dealId };
       store.deals.set(deal.dealId, {
         ...deal,
         companyName: input.name,
@@ -1043,6 +1139,8 @@ export const clientsRouter = router({
         commercialMode: input.engagementType,
       });
       client.market = input.market;
+      client.renewalDate = "";
+      client.updatedAt = new Date().toISOString();
       store.appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "clients.create",
