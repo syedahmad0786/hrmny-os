@@ -543,6 +543,7 @@ describe("openrouter free-model failover", () => {
   });
 
   it("hard-caps OpenRouter web research and preserves source receipts", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
     const fetchMock = vi.fn(
       async (_url: string, _init?: RequestInit) =>
         new Response(
@@ -592,6 +593,7 @@ describe("openrouter free-model failover", () => {
 
     expect(request).toMatchObject({
       reasoning: { effort: "low", exclude: true },
+      model: "nvidia/nemotron-3-super-120b-a12b:free",
       max_tokens: 4096,
       max_tool_calls: 2,
       tools: [
@@ -601,6 +603,8 @@ describe("openrouter free-model failover", () => {
         },
       ],
     });
+    expect(timeout).toHaveBeenCalledWith(180_000);
+    timeout.mockRestore();
     expect(result).toMatchObject({
       requestId: "research-1",
       webSearchRequests: 2,
@@ -645,6 +649,43 @@ describe("openrouter free-model failover", () => {
       });
       expect(result.text).toBe("Finished sourced answer");
       expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps privacy restrictions on every fallback and blocks private web search", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "No compatible endpoint" }), {
+          status: 404,
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const provider = createProvider({
+        provider: "openrouter",
+        openRouterApiKey: "sk-test",
+      });
+      await expect(
+        provider.generate({
+          messages: [{ role: "user", content: "Private context" }],
+          privateContext: true,
+          webSearch: true,
+        }),
+      ).rejects.toThrow(/public web search/);
+      expect(fetchMock).not.toHaveBeenCalled();
+      await expect(
+        provider.generate({
+          messages: [{ role: "user", content: "Private context" }],
+          privateContext: true,
+        }),
+      ).rejects.toThrow(/compatible provider/);
+      for (const call of fetchMock.mock.calls)
+        expect(
+          JSON.parse(String((call as unknown as [string, RequestInit])[1].body))
+            .provider,
+        ).toEqual({ data_collection: "deny", zdr: true });
     } finally {
       vi.unstubAllGlobals();
     }

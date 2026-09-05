@@ -38,7 +38,7 @@ export function assertOpenRouterFreeRoute(model: string): void {
 export const OPENROUTER_FREE_FALLBACK_MODELS = [
   OPENROUTER_FREE_DEFAULT_MODEL,
   "liquid/lfm-2.5-2.6b:free",
-  "nvidia/nemotron-nano-9b-v2:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
   "openrouter/free",
 ] as const;
 
@@ -60,6 +60,8 @@ export type LLMGenerateOptions = {
   images?: LLMImageInput[];
   /** OpenRouter live web grounding, hard-capped to two searches. */
   webSearch?: boolean;
+  /** Confidential employee or client context requires private provider routing. */
+  privateContext?: boolean;
   /** Optional task hint for mock structured outputs. */
   task?: "invoice_extract" | "outreach_draft" | "reply_intent" | "generic";
 };
@@ -269,6 +271,8 @@ export function createMockProvider(
   return {
     name: "mock",
     async generate(options) {
+      if (options.privateContext && options.webSearch)
+        throw new Error("Private context cannot be sent to public web search");
       const userText = extractUserText(options.messages);
       const emailRefMatch = userText.match(/emailRef[:=]\s*(\S+)/i);
       const emailRef = emailRefMatch?.[1] ?? "demo-email-ref";
@@ -787,12 +791,21 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
     name,
     async generate(options) {
       const primary = selectedModel(options.model);
+      if (options.privateContext && options.webSearch)
+        throw new Error("Private context cannot be sent to public web search");
       const signal = AbortSignal.timeout(
-        options.task === "outreach_draft" ? 45_000 : 60_000,
+        options.task === "outreach_draft"
+          ? 45_000
+          : options.webSearch
+            ? 180_000
+            : 60_000,
       );
       if (name === "openrouter") {
         const chain = [
           ...new Set([
+            ...(options.webSearch && !options.privateContext
+              ? ["nvidia/nemotron-3-super-120b-a12b:free"]
+              : []),
             ...(options.schema ? ["openrouter/free"] : []),
             primary,
             ...OPENROUTER_FREE_FALLBACK_MODELS,
@@ -821,6 +834,9 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
                   temperature: options.temperature ?? 0.2,
                   max_tokens: options.webSearch ? 4_096 : 2_048,
                   reasoning: { effort: "low", exclude: true },
+                  ...(options.privateContext
+                    ? { provider: { data_collection: "deny", zdr: true } }
+                    : {}),
                   stream: false,
                   ...(options.webSearch
                     ? {
@@ -903,6 +919,10 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
             continue;
           }
         }
+        if (options.privateContext)
+          throw new Error(
+            "Private AI preparation needs an available provider with zero retention and no data collection. Configure a compatible provider before retrying.",
+          );
         if (options.task === "outreach_draft") {
           const object = mockOutreachDraft(extractUserText(options.messages));
           return {
