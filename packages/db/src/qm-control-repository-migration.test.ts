@@ -18,7 +18,7 @@ const journal = JSON.parse(
 describe("0077 QM control repository migration", () => {
   it("remains ordered after Apollo and before the additive market migration", () => {
     expect(
-      journal.entries.slice(-4).map(({ idx, tag }) => ({ idx, tag })),
+      journal.entries.slice(74, 78).map(({ idx, tag }) => ({ idx, tag })),
     ).toEqual([
       { idx: 74, tag: "0075_apollo_search_fencing" },
       { idx: 75, tag: "0076_apollo_people_search_serialization" },

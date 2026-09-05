@@ -36,7 +36,7 @@ const journal = JSON.parse(
 ) as { entries: Array<{ tag: string }> };
 const apolloPriorHead = "0075_apollo_search_fencing";
 const apolloHead = "0076_apollo_people_search_serialization";
-const head = "0078_gcc_markets";
+const head = "0079_crm_operational_truth";
 assert.equal(
   journal.entries.at(-1)?.tag,
   head,
@@ -81,6 +81,57 @@ async function prepareSupabaseDatabase(connection: Sql): Promise<void> {
 }
 
 async function assertCurrentHead(connection: Sql): Promise<void> {
+  const [operationalColumns] = await connection<Array<{ count: number }>>`
+    select count(*)::int as count from information_schema.columns
+    where table_schema='public' and table_name='deal'
+      and column_name in ('record_class','classification_reason','opportunity_name','expected_close_date','closed_at','stage_entered_at')
+  `;
+  assert.equal(
+    operationalColumns?.count,
+    6,
+    "Commercial provenance/date columns are missing.",
+  );
+  const [proofDeal] = await connection<Array<{ deal_id: string }>>`
+    insert into public.deal (company_name, lead_source_lane)
+    values ('Migration verification only', 'relationship_led') returning deal_id
+  `;
+  assert(proofDeal);
+  try {
+    const [closed] = await connection<
+      Array<{ closed_at: Date; stage_entered_at: Date }>
+    >`
+      update public.deal set stage='qualify', close_outcome='won'
+      where deal_id=${proofDeal.deal_id}::uuid returning closed_at, stage_entered_at
+    `;
+    assert(closed?.closed_at && closed.stage_entered_at);
+    const [edited] = await connection<
+      Array<{ closed_at: Date; stage_entered_at: Date }>
+    >`
+      update public.deal set opportunity_name='Edited after closing', updated_at=now()
+      where deal_id=${proofDeal.deal_id}::uuid returning closed_at, stage_entered_at
+    `;
+    assert.deepEqual(
+      edited,
+      closed,
+      "Editing a deal must not rewrite its commercial dates.",
+    );
+    const [draft] = await connection<Array<{ outreach_item_id: string }>>`
+      insert into public.outreach_items (deal_id, channel, recipient, body, state)
+      values (${proofDeal.deal_id}::uuid, 'email', 'verification@example.test', 'Reviewed text', 'approved')
+      returning outreach_item_id
+    `;
+    assert(draft);
+    const [changed] = await connection<
+      Array<{ state: string; approved_by: string | null }>
+    >`
+      update public.outreach_items set body='Changed text'
+      where outreach_item_id=${draft.outreach_item_id}::uuid returning state, approved_by
+    `;
+    assert.deepEqual(changed, { state: "draft", approved_by: null });
+  } finally {
+    await connection`delete from public.outreach_items where deal_id=${proofDeal.deal_id}::uuid`;
+    await connection`delete from public.deal where deal_id=${proofDeal.deal_id}::uuid`;
+  }
   const [markets] = await connection<Array<{ values: string[] }>>`
     select array_agg(value.enumlabel order by value.enumsortorder) as values
     from pg_enum value
