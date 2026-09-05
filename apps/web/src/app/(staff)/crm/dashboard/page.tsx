@@ -19,6 +19,8 @@ import { trpc } from "@/lib/trpc";
 import type { CrmMarket } from "@/lib/crm-markets";
 
 export default function SalesDashboardPage() {
+  const [workView, setWorkView] = useState("all");
+  const [expanded, setExpanded] = useState(false);
   const [market, setMarket] = useState<CrmMarket | "">("");
   const [owner, setOwner] = useState("");
   const [channel, setChannel] = useState("");
@@ -45,6 +47,13 @@ export default function SalesDashboardPage() {
     { refetchInterval: 30_000 },
   );
   const session = trpc.auth.session.useQuery();
+  const connections = trpc.connections.list.useQuery(undefined, {
+    refetchInterval: 30_000,
+  });
+  const conversations = trpc.leadgen.outreach.conversations.useQuery(
+    undefined,
+    { refetchInterval: 30_000 },
+  );
   const funnel = trpc.salesOs.funnel.useQuery(
     {
       market: market || undefined,
@@ -177,19 +186,19 @@ export default function SalesDashboardPage() {
       label: "Follow-ups due",
       count: digest.data?.followUps.due,
       detail: "Prepare the next touch, review it, then approve the send.",
-      href: "/crm/outreach",
+      href: "/crm/outreach?view=followups",
     },
     {
       label: "Approved emails ready",
       count: digest.data?.outreachApproved,
       detail: "A person still chooses Send; nothing is sent automatically.",
-      href: "/crm/outreach",
+      href: "/crm/outreach?view=approved",
     },
     {
       label: "Drafts to review",
       count: digest.data?.outreachDrafts,
       detail: "Check the recipient, angle and evidence before approval.",
-      href: "/crm/outreach",
+      href: "/crm/outreach?view=drafts",
     },
     {
       label: "Company research waiting",
@@ -223,12 +232,49 @@ export default function SalesDashboardPage() {
     ["Awaiting review", digest.data?.followUps.awaitingReview],
   ] as const;
 
+  const attention = [
+    ...(conversations.data ?? [])
+      .filter(
+        (item) =>
+          !item.replyDraftId &&
+          !isSyntheticRecordName(item.companyName) &&
+          !item.messages.some(
+            (message) =>
+              message.direction === "outbound" &&
+              message.status === "sent" &&
+              message.occurredAt > item.latestInboundAt,
+          ),
+      )
+      .map((item) => ({
+        id: `reply-${item.id}`,
+        kind: "reply",
+        title: item.companyName,
+        detail: `${item.contactName}: ${item.latestInboundBody || "Open the conversation to review the reply."}`,
+        href: `/crm/inbox#conversation-${encodeURIComponent(item.id)}`,
+        action: "Read reply",
+      })),
+    ...(digest.data?.attention ?? []),
+  ];
+  const filteredWork = attention.filter(
+    (item) => workView === "all" || item.kind === workView,
+  );
+  const workError = digest.error ?? conversations.error;
+  const workLoading = digest.isLoading || conversations.isLoading;
+  const workTabs = [
+    ["all", "All"],
+    ["reply", "Replies"],
+    ["review", "Review"],
+    ["followup", "Follow-ups"],
+    ["send", "Ready to send"],
+    ["closing", "Closing"],
+  ] as const;
+
   return (
     <main data-testid="sales-dashboard">
       <CrmPageHeader
-        kicker="Sales · Live operating view"
+        kicker="hrmny Sales"
         title="Sales command center"
-        description="One place to see what needs attention across research, outreach, follow-ups and the CRM pipeline. Counts read directly from the same records used by each Sales screen."
+        description="Find the right clients. Start useful conversations. Keep every opportunity moving."
         actions={
           <>
             <Link className="crm-btn primary" href="/crm/hunt">
@@ -250,106 +296,308 @@ export default function SalesDashboardPage() {
         </p>
       ) : null}
 
-      <section
-        className="crm-panel mb-4 overflow-hidden"
-        aria-labelledby="sales-actions-heading"
-        data-testid="sales-action-groups"
-      >
-        <div className="crm-panel-head justify-between py-4">
-          <div>
-            <p className="growth-kicker">Sales</p>
-            <h2
-              id="sales-actions-heading"
-              className="font-display text-[28px] font-semibold tracking-[-0.035em]"
-            >
-              {actionGroups.reduce((sum, group) => sum + group.items.length, 0)}{" "}
-              things need you
-            </h2>
-          </div>
-          <CrmTag kind={digest.isFetching ? "warn" : "success"}>
-            {digest.isFetching ? "Syncing" : "Live"}
-          </CrmTag>
-        </div>
-        <div className="grid gap-px bg-[var(--line)] md:grid-cols-2">
-          {actionGroups.map((group) => (
-            <div key={group.label} className="bg-[var(--paper-2)] p-[18px]">
-              <h3 className="mb-3 text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">
-                {group.label} · {group.items.length}
-              </h3>
-              {group.items.length ? (
-                <ol className="m-0 list-none divide-y divide-[var(--line)] p-0">
-                  {group.items.map((item) => (
-                    <li key={item.id}>
-                      <Link
-                        href={`/crm/deals/${item.dealId}`}
-                        className="grid grid-cols-[minmax(0,1fr)_18px] gap-3 py-3 text-[var(--ink)] hover:text-[var(--ochre-dark)]"
-                      >
-                        <span>
-                          <strong className="block text-xs">
-                            {item.title}
-                          </strong>
-                          <small className="mt-1 block text-[9px] leading-[1.45] text-[var(--muted)]">
-                            {item.detail}
-                          </small>
-                        </span>
-                        <span aria-hidden>→</span>
-                      </Link>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <p className="py-3 text-[10px] text-[var(--muted)]">
-                  Nothing here right now.
-                </p>
-              )}
+      <div className="sales-workspace">
+        <section
+          className="crm-panel"
+          aria-labelledby="sales-work-heading"
+          data-testid="sales-work-queue"
+        >
+          <div className="crm-panel-head justify-between">
+            <div>
+              <h2
+                id="sales-work-heading"
+                className="font-display text-2xl font-semibold"
+              >
+                Your next moves
+              </h2>
+              <p>
+                {workLoading
+                  ? "Loading your sales work…"
+                  : workError
+                    ? "Some sales work could not load."
+                    : `${attention.length} item${attention.length === 1 ? "" : "s"} to move forward`}
+              </p>
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section
-        className="crm-panel mb-4 overflow-hidden"
-        aria-labelledby="sales-queue-heading"
-        data-testid="sales-dashboard-queue"
-      >
-        <div className="crm-panel-head justify-between py-4">
-          <div>
-            <p className="growth-kicker">System queues</p>
-            <h2
-              id="sales-queue-heading"
-              className="font-display text-[21px] font-semibold tracking-[-0.025em]"
+            <button
+              className="crm-btn"
+              disabled={digest.isFetching || conversations.isFetching}
+              onClick={() =>
+                void Promise.all([digest.refetch(), conversations.refetch()])
+              }
             >
-              Today&apos;s sales queue
-            </h2>
+              Refresh
+            </button>
           </div>
-          <CrmTag kind={digest.isFetching ? "warn" : "success"}>
-            {digest.isFetching ? "Syncing" : "Synced · 30s"}
-          </CrmTag>
-        </div>
-        <div className="grid gap-px bg-[var(--line)] md:grid-cols-2">
-          {queue.map((item, index) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`grid min-h-[82px] grid-cols-[28px_minmax(0,1fr)_auto_18px] items-center gap-3 bg-[var(--paper-2)] px-[18px] py-4 text-[var(--ink)] hover:bg-[var(--muted-surface-soft)] focus-visible:outline focus-visible:outline-3 focus-visible:outline-offset-[-3px] focus-visible:outline-[var(--ochre)] ${item.count && item.count > 0 ? "border-l-[3px] border-l-[var(--ochre)]" : ""}`}
+          <nav className="sales-work-tabs" aria-label="Sales work filters">
+            {workTabs.map(([value, label]) => (
+              <button
+                key={value}
+                aria-pressed={workView === value}
+                onClick={() => {
+                  setWorkView(value);
+                  setExpanded(false);
+                }}
+              >
+                {label}{" "}
+                <span>
+                  {workLoading || workError
+                    ? "—"
+                    : attention.filter(
+                        (item) => value === "all" || item.kind === value,
+                      ).length}
+                </span>
+              </button>
+            ))}
+          </nav>
+          {workError ? (
+            <p className="crm-note" role="alert">
+              Refresh to retry: {workError.message}
+            </p>
+          ) : null}
+          {!workLoading && !workError && !filteredWork.length ? (
+            <div className="p-6">
+              <CrmEmpty
+                title="Nothing waiting here"
+                hint="Find a new client or choose another queue to keep the pipeline moving."
+              />
+              <Link className="crm-btn" href="/crm/hunt">
+                Find clients
+              </Link>
+            </div>
+          ) : null}
+          <ol className="sales-work-list">
+            {(expanded ? filteredWork : filteredWork.slice(0, 6)).map(
+              (item) => (
+                <li key={item.id}>
+                  <span className={`sales-work-dot ${item.kind}`} aria-hidden />
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.detail}</p>
+                  </div>
+                  <Link className="crm-btn" href={item.href}>
+                    {item.action}
+                  </Link>
+                </li>
+              ),
+            )}
+          </ol>
+          {filteredWork.length > 6 ? (
+            <button
+              className="sales-show-more"
+              aria-expanded={expanded}
+              onClick={() => setExpanded(!expanded)}
             >
-              <span className="font-mono text-[9px] font-bold text-[var(--ochre-dark)]">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <span>
-                <strong className="block text-xs">{item.label}</strong>
-                <small className="mt-1 block text-[9px] leading-[1.45] text-[var(--muted)]">
-                  {item.detail}
-                </small>
-              </span>
-              <b className="min-w-[34px] text-right font-display text-[26px] font-semibold leading-none">
-                {item.count ?? "…"}
-              </b>
-              <span aria-hidden>→</span>
+              {expanded ? "Show less" : `Show ${filteredWork.length - 6} more`}
+            </button>
+          ) : null}
+        </section>
+        <aside className="sales-work-sidebar">
+          <section className="crm-panel p-5">
+            <h2 className="font-display text-lg font-semibold">
+              Today’s focus
+            </h2>
+            <p className="my-3 capitalize">
+              {digest.data?.sectorHint ?? "Loading focus…"}
+            </p>
+            <p className="mb-4 text-sm text-[var(--muted)]">
+              Start with a real launch, hiring signal or warm introduction.
+              Review the fit before finding contacts.
+            </p>
+            <Link className="crm-btn primary" href="/crm/hunt">
+              Find clients
             </Link>
-          ))}
-        </div>
-      </section>
+            <Link className="crm-btn mt-2" href="/crm/research">
+              Add a company signal
+            </Link>
+          </section>
+          <section className="crm-panel p-5" data-testid="sales-connections">
+            <h2 className="font-display text-lg font-semibold">
+              Your sales tools
+            </h2>
+            {connections.error ? (
+              <p role="alert">
+                Connection status unavailable. Open setup to retry.
+              </p>
+            ) : (
+              ["google_workspace", "apollo"].map((toolkit) => {
+                const item = connections.data?.find(
+                  (tool) => tool.toolkit === toolkit,
+                );
+                return (
+                  <Link
+                    key={toolkit}
+                    href={`/settings/connections?view=sales#conn-${toolkit}`}
+                    className="sales-tool-row"
+                  >
+                    <span>
+                      <strong>
+                        {toolkit === "apollo" ? "Apollo" : "Google Workspace"}
+                      </strong>
+                      <small>
+                        {toolkit === "apollo"
+                          ? "Find decision-makers"
+                          : "Send email and track replies"}
+                      </small>
+                    </span>
+                    <CrmTag
+                      kind={item?.status === "connected" ? "success" : "warn"}
+                    >
+                      {connections.isLoading
+                        ? "Checking"
+                        : item?.status === "connected"
+                          ? "Connected"
+                          : "Set up"}
+                    </CrmTag>
+                  </Link>
+                );
+              })
+            )}
+            <Link
+              className="crm-btn mt-3"
+              href="/settings/connections?view=sales"
+            >
+              Manage connections
+            </Link>
+            <p className="mt-3 text-xs text-[var(--muted)]">
+              Use existing contacts or CSV to start. Apollo enrichment uses
+              credits; review the cost before importing.
+            </p>
+          </section>
+          <section className="crm-panel p-5">
+            <h2 className="font-display text-lg font-semibold">
+              From lead to client
+            </h2>
+            <ol className="sales-journey">
+              {[
+                ["Find and qualify", "/crm/hunt"],
+                ["Prepare outreach", "/crm/campaigns"],
+                ["Read replies", "/crm/inbox"],
+                ["Agree scope and price", "/crm"],
+                ["Close and hand over", "/crm/handover"],
+              ].map(([label, href]) => (
+                <li key={href}>
+                  <Link href={href!}>{label}</Link>
+                </li>
+              ))}
+            </ol>
+          </section>
+        </aside>
+      </div>
+
+      <details className="crm-panel my-4 p-4">
+        <summary className="cursor-pointer font-semibold">
+          Deal activity and team workload
+        </summary>
+
+        <section
+          className="crm-panel mb-4 overflow-hidden"
+          aria-labelledby="sales-actions-heading"
+          data-testid="sales-action-groups"
+        >
+          <div className="crm-panel-head justify-between py-4">
+            <div>
+              <p className="growth-kicker">Sales</p>
+              <h2
+                id="sales-actions-heading"
+                className="font-display text-[28px] font-semibold tracking-[-0.035em]"
+              >
+                {actionGroups.reduce(
+                  (sum, group) => sum + group.items.length,
+                  0,
+                )}{" "}
+                things need you
+              </h2>
+            </div>
+            <CrmTag kind={digest.isFetching ? "warn" : "success"}>
+              {digest.isFetching ? "Syncing" : "Live"}
+            </CrmTag>
+          </div>
+          <div className="grid gap-px bg-[var(--line)] md:grid-cols-2">
+            {actionGroups.map((group) => (
+              <div key={group.label} className="bg-[var(--paper-2)] p-[18px]">
+                <h3 className="mb-3 text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">
+                  {group.label} · {group.items.length}
+                </h3>
+                {group.items.length ? (
+                  <ol className="m-0 list-none divide-y divide-[var(--line)] p-0">
+                    {group.items.map((item) => (
+                      <li key={item.id}>
+                        <Link
+                          href={`/crm/deals/${item.dealId}`}
+                          className="grid grid-cols-[minmax(0,1fr)_18px] gap-3 py-3 text-[var(--ink)] hover:text-[var(--ochre-dark)]"
+                        >
+                          <span>
+                            <strong className="block text-xs">
+                              {item.title}
+                            </strong>
+                            <small className="mt-1 block text-[9px] leading-[1.45] text-[var(--muted)]">
+                              {item.detail}
+                            </small>
+                          </span>
+                          <span aria-hidden>→</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="py-3 text-[10px] text-[var(--muted)]">
+                    Nothing here right now.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      </details>
+
+      <details className="crm-panel mb-4 p-4">
+        <summary className="cursor-pointer font-semibold">
+          All sales queues
+        </summary>
+        <section
+          className="crm-panel mb-4 overflow-hidden"
+          aria-labelledby="sales-queue-heading"
+          data-testid="sales-dashboard-queue"
+        >
+          <div className="crm-panel-head justify-between py-4">
+            <div>
+              <p className="growth-kicker">System queues</p>
+              <h2
+                id="sales-queue-heading"
+                className="font-display text-[21px] font-semibold tracking-[-0.025em]"
+              >
+                Today&apos;s sales queue
+              </h2>
+            </div>
+            <CrmTag kind={digest.isFetching ? "warn" : "success"}>
+              {digest.isFetching ? "Syncing" : "Synced · 30s"}
+            </CrmTag>
+          </div>
+          <div className="grid gap-px bg-[var(--line)] md:grid-cols-2">
+            {queue.map((item, index) => (
+              <Link
+                key={item.label}
+                href={item.href}
+                className={`grid min-h-[82px] grid-cols-[28px_minmax(0,1fr)_auto_18px] items-center gap-3 bg-[var(--paper-2)] px-[18px] py-4 text-[var(--ink)] hover:bg-[var(--muted-surface-soft)] focus-visible:outline focus-visible:outline-3 focus-visible:outline-offset-[-3px] focus-visible:outline-[var(--ochre)] ${item.count && item.count > 0 ? "border-l-[3px] border-l-[var(--ochre)]" : ""}`}
+              >
+                <span className="font-mono text-[9px] font-bold text-[var(--ochre-dark)]">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span>
+                  <strong className="block text-xs">{item.label}</strong>
+                  <small className="mt-1 block text-[9px] leading-[1.45] text-[var(--muted)]">
+                    {item.detail}
+                  </small>
+                </span>
+                <b className="min-w-[34px] text-right font-display text-[26px] font-semibold leading-none">
+                  {item.count ?? "…"}
+                </b>
+                <span aria-hidden>→</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      </details>
 
       <section
         className="mb-[18px] grid gap-6 rounded-[18px] bg-[var(--ink)] p-5 text-[var(--paper)] lg:grid-cols-[minmax(190px,0.65fr)_minmax(0,2fr)] lg:items-center"
@@ -381,180 +629,187 @@ export default function SalesDashboardPage() {
         </dl>
       </section>
 
-      <section
-        className="crm-panel mb-4 overflow-hidden"
-        aria-labelledby="sales-funnel-heading"
-        data-testid="sales-funnel"
-      >
-        <div className="crm-panel-head block py-4">
-          <p className="growth-kicker">Conversion funnel</p>
-          <h2
-            id="sales-funnel-heading"
-            className="font-display text-[21px] font-semibold tracking-[-0.025em]"
-          >
-            From lead to won
-          </h2>
-          <p className="mt-1 text-[10px] text-[var(--muted)]">
-            Filter the same live CRM, research, outreach and email-event
-            records.
-          </p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-            <label className="crm-field">
-              <span>Market</span>
-              <select
-                className="crm-input"
-                value={market}
-                onChange={(event) =>
-                  setMarket(event.target.value as CrmMarket | "")
-                }
-              >
-                <option value="">All markets</option>
-                {funnel.data?.options.markets.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="crm-field">
-              <span>Owner</span>
-              <select
-                className="crm-input"
-                value={owner}
-                onChange={(event) => setOwner(event.target.value)}
-              >
-                <option value="">All owners</option>
-                {funnel.data?.options.owners.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="crm-field">
-              <span>Channel</span>
-              <select
-                className="crm-input"
-                value={channel}
-                onChange={(event) => setChannel(event.target.value)}
-              >
-                <option value="">All channels</option>
-                {funnel.data?.options.channels.map((value) => (
-                  <option key={value} value={value}>
-                    {value.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="crm-field">
-              <span>Campaign / source</span>
-              <select
-                className="crm-input"
-                value={campaign}
-                onChange={(event) => setCampaign(event.target.value)}
-              >
-                <option value="">All sources</option>
-                {funnel.data?.options.campaigns.map((value) => (
-                  <option key={value} value={value}>
-                    {value.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="crm-field">
-              <span>Created from</span>
-              <input
-                className="crm-input"
-                type="date"
-                value={dateFrom}
-                onChange={(event) => setDateFrom(event.target.value)}
-              />
-            </label>
-            <label className="crm-field">
-              <span>Created to</span>
-              <input
-                className="crm-input"
-                type="date"
-                value={dateTo}
-                onChange={(event) => setDateTo(event.target.value)}
-              />
-            </label>
-          </div>
-        </div>
-        {funnel.error ? (
-          <p className="crm-note m-4" role="alert">
-            Funnel unavailable: {funnel.error.message}
-          </p>
-        ) : (
-          <div className="grid gap-6 p-[18px] lg:grid-cols-[minmax(0,1.5fr)_minmax(220px,0.7fr)]">
-            <ol className="m-0 grid list-none gap-3 p-0">
-              {(funnel.data?.steps ?? []).map((item, index) => (
-                <li
-                  key={item.key}
-                  className="grid grid-cols-[24px_minmax(0,1fr)_46px] items-center gap-3"
-                >
-                  <span className="font-mono text-[9px] font-bold text-[var(--ochre-dark)]">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <div>
-                    <div className="mb-1 flex justify-between gap-3 text-[10px]">
-                      <strong>{item.label}</strong>
-                      <span>{item.percentOfLeads}%</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-[var(--muted-surface-soft)]">
-                      <div
-                        className="h-full rounded-full bg-[var(--ochre)]"
-                        style={{ width: `${item.percentOfLeads}%` }}
-                      />
-                    </div>
-                  </div>
-                  <strong className="text-right font-display text-xl">
-                    {item.count}
-                  </strong>
-                </li>
-              ))}
-            </ol>
-            <div className="rounded-xl bg-[var(--muted-surface-soft)] p-4">
-              <p className="growth-kicker">Email evidence</p>
-              <dl className="mt-3 grid grid-cols-2 gap-3">
-                {[
-                  ["Gmail accepted", funnel.data?.evidence.providerAccepted],
-                  ["Replies", funnel.data?.evidence.replied],
-                  ["Bounces", funnel.data?.evidence.bounced],
-                  ["Complaints", funnel.data?.evidence.complained],
-                ].map(([label, value]) => (
-                  <div key={String(label)}>
-                    <dt className="text-[9px] text-[var(--muted)]">{label}</dt>
-                    <dd className="mt-1 font-display text-2xl font-semibold">
-                      {value ?? "…"}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-              <p className="mt-4 text-[9px] leading-[1.5] text-[var(--muted)]">
-                Gmail accepted means the exact message was read back from Sent
-                Mail. It is not proof of delivery; bounces, complaints and
-                replies are tracked separately.
-              </p>
-            </div>
-          </div>
-        )}
-      </section>
-
-      <section aria-labelledby="revenue-heading">
-        <div className="flex items-center justify-between gap-4 pb-3 pt-2">
-          <div>
-            <p className="growth-kicker">Pipeline health</p>
+      <details className="crm-panel mb-4 p-4">
+        <summary className="cursor-pointer font-semibold">
+          Conversion and revenue reports
+        </summary>
+        <section
+          className="mb-4 overflow-hidden"
+          aria-labelledby="sales-funnel-heading"
+          data-testid="sales-funnel"
+        >
+          <div className="crm-panel-head block py-4">
+            <p className="growth-kicker">Conversion funnel</p>
             <h2
-              id="revenue-heading"
+              id="sales-funnel-heading"
               className="font-display text-[21px] font-semibold tracking-[-0.025em]"
             >
-              Revenue &amp; forecast
+              From lead to won
             </h2>
+            <p className="mt-1 text-[10px] text-[var(--muted)]">
+              Filter the same live CRM, research, outreach and email-event
+              records.
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+              <label className="crm-field">
+                <span>Market</span>
+                <select
+                  className="crm-input"
+                  value={market}
+                  onChange={(event) =>
+                    setMarket(event.target.value as CrmMarket | "")
+                  }
+                >
+                  <option value="">All markets</option>
+                  {funnel.data?.options.markets.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="crm-field">
+                <span>Owner</span>
+                <select
+                  className="crm-input"
+                  value={owner}
+                  onChange={(event) => setOwner(event.target.value)}
+                >
+                  <option value="">All owners</option>
+                  {funnel.data?.options.owners.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="crm-field">
+                <span>Channel</span>
+                <select
+                  className="crm-input"
+                  value={channel}
+                  onChange={(event) => setChannel(event.target.value)}
+                >
+                  <option value="">All channels</option>
+                  {funnel.data?.options.channels.map((value) => (
+                    <option key={value} value={value}>
+                      {value.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="crm-field">
+                <span>Campaign / source</span>
+                <select
+                  className="crm-input"
+                  value={campaign}
+                  onChange={(event) => setCampaign(event.target.value)}
+                >
+                  <option value="">All sources</option>
+                  {funnel.data?.options.campaigns.map((value) => (
+                    <option key={value} value={value}>
+                      {value.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="crm-field">
+                <span>Created from</span>
+                <input
+                  className="crm-input"
+                  type="date"
+                  value={dateFrom}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                />
+              </label>
+              <label className="crm-field">
+                <span>Created to</span>
+                <input
+                  className="crm-input"
+                  type="date"
+                  value={dateTo}
+                  onChange={(event) => setDateTo(event.target.value)}
+                />
+              </label>
+            </div>
           </div>
-        </div>
-        <DashStrip refetchInterval={30_000} />
-      </section>
+          {funnel.error ? (
+            <p className="crm-note m-4" role="alert">
+              Funnel unavailable: {funnel.error.message}
+            </p>
+          ) : (
+            <div className="grid gap-6 p-[18px] lg:grid-cols-[minmax(0,1.5fr)_minmax(220px,0.7fr)]">
+              <ol className="m-0 grid list-none gap-3 p-0">
+                {(funnel.data?.steps ?? []).map((item, index) => (
+                  <li
+                    key={item.key}
+                    className="grid grid-cols-[24px_minmax(0,1fr)_46px] items-center gap-3"
+                  >
+                    <span className="font-mono text-[9px] font-bold text-[var(--ochre-dark)]">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <div>
+                      <div className="mb-1 flex justify-between gap-3 text-[10px]">
+                        <strong>{item.label}</strong>
+                        <span>{item.percentOfLeads}%</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-[var(--muted-surface-soft)]">
+                        <div
+                          className="h-full rounded-full bg-[var(--ochre)]"
+                          style={{ width: `${item.percentOfLeads}%` }}
+                        />
+                      </div>
+                    </div>
+                    <strong className="text-right font-display text-xl">
+                      {item.count}
+                    </strong>
+                  </li>
+                ))}
+              </ol>
+              <div className="rounded-xl bg-[var(--muted-surface-soft)] p-4">
+                <p className="growth-kicker">Email evidence</p>
+                <dl className="mt-3 grid grid-cols-2 gap-3">
+                  {[
+                    ["Gmail accepted", funnel.data?.evidence.providerAccepted],
+                    ["Replies", funnel.data?.evidence.replied],
+                    ["Bounces", funnel.data?.evidence.bounced],
+                    ["Complaints", funnel.data?.evidence.complained],
+                  ].map(([label, value]) => (
+                    <div key={String(label)}>
+                      <dt className="text-[9px] text-[var(--muted)]">
+                        {label}
+                      </dt>
+                      <dd className="mt-1 font-display text-2xl font-semibold">
+                        {value ?? "…"}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="mt-4 text-[9px] leading-[1.5] text-[var(--muted)]">
+                  Gmail accepted means the exact message was read back from Sent
+                  Mail. It is not proof of delivery; bounces, complaints and
+                  replies are tracked separately.
+                </p>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section aria-labelledby="revenue-heading">
+          <div className="flex items-center justify-between gap-4 pb-3 pt-2">
+            <div>
+              <p className="growth-kicker">Pipeline health</p>
+              <h2
+                id="revenue-heading"
+                className="font-display text-[21px] font-semibold tracking-[-0.025em]"
+              >
+                Revenue &amp; forecast
+              </h2>
+            </div>
+          </div>
+          <DashStrip refetchInterval={30_000} />
+        </section>
+      </details>
 
       <section className="crm-panel" aria-labelledby="active-pipeline-heading">
         <div className="crm-panel-head justify-between">

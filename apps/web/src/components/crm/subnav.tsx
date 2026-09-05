@@ -6,13 +6,16 @@ import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/crm/dashboard", label: "Dashboard" },
   { href: "/crm/hunt", label: "Find clients" },
-  { href: "/crm/research", label: "Research" },
   { href: "/crm/campaigns", label: "Campaigns" },
   { href: "/crm/outreach", label: "Outreach" },
   { href: "/crm/inbox", label: "Inbox" },
   { href: "/crm", label: "Pipeline", exact: true },
-  { href: "/crm/handover", label: "Handover" },
+] as const;
+const MORE_TABS = [
+  { href: "/crm/research", label: "Company research" },
   { href: "/crm/contacts", label: "Contacts" },
+  { href: "/crm/handover", label: "Won deal handover" },
+  { href: "/crm/settings/sales-os", label: "Sales settings" },
 ] as const;
 
 function isActive(
@@ -39,7 +42,32 @@ export function CrmSubnav() {
           {tab.label}
         </Link>
       ))}
-      <Link href="/settings/connections" className="crm-subnav-connection">
+      <details className="sales-more-nav" key={pathname}>
+        <summary
+          className={
+            MORE_TABS.some((tab) => isActive(pathname, tab))
+              ? "active"
+              : undefined
+          }
+        >
+          More
+        </summary>
+        <div>
+          {MORE_TABS.map((tab) => (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              aria-current={isActive(pathname, tab) ? "page" : undefined}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+      </details>
+      <Link
+        href="/settings/connections?view=sales"
+        className="crm-subnav-connection"
+      >
         Connected tools
       </Link>
     </nav>

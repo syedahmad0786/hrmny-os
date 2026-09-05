@@ -742,8 +742,9 @@ test.describe("Hunt Apollo prospect UI", () => {
     ).toBeVisible();
 
     const crmNav = page.getByRole("navigation", { name: "Sales sections" });
-    await expect(crmNav.locator("summary")).toHaveCount(0);
+    await expect(crmNav.locator("summary")).toHaveCount(1);
     await expect(crmNav.getByRole("link", { name: "Dashboard" })).toBeVisible();
+    await crmNav.getByText("More", { exact: true }).click();
     await expect(crmNav.getByRole("link", { name: "Contacts" })).toBeVisible();
     await expect(
       crmNav.getByRole("link", { name: "Connected tools" }),

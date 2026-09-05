@@ -271,6 +271,7 @@ export function ResearchConsole() {
               companies.map((c) => (
                 <article
                   key={c.id}
+                  id={`company-${c.id}`}
                   className="crm-approval-mini"
                   data-testid="sales-os-company"
                 >
@@ -402,6 +403,7 @@ export function ResearchConsole() {
             contacts.map((c) => (
               <article
                 key={c.id}
+                id={`contact-${c.id}`}
                 className="crm-approval-mini"
                 data-testid="sales-os-contact"
               >

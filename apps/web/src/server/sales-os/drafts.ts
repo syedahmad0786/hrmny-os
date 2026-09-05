@@ -1,6 +1,7 @@
 import { getDeal } from "../crm/repository";
 import { defaultRunAgent, type RunAgent } from "../leadgen/agent-run";
 import { insertOutreach, listOutreach } from "../leadgen/store";
+import { OUTREACH_GUIDELINES } from "./sops";
 import {
   buildComplianceFooter,
   buildUnsubscribeUrl,
@@ -65,7 +66,7 @@ export async function draftChannelsForApprovedContact(
       settings.outreach.linkedinConnectMaxChars,
     );
   const service = companyResearch?.suggestedServices?.trim();
-  const followup = `Hi ${first}, thanks for connecting. ${service ? `I see a strong ${service} opportunity for ${deal.companyName}.` : `We help brands like ${deal.companyName} land launches in the UAE.`} Open to a short call this week?`;
+  const followup = `Hi ${first}, thanks for connecting. ${reason ?? `Following ${deal.companyName}'s work in the UAE.`} ${service ? `A useful angle could be ${service}, shaped around the local audience.` : "Local audience context is a useful starting point for the creative."} Happy to share a relevant example when useful.`;
 
   const created = [];
   if (canEmail && !existing("gmail")) {
@@ -78,6 +79,9 @@ export async function draftChannelsForApprovedContact(
         whyThis: companyResearch?.whyThis ?? research.title,
         suggestedServices: companyResearch?.suggestedServices,
         sopVoice: settings.outreach.voice,
+        outreachGuidelines: OUTREACH_GUIDELINES,
+        emailWordsMin: settings.outreach.emailWordsMin,
+        emailWordsMax: settings.outreach.emailWordsMax,
       },
     });
     if (

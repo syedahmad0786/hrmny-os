@@ -3,10 +3,8 @@
  * documentation (v3.0, 2026-02-27, written for Ayham Homsi) and the June
  * SQLite prototype encoded in `@hrmny/integrations/salesgrowth`.
  *
- * The Windows Claude project and Drive zip were not mounted here; these
- * defaults are the seed that replaces `reference/*.md` + `context/strategy.md`
- * inside the CRM. Staff edit them from /crm/settings/sales-os. /evolve
- * proposes diffs; a human applies them.
+ * Reconciled with Ayham's March outreach rules and June follow-up brief.
+ * Staff edit settings from /crm/settings/sales-os.
  */
 
 export type SalesOsSettings = {
@@ -218,8 +216,8 @@ export const DEFAULT_SALES_OS_SETTINGS: SalesOsSettings = {
   outreach: {
     voice:
       "Managing Partner, relationship-first, specific, never a template. Agency reputation, not product blast.",
-    emailWordsMin: 150,
-    emailWordsMax: 200,
+    emailWordsMin: 100,
+    emailWordsMax: 150,
     linkedinConnectMaxChars: 300,
     linkedinFollowupWords: 100,
     cadenceTouches: 6,
@@ -272,7 +270,7 @@ export const OUTREACH_GUIDELINES = `
 
 Voice: Managing Partner. Relationship-first. Reputation-driven. Service, not product.
 
-Cold email (150–200 words):
+Cold email (100–150 words):
 1. Specific opening observation about THIS company (launch, hire, location, campaign).
 2. Bridge to a concrete opportunity hrmny can help with.
 3. One credibility signal (relevant work, not a capability dump).
@@ -281,8 +279,16 @@ Cold email (150–200 words):
 LinkedIn connection (max 300 characters):
 Personalised, non-salesy introduction. No pitch. No calendar link.
 
+Before drafting: check current events and UAE holidays, adapt the tone, and never
+invent news, meeting dates, relationships or credentials. Use the local distributor
+decision-maker when a global brand is operated locally. For warm introductions,
+name the real introducer and the introduction context; do not reuse cold copy.
+Subject: 5–8 words, specific to a relationship or company event.
+
 LinkedIn follow-up (~100 words):
-Value-forward. Meeting CTA. Only after the human marks the connection Accepted.
+Only after the human marks the connection Accepted. A silent acceptance gets one
+value-first touch, without a meeting ask. A reply gets a response that references
+what they actually said and one soft CTA. Never treat an acceptance as a reply.
 
 Specificity test: if you can swap another company name and the copy still reads
 naturally, rewrite it.
@@ -327,7 +333,7 @@ export function weekdayKey(
       "friday",
       "saturday",
     ] as const
-  )[date.getUTCDay()]!;
+  )[new Date(date.getTime() + 4 * 60 * 60 * 1000).getUTCDay()]!;
 }
 
 export function sectorForDate(

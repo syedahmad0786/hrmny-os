@@ -1,3 +1,181 @@
+/* Sales uses the existing HRMNY palette and native disclosure controls. */
+.sales-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 24px;
+}
+.sales-work-sidebar {
+  display: grid;
+  gap: 16px;
+}
+.sales-work-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.sales-work-tabs button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.sales-work-tabs button[aria-pressed="true"],
+.sales-work-tabs a[aria-current="page"] {
+  background: var(--ochre-soft);
+  color: var(--ink);
+  font-weight: 600;
+}
+.sales-work-tabs button span {
+  margin-left: 5px;
+  font-size: 12px;
+}
+.sales-work-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sales-work-list li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  border-bottom: 1px solid var(--line);
+  scroll-margin-top: 120px;
+}
+.sales-work-list strong {
+  font-size: 15px;
+}
+.sales-work-list p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sales-work-dot {
+  width: 7px;
+  height: 7px;
+  background: var(--ochre);
+  border-radius: 50%;
+}
+.sales-work-dot.reply {
+  background: var(--success);
+}
+.sales-work-dot.followup {
+  background: var(--danger);
+}
+.sales-show-more {
+  width: 100%;
+  min-height: 48px;
+  color: var(--ochre-dark);
+  font-size: 13px;
+}
+.sales-tool-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.sales-tool-row strong {
+  font-size: 13px;
+}
+.sales-tool-row small {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.sales-journey {
+  padding-left: 20px;
+  margin-top: 12px;
+  font-size: 14px;
+}
+.sales-journey a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+}
+.sales-more-nav {
+  position: relative;
+}
+.sales-more-nav summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-size: 13px;
+}
+.sales-more-nav > div {
+  min-width: 200px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-2);
+}
+.sales-more-nav a {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+}
+[data-outreach-view="drafts"] .outreach-approved-panel,
+[data-outreach-view="approved"] .outreach-drafts-panel,
+[data-outreach-view="followups"] .outreach-review-panels,
+[data-outreach-view="history"] .outreach-review-panels,
+[data-outreach-view]:not([data-outreach-view="all"]) .outreach-compose-panels,
+[data-outreach-view]:not([data-outreach-view="all"]):not(
+    [data-outreach-view="history"]
+  )
+  .outreach-history-panel {
+  display: none;
+}
+[data-outreach-view="drafts"] .outreach-review-panels,
+[data-outreach-view="approved"] .outreach-review-panels {
+  grid-template-columns: minmax(0, 1fr);
+}
+[id^="company-"],
+[id^="contact-"],
+[id^="conversation-"] {
+  scroll-margin-top: 120px;
+}
+.sales-workspace :focus-visible,
+.sales-work-tabs :focus-visible,
+.sales-more-nav :focus-visible {
+  outline: 3px solid var(--ochre);
+  outline-offset: 3px;
+}
+@media (max-width: 1000px) {
+  .sales-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sales-work-sidebar {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .sales-work-list li {
+    grid-template-columns: 8px minmax(0, 1fr);
+    gap: 10px;
+    padding: 16px;
+  }
+  .sales-work-list li > .crm-btn {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
 /* Harmony CRM redesign — desk chrome + CRM surfaces */
 :root {
   --ochre: #e47300;

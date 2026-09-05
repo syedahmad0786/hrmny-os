@@ -564,6 +564,9 @@ describe("research → enrich → draft gates", () => {
     expect(drafts.created.some((d) => d.channel === "linkedin_followup")).toBe(
       true,
     );
+    expect(
+      drafts.created.find((d) => d.channel === "linkedin_followup")?.body,
+    ).not.toMatch(/call|meeting|Tuesday/);
     const email = drafts.created.find((d) => d.channel === "gmail");
     if (email) {
       expect(email.body).toContain(FOOTER_MARKER);
@@ -702,6 +705,61 @@ describe("research → enrich → draft gates", () => {
 
 describe("digest, replies, intent CSV, evolve, stale", () => {
   beforeEach(resetAll);
+
+  it("routes actionable work to exact records and removes a follow-up after a reply", async () => {
+    const deal = await createDeal({ companyName: "Cedar Retail" });
+    const draft = await insertOutreach({
+      dealId: deal.dealId,
+      channel: "gmail",
+      recipient: "maya@cedar.co",
+      subject: "Dubai launch",
+      body: "Launch context",
+    });
+    const first = await buildSalesOsDigest();
+    expect(first.attention.find((item) => item.id === draft.id)).toMatchObject({
+      kind: "review",
+      title: "Cedar Retail",
+      href: `/crm/outreach?id=${draft.id}`,
+    });
+    await patchOutreach(draft.id, { state: "approved" });
+    expect(
+      (await buildSalesOsDigest()).attention.find(
+        (item) => item.id === draft.id,
+      )?.kind,
+    ).toBe("send");
+    await patchOutreach(draft.id, {
+      state: "sent",
+      sentAt: "2026-08-01T08:00:00.000Z",
+    });
+    const now = new Date("2026-09-06T20:30:00.000Z");
+    const due = await buildSalesOsDigest(now);
+    expect(due.sectorHint).toBe(
+      DEFAULT_SALES_OS_SETTINGS.sectorRotation.monday,
+    );
+    expect(
+      due.attention.find((item) => item.kind === "followup"),
+    ).toMatchObject({
+      href: `/crm/outreach?view=followups#followup-${draft.id}`,
+    });
+    await recordEmailEvent({
+      outreachItemId: draft.id,
+      kind: "replied",
+      provider: "gmail",
+      externalId: "reply-workspace",
+      payload: {},
+    });
+    expect(
+      (await buildSalesOsDigest(now)).attention.some(
+        (item) => item.kind === "followup",
+      ),
+    ).toBe(false);
+    expect(
+      sectorForDate(
+        DEFAULT_SALES_OS_SETTINGS,
+        new Date("2026-09-06T19:59:59.000Z"),
+      ),
+    ).toBe(DEFAULT_SALES_OS_SETTINGS.sectorRotation.sunday);
+  });
 
   it("builds a coverage digest and flags stalls", async () => {
     await proposeSignal();

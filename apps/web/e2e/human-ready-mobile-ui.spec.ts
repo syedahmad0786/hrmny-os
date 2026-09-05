@@ -43,6 +43,11 @@ test("primary CRM actions stay usable on a phone", async ({ page }) => {
   );
 
   await page.goto("/crm", { waitUntil: "domcontentloaded" });
+  const more = page
+    .getByRole("navigation", { name: "Sales sections" })
+    .locator("summary");
+  await expectMobileReady(page, more);
+  await more.click();
   await expectMobileReady(
     page,
     page.locator('.crm-subnav a[href="/crm/contacts"]'),

@@ -11,6 +11,16 @@ import {
   listEmailEvents,
 } from "./store";
 import { buildEmailFollowupStatuses } from "./followups";
+import { sectorForDate } from "./sops";
+
+export type SalesAttentionItem = {
+  id: string;
+  kind: "review" | "send" | "followup" | "closing";
+  title: string;
+  detail: string;
+  href: string;
+  action: string;
+};
 
 export type StallDeal = {
   dealId: string;
@@ -23,6 +33,7 @@ export type StallDeal = {
 export type SalesOsDigest = {
   date: string;
   sectorHint: string;
+  attention: SalesAttentionItem[];
   researchedWaiting: number;
   contactsWaiting: number;
   outreachDrafts: number;
@@ -122,22 +133,66 @@ export async function buildSalesOsDigest(
       });
     }
   }
+  const attention: SalesAttentionItem[] = [
+    ...followUps
+      .filter((item) => item.state === "due")
+      .map((item) => ({
+        id: `followup-${item.sourceId}`,
+        kind: "followup" as const,
+        title: companyByDeal.get(item.dealId) ?? item.recipient,
+        detail: `${item.recipient} · ${item.reason}`,
+        href: `/crm/outreach?view=followups#followup-${item.sourceId}`,
+        action: "Prepare follow-up",
+      })),
+    ...drafts.map((item) => ({
+      id: item.id,
+      kind: "review" as const,
+      title: companyByDeal.get(item.dealId) ?? item.recipient,
+      detail: `${item.channel} · ${item.subject ?? item.body.slice(0, 120)}`,
+      href: `/crm/outreach?id=${item.id}`,
+      action: "Review draft",
+    })),
+    ...approved.map((item) => ({
+      id: item.id,
+      kind: "send" as const,
+      title: companyByDeal.get(item.dealId) ?? item.recipient,
+      detail: `${item.channel} · ${item.subject ?? item.body.slice(0, 120)}`,
+      href: `/crm/outreach?id=${item.id}`,
+      action: "Review and send",
+    })),
+    ...companies.map((item) => ({
+      id: item.id,
+      kind: "review" as const,
+      title: item.name,
+      detail: `${item.temperature} · ${item.whyThis}`,
+      href: `/crm/research#company-${item.id}`,
+      action: "Review company",
+    })),
+    ...contacts.map((item) => ({
+      id: item.id,
+      kind: "review" as const,
+      title: item.fullName,
+      detail: `${item.title ?? "Decision-maker"} · ${item.email ?? "Email not verified"}`,
+      href: `/crm/research#contact-${item.id}`,
+      action: "Qualify contact",
+    })),
+    ...open
+      .filter((item) =>
+        ["price_cost", "propose", "close"].includes(String(item.stage)),
+      )
+      .map((item) => ({
+        id: item.dealId,
+        kind: "closing" as const,
+        title: item.companyName,
+        detail: `${String(item.stage).replaceAll("_", " ")} · ${new Intl.NumberFormat("en-AE", { style: "currency", currency: "AED", maximumFractionDigits: 0 }).format(Number(item.quoteValue ?? 0))}`,
+        href: `/crm/deals/${item.dealId}`,
+        action: "Move deal forward",
+      })),
+  ];
   return {
     date: now.toISOString().slice(0, 10),
-    sectorHint:
-      settings.sectorRotation[
-        (
-          [
-            "sunday",
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-            "saturday",
-          ] as const
-        )[now.getUTCDay()]!
-      ],
+    sectorHint: sectorForDate(settings, now),
+    attention,
     researchedWaiting: companies.length,
     contactsWaiting: contacts.length,
     outreachDrafts: drafts.length,
