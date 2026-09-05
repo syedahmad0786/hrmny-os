@@ -364,18 +364,16 @@ export function ResearchConsole() {
             {(approved.data ?? []).map((c) => (
               <article key={c.id} className="crm-approval-mini">
                 <strong>{c.name}</strong>
-                {access.data?.canOperate &&
-                c.temperature !== "cool" &&
-                c.temperature !== "cold" ? (
+                {access.data?.canOperate ? (
                   <Link
                     className="crm-btn primary"
                     href={`/crm/hunt?q=${encodeURIComponent(c.name)}#apollo-people-search`}
                   >
-                    Open governed People Search
+                    Find decision-makers
                   </Link>
                 ) : (
                   <span className="text-xs text-[var(--muted)]">
-                    Discovery unavailable for this company state
+                    Sales operator access required
                   </span>
                 )}
               </article>
