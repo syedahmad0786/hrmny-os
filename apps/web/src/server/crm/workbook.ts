@@ -185,7 +185,7 @@ export async function workbookSnapshot() {
         "contacts",
         c.contactId,
         `${c.firstName} ${c.lastName ?? ""}`.trim(),
-        c.ownerEmployeeId ?? company?.ownerEmployeeId,
+        c.ownerEmployeeId,
       ),
       company: company?.name ?? "",
       title: c.title ?? "",

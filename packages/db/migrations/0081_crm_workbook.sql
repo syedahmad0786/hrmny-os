@@ -15,7 +15,7 @@ CREATE INDEX IF NOT EXISTS crm_saved_view_owner_idx ON public.crm_saved_view(own
 CREATE INDEX IF NOT EXISTS activity_contact_interaction_idx ON public.activity(contact_id, occurred_at DESC)
   WHERE type IN ('call', 'meeting', 'email', 'outreach');
 --> statement-breakpoint
-CREATE TABLE public.client_source_project (
+CREATE TABLE IF NOT EXISTS public.client_source_project (
   project_id text PRIMARY KEY CHECK (project_id ~ '^[0-9]{6,30}$'),
   workspace_id text NOT NULL CHECK (workspace_id ~ '^[0-9]{6,30}$'),
   client_id uuid NOT NULL REFERENCES public.client(client_id),
@@ -23,7 +23,7 @@ CREATE TABLE public.client_source_project (
   observed_at timestamptz NOT NULL,
   imported_by uuid NOT NULL REFERENCES public.employee(employee_id)
 );
-CREATE INDEX client_source_project_client_idx ON public.client_source_project(client_id);
+CREATE INDEX IF NOT EXISTS client_source_project_client_idx ON public.client_source_project(client_id);
 --> statement-breakpoint
 DO $$
 DECLARE app_table text;
