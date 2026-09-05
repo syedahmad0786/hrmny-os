@@ -6,7 +6,7 @@ export type LLMProviderName = "openrouter" | "anthropic" | "ollama" | "mock";
 /**
  * Default OpenRouter free route for demos / agent tests.
  * Prefer content-bearing free models; `openrouter/free` may resolve to
- * reasoning-only upstreams (handled by content→reasoning fallback).
+ * reasoning-only upstreams (rejected so internal reasoning is never an answer).
  */
 export const OPENROUTER_FREE_DEFAULT_MODEL = "stealth/ox-alpha";
 
@@ -819,7 +819,8 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
                   model: activeModel,
                   messages: openRouterMessages(options),
                   temperature: options.temperature ?? 0.2,
-                  max_tokens: 2_048,
+                  max_tokens: options.webSearch ? 4_096 : 2_048,
+                  reasoning: { effort: "low", exclude: true },
                   stream: false,
                   ...(options.webSearch
                     ? {
@@ -858,13 +859,8 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
               typeof message?.content === "string"
                 ? message.content.trim()
                 : "";
-            const reasoning =
-              typeof message?.reasoning === "string"
-                ? message.reasoning.trim()
-                : "";
-            // Free / reasoning-first OpenRouter models often return content=null
-            // and put the answer in `reasoning`. Prefer content; fall back.
-            const text = content || reasoning;
+            // A reasoning-only response has no finished answer. Try the next route.
+            const text = content;
             if (!text) {
               throw new Error("LLM provider returned no text");
             }

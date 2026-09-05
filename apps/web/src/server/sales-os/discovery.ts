@@ -21,6 +21,7 @@ export const discoveryInput = z.object({
   focus: z.string().trim().max(300).default(""),
   mode: z.enum(["signals", "tenders"]).default("signals"),
 });
+const discoveryOutput = z.object({ candidates: z.array(z.unknown()).max(30) });
 const date = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -66,12 +67,18 @@ export function parseResearchOutput(
     }
     return output;
   }
-  return JSON.parse(
-    output
-      .trim()
-      .replace(/^```(?:json)?\s*/, "")
-      .replace(/\s*```$/, ""),
-  );
+  try {
+    return JSON.parse(
+      output
+        .trim()
+        .replace(/^```(?:json)?\s*/, "")
+        .replace(/\s*```$/, ""),
+    );
+  } catch {
+    throw new Error(
+      "Research did not return a finished structured result. Review the run history before starting a new request.",
+    );
+  }
 }
 
 /** Provider dates and excerpts are review evidence, never buyer-confirmed intent. */
@@ -197,7 +204,9 @@ export async function discoverSalesOpportunities(
         agent: "research",
         roles: input.roles,
         webSearch: true,
+        outputSchema: discoveryOutput,
         input: [
+          "hrmny is the SELLER: a UAE creative agency offering branding, PR, social media, content and production. Find OTHER organizations that might buy these services. Do not search for hrmny itself, its own jobs or its own leadership.",
           `Today is ${now.toISOString().slice(0, 10)}. Find up to ${Math.min(10, settings.caps.companiesPerResearchRun)} NEW UAE/GCC sales opportunities for hrmny. Focus: ${sector}.`,
           input.mode === "tenders"
             ? "Search official public procurement/RFP notices for creative, PR, branding, marketing and production work. Only open deadlines; never claim a portal was searched when inaccessible."
@@ -219,10 +228,12 @@ export async function discoverSalesOpportunities(
       });
       if (run.model === "mock")
         throw new Error("Live web research is not configured");
-      const parsed = z
-        .object({ candidates: z.array(z.unknown()).max(30) })
-        .parse(parseResearchOutput(run.output));
-      candidates = parsed.candidates;
+      const parsed = discoveryOutput.safeParse(parseResearchOutput(run.output));
+      if (!parsed.success)
+        throw new Error(
+          "Research did not return usable opportunity data. Review the run history before starting a new request.",
+        );
+      candidates = parsed.data.candidates;
       citations = new Set(
         (run.sourceCitations ?? []).flatMap((row) => {
           try {

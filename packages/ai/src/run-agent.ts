@@ -174,7 +174,8 @@ export async function runAgent(
     task: taskFor(agent),
     model: input.model,
     webSearch: input.webSearch,
-    schema: agent === "outreach-draft" ? OutreachDraftSchema : undefined,
+    schema:
+      agent === "outreach-draft" ? OutreachDraftSchema : input.outputSchema,
     messages: [
       { role: "system", content: AGENT_REGISTRY[agent].responsibility },
       { role: "user", content: `${userText}${context}` },

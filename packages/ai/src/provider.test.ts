@@ -384,25 +384,25 @@ describe("openrouter free-model failover", () => {
     vi.unstubAllGlobals();
   });
 
-  it("extracts schema-valid JSON from reasoning prose and requests response healing", async () => {
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
-      new Response(
-        JSON.stringify({
-          id: "structured-1",
-          model: OPENROUTER_FREE_DEFAULT_MODEL,
-          choices: [
-            {
-              message: {
-                role: "assistant",
-                content: null,
-                reasoning:
-                  'We need to return the draft.\n```json\n{"channel":"email","subject":"Hello","body":"Hi Sam","cta":"Reply yes"}\n```',
+  it("extracts schema-valid JSON from finished response prose and requests response healing", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            id: "structured-1",
+            model: OPENROUTER_FREE_DEFAULT_MODEL,
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content:
+                    'We need to return the draft.\n```json\n{"channel":"email","subject":"Hello","body":"Hi Sam","cta":"Reply yes"}\n```',
+                },
               },
-            },
-          ],
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
     const provider = createProvider({
@@ -440,15 +440,16 @@ describe("openrouter free-model failover", () => {
   });
 
   it("uses a review-only local outreach draft when every free route fails", async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          choices: [
-            { message: { role: "assistant", content: "[incomplete output" } },
-          ],
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              { message: { role: "assistant", content: "[incomplete output" } },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
     const provider = createProvider({
@@ -590,6 +591,8 @@ describe("openrouter free-model failover", () => {
     ) as Record<string, unknown>;
 
     expect(request).toMatchObject({
+      reasoning: { effort: "low", exclude: true },
+      max_tokens: 4096,
       max_tool_calls: 2,
       tools: [
         {
@@ -606,5 +609,44 @@ describe("openrouter free-model failover", () => {
       ],
     });
     vi.unstubAllGlobals();
+  });
+
+  it("never exposes reasoning-only responses as finished answers", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  reasoning: "Unfinished internal analysis",
+                },
+              },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "Finished sourced answer" } }],
+          }),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const result = await createProvider({
+        provider: "openrouter",
+        openRouterApiKey: "sk-test",
+      }).generate({
+        messages: [{ role: "user", content: "Research a company" }],
+      });
+      expect(result.text).toBe("Finished sourced answer");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
