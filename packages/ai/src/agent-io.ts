@@ -17,6 +17,8 @@ export type AgentRunInput = {
   context?: Record<string, unknown>;
   /** Explicit user-triggered, bounded OpenRouter web grounding. */
   webSearch?: boolean;
+  /** Server-selected structured result contract. Never supplied by a browser. */
+  outputSchema?: z.ZodTypeAny;
   /** Private employee context: cost ledger retains metrics, never content. */
   privateContext?: boolean;
   /** Actor roles for sandbox routing (primary privileged-data control). */
