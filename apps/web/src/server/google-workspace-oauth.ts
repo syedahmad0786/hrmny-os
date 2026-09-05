@@ -269,7 +269,7 @@ async function loadStoredRefreshToken(
     .where(
       and(
         eq(connectionAccount.ownerEmployeeId, employeeId),
-        eq(connectionAccount.externalConnectionId, email),
+        sql`lower(btrim(${connectionAccount.externalConnectionId})) = ${email}`,
         eq(connectionAccount.toolkit, "google_workspace"),
         eq(connectionAccount.scope, "staff"),
       ),
@@ -336,7 +336,7 @@ export async function persistGoogleWorkspaceTokens(input: {
       .where(
         and(
           eq(connectionAccount.ownerEmployeeId, input.employeeId),
-          eq(connectionAccount.externalConnectionId, email),
+          sql`lower(btrim(${connectionAccount.externalConnectionId})) = ${email}`,
           eq(connectionAccount.toolkit, "google_workspace"),
           eq(connectionAccount.scope, "staff"),
         ),

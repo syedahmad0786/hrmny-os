@@ -47,6 +47,9 @@ it("retains multiple domains, reconnects exactly one mailbox, and denies another
       email: "third@domain-three.test",
     }),
   ).rejects.toThrow("refresh token");
+  await db.execute(
+    sql`update public.connection_account set external_connection_id = ' FIRST@DOMAIN-ONE.TEST ' where connection_account_id = ${first.connectionAccountId}::uuid`,
+  );
   expect(
     (
       await persistGoogleWorkspaceTokens({

@@ -671,14 +671,10 @@ test.describe("Hunt Apollo prospect UI", () => {
     await page.setExtraHTTPHeaders({ "x-dev-role": "am" });
     await page.locator("#persona").selectOption("am");
     await readinessStarted;
-    await expect(page.getByTestId("hunt-apollo-search")).toBeDisabled();
-    await expect(page.getByTestId("hunt-apollo-search")).toHaveText(
-      "Checking employee connection…",
-    );
-    await page.getByTestId("hunt-apollo-search").evaluate((button) => {
-      button.closest("form")?.requestSubmit();
-    });
-    await page.waitForTimeout(100);
+    await expect(
+      page.getByText("Checking access…", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByTestId("hunt-apollo-search")).toHaveCount(0);
     expect(apolloEffectRequests).toBe(0);
     releaseReadiness();
     await expect(page.getByTestId("hunt-apollo-title")).toHaveValue(

@@ -30,6 +30,11 @@ test("personal mail switches accounts and folders without carrying an old messag
           status: "connected",
           lastError: null,
         }));
+      if (
+        name === "connections.myMailboxes" &&
+        route.request().headers()["x-dev-role"] === "am"
+      )
+        json = [];
       if (name === "connections.mailboxPage") {
         const params = input[index]?.json;
         json = {
@@ -70,16 +75,32 @@ test("personal mail switches accounts and folders without carrying an old messag
   await expect(
     page.getByRole("button", { name: /SENT older one/ }),
   ).toBeVisible();
-  await page.getByRole("combobox", { name: "Mailbox", exact: true }).selectOption(ids[1]!);
+  await page
+    .getByRole("combobox", { name: "Mailbox", exact: true })
+    .selectOption(ids[1]!);
   await expect(
     page.getByRole("button", { name: /SENT latest two/ }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Newer", exact: true }),
   ).toBeDisabled();
+  await page.getByRole("button", { name: /SENT latest two/ }).click();
+  await expect(
+    page.getByText("Private message body", { exact: false }),
+  ).toBeVisible();
+  await page.setExtraHTTPHeaders({ "x-dev-role": "am" });
+  await page.getByRole("combobox", { name: "Dev only" }).selectOption("am");
+  await expect(
+    page.getByText("Private message body", { exact: false }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "My inbox & sent mail" }).click();
+  await expect(
+    page.getByText("Connect your own Google mailbox", { exact: false }),
+  ).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth + 1,
     ),
   ).toBe(true);
+  await page.unrouteAll({ behavior: "wait" });
 });
