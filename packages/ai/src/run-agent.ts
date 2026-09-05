@@ -174,6 +174,7 @@ export async function runAgent(
     task: taskFor(agent),
     model: input.model,
     webSearch: input.webSearch,
+    privateContext: input.privateContext,
     schema:
       agent === "outreach-draft" ? OutreachDraftSchema : input.outputSchema,
     messages: [
