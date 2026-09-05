@@ -15,12 +15,7 @@ export const GOOGLE_WORKSPACE_OAUTH_SCOPES = [
 ] as const;
 
 export const GoogleProfileSchema = z.object({
-  email: z
-    .string()
-    .email()
-    .refine((email) => email.toLowerCase().endsWith("@hrmny.co"), {
-      message: "Connect an @hrmny.co Google Workspace account",
-    }),
+  email: z.string().email(),
   email_verified: z.literal(true),
 });
 
@@ -136,7 +131,9 @@ export function googleWorkspaceRedirectUri(requestOrigin?: string): string {
   );
 }
 
-export function isAllowedGoogleWorkspaceRedirectUri(redirectUri: string): boolean {
+export function isAllowedGoogleWorkspaceRedirectUri(
+  redirectUri: string,
+): boolean {
   const explicit = explicitGoogleWorkspaceRedirectUri();
   if (explicit && redirectUri === explicit) return true;
   try {
@@ -250,9 +247,8 @@ export async function buildGoogleWorkspaceAuthorizeUrl(
     response_type: "code",
     scope: GOOGLE_WORKSPACE_OAUTH_SCOPES.join(" "),
     access_type: "offline",
-    prompt: "consent",
+    prompt: "select_account consent",
     include_granted_scopes: "true",
-    hd: "hrmny.co",
     state,
   });
   return {
@@ -263,6 +259,7 @@ export async function buildGoogleWorkspaceAuthorizeUrl(
 
 async function loadStoredRefreshToken(
   employeeId: string,
+  email: string,
 ): Promise<string | null> {
   const db = getDb();
   if (!db) return null;
@@ -272,6 +269,7 @@ async function loadStoredRefreshToken(
     .where(
       and(
         eq(connectionAccount.ownerEmployeeId, employeeId),
+        eq(connectionAccount.externalConnectionId, email),
         eq(connectionAccount.toolkit, "google_workspace"),
         eq(connectionAccount.scope, "staff"),
       ),
@@ -311,11 +309,11 @@ export async function persistGoogleWorkspaceTokens(input: {
   if (!db) {
     throw new Error("DATABASE_URL required to persist Google Workspace tokens");
   }
-  const email = input.email.toLowerCase();
+  const email = z.string().email().parse(input.email.trim()).toLowerCase();
   const refreshToken =
     input.refreshToken?.trim() && input.refreshToken.trim().length >= 20
       ? input.refreshToken.trim()
-      : await loadStoredRefreshToken(input.employeeId);
+      : await loadStoredRefreshToken(input.employeeId, email);
   if (!refreshToken) {
     throw new Error(
       "Google did not return a refresh token. Revoke hrmny OS under Google Account → Security → Third-party access, then Reconnect.",
@@ -328,19 +326,23 @@ export async function persistGoogleWorkspaceTokens(input: {
     expiresAt: expiresAt.toISOString(),
   });
 
-  const [existing] = await db
-    .select()
-    .from(connectionAccount)
-    .where(
-      and(
-        eq(connectionAccount.ownerEmployeeId, input.employeeId),
-        eq(connectionAccount.toolkit, "google_workspace"),
-        eq(connectionAccount.scope, "staff"),
-      ),
-    )
-    .limit(1);
-
   const saved = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`google-mailbox:${input.employeeId}:${email}`}, 0))`,
+    );
+    const [existing] = await tx
+      .select()
+      .from(connectionAccount)
+      .where(
+        and(
+          eq(connectionAccount.ownerEmployeeId, input.employeeId),
+          eq(connectionAccount.externalConnectionId, email),
+          eq(connectionAccount.toolkit, "google_workspace"),
+          eq(connectionAccount.scope, "staff"),
+        ),
+      )
+      .limit(1);
+
     let secretId = existing?.secretId ?? null;
     if (secretId) {
       await tx.execute(
@@ -351,7 +353,7 @@ export async function persistGoogleWorkspaceTokens(input: {
         sql<{ id: string }>`
           select vault.create_secret(
             ${secret},
-            ${`hrmny:${input.employeeId}:google_workspace`},
+            ${`hrmny:${input.employeeId}:google_workspace:${email}`},
             ${"Google Workspace OAuth tokens managed by hrmny OS"}
           ) as id
         `,
@@ -366,7 +368,7 @@ export async function persistGoogleWorkspaceTokens(input: {
       toolkit: "google_workspace",
       scope: "staff" as const,
       authType: "oauth",
-      label: "Google Workspace",
+      label: email,
       secretId,
       externalConnectionId: email,
       status: "connected",
@@ -403,15 +405,15 @@ export async function persistGoogleWorkspaceTokens(input: {
         account: email,
       },
     });
-    return row!;
+    return {
+      connectionAccountId: row!.connectionAccountId,
+      email,
+      created: !existing,
+      previousStatus: existing?.status ?? null,
+    };
   });
 
-  return {
-    connectionAccountId: saved.connectionAccountId,
-    email,
-    created: !existing,
-    previousStatus: existing?.status ?? null,
-  };
+  return saved;
 }
 
 async function exchangeGoogleAuthorizationCode(
@@ -465,7 +467,7 @@ export async function completeGoogleWorkspaceOAuth(input: {
   }
   const parsed = GoogleProfileSchema.safeParse(await profileResponse.json());
   if (!parsed.success) {
-    throw new Error("Connect an @hrmny.co Google Workspace account");
+    throw new Error("Connect a verified Google account");
   }
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
   const saved = await persistGoogleWorkspaceTokens({

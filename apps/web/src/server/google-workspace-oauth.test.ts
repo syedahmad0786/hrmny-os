@@ -80,9 +80,7 @@ describe("google workspace oauth helpers", () => {
     delete process.env.GOOGLE_OAUTH_REDIRECT_URI;
     delete process.env.GOOGLE_WORKSPACE_REDIRECT_URI;
     delete process.env.NEXT_PUBLIC_APP_URL;
-    expect(
-      googleWorkspaceRedirectUri("https://hrmny-os.vercel.app"),
-    ).toBe(
+    expect(googleWorkspaceRedirectUri("https://hrmny-os.vercel.app")).toBe(
       "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback",
     );
   });
@@ -121,7 +119,8 @@ describe("google workspace oauth helpers", () => {
     delete process.env.client_id;
     delete process.env.client_secret;
     expect(googleWorkspaceClientConfigured()).toBe(false);
-    process.env.GOOGLE_OAUTH_CLIENT_ID = "test-client.apps.googleusercontent.com";
+    process.env.GOOGLE_OAUTH_CLIENT_ID =
+      "test-client.apps.googleusercontent.com";
     process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-secret";
     expect(googleWorkspaceClientConfigured()).toBe(true);
   });
@@ -130,14 +129,13 @@ describe("google workspace oauth helpers", () => {
     delete process.env.GOOGLE_OAUTH_STATE_SECRET;
     process.env.CRON_SECRET = "c".repeat(32);
     expect(() =>
-      signGoogleWorkspaceOAuthState(
-        "c0000000-0000-4000-8000-000000000011",
-      ),
+      signGoogleWorkspaceOAuthState("c0000000-0000-4000-8000-000000000011"),
     ).toThrow(/GOOGLE_OAUTH_STATE_SECRET/);
   });
 
-  it("builds an offline consent URL for @hrmny.co", async () => {
-    process.env.GOOGLE_OAUTH_CLIENT_ID = "test-client.apps.googleusercontent.com";
+  it("builds account selection without a mailbox domain restriction", async () => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID =
+      "test-client.apps.googleusercontent.com";
     process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-secret";
     process.env.NEXT_PUBLIC_APP_URL = "https://hrmny-os.vercel.app";
     delete process.env.GOOGLE_OAUTH_REDIRECT_URI;
@@ -149,8 +147,8 @@ describe("google workspace oauth helpers", () => {
       "https://accounts.google.com/o/oauth2/v2/auth",
     );
     expect(url.searchParams.get("access_type")).toBe("offline");
-    expect(url.searchParams.get("prompt")).toBe("consent");
-    expect(url.searchParams.get("hd")).toBe("hrmny.co");
+    expect(url.searchParams.get("prompt")).toBe("select_account consent");
+    expect(url.searchParams.get("hd")).toBeNull();
     expect(url.searchParams.get("redirect_uri")).toBe(
       "https://hrmny-os.vercel.app/api/integrations/google-workspace/callback",
     );

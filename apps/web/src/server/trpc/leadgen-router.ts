@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { outreachReadiness } from "../leadgen/readiness";
+import { GmailSenderIdentityError } from "../leadgen/google-mailbox-identities";
 import { TRPCError } from "@trpc/server";
 import {
   bootstrapGateRegistry,
@@ -592,13 +593,14 @@ function testEmailBody(item: OutreachItem): string {
   ].join("\n");
 }
 
-/** Send an approved email to the operator's own @hrmny.co mailbox only. */
+/** Send an approved email only to the server-resolved connected mailbox. */
 export async function sendOutreachTest(input: {
   id: string;
   idempotencyKey: string;
   actor: ActorContext;
   composio?: ComposioSendAdapter;
   senderConnectionAccountId?: string;
+  fromEmail?: string;
   /** Test-only dependency; the tRPC route always resolves this server-side. */
   testRecipient?: string;
 }) {
@@ -630,17 +632,21 @@ export async function sendOutreachTest(input: {
   )
     ?.trim()
     .toLowerCase();
-  if (
-    !recipient ||
-    !z.string().email().safeParse(recipient).success ||
-    !recipient.endsWith("@hrmny.co")
-  ) {
+  if (!recipient || !z.string().email().safeParse(recipient).success) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message:
-        "Connect your @hrmny.co Google Workspace mailbox before sending a test.",
+      message: "Connect your own Google mailbox before sending a test.",
     });
   }
+
+  const fromEmail = input.fromEmail
+    ? z.string().email().parse(input.fromEmail).toLowerCase()
+    : recipient;
+  if (input.fromEmail && !sender && !input.composio)
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Select a connected Google mailbox before choosing an alias.",
+    });
 
   const subject = `[TEST — NOT SENT TO CLIENT] ${item.subject ?? "(no subject)"}`;
   const body = testEmailBody(item);
@@ -656,7 +662,7 @@ export async function sendOutreachTest(input: {
       body,
       messageId,
       senderConnectionAccountId: sender?.connectionAccountId,
-      senderEmail: sender?.email ?? recipient,
+      senderEmail: fromEmail,
     }),
     status: "processing",
     result: { bridgeStatus: "sending_test" },
@@ -667,7 +673,7 @@ export async function sendOutreachTest(input: {
       intendedRecipient: item.recipient,
       messageId,
       senderConnectionAccountId: sender?.connectionAccountId,
-      senderEmail: sender?.email ?? recipient,
+      senderEmail: fromEmail,
     },
   });
   if (receipt.duplicate) {
@@ -709,6 +715,7 @@ export async function sendOutreachTest(input: {
       const readback = await composio.readbackAfterSend({
         externalId: priorResult.externalId,
         recipient,
+        expectedFromEmail: fromEmail,
       });
       await completeIntegrationReceipt(receipt.receiptId, {
         ...priorResult,
@@ -751,6 +758,7 @@ export async function sendOutreachTest(input: {
     const sent = await composio.sendAfterApproval({
       toolkit: "gmail",
       to: recipient,
+      fromEmail,
       subject,
       body,
       messageId,
@@ -776,7 +784,7 @@ export async function sendOutreachTest(input: {
       readbackAt: sent.readbackAt,
       readbackRecipient: sent.readbackRecipient,
       senderConnectionAccountId: sender?.connectionAccountId,
-      senderEmail: sender?.email ?? recipient,
+      senderEmail: fromEmail,
     });
     return {
       sent: true as const,
@@ -789,7 +797,10 @@ export async function sendOutreachTest(input: {
       outreachState: item.state,
     };
   } catch (error) {
-    const definitelyNotSent = !providerAttempted || mode === "stub";
+    const definitelyNotSent =
+      !providerAttempted ||
+      mode === "stub" ||
+      error instanceof GmailSenderIdentityError;
     await updateIntegrationReceiptProgress(receipt.receiptId, {
       status: definitelyNotSent ? "failed" : "processing",
       result: {
@@ -913,6 +924,7 @@ export async function sendOutreach(input: {
   actor: ActorContext;
   composio?: ComposioSendAdapter;
   senderConnectionAccountId?: string;
+  fromEmail?: string;
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<
@@ -1028,6 +1040,15 @@ export async function sendOutreach(input: {
       );
     }
   }
+  const fromEmail = input.fromEmail
+    ? z.string().email().parse(input.fromEmail).toLowerCase()
+    : sender?.email;
+  if (input.fromEmail && !sender && !input.composio)
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "Choose a connected Google mailbox before selecting its sender address.",
+    });
   const composio =
     input.composio ??
     (await resolveComposioSend(
@@ -1062,7 +1083,7 @@ export async function sendOutreach(input: {
             threadId: replyContext?.threadId,
             inReplyTo: replyContext?.inReplyTo,
             senderConnectionAccountId: requiredSenderConnectionAccountId,
-            senderEmail: sender?.email,
+            senderEmail: fromEmail,
           });
           const receipt = await recordIntegrationReceipt({
             provider: "gmail",
@@ -1080,7 +1101,7 @@ export async function sendOutreach(input: {
               threadId: replyContext?.threadId,
               inReplyTo: replyContext?.inReplyTo,
               senderConnectionAccountId: requiredSenderConnectionAccountId,
-              senderEmail: sender?.email,
+              senderEmail: fromEmail,
             },
           });
 
@@ -1132,6 +1153,7 @@ export async function sendOutreach(input: {
                 externalId,
                 recipient: item.recipient,
                 expectedThreadId: replyContext?.threadId,
+                expectedFromEmail: fromEmail,
               });
               threadId = readback.threadId ?? threadId;
               readbackAt = readback.readbackAt;
@@ -1171,6 +1193,7 @@ export async function sendOutreach(input: {
               const res = await composio.sendAfterApproval({
                 toolkit,
                 to: item.recipient,
+                fromEmail,
                 subject: item.subject ?? undefined,
                 body: item.body,
                 messageId,
@@ -1210,11 +1233,13 @@ export async function sendOutreach(input: {
                 readbackAt,
                 readbackRecipient: res.readbackRecipient,
                 senderConnectionAccountId: requiredSenderConnectionAccountId,
-                senderEmail: sender?.email,
+                senderEmail: fromEmail,
               });
             } catch (error) {
               const definitelyNotSent =
-                !providerAttempted || sendMode === "stub";
+                !providerAttempted ||
+                sendMode === "stub" ||
+                error instanceof GmailSenderIdentityError;
               await updateIntegrationReceiptProgress(receipt.receiptId, {
                 status: definitelyNotSent ? "failed" : "processing",
                 result: {
@@ -1224,7 +1249,7 @@ export async function sendOutreach(input: {
                   outreachItemId: item.id,
                   messageId,
                   senderConnectionAccountId: requiredSenderConnectionAccountId,
-                  senderEmail: sender?.email,
+                  senderEmail: fromEmail,
                   ...(externalId
                     ? {
                         externalId,
@@ -1275,7 +1300,7 @@ export async function sendOutreach(input: {
                 providerAccepted: true,
                 readbackAt,
                 senderConnectionAccountId: requiredSenderConnectionAccountId,
-                senderEmail: sender?.email,
+                senderEmail: fromEmail,
                 dealId: item.dealId,
                 recipient: item.recipient,
                 subject: item.subject,
@@ -1298,7 +1323,7 @@ export async function sendOutreach(input: {
       sendMode,
       providerAccepted,
       readbackAt,
-      senderEmail: sender?.email,
+      senderEmail: fromEmail,
     };
   } catch (err) {
     if (
@@ -1561,6 +1586,7 @@ const outreachRouter = router({
     .input(
       z.object({
         id: z.string(),
+        fromEmail: z.string().email().optional(),
         senderConnectionAccountId: z.string().uuid().optional(),
       }),
     )
@@ -1576,6 +1602,7 @@ const outreachRouter = router({
       z.object({
         id: z.string().uuid(),
         idempotencyKey: z.string().uuid(),
+        fromEmail: z.string().email().optional(),
         senderConnectionAccountId: z.string().uuid().optional(),
       }),
     )

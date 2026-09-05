@@ -18,25 +18,30 @@ describe("Google Workspace connection", () => {
     vi.unstubAllEnvs();
   });
 
-  it("accepts verified hrmny accounts and rejects personal accounts", () => {
+  it("accepts verified mailboxes from any domain and rejects unverified identities", () => {
     expect(
       GoogleProfileSchema.parse({
         email: "developer@hrmny.co",
         email_verified: true,
       }).email,
     ).toBe("developer@hrmny.co");
+    expect(
+      GoogleProfileSchema.parse({
+        email: "sales@another-domain.com",
+        email_verified: true,
+      }).email,
+    ).toBe("sales@another-domain.com");
     expect(() =>
       GoogleProfileSchema.parse({
         email: "developer@gmail.com",
-        email_verified: true,
+        email_verified: false,
       }),
     ).toThrow();
   });
 
   it("saveApiKey persists in memory when DATABASE_URL is missing", async () => {
-    const { clearMemoryApiKeys, getMemoryApiKey } = await import(
-      "./integrations/memory-keys"
-    );
+    const { clearMemoryApiKeys, getMemoryApiKey } =
+      await import("./integrations/memory-keys");
     const prev = process.env.DATABASE_URL;
     process.env.DATABASE_URL = "";
     clearMemoryApiKeys();
@@ -58,7 +63,9 @@ describe("Google Workspace connection", () => {
       expect(saved.store).toBe("memory");
       expect(saved.hasSecret).toBe(true);
       expect(saved.probed).toBe(false);
-      expect(saved.probeWarning).toMatch(/provider acceptance was not verified/i);
+      expect(saved.probeWarning).toMatch(
+        /provider acceptance was not verified/i,
+      );
       expect(fetchMock).not.toHaveBeenCalled();
       expect(getMemoryApiKey("n8n")).toBe("n8n-memory-test-key");
       const rows = await caller.connections.list();
@@ -131,7 +138,8 @@ describe("Google Workspace connection", () => {
       else process.env.DATABASE_URL = prevDb;
       if (prevId === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_ID;
       else process.env.GOOGLE_OAUTH_CLIENT_ID = prevId;
-      if (prevSecret === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+      if (prevSecret === undefined)
+        delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
       else process.env.GOOGLE_OAUTH_CLIENT_SECRET = prevSecret;
     }
   });
@@ -151,13 +159,14 @@ describe("Google Workspace connection", () => {
         roles: user.roles,
         canViewMargin: sessionCanViewMargin(user),
       });
-      await expect(caller.connections.startGoogleWorkspaceOAuth()).rejects.toThrow(
-        /GOOGLE_OAUTH_CLIENT/,
-      );
+      await expect(
+        caller.connections.startGoogleWorkspaceOAuth(),
+      ).rejects.toThrow(/GOOGLE_OAUTH_CLIENT/);
     } finally {
       if (prevId === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_ID;
       else process.env.GOOGLE_OAUTH_CLIENT_ID = prevId;
-      if (prevSecret === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+      if (prevSecret === undefined)
+        delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
       else process.env.GOOGLE_OAUTH_CLIENT_SECRET = prevSecret;
     }
   });
@@ -166,7 +175,8 @@ describe("Google Workspace connection", () => {
     const prevId = process.env.GOOGLE_OAUTH_CLIENT_ID;
     const prevSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
     const prevApp = process.env.NEXT_PUBLIC_APP_URL;
-    process.env.GOOGLE_OAUTH_CLIENT_ID = "test-client.apps.googleusercontent.com";
+    process.env.GOOGLE_OAUTH_CLIENT_ID =
+      "test-client.apps.googleusercontent.com";
     process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-secret";
     process.env.NEXT_PUBLIC_APP_URL = "https://hrmny-os.vercel.app";
     try {
@@ -190,11 +200,12 @@ describe("Google Workspace connection", () => {
       const built = await buildGoogleWorkspaceAuthorizeUrl(user.employeeId!, {
         requestOrigin: "https://hrmny-os.vercel.app",
       });
-      expect(new URL(built.redirectUrl).searchParams.get("hd")).toBe("hrmny.co");
+      expect(new URL(built.redirectUrl).searchParams.get("hd")).toBeNull();
     } finally {
       if (prevId === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_ID;
       else process.env.GOOGLE_OAUTH_CLIENT_ID = prevId;
-      if (prevSecret === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+      if (prevSecret === undefined)
+        delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
       else process.env.GOOGLE_OAUTH_CLIENT_SECRET = prevSecret;
       if (prevApp === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
       else process.env.NEXT_PUBLIC_APP_URL = prevApp;

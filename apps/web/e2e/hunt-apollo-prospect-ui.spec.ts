@@ -103,7 +103,10 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect(
       page.getByRole("checkbox", { name: "Oman" }),
     ).not.toBeChecked();
-    await page.locator("summary").filter({ hasText: "Advanced filters" }).click();
+    await page
+      .locator("summary")
+      .filter({ hasText: "Advanced filters" })
+      .click();
     await expect(page.getByTestId("hunt-apollo-location-basis")).toHaveValue(
       "company",
     );
@@ -251,11 +254,6 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect(page.getByTestId("hunt-apollo-results-summary")).toBeVisible({
       timeout: 60_000,
     });
-    await expect(page.getByText(restoredCandidate)).toHaveCount(0);
-    await expect(page.getByTestId("hunt-apollo-results-toggle")).toHaveText(
-      "Review results",
-    );
-    await page.getByTestId("hunt-apollo-results-toggle").click();
     await expect(page.getByText(restoredCandidate)).toBeVisible();
     await expect(page.getByTestId("hunt-apollo-view-new")).toContainText("1");
     await expect(page.getByTestId("hunt-apollo-title")).toHaveValue(
@@ -721,7 +719,7 @@ test.describe("Hunt Apollo prospect UI", () => {
     await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
 
     await expect(
-      page.getByRole("heading", { name: "Find the next right client." }),
+      page.getByRole("heading", { name: "Find clients" }),
     ).toBeVisible({ timeout: 60_000 });
     await expect(
       page.getByRole("navigation", { name: "Sales sections" }),
@@ -738,7 +736,7 @@ test.describe("Hunt Apollo prospect UI", () => {
     await expect(page).toHaveURL(/\/work\/search$/);
     await page.goBack({ waitUntil: "domcontentloaded" });
     await expect(
-      page.getByRole("heading", { name: "Find the next right client." }),
+      page.getByRole("heading", { name: "Find clients" }),
     ).toBeVisible();
 
     const crmNav = page.getByRole("navigation", { name: "Sales sections" });

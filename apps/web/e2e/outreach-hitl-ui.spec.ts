@@ -7,6 +7,14 @@ import { expect, test } from "@playwright/test";
 test.describe("Outreach HITL UI", () => {
   test("Create draft then Approve draft without sending", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    const companyName = `Acceptance Outreach ${Date.now()}`;
+    await page.goto("/crm/hunt", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("hunt-test-tools").click();
+    await page.getByTestId("hunt-synthetic-company").fill(companyName);
+    await page.getByTestId("hunt-apollo-prospect").click();
+    await expect(page.getByTestId("hunt-apollo-open-deal")).toBeVisible({
+      timeout: 30_000,
+    });
     await page.goto("/crm/outreach", { waitUntil: "domcontentloaded" });
     await expect(
       page.getByRole("heading", { name: /^Outreach$/i }),
@@ -18,39 +26,28 @@ test.describe("Outreach HITL UI", () => {
     });
     await expect(page.getByTestId("outreach-ready-gw")).toBeVisible();
 
+    await page.getByRole("checkbox", { name: /Show test records/i }).check();
     const deal = page.getByTestId("outreach-draft-deal");
     await expect(deal).toBeVisible();
     await expect
       .poll(async () => deal.locator("option").count(), { timeout: 30_000 })
       .toBeGreaterThan(1);
 
-    // Prefer Demo Co / JW seed deal by label substring.
-    const options = deal.locator("option");
-    const count = await options.count();
-    let selected = false;
-    for (let i = 0; i < count; i++) {
-      const label = (await options.nth(i).textContent()) ?? "";
-      if (/JW Marriott|Demo Co/i.test(label)) {
-        await deal.selectOption({ index: i });
-        selected = true;
-        break;
-      }
-    }
-    if (!selected) {
-      await deal.selectOption({ index: 1 });
-    }
+    const option = deal.locator("option").filter({ hasText: companyName });
+    await expect(option).toBeAttached();
+    await deal.selectOption((await option.getAttribute("value"))!);
 
     const subject = `E2E HITL draft ${Date.now()}`;
     await page.getByTestId("outreach-draft-subject").fill(subject);
     await page
       .getByTestId("outreach-draft-body")
       .fill(
-        "JW Marriott Marquis Dubai team, this is a review-only campaign idea for a relevant hospitality story.",
+        `${companyName} team, this is a review-only campaign idea for a relevant hospitality story.`,
       );
     await page.getByTestId("outreach-draft-create").click();
 
     const showTestDrafts = page.getByRole("checkbox", {
-      name: /Show \d+ test drafts?/i,
+      name: /Show test records/i,
     });
     await expect(showTestDrafts).toBeVisible({ timeout: 30_000 });
     await showTestDrafts.check();

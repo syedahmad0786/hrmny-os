@@ -16,6 +16,7 @@ function AppPolicyBanner() {
       void Promise.all([
         utils.connections.organizationPolicy.invalidate(),
         utils.connections.list.invalidate(),
+        utils.connections.myMailboxes.invalidate(),
         utils.connections.workApps.invalidate(),
       ]),
   });
@@ -310,6 +311,7 @@ export default function ConnectionsPage() {
   const utils = trpc.useUtils();
   const [personalToolsOpen, setPersonalToolsOpen] = useState(false);
   const list = trpc.connections.list.useQuery();
+  const myMailboxes = trpc.connections.myMailboxes.useQuery();
   const salesMailboxes = trpc.connections.salesMailboxes.useQuery();
   const [mailboxEdits, setMailboxEdits] = useState<
     Record<string, { label: string; dailyCap: number; enabled: boolean }>
@@ -339,6 +341,7 @@ export default function ConnectionsPage() {
       }));
       void Promise.all([
         utils.connections.list.invalidate(),
+        utils.connections.myMailboxes.invalidate(),
         utils.connections.workApps.invalidate(),
         utils.connections.asanaStatus.invalidate(),
       ]);
@@ -353,6 +356,7 @@ export default function ConnectionsPage() {
     onSuccess: () =>
       void Promise.all([
         utils.connections.list.invalidate(),
+        utils.connections.myMailboxes.invalidate(),
         utils.connections.workApps.invalidate(),
       ]),
   });
@@ -360,6 +364,7 @@ export default function ConnectionsPage() {
     onSuccess: () =>
       void Promise.all([
         utils.connections.list.invalidate(),
+        utils.connections.myMailboxes.invalidate(),
         utils.connections.workApps.invalidate(),
         utils.connections.asanaStatus.invalidate(),
         utils.connections.salesMailboxes.invalidate(),
@@ -790,6 +795,71 @@ export default function ConnectionsPage() {
           })}
       </div>
 
+      <section id="my-mailboxes" className="crm-panel my-5">
+        <div className="crm-panel-head">
+          <div>
+            <h2>My mailboxes</h2>
+            <p>
+              Connect additional Google accounts from any domain. Each keeps its
+              own credentials, inbox and sent mail.
+            </p>
+          </div>
+          <Button
+            type="button"
+            disabled={startGoogleWorkspaceOAuth.isPending}
+            onClick={() => void connectGoogleWorkspace()}
+          >
+            Add a mailbox
+          </Button>
+        </div>
+        <div className="crm-panel-body">
+          {myMailboxes.error ? (
+            <p role="alert">{myMailboxes.error.message}</p>
+          ) : null}
+          {myMailboxes.data?.map((mailbox) => (
+            <div
+              key={mailbox.connectionAccountId}
+              className="flex flex-wrap items-center justify-between gap-3 border-b border-sand py-3"
+            >
+              <div>
+                <strong>{mailbox.email}</strong>
+                <p className="text-sm">{mailbox.status}</p>
+                {mailbox.lastError ? (
+                  <p role="alert">{mailbox.lastError}</p>
+                ) : null}
+              </div>
+              <div className="flex gap-2">
+                <a className="crm-btn" href="/crm/inbox">
+                  Open inbox
+                </a>
+                <Button
+                  type="button"
+                  disabled={
+                    disconnect.isPending || mailbox.status === "disconnected"
+                  }
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Disconnect ${mailbox.email}? Sending and syncing stop for this mailbox. Existing CRM history remains.`,
+                      )
+                    )
+                      disconnect.mutate({ id: mailbox.connectionAccountId });
+                  }}
+                >
+                  Disconnect
+                </Button>
+              </div>
+            </div>
+          ))}
+          {!myMailboxes.isLoading && !myMailboxes.data?.length ? (
+            <p>No personal mailboxes connected yet.</p>
+          ) : null}
+          {disconnect.error ? (
+            <p role="alert">{disconnect.error.message}</p>
+          ) : null}
+        </div>
+      </section>
+
       <section
         className="rounded-xl border border-sand bg-white/75 p-5"
         data-testid="sales-sender-mailboxes"
@@ -802,7 +872,8 @@ export default function ConnectionsPage() {
         </h2>
         <p className="mt-1 text-sm text-muted">
           Sales chooses one approved sender before every Gmail send. Each
-          mailbox has its own atomic daily attempt cap.
+          mailbox has its own daily sending limit. Verified aliases are
+          available when composing outreach.
         </p>
         {salesMailboxes.isLoading ? (
           <p className="mt-4 text-sm text-muted">Loading mailboxes…</p>
@@ -909,7 +980,8 @@ export default function ConnectionsPage() {
           </div>
         ) : (
           <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-            Connect an internal @hrmny.co Google Workspace account first.
+            Connect a verified Google mailbox. Other domains and Gmail accounts
+            are supported.
           </p>
         )}
         {saveMailbox.error ? (

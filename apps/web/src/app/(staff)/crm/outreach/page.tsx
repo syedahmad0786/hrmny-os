@@ -86,6 +86,15 @@ function OutreachInner() {
   const [senderConnectionAccountId, setSenderConnectionAccountId] =
     useState("");
 
+  const [fromEmail, setFromEmail] = useState("");
+  const identities = trpc.connections.gmailIdentities.useQuery(
+    { connectionAccountId: senderConnectionAccountId },
+    { enabled: Boolean(senderConnectionAccountId), staleTime: 60000 },
+  );
+  useEffect(() => {
+    setFromEmail("");
+  }, [senderConnectionAccountId]);
+
   const invalidate = () => {
     void utils.leadgen.outreach.invalidate();
     void utils.connections.salesMailboxes.invalidate();
@@ -339,6 +348,7 @@ function OutreachInner() {
       const result = await sendTest.mutateAsync({
         id,
         idempotencyKey: crypto.randomUUID(),
+        fromEmail: fromEmail || undefined,
         senderConnectionAccountId,
       });
       setSendNote(
@@ -412,9 +422,33 @@ function OutreachInner() {
                   ))}
                 </select>
               </label>
-              <strong>{senderAccount}</strong> will send via Google Workspace
-              Gmail. Gmail acceptance is verified by reading the exact message
-              back from Sent Mail; delivery is monitored separately.{" "}
+              <label className="crm-field mb-2">
+                <span>Sender address</span>
+                <select
+                  className="crm-input"
+                  value={fromEmail}
+                  onChange={(event) => setFromEmail(event.target.value)}
+                >
+                  <option value="">{senderAccount} (mailbox address)</option>
+                  {(identities.data ?? [])
+                    .filter((identity) => identity.email !== senderAccount)
+                    .map((identity) => (
+                      <option key={identity.email} value={identity.email}>
+                        {identity.name ? `${identity.name} · ` : ""}
+                        {identity.email}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {identities.error ? (
+                <p role="status">
+                  {identities.error.message} Your primary mailbox remains
+                  selected.
+                </p>
+              ) : null}
+              <strong>{fromEmail || senderAccount}</strong> will send via Google
+              Workspace Gmail. Gmail acceptance is verified by reading the exact
+              message back from Sent Mail; delivery is monitored separately.{" "}
               <Link
                 href="/settings/connections#conn-google_workspace"
                 className="font-bold underline"
@@ -536,15 +570,14 @@ function OutreachInner() {
         </div>
       </details>
 
-      {hiddenTestCount ? (
+      {hiddenTestCount || (deals.data ?? []).some(isSyntheticDeal) ? (
         <label className="mt-3 flex w-fit items-center gap-2 text-xs text-muted">
           <input
             type="checkbox"
             checked={showTestRecords}
             onChange={(event) => setShowTestRecords(event.target.checked)}
           />
-          {showTestRecords ? "Hide" : "Show"} {hiddenTestCount} test draft
-          {hiddenTestCount === 1 ? "" : "s"}
+          Show test records ({hiddenTestCount} drafts)
         </label>
       ) : null}
 
@@ -790,7 +823,7 @@ function OutreachInner() {
                         }
                         onClick={() => {
                           const confirmed = window.confirm(
-                            `Send an INTERNAL TEST only?\n\nFrom: ${senderAccount ?? "No sender connected"}\nTo: ${senderAccount ?? "No sender connected"}\nOriginal client: ${item.recipient}\n\nThe client will not be contacted and this outreach will stay approved.`,
+                            `Send an INTERNAL TEST only?\n\nFrom: ${fromEmail || senderAccount || "No sender connected"}\nTo: ${senderAccount ?? "No sender connected"}\nOriginal client: ${item.recipient}\n\nThe client will not be contacted and this outreach will stay approved.`,
                           );
                           if (confirmed) void sendInternalTest(item.id);
                         }}
@@ -810,13 +843,14 @@ function OutreachInner() {
                         }
                         onClick={() => {
                           const confirmed = window.confirm(
-                            `Send this email now?\n\nFrom: ${senderAccount ?? "No sender connected"}\nTo: ${item.recipient}\nSubject: ${item.subject ?? "(no subject)"}\n\nThis creates a real external email.`,
+                            `Send this email now?\n\nFrom: ${fromEmail || senderAccount || "No sender connected"}\nTo: ${item.recipient}\nSubject: ${item.subject ?? "(no subject)"}\n\nThis creates a real external email.`,
                           );
                           if (!confirmed) return;
                           void run(item.id, "Send", () =>
                             send.mutateAsync({
                               id: item.id,
                               senderConnectionAccountId,
+                              fromEmail: fromEmail || undefined,
                             }),
                           );
                         }}

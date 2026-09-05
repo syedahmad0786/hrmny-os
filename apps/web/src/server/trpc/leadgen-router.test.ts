@@ -325,7 +325,7 @@ describe("outreach HITL gate flow", () => {
         channel: "gmail" as const,
         providerAccepted: true,
         readbackAt: new Date().toISOString(),
-        readbackRecipient: "developer@hrmny.co",
+        readbackRecipient: "sender@another-domain.test",
       }),
     );
     const composio = {
@@ -339,27 +339,30 @@ describe("outreach HITL gate flow", () => {
       idempotencyKey,
       actor: staff,
       composio,
-      testRecipient: "developer@hrmny.co",
+      testRecipient: "sender@another-domain.test",
+      fromEmail: "sales@alias-domain.test",
     });
     const replay = await sendOutreachTest({
       id: item.id,
       idempotencyKey,
       actor: staff,
       composio,
-      testRecipient: "developer@hrmny.co",
+      testRecipient: "sender@another-domain.test",
+      fromEmail: "sales@alias-domain.test",
     });
 
     expect(first).toMatchObject({
       sent: true,
       duplicate: false,
-      recipient: "developer@hrmny.co",
+      recipient: "sender@another-domain.test",
       outreachState: "approved",
     });
     expect(replay).toMatchObject({ sent: true, duplicate: true });
     expect(sendAfterApproval).toHaveBeenCalledOnce();
     expect(sendAfterApproval).toHaveBeenCalledWith(
       expect.objectContaining({
-        to: "developer@hrmny.co",
+        to: "sender@another-domain.test",
+        fromEmail: "sales@alias-domain.test",
         subject: expect.stringMatching(/^\[TEST — NOT SENT TO CLIENT\]/),
         body: expect.stringContaining(
           "Original intended recipient: sara@acme.example",
@@ -385,9 +388,9 @@ describe("outreach HITL gate flow", () => {
         idempotencyKey: "79000000-0000-4000-8000-000000000002",
         actor: staff,
         composio,
-        testRecipient: "real-client@example.com",
+        testRecipient: "invalid-email",
       }),
-    ).rejects.toThrow(/@hrmny\.co/i);
+    ).rejects.toThrow(/Connect your own Google mailbox/i);
     expect(sendAfterApproval).toHaveBeenCalledOnce();
   });
 

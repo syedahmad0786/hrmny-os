@@ -115,7 +115,7 @@ function collectReadableParts(part: GmailPart | undefined): string[] {
     : [];
 }
 
-function messageBody(message: z.infer<typeof messageSchema>): string {
+export function messageBody(message: z.infer<typeof messageSchema>): string {
   return [message.snippet ?? "", ...collectReadableParts(message.payload)]
     .join("\n")
     .replace(/\s+/g, " ")
@@ -153,7 +153,10 @@ export async function listMessages(
   for (let page = 0; page < 50; page++) {
     const response = await fetchImpl(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages?${params}`,
-      { headers: { authorization: `Bearer ${accessToken}` } },
+      {
+        headers: { authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(20000),
+      },
     );
     if (!response.ok) {
       throw new Error(`Gmail inbox list failed (${response.status})`);
@@ -171,14 +174,17 @@ export async function listMessages(
   );
 }
 
-async function getMessage(
+export async function getMessage(
   accessToken: string,
   id: string,
   fetchImpl: typeof fetch,
 ) {
   const response = await fetchImpl(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`,
-    { headers: { authorization: `Bearer ${accessToken}` } },
+    {
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(20000),
+    },
   );
   if (!response.ok) {
     throw new Error(`Gmail inbox read failed (${response.status})`);
