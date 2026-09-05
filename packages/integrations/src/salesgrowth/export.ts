@@ -48,10 +48,9 @@ export async function exportSalesGrowthDb(opts: {
     const read = <T>(sql: string): T[] =>
       db.prepare(sql).all() as unknown as T[];
     const tables = new Set(
-      db
-        .prepare("SELECT name FROM sqlite_master WHERE type='table'")
-        .all()
-        .map((row) => row.name),
+      read<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table'",
+      ).map((row) => row.name),
     );
     const optional = <T>(table: string): T[] =>
       tables.has(table) ? read<T>(`SELECT * FROM ${table}`) : [];
