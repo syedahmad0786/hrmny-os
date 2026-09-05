@@ -208,6 +208,28 @@ describe("outreach HITL gate flow", () => {
     expect(await listOutreach()).toHaveLength(0);
   });
 
+  it("accepts a reviewed profile for a new LinkedIn draft and rejects unsafe destinations", async () => {
+    const deal = await seedDeal();
+    await updateContact(deal.primaryContactId!, { linkedinUrl: null });
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      channel: "linkedin_connect",
+      body: "Hi Sara, glad to connect.",
+      linkedinUrl: "https://www.linkedin.com/in/sara-acme?trk=profile",
+    });
+    expect(item.linkedinUrl).toBe("https://www.linkedin.com/in/sara-acme");
+    expect(item.recipient).toBe(item.linkedinUrl);
+    expect(item.state).toBe("draft");
+    await expect(
+      draftOutreach({
+        dealId: deal.dealId,
+        channel: "linkedin_connect",
+        body: "Hi Sara",
+        linkedinUrl: "https://linkedin.com.evil.example/in/sara",
+      }),
+    ).rejects.toThrow(/supported format/);
+  });
+
   it("replaces a legacy email unsubscribe query before approval", async () => {
     const deal = await seedDeal();
     const item = await draftOutreach({

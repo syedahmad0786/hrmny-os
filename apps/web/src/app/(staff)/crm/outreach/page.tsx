@@ -81,6 +81,7 @@ function OutreachInner() {
   const [draftSubject, setDraftSubject] = useState("");
   const [draftBody, setDraftBody] = useState("");
   const [draftChannel, setDraftChannel] = useState("gmail");
+  const [draftLinkedInUrl, setDraftLinkedInUrl] = useState("");
   const [reworkFeedback, setReworkFeedback] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showTestRecords, setShowTestRecords] = useState(false);
@@ -128,6 +129,7 @@ function OutreachInner() {
       setGateError(null);
       setDraftSubject("");
       setDraftBody("");
+      setDraftLinkedInUrl("");
       invalidate();
     },
     onError: onErr,
@@ -174,7 +176,7 @@ function OutreachInner() {
     const profile = linkedInHref(item);
     if (!profile) {
       setGateError(
-        "Add the person's LinkedIn public profile URL to this draft first.",
+        "Create a new LinkedIn draft below with the person's verified public profile URL.",
       );
       return;
     }
@@ -917,6 +919,9 @@ function OutreachInner() {
                   channel: draftChannel,
                   subject: draftSubject.trim() || undefined,
                   body: draftBody.trim() || undefined,
+                  linkedinUrl: isLinkedIn(draftChannel)
+                    ? draftLinkedInUrl.trim() || undefined
+                    : undefined,
                 });
               }}
             >
@@ -958,6 +963,23 @@ function OutreachInner() {
                   </option>
                 </select>
               </div>
+              {isLinkedIn(draftChannel) ? (
+                <label className="crm-field wide">
+                  LinkedIn public profile URL (optional if already saved)
+                  <input
+                    className="crm-input"
+                    type="url"
+                    value={draftLinkedInUrl}
+                    maxLength={1000}
+                    onChange={(e) => setDraftLinkedInUrl(e.target.value)}
+                    placeholder="https://www.linkedin.com/in/person"
+                  />
+                  <span className="text-xs">
+                    Verify that this profile belongs to the selected lead. This
+                    creates a reviewable draft; it does not contact anyone.
+                  </span>
+                </label>
+              ) : null}
               <div className="crm-field">
                 <label>Subject (optional)</label>
                 <input

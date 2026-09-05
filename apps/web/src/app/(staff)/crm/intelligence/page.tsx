@@ -276,9 +276,18 @@ export default function CompanyIntelligencePage() {
                     <p className="whitespace-pre-wrap">
                       {String(row.result.brief)}
                     </p>
-                    <p className="mt-3 text-sm">
-                      Source coverage: {JSON.stringify(row.result.coverage)}
-                    </p>
+                    <ul className="mt-3 text-sm" aria-label="Source coverage">
+                      {Array.isArray(row.result.coverage) ? (
+                        row.result.coverage.map((source, index) => (
+                          <li key={index}>
+                            {String(source.source)}: {String(source.status)} ·{" "}
+                            {String(source.count ?? 0)} results
+                          </li>
+                        ))
+                      ) : (
+                        <li>Source coverage unavailable</li>
+                      )}
+                    </ul>
                     <CrmBtn
                       className="mt-3"
                       onClick={() =>
