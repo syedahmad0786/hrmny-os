@@ -543,6 +543,7 @@ describe("openrouter free-model failover", () => {
   });
 
   it("hard-caps OpenRouter web research and preserves source receipts", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
     const fetchMock = vi.fn(
       async (_url: string, _init?: RequestInit) =>
         new Response(
@@ -601,6 +602,8 @@ describe("openrouter free-model failover", () => {
         },
       ],
     });
+    expect(timeout).toHaveBeenCalledWith(180_000);
+    timeout.mockRestore();
     expect(result).toMatchObject({
       requestId: "research-1",
       webSearchRequests: 2,

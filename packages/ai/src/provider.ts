@@ -788,7 +788,11 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
     async generate(options) {
       const primary = selectedModel(options.model);
       const signal = AbortSignal.timeout(
-        options.task === "outreach_draft" ? 45_000 : 60_000,
+        options.task === "outreach_draft"
+          ? 45_000
+          : options.webSearch
+            ? 180_000
+            : 60_000,
       );
       if (name === "openrouter") {
         const chain = [
