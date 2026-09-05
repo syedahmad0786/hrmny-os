@@ -274,6 +274,9 @@ export const attendanceCorrectionRequest = pgTable(
 export const company = pgTable("company", {
   companyId: uuid("company_id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
+  ownerEmployeeId: uuid("owner_employee_id").references(
+    () => employee.employeeId,
+  ),
   sector: text("sector"),
   market: marketEnum("market").default("UAE"),
   website: text("website"),
@@ -287,6 +290,9 @@ export const contact = pgTable("contact", {
   contactId: uuid("contact_id").defaultRandom().primaryKey(),
   companyId: uuid("company_id").references(() => company.companyId),
   firstName: text("first_name").notNull(),
+  ownerEmployeeId: uuid("owner_employee_id").references(
+    () => employee.employeeId,
+  ),
   lastName: text("last_name"),
   email: text("email"),
   phone: text("phone"),
@@ -388,6 +394,20 @@ export const crmTask = pgTable("crm_task", {
   ...timestamps,
 });
 
+/** Personal/team filter definitions; CRM data remains in its original records. */
+export const crmSavedView = pgTable("crm_saved_view", {
+  viewId: uuid("view_id").defaultRandom().primaryKey(),
+  ownerEmployeeId: uuid("owner_employee_id")
+    .notNull()
+    .references(() => employee.employeeId),
+  name: text("name").notNull(),
+  visibility: text("visibility").notNull(),
+  config: jsonb("config").$type<Record<string, unknown>>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 /** 1. client */
 export const client = pgTable("client", {
   clientId: uuid("client_id").defaultRandom().primaryKey(),
@@ -409,6 +429,19 @@ export const client = pgTable("client", {
   contacts: jsonb("contacts").$type<Record<string, unknown>>().default({}),
   approvers: jsonb("approvers").$type<Record<string, unknown>>().default({}),
   ...timestamps,
+});
+
+export const clientSourceProject = pgTable("client_source_project", {
+  projectId: text("project_id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  clientId: uuid("client_id")
+    .notNull()
+    .references(() => client.clientId),
+  projectName: text("project_name").notNull(),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  importedBy: uuid("imported_by")
+    .notNull()
+    .references(() => employee.employeeId),
 });
 
 /** 2. account_team_member */

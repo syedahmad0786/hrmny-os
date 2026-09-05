@@ -36,7 +36,7 @@ const journal = JSON.parse(
 ) as { entries: Array<{ tag: string }> };
 const apolloPriorHead = "0075_apollo_search_fencing";
 const apolloHead = "0076_apollo_people_search_serialization";
-const head = "0080_multiple_google_mailboxes";
+const head = "0081_crm_workbook";
 assert.equal(
   journal.entries.at(-1)?.tag,
   head,
@@ -81,6 +81,26 @@ async function prepareSupabaseDatabase(connection: Sql): Promise<void> {
 }
 
 async function assertCurrentHead(connection: Sql): Promise<void> {
+  const [workbook] = await connection<
+    Array<{ owners: number; rls: boolean; public_read: boolean }>
+  >`
+    select (select count(*)::int from information_schema.columns where table_schema='public' and table_name in ('company','contact') and column_name='owner_employee_id') as owners,
+      (select relrowsecurity from pg_class where oid='public.crm_saved_view'::regclass) as rls,
+      has_table_privilege('authenticated', 'public.crm_saved_view', 'select') as public_read`;
+  assert.equal(workbook?.owners, 2);
+  assert.equal(workbook?.rls, true);
+  assert.equal(
+    workbook?.public_read,
+    false,
+    "Saved views must not be exposed through the public database API.",
+  );
+  const [source] = await connection<
+    Array<{ rls: boolean; public_read: boolean }>
+  >`select
+    (select relrowsecurity from pg_class where oid='public.client_source_project'::regclass) as rls,
+    has_table_privilege('authenticated', 'public.client_source_project', 'select') as public_read`;
+  assert.equal(source?.rls, true);
+  assert.equal(source?.public_read, false);
   await connection.unsafe(`DO $$
     DECLARE staff_id uuid := gen_random_uuid();
     BEGIN

@@ -1,4 +1,6 @@
+import { applyCrmImport, planCrmImport } from "../crm/import";
 import { z } from "zod";
+import { crmWorkbookRouter } from "./crm-workbook-router";
 import { TRPCError } from "@trpc/server";
 import { CRM_MARKETS } from "@/lib/crm-markets";
 import {
@@ -38,7 +40,6 @@ import {
   mergeCompanies,
   mergeContacts,
   moveDealStage,
-  normalizeDomain,
   omniSearch,
   pipelineStages,
   updateCompany,
@@ -592,6 +593,14 @@ export const crmActivitiesRouter = router({
     .input(
       z.object({
         type: activityTypeSchema,
+        occurredAt: z
+          .string()
+          .datetime()
+          .refine(
+            (value) => Date.parse(value) <= Date.now(),
+            "Log completed interactions; use a follow-up for future work.",
+          )
+          .optional(),
         subject: z.string().nullable().optional(),
         body: z.string().nullable().optional(),
         companyId: z.string().uuid().nullable().optional(),
@@ -674,7 +683,7 @@ export const crmTasksRouter = router({
     .input(
       z.object({
         title: z.string().min(1),
-        dueDate: z.string().nullable().optional(),
+        dueDate: z.string().date().nullable().optional(),
         companyId: z.string().uuid().nullable().optional(),
         contactId: z.string().uuid().nullable().optional(),
         dealId: z.string().uuid().nullable().optional(),
@@ -704,7 +713,7 @@ export const crmTasksRouter = router({
         id: z.string().uuid(),
         title: z.string().min(1).optional(),
         status: crmTaskStatusSchema.optional(),
-        dueDate: z.string().nullable().optional(),
+        dueDate: z.string().date().nullable().optional(),
         ownerEmployeeId: z.string().uuid().nullable().optional(),
       }),
     )
@@ -1062,131 +1071,26 @@ export const crmExportRouter = router({
   }),
 });
 
-const companyImportRowSchema = z.object({
-  name: z.string().min(1),
-  sector: z.string().nullable().optional(),
-  market: marketSchema.optional(),
-  website: z.string().nullable().optional(),
-  linkedinUrl: z.string().nullable().optional(),
-  notes: z.string().nullable().optional(),
-});
-
-const contactImportRowSchema = z.object({
-  companyId: z.string().uuid().nullable().optional(),
-  firstName: z.string().min(1),
-  lastName: z.string().nullable().optional(),
-  email: z.string().email().nullable().optional(),
-  phone: z.string().nullable().optional(),
-  title: z.string().nullable().optional(),
-  linkedinUrl: z.string().nullable().optional(),
-});
-
-type ImportSummary = {
-  created: number;
-  skipped: number;
-  errors: { row: number; message: string }[];
-};
-
 export const crmImportRouter = router({
+  preview: staffProcedure
+    .input(
+      z.object({
+        kind: z.enum(["companies", "contacts"]),
+        rows: z.array(z.record(z.unknown())).min(1).max(5000),
+      }),
+    )
+    .mutation(({ input }) => planCrmImport(input.kind, input.rows)),
   companies: staffProcedure
     .input(z.object({ rows: z.array(z.record(z.unknown())).min(1).max(5000) }))
-    .mutation(async ({ input, ctx }) => {
-      const existing = await listCompanies();
-      const seen = new Set<string>();
-      for (const co of existing) {
-        const domain = normalizeDomain(co.website);
-        if (domain) seen.add(`d:${domain}`);
-        seen.add(`n:${co.name.trim().toLowerCase()}`);
-      }
-      const summary: ImportSummary = { created: 0, skipped: 0, errors: [] };
-      for (const [i, raw] of input.rows.entries()) {
-        const parsed = companyImportRowSchema.safeParse(raw);
-        if (!parsed.success) {
-          summary.errors.push({
-            row: i,
-            message: parsed.error.issues
-              .map((iss) => `${iss.path.join(".")}: ${iss.message}`)
-              .join("; "),
-          });
-          continue;
-        }
-        const row = parsed.data;
-        const domain = normalizeDomain(row.website ?? null);
-        const nameKey = `n:${row.name.trim().toLowerCase()}`;
-        if ((domain && seen.has(`d:${domain}`)) || seen.has(nameKey)) {
-          summary.skipped += 1;
-          continue;
-        }
-        // Per-row guard: one failing insert must not 500 the whole batch.
-        try {
-          await createCompany(row);
-        } catch (e) {
-          summary.errors.push({
-            row: i,
-            message: e instanceof Error ? e.message : String(e),
-          });
-          continue;
-        }
-        if (domain) seen.add(`d:${domain}`);
-        seen.add(nameKey);
-        summary.created += 1;
-      }
-      await auditMutation(ctx, "crm.import.companies", "company", null, null, {
-        created: summary.created,
-        skipped: summary.skipped,
-        errorCount: summary.errors.length,
-      });
-      return summary;
-    }),
+    .mutation(({ input, ctx }) =>
+      applyCrmImport("companies", input.rows, ctx.employeeId!),
+    ),
   contacts: staffProcedure
     .input(z.object({ rows: z.array(z.record(z.unknown())).min(1).max(5000) }))
-    .mutation(async ({ input, ctx }) => {
-      const existing = await listContacts();
-      const seenEmails = new Set(
-        existing
-          .map((c) => c.email?.trim().toLowerCase())
-          .filter((e): e is string => !!e),
-      );
-      const summary: ImportSummary = { created: 0, skipped: 0, errors: [] };
-      for (const [i, raw] of input.rows.entries()) {
-        const parsed = contactImportRowSchema.safeParse(raw);
-        if (!parsed.success) {
-          summary.errors.push({
-            row: i,
-            message: parsed.error.issues
-              .map((iss) => `${iss.path.join(".")}: ${iss.message}`)
-              .join("; "),
-          });
-          continue;
-        }
-        const row = parsed.data;
-        const emailKey = row.email?.trim().toLowerCase();
-        if (emailKey && seenEmails.has(emailKey)) {
-          summary.skipped += 1;
-          continue;
-        }
-        // Per-row guard: one failing insert must not 500 the whole batch.
-        try {
-          await createContact(row);
-        } catch (e) {
-          summary.errors.push({
-            row: i,
-            message: e instanceof Error ? e.message : String(e),
-          });
-          continue;
-        }
-        if (emailKey) seenEmails.add(emailKey);
-        summary.created += 1;
-      }
-      await auditMutation(ctx, "crm.import.contacts", "contact", null, null, {
-        created: summary.created,
-        skipped: summary.skipped,
-        errorCount: summary.errors.length,
-      });
-      return summary;
-    }),
+    .mutation(({ input, ctx }) =>
+      applyCrmImport("contacts", input.rows, ctx.employeeId!),
+    ),
 });
-
 /** Durable CRM surface — Postgres when DATABASE_URL set, else seeded memory. */
 export const crmRouter = router({
   health: publicProcedure.query(async () => ({
@@ -1296,6 +1200,7 @@ export const crmRouter = router({
   }),
 
   companies: crmCompaniesRouter,
+  workbook: crmWorkbookRouter,
   contacts: crmContactsRouter,
   deals: crmDealsRouter,
   activities: crmActivitiesRouter,

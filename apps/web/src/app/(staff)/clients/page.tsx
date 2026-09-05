@@ -8,6 +8,8 @@ import { trpc } from "@/lib/trpc";
 import { deliveryRhythmFor } from "@/lib/delivery-rhythm";
 import { isSyntheticRecordName } from "@/lib/synthetic-records";
 import { CRM_MARKETS, type CrmMarket } from "@/lib/crm-markets";
+import { AsanaRosterImport } from "@/components/crm/asana-roster-import";
+import { isSyntheticDeal } from "@/lib/synthetic-records";
 
 type ClientRow = {
   clientId: string;
@@ -22,6 +24,12 @@ type ClientRow = {
 export default function ClientsPage() {
   const utils = trpc.useUtils();
   const clients = trpc.clients.list.useQuery();
+  const deals = trpc.crm.deals.list.useQuery();
+  const companies = trpc.crm.companies.list.useQuery();
+  const [search, setSearch] = useState("");
+  const [lifecycle, setLifecycle] = useState("all");
+  const [companyId, setCompanyId] = useState("");
+  const [wonDealId, setWonDealId] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [showTestRecords, setShowTestRecords] = useState(false);
   const [name, setName] = useState("");
@@ -42,6 +50,8 @@ export default function ClientsPage() {
       setName("");
       setContractValue("");
       setShowCreate(false);
+      setCompanyId("");
+      setWonDealId("");
       await utils.clients.list.invalidate();
     },
   });
@@ -83,7 +93,16 @@ export default function ClientsPage() {
     isSyntheticRecordName(client.name),
   ).length;
   const rows = allRows.filter(
-    (client) => showTestRecords || !isSyntheticRecordName(client.name),
+    (client) =>
+      (showTestRecords || !isSyntheticRecordName(client.name)) &&
+      client.name.toLowerCase().includes(search.toLowerCase()) &&
+      (lifecycle === "all" || client.lifecycleStatus === lifecycle),
+  );
+  const unlinkedWon = (deals.data ?? []).filter(
+    (deal) =>
+      deal.closeOutcome === "won" &&
+      !isSyntheticDeal(deal) &&
+      !allRows.some((client) => client.dealId === deal.dealId),
   );
 
   return (
@@ -101,11 +120,80 @@ export default function ClientsPage() {
             attention next.
           </p>
         </div>
+        <Link
+          className="rounded-lg border border-sand px-3 py-2 text-sm"
+          href="/crm/workbook?tab=clients"
+        >
+          Open client workbook
+        </Link>
         <Button type="button" onClick={() => setShowCreate((value) => !value)}>
           + Add client
         </Button>
       </header>
 
+      <div className="flex flex-wrap gap-3">
+        <label className="grid gap-1 text-sm">
+          Search clients
+          <input
+            className="rounded-lg border border-sand px-3 py-2"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          Status
+          <select
+            className="rounded-lg border border-sand px-3 py-2"
+            value={lifecycle}
+            onChange={(e) => setLifecycle(e.target.value)}
+          >
+            <option value="all">All statuses</option>
+            {[
+              "onboarding",
+              "active",
+              "renewing",
+              "at_risk",
+              "churned",
+              "closed",
+            ].map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {unlinkedWon.length ? (
+        <section className="rounded-xl border border-sand p-4">
+          <h2 className="font-semibold">Won deals awaiting a client record</h2>
+          <p className="text-sm text-muted">
+            Review the handover and connect confirmed customer work.
+          </p>
+          <ul>
+            {unlinkedWon.map((deal) => (
+              <li key={deal.dealId} className="mt-2">
+                <Link
+                  className="text-ochre underline"
+                  href={`/crm/deals/${deal.dealId}`}
+                >
+                  {deal.opportunityName || deal.companyName}
+                </Link>
+                <Button
+                  className="ml-3"
+                  onClick={() => {
+                    setWonDealId(deal.dealId);
+                    setName(deal.companyName);
+                    setContractValue(deal.quoteValue ?? "");
+                    setShowCreate(true);
+                  }}
+                >
+                  Use won deal
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <AsanaRosterImport />
       <details className="rounded-xl border border-sand bg-white/70 px-4 py-3 text-sm text-muted">
         <summary className="cursor-pointer font-medium text-ink">
           Client setup status
@@ -134,6 +222,11 @@ export default function ClientsPage() {
           onSubmit={(event) => {
             event.preventDefault();
             createClient.mutate({
+              ...(wonDealId
+                ? { dealId: wonDealId }
+                : companyId
+                  ? { companyId }
+                  : {}),
               name,
               market,
               engagementType,
@@ -141,6 +234,46 @@ export default function ClientsPage() {
             });
           }}
         >
+          <label className="grid gap-1 text-sm">
+            Existing company
+            <select
+              aria-label="Existing company"
+              disabled={Boolean(wonDealId)}
+              className="rounded-lg border border-sand px-3 py-2"
+              value={companyId}
+              onChange={(e) => {
+                setCompanyId(e.target.value);
+                const company = companies.data?.find(
+                  (c) => c.companyId === e.target.value,
+                );
+                if (company) {
+                  setName(company.name);
+                  setMarket(company.market ?? "UAE");
+                }
+              }}
+            >
+              <option value="">Create a new company</option>
+              {companies.data
+                ?.filter((c) => !isSyntheticRecordName(c.name))
+                .map((c) => (
+                  <option key={c.companyId} value={c.companyId}>
+                    {c.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          {wonDealId ? (
+            <p className="text-sm">
+              Linked to the selected won deal.{" "}
+              <button
+                type="button"
+                className="underline"
+                onClick={() => setWonDealId("")}
+              >
+                Clear
+              </button>
+            </p>
+          ) : null}
           <input
             className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"
             placeholder="Client name"
@@ -211,7 +344,7 @@ export default function ClientsPage() {
                 </p>
                 <p className="mt-2 text-xs text-muted">
                   {client.dealId
-                    ? "Won in Sales · client onboarding started"
+                    ? "Connected to its CRM company and engagement"
                     : "Added directly to the client directory"}
                 </p>
                 <p className="mt-1 text-xs text-muted">
@@ -228,7 +361,7 @@ export default function ClientsPage() {
                 className="rounded-lg bg-ink px-3 py-2 text-sm font-medium text-white"
                 href={`/clients/${client.clientId}`}
               >
-                Continue onboarding →
+                Open client workspace →
               </Link>
               <Link
                 className="rounded-lg border border-sand bg-white px-3 py-2 text-sm"

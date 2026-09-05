@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { CsvActions } from "./csv-actions";
+import Link from "next/link";
 import { CrmOmniSearch } from "./search-omni";
 
 export function CrmUtilities() {
@@ -9,6 +9,13 @@ export function CrmUtilities() {
   if (
     pathname === "/crm/hunt" ||
     pathname === "/crm/dashboard" ||
+    [
+      "/crm/workbook",
+      "/crm/leads",
+      "/crm/contacts",
+      "/crm/companies",
+      "/crm/followups",
+    ].some((route) => pathname === route || pathname.startsWith(`${route}/`)) ||
     pathname.startsWith("/crm/settings/")
   ) {
     return null;
@@ -16,7 +23,9 @@ export function CrmUtilities() {
   return (
     <div className="crm-utilities" aria-label="CRM utilities">
       <CrmOmniSearch />
-      <CsvActions kind="deals" />
+      <Link className="crm-btn" href="/crm/workbook?tab=deals">
+        Export from workbook
+      </Link>
     </div>
   );
 }

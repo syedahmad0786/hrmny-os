@@ -268,6 +268,8 @@ export type DemoEscalation = {
 };
 
 export type DemoClient = {
+  ownerEmployeeId?: string | null;
+  updatedAt?: string;
   clientId: string;
   dealId: string;
   name: string;
@@ -418,8 +420,7 @@ const DEMO_CLIENT_ID = "c1000000-0000-4000-8000-0000000000a4";
 const DEMO_PORTAL_USER_ID = "c0000000-0000-4000-8000-0000000000a1";
 /** Second client for portal isolation demos (must not leak into portal_a). */
 const DEMO_CLIENT_B_ID = "c1000000-0000-4000-8000-0000000000b4";
-const DEMO_CLIENT_B_PORTAL_USER_ID =
-  "c0000000-0000-4000-8000-0000000000b1";
+const DEMO_CLIENT_B_PORTAL_USER_ID = "c0000000-0000-4000-8000-0000000000b1";
 const DEMO_CALENDAR_ID = "a1000000-0000-4000-8000-0000000000a4";
 const DEMO_TASK_ID = "b1000000-0000-4000-8000-0000000000a4";
 const DEMO_BRIEF_ID = "d1000000-0000-4000-8000-0000000000a4";
@@ -778,7 +779,9 @@ class MemoryDemoStore {
       contractValue: "50000.00",
       currency: "AED",
       startDate: new Date().toISOString().slice(0, 10),
-      renewalDate: new Date(Date.now() + 130 * 86400000).toISOString().slice(0, 10),
+      renewalDate: new Date(Date.now() + 130 * 86400000)
+        .toISOString()
+        .slice(0, 10),
       fee: "50000.00",
       lifecycleStatus: "active",
       contacts: { primary: { email: "alex@democo.example" } },
@@ -929,7 +932,10 @@ class MemoryDemoStore {
       briefId: null,
     };
     this.tasks.set(taskB.taskId, taskB);
-    const assetB = this.createAsset("Other Co confidential cut", DEMO_CLIENT_B_ID);
+    const assetB = this.createAsset(
+      "Other Co confidential cut",
+      DEMO_CLIENT_B_ID,
+    );
     assetB.status = "internal_review";
     this.clientDeliveryStatus.set(DEMO_CLIENT_B_ID, {
       clientId: DEMO_CLIENT_B_ID,
@@ -942,7 +948,8 @@ class MemoryDemoStore {
 
   seedPortalApprovals() {
     const asset = [...this.assets.values()].find(
-      (a) => a.clientId === DEMO_CLIENT_ID && a.taskId === DEMO_CREATIVE_TASK_ID,
+      (a) =>
+        a.clientId === DEMO_CLIENT_ID && a.taskId === DEMO_CREATIVE_TASK_ID,
     );
     if (asset) {
       const approvalId = "f1000000-0000-4000-8000-0000000000a1";
@@ -1141,7 +1148,9 @@ class MemoryDemoStore {
         revenueToDate > 0
           ? (((revenueToDate - deliveryCost) / revenueToDate) * 100).toFixed(2)
           : "0.00";
-      const scope = [...this.scopes.values()].find((s) => s.clientId === c.clientId);
+      const scope = [...this.scopes.values()].find(
+        (s) => s.clientId === c.clientId,
+      );
       const overServicing = deliveryCost > fee;
       const scopeVsActualPct =
         fee > 0 ? ((deliveryCost / fee) * 100).toFixed(2) : "0.00";
@@ -1249,7 +1258,8 @@ class MemoryDemoStore {
     };
     asset.versions = [...asset.versions, version];
     this.appendAudit({
-      actorEmployeeId: opts.employeeId ?? "00000000-0000-4000-8000-000000000000",
+      actorEmployeeId:
+        opts.employeeId ?? "00000000-0000-4000-8000-000000000000",
       action: "assets.uploadVersion",
       entityType: "asset",
       entityId: opts.assetId,
@@ -1260,7 +1270,11 @@ class MemoryDemoStore {
     return version;
   }
 
-  pushHealth(signalKey: string, severity: string, payload: Record<string, unknown>) {
+  pushHealth(
+    signalKey: string,
+    severity: string,
+    payload: Record<string, unknown>,
+  ) {
     const row: HealthSignal = {
       signalKey,
       severity,
