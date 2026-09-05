@@ -404,6 +404,7 @@ export default function HuntClientsPage() {
     setTechnologyIds(snapshot.search.technologyIds?.join(", ") ?? "");
     setIncludeSimilarTitles(snapshot.search.includeSimilarTitles ?? true);
     setApolloSearchResult(snapshot.result);
+    setShowSearchResults(snapshot.result.candidates.length > 0);
     setSearchNote(
       `${SERVER_RESTORE_NOTE} ${searchStatusNote(snapshot.result)}`,
     );
@@ -830,11 +831,10 @@ export default function HuntClientsPage() {
       <header className="growth-header">
         <div>
           <p className="growth-kicker">Find clients</p>
-          <h1>Find the next right client.</h1>
+          <h1>Find clients</h1>
           <p>
-            Search Apollo for the right decision-maker, review the fit, then
-            choose what enters outreach. Search is free; paid details and sends
-            always need a separate approval.
+            Find relevant companies and people. Review each prospect before
+            spending credits or preparing outreach.
           </p>
         </div>
         <div className="growth-header-actions">

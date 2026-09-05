@@ -453,7 +453,7 @@ describe("Sales Gmail conversations", () => {
           senderConnectionAccountId: conversation!.senderConnectionAccountId!,
           actorEmployeeId: user.employeeId,
           subject: conversation!.subject!,
-          body: "I will send the final agenda today.",
+          body: "I will send the final Inbox Proof Hospitality agenda today for your review.",
           cadenceTouch: 2,
           previousMessage: {
             subject: conversation!.subject,
@@ -528,7 +528,7 @@ describe("Sales Gmail conversations", () => {
       senderConnectionAccountId: conversation!.senderConnectionAccountId!,
       actorEmployeeId: user.employeeId,
       subject: conversation!.subject!,
-      body: "Tuesday is confirmed.",
+      body: "Tuesday is confirmed for our Inbox Proof Hospitality discovery meeting.",
       cadenceTouch: 2,
       previousMessage: {
         subject: conversation!.subject,

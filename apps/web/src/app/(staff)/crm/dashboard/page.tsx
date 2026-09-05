@@ -14,11 +14,15 @@ import {
   formatRelative,
   initials,
 } from "@/components/crm/format";
-import { isSyntheticRecordName } from "@/lib/synthetic-records";
+import {
+  isSyntheticDeal,
+  isSyntheticRecordName,
+} from "@/lib/synthetic-records";
 import { trpc } from "@/lib/trpc";
 import type { CrmMarket } from "@/lib/crm-markets";
 
 export default function SalesDashboardPage() {
+  const [assignmentView, setAssignmentView] = useState("mine");
   const [workView, setWorkView] = useState("all");
   const [expanded, setExpanded] = useState(false);
   const [market, setMarket] = useState<CrmMarket | "">("");
@@ -76,10 +80,7 @@ export default function SalesDashboardPage() {
   const activeDeals = useMemo(
     () =>
       (deals.data ?? [])
-        .filter(
-          (deal) =>
-            !deal.closeOutcome && !isSyntheticRecordName(deal.companyName),
-        )
+        .filter((deal) => !deal.closeOutcome && !isSyntheticDeal(deal))
         .sort(
           (a, b) =>
             new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
@@ -110,7 +111,7 @@ export default function SalesDashboardPage() {
       .slice(0, 3)
       .flatMap((task) => {
         const deal = task.dealId ? dealById.get(task.dealId) : null;
-        return deal && !isSyntheticRecordName(deal.companyName)
+        return deal && !isSyntheticDeal(deal)
           ? [
               {
                 id: `task-${task.crmTaskId}`,
@@ -140,7 +141,7 @@ export default function SalesDashboardPage() {
         if (!activity.dealId || seen.has(activity.dealId)) return [];
         seen.add(activity.dealId);
         const deal = dealById.get(activity.dealId);
-        return deal && !isSyntheticRecordName(deal.companyName)
+        return deal && !isSyntheticDeal(deal)
           ? [
               {
                 id: `moving-${activity.dealId}`,
@@ -157,7 +158,7 @@ export default function SalesDashboardPage() {
         (deal) =>
           !deal.closeOutcome &&
           ["propose", "price_cost", "close"].includes(String(deal.stage)) &&
-          !isSyntheticRecordName(deal.companyName),
+          !isSyntheticDeal(deal),
       )
       .sort((a, b) => Number(b.quoteValue ?? 0) - Number(a.quoteValue ?? 0))
       .slice(0, 3)
@@ -189,7 +190,7 @@ export default function SalesDashboardPage() {
       href: "/crm/outreach?view=followups",
     },
     {
-      label: "Approved emails ready",
+      label: "Approved messages",
       count: digest.data?.outreachApproved,
       detail: "A person still chooses Send; nothing is sent automatically.",
       href: "/crm/outreach?view=approved",
@@ -247,6 +248,8 @@ export default function SalesDashboardPage() {
       )
       .map((item) => ({
         id: `reply-${item.id}`,
+        ownerEmployeeId: dealById.get(item.dealId ?? "")?.ownerEmployeeId,
+        dueDate: null,
         kind: "reply",
         title: item.companyName,
         detail: `${item.contactName}: ${item.latestInboundBody || "Open the conversation to review the reply."}`,
@@ -255,17 +258,39 @@ export default function SalesDashboardPage() {
       })),
     ...(digest.data?.attention ?? []),
   ];
-  const filteredWork = attention.filter(
-    (item) => workView === "all" || item.kind === workView,
+  const priority: Record<string, number> = {
+    reply: 0,
+    task: 1,
+    followup: 2,
+    send: 3,
+    setup: 4,
+    closing: 5,
+    review: 6,
+  };
+  const assignedWork = attention.filter(
+    (item) =>
+      assignmentView === "team" ||
+      (assignmentView === "unassigned"
+        ? !item.ownerEmployeeId
+        : item.ownerEmployeeId === session.data?.employeeId),
   );
+  const filteredWork = assignedWork
+    .filter((item) => workView === "all" || item.kind === workView)
+    .sort(
+      (a, b) =>
+        (priority[a.kind] ?? 9) - (priority[b.kind] ?? 9) ||
+        (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999"),
+    );
   const workError = digest.error ?? conversations.error;
   const workLoading = digest.isLoading || conversations.isLoading;
   const workTabs = [
     ["all", "All"],
+    ["task", "Tasks due"],
+    ["setup", "Plan next step"],
     ["reply", "Replies"],
     ["review", "Review"],
     ["followup", "Follow-ups"],
-    ["send", "Ready to send"],
+    ["send", "Approved"],
     ["closing", "Closing"],
   ] as const;
 
@@ -273,8 +298,8 @@ export default function SalesDashboardPage() {
     <main data-testid="sales-dashboard">
       <CrmPageHeader
         kicker="hrmny Sales"
-        title="Sales command center"
-        description="Find the right clients. Start useful conversations. Keep every opportunity moving."
+        title="Sales workspace"
+        description="Your conversations, commitments and next actions."
         actions={
           <>
             <Link className="crm-btn primary" href="/crm/hunt">
@@ -308,14 +333,14 @@ export default function SalesDashboardPage() {
                 id="sales-work-heading"
                 className="font-display text-2xl font-semibold"
               >
-                Your next moves
+                What needs attention
               </h2>
               <p>
                 {workLoading
                   ? "Loading your sales work…"
                   : workError
                     ? "Some sales work could not load."
-                    : `${attention.length} item${attention.length === 1 ? "" : "s"} to move forward`}
+                    : `${assignedWork.length} work item${assignedWork.length === 1 ? "" : "s"} in this view`}
               </p>
             </div>
             <button
@@ -328,26 +353,51 @@ export default function SalesDashboardPage() {
               Refresh
             </button>
           </div>
-          <nav className="sales-work-tabs" aria-label="Sales work filters">
-            {workTabs.map(([value, label]) => (
+          <div className="sales-work-tabs" aria-label="Sales ownership">
+            {[
+              ["mine", "My work"],
+              ["unassigned", "Needs an owner"],
+              ["team", "Team work"],
+            ].map(([value, label]) => (
               <button
                 key={value}
-                aria-pressed={workView === value}
+                aria-pressed={assignmentView === value}
                 onClick={() => {
-                  setWorkView(value);
-                  setExpanded(false);
+                  setAssignmentView(value!);
+                  setWorkView("all");
                 }}
               >
-                {label}{" "}
-                <span>
-                  {workLoading || workError
-                    ? "—"
-                    : attention.filter(
-                        (item) => value === "all" || item.kind === value,
-                      ).length}
-                </span>
+                {label}
               </button>
             ))}
+          </div>
+          <nav className="sales-work-tabs" aria-label="Sales work filters">
+            {workTabs
+              .filter(
+                ([value]) =>
+                  value === "all" ||
+                  value === workView ||
+                  assignedWork.some((item) => item.kind === value),
+              )
+              .map(([value, label]) => (
+                <button
+                  key={value}
+                  aria-pressed={workView === value}
+                  onClick={() => {
+                    setWorkView(value);
+                    setExpanded(false);
+                  }}
+                >
+                  {label}{" "}
+                  <span>
+                    {workLoading || workError
+                      ? "—"
+                      : assignedWork.filter(
+                          (item) => value === "all" || item.kind === value,
+                        ).length}
+                  </span>
+                </button>
+              ))}
           </nav>
           {workError ? (
             <p className="crm-note" role="alert">
@@ -358,11 +408,26 @@ export default function SalesDashboardPage() {
             <div className="p-6">
               <CrmEmpty
                 title="Nothing waiting here"
-                hint="Find a new client or choose another queue to keep the pipeline moving."
+                hint="Check Needs an owner for unassigned prospects, or find a new client."
               />
-              <Link className="crm-btn" href="/crm/hunt">
-                Find clients
-              </Link>
+              {assignmentView === "mine" &&
+              attention.some((item) => !item.ownerEmployeeId) ? (
+                <button
+                  className="crm-btn primary"
+                  onClick={() => {
+                    setAssignmentView("unassigned");
+                    setWorkView("all");
+                  }}
+                >
+                  Review{" "}
+                  {attention.filter((item) => !item.ownerEmployeeId).length}{" "}
+                  unassigned items
+                </button>
+              ) : (
+                <Link className="crm-btn" href="/crm/hunt">
+                  Find clients
+                </Link>
+              )}
             </div>
           ) : null}
           <ol className="sales-work-list">
@@ -373,6 +438,16 @@ export default function SalesDashboardPage() {
                   <div>
                     <strong>{item.title}</strong>
                     <p>{item.detail}</p>
+                    <p>
+                      {item.ownerEmployeeId === session.data?.employeeId
+                        ? "You"
+                        : item.ownerEmployeeId
+                          ? "Assigned to a teammate"
+                          : "Needs an owner"}
+                      {item.dueDate
+                        ? ` · Due ${item.dueDate.slice(0, 10)}`
+                        : ""}
+                    </p>
                   </div>
                   <Link className="crm-btn" href={item.href}>
                     {item.action}

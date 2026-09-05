@@ -1,4 +1,4 @@
-import { isSyntheticRecordName } from "@/lib/synthetic-records";
+import { isSyntheticDeal } from "@/lib/synthetic-records";
 
 export function matchesCampaignLeadView(
   deal: {
@@ -11,7 +11,7 @@ export function matchesCampaignLeadView(
 ): boolean {
   const search = query.trim().toLowerCase();
   return (
-    (showTestRecords || !isSyntheticRecordName(deal.companyName)) &&
+    (showTestRecords || !isSyntheticDeal(deal)) &&
     (!search ||
       deal.companyName.toLowerCase().includes(search) ||
       (deal.sector ?? "").toLowerCase().includes(search) ||

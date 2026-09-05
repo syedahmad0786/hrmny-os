@@ -55,6 +55,7 @@ export default function CrmDealDetailPage() {
     { enabled: Boolean(deal.data?.primaryContactId) },
   );
   const session = trpc.auth.session.useQuery();
+  const employees = trpc.work.members.listEmployees.useQuery();
   const activities = trpc.crm.activities.list.useQuery({
     dealId: id,
     limit: 50,
@@ -100,11 +101,14 @@ export default function CrmDealDetailPage() {
   const [note, setNote] = useState("");
   const [nextActionTitle, setNextActionTitle] = useState("");
   const [nextActionDate, setNextActionDate] = useState("");
+  const [nextActionOwner, setNextActionOwner] = useState("");
   const [needObjective, setNeedObjective] = useState("");
   const [needDeliverables, setNeedDeliverables] = useState("");
   const [needTiming, setNeedTiming] = useState("");
   const [needDecisionMaker, setNeedDecisionMaker] = useState("");
   const [actionStatus, setActionStatus] = useState<string | null>(null);
+  const [opportunityName, setOpportunityName] = useState("");
+  const [expectedCloseDate, setExpectedCloseDate] = useState("");
 
   useEffect(() => {
     if (!d) return;
@@ -113,6 +117,8 @@ export default function CrmDealDetailPage() {
     setAccess(Boolean(d.buafAccess));
     setFit(Boolean(d.buafFit));
     setTemp(d.buafTemperature ?? "");
+    setOpportunityName(d.opportunityName ?? "");
+    setExpectedCloseDate(d.expectedCloseDate ?? "");
   }, [d]);
 
   const score = useMemo(() => (d ? buafScore(d) : null), [d]);
@@ -179,10 +185,19 @@ export default function CrmDealDetailPage() {
     if (tasks.isLoading) return;
     setNextActionTitle(nextTask?.title ?? "");
     setNextActionDate(nextTask?.dueDate?.slice(0, 10) ?? "");
+    setNextActionOwner(
+      nextTask?.ownerEmployeeId ??
+        d?.ownerEmployeeId ??
+        session.data?.employeeId ??
+        "",
+    );
   }, [
     nextTask?.crmTaskId,
     nextTask?.title,
     nextTask?.dueDate,
+    nextTask?.ownerEmployeeId,
+    d?.ownerEmployeeId,
+    session.data?.employeeId,
     tasks.isLoading,
   ]);
 
@@ -219,7 +234,7 @@ export default function CrmDealDetailPage() {
     <main>
       <CrmPageHeader
         kicker="CRM · Deal detail"
-        title={contactName ?? d.companyName}
+        title={d.opportunityName ?? d.companyName}
         description={`${contactName ? `${d.companyName} · ` : ""}${primaryContact.data?.title ? `${primaryContact.data.title} · ` : ""}${stageLabel} · ${formatLane(d.leadSourceLane)} · ${formatAed(d.quoteValue)}`}
         actions={
           <>
@@ -361,6 +376,241 @@ export default function CrmDealDetailPage() {
         }
       />
 
+      <div
+        className="crm-panel mb-4"
+        id="next-action"
+        data-testid="deal-next-action"
+      >
+        <div className="crm-panel-head">
+          <div>
+            <h3>Next action</h3>
+            <p>
+              {nextTask
+                ? "The earliest open sales task for this deal."
+                : "Set one clear action so this deal does not stall."}
+            </p>
+          </div>
+          <CrmTag kind={nextTask ? "info" : "warn"}>
+            {nextTask ? nextTask.status.replace(/_/g, " ") : "Not set"}
+          </CrmTag>
+        </div>
+        <div className="crm-panel-body">
+          <div className="crm-form-grid">
+            <div className="crm-field wide">
+              <label htmlFor="deal-next-action-title">Action</label>
+              <input
+                id="deal-next-action-title"
+                data-testid="deal-next-action-title"
+                value={nextActionTitle}
+                placeholder="Example: Follow up with the decision maker"
+                onChange={(event) => setNextActionTitle(event.target.value)}
+              />
+            </div>
+            <div className="crm-field">
+              <label htmlFor="deal-next-action-date">Due date</label>
+              <input
+                id="deal-next-action-date"
+                data-testid="deal-next-action-date"
+                type="date"
+                value={nextActionDate}
+                onChange={(event) => setNextActionDate(event.target.value)}
+              />
+            </div>
+            <div className="crm-field">
+              <label htmlFor="deal-next-action-owner">Owner</label>
+              <select
+                id="deal-next-action-owner"
+                value={nextActionOwner}
+                onChange={(event) => setNextActionOwner(event.target.value)}
+              >
+                <option value="">Choose a teammate</option>
+                {(employees.data ?? []).map((person) => (
+                  <option key={person.employeeId} value={person.employeeId}>
+                    {person.displayLabel}
+                  </option>
+                ))}
+                {nextActionOwner &&
+                !employees.data?.some(
+                  (person) => person.employeeId === nextActionOwner,
+                ) ? (
+                  <option value={nextActionOwner}>
+                    {nextActionOwner === session.data?.employeeId
+                      ? "You"
+                      : "Current owner"}
+                  </option>
+                ) : null}
+              </select>
+            </div>
+          </div>
+          {createTask.error || updateTask.error ? (
+            <p role="alert">
+              {createTask.error?.message ?? updateTask.error?.message}
+            </p>
+          ) : null}
+          <div className="crm-approval-actions">
+            <CrmBtn
+              variant="primary"
+              data-testid="deal-next-action-save"
+              disabled={
+                !nextActionTitle.trim() ||
+                !nextActionDate ||
+                !nextActionOwner ||
+                !session.data?.employeeId ||
+                createTask.isPending ||
+                updateTask.isPending
+              }
+              onClick={async () => {
+                if (!session.data?.employeeId) return;
+                const taskInput = {
+                  title: nextActionTitle.trim(),
+                  dueDate: nextActionDate || null,
+                  ownerEmployeeId: nextActionOwner,
+                };
+                if (nextTask) {
+                  await updateTask.mutateAsync({
+                    id: nextTask.crmTaskId,
+                    ...taskInput,
+                  });
+                } else {
+                  await createTask.mutateAsync({
+                    ...taskInput,
+                    dealId: id,
+                    companyId: d.companyId,
+                    contactId: d.primaryContactId,
+                  });
+                }
+                if (!d.ownerEmployeeId)
+                  await update.mutateAsync({
+                    id,
+                    ownerEmployeeId: nextActionOwner,
+                  });
+                await utils.salesOs.digest.invalidate();
+                setActionStatus(
+                  nextTask ? "Next action updated." : "Next action created.",
+                );
+              }}
+            >
+              {nextTask ? "Save next action" : "Create next action"}
+            </CrmBtn>
+            {nextTask ? (
+              <CrmBtn
+                disabled={updateTask.isPending}
+                onClick={async () => {
+                  try {
+                    await updateTask.mutateAsync({
+                      id: nextTask.crmTaskId,
+                      status: "done",
+                    });
+                    await utils.salesOs.digest.invalidate();
+                    setActionStatus(
+                      "Action completed. Schedule the next commitment when you are ready.",
+                    );
+                  } catch (error) {
+                    setActionStatus(
+                      error instanceof Error
+                        ? error.message
+                        : "Could not complete. Try again.",
+                    );
+                  }
+                }}
+              >
+                Mark complete
+              </CrmBtn>
+            ) : null}
+            {!nextActionDate ? (
+              <p className="crm-note">
+                Choose a due date so this appears in your daily work.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <section className="crm-panel mb-4">
+        <div className="crm-panel-head">
+          <h2>Relationship and opportunity</h2>
+        </div>
+        <div className="crm-panel-body">
+          <div className="crm-form-grid">
+            <div className="crm-field">
+              <label htmlFor="opportunity-name">Opportunity name</label>
+              <input
+                id="opportunity-name"
+                value={opportunityName}
+                maxLength={200}
+                placeholder="For example, autumn brand campaign"
+                onChange={(event) => setOpportunityName(event.target.value)}
+              />
+            </div>
+            <div className="crm-field">
+              <label htmlFor="expected-close-date">
+                Expected decision date
+              </label>
+              <input
+                id="expected-close-date"
+                type="date"
+                value={expectedCloseDate}
+                onChange={(event) => setExpectedCloseDate(event.target.value)}
+              />
+            </div>
+          </div>
+          <div className="crm-approval-actions">
+            <CrmBtn
+              disabled={update.isPending}
+              onClick={async () => {
+                try {
+                  await update.mutateAsync({
+                    id,
+                    opportunityName: opportunityName.trim() || null,
+                    expectedCloseDate: expectedCloseDate || null,
+                  });
+                  setActionStatus("Opportunity details saved.");
+                } catch (error) {
+                  setActionStatus(
+                    error instanceof Error
+                      ? error.message
+                      : "Could not save. Try again.",
+                  );
+                }
+              }}
+            >
+              Save details
+            </CrmBtn>
+            {!d.ownerEmployeeId ? (
+              <CrmBtn
+                disabled={update.isPending || !session.data?.employeeId}
+                onClick={async () => {
+                  try {
+                    await update.mutateAsync({
+                      id,
+                      ownerEmployeeId: session.data!.employeeId,
+                    });
+                    setActionStatus(
+                      "You now own this relationship. Schedule the next action below.",
+                    );
+                  } catch (error) {
+                    setActionStatus(
+                      error instanceof Error
+                        ? error.message
+                        : "Could not assign. Try again.",
+                    );
+                  }
+                }}
+              >
+                Assign relationship to me
+              </CrmBtn>
+            ) : (
+              <span>
+                {d.ownerEmployeeId === session.data?.employeeId
+                  ? "Relationship owner: you"
+                  : "Relationship has an owner"}
+              </span>
+            )}
+          </div>
+          {update.error ? <p role="alert">{update.error.message}</p> : null}
+        </div>
+      </section>
+
       <section className="crm-panel mb-4" data-testid="deal-stage-strip">
         <div className="crm-panel-head">
           <div>
@@ -384,7 +634,7 @@ export default function CrmDealDetailPage() {
                   data-stage={stage.key}
                   data-current={current ? "true" : "false"}
                   aria-current={current ? "step" : undefined}
-                  className={`rounded-lg border px-3 py-2 text-[10px] font-bold uppercase tracking-wide ${
+                  className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
                     current
                       ? "border-[var(--ink)] bg-[var(--ink)] text-white"
                       : complete
@@ -392,7 +642,7 @@ export default function CrmDealDetailPage() {
                         : "border-[var(--line)] bg-white text-[var(--muted)]"
                   }`}
                 >
-                  <span className="mb-1 block text-[9px] opacity-70">
+                  <span className="mb-1 block text-xs opacity-70">
                     {complete ? "✓" : String(index + 1).padStart(2, "0")}
                   </span>
                   {stage.label}
@@ -670,96 +920,6 @@ export default function CrmDealDetailPage() {
         </div>
 
         <aside className="space-y-4">
-          <div className="crm-panel" data-testid="deal-next-action">
-            <div className="crm-panel-head">
-              <div>
-                <h3>Next action</h3>
-                <p>
-                  {nextTask
-                    ? "The earliest open sales task for this deal."
-                    : "Set one clear action so this deal does not stall."}
-                </p>
-              </div>
-              <CrmTag kind={nextTask ? "info" : "warn"}>
-                {nextTask ? nextTask.status.replace(/_/g, " ") : "Not set"}
-              </CrmTag>
-            </div>
-            <div className="crm-panel-body">
-              <div className="crm-form-grid">
-                <div className="crm-field wide">
-                  <label htmlFor="deal-next-action-title">Action</label>
-                  <input
-                    id="deal-next-action-title"
-                    data-testid="deal-next-action-title"
-                    value={nextActionTitle}
-                    placeholder="Example: Follow up with the decision maker"
-                    onChange={(event) => setNextActionTitle(event.target.value)}
-                  />
-                </div>
-                <div className="crm-field">
-                  <label htmlFor="deal-next-action-date">Due date</label>
-                  <input
-                    id="deal-next-action-date"
-                    data-testid="deal-next-action-date"
-                    type="date"
-                    value={nextActionDate}
-                    onChange={(event) => setNextActionDate(event.target.value)}
-                  />
-                </div>
-                <div className="crm-field">
-                  <label>Owner</label>
-                  <div className="crm-note">
-                    {nextTask?.ownerEmployeeId === session.data?.employeeId
-                      ? "You"
-                      : nextTask?.ownerEmployeeId
-                        ? "A teammate — saving assigns it to you"
-                        : "You when saved"}
-                  </div>
-                </div>
-              </div>
-              <div className="crm-approval-actions">
-                <CrmBtn
-                  variant="primary"
-                  data-testid="deal-next-action-save"
-                  disabled={
-                    !nextActionTitle.trim() ||
-                    !session.data?.employeeId ||
-                    createTask.isPending ||
-                    updateTask.isPending
-                  }
-                  onClick={async () => {
-                    if (!session.data?.employeeId) return;
-                    const taskInput = {
-                      title: nextActionTitle.trim(),
-                      dueDate: nextActionDate || null,
-                      ownerEmployeeId: session.data.employeeId,
-                    };
-                    if (nextTask) {
-                      await updateTask.mutateAsync({
-                        id: nextTask.crmTaskId,
-                        ...taskInput,
-                      });
-                    } else {
-                      await createTask.mutateAsync({
-                        ...taskInput,
-                        dealId: id,
-                        companyId: d.companyId,
-                        contactId: d.primaryContactId,
-                      });
-                    }
-                    setActionStatus(
-                      nextTask
-                        ? "Next action updated and assigned to you."
-                        : "Next action created and assigned to you.",
-                    );
-                  }}
-                >
-                  {nextTask ? "Save next action" : "Create next action"}
-                </CrmBtn>
-              </div>
-            </div>
-          </div>
-
           <div className="crm-panel">
             <div className="crm-panel-head">
               <div>
@@ -834,7 +994,7 @@ export default function CrmDealDetailPage() {
               </div>
               {(tasks.data ?? []).length > 0 ? (
                 <div className="mt-4">
-                  <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+                  <p className="mb-2 text-xs font-semiboldr text-[var(--muted)]">
                     Linked tasks
                   </p>
                   <div className="crm-checklist">

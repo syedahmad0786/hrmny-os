@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { isSyntheticRecordName } from "@/lib/synthetic-records";
+import { isSyntheticDeal } from "@/lib/synthetic-records";
 import {
   CompanyCell,
   CrmBtn,
@@ -57,7 +57,7 @@ export default function CrmDealsPage() {
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (deals.data ?? []).filter((d) => {
-      if (!showTestRecords && isSyntheticRecordName(d.companyName)) {
+      if (!showTestRecords && isSyntheticDeal(d)) {
         return false;
       }
       if (stage !== "all" && d.stage !== stage) return false;
@@ -73,10 +73,10 @@ export default function CrmDealsPage() {
     });
   }, [contactById, deals.data, search, showTestRecords, stage]);
   const hiddenTestCount = (deals.data ?? []).filter((deal) =>
-    isSyntheticRecordName(deal.companyName),
+    isSyntheticDeal(deal),
   ).length;
   const visibleStalled = (digest.data?.stalled ?? []).filter(
-    (deal) => showTestRecords || !isSyntheticRecordName(deal.companyName),
+    (deal) => showTestRecords || !isSyntheticDeal(deal),
   );
 
   return (

@@ -30,6 +30,12 @@ export type ContactRow = {
 
 export type DealRow = {
   dealId: string;
+  recordClass?: string;
+  classificationReason?: string | null;
+  opportunityName?: string | null;
+  expectedCloseDate?: string | null;
+  closedAt?: string | null;
+  stageEnteredAt?: string | null;
   companyId: string | null;
   primaryContactId: string | null;
   companyName: string;

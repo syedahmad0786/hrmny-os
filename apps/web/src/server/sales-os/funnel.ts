@@ -7,7 +7,7 @@ import type { CompanyResearchRow, EmailEventRow } from "./types";
 import type { CompanyRow, CrmNoteRow, DealRow } from "../crm/types";
 import {
   hasSyntheticMarker,
-  isSyntheticRecordName,
+  isSyntheticDeal,
 } from "../../lib/synthetic-records";
 
 export type SalesFunnelFilters = {
@@ -32,9 +32,7 @@ export function buildSalesFunnel(input: {
   const companyById = new Map(
     input.companies.map((row) => [row.companyId, row]),
   );
-  const businessDeals = input.deals.filter(
-    (deal) => !isSyntheticRecordName(deal.companyName),
-  );
+  const businessDeals = input.deals.filter((deal) => !isSyntheticDeal(deal));
   const businessDealById = new Map(
     businessDeals.map((deal) => [deal.dealId, deal]),
   );

@@ -72,6 +72,12 @@ function mapContact(r: typeof contact.$inferSelect): ContactRow {
 function mapDeal(r: typeof deal.$inferSelect): DealRow {
   return {
     dealId: r.dealId,
+    recordClass: r.recordClass,
+    classificationReason: r.classificationReason,
+    opportunityName: r.opportunityName,
+    expectedCloseDate: r.expectedCloseDate,
+    closedAt: r.closedAt ? iso(r.closedAt) : null,
+    stageEnteredAt: r.stageEnteredAt ? iso(r.stageEnteredAt) : null,
     companyId: r.companyId ?? null,
     primaryContactId: r.primaryContactId ?? null,
     companyName: r.companyName,
@@ -549,6 +555,8 @@ export async function createDeal(input: {
 export async function updateDeal(
   id: string,
   input: Partial<{
+    opportunityName: string | null;
+    expectedCloseDate: string | null;
     companyName: string;
     companyId: string | null;
     primaryContactId: string | null;
@@ -585,6 +593,15 @@ export async function updateDeal(
       const next = {
         ...existing,
         ...input,
+        ...(input.closeOutcome !== undefined &&
+        input.closeOutcome !== existing.closeOutcome
+          ? {
+              closedAt:
+                input.closeOutcome === "won" || input.closeOutcome === "lost"
+                  ? new Date().toISOString()
+                  : null,
+            }
+          : {}),
         updatedAt: new Date().toISOString(),
       };
       mem.deals.set(id, next);
@@ -615,6 +632,7 @@ export async function moveDealStage(input: {
         .update(deal)
         .set({
           stage: input.to as typeof deal.$inferInsert.stage,
+          stageEnteredAt: input.to === from ? undefined : new Date(),
           updatedAt: new Date(),
         })
         .where(eq(deal.dealId, input.dealId))
@@ -628,6 +646,8 @@ export async function moveDealStage(input: {
       const next = {
         ...d,
         stage: input.to,
+        stageEnteredAt:
+          input.to === from ? d.stageEnteredAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
       mem.deals.set(input.dealId, next);

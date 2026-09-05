@@ -114,7 +114,7 @@ describe("leadgen daily cron", () => {
 
     expect(first).toEqual({
       ran: false,
-      skipped: "proposal_runtime_unavailable",
+      skipped: "research_owner_required",
     });
     expect(replay).toEqual({ ran: false, skipped: "already_ran" });
     expect(fetchSpy).not.toHaveBeenCalled();

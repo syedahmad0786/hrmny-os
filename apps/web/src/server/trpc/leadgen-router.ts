@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import { outreachReadiness } from "../leadgen/readiness";
 import { TRPCError } from "@trpc/server";
 import {
   bootstrapGateRegistry,
@@ -534,6 +535,12 @@ export async function approveOutreach(input: {
       authorize: async (a) => authorizeStaff(a),
       apply: async () => {
         const body = await recipientBoundEmailBody(item);
+        const readiness = await outreachReadiness({ ...item, body });
+        if (!readiness.ready)
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: readiness.reason ?? "Review this message before approval.",
+          });
         const next = await patchOutreach(input.id, {
           state: "approved",
           approvedBy: input.actor.employeeId,
@@ -934,6 +941,14 @@ export async function sendOutreach(input: {
     };
   }
   const toolkit = "gmail" as const;
+  if (item.state === "approved" && authorizeStaff(input.actor)) {
+    const readiness = await outreachReadiness(item);
+    if (!readiness.ready)
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: readiness.reason ?? "This message is not ready to send.",
+      });
+  }
   const replyContext = await resolveGmailReplyContext(item);
   if (replyContext && !replyContext.inReplyTo) {
     throw new TRPCError({
@@ -984,11 +999,7 @@ export async function sendOutreach(input: {
         message: allowed.reason,
       });
     }
-    const nextBody = await recipientBoundEmailBody(item);
-    if (nextBody !== item.body) {
-      await patchOutreach(input.id, { body: nextBody });
-      item.body = nextBody;
-    }
+    // Dispatch the exact reviewed body. A stale link must be reworked and approved again.
   }
   const requiredSenderConnectionAccountId =
     replyContext?.senderConnectionAccountId ?? input.senderConnectionAccountId;
@@ -1399,7 +1410,23 @@ const outreachRouter = router({
         })
         .optional(),
     )
-    .query(({ input }) => listOutreach(input)),
+    .query(async ({ input }) => {
+      const all = await listOutreach();
+      const rows = all.filter(
+        (item) =>
+          (!input?.dealId || item.dealId === input.dealId) &&
+          (!input?.state || item.state === input.state),
+      );
+      return Promise.all(
+        rows.map(async (item) => ({
+          ...item,
+          readiness:
+            item.state === "approved"
+              ? await outreachReadiness(item, all)
+              : null,
+        })),
+      );
+    }),
 
   get: staffProcedure
     .input(z.object({ id: z.string() }))

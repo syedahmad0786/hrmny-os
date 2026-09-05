@@ -7,11 +7,11 @@ test("Sales opens on one synchronized operating dashboard", async ({
   await page.goto("/crm/dashboard", { waitUntil: "commit" });
 
   await expect(
-    page.getByRole("heading", { name: "Sales command center" }),
+    page.getByRole("heading", { name: "Sales workspace" }),
   ).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("sales-work-queue")).toBeVisible();
-  await page.getByRole("button", { name: /^Replies/ }).click();
-  await expect(page.getByRole("button", { name: /^Replies/ })).toHaveAttribute(
+  await page.getByRole("button", { name: "Team work" }).click();
+  await expect(page.getByRole("button", { name: "Team work" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );

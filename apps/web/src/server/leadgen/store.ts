@@ -41,7 +41,10 @@ export type OutreachItem = {
   updatedAt: string;
 };
 
-export type CompetitorFindingRow = CompetitorFinding & { id: string; createdAt: string };
+export type CompetitorFindingRow = CompetitorFinding & {
+  id: string;
+  createdAt: string;
+};
 
 export type ContactEdgeRow = {
   id: string;
@@ -147,7 +150,11 @@ async function withDb<T>(
 }
 
 const iso = (d: Date | string | null | undefined): string =>
-  d instanceof Date ? d.toISOString() : d ? String(d) : new Date().toISOString();
+  d instanceof Date
+    ? d.toISOString()
+    : d
+      ? String(d)
+      : new Date().toISOString();
 
 // ── outreach_items ─────────────────────────────────────────
 
@@ -289,9 +296,11 @@ export async function patchOutreach(
       if (patch.recipient !== undefined) set.recipient = patch.recipient;
       if (patch.channel !== undefined) set.channel = patch.channel;
       if (patch.contactId !== undefined) set.contactId = patch.contactId;
-      if (patch.reworkFeedback !== undefined) set.reworkFeedback = patch.reworkFeedback;
+      if (patch.reworkFeedback !== undefined)
+        set.reworkFeedback = patch.reworkFeedback;
       if (patch.linkedinUrl !== undefined) set.linkedinUrl = patch.linkedinUrl;
-      if (patch.cadenceTouch !== undefined) set.cadenceTouch = patch.cadenceTouch;
+      if (patch.cadenceTouch !== undefined)
+        set.cadenceTouch = patch.cadenceTouch;
       if (patch.acceptedAt !== undefined)
         set.acceptedAt = patch.acceptedAt ? new Date(patch.acceptedAt) : null;
       const [row] = await db
@@ -304,7 +313,20 @@ export async function patchOutreach(
     () => {
       const existing = store.outreach.get(id);
       if (!existing) return null;
-      const next = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+      const changed = (
+        ["body", "subject", "recipient", "channel", "contactId"] as const
+      ).some((key) => patch[key] !== undefined && patch[key] !== existing[key]);
+      if (changed && existing.state === "sent")
+        throw new Error("Sent outreach content is immutable");
+      const next = {
+        ...existing,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      if (changed && existing.state === "approved") {
+        next.state = "draft";
+        next.approvedBy = null;
+      }
       store.outreach.set(id, next);
       return next;
     },
@@ -524,7 +546,8 @@ export async function listWinLossNotes(filter?: {
     () => {
       let rows = [...store.winLossNotes];
       if (filter?.dealId) rows = rows.filter((r) => r.dealId === filter.dealId);
-      if (filter?.outcome) rows = rows.filter((r) => r.outcome === filter.outcome);
+      if (filter?.outcome)
+        rows = rows.filter((r) => r.outcome === filter.outcome);
       return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     },
   );

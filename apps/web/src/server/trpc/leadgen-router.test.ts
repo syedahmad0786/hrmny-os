@@ -557,6 +557,7 @@ describe("outreach HITL gate flow", () => {
     await patchOutreach(item.id, {
       body: `${COMPLIANT_BODY} Updated after the uncertain attempt.`,
     });
+    await approveOutreach({ id: item.id, actor: staff, audit, emit });
     await expect(
       sendOutreach({
         id: item.id,
@@ -596,14 +597,14 @@ describe("outreach HITL gate flow", () => {
       dealId: deal.dealId,
       body: COMPLIANT_BODY,
     });
-    await approveOutreach({ id: item.id, actor: staff, audit, emit });
+    await expect(
+      approveOutreach({ id: item.id, actor: staff, audit, emit }),
+    ).rejects.toThrow(/verified by the connected provider/i);
     const composio = countingLiveComposio();
 
-    await expect(
-      sendOutreach({ id: item.id, actor: staff, composio, audit, emit }),
-    ).rejects.toThrow(/verified by the connected provider/i);
+    await sendOutreach({ id: item.id, actor: staff, composio, audit, emit });
     expect(composio.sends).toBe(0);
-    expect((await getOutreach(item.id))?.state).toBe("approved");
+    expect((await getOutreach(item.id))?.state).toBe("draft");
   });
 
   it("LinkedIn copy-draft stays approved (not sent)", async () => {

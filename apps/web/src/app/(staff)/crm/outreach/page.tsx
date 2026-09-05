@@ -14,10 +14,7 @@ import {
 } from "@/components/crm/ui";
 import { formatRelative } from "@/components/crm/format";
 import { HitlReadyBanner } from "@/components/hitl-ready-banner";
-import {
-  hasSyntheticMarker,
-  isSyntheticRecordName,
-} from "@/lib/synthetic-records";
+import { hasSyntheticMarker, isSyntheticDeal } from "@/lib/synthetic-records";
 import { googleWorkspaceGmailApiEnableUrl } from "@/lib/google-workspace-error";
 
 /** Serialized shape of a @hrmny/gate TransitionResult refusal. */
@@ -205,13 +202,14 @@ function OutreachInner() {
   const byState = useMemo(() => {
     const all = (items.data ?? []).filter(
       (item) =>
-        showTestRecords ||
-        item.id === focusId ||
-        !hasSyntheticMarker(
-          companyByDeal.get(item.dealId),
-          item.recipient,
-          item.subject,
-        ),
+        (!focusId || item.id === focusId) &&
+        (showTestRecords ||
+          item.id === focusId ||
+          !hasSyntheticMarker(
+            companyByDeal.get(item.dealId),
+            item.recipient,
+            item.subject,
+          )),
     );
     return {
       drafts: orderOutreachWorkItems(
@@ -704,13 +702,13 @@ function OutreachInner() {
         <aside className="crm-panel outreach-approved-panel">
           <div className="crm-panel-head">
             <div>
-              <h3>Approved — ready to send</h3>
+              <h3>Approved messages</h3>
               <p>
                 Oldest first. Email sends only after a second confirmation.
                 LinkedIn stays manual.
               </p>
             </div>
-            <CrmTag kind="success">{byState.approved.length} ready</CrmTag>
+            <CrmTag kind="info">{byState.approved.length} approved</CrmTag>
           </div>
           <div className="crm-panel-body crm-approval-stack">
             {items.isLoading ? (
@@ -805,6 +803,7 @@ function OutreachInner() {
                         variant="primary"
                         disabled={
                           busyId !== null ||
+                          !item.readiness?.ready ||
                           mailboxes.isLoading ||
                           !senderAccount ||
                           (selectedSender?.remainingToday ?? 0) < 1
@@ -824,6 +823,11 @@ function OutreachInner() {
                       >
                         {busyId === item.id ? "Sending…" : "Send via Gmail"}
                       </CrmBtn>
+                      {item.readiness && !item.readiness.ready ? (
+                        <p className="crm-note" role="status">
+                          {item.readiness.reason}
+                        </p>
+                      ) : null}
                       <CrmBtn
                         disabled={busyId !== null}
                         onClick={() =>
@@ -884,11 +888,7 @@ function OutreachInner() {
                     {deals.isLoading ? "Loading deals…" : "Select a deal"}
                   </option>
                   {(deals.data ?? [])
-                    .filter(
-                      (deal) =>
-                        showTestRecords ||
-                        !isSyntheticRecordName(deal.companyName),
-                    )
+                    .filter((deal) => showTestRecords || !isSyntheticDeal(deal))
                     .map((d) => (
                       <option key={d.dealId} value={d.dealId}>
                         {d.companyName} · {String(d.stage).replace(/_/g, " ")}

@@ -315,6 +315,14 @@ export const crmDealsRouter = router({
         primaryContactId: z.string().uuid().nullable().optional(),
         sector: z.string().nullable().optional(),
         ownerEmployeeId: z.string().uuid().nullable().optional(),
+        opportunityName: z
+          .string()
+          .trim()
+          .min(1)
+          .max(200)
+          .nullable()
+          .optional(),
+        expectedCloseDate: z.string().date().nullable().optional(),
         buafBudget: z.boolean().nullable().optional(),
         buafUrgency: z.boolean().nullable().optional(),
         buafAccess: z.boolean().nullable().optional(),

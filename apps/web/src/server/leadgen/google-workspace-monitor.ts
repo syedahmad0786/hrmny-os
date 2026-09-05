@@ -18,6 +18,7 @@ import {
 } from "../trpc/connections-router";
 
 const messageListSchema = z.object({
+  nextPageToken: z.string().optional(),
   messages: z
     .array(z.object({ id: z.string().min(1), threadId: z.string().optional() }))
     .optional(),
@@ -136,7 +137,7 @@ function emailAddress(value: string | undefined): string | null {
   );
 }
 
-async function listMessages(
+export async function listMessages(
   accessToken: string,
   query: string,
   fetchImpl: typeof fetch,
@@ -144,16 +145,30 @@ async function listMessages(
   const params = new URLSearchParams({
     q: query,
     maxResults: "200",
-    fields: "messages(id,threadId)",
+    fields: "messages(id,threadId),nextPageToken",
   });
-  const response = await fetchImpl(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?${params}`,
-    { headers: { authorization: `Bearer ${accessToken}` } },
-  );
-  if (!response.ok) {
-    throw new Error(`Gmail inbox list failed (${response.status})`);
+  const messages: Array<{ id: string; threadId?: string }> = [];
+  const seenTokens = new Set<string>();
+  // ponytail: bounded recovery sweep; refuse with a health error rather than silently truncating above 10,000.
+  for (let page = 0; page < 50; page++) {
+    const response = await fetchImpl(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?${params}`,
+      { headers: { authorization: `Bearer ${accessToken}` } },
+    );
+    if (!response.ok) {
+      throw new Error(`Gmail inbox list failed (${response.status})`);
+    }
+    const result = messageListSchema.parse(await response.json());
+    messages.push(...(result.messages ?? []));
+    if (!result.nextPageToken) return messages;
+    if (seenTokens.has(result.nextPageToken))
+      throw new Error("Gmail repeated a pagination token. Sync needs retry.");
+    seenTokens.add(result.nextPageToken);
+    params.set("pageToken", result.nextPageToken);
   }
-  return messageListSchema.parse(await response.json()).messages ?? [];
+  throw new Error(
+    "Gmail recovery exceeded 10,000 messages. Narrow the recovery window before retrying.",
+  );
 }
 
 async function getMessage(
@@ -213,8 +228,7 @@ export async function runGoogleWorkspaceOutreachMonitor(
             : [],
         ),
       );
-      // ponytail: newest 200 is bounded; add Gmail history pagination only if
-      // mailbox volume can hide replies between 15-minute ticks.
+      // Read every page in the recovery window; existing durable receipts deduplicate retries.
       const [inbox, notices] = await Promise.all([
         listMessages(
           accessToken,

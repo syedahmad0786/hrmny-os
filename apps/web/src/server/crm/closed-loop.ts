@@ -13,6 +13,7 @@ import {
   createQuoteVersion,
   moveDealStage,
   updateDeal,
+  updateContact,
 } from "./repository";
 import { assertLegacySalesSyntheticRuntime } from "../sales-os/legacy-effect-policy";
 
@@ -114,6 +115,7 @@ export async function runDemoClosedLoopCore(
         isPrimary: true,
       });
       contactId = contact.contactId;
+      await updateContact(contactId, { emailVerified: true });
       await updateDeal(dealId, { primaryContactId: contactId });
     }
   } else {
@@ -140,6 +142,8 @@ export async function runDemoClosedLoopCore(
     });
     companyId = company.companyId;
     contactId = contact.contactId;
+    // This entry point is restricted to synthetic fixtures; no real email is verified here.
+    await updateContact(contactId, { emailVerified: true });
     dealId = deal.dealId;
   }
 

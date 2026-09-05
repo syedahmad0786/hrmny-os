@@ -20,7 +20,7 @@ import {
 } from "@/components/crm/format";
 import { DemoReadinessPanel } from "@/components/demo-readiness-panel";
 import { DashStrip } from "./_components/dash-strip";
-import { isSyntheticRecordName } from "@/lib/synthetic-records";
+import { isSyntheticDeal } from "@/lib/synthetic-records";
 import { CRM_MARKETS } from "@/lib/crm-markets";
 import {
   DEFAULT_PIPELINE_FILTERS,
@@ -174,8 +174,7 @@ export default function CrmPipelinePage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (deals.data ?? []).filter((d) => {
-      if (!showTestRecords && isSyntheticRecordName(d.companyName))
-        return false;
+      if (!showTestRecords && isSyntheticDeal(d)) return false;
       if (records === "active" && d.closeOutcome) return false;
       if (
         records === "retention" &&
@@ -221,7 +220,7 @@ export default function CrmPipelinePage() {
   ]);
 
   const hiddenTestCount = (deals.data ?? []).filter((deal) =>
-    isSyntheticRecordName(deal.companyName),
+    isSyntheticDeal(deal),
   ).length;
 
   const stageList = stages.data ?? [];

@@ -1,8 +1,8 @@
-import { listDeals } from "../crm/repository";
+import { listDeals, listCrmTasks } from "../crm/repository";
 import { listOutreach } from "../leadgen/store";
 import {
   hasSyntheticMarker,
-  isSyntheticRecordName,
+  isSyntheticDeal,
 } from "../../lib/synthetic-records";
 import {
   getSalesOsSettings,
@@ -15,7 +15,10 @@ import { sectorForDate } from "./sops";
 
 export type SalesAttentionItem = {
   id: string;
-  kind: "review" | "send" | "followup" | "closing";
+  kind: "review" | "send" | "followup" | "closing" | "task" | "setup";
+  dealId?: string;
+  ownerEmployeeId?: string | null;
+  dueDate?: string | null;
   title: string;
   detail: string;
   href: string;
@@ -62,20 +65,26 @@ export async function buildSalesOsDigest(
   now = new Date(),
 ): Promise<SalesOsDigest> {
   const settings = await getSalesOsSettings();
-  const [companies, contacts, outreach, deals, emailEvents] = await Promise.all(
-    [
+  const [companies, contacts, outreach, deals, emailEvents, tasks] =
+    await Promise.all([
       listCompanyResearch({ state: "researched" }),
       listContactResearch({ state: "found" }),
       listOutreach(),
       listDeals(),
       listEmailEvents(),
-    ],
-  );
+      listCrmTasks(),
+    ]);
   const companyByDeal = new Map(
     deals.map((deal) => [deal.dealId, deal.companyName]),
   );
   const businessOutreach = outreach.filter(
     (item) =>
+      !isSyntheticDeal(
+        deals.find((deal) => deal.dealId === item.dealId) ?? {
+          companyName: "",
+        },
+      ) &&
+      !/^test$/i.test(item.subject?.trim() ?? "") &&
       !hasSyntheticMarker(
         companyByDeal.get(item.dealId),
         item.recipient,
@@ -111,9 +120,7 @@ export async function buildSalesOsDigest(
     cadenceDays: settings.outreach.cadenceDays,
     now,
   });
-  const open = deals.filter(
-    (d) => !d.closeOutcome && !isSyntheticRecordName(d.companyName),
-  );
+  const open = deals.filter((d) => !d.closeOutcome && !isSyntheticDeal(d));
   const openValue = open.reduce((sum, d) => sum + Number(d.quoteValue ?? 0), 0);
   const monthlyTarget = settings.targets.h1BookedAed / 6;
   const coverageX = monthlyTarget > 0 ? openValue / monthlyTarget : 0;
@@ -121,7 +128,8 @@ export async function buildSalesOsDigest(
   for (const d of open) {
     const maxDays = settings.stallDays[d.stage] ?? 14;
     const days = Math.floor(
-      (now.getTime() - new Date(d.updatedAt).getTime()) / 86_400_000,
+      (now.getTime() - new Date(d.stageEnteredAt ?? d.createdAt).getTime()) /
+        86_400_000,
     );
     if (days > maxDays) {
       stalled.push({
@@ -134,10 +142,59 @@ export async function buildSalesOsDigest(
     }
   }
   const attention: SalesAttentionItem[] = [
+    ...open.flatMap((deal): SalesAttentionItem[] => {
+      const pending = tasks.filter(
+        (task) =>
+          task.dealId === deal.dealId &&
+          task.status !== "done" &&
+          task.status !== "cancelled",
+      );
+      const dated = pending
+        .filter((task) => task.dueDate)
+        .sort((a, b) => a.dueDate!.localeCompare(b.dueDate!));
+      const next = dated[0] ?? pending[0];
+      if (!deal.ownerEmployeeId || !next?.dueDate || !next.ownerEmployeeId) {
+        return [
+          {
+            id: `setup-${deal.dealId}`,
+            kind: "setup",
+            dealId: deal.dealId,
+            ownerEmployeeId: deal.ownerEmployeeId,
+            dueDate: next?.dueDate,
+            title: deal.companyName,
+            detail: !deal.ownerEmployeeId
+              ? "Choose who owns this relationship and schedule the next step."
+              : !next
+                ? "Choose the next action and when to do it."
+                : !next.ownerEmployeeId
+                  ? "Assign the next action to a salesperson."
+                  : "Schedule a date for the next action.",
+            href: `/crm/deals/${deal.dealId}#next-action`,
+            action: "Plan next step",
+          },
+        ];
+      }
+      return dated
+        .filter((task) => task.dueDate! <= now.toISOString().slice(0, 10))
+        .map((task) => ({
+          id: `task-${task.crmTaskId}`,
+          kind: "task" as const,
+          dealId: deal.dealId,
+          ownerEmployeeId: task.ownerEmployeeId,
+          dueDate: task.dueDate,
+          title: deal.companyName,
+          detail: task.title,
+          href: `/crm/deals/${deal.dealId}#next-action`,
+          action: "Complete next step",
+        }));
+    }),
     ...followUps
       .filter((item) => item.state === "due")
       .map((item) => ({
         id: `followup-${item.sourceId}`,
+        dealId: item.dealId,
+        ownerEmployeeId: deals.find((deal) => deal.dealId === item.dealId)
+          ?.ownerEmployeeId,
         kind: "followup" as const,
         title: companyByDeal.get(item.dealId) ?? item.recipient,
         detail: `${item.recipient} · ${item.reason}`,
@@ -146,6 +203,9 @@ export async function buildSalesOsDigest(
       })),
     ...drafts.map((item) => ({
       id: item.id,
+      dealId: item.dealId,
+      ownerEmployeeId: deals.find((deal) => deal.dealId === item.dealId)
+        ?.ownerEmployeeId,
       kind: "review" as const,
       title: companyByDeal.get(item.dealId) ?? item.recipient,
       detail: `${item.channel} · ${item.subject ?? item.body.slice(0, 120)}`,
@@ -154,6 +214,9 @@ export async function buildSalesOsDigest(
     })),
     ...approved.map((item) => ({
       id: item.id,
+      dealId: item.dealId,
+      ownerEmployeeId: deals.find((deal) => deal.dealId === item.dealId)
+        ?.ownerEmployeeId,
       kind: "send" as const,
       title: companyByDeal.get(item.dealId) ?? item.recipient,
       detail: `${item.channel} · ${item.subject ?? item.body.slice(0, 120)}`,
@@ -182,6 +245,8 @@ export async function buildSalesOsDigest(
       )
       .map((item) => ({
         id: item.dealId,
+        dealId: item.dealId,
+        ownerEmployeeId: item.ownerEmployeeId,
         kind: "closing" as const,
         title: item.companyName,
         detail: `${String(item.stage).replaceAll("_", " ")} · ${new Intl.NumberFormat("en-AE", { style: "currency", currency: "AED", maximumFractionDigits: 0 }).format(Number(item.quoteValue ?? 0))}`,

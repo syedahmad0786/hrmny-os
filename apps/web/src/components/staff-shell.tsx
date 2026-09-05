@@ -142,7 +142,7 @@ const PRIMARY_NAV: readonly StaffNavDefinition[] = [
   },
   {
     id: "settings",
-    label: "Connections",
+    label: "Settings",
     index: "11",
     destinations: [
       {

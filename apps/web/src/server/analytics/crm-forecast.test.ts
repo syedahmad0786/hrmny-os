@@ -105,7 +105,8 @@ describe("computeForecast (memory repository)", () => {
     const row = mem.deals.get(d.dealId)!;
     mem.deals.set(d.dealId, {
       ...row,
-      updatedAt: new Date(Date.now() - 200 * 864e5).toISOString(),
+      closedAt: new Date(Date.now() - 200 * 864e5).toISOString(),
+      updatedAt: new Date().toISOString(),
     });
 
     const res = computeForecast(await listDeals(), { horizonDays: 90 });
@@ -118,9 +119,21 @@ describe("computeWinLoss (memory repository)", () => {
   it("counts won/lost, computes win rate, and ranks lost reasons", async () => {
     await seedDeal({ quoteValue: "1.00", closeOutcome: "won" });
     await seedDeal({ quoteValue: "1.00", closeOutcome: "won" });
-    await seedDeal({ quoteValue: "1.00", closeOutcome: "lost", lostReason: "budget" });
-    await seedDeal({ quoteValue: "1.00", closeOutcome: "lost", lostReason: "budget" });
-    await seedDeal({ quoteValue: "1.00", closeOutcome: "lost", lostReason: "timing" });
+    await seedDeal({
+      quoteValue: "1.00",
+      closeOutcome: "lost",
+      lostReason: "budget",
+    });
+    await seedDeal({
+      quoteValue: "1.00",
+      closeOutcome: "lost",
+      lostReason: "budget",
+    });
+    await seedDeal({
+      quoteValue: "1.00",
+      closeOutcome: "lost",
+      lostReason: "timing",
+    });
     await seedDeal({ quoteValue: "1.00", closeOutcome: "postponed_on_hold" }); // excluded
     await seedDeal({ quoteValue: "1.00" }); // open, excluded
 
@@ -159,7 +172,11 @@ describe("computeStageConversion (memory repository)", () => {
 
     expect(res.method).toBe("audit_trail");
     const byStage = Object.fromEntries(res.stages.map((s) => [s.stage, s]));
-    expect(byStage.discover).toMatchObject({ entered: 2, advanced: 2, rate: 1 });
+    expect(byStage.discover).toMatchObject({
+      entered: 2,
+      advanced: 2,
+      rate: 1,
+    });
     expect(byStage.qualify).toMatchObject({ entered: 1, advanced: 0, rate: 0 });
     expect(byStage.engage).toMatchObject({ entered: 0, rate: null });
   });
@@ -179,7 +196,11 @@ describe("computeStageConversion (memory repository)", () => {
     expect(res.method).toBe("stage_distribution");
     const byStage = Object.fromEntries(res.stages.map((s) => [s.stage, s]));
     // 4 at-or-beyond discover; only the won deal counts beyond → 0.25.
-    expect(byStage.discover).toMatchObject({ entered: 4, advanced: 1, rate: 0.25 });
+    expect(byStage.discover).toMatchObject({
+      entered: 4,
+      advanced: 1,
+      rate: 0.25,
+    });
     expect(byStage.qualify).toMatchObject({ entered: 1, advanced: 1, rate: 1 });
   });
 });

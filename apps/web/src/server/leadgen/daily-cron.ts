@@ -5,15 +5,14 @@ import {
   type AutonomyPolicy,
 } from "@hrmny/ai";
 import { readAiAutonomyPolicy } from "../ai/autonomy-policy";
+import { z } from "zod";
+import { proposeDailyResearch } from "../sales-os/scheduled-research";
 import { getDb } from "../db";
 import { recordHealthSignal } from "../m1-persistence";
 
 /**
- * Cron-driven Sales research gate. The previous implementation resolved live
- * Apollo/email-verification credentials and created CRM records before reading
- * the audited autonomy policy. Until a proposal-only research runtime exists,
- * this entry point records one explicit refusal and performs no provider, AI,
- * enrichment, outreach, or CRM operation.
+ * Cron-driven proposal-only research. The policy is checked before provider
+ * discovery; canonical CRM promotion and outreach always retain their own gates.
  */
 export const LEADGEN_DAILY_SIGNAL = "leadgen_daily";
 /** First cron tick at/after this UTC hour (~06:00 Asia/Dubai). */
@@ -43,6 +42,8 @@ export type LeadgenDailyCronResult = {
     | "before_window"
     | "already_ran"
     | "policy_denied"
+    | "research_owner_required"
+    | "research_pending"
     | "proposal_runtime_unavailable";
   policyViolation?:
     "forbidden_action" | "mode_not_scheduled" | "agent_not_allowlisted";
@@ -55,6 +56,7 @@ export type LeadgenDailyCronResult = {
 export type LeadgenDailyCronDeps = {
   readPolicy?: () => Promise<AutonomyPolicy>;
   recordSignal?: typeof recordHealthSignal;
+  runProposals?: typeof proposeDailyResearch;
 };
 
 async function recordRefusal(
@@ -101,9 +103,25 @@ export async function runLeadgenDailyCron(
     );
   }
 
-  return recordRefusal(
-    todayIso,
-    { ran: false, skipped: "proposal_runtime_unavailable" },
-    recordSignal,
+  if (!z.string().uuid().safeParse(policy.updatedBy).success)
+    return recordRefusal(
+      todayIso,
+      { ran: false, skipped: "research_owner_required" },
+      recordSignal,
+    );
+  const result = await (deps.runProposals ?? proposeDailyResearch)(
+    policy.updatedBy!,
+    now,
   );
+  if (result.pending) return { ran: false, skipped: "research_pending" };
+  await recordSignal(LEADGEN_DAILY_SIGNAL, "info", {
+    date: todayIso,
+    outcome: "proposals_created",
+    proposed: result.proposed,
+    receiptId: result.receiptId,
+    canonicalCrmWrites: 0,
+    outreachSends: 0,
+  });
+  memoryLastRunDay = todayIso;
+  return { ran: true, created: result.proposed, apolloSource: "live" };
 }

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { CrmBtn, CrmEmpty, CrmPageHeader, CrmTag } from "@/components/crm/ui";
-import { isSyntheticRecordName } from "@/lib/synthetic-records";
+import { isSyntheticDeal } from "@/lib/synthetic-records";
 import { trpc } from "@/lib/trpc";
 import { matchesCampaignLeadView } from "./lead-picker";
 
@@ -70,7 +70,7 @@ export default function SalesCampaignsPage() {
     [deals.data],
   );
   const hiddenTestCount = availableDeals.filter((deal) =>
-    isSyntheticRecordName(deal.companyName),
+    isSyntheticDeal(deal),
   ).length;
   const visibleDeals = useMemo(() => {
     return availableDeals.filter((deal) =>
@@ -192,9 +192,7 @@ export default function SalesCampaignsPage() {
                     if (!show) {
                       const testIds = new Set(
                         availableDeals
-                          .filter((deal) =>
-                            isSyntheticRecordName(deal.companyName),
-                          )
+                          .filter((deal) => isSyntheticDeal(deal))
                           .map((deal) => deal.dealId),
                       );
                       setSelected((current) =>
