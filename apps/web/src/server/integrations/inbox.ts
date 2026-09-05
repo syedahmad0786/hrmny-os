@@ -281,6 +281,43 @@ export async function getIntegrationReceipt(
     : null;
 }
 
+/** Ownership only: never expose provider receipt payloads to shared sales views. */
+export async function listOutreachEmailBindings() {
+  const db = getDb();
+  const rows = db
+    ? await db
+        .select({
+          payload: integrationInbox.payload,
+          ownerEmployeeId: integrationInbox.ownerEmployeeId,
+          credentialConnectionAccountId:
+            integrationInbox.credentialConnectionAccountId,
+        })
+        .from(integrationInbox).where(sql`${integrationInbox.provider} = 'gmail'
+        and ${integrationInbox.operation} in ('messages.send', 'messages.send.test', 'messages.reply.draft')`)
+    : [...memoryReceipts.values()].filter(
+        (row) =>
+          row.provider === "gmail" &&
+          [
+            "messages.send",
+            "messages.send.test",
+            "messages.reply.draft",
+          ].includes(row.operation),
+      );
+  return rows.flatMap((row) =>
+    typeof row.payload?.outreachItemId === "string"
+      ? [
+          {
+            outreachItemId: row.payload.outreachItemId,
+            ownerEmployeeId: row.ownerEmployeeId,
+            connectionAccountId:
+              row.credentialConnectionAccountId ??
+              row.payload.senderConnectionAccountId,
+          },
+        ]
+      : [],
+  );
+}
+
 /** Find the durable provider receipt that created a CRM deal. */
 export async function findIntegrationReceiptByDealId(input: {
   provider: string;

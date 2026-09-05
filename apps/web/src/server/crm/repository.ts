@@ -679,7 +679,7 @@ export async function listActivities(q?: {
   limit?: number;
 }): Promise<ActivityRow[]> {
   const limit = q?.limit ?? 50;
-  return withDb(
+  const rows = await withDb(
     async (db) => {
       const conditions = [];
       if (q?.dealId) conditions.push(eq(activity.dealId, q.dealId));
@@ -702,6 +702,22 @@ export async function listActivities(q?: {
         .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
         .slice(0, limit);
     },
+  );
+  // Old imports/replies may contain full emails. Shared timelines and AI summaries
+  // receive status only; the original message remains in the private mailbox.
+  return rows.map((row) =>
+    row.type === "email"
+      ? {
+          ...row,
+          subject: "Email activity",
+          body: "Message content is available in the owner's private inbox.",
+          metadata: {
+            direction: row.metadata.direction,
+            provider: row.metadata.provider,
+            emailEventId: row.metadata.emailEventId,
+          },
+        }
+      : row,
   );
 }
 

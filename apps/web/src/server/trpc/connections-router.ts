@@ -718,6 +718,8 @@ export async function listSalesSenderMailboxes(input: {
   const today = (input.now ?? new Date()).toISOString().slice(0, 10);
   const mailboxes = await Promise.all(
     rows.flatMap((row) => {
+      if (!input.includeDisabled && row.ownerEmployeeId !== input.employeeId)
+        return [];
       const email = validMailbox(row.email);
       if (!email) return [];
       const policy = policyById.get(row.connectionAccountId);
@@ -835,6 +837,7 @@ export async function getGoogleWorkspaceAccessToken(
         selectedId
           ? eq(connectionAccount.connectionAccountId, selectedId)
           : eq(connectionAccount.ownerEmployeeId, employeeId),
+        eq(connectionAccount.ownerEmployeeId, employeeId),
         eq(connectionAccount.toolkit, "google_workspace"),
         eq(connectionAccount.scope, "staff"),
         or(
@@ -1116,20 +1119,22 @@ export const connectionsRouter = router({
       return listGmailIdentities(token);
     }),
 
-  salesMailboxes: staffProcedure.query(async ({ ctx }) => {
-    const employeeId = requireEmployeeId(ctx.employeeId);
-    const canManage = Boolean(
-      ctx.user && sessionHas(ctx.user, "admin", "features"),
-    );
-    return {
-      canManage,
-      items: await listSalesSenderMailboxes({
-        employeeId,
-        roles: ctx.roles,
-        includeDisabled: canManage,
-      }),
-    };
-  }),
+  salesMailboxes: staffProcedure
+    .input(z.object({ manage: z.boolean().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const employeeId = requireEmployeeId(ctx.employeeId);
+      const canManage = Boolean(
+        ctx.user && sessionHas(ctx.user, "admin", "features"),
+      );
+      return {
+        canManage,
+        items: await listSalesSenderMailboxes({
+          employeeId,
+          roles: ctx.roles,
+          includeDisabled: canManage && input?.manage === true,
+        }),
+      };
+    }),
 
   setSalesMailboxPolicy: connectionPolicyAdminProcedure
     .input(

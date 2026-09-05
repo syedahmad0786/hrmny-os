@@ -5,6 +5,7 @@ import { getDb } from "../db";
 import { persistGoogleWorkspaceTokens } from "../google-workspace-oauth";
 import { createCaller } from "../trpc/root";
 import { resolveDevUser } from "../auth/session";
+import { mutateSalesOsSettings, recordEmailEvent } from "../sales-os/store";
 
 it("retains multiple domains, reconnects exactly one mailbox, and denies another employee's private mail", async () => {
   const db = getDb()!;
@@ -77,4 +78,74 @@ it("retains multiple domains, reconnects exactly one mailbox, and denies another
       folder: "INBOX",
     }),
   ).rejects.toThrow("Only the mailbox owner");
+  await expect(
+    caller.connections.mailboxPage({
+      connectionAccountId: first.connectionAccountId,
+      folder: "SENT",
+    }),
+  ).rejects.toThrow("Only the mailbox owner");
+  await expect(
+    caller.connections.mailboxMessage({
+      connectionAccountId: first.connectionAccountId,
+      id: "private-message",
+    }),
+  ).rejects.toThrow("Only the mailbox owner");
+
+  await mutateSalesOsSettings((settings) => ({
+    settings: {
+      ...settings,
+      outreach: {
+        ...settings.outreach,
+        senderMailboxes: [
+          ...(settings.outreach.senderMailboxes ?? []),
+          {
+            connectionAccountId: first.connectionAccountId,
+            label: "Approved private sender",
+            dailyCap: 10,
+            enabled: true,
+          },
+        ],
+      },
+    },
+    result: null,
+  }));
+  const ownUser = { ...user, employeeId };
+  const ownCaller = createCaller({
+    user: ownUser,
+    employeeId,
+    roles: ownUser.roles,
+    canViewMargin: true,
+  });
+  expect(
+    (await ownCaller.connections.salesMailboxes()).items.map(
+      (item) => item.connectionAccountId,
+    ),
+  ).toContain(first.connectionAccountId);
+  expect(
+    (await caller.connections.salesMailboxes()).items.map(
+      (item) => item.connectionAccountId,
+    ),
+  ).not.toContain(first.connectionAccountId);
+  await expect(
+    caller.connections.gmailIdentities({
+      connectionAccountId: first.connectionAccountId,
+    }),
+  ).rejects.toThrow();
+
+  // A legacy event with no employee field still belongs to its proven mailbox owner.
+  const privateBody = `private-db-message-${randomUUID()}`;
+  await recordEmailEvent({
+    provider: "gmail",
+    kind: "replied",
+    payload: {
+      senderConnectionAccountId: first.connectionAccountId,
+      body: privateBody,
+    },
+  });
+  expect(
+    JSON.stringify(await ownCaller.leadgen.outreach.conversations()),
+  ).toContain(privateBody);
+  expect(
+    JSON.stringify(await caller.leadgen.outreach.conversations()),
+  ).not.toContain(privateBody);
 });

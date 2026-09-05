@@ -31,15 +31,26 @@ export async function writeAudit(input: AuditInput) {
 
 export async function listAudit(limit: number) {
   const db = getDb();
-  if (!db) return getDemoStore().audits.slice(0, limit);
-  const rows = await db
-    .select()
-    .from(auditEvent)
-    .orderBy(desc(auditEvent.createdAt))
-    .limit(limit);
+  const rows = db
+    ? await db
+        .select()
+        .from(auditEvent)
+        .orderBy(desc(auditEvent.createdAt))
+        .limit(limit)
+    : getDemoStore().audits.slice(0, limit);
   return rows.map((row) => ({
     ...row,
-    createdAt: row.createdAt.toISOString(),
+    // Preserve immutable audit evidence in storage without republishing email copy.
+    ...(row.entityType === "outreach"
+      ? {
+          before: row.before ? { state: row.before.state ?? null } : null,
+          after: row.after ? { state: row.after.state ?? null } : null,
+        }
+      : {}),
+    createdAt:
+      row.createdAt instanceof Date
+        ? row.createdAt.toISOString()
+        : row.createdAt,
   }));
 }
 

@@ -461,10 +461,8 @@ export async function ingestGmailReply(input: {
       if (!activityExists) {
         await createActivity({
           type: "email",
-          subject: input.subject
-            ? `Reply received: ${input.subject.slice(0, 500)}`
-            : "Email reply received",
-          body: input.body.slice(0, 2_000),
+          subject: "Email reply received",
+          body: "Message content is available in the owner's private inbox.",
           companyId: deal.companyId,
           contactId: item?.contactId ?? deal.primaryContactId,
           dealId,

@@ -312,7 +312,7 @@ export default function ConnectionsPage() {
   const [personalToolsOpen, setPersonalToolsOpen] = useState(false);
   const list = trpc.connections.list.useQuery();
   const myMailboxes = trpc.connections.myMailboxes.useQuery();
-  const salesMailboxes = trpc.connections.salesMailboxes.useQuery();
+  const salesMailboxes = trpc.connections.salesMailboxes.useQuery({ manage: true });
   const [mailboxEdits, setMailboxEdits] = useState<
     Record<string, { label: string; dailyCap: number; enabled: boolean }>
   >({});
@@ -871,9 +871,9 @@ export default function ConnectionsPage() {
           Approved Google Workspace mailboxes
         </h2>
         <p className="mt-1 text-sm text-muted">
-          Sales chooses one approved sender before every Gmail send. Each
-          mailbox has its own daily sending limit. Verified aliases are
-          available when composing outreach.
+          Each person sends from their own connected mailbox. Organization
+          approval sets sending limits; it does not grant the team access to
+          anyone's inbox, sent mail or replies.
         </p>
         {salesMailboxes.isLoading ? (
           <p className="mt-4 text-sm text-muted">Loading mailboxes…</p>

@@ -85,6 +85,7 @@ describe("Sales Gmail conversations", () => {
         subject: outreach.subject,
         body: outreach.body,
         senderEmail: "sales@hrmny.co",
+        ownerEmployeeId: resolveDevUser("partner").employeeId,
         senderConnectionAccountId: MAILBOX_ID,
       },
     });
@@ -125,7 +126,7 @@ describe("Sales Gmail conversations", () => {
     expect(replyActivities[0]).toMatchObject({
       type: "email",
       dealId: deal.dealId,
-      body: "Interested. Can we meet on Tuesday?",
+      body: "Message content is available in the owner's private inbox.",
     });
   });
 
@@ -155,6 +156,7 @@ describe("Sales Gmail conversations", () => {
       subject: "Re: Winter campaign idea",
       body: "Could you send timing and pricing?",
       externalId: "gmail-reply-draft-proof",
+      actorEmployeeId: resolveDevUser("partner").employeeId,
       threadId: "gmail-thread-proof",
       rfcMessageId: "<gmail-client-reply-proof@example.com>",
       senderConnectionAccountId: MAILBOX_ID,
@@ -202,6 +204,7 @@ describe("Sales Gmail conversations", () => {
       provider: "gmail",
       externalId: "gmail-competing-same-subject-reply",
       payload: {
+        ownerEmployeeId: user.employeeId,
         dealId: conversation!.dealId,
         from: conversation!.contactEmail,
         subject: conversation!.subject,
@@ -402,6 +405,7 @@ describe("Sales Gmail conversations", () => {
       subject: "Re: Winter campaign idea",
       body: "Thanks for the details.",
       externalId: "gmail-reply-without-rfc-id",
+      actorEmployeeId: resolveDevUser("partner").employeeId,
       threadId: "gmail-thread-proof",
       senderConnectionAccountId: MAILBOX_ID,
     });

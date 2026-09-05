@@ -2,7 +2,7 @@ import { sql } from "@hrmny/db";
 import { listDeals, listCompanies, getDeal } from "../crm/repository";
 import { listDeliveryTasks } from "../tasks/delivery-tasks";
 import { listDeliveryCalendars } from "../tasks/delivery-calendars";
-import { listOutreach } from "../leadgen/store";
+import { visibleSalesEmailData } from "../leadgen/email-access";
 import { getClientOnboarding } from "../clients/onboarding";
 import { getDb } from "../db";
 import { getDemoStore } from "../demo-store";
@@ -424,8 +424,10 @@ async function executeAgentTools(
           data: { count: 0, items: [], sandbox: "client_unlinked" },
         });
       } else {
-        const rows = await listOutreach(
-          outreachDealId ? { dealId: outreachDealId } : undefined,
+        const rows = (
+          await visibleSalesEmailData(input.scope.employeeId ?? null)
+        ).outreach.filter(
+          (item) => !outreachDealId || item.dealId === outreachDealId,
         );
         results.push({
           tool: "outreach.read",

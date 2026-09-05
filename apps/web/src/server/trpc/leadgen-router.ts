@@ -54,6 +54,11 @@ import {
   getSalesConversation,
   listSalesConversations,
 } from "../sales-os/conversations";
+import {
+  requireVisibleOutreach,
+  visibleOutreach,
+  visibleSalesEmailData,
+} from "../leadgen/email-access";
 
 async function resolveComposioSend(
   employeeId: string | null | undefined,
@@ -423,13 +428,18 @@ export async function draftOutreach(input: {
   });
 }
 
-export async function listEmailFollowups(now = new Date()) {
+export async function listEmailFollowups(
+  now = new Date(),
+  employeeId?: string | null,
+) {
+  const visible =
+    employeeId === undefined ? null : await visibleSalesEmailData(employeeId);
   const { getSalesOsSettings, listEmailEvents } =
     await import("../sales-os/store");
   const [settings, outreach, emailEvents] = await Promise.all([
     getSalesOsSettings(),
-    listOutreach(),
-    listEmailEvents(),
+    visible ? visible.outreach : listOutreach(),
+    visible ? visible.emailEvents : listEmailEvents(),
   ]);
   return buildEmailFollowupStatuses({
     outreach,
@@ -444,8 +454,12 @@ export async function draftEmailFollowup(input: {
   id: string;
   now?: Date;
   runAgent?: RunAgent;
+  employeeId?: string | null;
 }): Promise<OutreachItem> {
-  const source = await getOutreach(input.id);
+  const source =
+    input.employeeId === undefined
+      ? await getOutreach(input.id)
+      : await requireVisibleOutreach(input.id, input.employeeId);
   if (!source || !["gmail", "email"].includes(source.channel.toLowerCase())) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -470,7 +484,10 @@ export async function draftEmailFollowup(input: {
     });
   }
   if (status.state === "queued" && status.queuedItemId) {
-    const queued = await getOutreach(status.queuedItemId);
+    const queued =
+      input.employeeId === undefined
+        ? await getOutreach(status.queuedItemId)
+        : await requireVisibleOutreach(status.queuedItemId, input.employeeId);
     if (queued) return queued;
   }
   if (status.state === "replied" || status.state === "stopped") {
@@ -526,8 +543,7 @@ export async function approveOutreach(input: {
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<TransitionResult> {
-  const item = await getOutreach(input.id);
-  if (!item) throw new Error(`Outreach not found: ${input.id}`);
+  const item = await requireVisibleOutreach(input.id, input.actor.employeeId);
   return transition(
     input.actor,
     outreachEntity(item),
@@ -561,8 +577,7 @@ export async function discardOutreach(input: {
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<TransitionResult> {
-  const item = await getOutreach(input.id);
-  if (!item) throw new Error(`Outreach not found: ${input.id}`);
+  const item = await requireVisibleOutreach(input.id, input.actor.employeeId);
   return transition(
     input.actor,
     outreachEntity(item),
@@ -604,8 +619,7 @@ export async function sendOutreachTest(input: {
   /** Test-only dependency; the tRPC route always resolves this server-side. */
   testRecipient?: string;
 }) {
-  const item = await getOutreach(input.id);
-  if (!item) throw new Error(`Outreach not found: ${input.id}`);
+  const item = await requireVisibleOutreach(input.id, input.actor.employeeId);
   const { isEmailChannel } = await import("../sales-os/compliance");
   if (!authorizeStaff(input.actor) || item.state !== "approved") {
     throw new TRPCError({
@@ -939,8 +953,7 @@ export async function sendOutreach(input: {
     copyDraft?: boolean;
   }
 > {
-  const item = await getOutreach(input.id);
-  if (!item) throw new Error(`Outreach not found: ${input.id}`);
+  const item = await requireVisibleOutreach(input.id, input.actor.employeeId);
   const { assertEmailSendAllowed, isEmailChannel, isLinkedInChannel } =
     await import("../sales-os/compliance");
   if (isLinkedInChannel(item.channel)) {
@@ -1435,8 +1448,8 @@ const outreachRouter = router({
         })
         .optional(),
     )
-    .query(async ({ input }) => {
-      const all = await listOutreach();
+    .query(async ({ input, ctx }) => {
+      const all = (await visibleSalesEmailData(ctx.employeeId)).outreach;
       const rows = all.filter(
         (item) =>
           (!input?.dealId || item.dealId === input.dealId) &&
@@ -1455,9 +1468,11 @@ const outreachRouter = router({
 
   get: staffProcedure
     .input(z.object({ id: z.string() }))
-    .query(({ input }) => getOutreach(input.id)),
+    .query(({ input, ctx }) => visibleOutreach(input.id, ctx.employeeId)),
 
-  followups: staffProcedure.query(() => listEmailFollowups()),
+  followups: staffProcedure.query(({ ctx }) =>
+    listEmailFollowups(undefined, ctx.employeeId),
+  ),
 
   conversations: staffProcedure.query(({ ctx }) => {
     if (!authorizeStaff(actorFromCtx(ctx))) {
@@ -1466,7 +1481,7 @@ const outreachRouter = router({
         message: "Only Sales operators may view Gmail conversations.",
       });
     }
-    return listSalesConversations();
+    return listSalesConversations(ctx.employeeId);
   }),
 
   draftReply: staffProcedure
@@ -1484,7 +1499,10 @@ const outreachRouter = router({
           message: "Only Sales operators may draft replies.",
         });
       }
-      const conversation = await getSalesConversation(input.conversationId);
+      const conversation = await getSalesConversation(
+        input.conversationId,
+        ctx.employeeId,
+      );
       if (!conversation) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -1574,7 +1592,9 @@ const outreachRouter = router({
 
   draftFollowup: staffProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(({ input }) => draftEmailFollowup(input)),
+    .mutation(({ input, ctx }) =>
+      draftEmailFollowup({ ...input, employeeId: ctx.employeeId }),
+    ),
 
   approve: staffProcedure
     .input(z.object({ id: z.string() }))
