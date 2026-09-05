@@ -643,6 +643,129 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
   padding: 26px 28px 46px;
 }
 
+.desk-back {
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+.desk-account-menu {
+  position: relative;
+}
+.desk-account-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  list-style: none;
+}
+.desk-account-toggle::-webkit-details-marker {
+  display: none;
+}
+.desk-account-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 12px);
+  width: min(330px, calc(100vw - 28px));
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+.desk-account-panel > strong {
+  display: block;
+  padding: 8px;
+}
+.desk-account-panel > a,
+.desk-account-panel > button {
+  display: block;
+  width: 100%;
+  padding: 10px 8px;
+  text-align: left;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.desk-account-panel > a:hover,
+.desk-account-panel > button:hover {
+  background: var(--paper-2);
+}
+.desk-account-panel small,
+.desk-preview-banner small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.desk-workspace-picker {
+  padding: 12px 8px;
+  border-block: 1px solid var(--line);
+}
+.desk-workspace-picker label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.desk-workspace-picker select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--control-surface);
+}
+.desk-preview-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 28px;
+  border-bottom: 1px solid var(--line);
+  background: #fff1dc;
+}
+.desk-preview-content {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.desk-preview-content :disabled {
+  cursor: not-allowed;
+}
+.desk-account-toggle:focus-visible,
+.desk-back:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 3px;
+}
+@media (max-width: 620px) {
+  .desk-topbar {
+    gap: 6px;
+    height: auto;
+    min-height: var(--topbar);
+    flex-wrap: wrap;
+    padding-block: 8px;
+  }
+  .desk-top-actions {
+    gap: 3px;
+  }
+  .desk-topbar-link {
+    padding-inline: 7px;
+  }
+  .desk-preview-banner {
+    padding: 14px;
+  }
+  .desk-devbox {
+    max-width: 85px;
+    padding-inline: 4px;
+  }
+  .desk-devbox select {
+    max-width: 70px;
+  }
+}
+
 .ops-home {
   max-width: 1580px;
   margin: 0 auto;
@@ -2110,12 +2233,12 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 
 @media (max-width: 420px) {
   .desk-devbox {
-    max-width: 140px;
+    max-width: 85px;
   }
 
   .desk-devbox select {
     min-width: 0;
-    max-width: 116px;
+    max-width: 70px;
   }
 
   .ops-live-pulse dl {

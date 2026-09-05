@@ -14,8 +14,16 @@ import { emitHealthSignal } from "../m1-persistence";
 import { featureForTrpcPath } from "@/features/catalog";
 import { featureEnabled } from "../features";
 import { isWorkViewOnlyMember } from "../work-governance";
+import {
+  canPreviewWorkspace,
+  WORKSPACE_PREVIEW_QUERIES,
+} from "@/lib/workspace-preview";
+import { resolveWorkspacePreview } from "../auth/workspace-preview";
 
 export type TrpcContext = {
+  requestedPreviewEmployeeId?: string | null;
+  previewResolution?: ReturnType<typeof resolveWorkspacePreview>;
+  workspacePreview?: { viewer: SessionUser; target: SessionUser };
   user: SessionUser | null;
   employeeId: string | null;
   roles: string[];
@@ -59,6 +67,7 @@ export async function createContext(
       roles: user.roles,
       canViewMargin: sessionCanViewMargin(user),
       clientId: user.clientId,
+      requestedPreviewEmployeeId: headers?.get("x-workspace-preview"),
     };
   }
 
@@ -77,6 +86,7 @@ export async function createContext(
     roles: user.roles,
     canViewMargin: sessionCanViewMargin(user),
     clientId: user.clientId,
+    requestedPreviewEmployeeId: headers?.get("x-workspace-preview"),
   };
 }
 
@@ -85,7 +95,40 @@ const t = initTRPC.context<TrpcContext>().create({
 });
 
 export const router = t.router;
-export const publicProcedure = t.procedure;
+const previewBoundary = t.middleware(async ({ ctx, next, path, type }) => {
+  if (!ctx.requestedPreviewEmployeeId) return next({ ctx });
+  if (!canPreviewWorkspace(ctx.user))
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Admin workspace access required",
+    });
+  if (type !== "query" || !WORKSPACE_PREVIEW_QUERIES.has(path))
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "Read-only workspace preview. Return to your workspace to use this area or make changes.",
+    });
+  // One authorization lookup and audit receipt per batch, with the real admin preserved.
+  ctx.previewResolution ??= resolveWorkspacePreview(
+    ctx.user,
+    ctx.requestedPreviewEmployeeId,
+  );
+  const preview = await ctx.previewResolution;
+  return next({
+    ctx: {
+      ...ctx,
+      workspacePreview: preview,
+      user: preview.target,
+      employeeId: preview.target.employeeId,
+      roles: preview.target.roles,
+      clientId: null,
+      canViewMargin:
+        sessionCanViewMargin(preview.target) &&
+        sessionCanViewMargin(preview.viewer),
+    },
+  });
+});
+export const publicProcedure = t.procedure.use(previewBoundary);
 export const createCallerFactory = t.createCallerFactory;
 export const middleware = t.middleware;
 export const mergeRouters = t.mergeRouters;
@@ -138,11 +181,16 @@ const requireEnabledFeature = t.middleware(async ({ ctx, next, path }) => {
   if (
     featureKey &&
     ctx.user &&
-    !(await featureEnabled(featureKey, {
+    (!(await featureEnabled(featureKey, {
       userId: ctx.user.employeeId,
       clientId: ctx.user.clientId,
       roles: ctx.user.roles,
-    }))
+    })) ||
+      (ctx.workspacePreview &&
+        !(await featureEnabled(featureKey, {
+          userId: ctx.workspacePreview.viewer.employeeId,
+          roles: ctx.workspacePreview.viewer.roles,
+        }))))
   ) {
     await recordAuthDenied(path, `feature:${featureKey}`, ctx.employeeId);
     throw new TRPCError({
@@ -153,7 +201,7 @@ const requireEnabledFeature = t.middleware(async ({ ctx, next, path }) => {
   return next({ ctx: { ...ctx, requestedFeatureKey: featureKey } });
 });
 
-export const protectedProcedure = t.procedure
+export const protectedProcedure = publicProcedure
   .use(isAuthed)
   .use(portalStaffBoundary)
   .use(requireEnabledFeature);
@@ -213,7 +261,12 @@ export const portalProcedure = protectedProcedure.use(requirePortal);
 
 export function requirePermission(resource: string, action: string) {
   return t.middleware(async ({ ctx, next, path }) => {
-    if (!ctx.user || !sessionHas(ctx.user, resource, action)) {
+    if (
+      !ctx.user ||
+      !sessionHas(ctx.user, resource, action) ||
+      (ctx.workspacePreview &&
+        !sessionHas(ctx.workspacePreview.viewer, resource, action))
+    ) {
       await recordAuthDenied(
         path,
         `permission:${resource}:${action}`,

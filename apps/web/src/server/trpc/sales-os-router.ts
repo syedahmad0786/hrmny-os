@@ -736,7 +736,7 @@ export const salesOsRouter = router({
   }),
 
   digest: salesOperatorProcedure.query(({ ctx }) =>
-    buildSalesOsDigest(undefined, ctx.employeeId),
+    buildSalesOsDigest(undefined, ctx.workspacePreview ? null : ctx.employeeId),
   ),
 
   funnel: staffProcedure

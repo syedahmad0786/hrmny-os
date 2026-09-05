@@ -52,8 +52,12 @@ export default function StaffHomePage() {
   const canLoadAssignedWork =
     Boolean(session.data?.employeeId) && enabledFeatures.has("work.my_tasks");
   const canLoadInbox =
-    Boolean(session.data?.employeeId) && enabledFeatures.has("work.inbox");
-  const canLoadConnections = enabledFeatures.has("integrations.connections");
+    Boolean(session.data?.employeeId) &&
+    !session.data?.workspacePreview &&
+    enabledFeatures.has("work.inbox");
+  const canLoadConnections =
+    !session.data?.workspacePreview &&
+    enabledFeatures.has("integrations.connections");
   const assigned = trpc.work.personal.myTasks.useQuery(
     { includeCompleted: false },
     { enabled: canLoadAssignedWork, retry: false, refetchInterval: 30_000 },
@@ -219,15 +223,21 @@ export default function StaffHomePage() {
               </strong>
             </div>
           ))}
-          <Link
-            href="/settings/connections"
-            className="col-span-2 flex items-center justify-between bg-[#fff8ee] px-5 py-4 text-sm font-semibold text-ink hover:bg-[#fff1dc]"
-          >
-            <span>
-              {connected} connected system{connected === 1 ? "" : "s"}
-            </span>
-            <span className="text-ochre">Manage →</span>
-          </Link>
+          {session.data?.workspacePreview ? (
+            <p className="col-span-2 bg-[#fff8ee] p-5 text-sm">
+              Private inbox and connected accounts are excluded from this view.
+            </p>
+          ) : (
+            <Link
+              href="/settings/connections"
+              className="col-span-2 flex items-center justify-between bg-[#fff8ee] px-5 py-4 text-sm font-semibold text-ink hover:bg-[#fff1dc]"
+            >
+              <span>
+                {connected} connected system{connected === 1 ? "" : "s"}
+              </span>
+              <span className="text-ochre">Manage →</span>
+            </Link>
+          )}
         </aside>
       </section>
 

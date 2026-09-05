@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { canPreviewWorkspace } from "@/lib/workspace-preview";
+import { workspacePreviewUsers } from "../auth/workspace-preview";
 import {
   and,
   asset,
@@ -113,8 +115,21 @@ bootstrapGateRegistry();
 
 export const authRouter = router({
   session: publicProcedure.query(async ({ ctx }) => {
+    const viewer = ctx.workspacePreview?.viewer ?? ctx.user;
+    const overrides = ctx.user ? await listFeatureOverrides() : [];
+    const viewerFeatures = new Set(
+      viewer
+        ? resolveFeatureCatalog(overrides, {
+            userId: viewer.employeeId,
+            clientId: viewer.clientId,
+            roles: viewer.roles,
+          })
+            .filter((item) => item.enabled)
+            .map((item) => item.key)
+        : [],
+    );
     const resolved = ctx.user
-      ? resolveFeatureCatalog(await listFeatureOverrides(), {
+      ? resolveFeatureCatalog(overrides, {
           userId: ctx.user.employeeId,
           clientId: ctx.user.clientId,
           roles: ctx.user.roles,
@@ -129,6 +144,14 @@ export const authRouter = router({
       actorType: ctx.user?.actorType ?? null,
       clientId: ctx.user?.clientId ?? null,
       authMode: getAuthMode(),
+      canPreviewWorkspace: canPreviewWorkspace(viewer),
+      workspacePreview: ctx.workspacePreview
+        ? {
+            employeeId: ctx.employeeId,
+            displayName: ctx.user?.displayName,
+            viewerName: viewer?.displayName,
+          }
+        : null,
       canPreviewClient:
         ctx.user?.actorType === "staff" && rolesCanPreviewClient(ctx.roles),
       canAdminFeatures:
@@ -141,10 +164,13 @@ export const authRouter = router({
         ctx.user?.actorType === "staff" &&
         sessionHas(ctx.user, "audit", "view"),
       enabledFeatureKeys: resolved
-        .filter((item) => item.enabled)
+        .filter((item) => item.enabled && viewerFeatures.has(item.key))
         .map((item) => item.key),
     };
   }),
+  workspaceUsers: protectedProcedure.query(({ ctx }) =>
+    workspacePreviewUsers(ctx.workspacePreview?.viewer ?? ctx.user),
+  ),
   /** Dev-only: list switchable personas for M1–M6 demo. */
   devUsers: publicProcedure.query(() =>
     getAuthMode() === "dev"
@@ -615,10 +641,7 @@ export const assetsRouter = router({
       );
       if (!version) return null;
       const ttl = Number(process.env.DAM_SIGNED_URL_TTL_SECONDS ?? 300);
-      const signed = await getObjectStore().signedUrl(
-        version.storagePath,
-        ttl,
-      );
+      const signed = await getObjectStore().signedUrl(version.storagePath, ttl);
       getDemoStore().appendAudit({
         actorEmployeeId: ctx.employeeId!,
         action: "assets.signedUrl",

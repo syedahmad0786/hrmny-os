@@ -23,7 +23,9 @@ export default function ReportsPage() {
     retry: false,
   });
   const connections = trpc.connections.list.useQuery(undefined, {
-    enabled: enabled.has("integrations.connections"),
+    enabled:
+      !session.data?.workspacePreview &&
+      enabled.has("integrations.connections"),
     retry: false,
   });
   const visibleTasks = (tasks.data ?? []).filter(
@@ -66,7 +68,7 @@ export default function ReportsPage() {
           label: "client accounts",
         }
       : null,
-    enabled.has("integrations.connections")
+    !session.data?.workspacePreview && enabled.has("integrations.connections")
       ? {
           href: "/settings/connections",
           title: "Connections",

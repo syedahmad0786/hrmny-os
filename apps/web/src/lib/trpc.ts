@@ -6,6 +6,17 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 export const trpc = createTRPCReact<AppRouter>();
 
+const WORKSPACE_PREVIEW_KEY = "hrmny-workspace-preview";
+export function getWorkspacePreview(): string | null {
+  return typeof window === "undefined"
+    ? null
+    : sessionStorage.getItem(WORKSPACE_PREVIEW_KEY);
+}
+export function setWorkspacePreview(employeeId: string | null) {
+  if (employeeId) sessionStorage.setItem(WORKSPACE_PREVIEW_KEY, employeeId);
+  else sessionStorage.removeItem(WORKSPACE_PREVIEW_KEY);
+}
+
 export function getDevRole(): string {
   if (typeof window === "undefined") return "partner";
   return localStorage.getItem("hrmny-dev-role") ?? "partner";
@@ -34,20 +45,22 @@ export function createTrpcClient() {
       httpBatchLink({
         url: "/api/trpc",
         transformer: superjson,
-      fetch(url, options) {
-        const signal = AbortSignal.any(
-          // Closed-loop / Apollo import can exceed 20s on cold SQL demos.
-          [options?.signal, AbortSignal.timeout(60_000)].filter(
-            (item): item is AbortSignal => Boolean(item),
-          ),
-        );
-        return fetch(url, { ...options, signal });
-      },
+        fetch(url, options) {
+          const signal = AbortSignal.any(
+            // Closed-loop / Apollo import can exceed 20s on cold SQL demos.
+            [options?.signal, AbortSignal.timeout(60_000)].filter(
+              (item): item is AbortSignal => Boolean(item),
+            ),
+          );
+          return fetch(url, { ...options, signal });
+        },
         async headers() {
           const headers: Record<string, string> = {
             "x-dev-role": getDevRole(),
           };
           const grant = getPortalGrant();
+          const preview = getWorkspacePreview();
+          if (preview) headers["x-workspace-preview"] = preview;
           if (grant) headers["x-portal-grant"] = grant;
           const client = getSupabaseBrowserClient();
           if (client) {
@@ -57,7 +70,9 @@ export function createTrpcClient() {
             // session settles).
             const result = await Promise.race([
               client.auth.getSession(),
-              new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+              new Promise<null>((resolve) =>
+                setTimeout(() => resolve(null), 3000),
+              ),
             ]);
             const token = result?.data.session?.access_token;
             if (token) headers.authorization = `Bearer ${token}`;

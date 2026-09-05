@@ -64,6 +64,7 @@ for (const journey of ROLE_JOURNEYS) {
         .getByRole("link", { name: journey.primaryArea, exact: true }),
     ).toBeVisible();
 
+    await page.getByTestId("account-menu").click();
     const clientPreview = page.getByRole("link", { name: "Client view" });
     await expect(clientPreview).toHaveCount(journey.canPreviewClient ? 1 : 0);
     const audit = page.getByRole("link", { name: "Open audit activity" });
