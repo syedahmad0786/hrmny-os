@@ -301,6 +301,12 @@ const WORK_APP_FAMILIES = [
 ] as const;
 
 export default function ConnectionsPage() {
+  const [salesOnly, setSalesOnly] = useState(false);
+  useEffect(() => {
+    setSalesOnly(
+      new URLSearchParams(window.location.search).get("view") === "sales",
+    );
+  }, []);
   const utils = trpc.useUtils();
   const [personalToolsOpen, setPersonalToolsOpen] = useState(false);
   const list = trpc.connections.list.useQuery();
@@ -448,7 +454,7 @@ export default function ConnectionsPage() {
   }
 
   return (
-    <main className="flex flex-col gap-6">
+    <main className="flex flex-col gap-6" data-sales-only={salesOnly}>
       <div>
         <h1 className="font-display text-3xl font-semibold">Connections</h1>
         <p className="mt-2 text-muted">
@@ -456,6 +462,37 @@ export default function ConnectionsPage() {
           shows whether the tool is ready and the next available action.
         </p>
       </div>
+
+      <nav className="flex flex-wrap gap-3" aria-label="Connection groups">
+        <button
+          className="crm-btn"
+          aria-pressed={salesOnly}
+          onClick={() => setSalesOnly(true)}
+        >
+          Sales essentials
+        </button>
+        <button
+          className="crm-btn"
+          aria-pressed={!salesOnly}
+          onClick={() => setSalesOnly(false)}
+        >
+          All business tools
+        </button>
+        <Link className="crm-btn" href="/crm/dashboard">
+          Back to sales
+        </Link>
+      </nav>
+      {list.error ? (
+        <p role="alert">Could not load connections: {list.error.message}</p>
+      ) : null}
+      {salesOnly ? (
+        <p className="text-sm text-muted">
+          Connect Google Workspace for email and replies. Add Apollo for
+          prospect discovery; search uses no credits, while enrichment may use
+          credits. You can also start with your existing contacts and CSV
+          imports.
+        </p>
+      ) : null}
 
       <details className="rounded-xl border border-sand bg-white/70 px-4 py-3 text-sm text-muted">
         <summary className="cursor-pointer font-medium text-ink">
@@ -466,6 +503,7 @@ export default function ConnectionsPage() {
           <BackendStoreBanner />
           <AppPolicyBanner />
           <ConnectionHealth />
+          <OperatingSurfaces />
           <Link
             href="/settings/automations"
             className="inline-flex min-h-11 w-fit items-center underline"
@@ -474,8 +512,6 @@ export default function ConnectionsPage() {
           </Link>
         </div>
       </details>
-
-      <OperatingSurfaces />
 
       {oauthBanner ? (
         <p
@@ -501,249 +537,257 @@ export default function ConnectionsPage() {
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        {(list.data ?? []).map((item) => {
-          const verifiedAsana =
-            item.toolkit === "asana" && asanaStatus.data?.connected;
-          const asanaUser = verifiedAsana ? asanaStatus.data?.user : null;
-          return (
-            <section
-              key={item.toolkit}
-              id={`conn-${item.toolkit}`}
-              data-testid={`conn-card-${item.toolkit}`}
-              className="rounded-lg border border-sand bg-white/70 p-4 scroll-mt-24"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="font-display text-lg">{item.label}</h2>
-                  <p className="text-sm text-muted">
-                    {item.authType === "api_key"
-                      ? "API key"
-                      : item.authType === "oauth"
-                        ? "OAuth"
-                        : item.authType === "managed"
-                          ? "Managed connection"
-                          : "Manual"}{" "}
-                    · {verifiedAsana ? "connected" : item.status}
-                  </p>
-                  <p className="mt-1 text-xs text-muted">{item.note}</p>
-                  {item.lastError ? (
-                    <p className="mt-1 text-xs font-medium text-red-700">
-                      {item.lastError}
+        {(list.data ?? [])
+          .filter(
+            (item) =>
+              !salesOnly ||
+              ["apollo", "google_workspace"].includes(item.toolkit),
+          )
+          .map((item) => {
+            const verifiedAsana =
+              item.toolkit === "asana" && asanaStatus.data?.connected;
+            const asanaUser = verifiedAsana ? asanaStatus.data?.user : null;
+            return (
+              <section
+                key={item.toolkit}
+                id={`conn-${item.toolkit}`}
+                data-testid={`conn-card-${item.toolkit}`}
+                className="rounded-lg border border-sand bg-white/70 p-4 scroll-mt-24"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-display text-lg">{item.label}</h2>
+                    <p className="text-sm text-muted">
+                      {item.authType === "api_key"
+                        ? "API key"
+                        : item.authType === "oauth"
+                          ? "OAuth"
+                          : item.authType === "managed"
+                            ? "Managed connection"
+                            : "Manual"}{" "}
+                      · {verifiedAsana ? "connected" : item.status}
                     </p>
-                  ) : null}
-                  {!item.allowed ? <PolicyBlockedNote /> : null}
-                  {asanaUser ? (
-                    <p className="mt-1 text-xs font-medium text-ink">
-                      {asanaUser.email ?? asanaUser.name}
-                    </p>
-                  ) : item.externalConnectionId ? (
-                    <p className="mt-1 text-xs font-medium text-ink">
-                      {item.externalConnectionId}
-                    </p>
-                  ) : null}
-                </div>
-                {item.connectionAccountId ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    disabled={disconnect.isPending}
-                    onClick={() => {
-                      if (
-                        !window.confirm(
-                          `Disconnect ${item.label}? HRMNY will stop using this account until another one is connected.`,
-                        )
-                      )
-                        return;
-                      disconnect.mutate({ id: item.connectionAccountId! });
-                    }}
-                  >
-                    {item.toolkit === "google_workspace" &&
-                    (item.status === "error" || item.lastError)
-                      ? "Clear dead token"
-                      : "Disconnect"}
-                  </Button>
-                ) : null}
-              </div>
-
-              {item.authType === "api_key" ? (
-                <div className="mt-4 flex flex-col gap-2">
-                  <div className="flex gap-2">
-                    <input
-                      className="min-w-0 flex-1 rounded border border-sand bg-white px-3 py-2"
-                      type="password"
-                      disabled={!item.allowed}
-                      autoComplete="off"
-                      placeholder={
-                        item.hasSecret
-                          ? "Paste a replacement API key"
-                          : "Paste your API key"
-                      }
-                      value={keys[item.toolkit] ?? ""}
-                      onChange={(event) =>
-                        setKeys((current) => ({
-                          ...current,
-                          [item.toolkit]: event.target.value,
-                        }))
-                      }
-                    />
+                    <p className="mt-1 text-xs text-muted">{item.note}</p>
+                    {item.lastError ? (
+                      <p className="mt-1 text-xs font-medium text-red-700">
+                        {item.lastError}
+                      </p>
+                    ) : null}
+                    {!item.allowed ? <PolicyBlockedNote /> : null}
+                    {asanaUser ? (
+                      <p className="mt-1 text-xs font-medium text-ink">
+                        {asanaUser.email ?? asanaUser.name}
+                      </p>
+                    ) : item.externalConnectionId ? (
+                      <p className="mt-1 text-xs font-medium text-ink">
+                        {item.externalConnectionId}
+                      </p>
+                    ) : null}
+                  </div>
+                  {item.connectionAccountId ? (
                     <Button
                       type="button"
-                      disabled={
-                        !item.allowed ||
-                        !keys[item.toolkit]?.trim() ||
-                        saveKey.isPending
-                      }
+                      variant="ghost"
+                      disabled={disconnect.isPending}
                       onClick={() => {
-                        saveKey.mutate({
-                          toolkit: item.toolkit as
-                            "apollo" | "hunter" | "bayzat" | "n8n",
-                          apiKey: keys[item.toolkit]!,
-                        });
+                        if (
+                          !window.confirm(
+                            `Disconnect ${item.label}? HRMNY will stop using this account until another one is connected.`,
+                          )
+                        )
+                          return;
+                        disconnect.mutate({ id: item.connectionAccountId! });
                       }}
                     >
-                      {item.hasSecret ? "Replace" : "Connect"}
+                      {item.toolkit === "google_workspace" &&
+                      (item.status === "error" || item.lastError)
+                        ? "Clear dead token"
+                        : "Disconnect"}
                     </Button>
-                  </div>
-                  {keyNotes[item.toolkit] ? (
-                    <p
-                      className="text-xs text-emerald-700"
-                      data-testid={`conn-key-note-${item.toolkit}`}
-                    >
-                      {keyNotes[item.toolkit]}
-                    </p>
-                  ) : null}
-                  {saveKey.error &&
-                  saveKey.variables?.toolkit === item.toolkit ? (
-                    <p className="text-xs text-red-700" role="alert">
-                      {saveKey.error.message}
-                    </p>
                   ) : null}
                 </div>
-              ) : item.authType === "oauth" ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    disabled={
-                      !item.allowed ||
-                      !item.ready ||
-                      startOAuth.isPending ||
-                      startXeroOAuth.isPending ||
-                      startGoogleWorkspaceOAuth.isPending ||
-                      authorizeManaged.isPending
-                    }
-                    onClick={() => {
-                      if (item.toolkit === "google_workspace") {
-                        void connectGoogleWorkspace();
-                        return;
-                      }
-                      if (item.toolkit === "xero") {
-                        void startXeroOAuth
-                          .mutateAsync()
-                          .then((result) =>
-                            window.location.assign(result.redirectUrl),
-                          );
-                        return;
-                      }
-                      if (
-                        item.toolkit === "canva" ||
-                        item.toolkit === "linkedin"
-                      ) {
-                        void authorizeManaged
-                          .mutateAsync({ toolkit: item.toolkit })
-                          .then((result) => setRedirect(result.redirectUrl));
-                      }
-                    }}
-                  >
-                    {item.ready
-                      ? item.toolkit === "canva" || item.toolkit === "linkedin"
-                        ? item.status === "connected"
-                          ? "Reconnect"
-                          : "Connect"
-                        : item.status === "error" || item.lastError
-                          ? "Reconnect"
-                          : item.status === "connected"
-                            ? "Reconnect"
-                            : "Connect"
-                      : "Setup required"}
-                  </Button>
-                  {item.toolkit === "google_workspace" &&
-                  isGoogleWorkspaceReconnectRequired(item.lastError) ? (
-                    <p className="w-full text-xs text-red-700">
-                      Heal cannot restore a revoked Google token. Use Reconnect
-                      — it starts a dedicated Google consent that writes tokens
-                      to Vault with the same client used for refresh.
-                    </p>
-                  ) : null}
-                  {item.toolkit === "google_workspace" &&
-                  item.ready &&
-                  (item.status === "error" ||
-                    item.status === "connected" ||
-                    item.lastError) ? (
+
+                {item.authType === "api_key" ? (
+                  <div className="mt-4 flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <input
+                        className="min-w-0 flex-1 rounded border border-sand bg-white px-3 py-2"
+                        type="password"
+                        disabled={!item.allowed}
+                        autoComplete="off"
+                        placeholder={
+                          item.hasSecret
+                            ? "Paste a replacement API key"
+                            : "Paste your API key"
+                        }
+                        value={keys[item.toolkit] ?? ""}
+                        onChange={(event) =>
+                          setKeys((current) => ({
+                            ...current,
+                            [item.toolkit]: event.target.value,
+                          }))
+                        }
+                      />
+                      <Button
+                        type="button"
+                        disabled={
+                          !item.allowed ||
+                          !keys[item.toolkit]?.trim() ||
+                          saveKey.isPending
+                        }
+                        onClick={() => {
+                          saveKey.mutate({
+                            toolkit: item.toolkit as
+                              "apollo" | "hunter" | "bayzat" | "n8n",
+                            apiKey: keys[item.toolkit]!,
+                          });
+                        }}
+                      >
+                        {item.hasSecret ? "Replace" : "Connect"}
+                      </Button>
+                    </div>
+                    {keyNotes[item.toolkit] ? (
+                      <p
+                        className="text-xs text-emerald-700"
+                        data-testid={`conn-key-note-${item.toolkit}`}
+                      >
+                        {keyNotes[item.toolkit]}
+                      </p>
+                    ) : null}
+                    {saveKey.error &&
+                    saveKey.variables?.toolkit === item.toolkit ? (
+                      <p className="text-xs text-red-700" role="alert">
+                        {saveKey.error.message}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : item.authType === "oauth" ? (
+                  <div className="mt-4 flex flex-wrap gap-2">
                     <Button
                       type="button"
                       variant="ghost"
                       disabled={
-                        probeGoogle.isPending ||
-                        isGoogleWorkspaceReconnectRequired(item.lastError)
+                        !item.allowed ||
+                        !item.ready ||
+                        startOAuth.isPending ||
+                        startXeroOAuth.isPending ||
+                        startGoogleWorkspaceOAuth.isPending ||
+                        authorizeManaged.isPending
                       }
-                      onClick={() => void probeGoogle.mutateAsync()}
+                      onClick={() => {
+                        if (item.toolkit === "google_workspace") {
+                          void connectGoogleWorkspace();
+                          return;
+                        }
+                        if (item.toolkit === "xero") {
+                          void startXeroOAuth
+                            .mutateAsync()
+                            .then((result) =>
+                              window.location.assign(result.redirectUrl),
+                            );
+                          return;
+                        }
+                        if (
+                          item.toolkit === "canva" ||
+                          item.toolkit === "linkedin"
+                        ) {
+                          void authorizeManaged
+                            .mutateAsync({ toolkit: item.toolkit })
+                            .then((result) => setRedirect(result.redirectUrl));
+                        }
+                      }}
                     >
-                      {probeGoogle.isPending
-                        ? "Testing…"
-                        : isGoogleWorkspaceReconnectRequired(item.lastError)
-                          ? "Heal unavailable — reconnect"
-                          : "Test / heal token"}
+                      {item.ready
+                        ? item.toolkit === "canva" ||
+                          item.toolkit === "linkedin"
+                          ? item.status === "connected"
+                            ? "Reconnect"
+                            : "Connect"
+                          : item.status === "error" || item.lastError
+                            ? "Reconnect"
+                            : item.status === "connected"
+                              ? "Reconnect"
+                              : "Connect"
+                        : "Setup required"}
                     </Button>
-                  ) : null}
-                  {probeGoogle.data && item.toolkit === "google_workspace" ? (
-                    <p
-                      className={`w-full text-xs ${
-                        probeGoogle.data.ok
-                          ? "text-emerald-700"
-                          : "text-red-700"
-                      }`}
+                    {item.toolkit === "google_workspace" &&
+                    isGoogleWorkspaceReconnectRequired(item.lastError) ? (
+                      <p className="w-full text-xs text-red-700">
+                        Heal cannot restore a revoked Google token. Use
+                        Reconnect — it starts a dedicated Google consent that
+                        writes tokens to Vault with the same client used for
+                        refresh.
+                      </p>
+                    ) : null}
+                    {item.toolkit === "google_workspace" &&
+                    item.ready &&
+                    (item.status === "error" ||
+                      item.status === "connected" ||
+                      item.lastError) ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        disabled={
+                          probeGoogle.isPending ||
+                          isGoogleWorkspaceReconnectRequired(item.lastError)
+                        }
+                        onClick={() => void probeGoogle.mutateAsync()}
+                      >
+                        {probeGoogle.isPending
+                          ? "Testing…"
+                          : isGoogleWorkspaceReconnectRequired(item.lastError)
+                            ? "Heal unavailable — reconnect"
+                            : "Test / heal token"}
+                      </Button>
+                    ) : null}
+                    {probeGoogle.data && item.toolkit === "google_workspace" ? (
+                      <p
+                        className={`w-full text-xs ${
+                          probeGoogle.data.ok
+                            ? "text-emerald-700"
+                            : "text-red-700"
+                        }`}
+                      >
+                        {probeGoogle.data.ok
+                          ? `OK · ${probeGoogle.data.status}${
+                              probeGoogle.data.account
+                                ? ` · ${probeGoogle.data.account}`
+                                : ""
+                            }`
+                          : `Failed · ${
+                              "reason" in probeGoogle.data
+                                ? probeGoogle.data.reason
+                                : "unknown"
+                            }${
+                              "reconnectRequired" in probeGoogle.data &&
+                              probeGoogle.data.reconnectRequired
+                                ? " — use Reconnect"
+                                : ""
+                            }`}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : item.toolkit === "asana" && item.allowed ? (
+                  <div className="mt-4 flex items-center gap-3">
+                    <Link
+                      className="rounded border border-sand px-3 py-2 text-sm font-medium hover:bg-cream"
+                      href="/settings/asana-migration"
                     >
-                      {probeGoogle.data.ok
-                        ? `OK · ${probeGoogle.data.status}${
-                            probeGoogle.data.account
-                              ? ` · ${probeGoogle.data.account}`
-                              : ""
-                          }`
-                        : `Failed · ${
-                            "reason" in probeGoogle.data
-                              ? probeGoogle.data.reason
-                              : "unknown"
-                          }${
-                            "reconnectRequired" in probeGoogle.data &&
-                            probeGoogle.data.reconnectRequired
-                              ? " — use Reconnect"
-                              : ""
-                          }`}
-                    </p>
-                  ) : null}
-                </div>
-              ) : item.toolkit === "asana" && item.allowed ? (
-                <div className="mt-4 flex items-center gap-3">
-                  <Link
-                    className="rounded border border-sand px-3 py-2 text-sm font-medium hover:bg-cream"
-                    href="/settings/asana-migration"
-                  >
-                    Verify & scan
-                  </Link>
-                  {asanaStatus.isFetching ? (
-                    <span className="text-xs text-muted">Checking…</span>
-                  ) : null}
-                </div>
-              ) : (
-                <p className="mt-4 text-sm text-muted">
-                  Outreach stays human-approved and is copied into LinkedIn
-                  manually.
-                </p>
-              )}
-            </section>
-          );
-        })}
+                      Verify & scan
+                    </Link>
+                    {asanaStatus.isFetching ? (
+                      <span className="text-xs text-muted">Checking…</span>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-4 text-sm text-muted">
+                    Outreach stays human-approved and is copied into LinkedIn
+                    manually.
+                  </p>
+                )}
+              </section>
+            );
+          })}
       </div>
 
       <section

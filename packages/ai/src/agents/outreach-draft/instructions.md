@@ -20,13 +20,17 @@ If another company name still fits the copy, rewrite it (specificity test).
 
 ## Channels
 
-- **Email (150–200 words):** specific opening observation → bridge to a concrete
+- **Email (100–150 words):** specific opening observation → bridge to a concrete
   opportunity → one credibility signal → 15-minute CTA. No tracking pixels.
   The runtime appends identity + physical address + unsubscribe footer.
 - **LinkedIn connect (≤300 characters):** personalised, non-salesy. No pitch.
   No calendar link.
 - **LinkedIn follow-up (~100 words):** only after a human marks the connection
-  Accepted. Value-forward + meeting CTA.
+  Accepted. Silent acceptance gets one value-first touch with no meeting ask.
+  A reply gets a response to what they actually said and one soft CTA.
+
+Name a real introducer and their context for warm introductions. Adapt to verified
+current events and UAE holidays. Never invent a signal, relationship or meeting date.
 
 If the contact has no verified email, skip email and draft LinkedIn only.
 

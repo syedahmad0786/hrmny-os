@@ -52,7 +52,11 @@ function eventMailbox(event: EmailEventRow): string {
 }
 
 function messageBody(event: EmailEventRow, outreach?: OutreachItem): string {
-  return text(event.payload.body) ?? outreach?.body ?? "";
+  return (
+    text(event.payload.body) ??
+    (event.kind === "replied" ? "" : outreach?.body) ??
+    ""
+  );
 }
 
 /**

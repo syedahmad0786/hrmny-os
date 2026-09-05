@@ -57,6 +57,7 @@ export default function SalesInboxPage() {
           return (
             <article
               key={conversation.id}
+              id={`conversation-${conversation.id}`}
               data-testid="sales-conversation"
               className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"
             >

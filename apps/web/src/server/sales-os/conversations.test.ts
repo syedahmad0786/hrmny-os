@@ -129,6 +129,25 @@ describe("Sales Gmail conversations", () => {
     });
   });
 
+  it("never displays our outgoing copy as a missing client reply", async () => {
+    const { outreach } = await fixture();
+    await recordEmailEvent({
+      outreachItemId: outreach.id,
+      kind: "replied",
+      provider: "gmail",
+      externalId: "reply-without-body",
+      payload: {
+        threadId: "gmail-thread-proof",
+        senderConnectionAccountId: MAILBOX_ID,
+      },
+    });
+    const [conversation] = await listSalesConversations();
+    expect(conversation?.latestInboundBody).toBe("");
+    expect(
+      conversation?.messages.find((item) => item.direction === "inbound")?.body,
+    ).toBe("");
+  });
+
   it("creates a reply as draft only and reuses it on a repeated request", async () => {
     await fixture();
     await ingestGmailReply({

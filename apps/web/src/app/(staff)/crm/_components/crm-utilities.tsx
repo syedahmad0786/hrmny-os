@@ -8,6 +8,7 @@ export function CrmUtilities() {
   const pathname = usePathname();
   if (
     pathname === "/crm/hunt" ||
+    pathname === "/crm/dashboard" ||
     pathname.startsWith("/crm/settings/")
   ) {
     return null;

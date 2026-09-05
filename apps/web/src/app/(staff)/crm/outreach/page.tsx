@@ -49,6 +49,12 @@ function OutreachInner() {
   const utils = trpc.useUtils();
   const searchParams = useSearchParams();
   const focusIdFromQuery = searchParams.get("id")?.trim() || "";
+  const requestedView = searchParams.get("view") ?? "all";
+  const view =
+    !focusIdFromQuery &&
+    ["drafts", "approved", "followups", "history"].includes(requestedView)
+      ? requestedView
+      : "all";
   const clientIdFromQuery = searchParams.get("clientId")?.trim() || "";
   const items = trpc.leadgen.outreach.list.useQuery();
   const followups = trpc.leadgen.outreach.followups.useQuery();
@@ -443,7 +449,7 @@ function OutreachInner() {
   );
 
   return (
-    <main>
+    <main data-outreach-view={view}>
       <CrmPageHeader
         title="Outreach"
         description="Review every draft before anything is sent. Approving a draft and sending it are always two separate decisions."
@@ -453,6 +459,75 @@ function OutreachInner() {
           </Link>
         }
       />
+
+      <nav className="sales-work-tabs" aria-label="Outreach queues">
+        {[
+          ["all", "All outreach"],
+          ["drafts", "Review drafts"],
+          ["approved", "Ready to send"],
+          ["followups", "Follow-ups due"],
+          ["history", "History"],
+        ].map(([value, label]) => (
+          <Link
+            className="crm-btn"
+            aria-current={view === value ? "page" : undefined}
+            key={value}
+            href={`/crm/outreach?view=${value}`}
+          >
+            {label}
+          </Link>
+        ))}
+      </nav>
+
+      {view === "followups" ? (
+        <section className="crm-panel mt-4" data-testid="outreach-due-queue">
+          <div className="crm-panel-head">
+            <h2>Follow-ups due</h2>
+          </div>
+          {followups.error ? (
+            <p className="crm-note" role="alert">
+              {followups.error.message}
+            </p>
+          ) : followups.isLoading ? (
+            <p className="p-5">Loading follow-ups…</p>
+          ) : (
+            <>
+              {!visibleFollowups.some((item) => item.state === "due") ? (
+                <CrmEmpty
+                  title="No follow-ups due"
+                  hint="Replies stop the cadence. Scheduled touches appear when they are due."
+                />
+              ) : null}
+              <ol className="sales-work-list">
+                {visibleFollowups
+                  .filter((item) => item.state === "due")
+                  .map((item) => (
+                    <li id={`followup-${item.sourceId}`} key={item.sourceId}>
+                      <span className="sales-work-dot followup" aria-hidden />
+                      <div>
+                        <strong>
+                          {companyByDeal.get(item.dealId) ?? item.recipient}
+                        </strong>
+                        <p>
+                          {item.recipient} · {item.reason}
+                        </p>
+                      </div>
+                      <CrmBtn
+                        disabled={busyId !== null}
+                        onClick={() => void prepareFollowup(item.sourceId)}
+                      >
+                        Prepare draft
+                      </CrmBtn>
+                    </li>
+                  ))}
+              </ol>
+              <Link className="crm-btn m-4" href="/crm/outreach?view=drafts">
+                Review prepared drafts
+              </Link>
+            </>
+          )}
+        </section>
+      ) : null}
 
       <details className="mt-4 rounded-xl border border-[var(--line)] bg-white px-4 py-3 text-sm text-muted">
         <summary className="cursor-pointer font-medium text-ink">
@@ -543,8 +618,8 @@ function OutreachInner() {
         </div>
       </section>
 
-      <section className="crm-split mt-4">
-        <div className="crm-panel">
+      <section className="crm-split mt-4 outreach-review-panels">
+        <div className="crm-panel outreach-drafts-panel">
           <div className="crm-panel-head">
             <div>
               <h3>Awaiting approval</h3>
@@ -626,7 +701,7 @@ function OutreachInner() {
           </div>
         </div>
 
-        <aside className="crm-panel">
+        <aside className="crm-panel outreach-approved-panel">
           <div className="crm-panel-head">
             <div>
               <h3>Approved — ready to send</h3>
@@ -768,7 +843,7 @@ function OutreachInner() {
         </aside>
       </section>
 
-      <section className="crm-split mt-4">
+      <section className="crm-split mt-4 outreach-compose-panels">
         <div className="crm-panel">
           <div className="crm-panel-head">
             <div>
@@ -919,7 +994,7 @@ function OutreachInner() {
         </aside>
       </section>
 
-      <div className="mt-4">
+      <div className="mt-4 outreach-history-panel">
         <CrmTableShell foot="Outreach history · gated engine (live)">
           <table className="crm-table">
             <thead>
