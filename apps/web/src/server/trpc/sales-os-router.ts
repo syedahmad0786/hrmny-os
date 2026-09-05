@@ -57,6 +57,7 @@ import {
   type SalesOsSettings,
 } from "../sales-os";
 import { getOutreach, listOutreach, patchOutreach } from "../leadgen/store";
+import { requireVisibleOutreach } from "../leadgen/email-access";
 import {
   ownedIntegrationConnectionStatus,
   resolveOwnedIntegrationApiKey,
@@ -694,7 +695,9 @@ export const salesOsRouter = router({
       ),
   }),
 
-  digest: salesOperatorProcedure.query(() => buildSalesOsDigest()),
+  digest: salesOperatorProcedure.query(({ ctx }) =>
+    buildSalesOsDigest(undefined, ctx.employeeId),
+  ),
 
   funnel: staffProcedure
     .input(
@@ -828,7 +831,10 @@ export const salesOsRouter = router({
       }),
     markSkipped: staffProcedure
       .input(z.object({ id: z.string() }))
-      .mutation(({ input }) => patchOutreach(input.id, { state: "discarded" })),
+      .mutation(async ({ input, ctx }) => {
+        await requireVisibleOutreach(input.id, ctx.employeeId);
+        return patchOutreach(input.id, { state: "discarded" });
+      }),
   }),
 
   evolve: router({
@@ -865,8 +871,8 @@ export const salesOsRouter = router({
   outreach: router({
     rework: staffProcedure
       .input(z.object({ id: z.string(), feedback: z.string().min(2) }))
-      .mutation(async ({ input }) => {
-        const item = await getOutreach(input.id);
+      .mutation(async ({ input, ctx }) => {
+        const item = await requireVisibleOutreach(input.id, ctx.employeeId);
         if (!item)
           throw new TRPCError({
             code: "NOT_FOUND",

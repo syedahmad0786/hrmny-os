@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
 import {
-  completeGoogleWorkspaceOAuth,
   googleWorkspaceConnectionsDest,
   googleWorkspaceRedirectUri,
   verifyGoogleWorkspaceOAuthState,
 } from "@/server/google-workspace-oauth";
 
 /**
- * Google Workspace OAuth redirect target. Exchanges the code with the same
- * GOOGLE_OAUTH_* client used for token refresh, persists tokens to Vault,
- * then sends staff back to Connections on the same origin that started OAuth.
+ * Return the code to the authenticated Connections page. The public callback
+ * never exchanges or saves tokens; the staff API verifies the completing user.
  *
  * Google Cloud must allow this exact URI on the OAuth client:
  *   {page origin}/api/integrations/google-workspace/callback
@@ -54,9 +52,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await completeGoogleWorkspaceOAuth({ code, state });
-    dest.searchParams.set("gw", "connected");
-    dest.searchParams.set("account", result.account);
+    verifyGoogleWorkspaceOAuthState(state);
+    // A fragment keeps the authorization code out of subsequent HTTP requests.
+    dest.hash = new URLSearchParams({ gw: "complete", code, state }).toString();
   } catch (e) {
     dest.searchParams.set("gw", "error");
     dest.searchParams.set(
@@ -64,5 +62,7 @@ export async function GET(request: Request) {
       e instanceof Error ? e.message.slice(0, 160) : "exchange_failed",
     );
   }
-  return NextResponse.redirect(dest);
+  return NextResponse.redirect(dest, {
+    headers: { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" },
+  });
 }

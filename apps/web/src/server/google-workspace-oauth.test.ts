@@ -171,8 +171,25 @@ describe("google workspace oauth helpers", () => {
 
   it("completeGoogleWorkspaceOAuth rejects bad state before calling Google", async () => {
     await expect(
-      completeGoogleWorkspaceOAuth({ code: "x", state: "bad" }),
+      completeGoogleWorkspaceOAuth({
+        code: "x",
+        state: "bad",
+        actorEmployeeId: "owner",
+      }),
     ).rejects.toThrow(/state/i);
+  });
+
+  it("rejects a forwarded consent callback before exchanging or saving mailbox tokens", async () => {
+    const state = signGoogleWorkspaceOAuthState(
+      "c0000000-0000-4000-8000-000000000011",
+    );
+    await expect(
+      completeGoogleWorkspaceOAuth({
+        code: "unused-code",
+        state,
+        actorEmployeeId: "c0000000-0000-4000-8000-000000000099",
+      }),
+    ).rejects.toThrow(/employee who started/);
   });
 
   it("formats Google OAuth error JSON", () => {

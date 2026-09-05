@@ -12,6 +12,7 @@ import {
 } from "./store";
 import { buildEmailFollowupStatuses } from "./followups";
 import { sectorForDate } from "./sops";
+import { visibleSalesEmailData } from "../leadgen/email-access";
 
 export type SalesAttentionItem = {
   id: string;
@@ -63,15 +64,18 @@ export type SalesOsDigest = {
 
 export async function buildSalesOsDigest(
   now = new Date(),
+  employeeId?: string | null,
 ): Promise<SalesOsDigest> {
+  const visible =
+    employeeId === undefined ? null : await visibleSalesEmailData(employeeId);
   const settings = await getSalesOsSettings();
   const [companies, contacts, outreach, deals, emailEvents, tasks] =
     await Promise.all([
       listCompanyResearch({ state: "researched" }),
       listContactResearch({ state: "found" }),
-      listOutreach(),
+      visible ? visible.outreach : listOutreach(),
       listDeals(),
-      listEmailEvents(),
+      visible ? visible.emailEvents : listEmailEvents(),
       listCrmTasks(),
     ]);
   const companyByDeal = new Map(

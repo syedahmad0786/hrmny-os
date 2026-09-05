@@ -26,7 +26,7 @@ export default function SalesInboxPage() {
       <CrmPageHeader
         kicker="Sales · Gmail conversations"
         title="Sales inbox"
-        description="Read your mail, follow client conversations and prepare replies."
+        description="Your emails and replies are private to you. Connecting the company domain does not share your mailbox."
         actions={<CrmTag kind="info">Nothing sends automatically</CrmTag>}
       />
 

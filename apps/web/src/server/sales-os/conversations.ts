@@ -3,6 +3,7 @@ import { listOutreach, type OutreachItem } from "../leadgen/store";
 import { getIntegrationReceipt } from "../integrations/inbox";
 import { listEmailEvents } from "./store";
 import type { EmailEventRow } from "./types";
+import { visibleSalesEmailData } from "../leadgen/email-access";
 
 export type SalesConversationMessage = {
   id: string;
@@ -64,10 +65,14 @@ function messageBody(event: EmailEventRow, outreach?: OutreachItem): string {
  * evidence; this function joins those immutable events to CRM records without
  * introducing a second conversation store that can drift from the provider.
  */
-export async function listSalesConversations(): Promise<SalesConversation[]> {
+export async function listSalesConversations(
+  employeeId?: string | null,
+): Promise<SalesConversation[]> {
+  const visible =
+    employeeId === undefined ? null : await visibleSalesEmailData(employeeId);
   const [events, outreach, deals, contacts, companies] = await Promise.all([
-    listEmailEvents(),
-    listOutreach(),
+    visible ? visible.emailEvents : listEmailEvents(),
+    visible ? visible.outreach : listOutreach(),
     listDeals(),
     listContacts(),
     listCompanies(),
@@ -224,8 +229,10 @@ export async function listSalesConversations(): Promise<SalesConversation[]> {
 
 export async function getSalesConversation(
   id: string,
+  employeeId?: string | null,
 ): Promise<SalesConversation | null> {
   return (
-    (await listSalesConversations()).find((item) => item.id === id) ?? null
+    (await listSalesConversations(employeeId)).find((item) => item.id === id) ??
+    null
   );
 }

@@ -312,7 +312,9 @@ export default function ConnectionsPage() {
   const [personalToolsOpen, setPersonalToolsOpen] = useState(false);
   const list = trpc.connections.list.useQuery();
   const myMailboxes = trpc.connections.myMailboxes.useQuery();
-  const salesMailboxes = trpc.connections.salesMailboxes.useQuery();
+  const salesMailboxes = trpc.connections.salesMailboxes.useQuery({
+    manage: true,
+  });
   const [mailboxEdits, setMailboxEdits] = useState<
     Record<string, { label: string; dailyCap: number; enabled: boolean }>
   >({});
@@ -402,6 +404,36 @@ export default function ConnectionsPage() {
     kind: "ok" | "err";
     text: string;
   } | null>(null);
+
+  const { mutate: completeGoogleWorkspace } =
+    trpc.connections.completeGoogleWorkspaceOAuth.useMutation({
+      retry: false,
+      onSuccess: (result) => {
+        setOauthBanner({
+          kind: "ok",
+          text: `Google Workspace connected: ${result.account}. Your mailbox is private to you.`,
+        });
+        void Promise.all([
+          utils.connections.list.invalidate(),
+          utils.connections.myMailboxes.invalidate(),
+          utils.connections.salesMailboxes.invalidate(),
+        ]);
+      },
+      onError: (error) => setOauthBanner({ kind: "err", text: error.message }),
+    });
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    if (params.get("gw") !== "complete") return;
+    const code = params.get("code");
+    const state = params.get("state");
+    // Consume the callback once, including React remounts; never retain codes in history.
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${window.location.search}#conn-google_workspace`,
+    );
+    if (code && state) completeGoogleWorkspace({ code, state });
+  }, [completeGoogleWorkspace]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -871,9 +903,9 @@ export default function ConnectionsPage() {
           Approved Google Workspace mailboxes
         </h2>
         <p className="mt-1 text-sm text-muted">
-          Sales chooses one approved sender before every Gmail send. Each
-          mailbox has its own daily sending limit. Verified aliases are
-          available when composing outreach.
+          Each person sends from their own connected mailbox. Organization
+          approval sets sending limits; it does not grant the team access to
+          anyone's inbox, sent mail or replies.
         </p>
         {salesMailboxes.isLoading ? (
           <p className="mt-4 text-sm text-muted">Loading mailboxes…</p>

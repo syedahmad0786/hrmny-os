@@ -446,6 +446,7 @@ async function exchangeGoogleAuthorizationCode(
 export async function completeGoogleWorkspaceOAuth(input: {
   code: string;
   state: string;
+  actorEmployeeId: string;
 }): Promise<{
   account: string;
   connectionAccountId: string;
@@ -454,6 +455,11 @@ export async function completeGoogleWorkspaceOAuth(input: {
   const { employeeId, redirectUri } = verifyGoogleWorkspaceOAuthState(
     input.state,
   );
+  if (employeeId !== input.actorEmployeeId) {
+    throw new Error(
+      "Finish connecting while signed in as the HRMNY employee who started this connection.",
+    );
+  }
   if (!googleWorkspaceClientConfigured()) {
     throw new Error("Google OAuth client credentials are not configured");
   }
