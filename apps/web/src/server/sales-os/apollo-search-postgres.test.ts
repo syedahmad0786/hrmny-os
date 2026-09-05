@@ -343,7 +343,7 @@ async function ensureFixtures() {
         'api_key', 'CI other Apollo', ${otherSecretId}::uuid, 'connected'
       )
     on conflict (owner_employee_id, toolkit, scope)
-      where owner_employee_id is not null
+      where owner_employee_id is not null and not (toolkit = 'google_workspace' and scope = 'staff')
     do update set
       secret_id = excluded.secret_id,
       status = 'connected',

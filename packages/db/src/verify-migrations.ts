@@ -36,7 +36,7 @@ const journal = JSON.parse(
 ) as { entries: Array<{ tag: string }> };
 const apolloPriorHead = "0075_apollo_search_fencing";
 const apolloHead = "0076_apollo_people_search_serialization";
-const head = "0079_crm_operational_truth";
+const head = "0080_multiple_google_mailboxes";
 assert.equal(
   journal.entries.at(-1)?.tag,
   head,
@@ -81,6 +81,26 @@ async function prepareSupabaseDatabase(connection: Sql): Promise<void> {
 }
 
 async function assertCurrentHead(connection: Sql): Promise<void> {
+  await connection.unsafe(`DO $$
+    DECLARE staff_id uuid := gen_random_uuid();
+    BEGIN
+      INSERT INTO public.employee (employee_id, email, display_name) VALUES (staff_id, staff_id::text || '@mailbox-proof.test', 'Migration mailbox proof');
+      INSERT INTO public.connection_account (owner_employee_id, toolkit, scope, external_connection_id)
+        VALUES (staff_id, 'google_workspace', 'staff', 'first@one.test'), (staff_id, 'google_workspace', 'staff', 'second@two.test');
+      BEGIN
+        INSERT INTO public.connection_account (owner_employee_id, toolkit, scope, external_connection_id)
+          VALUES (staff_id, 'google_workspace', 'staff', ' FIRST@ONE.TEST ');
+        RAISE EXCEPTION 'Duplicate mailbox identity was accepted';
+      EXCEPTION WHEN unique_violation THEN NULL; END;
+      INSERT INTO public.connection_account (owner_employee_id, toolkit, scope) VALUES (staff_id, 'apollo', 'staff');
+      BEGIN
+        INSERT INTO public.connection_account (owner_employee_id, toolkit, scope) VALUES (staff_id, 'apollo', 'staff');
+        RAISE EXCEPTION 'Duplicate non-mail provider was accepted';
+      EXCEPTION WHEN unique_violation THEN NULL; END;
+      DELETE FROM public.connection_account WHERE owner_employee_id = staff_id;
+      DELETE FROM public.employee WHERE employee_id = staff_id;
+    END $$`);
+
   const [operationalColumns] = await connection<Array<{ count: number }>>`
     select count(*)::int as count from information_schema.columns
     where table_schema='public' and table_name='deal'
