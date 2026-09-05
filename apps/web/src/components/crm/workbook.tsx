@@ -47,6 +47,9 @@ const attentionLabels = {
 function WorkbookInner({ initialTab = "leads" }: { initialTab?: WorkbookTab }) {
   const utils = trpc.useUtils(),
     params = useSearchParams();
+  const queryTab = params.get("tab"),
+    querySearch = params.get("q"),
+    queryRecord = params.get("record");
   const session = trpc.auth.session.useQuery();
   const snapshot = trpc.crm.workbook.snapshot.useQuery();
   const views = trpc.crm.workbook.views.useQuery();
@@ -101,14 +104,12 @@ function WorkbookInner({ initialTab = "leads" }: { initialTab?: WorkbookTab }) {
     } catch {
       /* An old view never prevents opening the CRM. */
     }
-    const tab = params.get("tab");
-    if (WORKBOOK_TABS.includes(tab as WorkbookTab))
-      next = { ...next, tab: tab as WorkbookTab, columns: [] };
-    const search = params.get("q");
-    if (search !== null) next.search = search;
-    if (params.get("record")) next.search = "";
+    if (WORKBOOK_TABS.includes(queryTab as WorkbookTab))
+      next = { ...next, tab: queryTab as WorkbookTab, columns: [] };
+    if (querySearch !== null) next.search = querySearch;
+    if (queryRecord) next.search = "";
     setConfig(next);
-  }, [employeeId, initialTab, storageKey, params]);
+  }, [employeeId, initialTab, storageKey, queryTab, querySearch, queryRecord]);
   useEffect(() => {
     if (editRows.length) dialog.current?.showModal();
   }, [editRows]);
@@ -129,7 +130,7 @@ function WorkbookInner({ initialTab = "leads" }: { initialTab?: WorkbookTab }) {
     [snapshot.data, config, employeeId],
   );
   useEffect(() => {
-    const id = params.get("record");
+    const id = queryRecord;
     if (!id || openedRecord.current === id || !snapshot.data) return;
     const row = snapshot.data.rows.find(
       (row) => row.id === id && row.kind === "followups",
@@ -149,7 +150,7 @@ function WorkbookInner({ initialTab = "leads" }: { initialTab?: WorkbookTab }) {
       setValue(row.name);
       setEditRows([row]);
     }
-  }, [params, snapshot.data, preview]);
+  }, [queryRecord, snapshot.data, preview]);
   useEffect(() => {
     setPage((page) =>
       Math.min(page, Math.max(0, Math.ceil(rows.length / 50) - 1)),

@@ -106,4 +106,44 @@ test("reviewed Asana roster creates a linked client with source provenance and n
   await expect(page.getByTestId("client-account-overview")).toContainText(
     "Not recorded",
   );
+  await expect(page.getByText(/Client workspace · Delivery/)).toContainText(
+    "Renewal not recorded",
+  );
+  await page
+    .getByLabel("USP", { exact: true })
+    .fill("Client-approved positioning");
+  await page.getByLabel("Audience", { exact: true }).fill("Local families");
+  await page
+    .getByLabel("Objective priority", { exact: true })
+    .fill("Increase qualified visits");
+  const save = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      request.url().includes("clients.immersion.upsert"),
+  );
+  await page.getByRole("button", { name: "Save & complete immersion" }).click();
+  const payload = (await save).postData()!;
+  expect(payload).toContain("Client-approved positioning");
+  expect(payload).not.toContain('"swot"');
+  await expect(
+    page.getByText("Immersion saved.", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("USP", { exact: true })).toHaveValue(
+    "Client-approved positioning",
+  );
+  await expect(page.getByLabel("Audience", { exact: true })).toHaveValue(
+    "Local families",
+  );
+  await page.goto(`/crm/workbook?tab=clients&q=${encodeURIComponent(name)}`, {
+    waitUntil: "commit",
+  });
+  await expect(page.getByPlaceholder("Search clients")).toHaveValue(name);
+  await page.getByPlaceholder("Search clients").fill("");
+  await page.getByText("Export", { exact: true }).click();
+  await expect(page.getByPlaceholder("Search clients")).toHaveValue("");
+  await page.getByRole("button", { name: "Contacts", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Contacts", exact: true }),
+  ).toBeVisible();
 });

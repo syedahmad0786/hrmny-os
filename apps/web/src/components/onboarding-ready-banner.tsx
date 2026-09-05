@@ -32,28 +32,25 @@ export function OnboardingReadyBanner({
 
   return (
     <div
-      className="rounded-xl border border-sand bg-white/80 px-4 py-3 text-sm text-muted"
+      className="rounded-xl border border-sand px-4 py-3 text-sm text-muted"
       role="status"
       data-testid={`${testIdPrefix}-ready-banner`}
     >
       <p data-testid={`${testIdPrefix}-ready-portal`}>
-        Portal magic-link: {magic}
         {magic === "enabled"
-          ? " — staff mint links open portal approvals/onboarding."
-          : " — portal login may require dev role until magic-link is enabled."}
+          ? "Client portal access links are available for authorized contacts."
+          : "Client portal sign-in is not ready. Configure portal access before inviting clients."}
       </p>
       <p className="mt-1" data-testid={`${testIdPrefix}-ready-resend`}>
         {resend === "live"
-          ? "Resend live — portal invite and onboarding emails can send."
-          : resend === "configured"
-            ? "Resend key present — set RESEND_MODE=live for real portal email."
-            : "Resend mock — portal invites show magic links in UI without email."}{" "}
+          ? "Portal invitation emails are enabled."
+          : "Portal invitation emails are not enabled. Access links are shown for staff review; no invitation email is sent."}{" "}
         {resend !== "live" ? (
           <Link
             href="/settings/connections"
             className="inline-flex min-h-11 items-center underline"
           >
-            Configure Resend
+            Configure invitation email
           </Link>
         ) : null}
       </p>
