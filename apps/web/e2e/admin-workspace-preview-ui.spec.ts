@@ -35,6 +35,7 @@ test("admin can enter an employee view, navigate back and return to self", async
 test("ordinary staff have a labelled account menu without employee switching", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.setExtraHTTPHeaders({ "x-dev-role": "am" });
   await page.goto("/");
   await page.getByTestId("account-menu").click();
@@ -45,4 +46,7 @@ test("ordinary staff have a labelled account menu without employee switching", a
   await expect(
     page.getByRole("link", { name: "Open notifications" }),
   ).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
 });

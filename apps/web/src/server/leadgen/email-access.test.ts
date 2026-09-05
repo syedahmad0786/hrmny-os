@@ -126,6 +126,17 @@ it("keeps sent mail, replies and reply drafts private across lists, IDs, AI and 
   expect(JSON.stringify(await other.salesOs.digest())).not.toContain(
     "PRIVATE-",
   );
+  expect(JSON.stringify(await own.salesOs.digest())).toContain("PRIVATE-");
+  const preview = createCaller({
+    user: colleague,
+    employeeId: colleague.employeeId,
+    roles: colleague.roles,
+    canViewMargin: true,
+    requestedPreviewEmployeeId: owner.employeeId,
+  });
+  const previewDigest = await preview.salesOs.digest();
+  expect(JSON.stringify(previewDigest)).not.toContain("PRIVATE-");
+  expect(previewDigest.replyRate).toEqual({ sent: 0, replied: 0, rate: 0 });
   expect(
     JSON.stringify(
       await runAgentTools({

@@ -743,6 +743,10 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 @media (max-width: 620px) {
   .desk-topbar {
     gap: 6px;
+    height: auto;
+    min-height: var(--topbar);
+    flex-wrap: wrap;
+    padding-block: 8px;
   }
   .desk-top-actions {
     gap: 3px;
@@ -2229,12 +2233,12 @@ html[data-work-colorblind="true"]:not([data-work-theme="dark"])
 
 @media (max-width: 420px) {
   .desk-devbox {
-    max-width: 140px;
+    max-width: 85px;
   }
 
   .desk-devbox select {
     min-width: 0;
-    max-width: 116px;
+    max-width: 70px;
   }
 
   .ops-live-pulse dl {
