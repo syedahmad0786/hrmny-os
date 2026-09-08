@@ -333,6 +333,12 @@ export default function HrmnyChatPage() {
         ) : null}
         <ChatReadyStrip />
 
+        {process.env.NEXT_PUBLIC_QM_URL && (
+          <a href={process.env.NEXT_PUBLIC_QM_URL} className="hrmny-chat-new">
+            Open assistant workspace
+          </a>
+        )}
+
         <button
           type="button"
           className="hrmny-chat-new"
@@ -601,8 +607,7 @@ export default function HrmnyChatPage() {
                     <div className="hrmny-chat-msg-role">
                       {m.role === "user"
                         ? "You"
-                        : (selectedAgent?.displayName ??
-                          "hrmny AI Assistant")}
+                        : (selectedAgent?.displayName ?? "hrmny AI Assistant")}
                     </div>
                     <div className="hrmny-chat-msg-body">
                       {m.role === "assistant" ? (
