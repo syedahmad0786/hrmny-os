@@ -9,6 +9,7 @@ export type ToolVerb = {
 };
 
 const TOOL_VERBS: Record<string, ToolVerb> = {
+  brain_read: { active: "Reading knowledge…", done: "Read knowledge" },
   "memory.search": { active: "Searching memory…", done: "Searched memory" },
   "crm.read": { active: "Reading CRM…", done: "Read CRM" },
   "crm.deals": { active: "Listing deals…", done: "Listed deals" },

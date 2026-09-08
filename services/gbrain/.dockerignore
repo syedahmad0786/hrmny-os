@@ -1,0 +1,5 @@
+*
+!Dockerfile
+!access.mjs
+!server.mjs
+!supabase-prod-ca-2021.crt

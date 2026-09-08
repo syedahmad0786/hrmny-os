@@ -38,6 +38,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: node --test services/gbrain/access.test.mjs
       - run: pnpm build
 
   e2e:
