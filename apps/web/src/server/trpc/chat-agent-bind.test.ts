@@ -17,6 +17,43 @@ function partnerCaller() {
 }
 
 describe("chat agent binding", () => {
+  it("requires private provider routing for direct and tool-enabled Chat", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openrouter");
+    vi.stubEnv("OPENROUTER_API_KEY", "synthetic-provider-key");
+    vi.stubEnv("LLM_DEFAULT_MODEL", "openrouter/free");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (_url, options) => {
+        expect(JSON.parse(String(options?.body)).provider).toEqual({
+          data_collection: "deny",
+          zdr: true,
+        });
+        return Response.json({
+          choices: [
+            { message: { content: "Synthetic private routing check." } },
+          ],
+        });
+      });
+    try {
+      const caller = partnerCaller();
+      const thread = await caller.chat.createThread({
+        title: "Private routing check",
+      });
+      for (const harness of ["direct", "react"] as const) {
+        const sent = await caller.chat.send({
+          threadId: thread.chatThreadId,
+          content: "Synthetic check",
+          harness,
+        });
+        expect(sent.assistant.content).toBe("Synthetic private routing check.");
+      }
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("lists memory-mode agents so the dropdown is not empty", async () => {
     const caller = partnerCaller();
     const agents = await caller.chat.listRunnableAgents();

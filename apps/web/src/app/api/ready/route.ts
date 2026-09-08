@@ -13,6 +13,7 @@ import {
   gbrainConfigured,
 } from "@/server/gbrain";
 import { getWorkOrganizationPolicy } from "@/server/work-governance";
+import { gbrainRetrievalConfigured } from "@/server/gbrain-access";
 
 /** Lightweight deploy smoke — no secrets, no business data, no writes. */
 export async function GET() {
@@ -149,6 +150,7 @@ export async function GET() {
         openUrl: `${appOrigin}/chat`,
       },
       gbrain: {
+        retrieval: gbrainRetrievalConfigured() ? "configured" : "missing",
         status:
           companyBrainConfigured && gbrainDelivered
             ? "live"
