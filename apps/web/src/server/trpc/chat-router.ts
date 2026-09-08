@@ -1094,7 +1094,7 @@ export const chatRouter = router({
       };
       const system = [
         customSystem ||
-          "You are hrmny AI Assistant, the assistant for Creative Harmony staff.",
+          "You are hrmny AI Assistant, the assistant for hrmny staff.",
         "Plan → call allowlisted CRM/OS tools → observe → answer.",
         "Be concise. Prefer tools for factual lookups. Never invent client data.",
         `Effort level: ${effort}.`,
