@@ -94,4 +94,26 @@ describe("pickActiveComposioAccount", () => {
       }),
     ).toBeUndefined();
   });
+
+  it("rejects an ACTIVE stored id for a different toolkit and uses only a matching replacement", () => {
+    const gmail = {
+      id: "wrong-toolkit",
+      status: "ACTIVE",
+      toolkit: { slug: "gmail" },
+    };
+    expect(
+      pickActiveComposioAccount({
+        externalConnectionId: gmail.id,
+        toolkitSlug: "canva",
+        remote: [gmail],
+      }),
+    ).toBeUndefined();
+    expect(
+      pickActiveComposioAccount({
+        externalConnectionId: gmail.id,
+        toolkitSlug: "CANVA",
+        remote: [gmail, ...remote],
+      })?.id,
+    ).toBe("live");
+  });
 });
