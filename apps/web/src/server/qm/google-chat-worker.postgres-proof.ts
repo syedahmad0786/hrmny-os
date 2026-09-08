@@ -117,6 +117,17 @@ it("claims concurrently, fences old workers, blocks revocation, and delivers a s
   const first = jobs.find((job) => job?.jobId === a.jobId)!;
   const second = jobs.find((job) => job?.jobId === b.jobId)!;
   expect(first.threadRef).not.toBe(second.threadRef);
+  expect(
+    first.threadRef.startsWith(
+      `web:${first.actorId}:google-chat-${employeeA}-`,
+    ),
+  ).toBe(true);
+  expect(
+    second.threadRef.startsWith(
+      `web:${second.actorId}:google-chat-${employeeB}-`,
+    ),
+  ).toBe(true);
+  expect(first.threadRef.startsWith(`web:${second.actorId}:`)).toBe(false);
   expect(new Set(jobs.map((job) => job!.jobId)).size).toBe(2);
   await expect(
     operate({ action: "renew", jobId: first.jobId, claimToken: randomUUID() }),
@@ -229,6 +240,7 @@ it("claims concurrently, fences old workers, blocks revocation, and delivers a s
   const reclaimed = await operate({ action: "claim" }, dbB);
   const current = "job" in reclaimed ? reclaimed.job! : null!;
   expect(current.runId).toBe(runId);
+  expect(current.threadRef).toBe(second.threadRef);
   expect(current.claimToken).not.toBe(old.claimToken);
   await expect(
     operate({ action: "renew", jobId: old.jobId, claimToken: old.claimToken }),
