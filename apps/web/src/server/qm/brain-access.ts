@@ -64,6 +64,8 @@ async function qmStaff(token: string) {
 
 /** Core verifies its own per-run token; the OS retains staff and source authority. */
 export async function readQmBrain(token: string, input: unknown) {
+  if (process.env.QM_BRAIN_ENABLED !== "1")
+    throw new Error("QM_BRAIN_NOT_ENABLED");
   const user = await qmStaff(token);
   const result = await readAuthorizedGbrain(user.employeeId, input);
   const current = await qmStaff(token);
