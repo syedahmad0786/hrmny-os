@@ -320,7 +320,7 @@ export default function HrmnyChatPage() {
               className="rounded-lg bg-white"
             />
             <div>
-              <strong>Harmony</strong>
+              <strong>hrmny</strong>
               <small>AI Assistant</small>
             </div>
           </div>
