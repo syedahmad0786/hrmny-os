@@ -294,14 +294,22 @@ async function readGoogleChatMessage(messageName: string, accessToken: string) {
   return googleChatMessageSchema.parse(await response.json());
 }
 
+async function requireActiveGoogleChatStaff(employeeId: string) {
+  const user = await resolveActiveStaffById(employeeId);
+  if (!user) throw new Error("GOOGLE_CHAT_STAFF_ACCESS_REVOKED");
+  return user;
+}
+
 /** Idempotent Chat API delivery with exact provider readback. */
 export async function sendGoogleChatReply(input: {
+  employeeId: string;
   receiptId: string;
   spaceName: string;
   threadName: string | null;
   text: string;
   googleUserName: string;
 }) {
+  z.string().uuid().parse(input.employeeId);
   z.string().uuid().parse(input.receiptId);
   googleUserNameSchema.parse(input.googleUserName);
   googleSpaceNameSchema.parse(input.spaceName);
@@ -312,6 +320,7 @@ export async function sendGoogleChatReply(input: {
     throw new Error("GOOGLE_CHAT_THREAD_SCOPE_MISMATCH");
   }
   const accessToken = await googleChatAccessToken();
+  await requireActiveGoogleChatStaff(input.employeeId);
   const messageId = googleChatReplyMessageId(input.receiptId);
   const messageName = `${input.spaceName}/messages/${messageId}`;
   const verifyReply = (message: z.infer<typeof googleChatMessageSchema>) => {
@@ -424,8 +433,7 @@ export async function runGoogleChatInteractionJob(raw: unknown) {
   ) {
     return { ok: true, messageName: receipt.result.messageName, replay: true };
   }
-  const user = await resolveActiveStaffById(payload.employeeId);
-  if (!user) throw new Error("GOOGLE_CHAT_STAFF_ACCESS_REVOKED");
+  const user = await requireActiveGoogleChatStaff(payload.employeeId);
 
   let text: string;
   let threadId: string;
@@ -464,6 +472,7 @@ export async function runGoogleChatInteractionJob(raw: unknown) {
   }
 
   const delivered = await sendGoogleChatReply({
+    employeeId: payload.employeeId,
     receiptId: payload.receiptId,
     spaceName: payload.spaceName,
     threadName: payload.threadName,
@@ -795,6 +804,7 @@ export async function handleGoogleChatRequest(
       harness: "react",
       proposalOnly: true,
     });
+    await requireActiveGoogleChatStaff(user.employeeId);
     const text = responseText(result.assistant.content, appOrigin);
     await completeIntegrationReceipt(receipt.receiptId, {
       ok: true,
