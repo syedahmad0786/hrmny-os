@@ -73,6 +73,6 @@ test("primary CRM actions stay usable on a phone", async ({ page }) => {
     "Google Chat → HRMNY",
   );
   await expect(page.getByTestId("operating-surfaces")).toContainText(
-    "QM + Fly Sprites",
+    "hrmny AI Assistant",
   );
 });

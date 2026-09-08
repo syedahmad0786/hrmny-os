@@ -35,6 +35,10 @@ export const GOOGLE_CHAT_INTERACTION_EVENT =
   "google-chat/interaction.queued" as const;
 const MAX_BODY_BYTES = 256_000;
 const MAX_JWT_CHARS = 16_384;
+const googleUserNameSchema = z
+  .string()
+  .max(100)
+  .regex(/^users\/[0-9]+$/);
 const googleSpaceNameSchema = z
   .string()
   .max(500)
@@ -72,12 +76,18 @@ const serviceAccountSchema = z.object({
   private_key: z.string().min(100).max(20_000),
 });
 const googleChatMessageSchema = z
-  .object({ name: z.string().min(1).max(500) })
+  .object({
+    name: z.string().min(1).max(500),
+    text: z.string(),
+    privateMessageViewer: z.object({ name: googleUserNameSchema }),
+    thread: z.object({ name: googleThreadNameSchema }).optional(),
+  })
   .passthrough();
 const googleChatJobSchema = z.object({
   receiptId: z.string().uuid(),
   externalEventId: z.string().min(1).max(500),
   employeeId: z.string().uuid(),
+  googleUserName: googleUserNameSchema,
   spaceName: googleSpaceNameSchema,
   threadName: googleThreadNameSchema.nullable(),
   prompt: z.string().min(1).max(8_000),
@@ -102,6 +112,7 @@ const googleChatEventSchema = z
       .passthrough(),
     user: z
       .object({
+        name: googleUserNameSchema.optional(),
         email: z.string().email().max(320),
         displayName: z.string().max(200).optional(),
       })
@@ -271,10 +282,7 @@ export function googleChatReplyMessageId(receiptId: string): string {
   return `client-${createHash("sha256").update(receiptId).digest("hex").slice(0, 40)}`;
 }
 
-async function readGoogleChatMessage(
-  messageName: string,
-  accessToken: string,
-) {
+async function readGoogleChatMessage(messageName: string, accessToken: string) {
   const response = await fetch(`${GOOGLE_CHAT_API_URL}/${messageName}`, {
     headers: { authorization: `Bearer ${accessToken}` },
     cache: "no-store",
@@ -291,12 +299,32 @@ export async function sendGoogleChatReply(input: {
   spaceName: string;
   threadName: string | null;
   text: string;
+  googleUserName: string;
 }) {
+  googleUserNameSchema.parse(input.googleUserName);
+  googleSpaceNameSchema.parse(input.spaceName);
+  if (
+    input.threadName &&
+    !input.threadName.startsWith(`${input.spaceName}/threads/`)
+  ) {
+    throw new Error("GOOGLE_CHAT_THREAD_SCOPE_MISMATCH");
+  }
   const accessToken = await googleChatAccessToken();
   const messageId = googleChatReplyMessageId(input.receiptId);
   const messageName = `${input.spaceName}/messages/${messageId}`;
+  const verifyReply = (message: z.infer<typeof googleChatMessageSchema>) => {
+    if (
+      message.name !== messageName ||
+      message.text !== input.text ||
+      message.privateMessageViewer.name !== input.googleUserName ||
+      (input.threadName && message.thread?.name !== input.threadName)
+    ) {
+      throw new Error("GOOGLE_CHAT_REPLY_MISMATCH");
+    }
+    return message;
+  };
   const existing = await readGoogleChatMessage(messageName, accessToken);
-  if (existing) return existing;
+  if (existing) return verifyReply(existing);
 
   const params = new URLSearchParams({ messageId });
   if (input.threadName) {
@@ -314,6 +342,7 @@ export async function sendGoogleChatReply(input: {
         },
         body: JSON.stringify({
           text: input.text,
+          privateMessageViewer: { name: input.googleUserName },
           ...(input.threadName ? { thread: { name: input.threadName } } : {}),
         }),
         signal: AbortSignal.timeout(15_000),
@@ -321,7 +350,7 @@ export async function sendGoogleChatReply(input: {
     );
   } catch {
     const recovered = await readGoogleChatMessage(messageName, accessToken);
-    if (recovered) return recovered;
+    if (recovered) return verifyReply(recovered);
     throw new Error("GOOGLE_CHAT_SEND_AMBIGUOUS");
   }
   if (!response.ok && response.status !== 409) {
@@ -329,7 +358,7 @@ export async function sendGoogleChatReply(input: {
   }
   const verified = await readGoogleChatMessage(messageName, accessToken);
   if (!verified) throw new Error("GOOGLE_CHAT_SEND_UNVERIFIED");
-  return verified;
+  return verifyReply(verified);
 }
 
 async function queueGoogleChatInteraction(payload: GoogleChatJob) {
@@ -377,7 +406,11 @@ export async function runGoogleChatInteractionJob(raw: unknown) {
     "google-chat",
     payload.externalEventId,
   );
-  if (!receipt || receipt.receiptId !== payload.receiptId) {
+  if (
+    !receipt ||
+    receipt.receiptId !== payload.receiptId ||
+    receipt.ownerEmployeeId !== payload.employeeId
+  ) {
     throw new Error("GOOGLE_CHAT_RECEIPT_NOT_FOUND");
   }
   if (
@@ -415,7 +448,8 @@ export async function runGoogleChatInteractionJob(raw: unknown) {
       threadId,
       content: payload.prompt,
       effort: "low",
-      harness: "direct",
+      harness: "react",
+      proposalOnly: true,
     });
     text = responseText(result.assistant.content, payload.appOrigin);
     await updateIntegrationReceiptProgress(payload.receiptId, {
@@ -429,6 +463,7 @@ export async function runGoogleChatInteractionJob(raw: unknown) {
     spaceName: payload.spaceName,
     threadName: payload.threadName,
     text,
+    googleUserName: payload.googleUserName,
   });
   await completeIntegrationReceipt(payload.receiptId, {
     ok: true,
@@ -561,6 +596,28 @@ export async function handleGoogleChatRequest(
     return Response.json({ error: "invalid_event" }, { status: 400 });
   }
   const event = parsed.data;
+  // Staff context must never be broadcast to everyone in a shared Chat space.
+  if (event.type === "MESSAGE" && !event.user.name) {
+    return Response.json(
+      { error: "chat_user_identity_required" },
+      { status: 400 },
+    );
+  }
+  const threadName = event.message?.thread?.name ?? null;
+  if (
+    (threadName && !threadName.startsWith(`${event.space.name}/threads/`)) ||
+    (event.message &&
+      !event.message.name.startsWith(`${event.space.name}/messages/`))
+  ) {
+    return Response.json({ error: "message_scope_mismatch" }, { status: 400 });
+  }
+  const privateReply = (text: string) =>
+    Response.json({
+      text,
+      ...(event.user.name
+        ? { privateMessageViewer: { name: event.user.name } }
+        : {}),
+    });
 
   let user;
   try {
@@ -616,13 +673,13 @@ export async function handleGoogleChatRequest(
     event.message?.text ??
     ""
   ).trim();
-  const threadName = event.message?.thread?.name ?? null;
   const jobPayload =
     event.type === "MESSAGE" && prompt
       ? googleChatJobSchema.safeParse({
           receiptId: receipt.receiptId,
           externalEventId,
           employeeId: user.employeeId,
+          googleUserName: event.user.name,
           spaceName: event.space.name,
           threadName,
           prompt,
@@ -656,17 +713,15 @@ export async function handleGoogleChatRequest(
       receipt.result && typeof receipt.result.text === "string"
         ? receipt.result.text
         : null;
-    return Response.json(
-      priorText
-        ? { text: priorText }
-        : { text: "HRMNY is already processing this message." },
+    return privateReply(
+      priorText ?? "hrmny AI Assistant is already processing this message.",
     );
   }
 
   try {
     if (event.type === "ADDED_TO_SPACE") {
       const text = responseText(
-        "HRMNY is connected. Ask for a client, pipeline, delivery, or operating update here; approvals and external sends remain explicit.",
+        "hrmny AI Assistant is connected. Ask for a client, pipeline, delivery, or operating update. Answers are private to you; approvals and external sends remain explicit.",
         appOrigin,
       );
       await completeIntegrationReceipt(receipt.receiptId, {
@@ -674,7 +729,7 @@ export async function handleGoogleChatRequest(
         text,
         eventType: event.type,
       });
-      return Response.json({ text });
+      return privateReply(text);
     }
     if (event.type !== "MESSAGE") {
       await completeIntegrationReceipt(receipt.receiptId, {
@@ -691,13 +746,14 @@ export async function handleGoogleChatRequest(
         appOrigin,
       );
       await completeIntegrationReceipt(receipt.receiptId, { ok: true, text });
-      return Response.json({ text });
+      return privateReply(text);
     }
     if (!jobPayload?.success) {
       return Response.json({ error: "invalid_event" }, { status: 400 });
     }
     if (getDb()) {
-      const text = "Got it — HRMNY will reply in this thread.";
+      const text =
+        "Got it — hrmny AI Assistant will reply privately in this thread.";
       try {
         const jobId = await queueGoogleChatInteraction(jobPayload.data);
         if (!jobId) throw new Error("GOOGLE_CHAT_JOB_UNAVAILABLE");
@@ -712,7 +768,7 @@ export async function handleGoogleChatRequest(
       } catch {
         return Response.json({ error: "queue_unavailable" }, { status: 503 });
       }
-      return Response.json({ text });
+      return privateReply(text);
     }
 
     // Local no-database mode remains synchronous for developer acceptance.
@@ -731,7 +787,8 @@ export async function handleGoogleChatRequest(
       threadId: thread.chatThreadId,
       content: prompt,
       effort: "low",
-      harness: "direct",
+      harness: "react",
+      proposalOnly: true,
     });
     const text = responseText(result.assistant.content, appOrigin);
     await completeIntegrationReceipt(receipt.receiptId, {
@@ -739,7 +796,7 @@ export async function handleGoogleChatRequest(
       text,
       threadId: thread.chatThreadId,
     });
-    return Response.json({ text });
+    return privateReply(text);
   } catch {
     const text = responseText(
       "I could not finish that request. Open HRMNY to retry or continue the conversation.",
@@ -755,6 +812,6 @@ export async function handleGoogleChatRequest(
       // Google will retry because the receipt store is unavailable.
       return Response.json({ error: "processing_failed" }, { status: 503 });
     }
-    return Response.json({ text });
+    return privateReply(text);
   }
 }

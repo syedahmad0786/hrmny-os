@@ -258,16 +258,16 @@ function OperatingSurfaces() {
 
       <article className="rounded-xl border border-sand bg-white/75 p-5">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
-          Agent computers · {qmUrl ? "connected" : "deployment ready"}
+          Agent computers · {qmUrl ? "address configured" : "setup required"}
         </p>
-        <h2 className="mt-1 font-display text-xl">QM + Fly Sprites</h2>
+        <h2 className="mt-1 font-display text-xl">hrmny AI Assistant</h2>
         <p className="mt-2 text-sm text-muted">
-          One isolated operator environment per user. The version-pinned deploy
-          package is ready; Fly must be billing-enabled before its apps and
-          Sprites can be created.
+          Isolated workspaces for staff and projects, powered by Fly Sprites.
+          Runtime access is available after deployment and staff access checks
+          have been verified.
         </p>
         <code className="mt-3 block overflow-x-auto rounded-lg bg-cream/70 p-3 text-xs">
-          {qmUrl ?? "https://hrmny-qm-portal.fly.dev"}
+          {qmUrl ?? "https://hrmny-portal.fly.dev"}
         </code>
         {qmUrl ? (
           <div className="mt-3 flex flex-wrap gap-2">
@@ -275,7 +275,7 @@ function OperatingSurfaces() {
               href={qmUrl}
               className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white"
             >
-              Open QM
+              Open hrmny AI Assistant
             </a>
             <a
               href={`${qmUrl}/admin/connectors`}
@@ -286,8 +286,7 @@ function OperatingSurfaces() {
           </div>
         ) : (
           <p className="mt-3 text-xs font-medium text-amber-800">
-            No dead link is shown until the Fly deployment is live and
-            NEXT_PUBLIC_QM_URL is set.
+            The assistant workspace will appear here after runtime setup.
           </p>
         )}
       </article>

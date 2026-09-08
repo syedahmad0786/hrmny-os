@@ -1,6 +1,7 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetIntegrationReceiptMemory } from "./integrations/inbox";
+import { createCaller } from "./trpc/root";
 import {
   googleChatAsyncConfigured,
   googleChatEndpoint,
@@ -9,6 +10,15 @@ import {
   sendGoogleChatReply,
   verifyGoogleChatJwt,
 } from "./google-chat";
+
+const { chatSend } = vi.hoisted(() => ({
+  chatSend: vi.fn(async () => ({
+    assistant: { content: "Scoped task result" },
+  })),
+}));
+vi.mock("./trpc/root", () => ({
+  createCaller: vi.fn(() => ({ chat: { send: chatSend } })),
+}));
 
 vi.mock("./auth/session", () => ({
   resolveActiveStaffByEmail: vi.fn(async (email: string) =>
@@ -125,12 +135,18 @@ describe("Google Chat request verification", () => {
     const receiptId = "550e8400-e29b-41d4-a716-446655440000";
     const messageId = googleChatReplyMessageId(receiptId);
     const messageName = `spaces/AAAA/messages/${messageId}`;
+    const verifiedMessage = {
+      name: messageName,
+      text: "Pipeline is ready.",
+      privateMessageViewer: { name: "users/123456" },
+      thread: { name: "spaces/AAAA/threads/thread-1" },
+    };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(Response.json({ access_token: "access-token" }))
       .mockResolvedValueOnce(new Response(null, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ name: messageName }))
-      .mockResolvedValueOnce(Response.json({ name: messageName }));
+      .mockResolvedValueOnce(Response.json(verifiedMessage));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
@@ -139,17 +155,19 @@ describe("Google Chat request verification", () => {
         spaceName: "spaces/AAAA",
         threadName: "spaces/AAAA/threads/thread-1",
         text: "Pipeline is ready.",
+        googleUserName: "users/123456",
       }),
     ).resolves.toMatchObject({ name: messageName });
     fetchMock
       .mockResolvedValueOnce(Response.json({ access_token: "access-token" }))
-      .mockResolvedValueOnce(Response.json({ name: messageName }));
+      .mockResolvedValueOnce(Response.json(verifiedMessage));
     await expect(
       sendGoogleChatReply({
         receiptId,
         spaceName: "spaces/AAAA",
         threadName: "spaces/AAAA/threads/thread-1",
         text: "Pipeline is ready.",
+        googleUserName: "users/123456",
       }),
     ).resolves.toMatchObject({ name: messageName });
     expect(googleChatAsyncConfigured()).toBe(true);
@@ -160,6 +178,7 @@ describe("Google Chat request verification", () => {
     expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(
       JSON.stringify({
         text: "Pipeline is ready.",
+        privateMessageViewer: { name: "users/123456" },
         thread: { name: "spaces/AAAA/threads/thread-1" },
       }),
     );
@@ -169,6 +188,24 @@ describe("Google Chat request verification", () => {
           String(url).includes("/messages?") && init?.method === "POST",
       ),
     ).toHaveLength(1);
+    for (const wrong of [
+      { ...verifiedMessage, privateMessageViewer: { name: "users/999999" } },
+      { ...verifiedMessage, text: "Different content" },
+      { ...verifiedMessage, thread: { name: "spaces/BBBB/threads/thread-1" } },
+    ]) {
+      fetchMock
+        .mockResolvedValueOnce(Response.json({ access_token: "access-token" }))
+        .mockResolvedValueOnce(Response.json(wrong));
+      await expect(
+        sendGoogleChatReply({
+          receiptId,
+          spaceName: "spaces/AAAA",
+          threadName: "spaces/AAAA/threads/thread-1",
+          text: "Pipeline is ready.",
+          googleUserName: "users/123456",
+        }),
+      ).rejects.toThrow("GOOGLE_CHAT_REPLY_MISMATCH");
+    }
   });
 
   it("accepts and replays one signed staff onboarding event", async () => {
@@ -202,7 +239,76 @@ describe("Google Chat request verification", () => {
     const replayPayload = await replay.json();
     expect(firstPayload).toEqual(replayPayload);
     expect(replayPayload).toMatchObject({
-      text: expect.stringContaining("HRMNY is connected"),
+      text: expect.stringContaining("hrmny AI Assistant is connected"),
     });
+  });
+
+  it("binds signed messages to staff, enables tools, and returns private replies", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ keys: [publicJwk] })),
+    );
+    const liveNow = Math.floor(Date.now() / 1_000);
+    const event = {
+      type: "MESSAGE",
+      space: { name: "spaces/AAAA" },
+      user: { name: "users/123456", email: "operator@hrmny.co" },
+      message: {
+        name: "spaces/AAAA/messages/request-1",
+        text: "Check delivery",
+        thread: { name: "spaces/AAAA/threads/thread-1" },
+      },
+    };
+    const send = (body: unknown) =>
+      handleGoogleChatRequest(
+        new Request(audience, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token({ exp: liveNow + 300, iat: liveNow - 10 })}`,
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+    const response = await send(event);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      text: expect.stringContaining("Scoped task result"),
+      privateMessageViewer: { name: "users/123456" },
+    });
+    expect(chatSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harness: "react",
+        proposalOnly: true,
+        content: "Check delivery",
+      }),
+    );
+    expect(createCaller).toHaveBeenCalledWith(
+      expect.objectContaining({
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+        clientId: null,
+      }),
+    );
+    expect(
+      (await send({ ...event, user: { email: "operator@hrmny.co" } })).status,
+    ).toBe(400);
+    expect(
+      (
+        await send({
+          ...event,
+          user: { ...event.user, email: "outsider@example.com" },
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await send({
+          ...event,
+          message: {
+            ...event.message,
+            thread: { name: "spaces/BBBB/threads/thread-1" },
+          },
+        })
+      ).status,
+    ).toBe(400);
   });
 });

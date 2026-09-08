@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatReadyStrip } from "@/components/chat-ready-strip";
 import { nextLinksFromChatObservation } from "@/lib/agent-next-links";
@@ -267,7 +268,7 @@ export default function HrmnyChatPage() {
 
   const bindingLabel = selectedAgent
     ? selectedAgent.displayName
-    : "Default Hrmny agent";
+    : "hrmny AI Assistant";
   const sandboxLabel = sandboxClient?.name ?? "Staff / org scope";
 
   function submit(text: string, harnessOverride?: HarnessMode) {
@@ -311,10 +312,16 @@ export default function HrmnyChatPage() {
             ☰
           </button>
           <div className="hrmny-chat-brand-lockup">
-            <span className="hrmny-chat-mark">h</span>
+            <Image
+              src="/icons/hrmny-assistant.png"
+              alt="HRMNY"
+              width={36}
+              height={36}
+              className="rounded-lg bg-white"
+            />
             <div>
-              <strong>Hrmny</strong>
-              <small>Agents</small>
+              <strong>Harmony</strong>
+              <small>AI Assistant</small>
             </div>
           </div>
         </div>
@@ -360,7 +367,7 @@ export default function HrmnyChatPage() {
                 }
               }}
             >
-              <option value="">Default Hrmny agent</option>
+              <option value="">hrmny AI Assistant</option>
               {visibleAgents.map((a) => (
                 <option key={a.customAgentId} value={a.slug}>
                   {a.displayName}
@@ -486,7 +493,7 @@ export default function HrmnyChatPage() {
       <section className="hrmny-chat-main">
         <header className="hrmny-chat-header">
           <div>
-            <p className="hrmny-chat-kicker">Hrmny chat</p>
+            <p className="hrmny-chat-kicker">hrmny AI Assistant</p>
             <h1>{activeTitle}</h1>
           </div>
           <div className="hrmny-chat-pills">
@@ -539,8 +546,8 @@ export default function HrmnyChatPage() {
               <h2>What should {bindingLabel} work on?</h2>
               <p>
                 {clientId
-                  ? "Hrmny reads scoped context and recommends the next handoff"
-                  : "Hrmny plans and answers from the reviewed org context"}{" "}
+                  ? "hrmny AI Assistant reads scoped context and recommends the next handoff"
+                  : "hrmny AI Assistant plans and answers from the reviewed org context"}{" "}
                 — scoped to {sandboxLabel}
                 {toolCount > 0 ? ` · ${toolCount} catalog entries` : ""}.
               </p>
@@ -594,7 +601,8 @@ export default function HrmnyChatPage() {
                     <div className="hrmny-chat-msg-role">
                       {m.role === "user"
                         ? "You"
-                        : (selectedAgent?.displayName ?? "Hrmny")}
+                        : (selectedAgent?.displayName ??
+                          "hrmny AI Assistant")}
                     </div>
                     <div className="hrmny-chat-msg-body">
                       {m.role === "assistant" ? (
@@ -611,7 +619,7 @@ export default function HrmnyChatPage() {
                   data-testid="chat-live-work"
                 >
                   <div className="hrmny-chat-msg-role">
-                    {selectedAgent?.displayName ?? "Hrmny"}
+                    {selectedAgent?.displayName ?? "hrmny AI Assistant"}
                   </div>
                   <div className="hrmny-chat-msg-body">
                     <div className="hrmny-chat-live-dock">

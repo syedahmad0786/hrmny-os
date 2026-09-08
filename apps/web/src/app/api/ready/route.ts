@@ -162,7 +162,7 @@ export async function GET() {
       qm: {
         status: qmUrl ? "configured" : "setup_required",
         publicUrl: qmUrl || null,
-        plannedUrl: "https://hrmny-qm-portal.fly.dev",
+        plannedUrl: "https://hrmny-portal.fly.dev",
       },
     },
     tools,
