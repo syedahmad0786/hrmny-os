@@ -53,8 +53,9 @@ type JobRow = {
   owner_employee_id: string;
 };
 
-function threadRef(employeeId: string, externalRef: string) {
-  return `hrmny-google-chat:${employeeId}:${createHash("sha256").update(externalRef).digest("hex")}`;
+function threadRef(employeeId: string, email: string, externalRef: string) {
+  // Native QM enables web continuation and approvals only on the principal's web thread namespace.
+  return `web:${email}:google-chat-${employeeId}-${createHash("sha256").update(externalRef).digest("hex")}`;
 }
 
 /** Only the private source worker calls this; delivery remains in the existing OS worker. */
@@ -145,7 +146,7 @@ export async function operateQmGoogleChat(raw: unknown) {
     `);
     throw new Error("QM_CHAT_STAFF_REVOKED");
   }
-  const qmThreadRef = threadRef(user.employeeId, job.externalRef);
+  const qmThreadRef = threadRef(user.employeeId, user.email, job.externalRef);
   if (input.action === "claim") {
     const bound = await db.execute(sql`
       update public.scheduled_job set result = result || jsonb_build_object('actorId', ${user.email}::text)
