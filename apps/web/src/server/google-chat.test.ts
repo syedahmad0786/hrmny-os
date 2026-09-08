@@ -134,9 +134,10 @@ describe("Google Chat request verification", () => {
     );
     const receiptId = "550e8400-e29b-41d4-a716-446655440000";
     const messageId = googleChatReplyMessageId(receiptId);
-    const messageName = `spaces/AAAA/messages/${messageId}`;
+    const messageName = "spaces/AAAA/messages/server-id.server-id";
     const verifiedMessage = {
       name: messageName,
+      clientAssignedMessageId: messageId,
       text: "Pipeline is ready.",
       privateMessageViewer: { name: "users/123456" },
       thread: { name: "spaces/AAAA/threads/thread-1" },
@@ -144,7 +145,6 @@ describe("Google Chat request verification", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(Response.json({ access_token: "access-token" }))
-      .mockResolvedValueOnce(new Response(null, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ name: messageName }))
       .mockResolvedValueOnce(Response.json(verifiedMessage));
     vi.stubGlobal("fetch", fetchMock);
@@ -160,6 +160,7 @@ describe("Google Chat request verification", () => {
     ).resolves.toMatchObject({ name: messageName });
     fetchMock
       .mockResolvedValueOnce(Response.json({ access_token: "access-token" }))
+      .mockResolvedValueOnce(new Response(null, { status: 409 }))
       .mockResolvedValueOnce(Response.json(verifiedMessage));
     await expect(
       sendGoogleChatReply({
@@ -172,10 +173,16 @@ describe("Google Chat request verification", () => {
     ).resolves.toMatchObject({ name: messageName });
     expect(googleChatAsyncConfigured()).toBe(true);
     expect(messageId).toMatch(/^client-[a-f0-9]{40}$/);
-    expect(String(fetchMock.mock.calls[2]?.[0])).toContain(
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
       "messageReplyOption=REPLY_MESSAGE_OR_FAIL",
     );
-    expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
+      `requestId=${receiptId}`,
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      String(fetchMock.mock.calls[4]?.[0]),
+    );
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(
       JSON.stringify({
         text: "Pipeline is ready.",
         privateMessageViewer: { name: "users/123456" },
@@ -187,14 +194,17 @@ describe("Google Chat request verification", () => {
         ([url, init]) =>
           String(url).includes("/messages?") && init?.method === "POST",
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     for (const wrong of [
+      { ...verifiedMessage, name: "spaces/BBBB/messages/server-id.server-id" },
+      { ...verifiedMessage, clientAssignedMessageId: "client-another-receipt" },
       { ...verifiedMessage, privateMessageViewer: { name: "users/999999" } },
       { ...verifiedMessage, text: "Different content" },
       { ...verifiedMessage, thread: { name: "spaces/BBBB/threads/thread-1" } },
     ]) {
       fetchMock
         .mockResolvedValueOnce(Response.json({ access_token: "access-token" }))
+        .mockResolvedValueOnce(new Response(null, { status: 409 }))
         .mockResolvedValueOnce(Response.json(wrong));
       await expect(
         sendGoogleChatReply({
@@ -206,6 +216,32 @@ describe("Google Chat request verification", () => {
         }),
       ).rejects.toThrow("GOOGLE_CHAT_REPLY_MISMATCH");
     }
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ access_token: "access-token" }))
+      .mockRejectedValueOnce(new Error("Response lost"))
+      .mockResolvedValueOnce(Response.json(verifiedMessage));
+    await expect(
+      sendGoogleChatReply({
+        receiptId,
+        spaceName: "spaces/AAAA",
+        threadName: "spaces/AAAA/threads/thread-1",
+        text: "Pipeline is ready.",
+        googleUserName: "users/123456",
+      }),
+    ).resolves.toMatchObject({ name: messageName });
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ access_token: "access-token" }))
+      .mockResolvedValueOnce(new Response(null, { status: 409 }))
+      .mockResolvedValueOnce(new Response(null, { status: 403 }));
+    await expect(
+      sendGoogleChatReply({
+        receiptId,
+        spaceName: "spaces/AAAA",
+        threadName: "spaces/AAAA/threads/thread-1",
+        text: "Pipeline is ready.",
+        googleUserName: "users/123456",
+      }),
+    ).rejects.toThrow("GOOGLE_CHAT_READBACK_403");
   });
 
   it("accepts and replays one signed staff onboarding event", async () => {

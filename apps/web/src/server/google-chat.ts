@@ -78,6 +78,7 @@ const serviceAccountSchema = z.object({
 const googleChatMessageSchema = z
   .object({
     name: z.string().min(1).max(500),
+    clientAssignedMessageId: z.string().min(1).max(63),
     text: z.string(),
     privateMessageViewer: z.object({ name: googleUserNameSchema }),
     thread: z.object({ name: googleThreadNameSchema }).optional(),
@@ -301,6 +302,7 @@ export async function sendGoogleChatReply(input: {
   text: string;
   googleUserName: string;
 }) {
+  z.string().uuid().parse(input.receiptId);
   googleUserNameSchema.parse(input.googleUserName);
   googleSpaceNameSchema.parse(input.spaceName);
   if (
@@ -314,7 +316,11 @@ export async function sendGoogleChatReply(input: {
   const messageName = `${input.spaceName}/messages/${messageId}`;
   const verifyReply = (message: z.infer<typeof googleChatMessageSchema>) => {
     if (
-      message.name !== messageName ||
+      !message.name.startsWith(`${input.spaceName}/messages/`) ||
+      !/^[A-Za-z0-9_.-]+$/.test(
+        message.name.slice(`${input.spaceName}/messages/`.length),
+      ) ||
+      message.clientAssignedMessageId !== messageId ||
       message.text !== input.text ||
       message.privateMessageViewer.name !== input.googleUserName ||
       (input.threadName && message.thread?.name !== input.threadName)
@@ -323,10 +329,9 @@ export async function sendGoogleChatReply(input: {
     }
     return message;
   };
-  const existing = await readGoogleChatMessage(messageName, accessToken);
-  if (existing) return verifyReply(existing);
-
-  const params = new URLSearchParams({ messageId });
+  // Google can return 403 for an absent message. Create idempotently first;
+  // reads below still fail closed and verify the provider's canonical resource.
+  const params = new URLSearchParams({ messageId, requestId: input.receiptId });
   if (input.threadName) {
     params.set("messageReplyOption", "REPLY_MESSAGE_OR_FAIL");
   }
