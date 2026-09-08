@@ -1,0 +1,15 @@
+# hrmny GBrain retrieval
+
+The OS authenticates the employee and checks current Work project membership before signing an exact, short-lived read request. It repeats authorization after the provider responds, so revoked access discards the response. The signing secret belongs only to OS and this service; never give it to a user Sprite, generic QM connector or browser.
+
+This service runs the pinned GBrain dispatch layer with `remote: true`, explicit read scopes, and an explicit source grant. Only search, page read, outgoing links and incoming links are exposed. Both graph endpoints and graph provenance must be in the grant. Global catalogs, counts, admin functions and writes are unavailable over this endpoint.
+
+Source conventions: `hrmny-company` for reviewed company knowledge, `hrmny-personal-<employee UUID>` and `hrmny-project-<Work project UUID>`. Prefix page slugs with their source identity when ingesting to avoid ambiguous duplicate slugs. Client project content stays in its Work project partition. Unassigned client-wide memory and client-portal retrieval require their own explicit grants; they are not implicitly granted to staff with access to one client project.
+
+Runtime: Bun, GBrain revision `5cfb84f1d3a809c70064c292c23db3d538d5c551`, dedicated Postgres database, `GBRAIN_SOURCE_ROOT`, `GBRAIN_DATABASE_URL`, `GBRAIN_DATABASE_PROJECT_REF`, `GBRAIN_REQUEST_SECRET`. OS needs `GBRAIN_RETRIEVAL_URL` ending exactly in `/read` and the same request secret. Schemas are provisioned separately. Never point the service at the existing OS database. A missing embedding provider is keyword-only retrieval, not semantic-vector acceptance.
+
+Checks: `node --test services/gbrain/access.test.mjs` and `pnpm --filter @hrmny/web test src/server/gbrain-access.test.ts`. For the pinned upstream engine, set an isolated `GBRAIN_HOME` and `GBRAIN_SOURCE_ROOT`, clear database/model credentials, then run `bun services/gbrain/engine.proof.mjs`. That check creates an in-memory PGLite database and verifies search, pages and graph edges with two synthetic project partitions.
+
+Deployment on 9 September 2026: `hrmny-brain` on Fly Singapore, separate Supabase project `bdjtpiypowcsvdwxaejb`, schema 145, vector extension 0.8.2. Public Supabase API roles have no usage privilege on the memory schema. Credentials live in the HRMNY 1Password vault. No private documents have been ingested and no embedding provider is configured. The database currently uses the existing HRMNY Free plan; a production availability plan remains a separate decision.
+
+The web and Google Chat harness expose `brain_read` only when configured, for staff conversations without a client-wide scope. Every read retains fresh employee/project authorization. Requests expire after 15 seconds with a maximum five-second tolerance for issuer clock skew. This endpoint does not grant the client portal or user Sprites access to organization knowledge. Private ingestion, semantic embeddings, client portal grants and QM principal integration remain separate acceptance work.
