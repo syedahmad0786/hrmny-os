@@ -494,7 +494,11 @@ export function pickActiveComposioAccount<
         (candidate) => candidate.id === input.externalConnectionId,
       )
     : undefined;
-  if (byId && isActiveComposioStatus(byId.status, byId.is_disabled)) {
+  if (
+    byId &&
+    byId.toolkit.slug.toLowerCase() === slug &&
+    isActiveComposioStatus(byId.status, byId.is_disabled)
+  ) {
     return byId;
   }
   return input.remote.find(
@@ -506,10 +510,10 @@ export function pickActiveComposioAccount<
 
 /**
  * After Composio OAuth, vault rows often stay `pending` even when the remote
- * account is ACTIVE. Flip them to `connected` so /api/ready and Connections UI
- * reflect a completed connect (and keep externalConnectionId in sync).
+ * account is ACTIVE. Reconcile only matching toolkits; a missing, disabled or
+ * mismatched remote account must not leave an old `connected` status in the UI.
  */
-async function reconcileComposioManagedStatus(
+export async function reconcileComposioManagedStatus(
   db: NonNullable<ReturnType<typeof getDb>>,
   employeeId: string,
   remote: readonly ComposioConnectedAccount[],
@@ -537,11 +541,12 @@ async function reconcileComposioManagedStatus(
       toolkitSlug: slug,
       remote,
     });
-    if (!current) {
+    if (!current && account.status !== "connected") {
       continue;
     }
     if (
       account.status === "connected" &&
+      current &&
       account.externalConnectionId === current.id
     ) {
       continue;
@@ -549,13 +554,20 @@ async function reconcileComposioManagedStatus(
     await db
       .update(connectionAccount)
       .set({
-        status: "connected",
-        externalConnectionId: current.id,
-        lastError: null,
+        status: current ? "connected" : "error",
+        externalConnectionId: current?.id ?? account.externalConnectionId,
+        lastError: current ? null : "COMPOSIO_ACCOUNT_NOT_ACTIVE_FOR_TOOLKIT",
         updatedAt: new Date(),
       })
       .where(
-        eq(connectionAccount.connectionAccountId, account.connectionAccountId),
+        and(
+          eq(
+            connectionAccount.connectionAccountId,
+            account.connectionAccountId,
+          ),
+          eq(connectionAccount.ownerEmployeeId, employeeId),
+          eq(connectionAccount.scope, "staff"),
+        ),
       );
   }
 }
