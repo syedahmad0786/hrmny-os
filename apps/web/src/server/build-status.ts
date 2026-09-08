@@ -1,6 +1,7 @@
 import { pingDatabase } from "@hrmny/db";
 import { getSupabasePublicConfig } from "@/lib/supabase-config";
 import { GBRAIN_UPSTREAM_VERSION, gbrainConfigured } from "@/server/gbrain";
+import { gbrainRetrievalConfigured } from "@/server/gbrain-access";
 
 export type MilestoneStatus = "done" | "live_pending" | "blocked" | "next";
 
@@ -36,6 +37,7 @@ export async function getBuildStatus() {
     process.env.GOOGLE_CHAT_SERVICE_ACCOUNT_JSON?.trim(),
   );
   const companyBrainConfigured = gbrainConfigured();
+  const brainSearchConfigured = gbrainRetrievalConfigured();
   const qmUrl = (
     process.env.QM_PUBLIC_URL?.trim() ||
     process.env.NEXT_PUBLIC_QM_URL?.trim() ||
@@ -57,7 +59,8 @@ export async function getBuildStatus() {
       title: "Substrate",
       fee: "$1,500",
       status: "live_pending",
-      summary: "Core live; Google Chat, GBrain and Harmony runtime need provider acceptance",
+      summary:
+        "Core live; Google Chat, GBrain and hrmny runtime have separate acceptance checks",
       href: "/gate",
       demoReady: true,
     },
@@ -166,15 +169,20 @@ export async function getBuildStatus() {
       status: qmUrl ? "endpoint_ready" : "missing",
       detail: qmUrl
         ? `${qmUrl} — address configured; staff access and execution need live verification`
-        : "Deployment contract ready; Fly billing and quota must be unlocked before provisioning.",
+        : "Runtime access remains pending; see the deployment receipt for provisioned services and the next acceptance check.",
     },
     {
       id: "gbrain",
       label: "GBrain company knowledge",
-      status: companyBrainConfigured ? "endpoint_ready" : "missing",
-      detail: companyBrainConfigured
-        ? `Scoped ${GBRAIN_UPSTREAM_VERSION} bridge configured; share one published article to verify read-back.`
-        : `Pinned ${GBRAIN_UPSTREAM_VERSION} bridge is built; add the dedicated MCP URL, projector token, and source ID.`,
+      status:
+        companyBrainConfigured || brainSearchConfigured
+          ? "endpoint_ready"
+          : "missing",
+      detail: brainSearchConfigured
+        ? "Scoped keyword search and graph reads are enabled in staff Chat. Reviewed article publishing has a separate connection."
+        : companyBrainConfigured
+          ? `Scoped ${GBRAIN_UPSTREAM_VERSION} bridge configured; share one published article to verify read-back.`
+          : `Pinned ${GBRAIN_UPSTREAM_VERSION} bridge is built; add the dedicated MCP URL, projector token, and source ID.`,
     },
     {
       id: "asana",

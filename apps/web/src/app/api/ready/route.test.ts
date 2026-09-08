@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearDemoWorkGovernance,
   getWorkOrganizationPolicy,
@@ -8,6 +8,22 @@ import { GET } from "./route";
 
 describe("/api/ready", () => {
   beforeEach(() => clearDemoWorkGovernance());
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("distinguishes configured retrieval from article publishing without exposing its secret", async () => {
+    vi.stubEnv("GBRAIN_RETRIEVAL_URL", "https://brain.example.test/read");
+    vi.stubEnv(
+      "GBRAIN_REQUEST_SECRET",
+      "synthetic-private-signing-key-1234567890",
+    );
+    const body = await (await GET()).json();
+    expect(body.surfaces.gbrain.retrieval).toBe("configured");
+    expect(JSON.stringify(body)).not.toContain("synthetic-private-signing-key");
+    vi.stubEnv("GBRAIN_REQUEST_SECRET", "");
+    expect((await (await GET()).json()).surfaces.gbrain.retrieval).toBe(
+      "missing",
+    );
+  });
 
   it("returns llm and platform fields without secrets", async () => {
     const res = await GET();

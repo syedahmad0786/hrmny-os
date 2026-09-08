@@ -159,6 +159,7 @@ function OperatingSurfaces() {
   const qmUrl = process.env.NEXT_PUBLIC_QM_URL?.trim().replace(/\/$/, "");
   const [googleChatStatus, setGoogleChatStatus] = useState("checking");
   const [gbrainStatus, setGbrainStatus] = useState("checking");
+  const [brainSearchEnabled, setBrainSearchEnabled] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void fetch("/api/ready")
@@ -169,6 +170,9 @@ function OperatingSurfaces() {
             body?.surfaces?.googleChat?.status ?? "endpoint_ready",
           );
           setGbrainStatus(body?.surfaces?.gbrain?.status ?? "setup_required");
+          setBrainSearchEnabled(
+            body?.surfaces?.gbrain?.retrieval === "configured",
+          );
         }
       })
       .catch(() => {
@@ -231,23 +235,35 @@ function OperatingSurfaces() {
         }`}
       >
         <p className="text-xs font-semibold uppercase tracking-[0.16em]">
-          Company brain ·{" "}
+          Knowledge ·{" "}
           {gbrainLive
             ? "live verified"
-            : gbrainConfigured
-              ? "credential present"
-              : "setup required"}
+            : brainSearchEnabled
+              ? "search enabled"
+              : gbrainConfigured
+                ? "credential present"
+                : "setup required"}
         </p>
         <h2 className="mt-1 font-display text-xl">
-          Published knowledge → GBrain
+          Search and publish knowledge
         </h2>
         <p className="mt-2 text-sm">
           {gbrainLive
             ? "A reviewed HRMNY article has crossed the scoped bridge and passed provider read-back. New versions still require their own approval."
-            : gbrainConfigured
-              ? "The scoped bridge is connected. Share one published article from Workplace to complete the live verification."
-              : "Deploy the pinned GBrain service, then add its MCP URL, source-scoped token and source ID. Drafts and operational records never cross this bridge."}
+            : brainSearchEnabled
+              ? "Chat can search indexed company, personal and authorized project knowledge and follow graph links. Publishing new articles from the Knowledge Hub still needs its separate connection."
+              : gbrainConfigured
+                ? "The scoped bridge is connected. Share one published article from Workplace to complete the live verification."
+                : "Deploy the pinned GBrain service, then add its MCP URL, source-scoped token and source ID. Drafts and operational records never cross this bridge."}
         </p>
+        {brainSearchEnabled && (
+          <Link
+            href="/chat"
+            className="mt-3 mr-3 inline-flex min-h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white"
+          >
+            Search in Chat
+          </Link>
+        )}
         <Link
           href="/workplace"
           className="mt-3 inline-flex min-h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white"
