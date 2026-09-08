@@ -82,6 +82,7 @@ vi.mock("@/server/sales-os/store", () => ({
 }));
 vi.mock("@/server/google-chat", () => ({
   GOOGLE_CHAT_INTERACTION_JOB_KIND: "google_chat_interaction",
+  GOOGLE_CHAT_QM_JOB_KIND: "google_chat_qm_interaction",
   runGoogleChatInteractionJob: mocks.runGoogleChatInteractionJob,
   failGoogleChatInteractionJob: mocks.failGoogleChatInteractionJob,
 }));
