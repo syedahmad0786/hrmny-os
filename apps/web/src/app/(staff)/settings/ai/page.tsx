@@ -55,6 +55,14 @@ function AdminNav() {
       >
         Feature Lab
       </Link>
+      {process.env.NEXT_PUBLIC_QM_URL && (
+        <a
+          className="rounded-full border border-sand bg-white px-4 py-2"
+          href={`${process.env.NEXT_PUBLIC_QM_URL.replace(/\/$/, "")}/admin/`}
+        >
+          Assistant administration
+        </a>
+      )}
     </nav>
   );
 }

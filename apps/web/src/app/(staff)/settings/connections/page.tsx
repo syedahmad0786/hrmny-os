@@ -278,9 +278,9 @@ function OperatingSurfaces() {
         </p>
         <h2 className="mt-1 font-display text-xl">hrmny AI Assistant</h2>
         <p className="mt-2 text-sm text-muted">
-          Isolated workspaces for staff and projects, powered by Fly Sprites.
-          Runtime access is available after deployment and staff access checks
-          have been verified.
+          Chat, files, project workspaces, skills, memory and schedules in the
+          hrmny assistant. Administrators manage runtime settings, models,
+          connectors, users and activity through Assistant administration.
         </p>
         <code className="mt-3 block overflow-x-auto rounded-lg bg-cream/70 p-3 text-xs">
           {qmUrl ?? "https://hrmny-portal.fly.dev"}
@@ -294,10 +294,10 @@ function OperatingSurfaces() {
               Open hrmny AI Assistant
             </a>
             <a
-              href={`${qmUrl}/admin/connectors`}
+              href={`${qmUrl}/admin/`}
               className="inline-flex min-h-11 items-center rounded-lg border border-sand bg-white px-4 text-sm font-semibold"
             >
-              Manage connectors
+              Assistant administration
             </a>
           </div>
         ) : (
