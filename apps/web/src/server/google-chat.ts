@@ -449,6 +449,7 @@ export async function runGoogleChatInteractionJob(raw: unknown) {
       content: payload.prompt,
       effort: "low",
       harness: "react",
+      proposalOnly: true,
     });
     text = responseText(result.assistant.content, payload.appOrigin);
     await updateIntegrationReceiptProgress(payload.receiptId, {
@@ -787,6 +788,7 @@ export async function handleGoogleChatRequest(
       content: prompt,
       effort: "low",
       harness: "react",
+      proposalOnly: true,
     });
     const text = responseText(result.assistant.content, appOrigin);
     await completeIntegrationReceipt(receipt.receiptId, {

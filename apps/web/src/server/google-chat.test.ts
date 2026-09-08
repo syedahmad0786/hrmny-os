@@ -276,7 +276,11 @@ describe("Google Chat request verification", () => {
       privateMessageViewer: { name: "users/123456" },
     });
     expect(chatSend).toHaveBeenCalledWith(
-      expect.objectContaining({ harness: "react", content: "Check delivery" }),
+      expect.objectContaining({
+        harness: "react",
+        proposalOnly: true,
+        content: "Check delivery",
+      }),
     );
     expect(createCaller).toHaveBeenCalledWith(
       expect.objectContaining({

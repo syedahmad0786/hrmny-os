@@ -31,10 +31,22 @@ beforeEach(() => {
   });
 });
 it("uses the authenticated employee and original request for a proposal, without applying it", async () => {
-  const tool = buildChatDefaultTools({
+  const tools = buildChatDefaultTools({
     employeeId,
     immutableUserPrompt: "Draft a task for the launch",
-  }).find((t) => t.name === "work_propose")!;
+    proposalOnly: true,
+  });
+  expect(tools.map((t) => t.name).sort()).toEqual([
+    "connected_search",
+    "crm_read",
+    "delivery_read",
+    "now",
+    "operations_read",
+    "outreach_read",
+    "search_memory",
+    "work_propose",
+  ]);
+  const tool = tools.find((t) => t.name === "work_propose")!;
   const result = await tool.run({
     projectId,
     employeeId: "attacker",
@@ -56,8 +68,10 @@ it("uses the authenticated employee and original request for a proposal, without
   await expect(tool.run({ projectId })).rejects.toThrow();
   expect(generateWorkAi).toHaveBeenCalledTimes(1);
   expect(
-    buildChatDefaultTools({ employeeId, clientId: projectId }).some(
-      (t) => t.name === "work_propose",
-    ),
+    buildChatDefaultTools({
+      employeeId,
+      clientId: projectId,
+      proposalOnly: true,
+    }).some((t) => t.name === "work_propose"),
   ).toBe(false);
 });

@@ -343,6 +343,7 @@ export function buildChatDefaultTools(scope: {
   clientId?: string | null;
   roles?: readonly string[];
   immutableUserPrompt?: string;
+  proposalOnly?: boolean;
 }): HarnessTool[] {
   const tools: HarnessTool[] = [
     {
@@ -807,11 +808,11 @@ export function buildChatDefaultTools(scope: {
   // through a typed command/effect broker, never a model-selected generic tool.
   // Recognizable portal-decision wording remains a second fail-closed guard for
   // org Chat, but it is not the authorization boundary.
-  if (
-    scope.clientId ||
-    isPortalDecisionIntent(scope.immutableUserPrompt ?? "")
-  ) {
-    const readOnly = new Set([
+  const readOnlyScope =
+    Boolean(scope.clientId) ||
+    isPortalDecisionIntent(scope.immutableUserPrompt ?? "");
+  if (readOnlyScope || scope.proposalOnly) {
+    const allowed = new Set([
       "search_memory",
       "operations_read",
       "connected_search",
@@ -820,7 +821,8 @@ export function buildChatDefaultTools(scope: {
       "outreach_read",
       "now",
     ]);
-    return tools.filter((tool) => readOnly.has(tool.name));
+    if (!readOnlyScope) allowed.add("work_propose");
+    return tools.filter((tool) => allowed.has(tool.name));
   }
   return tools;
 }
@@ -830,6 +832,7 @@ function defaultTools(scope: {
   clientId?: string | null;
   roles?: readonly string[];
   immutableUserPrompt?: string;
+  proposalOnly?: boolean;
 }): HarnessTool[] {
   return buildChatDefaultTools(scope);
 }
@@ -967,6 +970,7 @@ export const chatRouter = router({
         content: z.string().min(1).max(8000),
         effort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
         harness: z.enum(["react", "direct"]).optional(),
+        proposalOnly: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1113,6 +1117,7 @@ export const chatRouter = router({
           clientId: thread.clientId,
           roles: ctx.roles,
           immutableUserPrompt: input.content,
+          proposalOnly: input.proposalOnly,
         }),
       ];
       const steps: Array<Record<string, unknown>> = [];
