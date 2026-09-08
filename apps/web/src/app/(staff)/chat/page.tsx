@@ -268,7 +268,7 @@ export default function HrmnyChatPage() {
 
   const bindingLabel = selectedAgent
     ? selectedAgent.displayName
-    : "Harmony AI Assistant";
+    : "hrmny AI Assistant";
   const sandboxLabel = sandboxClient?.name ?? "Staff / org scope";
 
   function submit(text: string, harnessOverride?: HarnessMode) {
@@ -313,7 +313,7 @@ export default function HrmnyChatPage() {
           </button>
           <div className="hrmny-chat-brand-lockup">
             <Image
-              src="/icons/harmony-assistant.png"
+              src="/icons/hrmny-assistant.png"
               alt="HRMNY"
               width={36}
               height={36}
@@ -367,7 +367,7 @@ export default function HrmnyChatPage() {
                 }
               }}
             >
-              <option value="">Harmony AI Assistant</option>
+              <option value="">hrmny AI Assistant</option>
               {visibleAgents.map((a) => (
                 <option key={a.customAgentId} value={a.slug}>
                   {a.displayName}
@@ -493,7 +493,7 @@ export default function HrmnyChatPage() {
       <section className="hrmny-chat-main">
         <header className="hrmny-chat-header">
           <div>
-            <p className="hrmny-chat-kicker">Harmony AI Assistant</p>
+            <p className="hrmny-chat-kicker">hrmny AI Assistant</p>
             <h1>{activeTitle}</h1>
           </div>
           <div className="hrmny-chat-pills">
@@ -546,8 +546,8 @@ export default function HrmnyChatPage() {
               <h2>What should {bindingLabel} work on?</h2>
               <p>
                 {clientId
-                  ? "Harmony AI Assistant reads scoped context and recommends the next handoff"
-                  : "Harmony AI Assistant plans and answers from the reviewed org context"}{" "}
+                  ? "hrmny AI Assistant reads scoped context and recommends the next handoff"
+                  : "hrmny AI Assistant plans and answers from the reviewed org context"}{" "}
                 — scoped to {sandboxLabel}
                 {toolCount > 0 ? ` · ${toolCount} catalog entries` : ""}.
               </p>
@@ -602,7 +602,7 @@ export default function HrmnyChatPage() {
                       {m.role === "user"
                         ? "You"
                         : (selectedAgent?.displayName ??
-                          "Harmony AI Assistant")}
+                          "hrmny AI Assistant")}
                     </div>
                     <div className="hrmny-chat-msg-body">
                       {m.role === "assistant" ? (
@@ -619,7 +619,7 @@ export default function HrmnyChatPage() {
                   data-testid="chat-live-work"
                 >
                   <div className="hrmny-chat-msg-role">
-                    {selectedAgent?.displayName ?? "Harmony AI Assistant"}
+                    {selectedAgent?.displayName ?? "hrmny AI Assistant"}
                   </div>
                   <div className="hrmny-chat-msg-body">
                     <div className="hrmny-chat-live-dock">

@@ -239,7 +239,7 @@ describe("Google Chat request verification", () => {
     const replayPayload = await replay.json();
     expect(firstPayload).toEqual(replayPayload);
     expect(replayPayload).toMatchObject({
-      text: expect.stringContaining("Harmony AI Assistant is connected"),
+      text: expect.stringContaining("hrmny AI Assistant is connected"),
     });
   });
 

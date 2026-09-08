@@ -1,4 +1,4 @@
-# Harmony AI Assistant icon
+# hrmny AI Assistant icon
 
 Unmodified 192 x 192 PNG from HRMNY's own website icon, retrieved 8 September 2026. Black artwork on transparency; display on a light background. Existing OS icons are preserved.
 

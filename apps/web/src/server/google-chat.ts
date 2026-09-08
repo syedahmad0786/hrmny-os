@@ -714,14 +714,14 @@ export async function handleGoogleChatRequest(
         ? receipt.result.text
         : null;
     return privateReply(
-      priorText ?? "Harmony AI Assistant is already processing this message.",
+      priorText ?? "hrmny AI Assistant is already processing this message.",
     );
   }
 
   try {
     if (event.type === "ADDED_TO_SPACE") {
       const text = responseText(
-        "Harmony AI Assistant is connected. Ask for a client, pipeline, delivery, or operating update. Answers are private to you; approvals and external sends remain explicit.",
+        "hrmny AI Assistant is connected. Ask for a client, pipeline, delivery, or operating update. Answers are private to you; approvals and external sends remain explicit.",
         appOrigin,
       );
       await completeIntegrationReceipt(receipt.receiptId, {
@@ -753,7 +753,7 @@ export async function handleGoogleChatRequest(
     }
     if (getDb()) {
       const text =
-        "Got it — Harmony AI Assistant will reply privately in this thread.";
+        "Got it — hrmny AI Assistant will reply privately in this thread.";
       try {
         const jobId = await queueGoogleChatInteraction(jobPayload.data);
         if (!jobId) throw new Error("GOOGLE_CHAT_JOB_UNAVAILABLE");

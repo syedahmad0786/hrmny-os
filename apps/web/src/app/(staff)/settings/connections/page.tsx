@@ -260,7 +260,7 @@ function OperatingSurfaces() {
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
           Agent computers · {qmUrl ? "address configured" : "setup required"}
         </p>
-        <h2 className="mt-1 font-display text-xl">Harmony AI Assistant</h2>
+        <h2 className="mt-1 font-display text-xl">hrmny AI Assistant</h2>
         <p className="mt-2 text-sm text-muted">
           Isolated workspaces for staff and projects, powered by Fly Sprites.
           Runtime access is available after deployment and staff access checks
@@ -275,7 +275,7 @@ function OperatingSurfaces() {
               href={qmUrl}
               className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white"
             >
-              Open Harmony AI Assistant
+              Open hrmny AI Assistant
             </a>
             <a
               href={`${qmUrl}/admin/connectors`}

@@ -162,7 +162,7 @@ export async function getBuildStatus() {
     },
     {
       id: "qm",
-      label: "Harmony AI Assistant · Fly Sprites",
+      label: "hrmny AI Assistant · Fly Sprites",
       status: qmUrl ? "endpoint_ready" : "missing",
       detail: qmUrl
         ? `${qmUrl} — address configured; staff access and execution need live verification`
