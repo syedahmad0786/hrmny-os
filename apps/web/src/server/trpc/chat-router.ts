@@ -301,7 +301,7 @@ export async function getOrCreateExternalChatThread(input: {
       title,
       agentSlug: null,
       clientId: null,
-      harness: "direct",
+      harness: "react",
       createdAt,
       updatedAt: createdAt,
     };
@@ -314,7 +314,7 @@ export async function getOrCreateExternalChatThread(input: {
     insert into public.chat_thread (
       chat_thread_id, employee_id, title, harness
     ) values (
-      ${chatThreadId}::uuid, ${input.employeeId}::uuid, ${title}, 'direct'
+      ${chatThreadId}::uuid, ${input.employeeId}::uuid, ${title}, 'react'
     )
     on conflict (chat_thread_id) do nothing
   `);
@@ -421,8 +421,7 @@ export function buildChatDefaultTools(scope: {
           scope: {
             clientId: scope.clientId ?? undefined,
             employeeId: scope.employeeId,
-            dealId:
-              typeof args.dealId === "string" ? args.dealId : undefined,
+            dealId: typeof args.dealId === "string" ? args.dealId : undefined,
           },
         });
         return {
@@ -465,8 +464,7 @@ export function buildChatDefaultTools(scope: {
           scope: {
             clientId: scope.clientId ?? undefined,
             employeeId: scope.employeeId,
-            dealId:
-              typeof args.dealId === "string" ? args.dealId : undefined,
+            dealId: typeof args.dealId === "string" ? args.dealId : undefined,
           },
         });
         return {
@@ -483,9 +481,8 @@ export function buildChatDefaultTools(scope: {
         if (!scope.clientId) {
           return { error: "client_sandbox_required" };
         }
-        const { runAgentTools, DEFAULT_FUNNEL_AGENT_TOOLS } = await import(
-          "../ai/agent-tools"
-        );
+        const { runAgentTools, DEFAULT_FUNNEL_AGENT_TOOLS } =
+          await import("../ai/agent-tools");
         const writes = DEFAULT_FUNNEL_AGENT_TOOLS.filter(
           (t) =>
             t === "tasks.create" ||
@@ -504,10 +501,8 @@ export function buildChatDefaultTools(scope: {
           scope: {
             clientId: scope.clientId,
             employeeId: scope.employeeId,
-            dealId:
-              typeof args.dealId === "string" ? args.dealId : undefined,
-            taskId:
-              typeof args.taskId === "string" ? args.taskId : undefined,
+            dealId: typeof args.dealId === "string" ? args.dealId : undefined,
+            taskId: typeof args.taskId === "string" ? args.taskId : undefined,
           },
         });
         return {
@@ -535,9 +530,9 @@ export function buildChatDefaultTools(scope: {
                 },
               });
               return {
-          nextLinks: nextLinksFromToolResults(results),
-          tools: results,
-        };
+                nextLinks: nextLinksFromToolResults(results),
+                tools: results,
+              };
             },
           } satisfies HarnessTool,
           {
@@ -551,18 +546,16 @@ export function buildChatDefaultTools(scope: {
               const base = String(
                 args.prompt ?? args.query ?? "Approve OS invoice",
               );
-              const prompt = id
-                ? `${base} invoiceId: ${id}`
-                : base;
+              const prompt = id ? `${base} invoiceId: ${id}` : base;
               const results = await runAgentTools({
                 allowedTools: ["finance.os_approve"],
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
               return {
-          nextLinks: nextLinksFromToolResults(results),
-          tools: results,
-        };
+                nextLinks: nextLinksFromToolResults(results),
+                tools: results,
+              };
             },
           } satisfies HarnessTool,
           {
@@ -576,18 +569,16 @@ export function buildChatDefaultTools(scope: {
               const base = String(
                 args.prompt ?? args.query ?? "Issue OS invoice",
               );
-              const prompt = id
-                ? `${base} invoiceId: ${id}`
-                : base;
+              const prompt = id ? `${base} invoiceId: ${id}` : base;
               const results = await runAgentTools({
                 allowedTools: ["finance.os_issue"],
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
               return {
-          nextLinks: nextLinksFromToolResults(results),
-          tools: results,
-        };
+                nextLinks: nextLinksFromToolResults(results),
+                tools: results,
+              };
             },
           } satisfies HarnessTool,
           {
@@ -601,18 +592,16 @@ export function buildChatDefaultTools(scope: {
               const base = String(
                 args.prompt ?? args.query ?? "Approve OS outreach",
               );
-              const prompt = id
-                ? `${base} outreachId: ${id}`
-                : base;
+              const prompt = id ? `${base} outreachId: ${id}` : base;
               const results = await runAgentTools({
                 allowedTools: ["outreach.os_approve"],
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
               return {
-          nextLinks: nextLinksFromToolResults(results),
-          tools: results,
-        };
+                nextLinks: nextLinksFromToolResults(results),
+                tools: results,
+              };
             },
           } satisfies HarnessTool,
           {
@@ -623,8 +612,7 @@ export function buildChatDefaultTools(scope: {
               const { runAgentTools } = await import("../ai/agent-tools");
               const briefId =
                 typeof args.briefId === "string" ? args.briefId : "";
-              const taskId =
-                typeof args.taskId === "string" ? args.taskId : "";
+              const taskId = typeof args.taskId === "string" ? args.taskId : "";
               const base = String(
                 args.prompt ?? args.query ?? "Lock the brief",
               );
@@ -644,9 +632,9 @@ export function buildChatDefaultTools(scope: {
                 },
               });
               return {
-          nextLinks: nextLinksFromToolResults(results),
-          tools: results,
-        };
+                nextLinks: nextLinksFromToolResults(results),
+                tools: results,
+              };
             },
           } satisfies HarnessTool,
           {
@@ -655,8 +643,7 @@ export function buildChatDefaultTools(scope: {
               "Org-only: pass/fail/waive creative QC on a delivery task. Prompt must mention pass QC + taskId UUID.",
             run: async (args: Record<string, unknown>) => {
               const { runAgentTools } = await import("../ai/agent-tools");
-              const id =
-                typeof args.taskId === "string" ? args.taskId : "";
+              const id = typeof args.taskId === "string" ? args.taskId : "";
               const base = String(
                 args.prompt ?? args.query ?? "Pass QC on creative task",
               );
@@ -670,9 +657,9 @@ export function buildChatDefaultTools(scope: {
                 },
               });
               return {
-          nextLinks: nextLinksFromToolResults(results),
-          tools: results,
-        };
+                nextLinks: nextLinksFromToolResults(results),
+                tools: results,
+              };
             },
           } satisfies HarnessTool,
           {
@@ -688,18 +675,16 @@ export function buildChatDefaultTools(scope: {
               const base = String(
                 args.prompt ?? args.query ?? "Approve OS campaign",
               );
-              const prompt = id
-                ? `${base} campaignItemId: ${id}`
-                : base;
+              const prompt = id ? `${base} campaignItemId: ${id}` : base;
               const results = await runAgentTools({
                 allowedTools: ["campaigns.os_approve"],
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
               return {
-          nextLinks: nextLinksFromToolResults(results),
-          tools: results,
-        };
+                nextLinks: nextLinksFromToolResults(results),
+                tools: results,
+              };
             },
           } satisfies HarnessTool,
           {
@@ -715,18 +700,16 @@ export function buildChatDefaultTools(scope: {
               const base = String(
                 args.prompt ?? args.query ?? "Publish OS campaign stub",
               );
-              const prompt = id
-                ? `${base} campaignItemId: ${id}`
-                : base;
+              const prompt = id ? `${base} campaignItemId: ${id}` : base;
               const results = await runAgentTools({
                 allowedTools: ["campaigns.os_publish"],
                 prompt,
                 scope: { employeeId: scope.employeeId },
               });
               return {
-          nextLinks: nextLinksFromToolResults(results),
-          tools: results,
-        };
+                nextLinks: nextLinksFromToolResults(results),
+                tools: results,
+              };
             },
           } satisfies HarnessTool,
           {
@@ -735,8 +718,7 @@ export function buildChatDefaultTools(scope: {
               "Org-only: sign off an active onboarding phase. Prompt must mention sign off + optional clientId/phaseIndex.",
             run: async (args: Record<string, unknown>) => {
               const { runAgentTools } = await import("../ai/agent-tools");
-              const id =
-                typeof args.clientId === "string" ? args.clientId : "";
+              const id = typeof args.clientId === "string" ? args.clientId : "";
               const base = String(
                 args.prompt ?? args.query ?? "Sign off onboarding phase",
               );
@@ -747,9 +729,9 @@ export function buildChatDefaultTools(scope: {
                 scope: { employeeId: scope.employeeId },
               });
               return {
-          nextLinks: nextLinksFromToolResults(results),
-          tools: results,
-        };
+                nextLinks: nextLinksFromToolResults(results),
+                tools: results,
+              };
             },
           } satisfies HarnessTool,
           {
@@ -770,12 +752,51 @@ export function buildChatDefaultTools(scope: {
                 scope: { employeeId: scope.employeeId },
               });
               return {
-          nextLinks: nextLinksFromToolResults(results),
-          tools: results,
-        };
+                nextLinks: nextLinksFromToolResults(results),
+                tools: results,
+              };
             },
           } satisfies HarnessTool,
         ]),
+    {
+      name: "work_propose",
+      description:
+        "Propose tasks or changes in an existing Work project. Supply projectId from operations_read. Uses the employee's original request; returns a proposal to review in Work AI. Does not apply changes.",
+      run: async (args) => {
+        const projectId = z.string().uuid().parse(args.projectId);
+        const requestText = z
+          .string()
+          .trim()
+          .min(1)
+          .max(8_000)
+          .parse(scope.immutableUserPrompt);
+        const { resolveActiveStaffById, sessionCanViewMargin } =
+          await import("../auth/session");
+        const user = await resolveActiveStaffById(scope.employeeId);
+        if (!user || user.actorType !== "staff" || user.clientId) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+        const { workAiRouter } = await import("./work-ai-router");
+        const { createCallerFactory } = await import("./trpc");
+        const run = await createCallerFactory(workAiRouter)({
+          user,
+          employeeId: user.employeeId,
+          roles: user.roles,
+          canViewMargin: sessionCanViewMargin(user),
+          clientId: null,
+        }).generate({
+          kind: "smart_chat",
+          projectIds: [projectId],
+          requestText,
+        });
+        return {
+          runId: run.runId,
+          status: run.status,
+          result: run.result,
+          nextLinks: [{ href: "/work/ai", label: "Review Work proposal" }],
+        };
+      },
+    },
     {
       name: "now",
       description: "Return the current UTC timestamp",
@@ -1023,9 +1044,8 @@ export const chatRouter = router({
       let agentModel: string | undefined;
       let agentTools: string[] = [];
       if (thread.agentSlug) {
-        const { getRunnableCustomAgentBySlug } = await import(
-          "./ai-admin-router"
-        );
+        const { getRunnableCustomAgentBySlug } =
+          await import("./ai-admin-router");
         const custom = await getRunnableCustomAgentBySlug(thread.agentSlug);
         if (custom) {
           customSystem = [
@@ -1070,8 +1090,8 @@ export const chatRouter = router({
       };
       const system = [
         customSystem ||
-          "You are Hrmny — the multiplayer agent harness for Creative Harmony staff.",
-        "Hrmny staff agent: plan → call allowlisted CRM/OS tools → observe → answer.",
+          "You are Harmony AI Assistant, the assistant for Creative Harmony staff.",
+        "Plan → call allowlisted CRM/OS tools → observe → answer.",
         "Be concise. Prefer tools for factual lookups. Never invent client data.",
         `Effort level: ${effort}.`,
         !customSystem && thread.agentSlug
@@ -1155,7 +1175,10 @@ export const chatRouter = router({
                     })(),
                   );
                   // Prefer links already embedded; else recompute from tools.
-                  if (!Array.isArray(row.nextLinks) || row.nextLinks.length === 0) {
+                  if (
+                    !Array.isArray(row.nextLinks) ||
+                    row.nextLinks.length === 0
+                  ) {
                     const embedded = (() => {
                       try {
                         const parsed = JSON.parse(String(row.observation)) as {

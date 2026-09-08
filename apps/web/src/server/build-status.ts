@@ -57,7 +57,7 @@ export async function getBuildStatus() {
       title: "Substrate",
       fee: "$1,500",
       status: "live_pending",
-      summary: "Core live; Google Chat, GBrain and QM need provider acceptance",
+      summary: "Core live; Google Chat, GBrain and Harmony runtime need provider acceptance",
       href: "/gate",
       demoReady: true,
     },
@@ -162,10 +162,10 @@ export async function getBuildStatus() {
     },
     {
       id: "qm",
-      label: "QM + Fly Sprites",
-      status: qmUrl ? "active" : "missing",
+      label: "Harmony AI Assistant · Fly Sprites",
+      status: qmUrl ? "endpoint_ready" : "missing",
       detail: qmUrl
-        ? `${qmUrl} — user sandboxes available`
+        ? `${qmUrl} — address configured; staff access and execution need live verification`
         : "Deployment contract ready; Fly billing and quota must be unlocked before provisioning.",
     },
     {
@@ -231,8 +231,8 @@ export async function getBuildStatus() {
       dbPing.ok ? "Postgres live" : "Fix DATABASE_URL",
       `Point the Google Chat app at ${appOrigin}/api/integrations/google-chat/events`,
       qmUrl
-        ? "Run QM live conformance and connect its portal in HRMNY"
-        : "Enable Fly billing, then publish the QM sandbox and deploy the stack",
+        ? "Verify Harmony runtime access and execution, then connect its portal in HRMNY"
+        : "Enable Fly billing, then publish the Harmony sandbox and deploy the stack",
       "Connect Google Workspace per staff user in Settings",
       "Run Sales in order: Apollo search → choose → draft → approve → send",
       `Xero mode: ${xeroMode}; Hunter is retired (${hunterMode})`,
