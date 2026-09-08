@@ -23,6 +23,7 @@ const fetcher = vi.fn<typeof fetch>();
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("QM_PUBLIC_URL", "https://hrmny-portal.fly.dev");
+  vi.stubEnv("QM_BRAIN_ENABLED", "1");
   vi.stubGlobal("fetch", fetcher);
   fetcher.mockImplementation(async () => Response.json(identity));
   vi.mocked(resolveActiveStaffByEmail).mockResolvedValue(staff);
@@ -92,6 +93,10 @@ it("discards results when QM scope or HRMNY staff authority changes during retri
 });
 
 it("caps provider responses and never forwards tokens to another origin", async () => {
+  vi.stubEnv("QM_BRAIN_ENABLED", "0");
+  await expect(readQmBrain(token, query)).rejects.toThrow("QM_BRAIN_NOT_ENABLED");
+  expect(fetcher).not.toHaveBeenCalled();
+  vi.stubEnv("QM_BRAIN_ENABLED", "1");
   fetcher.mockResolvedValueOnce(new Response("x".repeat(128_001)));
   await expect(readQmBrain(token, query)).rejects.toThrow(
     "QM_RESPONSE_TOO_LARGE",
