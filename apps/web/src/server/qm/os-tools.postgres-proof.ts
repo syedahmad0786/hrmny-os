@@ -21,7 +21,11 @@ it("uses real current staff and Work membership to exclude another employee's pr
       displayName: "QM OS CI other",
     },
   ]);
-  for (const featureKey of ["work.projects", "work.tasks"]) {
+  for (const featureKey of [
+    "work.projects",
+    "work.tasks",
+    "work.ai.smart_chat",
+  ]) {
     await setFeatureOverride({
       featureKey,
       scopeType: "global",
@@ -80,6 +84,46 @@ it("uses real current staff and Work membership to exclude another employee's pr
     expect(
       (await call({ operation: "get_project", projectId: visible })).status,
     ).toBe(200);
+    const secondVisible = randomUUID();
+    await db.execute(sql`
+      insert into public.work_project (work_project_id, name, privacy, owner_employee_id, created_by_employee_id)
+      values (${secondVisible}::uuid, 'CI second visible project', 'private', ${owner}::uuid, ${owner}::uuid)
+    `);
+    const multiple = await call({ operation: "list_projects" });
+    expect(multiple.status).toBe(200);
+    expect(
+      ((await multiple.json()) as { projectId: string }[]).map(
+        (project) => project.projectId,
+      ),
+    ).toEqual(expect.arrayContaining([visible, secondVisible]));
+    const beforeItems = await db.execute(
+      sql`select count(*)::int as total from public.work_item`,
+    );
+    const proposal = await call({
+      operation: "work_propose",
+      projectId: visible,
+      requestText: "Create a task for the delivery checklist",
+    });
+    expect(proposal.status).toBe(200);
+    const proposalBody = (await proposal.json()) as {
+      runId: string;
+      status: string;
+    };
+    expect(proposalBody.status).toBe("proposed");
+    const [stored] = await db.execute(sql`
+      select created_by_employee_id as owner, project_ids as projects, provider
+      from public.work_ai_run where work_ai_run_id = ${proposalBody.runId}::uuid
+    `);
+    expect(stored).toMatchObject({
+      owner,
+      projects: [visible],
+      provider: "mock",
+    });
+    expect(
+      await db.execute(
+        sql`select count(*)::int as total from public.work_item`,
+      ),
+    ).toEqual(beforeItems);
     expect(
       (await call({ operation: "get_project", projectId: hidden })).status,
     ).toBe(403);

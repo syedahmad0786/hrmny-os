@@ -1364,7 +1364,7 @@ export async function generateWorkAi(input: {
         context_refs, created_by_employee_id, expires_at
       ) values (
         ${runId}::uuid, ${input.kind}, ${input.requestText},
-        ${context.projectIds}::uuid[], ${input.itemId}::uuid,
+        string_to_array(${context.projectIds.join(",")}, ',')::uuid[], ${input.itemId}::uuid,
         ${JSON.stringify(context.sources.map(({ id, type, label }) => ({ id, type, label })))}::jsonb,
         ${employeeId}::uuid, ${expiresAt}
       )
