@@ -622,7 +622,10 @@ export default function ConnectionsPage() {
                     <p className="mt-1 text-xs text-muted">{item.note}</p>
                     {item.lastError ? (
                       <p className="mt-1 text-xs font-medium text-red-700">
-                        {item.lastError}
+                        {item.lastError ===
+                        "COMPOSIO_ACCOUNT_NOT_ACTIVE_FOR_TOOLKIT"
+                          ? "No active connection matches this tool. Reconnect it to continue."
+                          : item.lastError}
                       </p>
                     ) : null}
                     {!item.allowed ? <PolicyBlockedNote /> : null}

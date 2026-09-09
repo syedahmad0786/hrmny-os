@@ -2357,7 +2357,7 @@ async function workloadForProjects(
       coalesce((select sum(allocation.allocated_minutes)
         from public.work_capacity_allocation allocation
         where allocation.employee_id = employee.employee_id
-          and allocation.work_project_id = any(${projectIds}::uuid[])
+          and allocation.work_project_id = any(string_to_array(${projectIds.join(",")}, ',')::uuid[])
           and allocation.week_start = ${weekStart}::date), 0)::int
         as "allocatedMinutes",
       coalesce((select sum(scoped.estimated_minutes) from (
@@ -2365,7 +2365,7 @@ async function workloadForProjects(
         from public.work_project_item membership
         join public.work_item item
           on item.work_item_id = membership.work_item_id
-        where membership.work_project_id = any(${projectIds}::uuid[])
+        where membership.work_project_id = any(string_to_array(${projectIds.join(",")}, ',')::uuid[])
           and item.assignee_employee_id = employee.employee_id
           and item.completed_at is null
           and item.due_at >= ${weekStart}::date
@@ -2373,7 +2373,7 @@ async function workloadForProjects(
       ) scoped), 0)::int as "assignedMinutes",
       coalesce((select sum(entry.minutes) from public.time_entry entry
         where entry.employee_id = employee.employee_id
-          and entry.work_project_id = any(${projectIds}::uuid[])
+          and entry.work_project_id = any(string_to_array(${projectIds.join(",")}, ',')::uuid[])
           and entry.work_date >= ${weekStart}::date
           and entry.work_date < ${weekStart}::date + 7), 0)::int
         as "actualMinutes"
@@ -3335,7 +3335,7 @@ async function numericReportFields(
           source_connection_external_id as "sourceConnectionExternalId",
           is_value_read_only as "isValueReadOnly"
         from public.work_custom_field
-        where work_project_id = any(${enabledProjectIds}::uuid[])
+        where work_project_id = any(string_to_array(${enabledProjectIds.join(",")}, ',')::uuid[])
           and field_type = 'number'
         order by lower(name), work_custom_field_id
       `);
@@ -3656,7 +3656,7 @@ async function objectCustomFieldsByTarget(
             source_connection_external_id as "sourceConnectionExternalId",
             is_value_read_only as "isValueReadOnly"
           from public.work_object_custom_field_value
-          where work_project_id = any(${targetIds}::uuid[])
+          where work_project_id = any(string_to_array(${targetIds.join(",")}, ',')::uuid[])
           order by lower(name), created_at
         `
       : targetType === "portfolio"
@@ -3671,7 +3671,7 @@ async function objectCustomFieldsByTarget(
             source_connection_external_id as "sourceConnectionExternalId",
             is_value_read_only as "isValueReadOnly"
           from public.work_object_custom_field_value
-          where work_portfolio_id = any(${targetIds}::uuid[])
+          where work_portfolio_id = any(string_to_array(${targetIds.join(",")}, ',')::uuid[])
           order by lower(name), created_at
         `
         : sql`
@@ -3685,7 +3685,7 @@ async function objectCustomFieldsByTarget(
             source_connection_external_id as "sourceConnectionExternalId",
             is_value_read_only as "isValueReadOnly"
           from public.work_object_custom_field_value
-          where work_goal_id = any(${targetIds}::uuid[])
+          where work_goal_id = any(string_to_array(${targetIds.join(",")}, ',')::uuid[])
           order by lower(name), created_at
         `,
   );
@@ -3890,7 +3890,7 @@ async function reportRowsForProjects(
         metric_custom_value.value as "metricCustomFieldValue",
         coalesce((select sum(entry.minutes)
           from public.time_entry entry
-          where entry.work_project_id = any(${timeProjectIds}::uuid[])
+          where entry.work_project_id = any(string_to_array(${timeProjectIds.join(",")}, ',')::uuid[])
             and entry.work_item_id = item.work_item_id), 0)::int
           as "actualMinutes"
       from public.work_project_item membership
@@ -3912,28 +3912,28 @@ async function reportRowsForProjects(
           on field.work_custom_field_id = value.work_custom_field_id
           and field.work_project_id = membership.work_project_id
         where value.work_item_id = item.work_item_id
-          and value.work_custom_field_id = any(${metricCustomFieldIds}::uuid[])
+          and value.work_custom_field_id = any(string_to_array(${metricCustomFieldIds.join(",")}, ',')::uuid[])
         order by array_position(
-          ${metricCustomFieldIds}::uuid[], value.work_custom_field_id
+          string_to_array(${metricCustomFieldIds.join(",")}, ',')::uuid[], value.work_custom_field_id
         )
         limit 1
       ) metric_custom_value on true
-      where membership.work_project_id = any(${projectIds}::uuid[])
+      where membership.work_project_id = any(string_to_array(${projectIds.join(",")}, ',')::uuid[])
         and item.archived_at is null
         and (${!timeMetric}
-          or membership.work_project_id = any(${timeProjectIds}::uuid[]))
+          or membership.work_project_id = any(string_to_array(${timeProjectIds.join(",")}, ',')::uuid[]))
         and (${!customMetric}
-          or membership.work_project_id = any(${customFieldProjectIds}::uuid[]))
+          or membership.work_project_id = any(string_to_array(${customFieldProjectIds.join(",")}, ',')::uuid[]))
         and (
           (item.item_type = 'task'
-            and membership.work_project_id = any(${taskProjectIds}::uuid[]))
+            and membership.work_project_id = any(string_to_array(${taskProjectIds.join(",")}, ',')::uuid[]))
           or (item.item_type = 'milestone'
-            and membership.work_project_id = any(${milestoneProjectIds}::uuid[]))
+            and membership.work_project_id = any(string_to_array(${milestoneProjectIds.join(",")}, ',')::uuid[]))
           or (item.item_type = 'approval'
-            and membership.work_project_id = any(${approvalProjectIds}::uuid[]))
+            and membership.work_project_id = any(string_to_array(${approvalProjectIds.join(",")}, ',')::uuid[]))
         )
       order by item.work_item_id,
-        array_position(${projectIds}::uuid[], membership.work_project_id)
+        array_position(string_to_array(${projectIds.join(",")}, ',')::uuid[], membership.work_project_id)
     `)
       ).map((item) => ({
         ...item,
@@ -11569,7 +11569,11 @@ export const workManagementRouter = router({
       .mutation(async ({ input, ctx }) => {
         const employeeId = actor(ctx);
         const db = getDb();
-        const project = await requireProjectAccess(ctx, input.projectId, "editor");
+        const project = await requireProjectAccess(
+          ctx,
+          input.projectId,
+          "editor",
+        );
         if (
           !db &&
           project.privacy === "private" &&
@@ -13316,7 +13320,7 @@ export const workManagementRouter = router({
               const active = await tx.execute<{ employeeId: string }>(sql`
                 select employee_id as "employeeId"
                 from public.employee
-                where employee_id = any(${viewerEmployeeIds}::uuid[])
+                where employee_id = any(string_to_array(${viewerEmployeeIds.join(",")}, ',')::uuid[])
                   and is_active = true
               `);
               if (active.length !== viewerEmployeeIds.length)
@@ -13343,7 +13347,7 @@ export const workManagementRouter = router({
                   work_reporting_dashboard_id, employee_id, added_by_employee_id
                 )
                 select ${input.dashboardId}::uuid, viewer_id, ${employeeId}::uuid
-                from unnest(${viewerEmployeeIds}::uuid[]) viewer_id
+                from unnest(string_to_array(${viewerEmployeeIds.join(",")}, ',')::uuid[]) viewer_id
               `);
           });
           dashboard = {
