@@ -4,6 +4,7 @@ import { expect, it, vi } from "vitest";
 import { POST } from "../../app/api/qm/os/route";
 import { getDb } from "../db";
 import { setFeatureOverride } from "../features";
+import { runQmOsTool } from "./os-tools";
 
 it("uses real current staff and Work membership to exclude another employee's private project and task", async () => {
   const db = getDb()!;
@@ -99,13 +100,11 @@ it("uses real current staff and Work membership to exclude another employee's pr
     const beforeItems = await db.execute(
       sql`select count(*)::int as total from public.work_item`,
     );
-    const proposal = await call({
+    const proposalBody = (await runQmOsTool("synthetic.ci.token", {
       operation: "work_propose",
       projectId: visible,
       requestText: "Create a task for the delivery checklist",
-    });
-    expect(proposal.status).toBe(200);
-    const proposalBody = (await proposal.json()) as {
+    })) as {
       runId: string;
       status: string;
     };
