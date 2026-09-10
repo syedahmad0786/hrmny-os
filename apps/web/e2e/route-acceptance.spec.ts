@@ -7,6 +7,7 @@ import {
   PORTAL_TRPC_PROBE,
   STAFF_TRPC_PROBE,
 } from "./route-manifest";
+import { NATIVE_QM_URL } from "../src/lib/native-qm";
 
 /**
  * Route-and-action acceptance crawl (PLAN-PRODUCTION.md §"Test Plan").
@@ -37,10 +38,21 @@ function isAllowed(group: Actor, route: RouteEntry): boolean {
 
 async function assertRenders(page: Page, route: RouteEntry, label: string) {
   if (route.nativeRedirect) {
-    const resp = await page.goto(route.sample, { waitUntil: "commit" });
+    const nativeOrigin = new URL(NATIVE_QM_URL).origin;
+    await page.route(
+      (url) => url.origin === nativeOrigin && url.pathname === "/",
+      (native) =>
+        native.fulfill({
+          contentType: "text/html",
+          body: "<main>Native assistant</main>",
+        }),
+    );
+    const resp = await page.goto(route.sample, { waitUntil: "domcontentloaded" });
     expect
       .soft(resp?.status() ?? 0, `${label} ${route.sample} must not 5xx`)
       .toBeLessThan(500);
+    await expect(page).toHaveURL(new URL(NATIVE_QM_URL).toString());
+    await expect(page.getByRole("main")).toHaveText("Native assistant");
     return;
   }
   const resp = await page.goto(route.sample, { waitUntil: "domcontentloaded" });
