@@ -32,9 +32,8 @@ export const googleIdentityLookupRequest = z.discriminatedUnion("proof", [
 
 export type GoogleIdentityLookup = z.infer<typeof googleIdentityLookupRequest>;
 
-export async function resolveEmployeeGoogleIdentity(
-  input: GoogleIdentityLookup,
-) {
+export async function resolveEmployeeGoogleIdentity(rawInput: unknown) {
+  const input = googleIdentityLookupRequest.parse(rawInput);
   const db = getDb();
   if (!db) throw new Error("QM_GOOGLE_IDENTITY_DATABASE_REQUIRED");
   const googleSubject =

@@ -35,6 +35,24 @@ beforeEach(() => {
   });
 });
 
+it.each([
+  { ...input, googleIssuer: "https://other.example" },
+  { ...input, googleIssuer: undefined },
+  { ...input, googleSubject: "1e2" },
+  { ...input, principal: "Developer@hrmny.co" },
+  { action: "resolve_identity", proof: "chat", googleChatUser: "other/123" },
+  { action: "resolve_identity", proof: "chat", googleChatUser: "users/123/" },
+  { action: "resolve_identity", proof: "chat", googleChatUser: "users/+123" },
+  null,
+])(
+  "rejects invalid direct-call proofs before database access: %j",
+  async (proof) => {
+    await expect(resolveEmployeeGoogleIdentity(proof)).rejects.toThrow();
+    expect(getDb).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  },
+);
+
 it("returns only an exact active staff binding for OIDC and Chat proofs", async () => {
   await expect(resolveEmployeeGoogleIdentity(input)).resolves.toEqual({
     employeeId: "11111111-1111-4111-8111-111111111111",
