@@ -72,6 +72,12 @@ export type GoogleChatSpaceSnapshot = Readonly<{
 export type GoogleChatUserMembershipSnapshot = Readonly<{
   spaceName: string;
   bindingReady: false;
+  assistantBotUserName: string;
+  humans: readonly Readonly<{
+    membershipName: string;
+    userName: string;
+    role: "ROLE_MEMBER" | "ROLE_MANAGER" | "ROLE_ASSISTANT_MANAGER";
+  }>[];
   members: readonly Readonly<{
     membershipName: string;
     userName: string;
@@ -221,16 +227,28 @@ export async function readValidatedGoogleChatSpace(
  * Server-only reader for an already-owned user OAuth token with
  * chat.memberships.readonly. Existing Workspace credentials do not currently
  * request that scope, and this result cannot authorize a binding: Google
- * documents `members/app` only for user authentication, while the app's
- * immutable Chat user still needs the durable identity integration.
+ * documents `members/app` for user authentication. The caller must resolve
+ * this token from an owned HRMNY Google-client connection; no route accepts it.
  */
-export async function readGoogleChatUserMembershipSnapshot(input: {
+export async function readGoogleChatOwnedUserMembershipSnapshot(input: {
   spaceName: string;
-  accessToken: string;
+  ownedAccessToken: string;
 }): Promise<GoogleChatUserMembershipSnapshot> {
   const spaceName = googleSpaceNameSchema.safeParse(input.spaceName);
-  if (!spaceName.success || !z.string().min(20).safeParse(input.accessToken).success) {
+  if (!spaceName.success || !z.string().min(20).safeParse(input.ownedAccessToken).success) {
     providerFailure("GOOGLE_CHAT_USER_CREDENTIAL_INVALID");
+  }
+  const rawAppMembership = await fetchJson(
+    `${GOOGLE_CHAT_API_URL}/${spaceName.data}/members/app`,
+    input.ownedAccessToken,
+  );
+  const appMembership = userMembershipSchema.safeParse(rawAppMembership);
+  if (
+    !appMembership.success ||
+    !appMembership.data.name.startsWith(`${spaceName.data}/members/`) ||
+    appMembership.data.member.type !== "BOT"
+  ) {
+    providerFailure("GOOGLE_CHAT_ASSISTANT_APP_INVALID");
   }
   const members: GoogleChatUserMembershipSnapshot["members"][number][] = [];
   const names = new Set<string>();
@@ -242,7 +260,7 @@ export async function readGoogleChatUserMembershipSnapshot(input: {
     if (pageToken) query.set("pageToken", pageToken);
     const rawPage = await fetchJson(
       `${GOOGLE_CHAT_API_URL}/${spaceName.data}/members?${query}`,
-      input.accessToken,
+      input.ownedAccessToken,
     );
     const parsed = membershipPageSchema.safeParse(rawPage);
     if (!parsed.success) providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_PAGE_INVALID");
@@ -265,7 +283,26 @@ export async function readGoogleChatUserMembershipSnapshot(input: {
       if (members.length > MAX_MEMBERSHIPS) providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_LIMIT");
     }
     const next = parsed.data.nextPageToken;
-    if (!next) return { spaceName: spaceName.data, bindingReady: false, members };
+    if (!next) {
+      const bots = members.filter((member) => member.kind === "BOT");
+      if (
+        bots.length !== 1 ||
+        bots[0]?.membershipName !== appMembership.data.name ||
+        bots[0]?.userName !== appMembership.data.member.name
+      ) {
+        providerFailure("GOOGLE_CHAT_ASSISTANT_APP_MISMATCH");
+      }
+      const humans = members
+        .filter((member) => member.kind === "HUMAN")
+        .map(({ membershipName, userName, role }) => ({ membershipName, userName, role }));
+      return {
+        spaceName: spaceName.data,
+        bindingReady: false,
+        assistantBotUserName: appMembership.data.member.name,
+        humans,
+        members,
+      };
+    }
     if (tokens.has(next)) providerFailure("GOOGLE_CHAT_SPACE_PAGE_TOKEN_REPEATED");
     tokens.add(next);
     pageToken = next;

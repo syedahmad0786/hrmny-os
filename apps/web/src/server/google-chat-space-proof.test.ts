@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  readGoogleChatUserMembershipSnapshot,
+  readGoogleChatOwnedUserMembershipSnapshot,
   readValidatedGoogleChatSpace,
 } from "./google-chat-space-proof";
 
@@ -73,27 +73,61 @@ function signedScopes(fetchMock: ReturnType<typeof vi.fn>) {
 }
 
 describe("Google Chat Space provider proof", () => {
-  it("reads user-authenticated humans and bots but never marks the unbound app ready", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      Response.json({
+  it("reconciles the user-auth app alias with exactly one bot and the human roster", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(member("200", { member: { name: "users/200", type: "BOT" } })),
+      )
+      .mockResolvedValueOnce(Response.json({
         memberships: [
           member("100"),
           member("200", { member: { name: "users/200", type: "BOT" } }),
         ],
-      }),
-    );
+      }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(
-      readGoogleChatUserMembershipSnapshot({ spaceName, accessToken: "u".repeat(20) }),
+      readGoogleChatOwnedUserMembershipSnapshot({ spaceName, ownedAccessToken: "u".repeat(20) }),
     ).resolves.toEqual({
       spaceName,
       bindingReady: false,
+      assistantBotUserName: "users/200",
+      humans: [
+        { membershipName: `${spaceName}/members/member-100`, userName: "users/100", role: "ROLE_MEMBER" },
+      ],
       members: [
         { membershipName: `${spaceName}/members/member-100`, userName: "users/100", kind: "HUMAN", role: "ROLE_MEMBER" },
         { membershipName: `${spaceName}/members/member-200`, userName: "users/200", kind: "BOT", role: "ROLE_MEMBER" },
       ],
     });
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("showGroups=true");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://chat.googleapis.com/v1/spaces/AAAA/members/app",
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("showGroups=true");
+  });
+
+  it.each([
+    ["missing bot", [member("100")], "GOOGLE_CHAT_ASSISTANT_APP_MISMATCH"],
+    ["foreign extra bot", [member("100"), member("200", { member: { name: "users/200", type: "BOT" } }), member("300", { member: { name: "users/300", type: "BOT" } })], "GOOGLE_CHAT_ASSISTANT_APP_MISMATCH"],
+    ["group", [{ ...member("group"), member: undefined, groupMember: { name: "groups/1" } }], "GOOGLE_CHAT_SPACE_MEMBER_INVALID"],
+  ])("rejects user snapshot %s", async (_name, memberships, code) => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json(member("200", { member: { name: "users/200", type: "BOT" } })))
+        .mockResolvedValueOnce(Response.json({ memberships })),
+    );
+    await expect(
+      readGoogleChatOwnedUserMembershipSnapshot({ spaceName, ownedAccessToken: "u".repeat(20) }),
+    ).rejects.toThrow(code);
+  });
+
+  it("denies a user token that lacks the app alias scope", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 403 })));
+    await expect(
+      readGoogleChatOwnedUserMembershipSnapshot({ spaceName, ownedAccessToken: "u".repeat(20) }),
+    ).rejects.toThrow("GOOGLE_CHAT_SPACE_PROVIDER_403");
   });
   it("reads all joined human memberships with the fixed app proof scope", async () => {
     const fetchMock = mockProvider(
