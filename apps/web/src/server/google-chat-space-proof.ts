@@ -6,6 +6,10 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const PAGE_SIZE = 1_000;
 const MAX_PAGES = 20;
 const MAX_MEMBERSHIPS = 1_000;
+const OWNED_USER_REQUIRED_SCOPES = [
+  "https://www.googleapis.com/auth/chat.spaces.readonly",
+  "https://www.googleapis.com/auth/chat.memberships.readonly",
+] as const;
 const googleSpaceNameSchema = z
   .string()
   .max(500)
@@ -71,6 +75,7 @@ export type GoogleChatSpaceSnapshot = Readonly<{
 
 export type GoogleChatUserMembershipSnapshot = Readonly<{
   spaceName: string;
+  audiencePolicy: "PRIVATE_NO_EXTERNAL_OR_GROUPS";
   /** Complete user-authenticated roster, distinct from binding authorization. */
   membershipCoverage: "COMPLETE_USER_AUTH";
   bindingReady: false;
@@ -103,6 +108,20 @@ const userMembershipSchema = z
 
 function providerFailure(code: string): never {
   throw new Error(code);
+}
+
+function validatePrivateSpace(
+  raw: unknown,
+  expectedSpaceName: string,
+) {
+  const space = spaceSchema.safeParse(raw);
+  if (!space.success || space.data.name !== expectedSpaceName)
+    providerFailure("GOOGLE_CHAT_SPACE_METADATA_INVALID");
+  if (space.data.accessSettings.audience !== undefined)
+    providerFailure("GOOGLE_CHAT_SPACE_NOT_PRIVATE");
+  if (space.data.membershipCount.joinedGroupCount !== 0)
+    providerFailure("GOOGLE_CHAT_SPACE_GROUP_MEMBERSHIP");
+  return space.data;
 }
 
 async function fetchJson(url: string, accessToken: string): Promise<unknown> {
@@ -141,16 +160,7 @@ export async function readValidatedGoogleChatSpace(
     `${GOOGLE_CHAT_API_URL}/${spaceName.data}`,
     metadataAccessToken,
   );
-  const space = spaceSchema.safeParse(rawSpace);
-  if (!space.success || space.data.name !== spaceName.data) {
-    providerFailure("GOOGLE_CHAT_SPACE_METADATA_INVALID");
-  }
-  if (space.data.accessSettings.audience !== undefined) {
-    providerFailure("GOOGLE_CHAT_SPACE_NOT_PRIVATE");
-  }
-  if (space.data.membershipCount.joinedGroupCount !== 0) {
-    providerFailure("GOOGLE_CHAT_SPACE_GROUP_MEMBERSHIP");
-  }
+  const space = validatePrivateSpace(rawSpace, spaceName.data);
 
   // App-authenticated membership reads omit Chat app memberships. This is a
   // bounded human snapshot, never complete delivery authorization.
@@ -206,12 +216,12 @@ export async function readValidatedGoogleChatSpace(
     const nextPageToken = parsedPage.data.nextPageToken;
     if (!nextPageToken) {
       if (
-        members.length !== space.data.membershipCount.joinedDirectHumanUserCount
+        members.length !== space.membershipCount.joinedDirectHumanUserCount
       ) {
         providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_COUNT_MISMATCH");
       }
       return {
-        spaceName: space.data.name,
+        spaceName: space.name,
         directHumanCount: members.length,
         joinedGroupCount: 0,
         membershipCoverage: "APP_AUTH_HUMANS_ONLY_INCOMPLETE",
@@ -237,14 +247,24 @@ export async function readValidatedGoogleChatSpace(
 export async function readGoogleChatOwnedUserMembershipSnapshot(input: {
   spaceName: string;
   ownedAccessToken: string;
+  grantedScopes: readonly string[];
 }): Promise<GoogleChatUserMembershipSnapshot> {
   const spaceName = googleSpaceNameSchema.safeParse(input.spaceName);
   if (
     !spaceName.success ||
-    !z.string().min(20).safeParse(input.ownedAccessToken).success
+    !z.string().min(20).safeParse(input.ownedAccessToken).success ||
+    !z.array(z.string()).max(100).safeParse(input.grantedScopes).success ||
+    OWNED_USER_REQUIRED_SCOPES.some(
+      (scope) => !input.grantedScopes.includes(scope),
+    )
   ) {
     providerFailure("GOOGLE_CHAT_USER_CREDENTIAL_INVALID");
   }
+  const rawSpace = await fetchJson(
+    `${GOOGLE_CHAT_API_URL}/${spaceName.data}`,
+    input.ownedAccessToken,
+  );
+  validatePrivateSpace(rawSpace, spaceName.data);
   const rawAppMembership = await fetchJson(
     `${GOOGLE_CHAT_API_URL}/${spaceName.data}/members/app`,
     input.ownedAccessToken,
@@ -319,6 +339,7 @@ export async function readGoogleChatOwnedUserMembershipSnapshot(input: {
         }));
       return {
         spaceName: spaceName.data,
+        audiencePolicy: "PRIVATE_NO_EXTERNAL_OR_GROUPS",
         membershipCoverage: "COMPLETE_USER_AUTH",
         bindingReady: false,
         assistantBotUserName: appMembership.data.member.name,

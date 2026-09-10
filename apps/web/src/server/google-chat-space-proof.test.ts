@@ -7,6 +7,10 @@ import {
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2_048 });
 const spaceName = "spaces/AAAA";
+const ownedScopes = [
+  "https://www.googleapis.com/auth/chat.spaces.readonly",
+  "https://www.googleapis.com/auth/chat.memberships.readonly",
+];
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -76,6 +80,7 @@ describe("Google Chat Space provider proof", () => {
   it("reconciles the user-auth app alias with exactly one bot and the human roster", async () => {
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(Response.json(space()))
       .mockResolvedValueOnce(
         Response.json(
           member("200", { member: { name: "users/200", type: "BOT" } }),
@@ -94,9 +99,11 @@ describe("Google Chat Space provider proof", () => {
       readGoogleChatOwnedUserMembershipSnapshot({
         spaceName,
         ownedAccessToken: "u".repeat(20),
+        grantedScopes: ownedScopes,
       }),
     ).resolves.toEqual({
       spaceName,
+      audiencePolicy: "PRIVATE_NO_EXTERNAL_OR_GROUPS",
       membershipCoverage: "COMPLETE_USER_AUTH",
       bindingReady: false,
       assistantBotUserName: "users/200",
@@ -123,9 +130,12 @@ describe("Google Chat Space provider proof", () => {
       ],
     });
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://chat.googleapis.com/v1/spaces/AAAA",
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
       "https://chat.googleapis.com/v1/spaces/AAAA/members/app",
     );
-    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("showGroups=true");
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain("showGroups=true");
   });
 
   it.each([
@@ -155,6 +165,7 @@ describe("Google Chat Space provider proof", () => {
       "fetch",
       vi
         .fn()
+        .mockResolvedValueOnce(Response.json(space()))
         .mockResolvedValueOnce(
           Response.json(
             member("200", { member: { name: "users/200", type: "BOT" } }),
@@ -166,6 +177,7 @@ describe("Google Chat Space provider proof", () => {
       readGoogleChatOwnedUserMembershipSnapshot({
         spaceName,
         ownedAccessToken: "u".repeat(20),
+        grantedScopes: ownedScopes,
       }),
     ).rejects.toThrow(code);
   });
@@ -179,8 +191,37 @@ describe("Google Chat Space provider proof", () => {
       readGoogleChatOwnedUserMembershipSnapshot({
         spaceName,
         ownedAccessToken: "u".repeat(20),
+        grantedScopes: ownedScopes,
       }),
     ).rejects.toThrow("GOOGLE_CHAT_SPACE_PROVIDER_403");
+  });
+
+  it("requires the owned user scopes before reading provider data", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      readGoogleChatOwnedUserMembershipSnapshot({
+        spaceName,
+        ownedAccessToken: "u".repeat(20),
+        grantedScopes: [ownedScopes[1]!],
+      }),
+    ).rejects.toThrow("GOOGLE_CHAT_USER_CREDENTIAL_INVALID");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["public", space({ accessSettings: { accessState: "DISCOVERABLE" } }), "GOOGLE_CHAT_SPACE_METADATA_INVALID"],
+    ["external", space({ externalUserAllowed: true }), "GOOGLE_CHAT_SPACE_METADATA_INVALID"],
+    ["group", space({ membershipCount: { joinedDirectHumanUserCount: 1, joinedGroupCount: 1 } }), "GOOGLE_CHAT_SPACE_GROUP_MEMBERSHIP"],
+  ])("rejects owned-user %s space metadata", async (_label, metadata, code) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json(metadata)));
+    await expect(
+      readGoogleChatOwnedUserMembershipSnapshot({
+        spaceName,
+        ownedAccessToken: "u".repeat(20),
+        grantedScopes: ownedScopes,
+      }),
+    ).rejects.toThrow(code);
   });
   it("reads all joined human memberships with the fixed app proof scope", async () => {
     const fetchMock = mockProvider(

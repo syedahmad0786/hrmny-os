@@ -11,6 +11,9 @@ import { requireProjectAccess } from "./trpc/work-management-router";
 
 const projectIdSchema = z.string().uuid();
 const userNameSchema = z.string().regex(/^users\/[0-9]{1,255}$/);
+const membershipNameSchema = z
+  .string()
+  .regex(/^spaces\/[A-Za-z0-9_-]+\/members\/[A-Za-z0-9_-]+$/);
 const roleSchema = z.enum([
   "ROLE_MEMBER",
   "ROLE_MANAGER",
@@ -19,13 +22,14 @@ const roleSchema = z.enum([
 const observedSnapshotSchema = z
   .object({
     spaceName: z.string().regex(/^spaces\/[A-Za-z0-9_-]+$/),
+    audiencePolicy: z.literal("PRIVATE_NO_EXTERNAL_OR_GROUPS"),
     membershipCoverage: z.literal("COMPLETE_USER_AUTH"),
     bindingReady: z.literal(false),
     assistantBotUserName: userNameSchema,
     humans: z
       .array(
         z.object({
-          membershipName: z.string(),
+          membershipName: membershipNameSchema,
           userName: userNameSchema,
           role: roleSchema,
         }),
@@ -35,7 +39,7 @@ const observedSnapshotSchema = z
     members: z
       .array(
         z.object({
-          membershipName: z.string(),
+          membershipName: membershipNameSchema,
           userName: userNameSchema,
           kind: z.enum(["HUMAN", "BOT"]),
           role: roleSchema,
@@ -95,6 +99,7 @@ export async function observeGoogleChatProjectIntersection(input: {
   );
   for (const member of snapshot.data.members) {
     if (
+      !member.membershipName.startsWith(`${snapshot.data.spaceName}/members/`) ||
       memberNames.has(member.membershipName) ||
       memberUsers.has(member.userName)
     )
@@ -113,6 +118,15 @@ export async function observeGoogleChatProjectIntersection(input: {
   );
   if (humanByUser.size !== snapshot.data.humans.length)
     deny("GOOGLE_CHAT_PROJECT_MEMBER_DUPLICATE");
+  if (
+    snapshot.data.humans.some(
+      (human) =>
+        !human.membershipName.startsWith(
+          `${snapshot.data.spaceName}/members/`,
+        ),
+    )
+  )
+    deny("GOOGLE_CHAT_PROJECT_OBSERVATION_INVALID");
   const listedHumans = snapshot.data.members.filter(
     (member) => member.kind === "HUMAN",
   );

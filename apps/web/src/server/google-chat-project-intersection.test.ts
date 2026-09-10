@@ -33,6 +33,7 @@ const actor: SessionUser = {
 function observed(overrides: Record<string, unknown> = {}) {
   return {
     spaceName: "spaces/AAAA",
+    audiencePolicy: "PRIVATE_NO_EXTERNAL_OR_GROUPS" as const,
     membershipCoverage: "COMPLETE_USER_AUTH" as const,
     bindingReady: false as const,
     assistantBotUserName: "users/900",
@@ -109,6 +110,18 @@ describe("Google Chat project intersection observation", () => {
     [
       "incomplete coverage",
       observed({ membershipCoverage: "APP_AUTH_HUMANS_ONLY_INCOMPLETE" }),
+      "GOOGLE_CHAT_PROJECT_OBSERVATION_INVALID",
+    ],
+    [
+      "missing private audience evidence",
+      observed({ audiencePolicy: undefined }),
+      "GOOGLE_CHAT_PROJECT_OBSERVATION_INVALID",
+    ],
+    [
+      "foreign-space membership",
+      observed({
+        humans: [{ membershipName: "spaces/BBBB/members/one", userName: "users/100", role: "ROLE_MANAGER" }],
+      }),
       "GOOGLE_CHAT_PROJECT_OBSERVATION_INVALID",
     ],
     [
