@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { sql, employee } from "@hrmny/db";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { getDb } from "../db";
 import {
   GoogleWorkspaceSecretSchema,
   persistGoogleWorkspaceTokens,
 } from "../google-workspace-oauth";
+import { disconnectGovernedApiKeyConnection } from "../integrations/governed-api-key";
+import { getOwnedGoogleWorkspaceCredentials } from "../trpc/connections-router";
 import { createCaller } from "../trpc/root";
 import { resolveDevUser } from "../auth/session";
 import { mutateSalesOsSettings, recordEmailEvent } from "../sales-os/store";
@@ -262,4 +264,115 @@ it("retains multiple domains, reconnects exactly one mailbox, and denies another
   expect(
     JSON.stringify(await caller.leadgen.outreach.conversations()),
   ).not.toContain(privateBody);
+});
+
+it("returns only an exact owned Google credential and cannot commit a stale refresh over replacement or disconnect", async () => {
+  const db = getDb()!;
+  const employeeId = randomUUID();
+  const otherEmployeeId = randomUUID();
+  await db.insert(employee).values([
+    { employeeId, email: `${employeeId}@example.test`, displayName: "Refresh owner" },
+    { employeeId: otherEmployeeId, email: `${otherEmployeeId}@example.test`, displayName: "Other owner" },
+  ]);
+  const email = `refresh-${randomUUID()}@example.test`;
+  const initial = await persistGoogleWorkspaceTokens({
+    employeeId,
+    email,
+    accessToken: "expired-access-token-not-real-12345",
+    refreshToken: "refresh-token-not-real-123456789",
+    expiresAt: new Date(0),
+    grantedScopes: ["scope.initial"],
+  });
+  await expect(
+    getOwnedGoogleWorkspaceCredentials(otherEmployeeId, initial.connectionAccountId),
+  ).resolves.toBeNull();
+
+  vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "test-client.apps.googleusercontent.com");
+  vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "test-secret");
+  let releaseFetch!: (response: Response) => void;
+  let fetchStarted!: () => void;
+  const started = new Promise<void>((resolve) => (fetchStarted = resolve));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => {
+      fetchStarted();
+      return new Promise<Response>((resolve) => (releaseFetch = resolve));
+    }),
+  );
+  const staleRefresh = getOwnedGoogleWorkspaceCredentials(
+    employeeId,
+    initial.connectionAccountId,
+  );
+  await started;
+  await persistGoogleWorkspaceTokens({
+    employeeId,
+    email,
+    accessToken: "replacement-access-token-not-real-12345",
+    refreshToken: "replacement-refresh-token-not-real-12345",
+    grantedScopes: ["scope.replacement"],
+  });
+  releaseFetch(
+    Response.json({
+      access_token: "stale-refreshed-access-token-not-real",
+      expires_in: 3600,
+      scope: "scope.stale",
+    }),
+  );
+  await expect(staleRefresh).resolves.toBeNull();
+  await expect(
+    getOwnedGoogleWorkspaceCredentials(employeeId, initial.connectionAccountId),
+  ).resolves.toMatchObject({
+    accessToken: "replacement-access-token-not-real-12345",
+    grantedScopes: ["scope.replacement"],
+    accountEmail: email,
+    connectionAccountId: initial.connectionAccountId,
+  });
+
+  const disconnectedDuringRefresh = await persistGoogleWorkspaceTokens({
+    employeeId,
+    email: `disconnect-${randomUUID()}@example.test`,
+    accessToken: "expired-disconnect-token-not-real-12345",
+    refreshToken: "disconnect-refresh-token-not-real-12345",
+    expiresAt: new Date(0),
+  });
+  let releaseDisconnectFetch!: (response: Response) => void;
+  let disconnectFetchStarted!: () => void;
+  const disconnectStarted = new Promise<void>(
+    (resolve) => (disconnectFetchStarted = resolve),
+  );
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => {
+      disconnectFetchStarted();
+      return new Promise<Response>(
+        (resolve) => (releaseDisconnectFetch = resolve),
+      );
+    }),
+  );
+  const disconnectedRefresh = getOwnedGoogleWorkspaceCredentials(
+    employeeId,
+    disconnectedDuringRefresh.connectionAccountId,
+  );
+  await disconnectStarted;
+  await disconnectGovernedApiKeyConnection({
+    database: db,
+    employeeId,
+    connectionAccountId: disconnectedDuringRefresh.connectionAccountId,
+    expectedToolkit: "google_workspace",
+  });
+  releaseDisconnectFetch(
+    Response.json({
+      access_token: "stale-after-disconnect-token-not-real",
+      expires_in: 3600,
+    }),
+  );
+  await expect(disconnectedRefresh).resolves.toBeNull();
+  await expect(
+    getOwnedGoogleWorkspaceCredentials(
+      employeeId,
+      disconnectedDuringRefresh.connectionAccountId,
+    ),
+  ).resolves.toBeNull();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
