@@ -75,6 +75,7 @@ const approvedToolSlugs = new Set([
   "CANVA_GET_DESIGN_EXPORT_JOB_RESULT",
   "LINKEDIN_GET_MY_INFO",
   "LINKEDIN_CREATE_LINKED_IN_POST",
+  "COMPOSIO_SEARCH_GOOGLE_MAPS",
 ]);
 
 export type ComposioConnectedAccount = z.infer<typeof connectedAccountSchema>;
@@ -131,7 +132,7 @@ export type ComposioLiveClient = {
     revokeOnDelete?: boolean;
   }): Promise<void>;
   executeTool<T = unknown>(input: {
-    connectedAccountId: string;
+    connectedAccountId?: string;
     toolSlug: string;
     arguments?: Record<string, unknown>;
     text?: string;
@@ -346,7 +347,7 @@ export function createComposioLive(input: {
     },
 
     async executeTool<T>(toolInput: {
-      connectedAccountId: string;
+      connectedAccountId?: string;
       toolSlug: string;
       arguments?: Record<string, unknown>;
       text?: string;
@@ -357,13 +358,23 @@ export function createComposioLive(input: {
           "Only approved Composio tools may be executed",
           403,
         );
+      if (
+        !toolInput.connectedAccountId &&
+        toolInput.toolSlug !== "COMPOSIO_SEARCH_GOOGLE_MAPS"
+      )
+        throw new ComposioApiError(
+          "This Composio tool requires a connected account",
+          403,
+        );
       const result = toolResponseSchema.parse(
         await request(
           `/tools/execute/${encodeURIComponent(toolInput.toolSlug)}`,
           {
             method: "POST",
             body: JSON.stringify({
-              connected_account_id: toolInput.connectedAccountId,
+              ...(toolInput.connectedAccountId
+                ? { connected_account_id: toolInput.connectedAccountId }
+                : {}),
               arguments: toolInput.arguments,
               text: toolInput.text,
               version: toolInput.version ?? "latest",
