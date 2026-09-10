@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createComposioLiveSend,
+  createComposioLive,
   createComposioStub,
   type ComposioLiveClient,
 } from "../index";
@@ -37,6 +38,7 @@ describe("createComposioLiveSend", () => {
       client: { proxy },
       connectedAccountId: "conn-1",
     });
+    const deadline = new AbortController().signal;
     const res = await adapter.sendAfterApproval({
       toolkit: "gmail",
       to: "lead@example.com",
@@ -45,6 +47,7 @@ describe("createComposioLiveSend", () => {
       messageId: "<hrmny-outreach-test@hrmny.co>",
       threadId: "thread-live-1",
       inReplyTo: "<client-reply@example.com>",
+      signal: deadline,
     });
     expect(res.mode).toBe("live");
     expect(res.sent).toBe(true);
@@ -53,6 +56,8 @@ describe("createComposioLiveSend", () => {
     expect(res.providerAccepted).toBe(true);
     expect(res.readbackRecipient).toBe("lead@example.com");
     expect(vi.mocked(proxy)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(proxy).mock.calls[0]![0].signal).toBe(deadline);
+    expect(vi.mocked(proxy).mock.calls[1]![0].signal).toBe(deadline);
     const arg = vi.mocked(proxy).mock.calls[0]![0];
     expect(arg.endpoint).toBe("/gmail/v1/users/me/messages/send");
     expect(arg.method).toBe("POST");
@@ -72,6 +77,21 @@ describe("createComposioLiveSend", () => {
       endpoint: "/gmail/v1/users/me/messages/msg-live-1",
       method: "GET",
     });
+  });
+
+  it("adds a default deadline to lower-level Composio HTTP requests", async () => {
+    const fetchImpl = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        expect(init?.signal).toBeInstanceOf(AbortSignal);
+        return Response.json({ status: 200, data: {}, headers: {} });
+      },
+    );
+    const client = createComposioLive({ apiKey: "test", fetchImpl });
+    await client.proxy({
+      connectedAccountId: "conn-1",
+      endpoint: "/gmail/v1/users/me/profile",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("keeps LinkedIn as copy-draft", async () => {

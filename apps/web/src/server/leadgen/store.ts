@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { CompetitorFinding } from "@hrmny/ai";
 import {
   and,
@@ -7,10 +8,58 @@ import {
   desc,
   eq,
   outreachItems,
+  withPostgresTransactionAdvisoryLock,
   winLossNotes,
   type Db,
 } from "@hrmny/db";
 import { getDb } from "../db";
+import { getIntegrationReceipt } from "../integrations/inbox";
+
+const decisions = new AsyncLocalStorage<{
+  id: string;
+  assertActive: () => Promise<void>;
+}>();
+const memoryDecisions = new Set<string>();
+
+export async function withOutreachDecision<T>(
+  id: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const current = decisions.getStore();
+  if (current?.id === id) {
+    await current.assertActive();
+    return work();
+  }
+  if (getDb()) {
+    const locked = await withPostgresTransactionAdvisoryLock(
+      process.env.DATABASE_URL ?? "",
+      `outreach-decision:${id}`,
+      ({ assertLockActive }) =>
+        decisions.run({ id, assertActive: assertLockActive }, work),
+    );
+    if (!locked.acquired)
+      throw new Error(
+        "This outreach item has an action in progress. Reload before retrying.",
+      );
+    return locked.value;
+  }
+  if (memoryDecisions.has(id))
+    throw new Error(
+      "This outreach item has an action in progress. Reload before retrying.",
+    );
+  memoryDecisions.add(id);
+  try {
+    return await decisions.run({ id, assertActive: async () => {} }, work);
+  } finally {
+    memoryDecisions.delete(id);
+  }
+}
+
+export async function assertOutreachDecisionActive(id: string): Promise<void> {
+  const current = decisions.getStore();
+  if (current?.id !== id) throw new Error("Outreach decision lock is required");
+  await current.assertActive();
+}
 
 /**
  * Durable leadgen store for the M8 `outreach_items` (0059) and lead_intel
@@ -283,6 +332,33 @@ export async function patchOutreach(
   id: string,
   patch: Partial<OutreachItem>,
 ): Promise<OutreachItem | null> {
+  return withOutreachDecision(id, () => patchOutreachLocked(id, patch));
+}
+
+async function patchOutreachLocked(
+  id: string,
+  patch: Partial<OutreachItem>,
+): Promise<OutreachItem | null> {
+  const delivery = await getIntegrationReceipt("gmail", `outreach-send:${id}`);
+  if (
+    delivery &&
+    !(
+      delivery.status === "failed" &&
+      delivery.result?.bridgeStatus === "not_sent"
+    )
+  ) {
+    const reconcilesSent =
+      patch.state === "sent" &&
+      delivery.result?.providerAccepted === true &&
+      patch.externalId === delivery.result?.externalId &&
+      Object.keys(patch).every((key) =>
+        ["state", "sentAt", "externalId"].includes(key),
+      );
+    if (!reconcilesSent)
+      throw new Error(
+        "This message has a send in progress or awaiting reconciliation. Check Sent Mail; its reviewed content cannot be changed.",
+      );
+  }
   return withDb(
     async (db) => {
       const set: Record<string, unknown> = { updatedAt: new Date() };

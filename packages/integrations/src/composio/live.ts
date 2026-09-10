@@ -147,6 +147,7 @@ export type ComposioLiveClient = {
       value: string;
       in: "header" | "query";
     }>;
+    signal?: AbortSignal;
   }): Promise<{ status: number; data: T; headers: Record<string, string> }>;
 };
 
@@ -181,6 +182,7 @@ export function createComposioLive(input: {
   async function request(path: string, init?: RequestInit) {
     const response = await fetchImpl(`${baseUrl}${path}`, {
       ...init,
+      signal: init?.signal ?? AbortSignal.timeout(30_000),
       headers: {
         accept: "application/json",
         "content-type": "application/json",
@@ -388,10 +390,12 @@ export function createComposioLive(input: {
         value: string;
         in: "header" | "query";
       }>;
+      signal?: AbortSignal;
     }) {
       const result = proxyResponseSchema.parse(
         await request("/tools/execute/proxy", {
           method: "POST",
+          signal: proxyInput.signal,
           body: JSON.stringify({
             connected_account_id: proxyInput.connectedAccountId,
             endpoint: proxyInput.endpoint,

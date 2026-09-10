@@ -44,12 +44,14 @@ it("uses only verified aliases and verifies the actual From address after sendin
   });
   vi.stubGlobal("fetch", fetcher);
   const sender = createGoogleWorkspaceGmailSend("test-owner");
+  const deadline = new AbortController().signal;
   await expect(
     sender.sendAfterApproval({
       toolkit: "gmail",
       to: "buyer@client.test",
       fromEmail: "pending@domain-two.test",
       body: "Test",
+      signal: deadline,
     }),
   ).rejects.toThrow("not a verified alias");
   expect(raw).toBe("");
@@ -59,9 +61,16 @@ it("uses only verified aliases and verifies the actual From address after sendin
       to: "buyer@client.test",
       fromEmail: "sales@domain-two.test",
       body: "Test",
+      signal: deadline,
     }),
   ).resolves.toMatchObject({ sent: true, providerAccepted: true });
   expect(raw).toContain("From: sales@domain-two.test\r\n");
+  const providerCalls = fetcher.mock.calls.filter(
+    ([url]) => !String(url).endsWith("settings/sendAs"),
+  );
+  expect(providerCalls).toHaveLength(2);
+  expect(providerCalls[0]?.[1]?.signal).toBe(deadline);
+  expect(providerCalls[1]?.[1]?.signal).toBe(deadline);
   await expect(
     sender.readbackAfterSend({
       externalId: "message-one",
@@ -69,6 +78,29 @@ it("uses only verified aliases and verifies the actual From address after sendin
       expectedFromEmail: "wrong@domain.test",
     }),
   ).rejects.toThrow("sender does not match");
+});
+
+it("checks an expired total deadline immediately before Gmail dispatch", async () => {
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.endsWith("settings/sendAs"))
+      return Response.json({
+        sendAs: [{ sendAsEmail: "sales@domain.test", isPrimary: true }],
+      });
+    throw new Error("provider send must not run");
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const controller = new AbortController();
+  controller.abort(new Error("deadline elapsed"));
+  await expect(
+    createGoogleWorkspaceGmailSend("test-owner").sendAfterApproval({
+      toolkit: "gmail",
+      to: "buyer@client.test",
+      fromEmail: "sales@domain.test",
+      body: "Approved body",
+      signal: controller.signal,
+    }),
+  ).rejects.toThrow("deadline elapsed");
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
 it("paginates Inbox and Sent with a fixed page size without modifying mail", async () => {

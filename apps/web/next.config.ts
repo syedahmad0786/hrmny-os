@@ -24,7 +24,19 @@ const nextConfig: NextConfig = {
   compress: false,
   outputFileTracingRoot: path.join(__dirname, "../.."),
   async headers() {
-    return [{ source: "/:path*", headers: [...SECURITY_HEADERS] }];
+    return [
+      { source: "/:path*", headers: [...SECURITY_HEADERS] },
+      {
+        source: "/assistant/review/outreach/:id",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'self' https://hrmny-portal.fly.dev",
+          },
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      },
+    ];
   },
   transpilePackages: [
     "@hrmny/ui",
@@ -36,8 +48,7 @@ const nextConfig: NextConfig = {
 };
 
 const sentryBuildEnabled = Boolean(
-  process.env.SENTRY_DSN?.trim() ||
-    process.env.NEXT_PUBLIC_SENTRY_DSN?.trim(),
+  process.env.SENTRY_DSN?.trim() || process.env.NEXT_PUBLIC_SENTRY_DSN?.trim(),
 );
 
 const sentryConfig = {

@@ -86,6 +86,7 @@ export function createGoogleWorkspaceGmailSend(
         "",
         input.body,
       ].join("\r\n");
+      input.signal?.throwIfAborted();
       const response = await fetch(
         "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
         {
@@ -98,6 +99,7 @@ export function createGoogleWorkspaceGmailSend(
             raw: Buffer.from(message, "utf8").toString("base64url"),
             ...(input.threadId ? { threadId: input.threadId } : {}),
           }),
+          signal: input.signal,
         },
       );
       if (!response.ok) {
@@ -121,6 +123,7 @@ export function createGoogleWorkspaceGmailSend(
           recipient: input.to,
           expectedThreadId: input.threadId,
           expectedFromEmail: fromEmail ?? undefined,
+          signal: input.signal,
         });
       } catch (error) {
         if (error instanceof GmailProviderReadbackError) throw error;
@@ -149,12 +152,16 @@ export function createGoogleWorkspaceGmailSend(
       if (!accessToken) {
         throw new Error("Google Workspace connection is unavailable");
       }
+      input.signal?.throwIfAborted();
       const params = new URLSearchParams({ format: "metadata" });
       params.append("metadataHeaders", "To");
       params.append("metadataHeaders", "From");
       const response = await fetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(input.externalId)}?${params}`,
-        { headers: { authorization: `Bearer ${accessToken}` } },
+        {
+          headers: { authorization: `Bearer ${accessToken}` },
+          signal: input.signal,
+        },
       );
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
