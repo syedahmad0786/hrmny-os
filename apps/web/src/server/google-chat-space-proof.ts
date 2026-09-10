@@ -71,6 +71,8 @@ export type GoogleChatSpaceSnapshot = Readonly<{
 
 export type GoogleChatUserMembershipSnapshot = Readonly<{
   spaceName: string;
+  /** Complete user-authenticated roster, distinct from binding authorization. */
+  membershipCoverage: "COMPLETE_USER_AUTH";
   bindingReady: false;
   assistantBotUserName: string;
   humans: readonly Readonly<{
@@ -203,7 +205,9 @@ export async function readValidatedGoogleChatSpace(
     }
     const nextPageToken = parsedPage.data.nextPageToken;
     if (!nextPageToken) {
-      if (members.length !== space.data.membershipCount.joinedDirectHumanUserCount) {
+      if (
+        members.length !== space.data.membershipCount.joinedDirectHumanUserCount
+      ) {
         providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_COUNT_MISMATCH");
       }
       return {
@@ -235,7 +239,10 @@ export async function readGoogleChatOwnedUserMembershipSnapshot(input: {
   ownedAccessToken: string;
 }): Promise<GoogleChatUserMembershipSnapshot> {
   const spaceName = googleSpaceNameSchema.safeParse(input.spaceName);
-  if (!spaceName.success || !z.string().min(20).safeParse(input.ownedAccessToken).success) {
+  if (
+    !spaceName.success ||
+    !z.string().min(20).safeParse(input.ownedAccessToken).success
+  ) {
     providerFailure("GOOGLE_CHAT_USER_CREDENTIAL_INVALID");
   }
   const rawAppMembership = await fetchJson(
@@ -256,20 +263,30 @@ export async function readGoogleChatOwnedUserMembershipSnapshot(input: {
   const tokens = new Set<string>();
   let pageToken: string | undefined;
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const query = new URLSearchParams({ pageSize: String(PAGE_SIZE), showGroups: "true" });
+    const query = new URLSearchParams({
+      pageSize: String(PAGE_SIZE),
+      showGroups: "true",
+    });
     if (pageToken) query.set("pageToken", pageToken);
     const rawPage = await fetchJson(
       `${GOOGLE_CHAT_API_URL}/${spaceName.data}/members?${query}`,
       input.ownedAccessToken,
     );
     const parsed = membershipPageSchema.safeParse(rawPage);
-    if (!parsed.success) providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_PAGE_INVALID");
+    if (!parsed.success)
+      providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_PAGE_INVALID");
     for (const raw of parsed.data.memberships) {
       const membership = userMembershipSchema.safeParse(raw);
-      if (!membership.success || !membership.data.name.startsWith(`${spaceName.data}/members/`)) {
+      if (
+        !membership.success ||
+        !membership.data.name.startsWith(`${spaceName.data}/members/`)
+      ) {
         providerFailure("GOOGLE_CHAT_SPACE_MEMBER_INVALID");
       }
-      if (names.has(membership.data.name) || users.has(membership.data.member.name)) {
+      if (
+        names.has(membership.data.name) ||
+        users.has(membership.data.member.name)
+      ) {
         providerFailure("GOOGLE_CHAT_SPACE_MEMBER_DUPLICATE");
       }
       names.add(membership.data.name);
@@ -280,7 +297,8 @@ export async function readGoogleChatOwnedUserMembershipSnapshot(input: {
         kind: membership.data.member.type,
         role: membership.data.role,
       });
-      if (members.length > MAX_MEMBERSHIPS) providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_LIMIT");
+      if (members.length > MAX_MEMBERSHIPS)
+        providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_LIMIT");
     }
     const next = parsed.data.nextPageToken;
     if (!next) {
@@ -294,16 +312,22 @@ export async function readGoogleChatOwnedUserMembershipSnapshot(input: {
       }
       const humans = members
         .filter((member) => member.kind === "HUMAN")
-        .map(({ membershipName, userName, role }) => ({ membershipName, userName, role }));
+        .map(({ membershipName, userName, role }) => ({
+          membershipName,
+          userName,
+          role,
+        }));
       return {
         spaceName: spaceName.data,
+        membershipCoverage: "COMPLETE_USER_AUTH",
         bindingReady: false,
         assistantBotUserName: appMembership.data.member.name,
         humans,
         members,
       };
     }
-    if (tokens.has(next)) providerFailure("GOOGLE_CHAT_SPACE_PAGE_TOKEN_REPEATED");
+    if (tokens.has(next))
+      providerFailure("GOOGLE_CHAT_SPACE_PAGE_TOKEN_REPEATED");
     tokens.add(next);
     pageToken = next;
   }

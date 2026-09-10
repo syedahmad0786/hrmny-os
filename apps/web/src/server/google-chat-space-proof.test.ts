@@ -77,27 +77,49 @@ describe("Google Chat Space provider proof", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        Response.json(member("200", { member: { name: "users/200", type: "BOT" } })),
-      )
-      .mockResolvedValueOnce(Response.json({
-        memberships: [
-          member("100"),
+        Response.json(
           member("200", { member: { name: "users/200", type: "BOT" } }),
-        ],
-      }));
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          memberships: [
+            member("100"),
+            member("200", { member: { name: "users/200", type: "BOT" } }),
+          ],
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
     await expect(
-      readGoogleChatOwnedUserMembershipSnapshot({ spaceName, ownedAccessToken: "u".repeat(20) }),
+      readGoogleChatOwnedUserMembershipSnapshot({
+        spaceName,
+        ownedAccessToken: "u".repeat(20),
+      }),
     ).resolves.toEqual({
       spaceName,
+      membershipCoverage: "COMPLETE_USER_AUTH",
       bindingReady: false,
       assistantBotUserName: "users/200",
       humans: [
-        { membershipName: `${spaceName}/members/member-100`, userName: "users/100", role: "ROLE_MEMBER" },
+        {
+          membershipName: `${spaceName}/members/member-100`,
+          userName: "users/100",
+          role: "ROLE_MEMBER",
+        },
       ],
       members: [
-        { membershipName: `${spaceName}/members/member-100`, userName: "users/100", kind: "HUMAN", role: "ROLE_MEMBER" },
-        { membershipName: `${spaceName}/members/member-200`, userName: "users/200", kind: "BOT", role: "ROLE_MEMBER" },
+        {
+          membershipName: `${spaceName}/members/member-100`,
+          userName: "users/100",
+          kind: "HUMAN",
+          role: "ROLE_MEMBER",
+        },
+        {
+          membershipName: `${spaceName}/members/member-200`,
+          userName: "users/200",
+          kind: "BOT",
+          role: "ROLE_MEMBER",
+        },
       ],
     });
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
@@ -108,25 +130,56 @@ describe("Google Chat Space provider proof", () => {
 
   it.each([
     ["missing bot", [member("100")], "GOOGLE_CHAT_ASSISTANT_APP_MISMATCH"],
-    ["foreign extra bot", [member("100"), member("200", { member: { name: "users/200", type: "BOT" } }), member("300", { member: { name: "users/300", type: "BOT" } })], "GOOGLE_CHAT_ASSISTANT_APP_MISMATCH"],
-    ["group", [{ ...member("group"), member: undefined, groupMember: { name: "groups/1" } }], "GOOGLE_CHAT_SPACE_MEMBER_INVALID"],
+    [
+      "foreign extra bot",
+      [
+        member("100"),
+        member("200", { member: { name: "users/200", type: "BOT" } }),
+        member("300", { member: { name: "users/300", type: "BOT" } }),
+      ],
+      "GOOGLE_CHAT_ASSISTANT_APP_MISMATCH",
+    ],
+    [
+      "group",
+      [
+        {
+          ...member("group"),
+          member: undefined,
+          groupMember: { name: "groups/1" },
+        },
+      ],
+      "GOOGLE_CHAT_SPACE_MEMBER_INVALID",
+    ],
   ])("rejects user snapshot %s", async (_name, memberships, code) => {
     vi.stubGlobal(
       "fetch",
       vi
         .fn()
-        .mockResolvedValueOnce(Response.json(member("200", { member: { name: "users/200", type: "BOT" } })))
+        .mockResolvedValueOnce(
+          Response.json(
+            member("200", { member: { name: "users/200", type: "BOT" } }),
+          ),
+        )
         .mockResolvedValueOnce(Response.json({ memberships })),
     );
     await expect(
-      readGoogleChatOwnedUserMembershipSnapshot({ spaceName, ownedAccessToken: "u".repeat(20) }),
+      readGoogleChatOwnedUserMembershipSnapshot({
+        spaceName,
+        ownedAccessToken: "u".repeat(20),
+      }),
     ).rejects.toThrow(code);
   });
 
   it("denies a user token that lacks the app alias scope", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 403 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 403 })),
+    );
     await expect(
-      readGoogleChatOwnedUserMembershipSnapshot({ spaceName, ownedAccessToken: "u".repeat(20) }),
+      readGoogleChatOwnedUserMembershipSnapshot({
+        spaceName,
+        ownedAccessToken: "u".repeat(20),
+      }),
     ).rejects.toThrow("GOOGLE_CHAT_SPACE_PROVIDER_403");
   });
   it("reads all joined human memberships with the fixed app proof scope", async () => {
@@ -143,7 +196,9 @@ describe("Google Chat Space provider proof", () => {
         memberships: [member("100", { role: "ROLE_MANAGER" })],
         nextPageToken: "page-2",
       }),
-      Response.json({ memberships: [member("200", { role: "ROLE_ASSISTANT_MANAGER" })] }),
+      Response.json({
+        memberships: [member("200", { role: "ROLE_ASSISTANT_MANAGER" })],
+      }),
     );
 
     await expect(readValidatedGoogleChatSpace(spaceName)).resolves.toEqual({
@@ -152,8 +207,16 @@ describe("Google Chat Space provider proof", () => {
       joinedGroupCount: 0,
       membershipCoverage: "APP_AUTH_HUMANS_ONLY_INCOMPLETE",
       members: [
-        { membershipName: `${spaceName}/members/member-100`, userName: "users/100", role: "ROLE_MANAGER" },
-        { membershipName: `${spaceName}/members/member-200`, userName: "users/200", role: "ROLE_ASSISTANT_MANAGER" },
+        {
+          membershipName: `${spaceName}/members/member-100`,
+          userName: "users/100",
+          role: "ROLE_MANAGER",
+        },
+        {
+          membershipName: `${spaceName}/members/member-200`,
+          userName: "users/200",
+          role: "ROLE_ASSISTANT_MANAGER",
+        },
       ],
     });
     expect(signedScopes(fetchMock)).toEqual([
@@ -187,22 +250,87 @@ describe("Google Chat Space provider proof", () => {
     const pages = Array.from({ length: 20 }, (_, index) =>
       Response.json({ memberships: [], nextPageToken: `next-${index}` }),
     );
-    mockProvider(Response.json(space({ membershipCount: { joinedDirectHumanUserCount: 0, joinedGroupCount: 0 } })), ...pages);
+    mockProvider(
+      Response.json(
+        space({
+          membershipCount: {
+            joinedDirectHumanUserCount: 0,
+            joinedGroupCount: 0,
+          },
+        }),
+      ),
+      ...pages,
+    );
     await expect(readValidatedGoogleChatSpace(spaceName)).rejects.toThrow(
       "GOOGLE_CHAT_SPACE_PAGE_LIMIT",
     );
   });
 
   it.each([
-    ["missing access settings", space({ accessSettings: undefined }), { memberships: [member("100")] }, "GOOGLE_CHAT_SPACE_METADATA_INVALID"],
-    ["unnamed space", space({ displayName: "" }), { memberships: [member("100")] }, "GOOGLE_CHAT_SPACE_METADATA_INVALID"],
-    ["external space", space({ externalUserAllowed: true }), { memberships: [member("100")] }, "GOOGLE_CHAT_SPACE_METADATA_INVALID"],
-    ["group count", space({ membershipCount: { joinedDirectHumanUserCount: 1, joinedGroupCount: 1 } }), { memberships: [member("100")] }, "GOOGLE_CHAT_SPACE_GROUP_MEMBERSHIP"],
-    ["external member", space(), { memberships: [member("100", { affiliation: "EXTERNAL" })] }, "GOOGLE_CHAT_SPACE_MEMBER_INVALID"],
-    ["unknown affiliation", space(), { memberships: [member("100", { affiliation: "UNKNOWN" })] }, "GOOGLE_CHAT_SPACE_MEMBER_INVALID"],
-    ["missing role", space(), { memberships: [member("100", { role: undefined })] }, "GOOGLE_CHAT_SPACE_MEMBER_INVALID"],
-    ["nonhuman member", space(), { memberships: [member("100", { member: { name: "users/100", type: "BOT" } })] }, "GOOGLE_CHAT_SPACE_MEMBER_INVALID"],
-    ["wrong membership parent", space(), { memberships: [{ ...member("100"), name: "spaces/BBBB/members/member-100" }] }, "GOOGLE_CHAT_SPACE_MEMBER_INVALID"],
+    [
+      "missing access settings",
+      space({ accessSettings: undefined }),
+      { memberships: [member("100")] },
+      "GOOGLE_CHAT_SPACE_METADATA_INVALID",
+    ],
+    [
+      "unnamed space",
+      space({ displayName: "" }),
+      { memberships: [member("100")] },
+      "GOOGLE_CHAT_SPACE_METADATA_INVALID",
+    ],
+    [
+      "external space",
+      space({ externalUserAllowed: true }),
+      { memberships: [member("100")] },
+      "GOOGLE_CHAT_SPACE_METADATA_INVALID",
+    ],
+    [
+      "group count",
+      space({
+        membershipCount: { joinedDirectHumanUserCount: 1, joinedGroupCount: 1 },
+      }),
+      { memberships: [member("100")] },
+      "GOOGLE_CHAT_SPACE_GROUP_MEMBERSHIP",
+    ],
+    [
+      "external member",
+      space(),
+      { memberships: [member("100", { affiliation: "EXTERNAL" })] },
+      "GOOGLE_CHAT_SPACE_MEMBER_INVALID",
+    ],
+    [
+      "unknown affiliation",
+      space(),
+      { memberships: [member("100", { affiliation: "UNKNOWN" })] },
+      "GOOGLE_CHAT_SPACE_MEMBER_INVALID",
+    ],
+    [
+      "missing role",
+      space(),
+      { memberships: [member("100", { role: undefined })] },
+      "GOOGLE_CHAT_SPACE_MEMBER_INVALID",
+    ],
+    [
+      "nonhuman member",
+      space(),
+      {
+        memberships: [
+          member("100", { member: { name: "users/100", type: "BOT" } }),
+        ],
+      },
+      "GOOGLE_CHAT_SPACE_MEMBER_INVALID",
+    ],
+    [
+      "wrong membership parent",
+      space(),
+      {
+        memberships: [
+          { ...member("100"), name: "spaces/BBBB/members/member-100" },
+        ],
+      },
+      "GOOGLE_CHAT_SPACE_MEMBER_INVALID",
+    ],
   ])("rejects %s", async (_name, metadata, memberships, code) => {
     mockProvider(Response.json(metadata), Response.json(memberships));
     await expect(readValidatedGoogleChatSpace(spaceName)).rejects.toThrow(code);
@@ -218,7 +346,9 @@ describe("Google Chat Space provider proof", () => {
       ),
       Response.json({ memberships: [member("100")] }),
     );
-    await expect(readValidatedGoogleChatSpace(spaceName)).resolves.toMatchObject({
+    await expect(
+      readValidatedGoogleChatSpace(spaceName),
+    ).resolves.toMatchObject({
       directHumanCount: 1,
       joinedGroupCount: 0,
       membershipCoverage: "APP_AUTH_HUMANS_ONLY_INCOMPLETE",
