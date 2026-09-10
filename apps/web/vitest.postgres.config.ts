@@ -14,6 +14,7 @@ export default defineConfig({
       "src/server/qm/work-authority-fence.postgres-proof.ts",
       "src/server/composio-status.postgres-proof.ts",
       "src/server/qm/google-chat-worker.postgres-proof.ts",
+      "src/server/qm/google-identity.postgres-proof.ts",
     ],
     setupFiles: ["./src/test/postgres-ci-setup.ts"],
     fileParallelism: false,
