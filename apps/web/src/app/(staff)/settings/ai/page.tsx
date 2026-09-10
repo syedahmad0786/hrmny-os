@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useState } from "react";
+import { NATIVE_QM_ADMIN_URL } from "@/lib/native-qm";
 import { trpc } from "@/lib/trpc";
 import type { AppRouter } from "@/server/trpc/root";
 import { formatAed, formatRelative } from "@/components/crm/format";
@@ -55,14 +56,12 @@ function AdminNav() {
       >
         Feature Lab
       </Link>
-      {process.env.NEXT_PUBLIC_QM_URL && (
-        <a
-          className="rounded-full border border-sand bg-white px-4 py-2"
-          href={`${process.env.NEXT_PUBLIC_QM_URL.replace(/\/$/, "")}/admin/`}
-        >
-          Assistant administration
-        </a>
-      )}
+      <a
+        className="rounded-full border border-sand bg-white px-4 py-2"
+        href={NATIVE_QM_ADMIN_URL}
+      >
+        Assistant administration
+      </a>
     </nav>
   );
 }

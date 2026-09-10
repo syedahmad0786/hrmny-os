@@ -36,6 +36,13 @@ function isAllowed(group: Actor, route: RouteEntry): boolean {
 }
 
 async function assertRenders(page: Page, route: RouteEntry, label: string) {
+  if (route.nativeRedirect) {
+    const resp = await page.goto(route.sample, { waitUntil: "commit" });
+    expect
+      .soft(resp?.status() ?? 0, `${label} ${route.sample} must not 5xx`)
+      .toBeLessThan(500);
+    return;
+  }
   const resp = await page.goto(route.sample, { waitUntil: "domcontentloaded" });
   const status = resp?.status() ?? 0;
   if (route.expect === "notFound") {
