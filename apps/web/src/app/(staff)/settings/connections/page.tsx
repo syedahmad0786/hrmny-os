@@ -423,7 +423,7 @@ export default function ConnectionsPage() {
           kind: "ok",
           text:
             result.intent === "google_chat_read"
-              ? `Google Chat read permission granted for ${result.account}. Shared spaces are not live or bound to projects yet.`
+              ? `Google Chat read access granted for ${result.account}. You can now verify a Space before connecting it to a project.`
               : `Google Workspace connected: ${result.account}. Your mailbox is private to you.`,
         });
         void Promise.all([
@@ -836,9 +836,9 @@ export default function ConnectionsPage() {
                           Google Chat space read permission
                         </p>
                         <p className="mt-1">
-                          Request read-only Space and membership access for your
-                          HRMNY account. Permission granted does not make shared
-                          Chat live or bind any Space to a project.
+                          Allow hrmny to verify Space settings and members
+                          before you connect a Space to a project. This grants
+                          read access using your own HRMNY account.
                         </p>
                         <Button
                           type="button"

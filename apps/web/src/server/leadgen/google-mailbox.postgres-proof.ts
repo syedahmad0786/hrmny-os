@@ -271,8 +271,16 @@ it("returns only an exact owned Google credential and cannot commit a stale refr
   const employeeId = randomUUID();
   const otherEmployeeId = randomUUID();
   await db.insert(employee).values([
-    { employeeId, email: `${employeeId}@example.test`, displayName: "Refresh owner" },
-    { employeeId: otherEmployeeId, email: `${otherEmployeeId}@example.test`, displayName: "Other owner" },
+    {
+      employeeId,
+      email: `${employeeId}@example.test`,
+      displayName: "Refresh owner",
+    },
+    {
+      employeeId: otherEmployeeId,
+      email: `${otherEmployeeId}@example.test`,
+      displayName: "Other owner",
+    },
   ]);
   const email = `refresh-${randomUUID()}@example.test`;
   const initial = await persistGoogleWorkspaceTokens({
@@ -284,10 +292,16 @@ it("returns only an exact owned Google credential and cannot commit a stale refr
     grantedScopes: ["scope.initial"],
   });
   await expect(
-    getOwnedGoogleWorkspaceCredentials(otherEmployeeId, initial.connectionAccountId),
+    getOwnedGoogleWorkspaceCredentials(
+      otherEmployeeId,
+      initial.connectionAccountId,
+    ),
   ).resolves.toBeNull();
 
-  vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "test-client.apps.googleusercontent.com");
+  vi.stubEnv(
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "test-client.apps.googleusercontent.com",
+  );
   vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "test-secret");
   let releaseFetch!: (response: Response) => void;
   let fetchStarted!: () => void;
