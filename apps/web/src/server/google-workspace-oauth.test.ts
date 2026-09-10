@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const resolveActiveStaffById = vi.hoisted(() => vi.fn());
+vi.mock("./auth/session", () => ({ resolveActiveStaffById }));
 import {
   googleWorkspaceClientConfigured,
   googleWorkspaceRedirectUri,
@@ -46,8 +49,12 @@ describe("google workspace oauth helpers", () => {
   rememberEnv();
   beforeEach(() => {
     process.env.GOOGLE_OAUTH_STATE_SECRET = "g".repeat(32);
+    resolveActiveStaffById.mockReset();
   });
-  afterEach(() => restoreEnv());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    restoreEnv();
+  });
 
   it("round-trips a signed employee state with the redirect URI", () => {
     const employeeId = "c0000000-0000-4000-8000-000000000011";
@@ -210,6 +217,8 @@ describe("google workspace oauth helpers", () => {
   it("rejects a forwarded consent callback before exchanging or saving mailbox tokens", async () => {
     const state = signGoogleWorkspaceOAuthState(
       "c0000000-0000-4000-8000-000000000011",
+      undefined,
+      "google_chat_read",
     );
     await expect(
       completeGoogleWorkspaceOAuth({
@@ -218,6 +227,116 @@ describe("google workspace oauth helpers", () => {
         actorEmployeeId: "c0000000-0000-4000-8000-000000000099",
       }),
     ).rejects.toThrow(/employee who started/);
+  });
+
+  function stubChatConsentCallback(input: {
+    staff: { actorType: string; email: string } | null;
+    profile?: { email: string; hd?: string };
+    scope?: string;
+  }) {
+    process.env.GOOGLE_OAUTH_CLIENT_ID =
+      "test-client.apps.googleusercontent.com";
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-secret";
+    resolveActiveStaffById.mockResolvedValue(input.staff);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              access_token: "a".repeat(20),
+              expires_in: 3600,
+              scope: input.scope,
+            }),
+            { status: 200 },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              email: input.profile?.email ?? "developer@hrmny.co",
+              email_verified: true,
+              hd: input.profile?.hd ?? "hrmny.co",
+            }),
+            { status: 200 },
+          ),
+        ),
+    );
+  }
+
+  it("rejects an inactive staff actor after the Chat callback", async () => {
+    stubChatConsentCallback({
+      staff: null,
+      scope: GOOGLE_CHAT_READ_SCOPES.join(" "),
+    });
+    await expect(
+      completeGoogleWorkspaceOAuth({
+        code: "mock-code",
+        state: signGoogleWorkspaceOAuthState(
+          "c0000000-0000-4000-8000-000000000011",
+          undefined,
+          "google_chat_read",
+        ),
+        actorEmployeeId: "c0000000-0000-4000-8000-000000000011",
+      }),
+    ).rejects.toThrow(/active HRMNY staff account/i);
+  });
+
+  it("rejects a mismatched Google account after the Chat callback", async () => {
+    stubChatConsentCallback({
+      staff: { actorType: "staff", email: "developer@hrmny.co" },
+      profile: { email: "other@hrmny.co", hd: "hrmny.co" },
+      scope: GOOGLE_CHAT_READ_SCOPES.join(" "),
+    });
+    await expect(
+      completeGoogleWorkspaceOAuth({
+        code: "mock-code",
+        state: signGoogleWorkspaceOAuthState(
+          "c0000000-0000-4000-8000-000000000011",
+          undefined,
+          "google_chat_read",
+        ),
+        actorEmployeeId: "c0000000-0000-4000-8000-000000000011",
+      }),
+    ).rejects.toThrow(/active HRMNY staff account/i);
+  });
+
+  it("rejects a non-HRMNY hosted domain after the Chat callback", async () => {
+    stubChatConsentCallback({
+      staff: { actorType: "staff", email: "developer@hrmny.co" },
+      profile: { email: "developer@hrmny.co", hd: "example.test" },
+      scope: GOOGLE_CHAT_READ_SCOPES.join(" "),
+    });
+    await expect(
+      completeGoogleWorkspaceOAuth({
+        code: "mock-code",
+        state: signGoogleWorkspaceOAuthState(
+          "c0000000-0000-4000-8000-000000000011",
+          undefined,
+          "google_chat_read",
+        ),
+        actorEmployeeId: "c0000000-0000-4000-8000-000000000011",
+      }),
+    ).rejects.toThrow(/active HRMNY staff account/i);
+  });
+
+  it("rejects missing or partial provider-returned Chat grant evidence", async () => {
+    stubChatConsentCallback({
+      staff: { actorType: "staff", email: "developer@hrmny.co" },
+      scope: GOOGLE_CHAT_READ_SCOPES[0],
+    });
+    await expect(
+      completeGoogleWorkspaceOAuth({
+        code: "mock-code",
+        state: signGoogleWorkspaceOAuthState(
+          "c0000000-0000-4000-8000-000000000011",
+          undefined,
+          "google_chat_read",
+        ),
+        actorEmployeeId: "c0000000-0000-4000-8000-000000000011",
+      }),
+    ).rejects.toThrow(/both returned Chat read scopes/i);
   });
 
   it("formats Google OAuth error JSON", () => {

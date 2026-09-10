@@ -69,6 +69,56 @@ test.describe("Connections Google Workspace OAuth", () => {
     );
   });
 
+  test("Chat read permission request carries the opt-in intent without opening Google", async ({
+    page,
+  }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    let requestedIntent: string | null = null;
+    await page.route("**/api/trpc/connections.startGoogleWorkspaceOAuth**", async (route) => {
+      const url = new URL(route.request().url());
+      const input =
+        route.request().postData() ?? url.searchParams.get("input") ?? "";
+      requestedIntent = input.includes("google_chat_read")
+        ? "google_chat_read"
+        : null;
+      const redirectUrl = new URL(
+        "/__test-google-chat-consent",
+        route.request().url(),
+      ).toString();
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            result: {
+              data: {
+                json: {
+                  redirectUrl,
+                  redirectUri:
+                    "http://localhost:3000/api/integrations/google-workspace/callback",
+                },
+              },
+            },
+          },
+        ]),
+      });
+    });
+    await page.route("**/__test-google-chat-consent", (route) =>
+      route.fulfill({ contentType: "text/html", body: "consent mock" }),
+    );
+    await page.goto("/settings/connections", { waitUntil: "domcontentloaded" });
+    const button = page
+      .getByTestId("conn-google-chat-read-consent")
+      .getByRole("button", { name: /Request Google Chat read permission/i });
+    // The test server deliberately has no OAuth client. Remove only its native
+    // disabled attribute so this intercepted request exercises the UI intent.
+    await button.evaluate((element: HTMLButtonElement) => {
+      element.disabled = false;
+    });
+    await button.click();
+    await expect(page).toHaveURL(/__test-google-chat-consent/);
+    expect(requestedIntent).toBe("google_chat_read");
+  });
+
   test("pasting an n8n key saves through the backend", async ({ page }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/settings/connections", { waitUntil: "domcontentloaded" });
