@@ -1,11 +1,26 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { resolveActiveStaffByEmail } from "../auth/session";
-import { readAuthorizedGbrain } from "../gbrain-access";
+import { getDb } from "../db";
+import {
+  readAuthorizedGbrain,
+  readAuthorizedProjectGbrain,
+} from "../gbrain-access";
+import { requireProjectAccess } from "../trpc/work-management-router";
 import { readQmBrain } from "./brain-access";
 import { POST } from "../../app/api/qm/brain/route";
 
-vi.mock("../auth/session", () => ({ resolveActiveStaffByEmail: vi.fn() }));
-vi.mock("../gbrain-access", () => ({ readAuthorizedGbrain: vi.fn() }));
+vi.mock("../auth/session", () => ({
+  resolveActiveStaffByEmail: vi.fn(),
+  sessionCanViewMargin: () => false,
+}));
+vi.mock("../db", () => ({ getDb: vi.fn() }));
+vi.mock("../trpc/work-management-router", () => ({
+  requireProjectAccess: vi.fn(),
+}));
+vi.mock("../gbrain-access", () => ({
+  readAuthorizedGbrain: vi.fn(),
+  readAuthorizedProjectGbrain: vi.fn(),
+}));
 const actorId = "operator@hrmny.co";
 const identity = { actorId, scopeId: `personal:${actorId}` };
 const staff = {
@@ -19,7 +34,15 @@ const staff = {
 };
 const token = "synthetic.run.token";
 const query = { operation: "search", query: "synthetic canary" };
+const projectId = "d0000000-0000-4000-8000-000000000001";
 const fetcher = vi.fn<typeof fetch>();
+function revisionDatabase(...revisions: string[]) {
+  const execute = vi.fn();
+  for (const revision of revisions)
+    execute.mockResolvedValueOnce([{ revision }]);
+  vi.mocked(getDb).mockReturnValue({ execute } as never);
+  return execute;
+}
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("QM_PUBLIC_URL", "https://hrmny-portal.fly.dev");
@@ -31,6 +54,11 @@ beforeEach(() => {
     requestId: "c0000000-0000-4000-8000-000000000009",
     results: [],
   });
+  vi.mocked(readAuthorizedProjectGbrain).mockResolvedValue({
+    requestId: "c0000000-0000-4000-8000-000000000009",
+    results: [],
+  });
+  vi.mocked(requireProjectAccess).mockResolvedValue({ projectId } as never);
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -64,6 +92,102 @@ it("uses the core-verified actor and existing source authorization, then recheck
   expect(await response.json()).toMatchObject({ results: [] });
 });
 
+it("accepts only current revision-bound Work project contexts and keeps the project server-selected", async () => {
+  vi.stubEnv("QM_WORK_PROJECTS_ENABLED", "1");
+  const shared = {
+    actorId,
+    scopeId: `group:web-project-${projectId}`,
+    scopeVersion: "hrmny-work:42",
+  };
+  fetcher.mockImplementation(async () => Response.json(shared));
+  const revision = revisionDatabase("42", "42", "42", "42");
+
+  await expect(readQmBrain(token, query)).resolves.toMatchObject({
+    results: [],
+  });
+  expect(readAuthorizedProjectGbrain).toHaveBeenCalledWith(
+    staff.employeeId,
+    projectId,
+    query,
+  );
+  expect(readAuthorizedGbrain).not.toHaveBeenCalled();
+  expect(requireProjectAccess).toHaveBeenCalledTimes(2);
+  for (const [context, selectedProject] of vi.mocked(requireProjectAccess).mock
+    .calls) {
+    expect(selectedProject).toBe(projectId);
+    expect(context).toMatchObject({
+      employeeId: staff.employeeId,
+      requestedFeatureKey: "work.projects",
+    });
+  }
+  expect(revision).toHaveBeenCalledTimes(4);
+});
+
+it("denies missing, stale, revoked, inactive, and changed shared Work authority", async () => {
+  const shared = {
+    actorId,
+    scopeId: `group:web-project-${projectId}`,
+    scopeVersion: "hrmny-work:42",
+  };
+
+  vi.stubEnv("QM_WORK_PROJECTS_ENABLED", "0");
+  fetcher.mockResolvedValueOnce(Response.json(shared));
+  await expect(readQmBrain(token, query)).rejects.toThrow(
+    "QM_SCOPE_NOT_SUPPORTED",
+  );
+  expect(getDb).not.toHaveBeenCalled();
+  vi.stubEnv("QM_WORK_PROJECTS_ENABLED", "1");
+
+  fetcher.mockResolvedValueOnce(
+    Response.json({ actorId, scopeId: shared.scopeId }),
+  );
+  await expect(readQmBrain(token, query)).rejects.toThrow(
+    "QM_SCOPE_NOT_SUPPORTED",
+  );
+  expect(getDb).not.toHaveBeenCalled();
+
+  fetcher.mockResolvedValueOnce(Response.json(shared));
+  vi.mocked(getDb).mockReturnValue({
+    execute: vi.fn().mockResolvedValue([]),
+  } as never);
+  await expect(readQmBrain(token, query)).rejects.toThrow(
+    "WORK_AUTHORITY_FENCE_STATE_MISSING",
+  );
+
+  fetcher.mockResolvedValueOnce(Response.json(shared));
+  revisionDatabase("43");
+  await expect(readQmBrain(token, query)).rejects.toThrow(
+    "QM_WORK_AUTHORITY_REVISION_STALE",
+  );
+  expect(readAuthorizedProjectGbrain).not.toHaveBeenCalled();
+
+  fetcher.mockResolvedValueOnce(Response.json(shared));
+  revisionDatabase("42");
+  vi.mocked(requireProjectAccess).mockRejectedValueOnce(
+    new Error("FEATURE_DISABLED:work.projects"),
+  );
+  await expect(readQmBrain(token, query)).rejects.toThrow(
+    "FEATURE_DISABLED:work.projects",
+  );
+
+  fetcher.mockResolvedValueOnce(Response.json(shared));
+  revisionDatabase("42");
+  vi.mocked(requireProjectAccess).mockRejectedValueOnce(new Error("FORBIDDEN"));
+  await expect(readQmBrain(token, query)).rejects.toThrow("FORBIDDEN");
+
+  fetcher.mockResolvedValueOnce(Response.json(shared));
+  vi.mocked(resolveActiveStaffByEmail).mockResolvedValueOnce(null);
+  await expect(readQmBrain(token, query)).rejects.toThrow("QM_ACCESS_DENIED");
+
+  fetcher
+    .mockResolvedValueOnce(Response.json(shared))
+    .mockResolvedValueOnce(
+      Response.json({ ...shared, scopeVersion: "hrmny-work:43" }),
+    );
+  revisionDatabase("42", "42", "43", "43");
+  await expect(readQmBrain(token, query)).rejects.toThrow("QM_ACCESS_CHANGED");
+});
+
 it("denies invalid, shared, foreign and revoked principals without reading brain", async () => {
   for (const result of [
     new Response(null, { status: 403 }),
@@ -94,7 +218,9 @@ it("discards results when QM scope or HRMNY staff authority changes during retri
 
 it("caps provider responses and never forwards tokens to another origin", async () => {
   vi.stubEnv("QM_BRAIN_ENABLED", "0");
-  await expect(readQmBrain(token, query)).rejects.toThrow("QM_BRAIN_NOT_ENABLED");
+  await expect(readQmBrain(token, query)).rejects.toThrow(
+    "QM_BRAIN_NOT_ENABLED",
+  );
   expect(fetcher).not.toHaveBeenCalled();
   vi.stubEnv("QM_BRAIN_ENABLED", "1");
   fetcher.mockResolvedValueOnce(new Response("x".repeat(128_001)));
