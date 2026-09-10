@@ -84,6 +84,9 @@ export const ROUTES: RouteEntry[] = [
   staff("/admin/features"),
   staff("/admin/work"),
   staff("/approvals"),
+  staff("/assistant/review/outreach/[id]", {
+    sample: "/assistant/review/outreach/c0000000-0000-4000-8000-000000000009",
+  }),
   staff("/assets"), // dev-only DAM probe — 404s unless getAuthMode()==="dev"
   staff("/benefits"),
   staff("/billing"),
