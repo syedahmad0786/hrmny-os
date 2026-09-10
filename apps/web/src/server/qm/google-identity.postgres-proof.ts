@@ -12,6 +12,10 @@ if (
   throw new Error("LOCAL_POSTGRES_PROOF_REQUIRED");
 const db = createDb(databaseUrl);
 const employeeIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+const employeeIdList = sql.join(
+  employeeIds.map((id) => sql`${id}::uuid`),
+  sql`, `,
+);
 const principals = employeeIds.map(
   (id, index) => `google-binding-${index}-${id}@hrmny.co`,
 );
@@ -35,10 +39,10 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.execute(sql`
     delete from public.employee_google_identity
-    where employee_id = any(${employeeIds}::uuid[])
+    where employee_id in (${employeeIdList})
   `);
   await db.execute(sql`
-    delete from public.employee where employee_id = any(${employeeIds}::uuid[])
+    delete from public.employee where employee_id in (${employeeIdList})
   `);
 });
 
