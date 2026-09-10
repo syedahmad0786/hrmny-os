@@ -53,7 +53,7 @@ import {
   type TrpcContext,
 } from "./trpc";
 
-type AccessLevel = "admin" | "editor" | "commenter" | "viewer";
+export type AccessLevel = "admin" | "editor" | "commenter" | "viewer";
 type CustomTaskTypeAccessLevel = "admin" | "editor" | "user" | "none";
 type CustomFieldAccessLevel = "admin" | "editor" | "user" | "none";
 type WorkObjectCustomField = {
@@ -1556,48 +1556,11 @@ export async function requireProjectAccess(
       await requireScopedFeature(ctx, ctx.requestedFeatureKey, projectId);
     return project;
   }
-  const rows = await db.execute<WorkProject>(sql`
-    select project.work_project_id as "projectId", project.name,
-      project.description, project.color, project.privacy,
-      project.client_id as "clientId",
-      project.owner_employee_id as "ownerEmployeeId",
-      project.source_platform as "sourcePlatform",
-      case
-        when project.created_by_employee_id = ${employeeId}::uuid
-          or project.owner_employee_id = ${employeeId}::uuid then 'admin'
-        when member.access_level is not null then member.access_level
-        when team_access.access_level is not null then team_access.access_level
-        else 'viewer'
-      end as "accessLevel",
-      project.created_at as "createdAt"
-    from public.work_project project
-    left join public.work_project_member member
-      on member.work_project_id = project.work_project_id
-      and member.employee_id = ${employeeId}::uuid
-    left join lateral (
-      select team_project.access_level
-      from public.work_team_project team_project
-      join public.work_team_member team_member
-        on team_member.work_team_id = team_project.work_team_id
-      where team_project.work_project_id = project.work_project_id
-        and team_member.employee_id = ${employeeId}::uuid
-      order by case team_project.access_level
-        when 'editor' then 3 when 'commenter' then 2 else 1 end desc
-      limit 1
-    ) team_access on true
-    where project.work_project_id = ${projectId}::uuid
-      and project.archived_at is null
-      and (
-        project.privacy = 'organization'
-        or project.created_by_employee_id = ${employeeId}::uuid
-        or project.owner_employee_id = ${employeeId}::uuid
-        or member.employee_id is not null
-        or team_access.access_level is not null
-      )
-    limit 1
-  `);
-  const project = rows[0];
-  if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+  const rows = await readProjectAccessForEmployees([employeeId], [projectId]);
+  const access = rows[0];
+  if (!access) throw new TRPCError({ code: "NOT_FOUND" });
+  const { actorEmployeeId, ...project } = access;
+  void actorEmployeeId;
   if (accessRank[project.accessLevel] < accessRank[minimum]) {
     throw new TRPCError({
       code: "FORBIDDEN",
@@ -1606,7 +1569,72 @@ export async function requireProjectAccess(
   }
   if (ctx.requestedFeatureKey)
     await requireScopedFeature(ctx, ctx.requestedFeatureKey, projectId);
-  return { ...project, createdAt: new Date(project.createdAt).toISOString() };
+  return project;
+}
+
+export type WorkProjectAccess = WorkProject & { actorEmployeeId: string };
+
+/** Canonical Work visibility/access query; callers must supply active staff IDs. */
+export async function readProjectAccessForEmployees(
+  employeeIds: readonly string[],
+  projectIds: readonly string[],
+): Promise<WorkProjectAccess[]> {
+  if (!employeeIds.length || !projectIds.length) return [];
+  const db = getDb();
+  if (!db)
+    throw new Error("Work project access batching requires DATABASE_URL");
+  const rows = await db.execute<WorkProjectAccess>(sql`
+    with actor as (
+      select unnest(
+        string_to_array(${employeeIds.join(",")}, ',')::uuid[]
+      ) as employee_id
+    )
+    select project.work_project_id as "projectId", project.name,
+      project.description, project.color, project.privacy,
+      project.client_id as "clientId",
+      project.owner_employee_id as "ownerEmployeeId",
+      project.source_platform as "sourcePlatform",
+      actor.employee_id as "actorEmployeeId",
+      case
+        when project.created_by_employee_id = actor.employee_id
+          or project.owner_employee_id = actor.employee_id then 'admin'
+        when member.access_level is not null then member.access_level
+        when team_access.access_level is not null then team_access.access_level
+        else 'viewer'
+      end as "accessLevel",
+      project.created_at as "createdAt"
+    from actor
+    join public.work_project project
+      on project.work_project_id = any(
+        string_to_array(${projectIds.join(",")}, ',')::uuid[]
+      )
+    left join public.work_project_member member
+      on member.work_project_id = project.work_project_id
+      and member.employee_id = actor.employee_id
+    left join lateral (
+      select team_project.access_level
+      from public.work_team_project team_project
+      join public.work_team_member team_member
+        on team_member.work_team_id = team_project.work_team_id
+      where team_project.work_project_id = project.work_project_id
+        and team_member.employee_id = actor.employee_id
+      order by case team_project.access_level
+        when 'editor' then 3 when 'commenter' then 2 else 1 end desc
+      limit 1
+    ) team_access on true
+    where project.archived_at is null
+      and (
+        project.privacy = 'organization'
+        or project.created_by_employee_id = actor.employee_id
+        or project.owner_employee_id = actor.employee_id
+        or member.employee_id is not null
+        or team_access.access_level is not null
+      )
+  `);
+  return rows.map((project) => ({
+    ...project,
+    createdAt: new Date(project.createdAt).toISOString(),
+  }));
 }
 
 export async function requireItemAccess(

@@ -224,14 +224,17 @@ export function sessionHas(
   return hasPermission(user.permissions, resource, action);
 }
 
-async function hydrateActiveStaff(
-  staff: ActiveStaff | undefined,
-): Promise<SessionUser | null> {
-  if (!staff?.isActive) return null;
+async function hydrateActiveStaffBatch(
+  staffRows: readonly ActiveStaff[],
+): Promise<SessionUser[]> {
+  const active = staffRows.filter((staff) => staff.isActive);
+  if (!active.length) return [];
   const db = getDb();
   if (!db) throw new Error("Staff authentication requires DATABASE_URL");
+  const employeeIds = active.map((staff) => staff.employeeId);
   const access = await db
     .select({
+      employeeId: employeeRole.employeeId,
       role: role.key,
       resource: permissionPolicy.resource,
       action: permissionPolicy.action,
@@ -243,21 +246,63 @@ async function hydrateActiveStaff(
       permissionPolicy,
       eq(employeeRole.roleId, permissionPolicy.roleId),
     )
-    .where(eq(employeeRole.employeeId, staff.employeeId));
+    .where(
+      sql`${employeeRole.employeeId} = any(string_to_array(${employeeIds.join(",")}, ',')::uuid[])`,
+    );
 
-  return {
-    employeeId: staff.employeeId,
-    email: staff.email,
-    displayName: staff.displayName,
-    roles: [...new Set(access.map((row) => row.role))],
-    permissions: access.flatMap((row) =>
-      row.resource && row.action && row.effect
-        ? [`${row.effect}:${row.resource}:${row.action}`]
-        : [],
+  return active.map((staff) => {
+    const staffAccess = access.filter(
+      (row) => row.employeeId === staff.employeeId,
+    );
+    return {
+      employeeId: staff.employeeId,
+      email: staff.email,
+      displayName: staff.displayName,
+      roles: [...new Set(staffAccess.map((row) => row.role))],
+      permissions: staffAccess.flatMap((row) =>
+        row.resource && row.action && row.effect
+          ? [`${row.effect}:${row.resource}:${row.action}`]
+          : [],
+      ),
+      actorType: "staff" as const,
+      clientId: null,
+    };
+  });
+}
+
+async function hydrateActiveStaff(
+  staff: ActiveStaff | undefined,
+): Promise<SessionUser | null> {
+  if (!staff?.isActive) return null;
+  return (await hydrateActiveStaffBatch([staff]))[0] ?? null;
+}
+
+/** Resolve a bounded staff roster with roles and permissions in two queries. */
+export async function resolveActiveStaffByEmails(
+  rawEmails: readonly string[],
+): Promise<SessionUser[]> {
+  const emailAddresses = [
+    ...new Set(
+      rawEmails.map((email) => email.trim().toLowerCase()).filter(Boolean),
     ),
-    actorType: "staff",
-    clientId: null,
-  };
+  ];
+  if (!emailAddresses.length) return [];
+  const db = getDb();
+  if (!db) throw new Error("Staff authentication requires DATABASE_URL");
+  const staff = await db
+    .select({
+      employeeId: employee.employeeId,
+      email: employee.email,
+      displayName: employee.displayName,
+      isActive: employee.isActive,
+    })
+    .from(employee)
+    .where(
+      sql`${employee.isActive} = true and lower(${employee.email}) in (
+        select jsonb_array_elements_text(${JSON.stringify(emailAddresses)}::jsonb)
+      )`,
+    );
+  return hydrateActiveStaffBatch(staff);
 }
 
 /** Resolve a verified external identity against the active staff allowlist. */
@@ -389,7 +434,9 @@ export async function resolveSupabaseUser(
   // Magic-link portal access (flag on): the invite allowlist is the source of
   // truth for the client binding. Flag off falls through to the table below.
   if (
-    await featureEnabled(PORTAL_MAGIC_LINK_FEATURE, { roles: ["portal_client"] })
+    await featureEnabled(PORTAL_MAGIC_LINK_FEATURE, {
+      roles: ["portal_client"],
+    })
   ) {
     return resolvePortalSessionForEmail(email);
   }

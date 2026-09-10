@@ -89,7 +89,11 @@ export const FIRST_PARTY_CRM_APPS = new Set([
 ]);
 
 export function normalizeAppPolicy(value: unknown): WorkAppPolicy {
-  if (value === "allow_all" || value === "approved_only" || value === "disabled") {
+  if (
+    value === "allow_all" ||
+    value === "approved_only" ||
+    value === "disabled"
+  ) {
     return value;
   }
   return "approved_only";
@@ -268,13 +272,27 @@ export async function isWorkViewOnlyMember(employeeId: string | null) {
   if (!employeeId) return false;
   const db = getDb();
   if (!db) return demoLicenses.get(employeeId) === "view_only";
-  const rows = await db.execute<{ viewOnly: boolean }>(sql`
-    select exists (
-      select 1 from public.work_member_license
-      where employee_id = ${employeeId}::uuid and license_type = 'view_only'
-    ) as "viewOnly"
+  return (await listWorkViewOnlyMemberIds([employeeId])).has(employeeId);
+}
+
+/** Load current view-only licenses once for a bounded active staff roster. */
+export async function listWorkViewOnlyMemberIds(
+  employeeIds: readonly string[],
+): Promise<Set<string>> {
+  if (!employeeIds.length) return new Set();
+  const db = getDb();
+  if (!db)
+    return new Set(
+      employeeIds.filter((id) => demoLicenses.get(id) === "view_only"),
+    );
+  const rows = await db.execute<{ employeeId: string }>(sql`
+    select employee_id as "employeeId"
+    from public.work_member_license
+    where employee_id = any(
+      string_to_array(${employeeIds.join(",")}, ',')::uuid[]
+    ) and license_type = 'view_only'
   `);
-  return rows[0]?.viewOnly ?? false;
+  return new Set(rows.map((row) => row.employeeId));
 }
 
 export function setDemoWorkLicense(
