@@ -1,1 +1,26 @@
-import { defineConfig } from "vitest/config";import path from "node:path";export default defineConfig({  test: {    environment: "node",    include: [      "src/server/crm/handover.postgres-proof.ts",      "src/server/crm/workbook.postgres-proof.ts",      "src/server/leadgen/google-mailbox.postgres-proof.ts",      "src/server/sales-os/sales-research.postgres-proof.ts",      "src/server/sales-os/replacement.postgres-proof.ts",      "src/server/qm/postgres-repository.postgres-proof.ts",`n      "src/server/qm/work-authority-fence.postgres-proof.ts",      "src/server/composio-status.postgres-proof.ts",      "src/server/qm/google-chat-worker.postgres-proof.ts",    ],    setupFiles: ["./src/test/postgres-ci-setup.ts"],    fileParallelism: false,  },  resolve: {    alias: {      "@": path.resolve(__dirname, "./src"),    },  },});
+import { defineConfig } from "vitest/config";
+import path from "node:path";
+
+export default defineConfig({
+  test: {
+    environment: "node",
+    include: [
+      "src/server/crm/handover.postgres-proof.ts",
+      "src/server/crm/workbook.postgres-proof.ts",
+      "src/server/leadgen/google-mailbox.postgres-proof.ts",
+      "src/server/sales-os/sales-research.postgres-proof.ts",
+      "src/server/sales-os/replacement.postgres-proof.ts",
+      "src/server/qm/postgres-repository.postgres-proof.ts",
+      "src/server/qm/work-authority-fence.postgres-proof.ts",
+      "src/server/composio-status.postgres-proof.ts",
+      "src/server/qm/google-chat-worker.postgres-proof.ts",
+    ],
+    setupFiles: ["./src/test/postgres-ci-setup.ts"],
+    fileParallelism: false,
+  },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+});
