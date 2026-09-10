@@ -37,6 +37,8 @@ export interface RouteEntry {
    *                        used for public [param] pages with no seeded record.
    */
   expect?: "notFound";
+  /** The native assistant owns this destination after the staff session resolves. */
+  nativeRedirect?: boolean;
   /** Final path after a server-side redirect() alias (for humans reading this). */
   redirectsTo?: string;
 }
@@ -118,7 +120,7 @@ export const ROUTES: RouteEntry[] = [
   staff("/crm/quote"),
   staff("/crm/seams"),
   staff("/crm/tasks"),
-  staff("/chat"),
+  staff("/chat", { nativeRedirect: true }),
   staff("/dashboards"),
   staff("/delivery"),
   staff("/finance"),

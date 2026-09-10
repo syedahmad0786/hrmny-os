@@ -2,6 +2,7 @@
 
 import { Button } from "@hrmny/ui";
 import { isGoogleWorkspaceReconnectRequired } from "@/lib/google-workspace-error";
+import { NATIVE_QM_ADMIN_URL, NATIVE_QM_URL } from "@/lib/native-qm";
 import { trpc } from "@/lib/trpc";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -156,7 +157,7 @@ function OperatingSurfaces() {
     process.env.NEXT_PUBLIC_APP_URL ?? "https://hrmny-os.vercel.app"
   ).replace(/\/$/, "");
   const googleChatUrl = `${appOrigin}/api/integrations/google-chat/events`;
-  const qmUrl = process.env.NEXT_PUBLIC_QM_URL?.trim().replace(/\/$/, "");
+  const qmUrl = NATIVE_QM_URL;
   const [googleChatStatus, setGoogleChatStatus] = useState("checking");
   const [gbrainStatus, setGbrainStatus] = useState("checking");
   const [brainSearchEnabled, setBrainSearchEnabled] = useState(false);
@@ -283,28 +284,22 @@ function OperatingSurfaces() {
           connectors, users and activity through Assistant administration.
         </p>
         <code className="mt-3 block overflow-x-auto rounded-lg bg-cream/70 p-3 text-xs">
-          {qmUrl ?? "https://hrmny-portal.fly.dev"}
+          {qmUrl}
         </code>
-        {qmUrl ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            <a
-              href={qmUrl}
-              className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white"
-            >
-              Open hrmny AI Assistant
-            </a>
-            <a
-              href={`${qmUrl}/admin/`}
-              className="inline-flex min-h-11 items-center rounded-lg border border-sand bg-white px-4 text-sm font-semibold"
-            >
-              Assistant administration
-            </a>
-          </div>
-        ) : (
-          <p className="mt-3 text-xs font-medium text-amber-800">
-            The assistant workspace will appear here after runtime setup.
-          </p>
-        )}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <a
+            href={qmUrl}
+            className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white"
+          >
+            Open hrmny AI Assistant
+          </a>
+          <a
+            href={NATIVE_QM_ADMIN_URL}
+            className="inline-flex min-h-11 items-center rounded-lg border border-sand bg-white px-4 text-sm font-semibold"
+          >
+            Assistant administration
+          </a>
+        </div>
       </article>
     </section>
   );
