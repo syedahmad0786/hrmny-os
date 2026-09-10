@@ -1,6 +1,9 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readValidatedGoogleChatSpace } from "./google-chat-space-proof";
+import {
+  readGoogleChatUserMembershipSnapshot,
+  readValidatedGoogleChatSpace,
+} from "./google-chat-space-proof";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2_048 });
 const spaceName = "spaces/AAAA";
@@ -70,6 +73,28 @@ function signedScopes(fetchMock: ReturnType<typeof vi.fn>) {
 }
 
 describe("Google Chat Space provider proof", () => {
+  it("reads user-authenticated humans and bots but never marks the unbound app ready", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        memberships: [
+          member("100"),
+          member("200", { member: { name: "users/200", type: "BOT" } }),
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      readGoogleChatUserMembershipSnapshot({ spaceName, accessToken: "u".repeat(20) }),
+    ).resolves.toEqual({
+      spaceName,
+      bindingReady: false,
+      members: [
+        { membershipName: `${spaceName}/members/member-100`, userName: "users/100", kind: "HUMAN", role: "ROLE_MEMBER" },
+        { membershipName: `${spaceName}/members/member-200`, userName: "users/200", kind: "BOT", role: "ROLE_MEMBER" },
+      ],
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("showGroups=true");
+  });
   it("reads all joined human memberships with the fixed app proof scope", async () => {
     const fetchMock = mockProvider(
       Response.json(

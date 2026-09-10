@@ -69,6 +69,30 @@ export type GoogleChatSpaceSnapshot = Readonly<{
   }>[];
 }>;
 
+export type GoogleChatUserMembershipSnapshot = Readonly<{
+  spaceName: string;
+  bindingReady: false;
+  members: readonly Readonly<{
+    membershipName: string;
+    userName: string;
+    kind: "HUMAN" | "BOT";
+    role: "ROLE_MEMBER" | "ROLE_MANAGER" | "ROLE_ASSISTANT_MANAGER";
+  }>[];
+}>;
+const userMembershipSchema = z
+  .object({
+    name: googleMemberNameSchema,
+    state: z.literal("JOINED"),
+    role: z.enum(["ROLE_MEMBER", "ROLE_MANAGER", "ROLE_ASSISTANT_MANAGER"]),
+    affiliation: z.literal("INTERNAL"),
+    member: z.object({
+      name: googleUserNameSchema,
+      type: z.enum(["HUMAN", "BOT"]),
+    }),
+    groupMember: z.never().optional(),
+  })
+  .passthrough();
+
 function providerFailure(code: string): never {
   throw new Error(code);
 }
@@ -189,6 +213,62 @@ export async function readValidatedGoogleChatSpace(
     }
     seenPageTokens.add(nextPageToken);
     pageToken = nextPageToken;
+  }
+  return providerFailure("GOOGLE_CHAT_SPACE_PAGE_LIMIT");
+}
+
+/**
+ * Server-only reader for an already-owned user OAuth token with
+ * chat.memberships.readonly. Existing Workspace credentials do not currently
+ * request that scope, and this result cannot authorize a binding: Google
+ * documents `members/app` only for user authentication, while the app's
+ * immutable Chat user still needs the durable identity integration.
+ */
+export async function readGoogleChatUserMembershipSnapshot(input: {
+  spaceName: string;
+  accessToken: string;
+}): Promise<GoogleChatUserMembershipSnapshot> {
+  const spaceName = googleSpaceNameSchema.safeParse(input.spaceName);
+  if (!spaceName.success || !z.string().min(20).safeParse(input.accessToken).success) {
+    providerFailure("GOOGLE_CHAT_USER_CREDENTIAL_INVALID");
+  }
+  const members: GoogleChatUserMembershipSnapshot["members"][number][] = [];
+  const names = new Set<string>();
+  const users = new Set<string>();
+  const tokens = new Set<string>();
+  let pageToken: string | undefined;
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const query = new URLSearchParams({ pageSize: String(PAGE_SIZE), showGroups: "true" });
+    if (pageToken) query.set("pageToken", pageToken);
+    const rawPage = await fetchJson(
+      `${GOOGLE_CHAT_API_URL}/${spaceName.data}/members?${query}`,
+      input.accessToken,
+    );
+    const parsed = membershipPageSchema.safeParse(rawPage);
+    if (!parsed.success) providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_PAGE_INVALID");
+    for (const raw of parsed.data.memberships) {
+      const membership = userMembershipSchema.safeParse(raw);
+      if (!membership.success || !membership.data.name.startsWith(`${spaceName.data}/members/`)) {
+        providerFailure("GOOGLE_CHAT_SPACE_MEMBER_INVALID");
+      }
+      if (names.has(membership.data.name) || users.has(membership.data.member.name)) {
+        providerFailure("GOOGLE_CHAT_SPACE_MEMBER_DUPLICATE");
+      }
+      names.add(membership.data.name);
+      users.add(membership.data.member.name);
+      members.push({
+        membershipName: membership.data.name,
+        userName: membership.data.member.name,
+        kind: membership.data.member.type,
+        role: membership.data.role,
+      });
+      if (members.length > MAX_MEMBERSHIPS) providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_LIMIT");
+    }
+    const next = parsed.data.nextPageToken;
+    if (!next) return { spaceName: spaceName.data, bindingReady: false, members };
+    if (tokens.has(next)) providerFailure("GOOGLE_CHAT_SPACE_PAGE_TOKEN_REPEATED");
+    tokens.add(next);
+    pageToken = next;
   }
   return providerFailure("GOOGLE_CHAT_SPACE_PAGE_LIMIT");
 }
