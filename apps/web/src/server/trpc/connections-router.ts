@@ -2196,7 +2196,14 @@ export const connectionsRouter = router({
    * vanish before save, and Google often omits a new refresh token.
    */
   startGoogleWorkspaceOAuth: staffProcedure
-    .input(z.object({ origin: z.string().url().optional() }).optional())
+    .input(
+      z
+        .object({
+          origin: z.string().url().optional(),
+          intent: z.enum(["mailbox", "google_chat_read"]).optional(),
+        })
+        .optional(),
+    )
     .mutation(async ({ ctx, input }) => {
       await requireAllowedApp("google_workspace");
       const employeeId = requireEmployeeId(ctx.employeeId);
@@ -2204,6 +2211,7 @@ export const connectionsRouter = router({
         await import("../google-workspace-oauth");
       return buildGoogleWorkspaceAuthorizeUrl(employeeId, {
         requestOrigin: input?.origin,
+        intent: input?.intent,
       });
     }),
 

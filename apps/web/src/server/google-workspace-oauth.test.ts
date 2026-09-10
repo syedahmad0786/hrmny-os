@@ -9,6 +9,8 @@ import {
   formatGoogleOAuthError,
   GoogleTokenResponseSchema,
   GoogleWorkspaceSecretSchema,
+  GOOGLE_CHAT_READ_SCOPES,
+  hasGoogleChatReadScopes,
   resolveGoogleWorkspaceGrantedScopes,
 } from "./google-workspace-oauth";
 
@@ -55,6 +57,7 @@ describe("google workspace oauth helpers", () => {
     expect(verifyGoogleWorkspaceOAuthState(state)).toEqual({
       employeeId,
       redirectUri,
+      intent: "mailbox",
     });
   });
 
@@ -170,6 +173,28 @@ describe("google workspace oauth helpers", () => {
     expect(() =>
       verifyGoogleWorkspaceOAuthState(url.searchParams.get("state") ?? ""),
     ).not.toThrow();
+  });
+
+  it("signs a Chat read-consent intent and requests only its two extra scopes", async () => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID =
+      "test-client.apps.googleusercontent.com";
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET = "test-secret";
+    const { redirectUrl } = await buildGoogleWorkspaceAuthorizeUrl(
+      "c0000000-0000-4000-8000-000000000011",
+      { intent: "google_chat_read" },
+    );
+    const url = new URL(redirectUrl);
+    expect(
+      verifyGoogleWorkspaceOAuthState(url.searchParams.get("state")!).intent,
+    ).toBe("google_chat_read");
+    const requested = url.searchParams.get("scope") ?? "";
+    for (const scope of GOOGLE_CHAT_READ_SCOPES)
+      expect(requested).toContain(scope);
+    expect(requested).toContain("gmail.readonly");
+    expect(hasGoogleChatReadScopes(GOOGLE_CHAT_READ_SCOPES.join(" "))).toBe(
+      true,
+    );
+    expect(hasGoogleChatReadScopes(GOOGLE_CHAT_READ_SCOPES[0])).toBe(false);
   });
 
   it("completeGoogleWorkspaceOAuth rejects bad state before calling Google", async () => {

@@ -14,9 +14,23 @@ export const GOOGLE_WORKSPACE_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/drive.readonly",
 ] as const;
 
+export const GOOGLE_CHAT_READ_SCOPES = [
+  "https://www.googleapis.com/auth/chat.spaces.readonly",
+  "https://www.googleapis.com/auth/chat.memberships.readonly",
+] as const;
+
+export const GoogleWorkspaceOAuthIntentSchema = z.enum([
+  "mailbox",
+  "google_chat_read",
+]);
+export type GoogleWorkspaceOAuthIntent = z.infer<
+  typeof GoogleWorkspaceOAuthIntentSchema
+>;
+
 export const GoogleProfileSchema = z.object({
   email: z.string().email(),
   email_verified: z.literal(true),
+  hd: z.string().optional(),
 });
 
 export const GoogleWorkspaceSecretSchema = z.object({
@@ -181,11 +195,13 @@ export function googleWorkspaceConnectionsDest(redirectUri: string): URL {
 export function signGoogleWorkspaceOAuthState(
   employeeId: string,
   redirectUri = googleWorkspaceRedirectUri(),
+  intent: GoogleWorkspaceOAuthIntent = "mailbox",
 ): string {
   const body = Buffer.from(
     JSON.stringify({
       employeeId,
       redirectUri,
+      intent,
       n: randomUUID(),
       exp: Date.now() + 15 * 60_000,
     }),
@@ -199,6 +215,7 @@ export function signGoogleWorkspaceOAuthState(
 export function verifyGoogleWorkspaceOAuthState(state: string): {
   employeeId: string;
   redirectUri: string;
+  intent: GoogleWorkspaceOAuthIntent;
 } {
   const [body, sig] = state.split(".");
   if (!body || !sig) throw new Error("Invalid Google Workspace OAuth state");
@@ -215,6 +232,7 @@ export function verifyGoogleWorkspaceOAuthState(state: string): {
   ) as {
     employeeId?: string;
     redirectUri?: string;
+    intent?: unknown;
     exp?: number;
   };
   if (!payload.employeeId || typeof payload.exp !== "number") {
@@ -230,7 +248,17 @@ export function verifyGoogleWorkspaceOAuthState(state: string): {
   if (!isAllowedGoogleWorkspaceRedirectUri(redirectUri)) {
     throw new Error("Invalid Google Workspace OAuth redirect");
   }
-  return { employeeId: payload.employeeId, redirectUri };
+  const intent =
+    payload.intent === undefined
+      ? "mailbox"
+      : GoogleWorkspaceOAuthIntentSchema.parse(payload.intent);
+  return { employeeId: payload.employeeId, redirectUri, intent };
+}
+
+export function hasGoogleChatReadScopes(scope: string | undefined): boolean {
+  if (!scope) return false;
+  const granted = new Set(scope.split(/\s+/));
+  return GOOGLE_CHAT_READ_SCOPES.every((required) => granted.has(required));
 }
 
 export function formatGoogleOAuthError(status: number, detail: string): string {
@@ -253,7 +281,10 @@ export function formatGoogleOAuthError(status: number, detail: string): string {
 
 export async function buildGoogleWorkspaceAuthorizeUrl(
   employeeId: string,
-  opts?: { requestOrigin?: string },
+  opts?: {
+    requestOrigin?: string;
+    intent?: GoogleWorkspaceOAuthIntent;
+  },
 ): Promise<{
   redirectUrl: string;
   redirectUri: string;
@@ -265,12 +296,17 @@ export async function buildGoogleWorkspaceAuthorizeUrl(
     );
   }
   const redirectUri = googleWorkspaceRedirectUri(opts?.requestOrigin);
-  const state = signGoogleWorkspaceOAuthState(employeeId, redirectUri);
+  const intent = opts?.intent ?? "mailbox";
+  const state = signGoogleWorkspaceOAuthState(employeeId, redirectUri, intent);
+  const scopes =
+    intent === "google_chat_read"
+      ? [...GOOGLE_WORKSPACE_OAUTH_SCOPES, ...GOOGLE_CHAT_READ_SCOPES]
+      : GOOGLE_WORKSPACE_OAUTH_SCOPES;
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: GOOGLE_WORKSPACE_OAUTH_SCOPES.join(" "),
+    scope: scopes.join(" "),
     access_type: "offline",
     prompt: "select_account consent",
     include_granted_scopes: "true",
@@ -482,8 +518,9 @@ export async function completeGoogleWorkspaceOAuth(input: {
   account: string;
   connectionAccountId: string;
   redirectUri: string;
+  intent: GoogleWorkspaceOAuthIntent;
 }> {
-  const { employeeId, redirectUri } = verifyGoogleWorkspaceOAuthState(
+  const { employeeId, redirectUri, intent } = verifyGoogleWorkspaceOAuthState(
     input.state,
   );
   if (employeeId !== input.actorEmployeeId) {
@@ -506,6 +543,23 @@ export async function completeGoogleWorkspaceOAuth(input: {
   if (!parsed.success) {
     throw new Error("Connect a verified Google account");
   }
+  if (intent === "google_chat_read") {
+    const { resolveActiveStaffById } = await import("./auth/session");
+    const staff = await resolveActiveStaffById(employeeId);
+    if (
+      !staff ||
+      staff.actorType !== "staff" ||
+      staff.email.trim().toLowerCase() !==
+        parsed.data.email.trim().toLowerCase() ||
+      !staff.email.trim().toLowerCase().endsWith("@hrmny.co") ||
+      parsed.data.hd !== "hrmny.co" ||
+      !hasGoogleChatReadScopes(tokens.scope)
+    ) {
+      throw new Error(
+        "Google Chat read consent requires the active HRMNY staff account and both returned Chat read scopes",
+      );
+    }
+  }
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
   const saved = await persistGoogleWorkspaceTokens({
     employeeId,
@@ -519,5 +573,6 @@ export async function completeGoogleWorkspaceOAuth(input: {
     account: saved.email,
     connectionAccountId: saved.connectionAccountId,
     redirectUri,
+    intent,
   };
 }

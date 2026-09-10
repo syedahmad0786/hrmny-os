@@ -421,7 +421,10 @@ export default function ConnectionsPage() {
       onSuccess: (result) => {
         setOauthBanner({
           kind: "ok",
-          text: `Google Workspace connected: ${result.account}. Your mailbox is private to you.`,
+          text:
+            result.intent === "google_chat_read"
+              ? `Google Chat read permission granted for ${result.account}. Shared spaces are not live or bound to projects yet.`
+              : `Google Workspace connected: ${result.account}. Your mailbox is private to you.`,
         });
         void Promise.all([
           utils.connections.list.invalidate(),
@@ -496,6 +499,14 @@ export default function ConnectionsPage() {
   async function connectGoogleWorkspace() {
     const result = await startGoogleWorkspaceOAuth.mutateAsync({
       origin: window.location.origin,
+    });
+    window.location.assign(result.redirectUrl);
+  }
+
+  async function requestGoogleChatReadConsent() {
+    const result = await startGoogleWorkspaceOAuth.mutateAsync({
+      origin: window.location.origin,
+      intent: "google_chat_read",
     });
     window.location.assign(result.redirectUrl);
   }
@@ -815,6 +826,34 @@ export default function ConnectionsPage() {
                                 : ""
                             }`}
                       </p>
+                    ) : null}
+                    {item.toolkit === "google_workspace" ? (
+                      <div
+                        className="w-full rounded-lg border border-sand bg-cream/50 p-3 text-xs text-muted"
+                        data-testid="conn-google-chat-read-consent"
+                      >
+                        <p className="font-semibold text-ink">
+                          Google Chat space read permission
+                        </p>
+                        <p className="mt-1">
+                          Request read-only Space and membership access for your
+                          HRMNY account. Permission granted does not make shared
+                          Chat live or bind any Space to a project.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="mt-2"
+                          disabled={
+                            !item.allowed ||
+                            !item.ready ||
+                            startGoogleWorkspaceOAuth.isPending
+                          }
+                          onClick={() => void requestGoogleChatReadConsent()}
+                        >
+                          Request Google Chat read permission
+                        </Button>
+                      </div>
                     ) : null}
                   </div>
                 ) : item.toolkit === "asana" && item.allowed ? (

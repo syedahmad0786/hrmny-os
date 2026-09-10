@@ -22,6 +22,14 @@ test.describe("Connections Google Workspace OAuth", () => {
     await expect(gwCard).not.toContainText(
       /Blocked by the organization connected-app policy/i,
     );
+    const chatReadConsent = page.getByTestId("conn-google-chat-read-consent");
+    await expect(chatReadConsent).toBeVisible();
+    await expect(chatReadConsent).toContainText(
+      /Request Google Chat read permission/i,
+    );
+    await expect(chatReadConsent).toContainText(
+      /not make shared Chat live or bind any Space to a project/i,
+    );
     await page.getByText("Connection diagnostics", { exact: true }).click();
     await expect(page.getByTestId("connections-app-policy")).toBeVisible();
     await expect(page.getByTestId("conn-card-apollo")).not.toContainText(
