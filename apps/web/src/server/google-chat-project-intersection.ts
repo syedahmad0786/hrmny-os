@@ -99,7 +99,9 @@ export async function observeGoogleChatProjectIntersection(input: {
   );
   for (const member of snapshot.data.members) {
     if (
-      !member.membershipName.startsWith(`${snapshot.data.spaceName}/members/`) ||
+      !member.membershipName.startsWith(
+        `${snapshot.data.spaceName}/members/`,
+      ) ||
       memberNames.has(member.membershipName) ||
       memberUsers.has(member.userName)
     )
@@ -121,9 +123,7 @@ export async function observeGoogleChatProjectIntersection(input: {
   if (
     snapshot.data.humans.some(
       (human) =>
-        !human.membershipName.startsWith(
-          `${snapshot.data.spaceName}/members/`,
-        ),
+        !human.membershipName.startsWith(`${snapshot.data.spaceName}/members/`),
     )
   )
     deny("GOOGLE_CHAT_PROJECT_OBSERVATION_INVALID");

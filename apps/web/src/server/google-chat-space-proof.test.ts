@@ -141,6 +141,20 @@ describe("Google Chat Space provider proof", () => {
   it.each([
     ["missing bot", [member("100")], "GOOGLE_CHAT_ASSISTANT_APP_MISMATCH"],
     [
+      "missing human from the metadata count",
+      [member("200", { member: { name: "users/200", type: "BOT" } })],
+      "GOOGLE_CHAT_SPACE_MEMBERSHIP_COUNT_MISMATCH",
+    ],
+    [
+      "extra human outside the metadata count",
+      [
+        member("100"),
+        member("101"),
+        member("200", { member: { name: "users/200", type: "BOT" } }),
+      ],
+      "GOOGLE_CHAT_SPACE_MEMBERSHIP_COUNT_MISMATCH",
+    ],
+    [
       "foreign extra bot",
       [
         member("100"),
@@ -210,11 +224,28 @@ describe("Google Chat Space provider proof", () => {
   });
 
   it.each([
-    ["public", space({ accessSettings: { accessState: "DISCOVERABLE" } }), "GOOGLE_CHAT_SPACE_METADATA_INVALID"],
-    ["external", space({ externalUserAllowed: true }), "GOOGLE_CHAT_SPACE_METADATA_INVALID"],
-    ["group", space({ membershipCount: { joinedDirectHumanUserCount: 1, joinedGroupCount: 1 } }), "GOOGLE_CHAT_SPACE_GROUP_MEMBERSHIP"],
+    [
+      "public",
+      space({ accessSettings: { accessState: "DISCOVERABLE" } }),
+      "GOOGLE_CHAT_SPACE_METADATA_INVALID",
+    ],
+    [
+      "external",
+      space({ externalUserAllowed: true }),
+      "GOOGLE_CHAT_SPACE_METADATA_INVALID",
+    ],
+    [
+      "group",
+      space({
+        membershipCount: { joinedDirectHumanUserCount: 1, joinedGroupCount: 1 },
+      }),
+      "GOOGLE_CHAT_SPACE_GROUP_MEMBERSHIP",
+    ],
   ])("rejects owned-user %s space metadata", async (_label, metadata, code) => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json(metadata)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(Response.json(metadata)),
+    );
     await expect(
       readGoogleChatOwnedUserMembershipSnapshot({
         spaceName,

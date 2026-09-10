@@ -110,10 +110,7 @@ function providerFailure(code: string): never {
   throw new Error(code);
 }
 
-function validatePrivateSpace(
-  raw: unknown,
-  expectedSpaceName: string,
-) {
+function validatePrivateSpace(raw: unknown, expectedSpaceName: string) {
   const space = spaceSchema.safeParse(raw);
   if (!space.success || space.data.name !== expectedSpaceName)
     providerFailure("GOOGLE_CHAT_SPACE_METADATA_INVALID");
@@ -215,9 +212,7 @@ export async function readValidatedGoogleChatSpace(
     }
     const nextPageToken = parsedPage.data.nextPageToken;
     if (!nextPageToken) {
-      if (
-        members.length !== space.membershipCount.joinedDirectHumanUserCount
-      ) {
+      if (members.length !== space.membershipCount.joinedDirectHumanUserCount) {
         providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_COUNT_MISMATCH");
       }
       return {
@@ -239,8 +234,8 @@ export async function readValidatedGoogleChatSpace(
 
 /**
  * Server-only reader for an already-owned user OAuth token with
- * chat.memberships.readonly. Existing Workspace credentials do not currently
- * request that scope, and this result cannot authorize a binding: Google
+ * chat.spaces.readonly and chat.memberships.readonly. Existing Workspace
+ * credentials do not request both scopes; this result cannot authorize a binding. Google
  * documents `members/app` for user authentication. The caller must resolve
  * this token from an owned HRMNY Google-client connection; no route accepts it.
  */
@@ -264,7 +259,7 @@ export async function readGoogleChatOwnedUserMembershipSnapshot(input: {
     `${GOOGLE_CHAT_API_URL}/${spaceName.data}`,
     input.ownedAccessToken,
   );
-  validatePrivateSpace(rawSpace, spaceName.data);
+  const space = validatePrivateSpace(rawSpace, spaceName.data);
   const rawAppMembership = await fetchJson(
     `${GOOGLE_CHAT_API_URL}/${spaceName.data}/members/app`,
     input.ownedAccessToken,
@@ -337,6 +332,8 @@ export async function readGoogleChatOwnedUserMembershipSnapshot(input: {
           userName,
           role,
         }));
+      if (humans.length !== space.membershipCount.joinedDirectHumanUserCount)
+        providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_COUNT_MISMATCH");
       return {
         spaceName: spaceName.data,
         audiencePolicy: "PRIVATE_NO_EXTERNAL_OR_GROUPS",

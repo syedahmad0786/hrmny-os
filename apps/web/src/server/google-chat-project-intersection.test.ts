@@ -120,7 +120,13 @@ describe("Google Chat project intersection observation", () => {
     [
       "foreign-space membership",
       observed({
-        humans: [{ membershipName: "spaces/BBBB/members/one", userName: "users/100", role: "ROLE_MANAGER" }],
+        humans: [
+          {
+            membershipName: "spaces/BBBB/members/one",
+            userName: "users/100",
+            role: "ROLE_MANAGER",
+          },
+        ],
       }),
       "GOOGLE_CHAT_PROJECT_OBSERVATION_INVALID",
     ],
