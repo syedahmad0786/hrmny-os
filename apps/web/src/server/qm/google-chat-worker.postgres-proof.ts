@@ -22,6 +22,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../trpc/root", () => ({ createCaller: mocks.createCaller }));
 vi.mock("../auth/session", async (original) => ({
   ...(await original<typeof import("../auth/session")>()),
+  resolveActiveStaffByEmail: vi.fn(async (email: string) => {
+    const entry = [...mocks.staff.entries()].find(([, staff]) => staff.active && staff.email === email);
+    return entry
+      ? { employeeId: entry[0], email, displayName: "Synthetic worker user", roles: [], permissions: [], actorType: "staff", clientId: null }
+      : null;
+  }),
   resolveActiveStaffById: vi.fn(async (employeeId: string) => {
     const entry = mocks.staff.get(employeeId);
     return entry?.active
@@ -102,6 +108,15 @@ async function enqueue(employeeId: string) {
 }
 const operate = (body: unknown, db = dbA) =>
   withDatabaseScope(db, () => operateQmGoogleChat(body));
+
+async function recordPrivateDm(employeeId: string, spaceName: string, googleUserName: string) {
+  const externalEventId = `${spaceName}/messages/${randomUUID()}`;
+  return withDatabaseScope(dbA, () => recordIntegrationReceipt({
+    provider: "google-chat", externalEventId, operation: "MESSAGE", rawBody: externalEventId,
+    status: "completed", completed: true, ownerEmployeeId: employeeId,
+    payload: { privateDm: { employeeId, googleUserName, spaceName, threadName: null } },
+  }));
+}
 
 it("claims concurrently, fences old workers, blocks revocation, and delivers a saved QM reply once", async () => {
   process.env.GOOGLE_CHAT_RUNTIME = "qm";
@@ -256,4 +271,60 @@ it("claims concurrently, fences old workers, blocks revocation, and delivers a s
       )
     )?.status,
   ).toBe("failed");
+});
+
+it("selects the employee's typed DM and freezes it across an ambiguous cron-delivery retry", async () => {
+  process.env.GOOGLE_CHAT_RUNTIME = "qm";
+  process.env.QM_GOOGLE_CHAT_EMPLOYEE_IDS = employeeA;
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  process.env.GOOGLE_CHAT_SERVICE_ACCOUNT_JSON = JSON.stringify({
+    client_email: "synthetic@hrmny.invalid",
+    private_key: privateKey.export({ type: "pkcs8", format: "pem" }),
+  });
+  mocks.staff.get(employeeA)!.active = true;
+  await recordPrivateDm(employeeB, "spaces/ForeignDm", "users/222");
+  await withDatabaseScope(dbA, () => recordIntegrationReceipt({
+    provider: "google-chat", externalEventId: `spaces/Legacy/messages/${randomUUID()}`,
+    operation: "MESSAGE", rawBody: randomUUID(), status: "completed", completed: true,
+    ownerEmployeeId: employeeA, payload: { space: "spaces/Legacy", user: employeeA },
+  }));
+  await recordPrivateDm(employeeA, "spaces/OriginalDm", "users/111");
+  const deliveryId = randomUUID();
+  const email = mocks.staff.get(employeeA)!.email;
+  const scope = `personal:${email}`;
+  const delivery = { action: "deliver", deliveryId, targetEmail: email, text: "Synthetic private digest",
+    attachments: [], audienceScopeId: scope, onBehalfOf: email,
+    provenance: { trigger: "cron", surface: "cron", sourceScopeId: scope } };
+  let ambiguous = true;
+  let receiptId = "";
+  const posts: string[] = [];
+  const fetcher = vi.fn<typeof fetch>(async (url, options) => {
+    const href = String(url);
+    if (href === "https://oauth2.googleapis.com/token") return Response.json({ access_token: "synthetic-access" });
+    if (options?.method === "POST") {
+      posts.push(new URL(href).pathname);
+      if (ambiguous) throw new Error("synthetic lost response");
+      return Response.json({});
+    }
+    if (ambiguous) return new Response(null, { status: 404 });
+    const name = new URL(href).pathname.replace(/^\/v1\//, "");
+    return Response.json({ name, text: delivery.text,
+      clientAssignedMessageId: googleChatReplyMessageId(receiptId),
+      privateMessageViewer: { name: "users/111" } });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  await expect(operate(delivery)).rejects.toThrow("GOOGLE_CHAT_SEND_AMBIGUOUS");
+  const frozen = await withDatabaseScope(dbA, () => getIntegrationReceipt("google-chat", `qm-delivery:${deliveryId}`));
+  receiptId = frozen!.receiptId;
+  expect(frozen?.ownerEmployeeId).toBe(employeeA);
+  expect(frozen?.payload).toMatchObject({ binding: { employeeId: employeeA, spaceName: "spaces/OriginalDm", googleUserName: "users/111" } });
+  await recordPrivateDm(employeeA, "spaces/NewerDm", "users/111");
+  ambiguous = false;
+  await expect(operate(delivery)).resolves.toMatchObject({ ok: true });
+  expect(posts).toEqual(["/v1/spaces/OriginalDm/messages", "/v1/spaces/OriginalDm/messages"]);
+  const completed = await withDatabaseScope(dbA, () => getIntegrationReceipt("google-chat", `qm-delivery:${deliveryId}`));
+  expect(completed?.result).toMatchObject({
+    bridgeStatus: "delivered",
+    messageName: `spaces/OriginalDm/messages/${googleChatReplyMessageId(receiptId)}`,
+  });
 });
