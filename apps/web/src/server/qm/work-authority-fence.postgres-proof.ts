@@ -90,6 +90,7 @@ beforeAll(async () => {
         create role qm_authority_fence_proof_role nologin;
       end if;
     end $$;
+    grant qm_authority_fence_proof_role to current_user;
     revoke all privileges on schema qm_internal
       from qm_authority_fence_proof_role;
     revoke all privileges on table qm_internal.work_authority_revision
@@ -116,6 +117,7 @@ afterAll(async () => {
       qm_internal.acquire_work_authority_fence(bigint)
       from qm_authority_fence_proof_role;
     revoke usage on schema qm_internal from qm_authority_fence_proof_role;
+    revoke qm_authority_fence_proof_role from current_user;
     drop role qm_authority_fence_proof_role;
   `);
   await Promise.all([

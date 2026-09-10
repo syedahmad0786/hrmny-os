@@ -10,12 +10,80 @@ function readMigration(name: string): string {
   return readFileSync(`${migrationsDirectory}${name}`, "utf8");
 }
 
-function createdTables(sql: string): string[] {
+type CreatedTable = { schema: string; name: string };
+
+function createdTables(sql: string): CreatedTable[] {
   return [
     ...sql.matchAll(
-      /CREATE TABLE(?: IF NOT EXISTS)?\s+(?:public\.)?"?([a-z_]+)"?/gi,
+      /CREATE TABLE(?: IF NOT EXISTS)?\s+(?:"?([a-z_]+)"?\.)?"?([a-z_]+)"?/gi,
     ),
-  ].map((match) => match[1]!);
+  ].map((match) => ({ schema: match[1] ?? "public", name: match[2]! }));
+}
+
+function expectPrivateTableLockdown(
+  migration: string,
+  migrationName: string,
+  { schema, name }: CreatedTable,
+): void {
+  const target = `${schema}.${name}`;
+  const apiRoleRevokes = migration.replace(/'\s*\r?\n\s*'/g, "");
+  expect(
+    migration,
+    `${migrationName} does not revoke ${schema} from PUBLIC`,
+  ).toMatch(
+    new RegExp(
+      `REVOKE ALL PRIVILEGES\\s+ON SCHEMA\\s+${schema}\\s+FROM PUBLIC`,
+      "i",
+    ),
+  );
+  expect(
+    migration,
+    `${migrationName} does not revoke ${target} from PUBLIC`,
+  ).toMatch(
+    new RegExp(
+      `REVOKE ALL PRIVILEGES\\s+ON TABLE\\s+${schema}\\.${name}\\s+FROM PUBLIC`,
+      "i",
+    ),
+  );
+  expect(
+    migration,
+    `${migrationName} does not revoke ${schema} functions from PUBLIC`,
+  ).toMatch(
+    new RegExp(`REVOKE ALL PRIVILEGES\\s+ON FUNCTION\\s+${schema}\\.`, "i"),
+  );
+  expect(
+    migration,
+    `${migrationName} does not restrict Supabase API roles`,
+  ).toMatch(
+    /WHERE rolname IN \('anon', 'authenticated', 'authenticator', 'service_role'\)/,
+  );
+  expect(
+    apiRoleRevokes,
+    `${migrationName} does not revoke ${schema} from API roles`,
+  ).toMatch(
+    new RegExp(
+      `REVOKE ALL PRIVILEGES\\s+ON SCHEMA\\s+${schema}\\s+FROM %I`,
+      "i",
+    ),
+  );
+  expect(
+    apiRoleRevokes,
+    `${migrationName} does not revoke ${target} from API roles`,
+  ).toMatch(
+    new RegExp(
+      `REVOKE ALL PRIVILEGES\\s+ON TABLE\\s+${schema}\\.${name}\\s+FROM %I`,
+      "i",
+    ),
+  );
+  expect(
+    apiRoleRevokes,
+    `${migrationName} does not revoke ${schema} functions from API roles`,
+  ).toMatch(
+    new RegExp(
+      `REVOKE ALL PRIVILEGES\\s+ON FUNCTION\\s+${schema}\\..+\\s+FROM %I`,
+      "i",
+    ),
+  );
 }
 
 describe("production migration security", () => {
@@ -27,7 +95,9 @@ describe("production migration security", () => {
         "0003_pgvector_memory.sql",
         "0004_tickets.sql",
         "0006_connectors_feature_requests.sql",
-      ].flatMap((name) => createdTables(readMigration(name))),
+      ].flatMap((name) =>
+        createdTables(readMigration(name)).map(({ name }) => name),
+      ),
     );
     const lockdown = readMigration("0005_lock_down_data_api.sql");
     const listedTables = lockdown
@@ -70,12 +140,18 @@ describe("production migration security", () => {
     for (const name of migrations) {
       const migration = readMigration(name);
       const tables = createdTables(migration);
-      for (const table of tables) {
-        expect(migration, `${name} does not list ${table}`).toContain(
-          `'${table}'`,
+      const publicTables = tables.filter(({ schema }) => schema === "public");
+      for (const table of publicTables) {
+        expect(migration, `${name} does not list ${table.name}`).toContain(
+          `'${table.name}'`,
         );
       }
-      if (tables.length === 0) continue;
+      for (const table of tables) {
+        if (table.schema !== "public") {
+          expectPrivateTableLockdown(migration, name, table);
+        }
+      }
+      if (publicTables.length === 0) continue;
       expect(migration, name).toMatch(/ENABLE ROW LEVEL SECURITY/i);
       expect(migration, name).toMatch(/FROM PUBLIC/i);
       expect(migration, name).toMatch(/FROM anon/i);
