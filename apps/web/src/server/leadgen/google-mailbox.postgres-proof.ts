@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { sql, employee } from "@hrmny/db";
 import { expect, it } from "vitest";
 import { getDb } from "../db";
-import { persistGoogleWorkspaceTokens } from "../google-workspace-oauth";
+import {
+  GoogleWorkspaceSecretSchema,
+  persistGoogleWorkspaceTokens,
+} from "../google-workspace-oauth";
 import { createCaller } from "../trpc/root";
 import { resolveDevUser } from "../auth/session";
 import { mutateSalesOsSettings, recordEmailEvent } from "../sales-os/store";
@@ -112,7 +115,29 @@ it("retains multiple domains, reconnects exactly one mailbox, and denies another
   const first = await persistGoogleWorkspaceTokens({
     ...base,
     email: "first@domain-one.test",
+    grantedScopes: ["https://www.googleapis.com/auth/gmail.readonly"],
   });
+  const readStoredScopes = async (connectionAccountId: string) => {
+    const [secret] = await db.execute<{ decrypted_secret: string }>(sql`
+      select vault.decrypted_secrets.decrypted_secret
+      from public.connection_account
+      join vault.decrypted_secrets
+        on vault.decrypted_secrets.id = public.connection_account.secret_id
+      where public.connection_account.connection_account_id = ${connectionAccountId}::uuid
+      limit 1
+    `);
+    return GoogleWorkspaceSecretSchema.parse(
+      JSON.parse(secret!.decrypted_secret),
+    ).grantedScopes;
+  };
+  expect(await readStoredScopes(first.connectionAccountId)).toEqual([
+    "https://www.googleapis.com/auth/gmail.readonly",
+  ]);
+  await persistGoogleWorkspaceTokens({
+    ...base,
+    email: "first@domain-one.test",
+  });
+  expect(await readStoredScopes(first.connectionAccountId)).toEqual([]);
   const second = await persistGoogleWorkspaceTokens({
     ...base,
     email: "second@domain-two.test",

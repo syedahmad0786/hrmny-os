@@ -282,10 +282,10 @@ export async function buildGoogleWorkspaceAuthorizeUrl(
   };
 }
 
-async function loadStoredSecret(
+async function loadStoredRefreshToken(
   employeeId: string,
   email: string,
-): Promise<z.infer<typeof GoogleWorkspaceSecretSchema> | null> {
+): Promise<string | null> {
   const db = getDb();
   if (!db) return null;
   const [row] = await db
@@ -312,7 +312,7 @@ async function loadStoredSecret(
   const raw = secrets[0]?.decrypted_secret;
   if (typeof raw !== "string" || !raw.trim()) return null;
   try {
-    return GoogleWorkspaceSecretSchema.parse(JSON.parse(raw));
+    return GoogleWorkspaceSecretSchema.parse(JSON.parse(raw)).refreshToken;
   } catch {
     return null;
   }
@@ -324,7 +324,7 @@ export async function persistGoogleWorkspaceTokens(input: {
   refreshToken?: string | null;
   expiresAt?: Date;
   email: string;
-  /** Provider-returned grant evidence only; undefined retains prior evidence. */
+  /** Provider-returned grant evidence only; undefined means unknown. */
   grantedScopes?: readonly string[];
 }): Promise<{
   connectionAccountId: string;
@@ -337,11 +337,10 @@ export async function persistGoogleWorkspaceTokens(input: {
     throw new Error("DATABASE_URL required to persist Google Workspace tokens");
   }
   const email = z.string().email().parse(input.email.trim()).toLowerCase();
-  const storedSecret = await loadStoredSecret(input.employeeId, email);
   const refreshToken =
     input.refreshToken?.trim() && input.refreshToken.trim().length >= 20
       ? input.refreshToken.trim()
-      : storedSecret?.refreshToken;
+      : await loadStoredRefreshToken(input.employeeId, email);
   if (!refreshToken) {
     throw new Error(
       "Google did not return a refresh token. Revoke hrmny OS under Google Account → Security → Third-party access, then Reconnect.",
@@ -349,10 +348,7 @@ export async function persistGoogleWorkspaceTokens(input: {
   }
   const expiresAt = input.expiresAt ?? new Date(Date.now() + 55 * 60 * 1000);
   const grantedScopes = resolveGoogleWorkspaceGrantedScopes(
-    input.grantedScopes === undefined
-      ? undefined
-      : input.grantedScopes.join(" "),
-    storedSecret?.grantedScopes,
+    input.grantedScopes?.join(" "),
   );
   const secret = JSON.stringify({
     accessToken: input.accessToken,
