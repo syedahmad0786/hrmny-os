@@ -2,6 +2,7 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetIntegrationReceiptMemory } from "./integrations/inbox";
 import { createCaller } from "./trpc/root";
+import { resolveActiveStaffById } from "./auth/session";
 import {
   googleChatAsyncConfigured,
   googleChatEndpoint,
@@ -21,6 +22,19 @@ vi.mock("./trpc/root", () => ({
 }));
 
 vi.mock("./auth/session", () => ({
+  resolveActiveStaffById: vi.fn(async (employeeId: string) =>
+    employeeId === "c0000000-0000-4000-8000-000000000001"
+      ? {
+          employeeId,
+          email: "operator@hrmny.co",
+          displayName: "Operator",
+          roles: ["partner"],
+          permissions: [],
+          actorType: "staff",
+          clientId: null,
+        }
+      : null,
+  ),
   resolveActiveStaffByEmail: vi.fn(async (email: string) =>
     email === "operator@hrmny.co"
       ? {
@@ -151,6 +165,7 @@ describe("Google Chat request verification", () => {
 
     await expect(
       sendGoogleChatReply({
+        employeeId: "c0000000-0000-4000-8000-000000000001",
         receiptId,
         spaceName: "spaces/AAAA",
         threadName: "spaces/AAAA/threads/thread-1",
@@ -164,6 +179,7 @@ describe("Google Chat request verification", () => {
       .mockResolvedValueOnce(Response.json(verifiedMessage));
     await expect(
       sendGoogleChatReply({
+        employeeId: "c0000000-0000-4000-8000-000000000001",
         receiptId,
         spaceName: "spaces/AAAA",
         threadName: "spaces/AAAA/threads/thread-1",
@@ -208,6 +224,7 @@ describe("Google Chat request verification", () => {
         .mockResolvedValueOnce(Response.json(wrong));
       await expect(
         sendGoogleChatReply({
+          employeeId: "c0000000-0000-4000-8000-000000000001",
           receiptId,
           spaceName: "spaces/AAAA",
           threadName: "spaces/AAAA/threads/thread-1",
@@ -222,6 +239,7 @@ describe("Google Chat request verification", () => {
       .mockResolvedValueOnce(Response.json(verifiedMessage));
     await expect(
       sendGoogleChatReply({
+        employeeId: "c0000000-0000-4000-8000-000000000001",
         receiptId,
         spaceName: "spaces/AAAA",
         threadName: "spaces/AAAA/threads/thread-1",
@@ -235,6 +253,7 @@ describe("Google Chat request verification", () => {
       .mockResolvedValueOnce(new Response(null, { status: 403 }));
     await expect(
       sendGoogleChatReply({
+        employeeId: "c0000000-0000-4000-8000-000000000001",
         receiptId,
         spaceName: "spaces/AAAA",
         threadName: "spaces/AAAA/threads/thread-1",
@@ -242,6 +261,41 @@ describe("Google Chat request verification", () => {
         googleUserName: "users/123456",
       }),
     ).rejects.toThrow("GOOGLE_CHAT_READBACK_403");
+  });
+
+  it("does not send a prepared answer after revocation or a directory failure", async () => {
+    vi.stubEnv(
+      "GOOGLE_CHAT_SERVICE_ACCOUNT_JSON",
+      JSON.stringify({
+        client_email: "hrmny-chat@example.iam.gserviceaccount.com",
+        private_key: privateKey.export({ format: "pem", type: "pkcs8" }),
+      }),
+    );
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ access_token: "access-token" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    for (const outcome of [null, new Error("Directory unavailable")]) {
+      if (outcome)
+        vi.mocked(resolveActiveStaffById).mockRejectedValueOnce(outcome);
+      else vi.mocked(resolveActiveStaffById).mockResolvedValueOnce(null);
+      await expect(
+        sendGoogleChatReply({
+          employeeId: "c0000000-0000-4000-8000-000000000001",
+          receiptId: "550e8400-e29b-41d4-a716-446655440000",
+          spaceName: "spaces/AAAA",
+          threadName: "spaces/AAAA/threads/thread-1",
+          text: "Private prepared answer",
+          googleUserName: "users/123456",
+        }),
+      ).rejects.toThrow(outcome?.message ?? "GOOGLE_CHAT_STAFF_ACCESS_REVOKED");
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      fetchMock.mock.calls.every(
+        ([url]) => String(url) === "https://oauth2.googleapis.com/token",
+      ),
+    ).toBe(true);
   });
 
   it("accepts and replays one signed staff onboarding event", async () => {
@@ -324,6 +378,25 @@ describe("Google Chat request verification", () => {
         clientId: null,
       }),
     );
+    chatSend.mockImplementationOnce(async () => {
+      vi.mocked(resolveActiveStaffById).mockResolvedValueOnce(null);
+      return {
+        assistant: { content: "Private answer generated during revocation" },
+      };
+    });
+    const revoked = await send({
+      ...event,
+      message: {
+        ...event.message,
+        name: "spaces/AAAA/messages/request-revoked",
+      },
+    });
+    expect(await revoked.json()).toMatchObject({
+      text: expect.not.stringContaining(
+        "Private answer generated during revocation",
+      ),
+      privateMessageViewer: { name: "users/123456" },
+    });
     expect(
       (await send({ ...event, user: { email: "operator@hrmny.co" } })).status,
     ).toBe(400);

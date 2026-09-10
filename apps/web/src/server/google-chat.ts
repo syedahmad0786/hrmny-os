@@ -31,6 +31,16 @@ const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_CHAT_API_URL = "https://chat.googleapis.com/v1";
 const GOOGLE_CHAT_BOT_SCOPE = "https://www.googleapis.com/auth/chat.bot";
 export const GOOGLE_CHAT_INTERACTION_JOB_KIND = "google_chat_interaction";
+export const GOOGLE_CHAT_QM_JOB_KIND = "google_chat_qm_interaction";
+export function qmGoogleChatAllowed(employeeId: string) {
+  return (
+    process.env.GOOGLE_CHAT_RUNTIME === "qm" &&
+    (process.env.QM_GOOGLE_CHAT_EMPLOYEE_IDS ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .includes(employeeId)
+  );
+}
 export const GOOGLE_CHAT_INTERACTION_EVENT =
   "google-chat/interaction.queued" as const;
 const MAX_BODY_BYTES = 256_000;
@@ -84,7 +94,7 @@ const googleChatMessageSchema = z
     thread: z.object({ name: googleThreadNameSchema }).optional(),
   })
   .passthrough();
-const googleChatJobSchema = z.object({
+export const googleChatJobSchema = z.object({
   receiptId: z.string().uuid(),
   externalEventId: z.string().min(1).max(500),
   employeeId: z.string().uuid(),
@@ -294,14 +304,22 @@ async function readGoogleChatMessage(messageName: string, accessToken: string) {
   return googleChatMessageSchema.parse(await response.json());
 }
 
+async function requireActiveGoogleChatStaff(employeeId: string) {
+  const user = await resolveActiveStaffById(employeeId);
+  if (!user) throw new Error("GOOGLE_CHAT_STAFF_ACCESS_REVOKED");
+  return user;
+}
+
 /** Idempotent Chat API delivery with exact provider readback. */
 export async function sendGoogleChatReply(input: {
+  employeeId: string;
   receiptId: string;
   spaceName: string;
   threadName: string | null;
   text: string;
   googleUserName: string;
 }) {
+  z.string().uuid().parse(input.employeeId);
   z.string().uuid().parse(input.receiptId);
   googleUserNameSchema.parse(input.googleUserName);
   googleSpaceNameSchema.parse(input.spaceName);
@@ -312,6 +330,7 @@ export async function sendGoogleChatReply(input: {
     throw new Error("GOOGLE_CHAT_THREAD_SCOPE_MISMATCH");
   }
   const accessToken = await googleChatAccessToken();
+  await requireActiveGoogleChatStaff(input.employeeId);
   const messageId = googleChatReplyMessageId(input.receiptId);
   const messageName = `${input.spaceName}/messages/${messageId}`;
   const verifyReply = (message: z.infer<typeof googleChatMessageSchema>) => {
@@ -369,33 +388,41 @@ export async function sendGoogleChatReply(input: {
 async function queueGoogleChatInteraction(payload: GoogleChatJob) {
   const db = getDb();
   if (!db) return null;
+  const kind = qmGoogleChatAllowed(payload.employeeId)
+    ? GOOGLE_CHAT_QM_JOB_KIND
+    : GOOGLE_CHAT_INTERACTION_JOB_KIND;
   const inserted = await db
     .insert(scheduledJob)
     .values({
       integrationInboxId: payload.receiptId,
       jobKey: `google-chat:${payload.receiptId}`,
-      kind: GOOGLE_CHAT_INTERACTION_JOB_KIND,
+      kind,
       runAt: new Date(),
       payload,
     })
     .onConflictDoNothing({ target: scheduledJob.jobKey })
     .returning({ id: scheduledJob.scheduledJobId });
-  if (inserted[0]) return inserted[0].id;
-  const [existing] = await db.execute<{ scheduled_job_id: string }>(sql`
-    select scheduled_job_id
+  if (inserted[0]) return { jobId: inserted[0].id, kind };
+  const [existing] = await db.execute<{
+    scheduled_job_id: string;
+    kind: string;
+  }>(sql`
+    select scheduled_job_id, kind
     from public.scheduled_job
     where job_key = ${`google-chat:${payload.receiptId}`}
-      and kind = ${GOOGLE_CHAT_INTERACTION_JOB_KIND}
+      and kind in (${GOOGLE_CHAT_INTERACTION_JOB_KIND}, ${GOOGLE_CHAT_QM_JOB_KIND})
     limit 1
   `);
   if (!existing) throw new Error("GOOGLE_CHAT_JOB_CONFLICT");
-  return existing.scheduled_job_id;
+  return { jobId: existing.scheduled_job_id, kind: existing.kind };
 }
 
-async function dispatchGoogleChatInteraction(input: {
+export async function dispatchGoogleChatInteraction(input: {
   jobId: string;
   receiptId: string;
+  kind?: string;
 }) {
+  if (input.kind === GOOGLE_CHAT_QM_JOB_KIND) return false;
   if (!inngestCloudConfigured()) return false;
   await inngest.send({
     id: `google-chat:${input.jobId}`,
@@ -424,18 +451,21 @@ export async function runGoogleChatInteractionJob(raw: unknown) {
   ) {
     return { ok: true, messageName: receipt.result.messageName, replay: true };
   }
-  const user = await resolveActiveStaffById(payload.employeeId);
-  if (!user) throw new Error("GOOGLE_CHAT_STAFF_ACCESS_REVOKED");
+  const user = await requireActiveGoogleChatStaff(payload.employeeId);
 
   let text: string;
-  let threadId: string;
+  let threadId: string | null;
   if (
     receipt.result?.bridgeStatus === "reply_ready" &&
     typeof receipt.result.text === "string" &&
-    typeof receipt.result.threadId === "string"
+    (typeof receipt.result.threadId === "string" ||
+      typeof receipt.result.qmThreadRef === "string")
   ) {
     text = receipt.result.text;
-    threadId = receipt.result.threadId;
+    threadId =
+      typeof receipt.result.threadId === "string"
+        ? receipt.result.threadId
+        : null;
   } else {
     const thread = await getOrCreateExternalChatThread({
       employeeId: user.employeeId,
@@ -464,6 +494,7 @@ export async function runGoogleChatInteractionJob(raw: unknown) {
   }
 
   const delivered = await sendGoogleChatReply({
+    employeeId: payload.employeeId,
     receiptId: payload.receiptId,
     spaceName: payload.spaceName,
     threadName: payload.threadName,
@@ -475,6 +506,13 @@ export async function runGoogleChatInteractionJob(raw: unknown) {
     bridgeStatus: "delivered",
     text,
     threadId,
+    ...(typeof receipt.result?.qmThreadRef === "string"
+      ? {
+          qmThreadRef: receipt.result.qmThreadRef,
+          qmSessionId: receipt.result.qmSessionId,
+          qmRunId: receipt.result.qmRunId,
+        }
+      : {}),
     messageName: delivered.name,
   });
   return { ok: true, messageName: delivered.name, replay: false };
@@ -700,10 +738,10 @@ export async function handleGoogleChatRequest(
   if (receipt.duplicate && jobPayload?.success) {
     if (receipt.status === "processing") {
       try {
-        const jobId = await queueGoogleChatInteraction(jobPayload.data);
-        if (jobId) {
+        const job = await queueGoogleChatInteraction(jobPayload.data);
+        if (job) {
           await dispatchGoogleChatInteraction({
-            jobId,
+            ...job,
             receiptId: receipt.receiptId,
           }).catch(() => false);
         }
@@ -760,14 +798,14 @@ export async function handleGoogleChatRequest(
       const text =
         "Got it — hrmny AI Assistant will reply privately in this thread.";
       try {
-        const jobId = await queueGoogleChatInteraction(jobPayload.data);
-        if (!jobId) throw new Error("GOOGLE_CHAT_JOB_UNAVAILABLE");
         await updateIntegrationReceiptProgress(receipt.receiptId, {
           status: "processing",
           result: { bridgeStatus: "queued" },
         });
+        const job = await queueGoogleChatInteraction(jobPayload.data);
+        if (!job) throw new Error("GOOGLE_CHAT_JOB_UNAVAILABLE");
         await dispatchGoogleChatInteraction({
-          jobId,
+          ...job,
           receiptId: receipt.receiptId,
         }).catch(() => false);
       } catch {
@@ -795,6 +833,7 @@ export async function handleGoogleChatRequest(
       harness: "react",
       proposalOnly: true,
     });
+    await requireActiveGoogleChatStaff(user.employeeId);
     const text = responseText(result.assistant.content, appOrigin);
     await completeIntegrationReceipt(receipt.receiptId, {
       ok: true,

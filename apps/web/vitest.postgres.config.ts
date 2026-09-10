@@ -12,6 +12,7 @@ export default defineConfig({
       "src/server/sales-os/replacement.postgres-proof.ts",
       "src/server/qm/postgres-repository.postgres-proof.ts",
       "src/server/composio-status.postgres-proof.ts",
+      "src/server/qm/google-chat-worker.postgres-proof.ts",
     ],
     setupFiles: ["./src/test/postgres-ci-setup.ts"],
     fileParallelism: false,
