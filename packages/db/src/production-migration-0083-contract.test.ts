@@ -28,5 +28,8 @@ describe("migration 0083 Google identity history boundary", () => {
     expect(migration).toMatch(
       /OLD\.revoked_at IS NOT NULL[\s\S]+Google identity revocation is immutable/,
     );
+    expect(migration).toMatch(
+      /revoked_at IS NOT NULL AND revoked_by_employee_id IS NOT NULL AND revocation_reason IS NOT NULL/,
+    );
   });
 });

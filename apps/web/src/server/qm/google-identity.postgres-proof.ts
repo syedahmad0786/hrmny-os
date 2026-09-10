@@ -113,6 +113,14 @@ it("enforces unique stable identifiers and denies unbound, mismatched, inactive,
   await db.execute(
     sql`update public.employee set is_active = true where employee_id = ${employeeIds[0]}::uuid`,
   );
+  await expect(
+    db.execute(sql`
+      update public.employee_google_identity set
+        revoked_at = now(), revoked_by_employee_id = ${employeeIds[0]}::uuid,
+        revocation_reason = null
+      where employee_id = ${employeeIds[0]}::uuid
+    `),
+  ).rejects.toThrow();
   await db.execute(sql`
     update public.employee_google_identity set
       revoked_at = now(), revoked_by_employee_id = ${employeeIds[0]}::uuid,

@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.employee_google_identity (
   CONSTRAINT employee_google_identity_revocation_chk CHECK (
     (revoked_at IS NULL AND revoked_by_employee_id IS NULL AND revocation_reason IS NULL)
     OR
-    (revoked_at IS NOT NULL AND revoked_by_employee_id IS NOT NULL AND length(trim(revocation_reason)) BETWEEN 1 AND 500)
+    (revoked_at IS NOT NULL AND revoked_by_employee_id IS NOT NULL AND revocation_reason IS NOT NULL AND length(trim(revocation_reason)) BETWEEN 1 AND 500)
   )
 );
 

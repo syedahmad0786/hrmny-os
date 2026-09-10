@@ -118,17 +118,20 @@ export async function observeGoogleChatProjectIntersection(input: {
   );
   if (
     listedHumans.length !== humanByUser.size ||
-    listedHumans.some((member) => !humanByUser.has(member.userName))
+    listedHumans.some((member) => {
+      const human = humanByUser.get(member.userName);
+      return (
+        !human ||
+        human.membershipName !== member.membershipName ||
+        human.role !== member.role
+      );
+    })
   )
     deny("GOOGLE_CHAT_PROJECT_ROSTER_INCOMPLETE");
 
-  await requireProjectAccess(
-    staffContext(input.actor),
-    projectId.data,
-    "admin",
-  );
   const employees = new Set<string>();
   const roles: Observation["roles"][number][] = [];
+  let freshActor: SessionUser | null = null;
   for (const human of snapshot.data.humans) {
     const identity = await resolveEmployeeGoogleIdentity({
       proof: "chat",
@@ -142,8 +145,11 @@ export async function observeGoogleChatProjectIntersection(input: {
       deny("GOOGLE_CHAT_PROJECT_IDENTITY_UNRESOLVED");
     await requireProjectAccess(staffContext(staff), projectId.data, "viewer");
     employees.add(identity.employeeId);
+    if (identity.employeeId === input.actor.employeeId) freshActor = staff;
     roles.push({ employeeId: identity.employeeId, googleRole: human.role });
   }
+  if (!freshActor) deny("GOOGLE_CHAT_PROJECT_ACTOR_NOT_PARTICIPANT");
+  await requireProjectAccess(staffContext(freshActor), projectId.data, "admin");
   const actorRole = roles.find(
     (role) => role.employeeId === input.actor.employeeId,
   );

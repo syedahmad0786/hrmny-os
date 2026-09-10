@@ -90,13 +90,13 @@ describe("Google Chat project intersection observation", () => {
       1,
       expect.any(Object),
       projectId,
-      "admin",
+      "viewer",
     );
     expect(mocks.access).toHaveBeenNthCalledWith(
       2,
       expect.any(Object),
       projectId,
-      "viewer",
+      "admin",
     );
     expect(mocks.resolveIdentity).toHaveBeenCalledWith({
       action: "resolve_identity",
@@ -145,6 +145,26 @@ describe("Google Chat project intersection observation", () => {
             membershipName: "spaces/AAAA/members/two",
             userName: "users/101",
             kind: "HUMAN",
+            role: "ROLE_MEMBER",
+          },
+        ],
+      }),
+      "GOOGLE_CHAT_PROJECT_ROSTER_INCOMPLETE",
+    ],
+    [
+      "parallel role mismatch",
+      observed({
+        members: [
+          {
+            membershipName: "spaces/AAAA/members/one",
+            userName: "users/100",
+            kind: "HUMAN",
+            role: "ROLE_MEMBER",
+          },
+          {
+            membershipName: "spaces/AAAA/members/app",
+            userName: "users/900",
+            kind: "BOT",
             role: "ROLE_MEMBER",
           },
         ],
@@ -215,5 +235,22 @@ describe("Google Chat project intersection observation", () => {
         }),
       }),
     ).rejects.toThrow("GOOGLE_CHAT_PROJECT_ACTOR_NOT_MANAGER");
+  });
+
+  it("uses freshly resolved staff roles for the Work-admin check", async () => {
+    const freshActor = { ...actor, roles: ["viewer"] };
+    mocks.staff.mockResolvedValue(freshActor);
+    mocks.access.mockImplementation((ctx, _projectId, minimum) => {
+      if (minimum === "admin" && ctx.roles.includes("viewer"))
+        throw new Error("fresh-admin-denied");
+      return Promise.resolve({ projectId });
+    });
+    await expect(
+      observeGoogleChatProjectIntersection({
+        projectId,
+        actor,
+        observedGoogle: observed(),
+      }),
+    ).rejects.toThrow("fresh-admin-denied");
   });
 });
