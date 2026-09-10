@@ -1,6 +1,6 @@
 import { createDb, employee, sql } from "@hrmny/db";
 import { randomUUID } from "node:crypto";
-import { beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import { withDatabaseScope } from "../db";
 import { resolveEmployeeGoogleIdentity } from "./google-identity";
 
@@ -32,6 +32,16 @@ beforeAll(async () => {
   );
 });
 
+afterAll(async () => {
+  await db.execute(sql`
+    delete from public.employee_google_identity
+    where employee_id = any(${employeeIds}::uuid[])
+  `);
+  await db.execute(sql`
+    delete from public.employee where employee_id = any(${employeeIds}::uuid[])
+  `);
+});
+
 const bind = (employeeId: string, qmPrincipal: string, googleSubject: string) =>
   db.execute(sql`
     insert into public.employee_google_identity (
@@ -56,6 +66,13 @@ it("enforces unique stable identifiers and denies unbound, mismatched, inactive,
   await expect(
     bind(employeeIds[1]!, principals[1]!, subjects[0]!),
   ).rejects.toThrow();
+  await expect(
+    db.execute(sql`
+      update public.employee_google_identity
+      set google_subject = ${subjects[1]}
+      where employee_id = ${employeeIds[0]}::uuid
+    `),
+  ).rejects.toThrow("binding and claim provenance are immutable");
 
   const oidc = {
     action: "resolve_identity" as const,
@@ -103,4 +120,19 @@ it("enforces unique stable identifiers and denies unbound, mismatched, inactive,
     where employee_id = ${employeeIds[0]}::uuid
   `);
   await expect(resolve(oidc)).resolves.toBeNull();
+  await expect(
+    db.execute(sql`
+      update public.employee_google_identity set
+        revoked_at = null, revoked_by_employee_id = null,
+        revocation_reason = null
+      where employee_id = ${employeeIds[0]}::uuid
+    `),
+  ).rejects.toThrow("revocation is immutable");
+  await expect(
+    db.execute(sql`
+      update public.employee_google_identity
+      set revocation_reason = 'rewritten reason'
+      where employee_id = ${employeeIds[0]}::uuid
+    `),
+  ).rejects.toThrow("revocation is immutable");
 });

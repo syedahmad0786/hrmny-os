@@ -35,6 +35,40 @@ CREATE TABLE IF NOT EXISTS public.employee_google_identity (
   )
 );
 
+CREATE OR REPLACE FUNCTION public.enforce_employee_google_identity_history() RETURNS trigger
+LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN
+  IF (NEW.employee_google_identity_id, NEW.employee_id, NEW.qm_principal,
+      NEW.google_issuer, NEW.google_subject, NEW.claim_method,
+      NEW.claim_evidence_digest, NEW.claimed_by_employee_id, NEW.claimed_at)
+      IS DISTINCT FROM
+     (OLD.employee_google_identity_id, OLD.employee_id, OLD.qm_principal,
+      OLD.google_issuer, OLD.google_subject, OLD.claim_method,
+      OLD.claim_evidence_digest, OLD.claimed_by_employee_id, OLD.claimed_at) THEN
+    RAISE EXCEPTION 'Google identity binding and claim provenance are immutable';
+  END IF;
+  IF OLD.revoked_at IS NOT NULL AND
+     (NEW.revoked_at, NEW.revoked_by_employee_id, NEW.revocation_reason)
+       IS DISTINCT FROM
+     (OLD.revoked_at, OLD.revoked_by_employee_id, OLD.revocation_reason) THEN
+    RAISE EXCEPTION 'Google identity revocation is immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'enforce_employee_google_identity_history'
+      AND tgrelid = 'public.employee_google_identity'::regclass
+  ) THEN
+    CREATE TRIGGER enforce_employee_google_identity_history
+    BEFORE UPDATE ON public.employee_google_identity
+    FOR EACH ROW EXECUTE FUNCTION public.enforce_employee_google_identity_history();
+  END IF;
+END $$;
+
 DO $$
 DECLARE app_table text;
 BEGIN
