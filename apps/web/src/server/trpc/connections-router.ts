@@ -38,6 +38,7 @@ import {
   googleWorkspaceClientId,
   googleWorkspaceClientSecret,
   persistGoogleWorkspaceTokens,
+  resolveGoogleWorkspaceGrantedScopes,
 } from "../google-workspace-oauth";
 import { isGoogleWorkspaceReconnectRequired } from "@/lib/google-workspace-error";
 import { isHardApiKeyRejection } from "@/lib/api-key-rejection";
@@ -943,6 +944,10 @@ export async function getGoogleWorkspaceAccessToken(
     accessToken: refreshed.access_token,
     refreshToken: refreshed.refresh_token ?? stored.refreshToken,
     expiresAt: expiresAt.toISOString(),
+    grantedScopes: resolveGoogleWorkspaceGrantedScopes(
+      refreshed.scope,
+      stored.grantedScopes,
+    ),
   });
   await db.transaction(async (tx) => {
     await tx.execute(

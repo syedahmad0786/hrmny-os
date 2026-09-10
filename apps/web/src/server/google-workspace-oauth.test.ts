@@ -7,6 +7,9 @@ import {
   buildGoogleWorkspaceAuthorizeUrl,
   completeGoogleWorkspaceOAuth,
   formatGoogleOAuthError,
+  GoogleTokenResponseSchema,
+  GoogleWorkspaceSecretSchema,
+  resolveGoogleWorkspaceGrantedScopes,
 } from "./google-workspace-oauth";
 
 const ENV_KEYS = [
@@ -202,5 +205,43 @@ describe("google workspace oauth helpers", () => {
         }),
       ),
     ).toBe("Google token exchange failed (400): Bad Request");
+  });
+
+  it("records provider-returned scopes from an initial token exchange", () => {
+    const token = GoogleTokenResponseSchema.parse({
+      access_token: "a".repeat(20),
+      expires_in: 3600,
+      scope: "https://www.googleapis.com/auth/gmail.readonly openid",
+    });
+    expect(resolveGoogleWorkspaceGrantedScopes(token.scope)).toEqual([
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "openid",
+    ]);
+  });
+
+  it("treats legacy stored credentials without scope evidence as unknown", () => {
+    expect(
+      GoogleWorkspaceSecretSchema.parse({
+        accessToken: "a".repeat(20),
+        refreshToken: "r".repeat(20),
+        expiresAt: "2026-09-11T00:00:00.000Z",
+      }).grantedScopes,
+    ).toEqual([]);
+  });
+
+  it("retains verified scopes when a refresh omits scope, and replaces them when it returns a narrower grant", () => {
+    const existing = [
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/gmail.send",
+    ];
+    expect(resolveGoogleWorkspaceGrantedScopes(undefined, existing)).toEqual(
+      existing,
+    );
+    expect(
+      resolveGoogleWorkspaceGrantedScopes(
+        "https://www.googleapis.com/auth/gmail.readonly",
+        existing,
+      ),
+    ).toEqual(["https://www.googleapis.com/auth/gmail.readonly"]);
   });
 });

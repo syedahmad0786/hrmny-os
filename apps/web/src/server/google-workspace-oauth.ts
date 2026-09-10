@@ -23,13 +23,38 @@ export const GoogleWorkspaceSecretSchema = z.object({
   accessToken: z.string().min(20),
   refreshToken: z.string().min(20),
   expiresAt: z.string().datetime(),
+  // Missing on credentials saved before grant evidence existed means unknown,
+  // never the scopes HRMNY asked Google for.
+  grantedScopes: z
+    .array(z.string().trim().min(1).max(1000))
+    .max(100)
+    .default([]),
 });
 
 export const GoogleTokenResponseSchema = z.object({
   access_token: z.string().min(20),
   expires_in: z.number().int().positive(),
   refresh_token: z.string().min(20).optional(),
+  scope: z.string().trim().min(1).max(8192).optional(),
 });
+
+/**
+ * Preserve only scopes Google actually returned. A refresh response commonly
+ * omits `scope`; in that case retain prior provider-granted evidence. This
+ * deliberately never fills in the requested authorize scopes.
+ */
+export function resolveGoogleWorkspaceGrantedScopes(
+  providerScope: string | undefined,
+  previousGrantedScopes: readonly string[] = [],
+): string[] {
+  const source =
+    providerScope === undefined
+      ? previousGrantedScopes
+      : providerScope.split(/\s+/);
+  return [
+    ...new Set(source.map((scope) => scope.trim()).filter(Boolean)),
+  ].sort();
+}
 
 function oauthSecret(): string {
   const secret = process.env.GOOGLE_OAUTH_STATE_SECRET?.trim();
@@ -257,10 +282,10 @@ export async function buildGoogleWorkspaceAuthorizeUrl(
   };
 }
 
-async function loadStoredRefreshToken(
+async function loadStoredSecret(
   employeeId: string,
   email: string,
-): Promise<string | null> {
+): Promise<z.infer<typeof GoogleWorkspaceSecretSchema> | null> {
   const db = getDb();
   if (!db) return null;
   const [row] = await db
@@ -287,7 +312,7 @@ async function loadStoredRefreshToken(
   const raw = secrets[0]?.decrypted_secret;
   if (typeof raw !== "string" || !raw.trim()) return null;
   try {
-    return GoogleWorkspaceSecretSchema.parse(JSON.parse(raw)).refreshToken;
+    return GoogleWorkspaceSecretSchema.parse(JSON.parse(raw));
   } catch {
     return null;
   }
@@ -299,6 +324,8 @@ export async function persistGoogleWorkspaceTokens(input: {
   refreshToken?: string | null;
   expiresAt?: Date;
   email: string;
+  /** Provider-returned grant evidence only; undefined retains prior evidence. */
+  grantedScopes?: readonly string[];
 }): Promise<{
   connectionAccountId: string;
   email: string;
@@ -310,20 +337,28 @@ export async function persistGoogleWorkspaceTokens(input: {
     throw new Error("DATABASE_URL required to persist Google Workspace tokens");
   }
   const email = z.string().email().parse(input.email.trim()).toLowerCase();
+  const storedSecret = await loadStoredSecret(input.employeeId, email);
   const refreshToken =
     input.refreshToken?.trim() && input.refreshToken.trim().length >= 20
       ? input.refreshToken.trim()
-      : await loadStoredRefreshToken(input.employeeId, email);
+      : storedSecret?.refreshToken;
   if (!refreshToken) {
     throw new Error(
       "Google did not return a refresh token. Revoke hrmny OS under Google Account → Security → Third-party access, then Reconnect.",
     );
   }
   const expiresAt = input.expiresAt ?? new Date(Date.now() + 55 * 60 * 1000);
+  const grantedScopes = resolveGoogleWorkspaceGrantedScopes(
+    input.grantedScopes === undefined
+      ? undefined
+      : input.grantedScopes.join(" "),
+    storedSecret?.grantedScopes,
+  );
   const secret = JSON.stringify({
     accessToken: input.accessToken,
     refreshToken,
     expiresAt: expiresAt.toISOString(),
+    grantedScopes,
   });
 
   const saved = await db.transaction(async (tx) => {
@@ -482,6 +517,7 @@ export async function completeGoogleWorkspaceOAuth(input: {
     refreshToken: tokens.refresh_token,
     expiresAt,
     email: parsed.data.email,
+    grantedScopes: resolveGoogleWorkspaceGrantedScopes(tokens.scope),
   });
   return {
     account: saved.email,
