@@ -41,6 +41,10 @@ export interface RouteEntry {
   nativeRedirect?: boolean;
   /** Final path after a server-side redirect() alias (for humans reading this). */
   redirectsTo?: string;
+  /** Standalone staff surfaces intentionally render without the StaffShell landmark. */
+  standaloneStaff?: boolean;
+  /** Visible heading that proves the standalone surface reached its intended page. */
+  expectedHeading?: string;
 }
 
 /** Dev demo-data ids — kept in sync with server/auth/session.ts + server/demo-store.ts. */
@@ -86,6 +90,8 @@ export const ROUTES: RouteEntry[] = [
   staff("/approvals"),
   staff("/assistant/review/outreach/[id]", {
     sample: "/assistant/review/outreach/c0000000-0000-4000-8000-000000000009",
+    standaloneStaff: true,
+    expectedHeading: "Outreach draft",
   }),
   staff("/assets"), // dev-only DAM probe — 404s unless getAuthMode()==="dev"
   staff("/benefits"),
