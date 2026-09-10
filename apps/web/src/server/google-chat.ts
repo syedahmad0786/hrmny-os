@@ -119,6 +119,8 @@ const googleChatEventSchema = z
       .object({
         name: googleSpaceNameSchema,
         displayName: z.string().max(200).optional(),
+        type: z.string().max(80).optional(),
+        spaceType: z.string().max(80).optional(),
       })
       .passthrough(),
     user: z
@@ -146,7 +148,48 @@ const googleChatEventSchema = z
 type GoogleJwk = z.infer<typeof jwkSchema>;
 type GoogleJwtClaims = z.infer<typeof jwtClaimsSchema>;
 type GoogleChatJob = z.infer<typeof googleChatJobSchema>;
+const privateDmBindingSchema = z
+  .object({
+    employeeId: z.string().uuid(),
+    googleUserName: googleUserNameSchema,
+    spaceName: googleSpaceNameSchema,
+    threadName: googleThreadNameSchema.nullable(),
+  })
+  .strict();
+const personalCronDeliverySchema = z
+  .object({
+    deliveryId: z.string().uuid(),
+    targetEmail: z.string().email().max(320),
+    text: z.string().trim().min(1).max(4_000),
+    attachments: z.array(z.never()).max(0),
+    audienceScopeId: z.string().min(1).max(400),
+    onBehalfOf: z.string().email().max(320),
+    provenance: z
+      .object({
+        trigger: z.literal("cron"),
+        surface: z.literal("cron"),
+        sourceScopeId: z.string().min(1).max(400),
+      })
+      .strict(),
+  })
+  .strict();
+type PrivateDmBinding = z.infer<typeof privateDmBindingSchema>;
 let jwksCache: { expiresAt: number; keys: GoogleJwk[] } | undefined;
+
+function isVerifiedDirectMessage(space: { type?: string; spaceType?: string }) {
+  const legacy = space.type;
+  const modern = space.spaceType;
+  return (
+    (legacy === undefined || legacy === "DM") &&
+    (modern === undefined || modern === "DIRECT_MESSAGE") &&
+    (legacy === "DM" || modern === "DIRECT_MESSAGE")
+  );
+}
+
+function deliveryThreadRef(email: string, employeeId: string, binding: PrivateDmBinding) {
+  const externalRef = `google-chat:${binding.spaceName}:${binding.threadName ?? "root"}`;
+  return `web:${email}:google-chat-${employeeId}-${createHash("sha256").update(externalRef).digest("hex")}`;
+}
 
 function decodeJsonSegment(segment: string): unknown {
   if (!/^[A-Za-z0-9_-]+$/.test(segment)) throw new Error("JWT_INVALID");
@@ -310,6 +353,102 @@ async function requireActiveGoogleChatStaff(employeeId: string) {
   return user;
 }
 
+async function findTrustedPrivateDm(employeeId: string): Promise<PrivateDmBinding | null> {
+  const db = getDb();
+  if (!db) throw new Error("QM_CHAT_DELIVERY_DATABASE_REQUIRED");
+  const [row] = await db.execute<{ payload: unknown; owner_employee_id: string | null }>(sql`
+    select payload, owner_employee_id
+    from public.integration_inbox
+    where provider = 'google-chat'
+      and owner_employee_id = ${employeeId}::uuid
+      and payload -> 'privateDm' ->> 'employeeId' = ${employeeId}
+    order by received_at desc
+    limit 1
+  `);
+  if (!row || row.owner_employee_id !== employeeId) return null;
+  const payload = z.object({ privateDm: privateDmBindingSchema }).passthrough().safeParse(row.payload);
+  return payload.success && payload.data.privateDm.employeeId === employeeId
+    ? payload.data.privateDm
+    : null;
+}
+
+function requirePersonalCronEnvelope(raw: unknown) {
+  const input = personalCronDeliverySchema.parse(raw);
+  const targetEmail = input.targetEmail;
+  if (
+    targetEmail !== targetEmail.trim().toLowerCase() ||
+    !/^[^@\s]+@hrmny\.co$/.test(targetEmail) ||
+    input.onBehalfOf !== targetEmail ||
+    input.audienceScopeId !== `personal:${targetEmail}` ||
+    input.provenance.sourceScopeId !== `personal:${targetEmail}`
+  ) throw new Error("QM_CHAT_DELIVERY_SCOPE_INVALID");
+  return input;
+}
+
+/** Service-authenticated personal cron delivery. Recipient resources come only from a signed inbound DM receipt. */
+export async function deliverPersonalGoogleChatCron(raw: unknown) {
+  const input = requirePersonalCronEnvelope(raw);
+  const user = await resolveActiveStaffByEmail(input.targetEmail);
+  if (!user || user.actorType !== "staff" || user.clientId !== null || user.email !== input.targetEmail || !qmGoogleChatAllowed(user.employeeId)) {
+    throw new Error("QM_CHAT_DELIVERY_STAFF_REVOKED");
+  }
+  const binding = await findTrustedPrivateDm(user.employeeId);
+  if (!binding || binding.employeeId !== user.employeeId) throw new Error("QM_CHAT_DELIVERY_DM_REQUIRED");
+  const rawReceipt = JSON.stringify({ deliveryId: input.deliveryId, targetEmail: input.targetEmail, text: input.text, attachments: input.attachments, audienceScopeId: input.audienceScopeId, onBehalfOf: input.onBehalfOf, provenance: input.provenance });
+  const payloadHash = hashIntegrationPayload(rawReceipt);
+  const receipt = await recordIntegrationReceipt({
+    provider: "google-chat", externalEventId: `qm-delivery:${input.deliveryId}`,
+    operation: "qm.cron.delivery", rawBody: rawReceipt, status: "processing",
+    ownerEmployeeId: user.employeeId, payload: { delivery: JSON.parse(rawReceipt), binding },
+  });
+  const frozen = z.object({ delivery: personalCronDeliverySchema, binding: privateDmBindingSchema }).strict().safeParse(receipt.payload);
+  if (!frozen.success || receipt.payloadHash !== payloadHash || receipt.ownerEmployeeId !== user.employeeId ||
+      JSON.stringify(frozen.data.delivery) !== rawReceipt || frozen.data.binding.employeeId !== user.employeeId) {
+    throw new Error("QM_CHAT_DELIVERY_RECEIPT_MISMATCH");
+  }
+  const recipientThreadRef = deliveryThreadRef(user.email, user.employeeId, frozen.data.binding);
+  if (receipt.status === "completed") {
+    if (receipt.result?.recipientThreadRef !== recipientThreadRef ||
+        typeof receipt.result.messageName !== "string" ||
+        !receipt.result.messageName.startsWith(`${frozen.data.binding.spaceName}/messages/`)) {
+      throw new Error("QM_CHAT_DELIVERY_RECEIPT_MISMATCH");
+    }
+    return { ok: true, recipientThreadRef };
+  }
+  const current = await resolveActiveStaffById(user.employeeId);
+  if (!current || current.actorType !== "staff" || current.clientId !== null || current.email !== input.targetEmail || !qmGoogleChatAllowed(current.employeeId)) {
+    throw new Error("QM_CHAT_DELIVERY_STAFF_REVOKED");
+  }
+  const currentBinding = await findTrustedPrivateDm(current.employeeId);
+  if (!currentBinding || currentBinding.googleUserName !== frozen.data.binding.googleUserName) {
+    throw new Error("QM_CHAT_DELIVERY_DM_REVOKED");
+  }
+  const delivered = await sendGoogleChatReply({
+    employeeId: current.employeeId, receiptId: receipt.receiptId,
+    spaceName: frozen.data.binding.spaceName, threadName: frozen.data.binding.threadName,
+    text: input.text, googleUserName: frozen.data.binding.googleUserName,
+    preSendCheck: async () => {
+      const rechecked = await resolveActiveStaffById(current.employeeId);
+      if (
+        !rechecked ||
+        rechecked.actorType !== "staff" ||
+        rechecked.clientId !== null ||
+        rechecked.email !== input.targetEmail ||
+        !qmGoogleChatAllowed(rechecked.employeeId)
+      ) {
+        throw new Error("QM_CHAT_DELIVERY_STAFF_REVOKED");
+      }
+    },
+  });
+  await completeIntegrationReceipt(receipt.receiptId, {
+    ok: true,
+    bridgeStatus: "delivered",
+    recipientThreadRef,
+    messageName: delivered.name,
+  });
+  return { ok: true, recipientThreadRef };
+}
+
 /** Idempotent Chat API delivery with exact provider readback. */
 export async function sendGoogleChatReply(input: {
   employeeId: string;
@@ -318,6 +457,7 @@ export async function sendGoogleChatReply(input: {
   threadName: string | null;
   text: string;
   googleUserName: string;
+  preSendCheck?: () => Promise<void>;
 }) {
   z.string().uuid().parse(input.employeeId);
   z.string().uuid().parse(input.receiptId);
@@ -331,6 +471,7 @@ export async function sendGoogleChatReply(input: {
   }
   const accessToken = await googleChatAccessToken();
   await requireActiveGoogleChatStaff(input.employeeId);
+  await input.preSendCheck?.();
   const messageId = googleChatReplyMessageId(input.receiptId);
   const messageName = `${input.spaceName}/messages/${messageId}`;
   const verifyReply = (message: z.infer<typeof googleChatMessageSchema>) => {
@@ -691,6 +832,9 @@ export async function handleGoogleChatRequest(
       payload: {
         space: event.space.name,
         user: user.employeeId,
+        ...(event.user.name && isVerifiedDirectMessage(event.space)
+          ? { privateDm: { employeeId: user.employeeId, googleUserName: event.user.name, spaceName: event.space.name, threadName } }
+          : {}),
       },
     });
   } catch (error) {

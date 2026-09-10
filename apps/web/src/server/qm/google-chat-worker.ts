@@ -5,6 +5,7 @@ import { getDb } from "../db";
 import { resolveActiveStaffById } from "../auth/session";
 import {
   dispatchGoogleChatInteraction,
+  deliverPersonalGoogleChatCron,
   googleChatJobSchema,
   GOOGLE_CHAT_INTERACTION_JOB_KIND,
   GOOGLE_CHAT_QM_JOB_KIND,
@@ -21,6 +22,12 @@ const lease = z.object({
   claimToken: z.string().uuid(),
 });
 export const qmChatWorkerRequest = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("deliver"), deliveryId: z.string().uuid(), targetEmail: z.string().email().max(320),
+    text: z.string().trim().min(1).max(4_000), attachments: z.array(z.never()).max(0),
+    audienceScopeId: z.string().min(1).max(400), onBehalfOf: z.string().email().max(320),
+    provenance: z.object({ trigger: z.literal("cron"), surface: z.literal("cron"), sourceScopeId: z.string().min(1).max(400) }).strict(),
+  }).strict(),
   z.object({ action: z.literal("claim") }).strict(),
   lease.extend({ action: z.literal("renew"), runId: ref.optional() }).strict(),
   lease
@@ -63,6 +70,10 @@ export async function operateQmGoogleChat(raw: unknown) {
   const input = qmChatWorkerRequest.parse(raw);
   if (process.env.GOOGLE_CHAT_RUNTIME !== "qm")
     throw new Error("QM_CHAT_DISABLED");
+  if (input.action === "deliver") {
+    const { action: _action, ...delivery } = input;
+    return deliverPersonalGoogleChatCron(delivery);
+  }
   const db = getDb();
   if (!db) throw new Error("QM_CHAT_DATABASE_REQUIRED");
   let row: JobRow | undefined;

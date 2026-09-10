@@ -1,6 +1,9 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetIntegrationReceiptMemory } from "./integrations/inbox";
+import {
+  getIntegrationReceipt,
+  resetIntegrationReceiptMemory,
+} from "./integrations/inbox";
 import { createCaller } from "./trpc/root";
 import { resolveActiveStaffById } from "./auth/session";
 import {
@@ -341,7 +344,8 @@ describe("Google Chat request verification", () => {
     const liveNow = Math.floor(Date.now() / 1_000);
     const event = {
       type: "MESSAGE",
-      space: { name: "spaces/AAAA" },
+      // Google Chat emits legacy `type: DM`; modern events use `spaceType: DIRECT_MESSAGE`.
+      space: { name: "spaces/AAAA", type: "DM" },
       user: { name: "users/123456", email: "operator@hrmny.co" },
       message: {
         name: "spaces/AAAA/messages/request-1",
@@ -378,6 +382,66 @@ describe("Google Chat request verification", () => {
         clientId: null,
       }),
     );
+    expect(
+      (
+        await getIntegrationReceipt(
+          "google-chat",
+          "spaces/AAAA/messages/request-1",
+        )
+      )?.payload,
+    ).toMatchObject({
+      privateDm: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+        googleUserName: "users/123456",
+        spaceName: "spaces/AAAA",
+        threadName: "spaces/AAAA/threads/thread-1",
+      },
+    });
+    expect(
+      (
+        await send({
+          ...event,
+          space: { name: "spaces/BBBB", spaceType: "DIRECT_MESSAGE" },
+          message: {
+            ...event.message,
+            name: "spaces/BBBB/messages/request-modern",
+            thread: { name: "spaces/BBBB/threads/thread-1" },
+          },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await getIntegrationReceipt(
+          "google-chat",
+          "spaces/BBBB/messages/request-modern",
+        )
+      )?.payload,
+    ).toMatchObject({
+      privateDm: {
+        employeeId: "c0000000-0000-4000-8000-000000000001",
+        googleUserName: "users/123456",
+        spaceName: "spaces/BBBB",
+        threadName: "spaces/BBBB/threads/thread-1",
+      },
+    });
+    const sharedName = "spaces/CCCC/messages/request-shared";
+    expect(
+      (
+        await send({
+          ...event,
+          space: { name: "spaces/CCCC", type: "ROOM", spaceType: "SPACE" },
+          message: {
+            ...event.message,
+            name: sharedName,
+            thread: { name: "spaces/CCCC/threads/thread-1" },
+          },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await getIntegrationReceipt("google-chat", sharedName))?.payload,
+    ).not.toHaveProperty("privateDm");
     chatSend.mockImplementationOnce(async () => {
       vi.mocked(resolveActiveStaffById).mockResolvedValueOnce(null);
       return {
@@ -420,4 +484,5 @@ describe("Google Chat request verification", () => {
       ).status,
     ).toBe(400);
   });
+
 });

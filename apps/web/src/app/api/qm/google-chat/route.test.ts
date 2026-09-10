@@ -33,6 +33,22 @@ it("requires the service credential and bounded strict actions before accessing 
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(await response.json()).toEqual({ job: null });
+  const delivery = JSON.stringify({
+    action: "deliver",
+    deliveryId: "550e8400-e29b-41d4-a716-446655440000",
+    targetEmail: "developer@hrmny.co",
+    text: "Private cron digest",
+    attachments: [],
+    audienceScopeId: "personal:developer@hrmny.co",
+    onBehalfOf: "developer@hrmny.co",
+    provenance: {
+      trigger: "cron",
+      surface: "cron",
+      sourceScopeId: "personal:developer@hrmny.co",
+    },
+  });
+  expect((await POST(request(delivery))).status).toBe(200);
+  expect((await POST(request(delivery.replace('"attachments":[]', '"attachments":["blocked"]')))).status).toBe(400);
   vi.stubEnv("QM_CHAT_BRIDGE_TOKEN", "");
   expect((await POST(request('{"action":"claim"}'))).status).toBe(403);
 });
