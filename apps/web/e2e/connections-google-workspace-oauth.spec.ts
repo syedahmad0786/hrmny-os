@@ -28,7 +28,7 @@ test.describe("Connections Google Workspace OAuth", () => {
       /Request Google Chat read permission/i,
     );
     await expect(chatReadConsent).toContainText(
-      /not make shared Chat live or bind any Space to a project/i,
+      /verify Space settings and members before you connect a Space to a project/i,
     );
     await page.getByText("Connection diagnostics", { exact: true }).click();
     await expect(page.getByTestId("connections-app-policy")).toBeVisible();
@@ -108,15 +108,41 @@ test.describe("Connections Google Workspace OAuth", () => {
     await page.route("**/__test-google-chat-consent", (route) =>
       route.fulfill({ contentType: "text/html", body: "consent mock" }),
     );
+    await page.route("**/api/trpc/connections.list**", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            result: {
+              data: {
+                json: [
+                  {
+                    toolkit: "google_workspace",
+                    label: "Google Workspace",
+                    authType: "oauth",
+                    ready: true,
+                    note: "Test-only enabled OAuth control.",
+                    allowed: true,
+                    connectionAccountId: null,
+                    scope: "staff",
+                    status: "disconnected",
+                    externalConnectionId: null,
+                    hasSecret: false,
+                    lastTestedAt: null,
+                    lastError: null,
+                  },
+                ],
+              },
+            },
+          },
+        ]),
+      }),
+    );
     await page.goto("/settings/connections", { waitUntil: "domcontentloaded" });
     const button = page
       .getByTestId("conn-google-chat-read-consent")
       .getByRole("button", { name: /Request Google Chat read permission/i });
-    // The test server deliberately has no OAuth client. Remove only its native
-    // disabled attribute so this intercepted request exercises the UI intent.
-    await button.evaluate((element: HTMLButtonElement) => {
-      element.disabled = false;
-    });
+    await expect(button).toBeEnabled();
     await button.click();
     await expect(page).toHaveURL(/__test-google-chat-consent/);
     expect(requestedIntent).toBe("google_chat_read");
