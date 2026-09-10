@@ -15,7 +15,14 @@ import {
   createDeal,
   updateContact,
 } from "../crm/repository";
-import { getOutreach, listOutreach, resetLeadgenStore } from "../leadgen/store";
+import {
+  getOutreach,
+  listOutreach,
+  patchOutreach,
+  resetLeadgenStore,
+} from "../leadgen/store";
+import { outreachSnapshotHash } from "../leadgen/outreach-review";
+import * as outreachStore from "../leadgen/store";
 import { resolveDevUser, sessionCanViewMargin } from "../auth/session";
 import {
   approveOutreach,
@@ -121,6 +128,148 @@ describe("outreach HITL gate flow", () => {
     resetLeadgenStore();
     resetSalesOsStore();
     resetIntegrationReceiptMemory();
+  });
+
+  it("rejects stale inline decisions and blocks edits while the exact approved message is sending", async () => {
+    const deal = await seedDeal();
+    const draft = await draftOutreach({
+      dealId: deal.dealId,
+      body: COMPLIANT_BODY,
+    });
+    const oldHash = outreachSnapshotHash(draft);
+    await patchOutreach(draft.id, { subject: "A reviewed idea" });
+    await expect(
+      approveOutreach({
+        id: draft.id,
+        actor: staff,
+        snapshotHash: oldHash,
+        audit,
+        emit,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect((await getOutreach(draft.id))?.state).toBe("draft");
+    const current = (await getOutreach(draft.id))!;
+    expect(
+      (
+        await approveOutreach({
+          id: draft.id,
+          actor: staff,
+          snapshotHash: outreachSnapshotHash(current),
+          audit,
+          emit,
+        })
+      ).ok,
+    ).toBe(true);
+    const approved = (await getOutreach(draft.id))!;
+    const provider = countingLiveComposio();
+    await expect(
+      sendOutreach({
+        id: draft.id,
+        actor: staff,
+        snapshotHash: oldHash,
+        composio: provider,
+        audit,
+        emit,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(provider.sends).toBe(0);
+    let release!: () => void;
+    let reached!: () => void;
+    const providerReached = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const originalSend = provider.sendAfterApproval.bind(provider);
+    provider.sendAfterApproval = async (input) => {
+      expect(input.body).toBe(approved.body);
+      expect(input.to).toBe(approved.recipient);
+      reached();
+      await released;
+      return originalSend(input);
+    };
+    const sending = sendOutreach({
+      id: draft.id,
+      actor: staff,
+      snapshotHash: outreachSnapshotHash(approved),
+      composio: provider,
+      audit,
+      emit,
+    });
+    await providerReached;
+    try {
+      await expect(
+        patchOutreach(draft.id, { body: "Unreviewed replacement" }),
+      ).rejects.toThrow("action in progress");
+      await expect(
+        sendOutreach({
+          id: draft.id,
+          actor: staff,
+          snapshotHash: outreachSnapshotHash(approved),
+          composio: provider,
+          audit,
+          emit,
+        }),
+      ).rejects.toThrow("action in progress");
+    } finally {
+      release();
+    }
+    expect((await sending).ok).toBe(true);
+    expect(provider.sends).toBe(1);
+    expect((await getOutreach(draft.id))?.body).toBe(approved.body);
+    expect((await getOutreach(draft.id))?.state).toBe("sent");
+  });
+
+  it("keeps uncertain sends immutable after the request lock is released", async () => {
+    const deal = await seedDeal();
+    const item = await draftOutreach({
+      dealId: deal.dealId,
+      body: COMPLIANT_BODY,
+    });
+    await approveOutreach({ id: item.id, actor: staff, audit, emit });
+    const provider = countingLiveComposio();
+    provider.sendAfterApproval = async () => {
+      throw new Error("provider deadline reached");
+    };
+    await expect(
+      sendOutreach({
+        id: item.id,
+        actor: staff,
+        composio: provider,
+        audit,
+        emit,
+      }),
+    ).rejects.toThrow("provider deadline");
+    await expect(
+      patchOutreach(item.id, { body: "Replacement" }),
+    ).rejects.toThrow("reconciliation");
+    await expect(
+      discardOutreach({ id: item.id, actor: staff, audit, emit }),
+    ).rejects.toThrow("reconciliation");
+    expect((await getOutreach(item.id))?.body).toBe(item.body);
+    const anonymous = createCaller({
+      user: null,
+      employeeId: null,
+      roles: [],
+      canViewMargin: false,
+    });
+    await expect(
+      anonymous.leadgen.outreach.review({ id: item.id }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(
+      anonymous.leadgen.outreach.reviewApprove({
+        id: item.id,
+        snapshotHash: "0".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(
+      anonymous.leadgen.outreach.reviewSend({
+        id: item.id,
+        snapshotHash: "0".repeat(64),
+        senderConnectionAccountId: item.id,
+      }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("drafts from a deal, resolving the recipient email", async () => {
@@ -492,16 +641,13 @@ describe("outreach HITL gate flow", () => {
       audit,
       emit,
     });
-    const { patchOutreach } = await import("../leadgen/store");
-    await patchOutreach(first.id, {
-      sentAt: new Date(Date.now() - 5 * 86_400_000).toISOString(),
-    });
+    const dueTime = new Date(Date.now() + 5 * 86_400_000);
 
     await expect(
-      runDueFollowupDrafts({ runAgent: createMockRunAgent() }),
+      runDueFollowupDrafts({ now: dueTime, runAgent: createMockRunAgent() }),
     ).resolves.toMatchObject({ considered: 1, drafted: 1, failed: 0 });
     await expect(
-      runDueFollowupDrafts({ runAgent: createMockRunAgent() }),
+      runDueFollowupDrafts({ now: dueTime, runAgent: createMockRunAgent() }),
     ).resolves.toMatchObject({ considered: 0, drafted: 0 });
     const sequence = await listOutreach({ dealId: deal.dealId });
     expect(sequence).toHaveLength(2);
@@ -519,11 +665,21 @@ describe("outreach HITL gate flow", () => {
     });
     const composio = countingLiveComposio();
     await approveOutreach({ id: item.id, actor: staff, audit, emit });
-    await sendOutreach({ id: item.id, actor: staff, composio, audit, emit });
+    const persist = vi
+      .spyOn(outreachStore, "patchOutreach")
+      .mockRejectedValueOnce(
+        new Error("storage unavailable after provider acceptance"),
+      );
+    try {
+      await expect(
+        sendOutreach({ id: item.id, actor: staff, composio, audit, emit }),
+      ).rejects.toThrow("storage unavailable");
+    } finally {
+      persist.mockRestore();
+    }
     expect(composio.sends).toBe(1);
 
-    const { patchOutreach } = await import("../leadgen/store");
-    await patchOutreach(item.id, { state: "approved", sentAt: null });
+    expect((await getOutreach(item.id))?.state).toBe("approved");
     const replay = await sendOutreach({
       id: item.id,
       actor: staff,
@@ -579,19 +735,11 @@ describe("outreach HITL gate flow", () => {
       result: { bridgeStatus: "reconcile_required" },
     });
     const { patchOutreach } = await import("../leadgen/store");
-    await patchOutreach(item.id, {
-      body: `${COMPLIANT_BODY} Updated after the uncertain attempt.`,
-    });
-    await approveOutreach({ id: item.id, actor: staff, audit, emit });
     await expect(
-      sendOutreach({
-        id: item.id,
-        actor: staff,
-        composio: uncertain,
-        audit,
-        emit,
+      patchOutreach(item.id, {
+        body: `${COMPLIANT_BODY} Updated after the uncertain attempt.`,
       }),
-    ).rejects.toThrow(/PAYLOAD_MISMATCH/);
+    ).rejects.toThrow(/reconciliation/);
     expect(sends).toBe(1);
   });
 

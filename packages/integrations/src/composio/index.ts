@@ -15,6 +15,8 @@ export type ComposioSendInput = {
   threadId?: string;
   /** RFC 5322 Message-ID of the inbound message, when the webhook supplied it. */
   inReplyTo?: string;
+  /** One deadline shared by provider dispatch and canonical readback. */
+  signal?: AbortSignal;
 };
 
 export type ComposioSendResult = {
@@ -138,6 +140,7 @@ export interface ComposioSendAdapter extends ComposioAdapter {
     connectionId?: string;
     expectedThreadId?: string;
     expectedFromEmail?: string;
+    signal?: AbortSignal;
   }): Promise<GmailProviderReadback>;
 }
 
@@ -272,6 +275,7 @@ export function createComposioLiveSend(opts: {
         endpoint: "/gmail/v1/users/me/messages/send",
         method: "POST",
         body: { raw, ...(input.threadId ? { threadId: input.threadId } : {}) },
+        signal: input.signal,
       });
       const externalId =
         typeof result.data?.id === "string" ? result.data.id.trim() : "";
@@ -285,6 +289,7 @@ export function createComposioLiveSend(opts: {
           recipient: input.to,
           connectionId: input.connectionId,
           expectedThreadId: input.threadId,
+          signal: input.signal,
         });
       } catch (error) {
         if (error instanceof GmailProviderReadbackError) throw error;
@@ -317,6 +322,7 @@ export function createComposioLiveSend(opts: {
           { name: "format", value: "metadata", in: "query" },
           { name: "metadataHeaders", value: "To", in: "query" },
         ],
+        signal: input.signal,
       });
       return verifyGmailProviderReadback({
         message: result.data,

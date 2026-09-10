@@ -2,6 +2,10 @@ import { z } from "zod";
 import { linkedinProfileUrl } from "@/lib/linkedin-profile";
 import { randomUUID } from "node:crypto";
 import { outreachReadiness } from "../leadgen/readiness";
+import {
+  outreachSnapshotHash,
+  assertOutreachSnapshot,
+} from "../leadgen/outreach-review";
 import { GmailSenderIdentityError } from "../leadgen/google-mailbox-identities";
 import { TRPCError } from "@trpc/server";
 import {
@@ -28,6 +32,8 @@ import {
   insertOutreach,
   listOutreach,
   patchOutreach,
+  withOutreachDecision,
+  assertOutreachDecisionActive,
   type OutreachItem,
 } from "../leadgen/store";
 import { applyReplyIntent } from "../leadgen/reply-intent";
@@ -542,13 +548,24 @@ export async function draftEmailFollowup(input: {
   });
 }
 
-export async function approveOutreach(input: {
+export function approveOutreach(
+  input: Parameters<typeof approveOutreachLocked>[0],
+) {
+  return withOutreachDecision(input.id, () => approveOutreachLocked(input));
+}
+
+async function approveOutreachLocked(input: {
   id: string;
   actor: ActorContext;
+  snapshotHash?: string;
   audit?: AuditWriter;
   emit?: EmitHook;
 }): Promise<TransitionResult> {
   const item = await requireVisibleOutreach(input.id, input.actor.employeeId);
+  assertOutreachSnapshot(
+    { ...item, body: await recipientBoundEmailBody(item) },
+    input.snapshotHash,
+  );
   return transition(
     input.actor,
     outreachEntity(item),
@@ -576,7 +593,13 @@ export async function approveOutreach(input: {
   );
 }
 
-export async function discardOutreach(input: {
+export function discardOutreach(
+  input: Parameters<typeof discardOutreachLocked>[0],
+) {
+  return withOutreachDecision(input.id, () => discardOutreachLocked(input));
+}
+
+async function discardOutreachLocked(input: {
   id: string;
   actor: ActorContext;
   audit?: AuditWriter;
@@ -938,9 +961,14 @@ export async function resolveGmailReplyContext(item: OutreachItem): Promise<{
   };
 }
 
-export async function sendOutreach(input: {
+export function sendOutreach(input: Parameters<typeof sendOutreachLocked>[0]) {
+  return withOutreachDecision(input.id, () => sendOutreachLocked(input));
+}
+
+async function sendOutreachLocked(input: {
   id: string;
   actor: ActorContext;
+  snapshotHash?: string;
   composio?: ComposioSendAdapter;
   senderConnectionAccountId?: string;
   fromEmail?: string;
@@ -961,6 +989,7 @@ export async function sendOutreach(input: {
   const item = await requireVisibleOutreach(input.id, input.actor.employeeId);
   const { assertEmailSendAllowed, isEmailChannel, isLinkedInChannel } =
     await import("../sales-os/compliance");
+  assertOutreachSnapshot(item, input.snapshotHash);
   if (isLinkedInChannel(item.channel)) {
     return {
       ok: true,
@@ -1142,6 +1171,9 @@ export async function sendOutreach(input: {
             );
           }
 
+          await assertOutreachDecisionActive(input.id);
+          const providerSignal = AbortSignal.timeout(30_000);
+
           if (!shouldSend) {
             const receiptResult = receipt.result ?? {};
             const receiptExternalId =
@@ -1172,6 +1204,7 @@ export async function sendOutreach(input: {
                 recipient: item.recipient,
                 expectedThreadId: replyContext?.threadId,
                 expectedFromEmail: fromEmail,
+                signal: providerSignal,
               });
               threadId = readback.threadId ?? threadId;
               readbackAt = readback.readbackAt;
@@ -1217,6 +1250,7 @@ export async function sendOutreach(input: {
                 messageId,
                 threadId: replyContext?.threadId,
                 inReplyTo: replyContext?.inReplyTo,
+                signal: providerSignal,
               });
               externalId = res.externalId;
               threadId = res.threadId;
@@ -1444,6 +1478,50 @@ export async function createBoundGmailReplyDraft(
 }
 
 const outreachRouter = router({
+  review: staffProcedure
+    .input(z.object({ id: z.string().uuid() }).strict())
+    .query(async ({ input, ctx }) => {
+      if (!authorizeStaff(actorFromCtx(ctx)))
+        throw new TRPCError({ code: "FORBIDDEN" });
+      const current = await requireVisibleOutreach(input.id, ctx.employeeId);
+      const item = {
+        ...current,
+        body:
+          current.state === "draft"
+            ? await recipientBoundEmailBody(current)
+            : current.body,
+      };
+      const readiness = await outreachReadiness(item);
+      return { item, snapshotHash: outreachSnapshotHash(item), ...readiness };
+    }),
+
+  reviewApprove: staffProcedure
+    .input(
+      z
+        .object({
+          id: z.string().uuid(),
+          snapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .strict(),
+    )
+    .mutation(({ input, ctx }) =>
+      approveOutreach({ ...input, actor: actorFromCtx(ctx) }),
+    ),
+
+  reviewSend: staffProcedure
+    .input(
+      z
+        .object({
+          id: z.string().uuid(),
+          snapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+          senderConnectionAccountId: z.string().uuid(),
+        })
+        .strict(),
+    )
+    .mutation(({ input, ctx }) =>
+      sendOutreach({ ...input, actor: actorFromCtx(ctx) }),
+    ),
+
   list: staffProcedure
     .input(
       z

@@ -69,9 +69,20 @@ async function assertRenders(page: Page, route: RouteEntry, label: string) {
 
   // Group landmark confirms the actor actually reached the intended surface.
   if (route.actor === "staff") {
-    await expect
-      .soft(page.getByRole("navigation", { name: "Primary" }), `${label} ${route.sample} staff shell`)
-      .toBeVisible();
+    if (route.standaloneStaff) {
+      await expect
+        .soft(page.getByRole("heading", { name: route.expectedHeading }), `${label} ${route.sample} standalone staff surface`)
+        .toBeVisible({ timeout: 15_000 });
+      for (const button of route.absentButtons ?? []) {
+        await expect
+          .soft(page.getByRole("button", { name: button }), `${label} ${route.sample} unavailable-record control ${button}`)
+          .toHaveCount(0);
+      }
+    } else {
+      await expect
+        .soft(page.getByRole("navigation", { name: "Primary" }), `${label} ${route.sample} staff shell`)
+        .toBeVisible();
+    }
   } else if (route.actor === "portal") {
     expect
       .soft(page.url(), `${label} ${route.sample} should not bounce to portal login`)

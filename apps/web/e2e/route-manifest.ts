@@ -41,6 +41,12 @@ export interface RouteEntry {
   nativeRedirect?: boolean;
   /** Final path after a server-side redirect() alias (for humans reading this). */
   redirectsTo?: string;
+  /** Standalone staff surfaces intentionally render without the StaffShell landmark. */
+  standaloneStaff?: boolean;
+  /** Visible heading that proves the standalone surface reached its intended page. */
+  expectedHeading?: string;
+  /** Controls that must stay absent for a standalone unavailable-record state. */
+  absentButtons?: string[];
 }
 
 /** Dev demo-data ids — kept in sync with server/auth/session.ts + server/demo-store.ts. */
@@ -84,6 +90,12 @@ export const ROUTES: RouteEntry[] = [
   staff("/admin/features"),
   staff("/admin/work"),
   staff("/approvals"),
+  staff("/assistant/review/outreach/[id]", {
+    sample: "/assistant/review/outreach/c0000000-0000-4000-8000-000000000009",
+    standaloneStaff: true,
+    expectedHeading: "Could not load outreach",
+    absentButtons: ["Approve draft", "Send this email"],
+  }),
   staff("/assets"), // dev-only DAM probe — 404s unless getAuthMode()==="dev"
   staff("/benefits"),
   staff("/billing"),
