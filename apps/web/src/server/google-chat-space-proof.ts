@@ -24,11 +24,13 @@ const spaceSchema = z
     name: googleSpaceNameSchema,
     spaceType: z.literal("SPACE"),
     displayName: z.string().trim().min(1).max(128),
-    externalUserAllowed: z.literal(false),
-    membershipCount: z.object({
-      joinedDirectHumanUserCount: z.number().int().nonnegative(),
-      joinedGroupCount: z.number().int().nonnegative(),
-    }),
+    externalUserAllowed: z.literal(false).default(false),
+    membershipCount: z
+      .object({
+        joinedDirectHumanUserCount: z.number().int().nonnegative().default(0),
+        joinedGroupCount: z.number().int().nonnegative().default(0),
+      })
+      .default({}),
     accessSettings: z.object({
       accessState: z.literal("PRIVATE"),
       audience: z.string().optional(),
@@ -39,6 +41,7 @@ const membershipSchema = z
   .object({
     name: googleMemberNameSchema,
     state: z.literal("JOINED"),
+    role: z.enum(["ROLE_MEMBER", "ROLE_MANAGER", "ROLE_ASSISTANT_MANAGER"]),
     affiliation: z.literal("INTERNAL"),
     member: z.object({
       name: googleUserNameSchema,
@@ -58,7 +61,12 @@ export type GoogleChatSpaceSnapshot = Readonly<{
   spaceName: string;
   directHumanCount: number;
   joinedGroupCount: number;
-  members: readonly Readonly<{ membershipName: string; userName: string }>[];
+  membershipCoverage: "APP_AUTH_HUMANS_ONLY_INCOMPLETE";
+  members: readonly Readonly<{
+    membershipName: string;
+    userName: string;
+    role: "ROLE_MEMBER" | "ROLE_MANAGER" | "ROLE_ASSISTANT_MANAGER";
+  }>[];
 }>;
 
 function providerFailure(code: string): never {
@@ -96,10 +104,10 @@ export async function readValidatedGoogleChatSpace(
   const spaceName = googleSpaceNameSchema.safeParse(rawSpaceName);
   if (!spaceName.success) providerFailure("GOOGLE_CHAT_SPACE_NAME_INVALID");
 
-  const accessToken = await googleChatAccessToken("space-proof");
+  const metadataAccessToken = await googleChatAccessToken("space-proof");
   const rawSpace = await fetchJson(
     `${GOOGLE_CHAT_API_URL}/${spaceName.data}`,
-    accessToken,
+    metadataAccessToken,
   );
   const space = spaceSchema.safeParse(rawSpace);
   if (!space.success || space.data.name !== spaceName.data) {
@@ -112,7 +120,14 @@ export async function readValidatedGoogleChatSpace(
     providerFailure("GOOGLE_CHAT_SPACE_GROUP_MEMBERSHIP");
   }
 
-  const members: { membershipName: string; userName: string }[] = [];
+  // App-authenticated membership reads omit Chat app memberships. This is a
+  // bounded human snapshot, never complete delivery authorization.
+  const membershipAccessToken = await googleChatAccessToken();
+  const members: {
+    membershipName: string;
+    userName: string;
+    role: "ROLE_MEMBER" | "ROLE_MANAGER" | "ROLE_ASSISTANT_MANAGER";
+  }[] = [];
   const membershipNames = new Set<string>();
   const userNames = new Set<string>();
   const seenPageTokens = new Set<string>();
@@ -125,7 +140,7 @@ export async function readValidatedGoogleChatSpace(
     if (pageToken) query.set("pageToken", pageToken);
     const rawPage = await fetchJson(
       `${GOOGLE_CHAT_API_URL}/${spaceName.data}/members?${query}`,
-      accessToken,
+      membershipAccessToken,
     );
     const parsedPage = membershipPageSchema.safeParse(rawPage);
     if (!parsedPage.success) {
@@ -150,6 +165,7 @@ export async function readValidatedGoogleChatSpace(
       members.push({
         membershipName: membership.data.name,
         userName: membership.data.member.name,
+        role: membership.data.role,
       });
       if (members.length > MAX_MEMBERSHIPS) {
         providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_LIMIT");
@@ -164,6 +180,7 @@ export async function readValidatedGoogleChatSpace(
         spaceName: space.data.name,
         directHumanCount: members.length,
         joinedGroupCount: 0,
+        membershipCoverage: "APP_AUTH_HUMANS_ONLY_INCOMPLETE",
         members,
       };
     }

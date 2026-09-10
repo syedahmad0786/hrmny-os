@@ -32,8 +32,6 @@ const GOOGLE_CHAT_API_URL = "https://chat.googleapis.com/v1";
 const GOOGLE_CHAT_BOT_SCOPE = "https://www.googleapis.com/auth/chat.bot";
 const GOOGLE_CHAT_APP_SPACES_SCOPE =
   "https://www.googleapis.com/auth/chat.app.spaces";
-const GOOGLE_CHAT_APP_MEMBERSHIPS_SCOPE =
-  "https://www.googleapis.com/auth/chat.app.memberships";
 const googleChatServiceAccountScopeSetSchema = z.enum([
   "bot",
   "space-proof",
@@ -270,7 +268,7 @@ export async function googleChatAccessToken(
 ): Promise<string> {
   const scope =
     googleChatServiceAccountScopeSetSchema.parse(scopeSet) === "space-proof"
-      ? `${GOOGLE_CHAT_APP_SPACES_SCOPE} ${GOOGLE_CHAT_APP_MEMBERSHIPS_SCOPE}`
+      ? GOOGLE_CHAT_APP_SPACES_SCOPE
       : GOOGLE_CHAT_BOT_SCOPE;
   const account = configuredServiceAccount();
   const now = Math.floor(Date.now() / 1_000);
