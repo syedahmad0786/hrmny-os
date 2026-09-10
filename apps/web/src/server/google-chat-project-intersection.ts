@@ -4,8 +4,12 @@ import {
   sessionCanViewMargin,
   type SessionUser,
 } from "./auth/session";
-import type { GoogleChatUserMembershipSnapshot } from "./google-chat-space-proof";
+import {
+  readGoogleChatOwnedUserMembershipSnapshot,
+  type GoogleChatUserMembershipSnapshot,
+} from "./google-chat-space-proof";
 import { resolveEmployeeGoogleIdentity } from "./qm/google-identity";
+import { getOwnedGoogleWorkspaceCredentials } from "./trpc/connections-router";
 import type { TrpcContext } from "./trpc/trpc";
 import { requireProjectAccess } from "./trpc/work-management-router";
 
@@ -73,6 +77,59 @@ function staffContext(user: SessionUser): TrpcContext {
 
 function deny(code: string): never {
   throw new Error(code);
+}
+
+export async function observeOwnedGoogleChatProject(input: {
+  actor: SessionUser;
+  projectId: string;
+  spaceName: string;
+  connectionAccountId: string;
+}): Promise<Observation> {
+  const { actor, ...request } = input;
+  const parsed = z
+    .object({
+      projectId: projectIdSchema,
+      spaceName: z
+        .string()
+        .max(500)
+        .regex(/^spaces\/[A-Za-z0-9_-]+$/),
+      connectionAccountId: z.string().uuid(),
+    })
+    .strict()
+    .parse(request);
+  if (
+    actor.actorType !== "staff" ||
+    actor.clientId !== null ||
+    !z.string().uuid().safeParse(actor.employeeId).success
+  )
+    deny("GOOGLE_CHAT_PROJECT_ACTOR_INVALID");
+  const staff = await resolveActiveStaffById(actor.employeeId);
+  if (
+    !staff ||
+    staff.actorType !== "staff" ||
+    staff.clientId !== null ||
+    !/^[^@\s]+@hrmny\.co$/.test(staff.email)
+  )
+    deny("GOOGLE_CHAT_PROJECT_ACTOR_INVALID");
+  await requireProjectAccess(staffContext(staff), parsed.projectId, "admin");
+  const credential = await getOwnedGoogleWorkspaceCredentials(
+    staff.employeeId,
+    parsed.connectionAccountId,
+  );
+  if (!credential || credential.accountEmail !== staff.email)
+    deny("GOOGLE_CHAT_PROJECT_ACCOUNT_MISMATCH");
+  const observedGoogle = await readGoogleChatOwnedUserMembershipSnapshot({
+    spaceName: parsed.spaceName,
+    ownedAccessToken: credential.accessToken,
+    grantedScopes: credential.grantedScopes,
+  });
+  if (observedGoogle.spaceName !== parsed.spaceName)
+    deny("GOOGLE_CHAT_PROJECT_OBSERVATION_INVALID");
+  return observeGoogleChatProjectIntersection({
+    projectId: parsed.projectId,
+    actor: staff,
+    observedGoogle,
+  });
 }
 
 /**

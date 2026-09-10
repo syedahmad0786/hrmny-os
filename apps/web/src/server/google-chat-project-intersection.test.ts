@@ -1,11 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionUser } from "./auth/session";
-import { observeGoogleChatProjectIntersection } from "./google-chat-project-intersection";
+import {
+  observeGoogleChatProjectIntersection,
+  observeOwnedGoogleChatProject,
+} from "./google-chat-project-intersection";
 
 const mocks = vi.hoisted(() => ({
   resolveIdentity: vi.fn(),
   staff: vi.fn(),
   access: vi.fn(),
+  credentials: vi.fn(),
+  readSpace: vi.fn(),
+}));
+
+vi.mock("./trpc/connections-router", () => ({
+  getOwnedGoogleWorkspaceCredentials: mocks.credentials,
+}));
+vi.mock("./google-chat-space-proof", () => ({
+  readGoogleChatOwnedUserMembershipSnapshot: mocks.readSpace,
 }));
 
 vi.mock("./qm/google-identity", () => ({
@@ -71,6 +83,93 @@ describe("Google Chat project intersection observation", () => {
     });
     mocks.staff.mockResolvedValue(actor);
     mocks.access.mockResolvedValue({ projectId });
+    mocks.credentials.mockResolvedValue({
+      accessToken: "synthetic-owned-token",
+      grantedScopes: ["synthetic-provider-scope"],
+      accountEmail: actor.email,
+      connectionAccountId: "c0000000-0000-4000-8000-000000000003",
+    });
+    mocks.readSpace.mockResolvedValue(observed());
+  });
+
+  const ownedRequest = {
+    actor,
+    projectId,
+    spaceName: "spaces/AAAA",
+    connectionAccountId: "c0000000-0000-4000-8000-000000000003",
+  };
+
+  it("reads only an owned account after current Work management permission, then rechecks the audience", async () => {
+    const result = await observeOwnedGoogleChatProject(ownedRequest);
+    expect(result).toMatchObject({
+      bindingReady: false,
+      humanEmployeeIds: [actor.employeeId],
+    });
+    expect(mocks.access).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ user: actor }),
+      projectId,
+      "admin",
+    );
+    expect(mocks.credentials).toHaveBeenCalledWith(
+      actor.employeeId,
+      ownedRequest.connectionAccountId,
+    );
+    expect(mocks.readSpace).toHaveBeenCalledWith({
+      spaceName: ownedRequest.spaceName,
+      ownedAccessToken: "synthetic-owned-token",
+      grantedScopes: ["synthetic-provider-scope"],
+    });
+    expect(mocks.access).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      projectId,
+      "admin",
+    );
+    expect(JSON.stringify(result)).not.toContain("synthetic-owned-token");
+  });
+
+  it("denies inactive or unauthorized staff before reading a credential or calling Google", async () => {
+    mocks.staff.mockResolvedValueOnce(null);
+    await expect(observeOwnedGoogleChatProject(ownedRequest)).rejects.toThrow(
+      "GOOGLE_CHAT_PROJECT_ACTOR_INVALID",
+    );
+    mocks.access.mockRejectedValueOnce(new Error("work-denied"));
+    await expect(observeOwnedGoogleChatProject(ownedRequest)).rejects.toThrow(
+      "work-denied",
+    );
+    expect(mocks.credentials).not.toHaveBeenCalled();
+    expect(mocks.readSpace).not.toHaveBeenCalled();
+  });
+
+  it("denies absent or different Google accounts before provider reads", async () => {
+    mocks.credentials.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      accessToken: "different-account-token",
+      grantedScopes: [],
+      accountEmail: "another@hrmny.co",
+    });
+    await expect(observeOwnedGoogleChatProject(ownedRequest)).rejects.toThrow(
+      "GOOGLE_CHAT_PROJECT_ACCOUNT_MISMATCH",
+    );
+    await expect(observeOwnedGoogleChatProject(ownedRequest)).rejects.toThrow(
+      "GOOGLE_CHAT_PROJECT_ACCOUNT_MISMATCH",
+    );
+    expect(mocks.readSpace).not.toHaveBeenCalled();
+  });
+
+  it("denies a mismatched Space response and Work revocation during provider reads", async () => {
+    mocks.readSpace.mockResolvedValueOnce(
+      observed({ spaceName: "spaces/OTHER" }),
+    );
+    await expect(observeOwnedGoogleChatProject(ownedRequest)).rejects.toThrow(
+      "GOOGLE_CHAT_PROJECT_OBSERVATION_INVALID",
+    );
+    mocks.access.mockImplementation((_ctx, _project, role) => {
+      if (role === "viewer") throw new Error("work-revoked");
+      return Promise.resolve({ projectId });
+    });
+    await expect(observeOwnedGoogleChatProject(ownedRequest)).rejects.toThrow(
+      "work-revoked",
+    );
   });
 
   it("observes a complete stable roster with canonical Work checks without binding it", async () => {
