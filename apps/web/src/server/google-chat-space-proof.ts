@@ -1,0 +1,177 @@
+import { z } from "zod";
+import { googleChatAccessToken } from "./google-chat";
+
+const GOOGLE_CHAT_API_URL = "https://chat.googleapis.com/v1";
+const REQUEST_TIMEOUT_MS = 10_000;
+const PAGE_SIZE = 1_000;
+const MAX_PAGES = 20;
+const MAX_MEMBERSHIPS = 1_000;
+const googleSpaceNameSchema = z
+  .string()
+  .max(500)
+  .regex(/^spaces\/[A-Za-z0-9_-]+$/);
+const googleMemberNameSchema = z
+  .string()
+  .max(500)
+  .regex(/^spaces\/[A-Za-z0-9_-]+\/members\/[A-Za-z0-9_-]+$/);
+const googleUserNameSchema = z
+  .string()
+  .max(100)
+  .regex(/^users\/[0-9]+$/);
+
+const spaceSchema = z
+  .object({
+    name: googleSpaceNameSchema,
+    spaceType: z.literal("SPACE"),
+    displayName: z.string().trim().min(1).max(128),
+    externalUserAllowed: z.literal(false),
+    membershipCount: z.object({
+      joinedDirectHumanUserCount: z.number().int().nonnegative(),
+      joinedGroupCount: z.number().int().nonnegative(),
+    }),
+    accessSettings: z.object({
+      accessState: z.literal("PRIVATE"),
+      audience: z.string().optional(),
+    }),
+  })
+  .passthrough();
+const membershipSchema = z
+  .object({
+    name: googleMemberNameSchema,
+    state: z.literal("JOINED"),
+    affiliation: z.literal("INTERNAL"),
+    member: z.object({
+      name: googleUserNameSchema,
+      type: z.literal("HUMAN"),
+    }),
+    groupMember: z.never().optional(),
+  })
+  .passthrough();
+const membershipPageSchema = z
+  .object({
+    memberships: z.array(z.unknown()).max(PAGE_SIZE),
+    nextPageToken: z.string().max(2_000).optional(),
+  })
+  .passthrough();
+
+export type GoogleChatSpaceSnapshot = Readonly<{
+  spaceName: string;
+  directHumanCount: number;
+  joinedGroupCount: number;
+  members: readonly Readonly<{ membershipName: string; userName: string }>[];
+}>;
+
+function providerFailure(code: string): never {
+  throw new Error(code);
+}
+
+async function fetchJson(url: string, accessToken: string): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    return providerFailure("GOOGLE_CHAT_SPACE_PROVIDER_UNAVAILABLE");
+  }
+  if (!response.ok) {
+    return providerFailure(`GOOGLE_CHAT_SPACE_PROVIDER_${response.status}`);
+  }
+  try {
+    return await response.json();
+  } catch {
+    return providerFailure("GOOGLE_CHAT_SPACE_PROVIDER_INVALID_JSON");
+  }
+}
+
+/**
+ * Reads and validates only the current provider Space audience. This is not
+ * wired to project authority, turn delivery, storage, or any mutation path.
+ */
+export async function readValidatedGoogleChatSpace(
+  rawSpaceName: string,
+): Promise<GoogleChatSpaceSnapshot> {
+  const spaceName = googleSpaceNameSchema.safeParse(rawSpaceName);
+  if (!spaceName.success) providerFailure("GOOGLE_CHAT_SPACE_NAME_INVALID");
+
+  const accessToken = await googleChatAccessToken("space-proof");
+  const rawSpace = await fetchJson(
+    `${GOOGLE_CHAT_API_URL}/${spaceName.data}`,
+    accessToken,
+  );
+  const space = spaceSchema.safeParse(rawSpace);
+  if (!space.success || space.data.name !== spaceName.data) {
+    providerFailure("GOOGLE_CHAT_SPACE_METADATA_INVALID");
+  }
+  if (space.data.accessSettings.audience !== undefined) {
+    providerFailure("GOOGLE_CHAT_SPACE_NOT_PRIVATE");
+  }
+  if (space.data.membershipCount.joinedGroupCount !== 0) {
+    providerFailure("GOOGLE_CHAT_SPACE_GROUP_MEMBERSHIP");
+  }
+
+  const members: { membershipName: string; userName: string }[] = [];
+  const membershipNames = new Set<string>();
+  const userNames = new Set<string>();
+  const seenPageTokens = new Set<string>();
+  let pageToken: string | undefined;
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const query = new URLSearchParams({
+      pageSize: String(PAGE_SIZE),
+      showGroups: "true",
+    });
+    if (pageToken) query.set("pageToken", pageToken);
+    const rawPage = await fetchJson(
+      `${GOOGLE_CHAT_API_URL}/${spaceName.data}/members?${query}`,
+      accessToken,
+    );
+    const parsedPage = membershipPageSchema.safeParse(rawPage);
+    if (!parsedPage.success) {
+      providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_PAGE_INVALID");
+    }
+    for (const rawMembership of parsedPage.data.memberships) {
+      const membership = membershipSchema.safeParse(rawMembership);
+      if (
+        !membership.success ||
+        !membership.data.name.startsWith(`${spaceName.data}/members/`)
+      ) {
+        providerFailure("GOOGLE_CHAT_SPACE_MEMBER_INVALID");
+      }
+      if (
+        membershipNames.has(membership.data.name) ||
+        userNames.has(membership.data.member.name)
+      ) {
+        providerFailure("GOOGLE_CHAT_SPACE_MEMBER_DUPLICATE");
+      }
+      membershipNames.add(membership.data.name);
+      userNames.add(membership.data.member.name);
+      members.push({
+        membershipName: membership.data.name,
+        userName: membership.data.member.name,
+      });
+      if (members.length > MAX_MEMBERSHIPS) {
+        providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_LIMIT");
+      }
+    }
+    const nextPageToken = parsedPage.data.nextPageToken;
+    if (!nextPageToken) {
+      if (members.length !== space.data.membershipCount.joinedDirectHumanUserCount) {
+        providerFailure("GOOGLE_CHAT_SPACE_MEMBERSHIP_COUNT_MISMATCH");
+      }
+      return {
+        spaceName: space.data.name,
+        directHumanCount: members.length,
+        joinedGroupCount: 0,
+        members,
+      };
+    }
+    if (seenPageTokens.has(nextPageToken)) {
+      providerFailure("GOOGLE_CHAT_SPACE_PAGE_TOKEN_REPEATED");
+    }
+    seenPageTokens.add(nextPageToken);
+    pageToken = nextPageToken;
+  }
+  return providerFailure("GOOGLE_CHAT_SPACE_PAGE_LIMIT");
+}
