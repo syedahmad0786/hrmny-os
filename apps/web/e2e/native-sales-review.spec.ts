@@ -67,7 +67,8 @@ test("inline review requires separate exact decisions and LinkedIn only copies",
       body: JSON.stringify(results),
     });
   });
-  await page.goto(`/assistant/review/outreach/${id}`, { waitUntil: "domcontentloaded" });
+  const response = await page.goto(`/assistant/review/outreach/${id}`, { waitUntil: "domcontentloaded" });
+  expect(response?.headers()["content-security-policy"]).toBe("frame-ancestors 'self' https://hrmny-portal.fly.dev");
   await expect(
     page.getByRole("heading", { name: "Outreach draft" }),
   ).toBeVisible();

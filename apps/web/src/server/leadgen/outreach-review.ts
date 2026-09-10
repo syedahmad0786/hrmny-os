@@ -1,26 +1,24 @@
-import { createHash } from "node:crypto";
 import { TRPCError } from "@trpc/server";
+import { hashIntegrationPayload } from "../integrations/inbox";
 import type { OutreachItem } from "./store";
 
 export function outreachSnapshotHash(item: OutreachItem): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify([
-        item.id,
-        item.dealId,
-        item.channel,
-        item.state,
-        item.recipient,
-        item.subject,
-        item.body,
-        item.contactId,
-        item.linkedinUrl,
-        item.approvedBy,
-        item.cadenceTouch,
-        item.updatedAt,
-      ]),
-    )
-    .digest("hex");
+  return hashIntegrationPayload(
+    JSON.stringify([
+      item.id,
+      item.dealId,
+      item.channel,
+      item.state,
+      item.recipient,
+      item.subject,
+      item.body,
+      item.contactId,
+      item.linkedinUrl,
+      item.approvedBy,
+      item.cadenceTouch,
+      item.updatedAt,
+    ]),
+  );
 }
 
 export function assertOutreachSnapshot(

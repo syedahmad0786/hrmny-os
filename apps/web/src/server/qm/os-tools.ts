@@ -3,7 +3,7 @@ import { linkedinProfileUrl } from "@/lib/linkedin-profile";
 import { sessionCanViewMargin, type SessionUser } from "../auth/session";
 import { searchComposioConnectedData } from "../composio-connected-data-ai";
 import { featureEnabled } from "../features";
-import { hashIntegrationPayload } from "../integrations/inbox";
+import { outreachSnapshotHash } from "../leadgen/outreach-review";
 import { searchGoogleMapsDiscovery } from "../integrations/google-maps-search";
 import { getOutreach, type OutreachItem } from "../leadgen/store";
 import { getVerifiedWorkAppConnection } from "../trpc/connections-router";
@@ -156,20 +156,10 @@ function sameStrings(left: readonly string[], right: readonly string[]) {
 }
 
 function artifact(item: OutreachItem) {
-  const payload = JSON.stringify({
-    id: item.id,
-    dealId: item.dealId,
-    channel: item.channel,
-    recipient: item.recipient,
-    subject: item.subject,
-    body: item.body,
-    state: item.state,
-    updatedAt: item.updatedAt,
-  });
   return {
     id: item.id,
     version: item.updatedAt,
-    hash: hashIntegrationPayload(payload),
+    hash: outreachSnapshotHash(item),
     channel: item.channel,
     recipient: item.recipient,
     subject: item.subject,
