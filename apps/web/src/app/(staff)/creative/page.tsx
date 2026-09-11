@@ -66,10 +66,26 @@ function CreativeQcPageInner() {
     },
   });
   const clients = trpc.clients.list.useQuery(undefined, { staleTime: 60_000 });
-  const canvaDesigns = trpc.connections.canvaListDesigns.useQuery(undefined, {
-    staleTime: 30_000,
-    retry: false,
-  });
+  const managedAccounts = trpc.connections.managedAccounts.useQuery();
+  const canvaAccounts = (managedAccounts.data ?? []).filter(
+    (account) =>
+      account.toolkit === "canva" &&
+      ["ACTIVE", "CONNECTED", "SUCCESS"].includes(account.status.toUpperCase()),
+  );
+  const [canvaAccountId, setCanvaAccountId] = useState("");
+  const selectedCanvaAccountId =
+    canvaAccountId ||
+    (canvaAccounts.length === 1 ? canvaAccounts[0]!.connectedAccountId : "");
+  const canvaDesigns = trpc.connections.canvaListDesigns.useQuery(
+    {
+      connectedAccountId: selectedCanvaAccountId || undefined,
+    },
+    {
+      staleTime: 30_000,
+      retry: false,
+      enabled: canvaAccounts.length <= 1 || Boolean(selectedCanvaAccountId),
+    },
+  );
   const canvaAttach = trpc.connections.canvaAttachToPortal.useMutation({
     onSuccess: (data) => {
       setPortalHref(data.ok ? data.portalHref : null);
@@ -174,6 +190,27 @@ function CreativeQcPageInner() {
           Third-party LLM via OpenRouter (Gemini image / compatible). Mock SVG
           when keys or credits are unavailable.
         </p>
+        {canvaAccounts.length > 1 ? (
+          <label className="mt-3 block text-xs text-muted">
+            Canva account
+            <select
+              className="mt-1 block w-full rounded border border-sand bg-white px-3 py-2 text-sm"
+              value={canvaAccountId}
+              onChange={(event) => setCanvaAccountId(event.target.value)}
+            >
+              <option value="">Select an account</option>
+              {canvaAccounts.map((account, index) => (
+                <option
+                  key={account.connectionAccountId}
+                  value={account.connectedAccountId ?? ""}
+                >
+                  Account {index + 1} · ID …
+                  {account.connectionAccountId.slice(-6)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <textarea
           className="mt-3 min-h-[80px] w-full rounded-lg border border-sand bg-white px-3 py-2 text-sm"
           value={prompt}
@@ -336,6 +373,7 @@ function CreativeQcPageInner() {
                         designId: design.id,
                         clientId: portalClientId,
                         title: design.title,
+                        connectedAccountId: selectedCanvaAccountId || undefined,
                       });
                     }}
                   >

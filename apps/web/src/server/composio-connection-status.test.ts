@@ -4,6 +4,7 @@ import {
   isActiveComposioRemote,
   pickActiveComposioAccount,
   composioConnectionsCallbackUrl,
+  selectOwnedActiveComposioAccount,
 } from "./trpc/connections-router";
 
 describe("composioConnectionsCallbackUrl", () => {
@@ -17,6 +18,45 @@ describe("composioConnectionsCallbackUrl", () => {
     } finally {
       process.env.NEXT_PUBLIC_APP_URL = prev;
     }
+  });
+});
+
+describe("selectOwnedActiveComposioAccount", () => {
+  const account = (id: string, userId = "employee-a") => ({
+    id,
+    user_id: userId,
+    status: "ACTIVE",
+    toolkit: { slug: "canva" },
+  });
+
+  it("requires selection for multiple accounts and resolves the exact owned id", () => {
+    const remote = [account("one"), account("two")];
+    expect(() =>
+      selectOwnedActiveComposioAccount({
+        employeeId: "employee-a",
+        toolkitSlug: "canva",
+        remote,
+      }),
+    ).toThrow("ACCOUNT_SELECTION_REQUIRED");
+    expect(
+      selectOwnedActiveComposioAccount({
+        employeeId: "employee-a",
+        toolkitSlug: "canva",
+        connectedAccountId: "two",
+        remote,
+      })?.id,
+    ).toBe("two");
+  });
+
+  it("denies an exact id owned by another employee", () => {
+    expect(() =>
+      selectOwnedActiveComposioAccount({
+        employeeId: "employee-a",
+        toolkitSlug: "canva",
+        connectedAccountId: "other",
+        remote: [account("other", "employee-b")],
+      }),
+    ).toThrow("ACCOUNT_NOT_OWNED");
   });
 });
 

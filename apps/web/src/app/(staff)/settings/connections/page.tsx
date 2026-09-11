@@ -762,7 +762,7 @@ export default function ConnectionsPage() {
                         ? item.toolkit === "canva" ||
                           item.toolkit === "linkedin"
                           ? item.status === "connected"
-                            ? "Reconnect"
+                            ? "Connect another account"
                             : "Connect"
                           : item.status === "error" || item.lastError
                             ? "Reconnect"
