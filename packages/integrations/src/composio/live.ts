@@ -202,6 +202,24 @@ export function createComposioLive(input: {
     return payload;
   }
 
+  async function listAuthConfigsForToolkits(
+    toolkits: readonly string[],
+  ): Promise<ComposioAuthConfig[]> {
+    const items: ComposioAuthConfig[] = [];
+    let cursor: string | undefined;
+    do {
+      const query = new URLSearchParams({ limit: "1000" });
+      if (toolkits.length) query.set("toolkit_slug", toolkits.join(","));
+      if (cursor) query.set("cursor", cursor);
+      const page = authConfigListSchema.parse(
+        await request(`/auth_configs?${query}`),
+      );
+      items.push(...page.items);
+      cursor = page.next_cursor ?? undefined;
+    } while (cursor);
+    return items;
+  }
+
   return {
     async listManagedToolkits() {
       const toolkits = await sdk.toolkits.get({
@@ -220,15 +238,11 @@ export function createComposioLive(input: {
     },
 
     async authorize(userId, toolkitSlug, options) {
-      const query = new URLSearchParams({
-        limit: "100",
-        toolkit_slugs: toolkitSlug,
-      });
-      const page = authConfigListSchema.parse(
-        await request(`/auth_configs?${query}`),
+      const configs = await listAuthConfigsForToolkits([toolkitSlug]);
+      const config = configs.find(
+        (row) =>
+          row.toolkit.slug === toolkitSlug && row.is_composio_managed,
       );
-      const config =
-        page.items.find((row) => row.is_composio_managed) ?? page.items[0];
       if (!config) {
         throw new ComposioApiError(
           `No Composio auth config for toolkit ${toolkitSlug}`,
@@ -307,20 +321,7 @@ export function createComposioLive(input: {
     },
 
     async listAuthConfigs(filters = {}) {
-      const items: ComposioAuthConfig[] = [];
-      let cursor: string | undefined;
-      do {
-        const query = new URLSearchParams({ limit: "1000" });
-        if (filters.toolkits?.length)
-          query.set("toolkit_slug", filters.toolkits.join(","));
-        if (cursor) query.set("cursor", cursor);
-        const page = authConfigListSchema.parse(
-          await request(`/auth_configs?${query}`),
-        );
-        items.push(...page.items);
-        cursor = page.next_cursor ?? undefined;
-      } while (cursor);
-      return items;
+      return listAuthConfigsForToolkits(filters.toolkits ?? []);
     },
 
     async createConnectLink(linkInput) {
