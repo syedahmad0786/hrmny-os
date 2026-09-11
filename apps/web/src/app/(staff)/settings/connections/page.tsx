@@ -421,7 +421,10 @@ export default function ConnectionsPage() {
       onSuccess: (result) => {
         setOauthBanner({
           kind: "ok",
-          text: `Google Workspace connected: ${result.account}. Your mailbox is private to you.`,
+          text:
+            result.intent === "google_chat_read"
+              ? `Google Chat read access granted for ${result.account}. You can now verify a Space before connecting it to a project.`
+              : `Google Workspace connected: ${result.account}. Your mailbox is private to you.`,
         });
         void Promise.all([
           utils.connections.list.invalidate(),
@@ -496,6 +499,14 @@ export default function ConnectionsPage() {
   async function connectGoogleWorkspace() {
     const result = await startGoogleWorkspaceOAuth.mutateAsync({
       origin: window.location.origin,
+    });
+    window.location.assign(result.redirectUrl);
+  }
+
+  async function requestGoogleChatReadConsent() {
+    const result = await startGoogleWorkspaceOAuth.mutateAsync({
+      origin: window.location.origin,
+      intent: "google_chat_read",
     });
     window.location.assign(result.redirectUrl);
   }
@@ -815,6 +826,38 @@ export default function ConnectionsPage() {
                                 : ""
                             }`}
                       </p>
+                    ) : null}
+                    {item.toolkit === "google_workspace" ? (
+                      <div
+                        className="w-full rounded-lg border border-sand bg-cream/50 p-3 text-xs text-muted"
+                        data-testid="conn-google-chat-read-consent"
+                      >
+                        <p className="font-semibold text-ink">
+                          Add Google Chat to Google Workspace
+                        </p>
+                        <p className="mt-1">
+                          This request asks Google for your basic account
+                          profile, Gmail read and send, Calendar event read,
+                          Drive read access and permission to create, edit, and
+                          delete files you use with hrmny, plus read-only access
+                          to Chat spaces and memberships. The resulting
+                          authorization also includes scopes you previously
+                          granted to hrmny.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="mt-2"
+                          disabled={
+                            !item.allowed ||
+                            !item.ready ||
+                            startGoogleWorkspaceOAuth.isPending
+                          }
+                          onClick={() => void requestGoogleChatReadConsent()}
+                        >
+                          Add Google Chat to Google Workspace
+                        </Button>
+                      </div>
                     ) : null}
                   </div>
                 ) : item.toolkit === "asana" && item.allowed ? (

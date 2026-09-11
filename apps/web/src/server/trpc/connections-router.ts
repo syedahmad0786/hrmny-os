@@ -38,6 +38,7 @@ import {
   googleWorkspaceClientId,
   googleWorkspaceClientSecret,
   persistGoogleWorkspaceTokens,
+  resolveGoogleWorkspaceGrantedScopes,
 } from "../google-workspace-oauth";
 import { isGoogleWorkspaceReconnectRequired } from "@/lib/google-workspace-error";
 import { isHardApiKeyRejection } from "@/lib/api-key-rejection";
@@ -832,11 +833,33 @@ export async function getGoogleWorkspaceAccessToken(
   // Include `error` rows that still have a vault secret so a transient refresh
   // failure (missing env locally, brief Google outage) can self-heal once
   // credentials work again — without forcing a full OAuth reconnect.
+  const credentials = await readOwnedGoogleWorkspaceCredentials(
+    employeeId,
+    selectedId,
+  );
+  return credentials?.accessToken ?? null;
+}
+
+export type OwnedGoogleWorkspaceCredentials = {
+  accessToken: string;
+  grantedScopes: string[];
+  accountEmail: string;
+  connectionAccountId: string;
+};
+
+async function readOwnedGoogleWorkspaceCredentials(
+  employeeId: string,
+  selectedId?: string,
+): Promise<OwnedGoogleWorkspaceCredentials | null> {
+  const db = getDb();
+  if (!db) return null;
   const [row] = await db
     .select({
       connectionAccountId: connectionAccount.connectionAccountId,
       secretId: connectionAccount.secretId,
       status: connectionAccount.status,
+      accountEmail: connectionAccount.externalConnectionId,
+      updatedAt: connectionAccount.updatedAt,
     })
     .from(connectionAccount)
     .where(
@@ -855,6 +878,8 @@ export async function getGoogleWorkspaceAccessToken(
     )
     .limit(1);
   if (!row?.secretId) return null;
+  const accountEmail = validMailbox(row.accountEmail);
+  if (!accountEmail) return null;
 
   const secrets = await db.execute(
     sql<{ decrypted_secret: string }>`
@@ -871,7 +896,7 @@ export async function getGoogleWorkspaceAccessToken(
   const stored = GoogleWorkspaceSecretSchema.parse(JSON.parse(decrypted));
   if (Date.parse(stored.expiresAt) > Date.now() + 60_000) {
     if (row.status === "error") {
-      await db
+      const healed = await db
         .update(connectionAccount)
         .set({
           status: "connected",
@@ -879,10 +904,28 @@ export async function getGoogleWorkspaceAccessToken(
           updatedAt: new Date(),
         })
         .where(
-          eq(connectionAccount.connectionAccountId, row.connectionAccountId),
-        );
+          and(
+            eq(connectionAccount.connectionAccountId, row.connectionAccountId),
+            eq(connectionAccount.ownerEmployeeId, employeeId),
+            eq(connectionAccount.secretId, row.secretId),
+            eq(connectionAccount.status, "error"),
+            eq(connectionAccount.updatedAt, row.updatedAt),
+            sql`exists (
+              select 1 from vault.decrypted_secrets
+              where id = ${row.secretId}::uuid
+                and decrypted_secret = ${decrypted}
+            )`,
+          ),
+        )
+        .returning({ id: connectionAccount.connectionAccountId });
+      if (healed.length !== 1) return null;
     }
-    return stored.accessToken;
+    return {
+      accessToken: stored.accessToken,
+      grantedScopes: stored.grantedScopes,
+      accountEmail,
+      connectionAccountId: row.connectionAccountId,
+    };
   }
 
   const clientId = googleWorkspaceClientId();
@@ -919,7 +962,7 @@ export async function getGoogleWorkspaceAccessToken(
     // Record the failure for ops UI, but keep the vault secret reachable so a
     // later refresh (after env/credentials recover) or reconnect can restore
     // `connected` without a stuck permanent lockout.
-    await db
+    const marked = await db
       .update(connectionAccount)
       .set({
         status: "error",
@@ -927,8 +970,21 @@ export async function getGoogleWorkspaceAccessToken(
         updatedAt: new Date(),
       })
       .where(
-        eq(connectionAccount.connectionAccountId, row.connectionAccountId),
-      );
+        and(
+          eq(connectionAccount.connectionAccountId, row.connectionAccountId),
+          eq(connectionAccount.ownerEmployeeId, employeeId),
+          eq(connectionAccount.secretId, row.secretId),
+          eq(connectionAccount.status, row.status),
+          eq(connectionAccount.updatedAt, row.updatedAt),
+          sql`exists (
+            select 1 from vault.decrypted_secrets
+            where id = ${row.secretId}::uuid
+              and decrypted_secret = ${decrypted}
+          )`,
+        ),
+      )
+      .returning({ id: connectionAccount.connectionAccountId });
+    if (marked.length !== 1) return null;
     throw new Error(reason);
   }
 
@@ -938,8 +994,45 @@ export async function getGoogleWorkspaceAccessToken(
     accessToken: refreshed.access_token,
     refreshToken: refreshed.refresh_token ?? stored.refreshToken,
     expiresAt: expiresAt.toISOString(),
+    grantedScopes: resolveGoogleWorkspaceGrantedScopes(
+      refreshed.scope,
+      stored.grantedScopes,
+    ),
   });
-  await db.transaction(async (tx) => {
+  const committed = await db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({
+        secretId: connectionAccount.secretId,
+        status: connectionAccount.status,
+        updatedAt: connectionAccount.updatedAt,
+        accountEmail: connectionAccount.externalConnectionId,
+      })
+      .from(connectionAccount)
+      .where(
+        and(
+          eq(connectionAccount.connectionAccountId, row.connectionAccountId),
+          eq(connectionAccount.ownerEmployeeId, employeeId),
+          eq(connectionAccount.toolkit, "google_workspace"),
+          eq(connectionAccount.scope, "staff"),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (
+      !current ||
+      current.secretId !== row.secretId ||
+      current.status !== row.status ||
+      current.updatedAt.getTime() !== row.updatedAt.getTime() ||
+      current.accountEmail !== row.accountEmail
+    )
+      return false;
+    const [currentSecret] = await tx.execute<{ decrypted_secret: string }>(sql`
+      select decrypted_secret
+      from vault.decrypted_secrets
+      where id = ${row.secretId}::uuid
+      limit 1
+    `);
+    if (currentSecret?.decrypted_secret !== decrypted) return false;
     await tx.execute(
       sql`select vault.update_secret(${row.secretId}::uuid, ${replacement})`,
     );
@@ -953,10 +1046,33 @@ export async function getGoogleWorkspaceAccessToken(
         updatedAt: new Date(),
       })
       .where(
-        eq(connectionAccount.connectionAccountId, row.connectionAccountId),
+        and(
+          eq(connectionAccount.connectionAccountId, row.connectionAccountId),
+          eq(connectionAccount.ownerEmployeeId, employeeId),
+        ),
       );
+    return true;
   });
-  return refreshed.access_token;
+  if (!committed) return null;
+  return {
+    accessToken: refreshed.access_token,
+    grantedScopes: resolveGoogleWorkspaceGrantedScopes(
+      refreshed.scope,
+      stored.grantedScopes,
+    ),
+    accountEmail,
+    connectionAccountId: row.connectionAccountId,
+  };
+}
+
+/** Server-only owned credential lookup. Never expose this result over HTTP. */
+export async function getOwnedGoogleWorkspaceCredentials(
+  employeeId: string,
+  connectionAccountId: string,
+): Promise<OwnedGoogleWorkspaceCredentials | null> {
+  const selectedId = z.string().uuid().parse(connectionAccountId.trim());
+  if (!(await isWorkConnectedAppAllowed("google_workspace"))) return null;
+  return readOwnedGoogleWorkspaceCredentials(employeeId, selectedId);
 }
 
 /** The verified internal mailbox shown to Sales and used as the test recipient. */
@@ -2019,7 +2135,14 @@ export const connectionsRouter = router({
    * vanish before save, and Google often omits a new refresh token.
    */
   startGoogleWorkspaceOAuth: staffProcedure
-    .input(z.object({ origin: z.string().url().optional() }).optional())
+    .input(
+      z
+        .object({
+          origin: z.string().url().optional(),
+          intent: z.enum(["mailbox", "google_chat_read"]).optional(),
+        })
+        .optional(),
+    )
     .mutation(async ({ ctx, input }) => {
       await requireAllowedApp("google_workspace");
       const employeeId = requireEmployeeId(ctx.employeeId);
@@ -2027,6 +2150,7 @@ export const connectionsRouter = router({
         await import("../google-workspace-oauth");
       return buildGoogleWorkspaceAuthorizeUrl(employeeId, {
         requestOrigin: input?.origin,
+        intent: input?.intent,
       });
     }),
 
