@@ -1599,6 +1599,17 @@ async function runScheduledApolloPeopleSearch(
     deps.workerClaimedAt ??
     (workerDatabase ? await readDatabaseNow(workerDatabase) : now);
   let current = resultFromReceipt(payload.idempotencyKey, receipt, true);
+  // A process can die after the immutable search completion CAS and before
+  // CRM persistence. Every worker re-entry repairs that owned native receipt.
+  if (current.status === "completed" && stored.nativeOs === true) {
+    await assertQueuedActorAuthorized(stored.actorEmployeeId, deps);
+    await persistCompletedApolloFreeSearchToCrm({
+      sourceSearchReceiptId: receipt.receiptId,
+      idempotencyKey: payload.idempotencyKey,
+      actorEmployeeId: stored.actorEmployeeId,
+    });
+    return current;
+  }
   if (
     current.status === "processing" &&
     receipt.result?.bridgeStatus === "processing"
