@@ -31,5 +31,20 @@ describe("migration 0083 Google identity history boundary", () => {
     expect(migration).toMatch(
       /revoked_at IS NOT NULL AND revoked_by_employee_id IS NOT NULL AND revocation_reason IS NOT NULL/,
     );
+    expect(migration).toMatch(
+      /TG_OP IN \('DELETE', 'TRUNCATE'\)[\s\S]+Google identity history cannot be deleted/,
+    );
+    expect(migration).toContain(
+      "BEFORE UPDATE OR DELETE ON public.employee_google_identity",
+    );
+    expect(migration).toContain(
+      "BEFORE TRUNCATE ON public.employee_google_identity",
+    );
+    expect(migration).toContain(
+      "GRANT SELECT, INSERT, UPDATE ON TABLE public.%I TO service_role",
+    );
+    expect(migration).not.toContain(
+      "GRANT ALL PRIVILEGES ON TABLE public.%I TO service_role",
+    );
   });
 });

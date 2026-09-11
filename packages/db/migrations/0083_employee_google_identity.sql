@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS public.employee_google_identity (
 CREATE OR REPLACE FUNCTION public.enforce_employee_google_identity_history() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public AS $$
 BEGIN
+  IF TG_OP IN ('DELETE', 'TRUNCATE') THEN
+    RAISE EXCEPTION 'Google identity history cannot be deleted';
+  END IF;
   IF (NEW.employee_google_identity_id, NEW.employee_id, NEW.qm_principal,
       NEW.google_issuer, NEW.google_subject, NEW.claim_method,
       NEW.claim_evidence_digest, NEW.claimed_by_employee_id, NEW.claimed_at)
@@ -64,8 +67,20 @@ DO $$ BEGIN
       AND tgrelid = 'public.employee_google_identity'::regclass
   ) THEN
     CREATE TRIGGER enforce_employee_google_identity_history
-    BEFORE UPDATE ON public.employee_google_identity
+    BEFORE UPDATE OR DELETE ON public.employee_google_identity
     FOR EACH ROW EXECUTE FUNCTION public.enforce_employee_google_identity_history();
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'enforce_employee_google_identity_no_truncate'
+      AND tgrelid = 'public.employee_google_identity'::regclass
+  ) THEN
+    CREATE TRIGGER enforce_employee_google_identity_no_truncate
+    BEFORE TRUNCATE ON public.employee_google_identity
+    FOR EACH STATEMENT EXECUTE FUNCTION public.enforce_employee_google_identity_history();
   END IF;
 END $$;
 
@@ -82,7 +97,8 @@ BEGIN
       EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE public.%I FROM authenticated', app_table);
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
-      EXECUTE format('GRANT ALL PRIVILEGES ON TABLE public.%I TO service_role', app_table);
+      EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE public.%I FROM service_role', app_table);
+      EXECUTE format('GRANT SELECT, INSERT, UPDATE ON TABLE public.%I TO service_role', app_table);
     END IF;
   END LOOP;
 END $$;
