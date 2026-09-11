@@ -83,7 +83,9 @@ function CreativeQcPageInner() {
     {
       staleTime: 30_000,
       retry: false,
-      enabled: canvaAccounts.length <= 1 || Boolean(selectedCanvaAccountId),
+      enabled:
+        managedAccounts.isSuccess &&
+        (canvaAccounts.length <= 1 || Boolean(selectedCanvaAccountId)),
     },
   );
   const canvaAttach = trpc.connections.canvaAttachToPortal.useMutation({
