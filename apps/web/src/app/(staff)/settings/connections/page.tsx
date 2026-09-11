@@ -1107,18 +1107,20 @@ export default function ConnectionsPage() {
                 <p className="mt-3 line-clamp-2 text-xs text-muted">
                   {toolkit.description ?? toolkit.slug}
                 </p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    disabled={!toolkit.allowed || authorizeManaged.isPending}
-                    onClick={() =>
-                      authorizeManaged.mutate({ toolkit: toolkit.slug })
-                    }
-                  >
-                    {accounts.length ? "Add account" : "Connect"}
-                  </Button>
-                </div>
+                {!accounts.length ? (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      disabled={!toolkit.allowed || authorizeManaged.isPending}
+                      onClick={() =>
+                        authorizeManaged.mutate({ toolkit: toolkit.slug })
+                      }
+                    >
+                      Connect
+                    </Button>
+                  </div>
+                ) : null}
                 {accounts.length ? (
                   <div className="mt-4 grid gap-2 border-t border-sand pt-3">
                     {accounts.map((account, index) => (
