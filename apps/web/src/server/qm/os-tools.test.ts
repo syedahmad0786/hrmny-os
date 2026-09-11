@@ -449,17 +449,40 @@ it("reads and updates the canonical CRM records through existing routers", async
     items: [{ contactId, firstName: "Mina" }],
     total: 1,
     truncated: false,
+    nextLinks: [
+      {
+        href: "https://hrmny-os.vercel.app/crm/contacts",
+        label: "Open CRM contacts",
+      },
+    ],
   });
   await expect(
     runQmOsTool(token, { operation: "crm_contact_get", contactId }),
-  ).resolves.toMatchObject({ contactId });
+  ).resolves.toMatchObject({
+    contactId,
+    nextLinks: [
+      {
+        href: `https://hrmny-os.vercel.app/crm/contacts/${contactId}`,
+        label: "Open CRM contact",
+      },
+    ],
+  });
   await expect(
     runQmOsTool(token, {
       operation: "crm_contact_update",
       contactId,
       title: "CEO",
     }),
-  ).resolves.toMatchObject({ contactId, title: "CEO" });
+  ).resolves.toMatchObject({
+    contactId,
+    title: "CEO",
+    nextLinks: [
+      {
+        href: `https://hrmny-os.vercel.app/crm/contacts/${contactId}`,
+        label: "Open CRM contact",
+      },
+    ],
+  });
   expect(mocks.contactUpdate).toHaveBeenCalledWith({
     id: contactId,
     title: "CEO",
@@ -471,17 +494,40 @@ it("reads and updates the canonical CRM records through existing routers", async
     items: [{ dealId, stage: "qualified" }],
     total: 1,
     truncated: false,
+    nextLinks: [
+      {
+        href: "https://hrmny-os.vercel.app/crm/deals",
+        label: "Open CRM deals",
+      },
+    ],
   });
   await expect(
     runQmOsTool(token, { operation: "crm_deal_get", dealId }),
-  ).resolves.toMatchObject({ dealId });
+  ).resolves.toMatchObject({
+    dealId,
+    nextLinks: [
+      {
+        href: `https://hrmny-os.vercel.app/crm/deals/${dealId}`,
+        label: "Open CRM deal",
+      },
+    ],
+  });
   await expect(
     runQmOsTool(token, {
       operation: "crm_deal_update",
       dealId,
       buafUrgency: true,
     }),
-  ).resolves.toMatchObject({ dealId, buafUrgency: true });
+  ).resolves.toMatchObject({
+    dealId,
+    buafUrgency: true,
+    nextLinks: [
+      {
+        href: `https://hrmny-os.vercel.app/crm/deals/${dealId}`,
+        label: "Open CRM deal",
+      },
+    ],
+  });
   expect(mocks.dealUpdate).toHaveBeenCalledWith({
     id: dealId,
     buafUrgency: true,
@@ -731,7 +777,12 @@ it("adds only caller-owned CRM import receipts to a completed Apollo status", as
   ).resolves.toMatchObject({
     status: "completed",
     crmImports: [{ externalId: "apollo-person-1", dealId }],
-    nextLinks: [{ href: `/crm/deals/${dealId}`, label: "Example Motors" }],
+    nextLinks: [
+      {
+        href: `https://hrmny-os.vercel.app/crm/deals/${dealId}`,
+        label: "Example Motors",
+      },
+    ],
   });
   expect(mocks.crmImports).toHaveBeenCalledWith({
     sourceSearchReceiptId: searchId,

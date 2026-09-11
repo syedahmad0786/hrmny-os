@@ -18,6 +18,7 @@ import { qmStaff } from "./staff-access";
 import { getDb, withDatabaseScope } from "../db";
 import type { Db } from "@hrmny/db";
 import { emitHealthSignal } from "../m1-persistence";
+import { PRODUCTION_APP_ORIGIN } from "../google-workspace-oauth";
 
 const searchApp = z.enum([
   "one_drive",
@@ -265,6 +266,10 @@ function sameStrings(left: readonly string[], right: readonly string[]) {
   return JSON.stringify(normalized(left)) === JSON.stringify(normalized(right));
 }
 
+function crmHref(path: string) {
+  return new URL(path, PRODUCTION_APP_ORIGIN).toString();
+}
+
 async function withApolloCrmImports(user: SessionUser, value: unknown) {
   const completed = z
     .object({
@@ -289,7 +294,7 @@ async function withApolloCrmImports(user: SessionUser, value: unknown) {
     ...completed.data,
     crmImports,
     nextLinks: [...savedDeals].map(([dealId, label]) => ({
-      href: `/crm/deals/${dealId}`,
+      href: crmHref(`/crm/deals/${dealId}`),
       label,
     })),
   };
@@ -317,7 +322,7 @@ function boundedCrmList(items: unknown[], href: string, label: string) {
     items: items.slice(0, 50),
     total: items.length,
     truncated: items.length > 50,
-    nextLinks: [{ href, label }],
+    nextLinks: [{ href: crmHref(href), label }],
   };
 }
 
@@ -327,7 +332,7 @@ function crmRecordLink(value: unknown, kind: "contacts" | "deals", id: string) {
     ...value,
     nextLinks: [
       {
-        href: `/crm/${kind}/${id}`,
+        href: crmHref(`/crm/${kind}/${id}`),
         label: kind === "contacts" ? "Open CRM contact" : "Open CRM deal",
       },
     ],
@@ -386,7 +391,10 @@ async function dispatchCrmWrite(
         ? {
             ...result,
             nextLinks: [
-              { href: `/crm/deals/${input.dealId}`, label: "Open CRM deal" },
+              {
+                href: crmHref(`/crm/deals/${input.dealId}`),
+                label: "Open CRM deal",
+              },
             ],
           }
         : result;
@@ -677,7 +685,10 @@ export async function runQmOsTool(token: string, raw: unknown) {
           result = {
             ...moved,
             nextLinks: [
-              { href: `/crm/deals/${input.dealId}`, label: "Open CRM deal" },
+              {
+                href: crmHref(`/crm/deals/${input.dealId}`),
+                label: "Open CRM deal",
+              },
             ],
           };
         }
