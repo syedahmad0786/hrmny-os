@@ -171,6 +171,11 @@ export function createComposioLive(input: {
   apiKey: string;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
+  createManagedAuthConfig?: (toolkitSlug: string) => Promise<{
+    id: string;
+    toolkit: string;
+    isComposioManaged: boolean;
+  }>;
 }): ComposioLiveClient {
   const apiKey = input.apiKey.trim();
   if (!apiKey) throw new Error("Composio API key is required");
@@ -179,6 +184,12 @@ export function createComposioLive(input: {
   ).replace(/\/$/, "");
   const fetchImpl = input.fetchImpl ?? fetch;
   const sdk = new Composio({ apiKey });
+  const createManagedAuthConfig =
+    input.createManagedAuthConfig ??
+    ((toolkitSlug: string) =>
+      sdk.authConfigs.create(toolkitSlug, {
+        type: "use_composio_managed_auth",
+      }));
 
   async function request(path: string, init?: RequestInit) {
     const response = await fetchImpl(`${baseUrl}${path}`, {
@@ -202,6 +213,24 @@ export function createComposioLive(input: {
     return payload;
   }
 
+  async function listAuthConfigsForToolkits(
+    toolkits: readonly string[],
+  ): Promise<ComposioAuthConfig[]> {
+    const items: ComposioAuthConfig[] = [];
+    let cursor: string | undefined;
+    do {
+      const query = new URLSearchParams({ limit: "1000" });
+      if (toolkits.length) query.set("toolkit_slug", toolkits.join(","));
+      if (cursor) query.set("cursor", cursor);
+      const page = authConfigListSchema.parse(
+        await request(`/auth_configs?${query}`),
+      );
+      items.push(...page.items);
+      cursor = page.next_cursor ?? undefined;
+    } while (cursor);
+    return items;
+  }
+
   return {
     async listManagedToolkits() {
       const toolkits = await sdk.toolkits.get({
@@ -220,27 +249,38 @@ export function createComposioLive(input: {
     },
 
     async authorize(userId, toolkitSlug, options) {
-      const query = new URLSearchParams({
-        limit: "100",
-        toolkit_slugs: toolkitSlug,
-      });
-      const page = authConfigListSchema.parse(
-        await request(`/auth_configs?${query}`),
-      );
-      const config =
-        page.items.find((row) => row.is_composio_managed) ?? page.items[0];
-      if (!config) {
-        throw new ComposioApiError(
-          `No Composio auth config for toolkit ${toolkitSlug}`,
-          404,
-        );
+      const configs = await listAuthConfigsForToolkits([toolkitSlug]);
+      let authConfigId = configs.find(
+        (row) =>
+          row.toolkit.slug === toolkitSlug && row.is_composio_managed,
+      )?.id;
+      if (!authConfigId) {
+        let created;
+        try {
+          created = await createManagedAuthConfig(toolkitSlug);
+        } catch {
+          throw new ComposioApiError(
+            `Composio managed authorization is unavailable for toolkit ${toolkitSlug}`,
+            422,
+          );
+        }
+        if (
+          created.toolkit !== toolkitSlug ||
+          created.isComposioManaged !== true
+        ) {
+          throw new ComposioApiError(
+            `Composio returned a mismatched auth config for toolkit ${toolkitSlug}`,
+            502,
+          );
+        }
+        authConfigId = created.id;
       }
       const link = connectLinkSchema.parse(
         await request("/connected_accounts/link", {
           method: "POST",
           body: JSON.stringify(
             buildComposioAuthorizeLinkBody({
-              authConfigId: config.id,
+              authConfigId,
               userId,
               callbackUrl: options?.callbackUrl,
             }),
@@ -307,20 +347,7 @@ export function createComposioLive(input: {
     },
 
     async listAuthConfigs(filters = {}) {
-      const items: ComposioAuthConfig[] = [];
-      let cursor: string | undefined;
-      do {
-        const query = new URLSearchParams({ limit: "1000" });
-        if (filters.toolkits?.length)
-          query.set("toolkit_slug", filters.toolkits.join(","));
-        if (cursor) query.set("cursor", cursor);
-        const page = authConfigListSchema.parse(
-          await request(`/auth_configs?${query}`),
-        );
-        items.push(...page.items);
-        cursor = page.next_cursor ?? undefined;
-      } while (cursor);
-      return items;
+      return listAuthConfigsForToolkits(filters.toolkits ?? []);
     },
 
     async createConnectLink(linkInput) {
