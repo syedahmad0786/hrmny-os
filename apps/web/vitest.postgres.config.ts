@@ -12,6 +12,7 @@ export default defineConfig({
       "src/server/sales-os/replacement.postgres-proof.ts",
       "src/server/qm/postgres-repository.postgres-proof.ts",
       "src/server/qm/work-authority-fence.postgres-proof.ts",
+      "src/server/qm/work-projects.postgres-proof.ts",
       "src/server/composio-status.postgres-proof.ts",
       "src/server/qm/google-chat-worker.postgres-proof.ts",
     ],
