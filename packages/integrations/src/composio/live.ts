@@ -171,6 +171,11 @@ export function createComposioLive(input: {
   apiKey: string;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
+  createManagedAuthConfig?: (toolkitSlug: string) => Promise<{
+    id: string;
+    toolkit: string;
+    isComposioManaged: boolean;
+  }>;
 }): ComposioLiveClient {
   const apiKey = input.apiKey.trim();
   if (!apiKey) throw new Error("Composio API key is required");
@@ -179,6 +184,12 @@ export function createComposioLive(input: {
   ).replace(/\/$/, "");
   const fetchImpl = input.fetchImpl ?? fetch;
   const sdk = new Composio({ apiKey });
+  const createManagedAuthConfig =
+    input.createManagedAuthConfig ??
+    ((toolkitSlug: string) =>
+      sdk.authConfigs.create(toolkitSlug, {
+        type: "use_composio_managed_auth",
+      }));
 
   async function request(path: string, init?: RequestInit) {
     const response = await fetchImpl(`${baseUrl}${path}`, {
@@ -239,22 +250,37 @@ export function createComposioLive(input: {
 
     async authorize(userId, toolkitSlug, options) {
       const configs = await listAuthConfigsForToolkits([toolkitSlug]);
-      const config = configs.find(
+      let authConfigId = configs.find(
         (row) =>
           row.toolkit.slug === toolkitSlug && row.is_composio_managed,
-      );
-      if (!config) {
-        throw new ComposioApiError(
-          `No Composio auth config for toolkit ${toolkitSlug}`,
-          404,
-        );
+      )?.id;
+      if (!authConfigId) {
+        let created;
+        try {
+          created = await createManagedAuthConfig(toolkitSlug);
+        } catch {
+          throw new ComposioApiError(
+            `Composio managed authorization is unavailable for toolkit ${toolkitSlug}`,
+            422,
+          );
+        }
+        if (
+          created.toolkit !== toolkitSlug ||
+          created.isComposioManaged !== true
+        ) {
+          throw new ComposioApiError(
+            `Composio returned a mismatched auth config for toolkit ${toolkitSlug}`,
+            502,
+          );
+        }
+        authConfigId = created.id;
       }
       const link = connectLinkSchema.parse(
         await request("/connected_accounts/link", {
           method: "POST",
           body: JSON.stringify(
             buildComposioAuthorizeLinkBody({
-              authConfigId: config.id,
+              authConfigId,
               userId,
               callbackUrl: options?.callbackUrl,
             }),

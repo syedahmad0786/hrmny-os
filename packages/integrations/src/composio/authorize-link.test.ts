@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildComposioAuthorizeLinkBody,
   ComposioApiError,
@@ -77,16 +77,42 @@ describe("Composio managed authorization", () => {
         expires_at: "2026-09-11T03:00:00Z",
       }));
     };
-    const client = createComposioLive({ apiKey: "test", fetchImpl });
+    const createManagedAuthConfig = vi.fn(async (toolkit: string) => ({
+      id: `ac_created_${toolkit}`,
+      toolkit,
+      isComposioManaged: true,
+    }));
+    const client = createComposioLive({
+      apiKey: "test",
+      fetchImpl,
+      createManagedAuthConfig,
+    });
     await expect(client.authorize("employee-1", "canva")).resolves.toMatchObject({
       id: "ca_canva",
     });
     expect(JSON.parse(posted[0]!)).toMatchObject({ auth_config_id: "ac_canva" });
 
     configs = configs.filter((row) => row.toolkit.slug !== "canva");
-    await expect(client.authorize("employee-1", "canva")).rejects.toEqual(
-      expect.objectContaining<Partial<ComposioApiError>>({ status: 404 }),
+    await expect(client.authorize("employee-1", "canva")).resolves.toMatchObject({
+      id: "ca_canva",
+    });
+    expect(createManagedAuthConfig).toHaveBeenCalledWith("canva");
+    expect(JSON.parse(posted[1]!)).toMatchObject({
+      auth_config_id: "ac_created_canva",
+    });
+
+    const mismatched = createComposioLive({
+      apiKey: "test",
+      fetchImpl,
+      createManagedAuthConfig: async () => ({
+        id: "ac_wrong",
+        toolkit: "googlesuper",
+        isComposioManaged: true,
+      }),
+    });
+    await expect(mismatched.authorize("employee-1", "canva")).rejects.toEqual(
+      expect.objectContaining<Partial<ComposioApiError>>({ status: 502 }),
     );
-    expect(posted).toHaveLength(1);
+    expect(posted).toHaveLength(2);
   });
 });
