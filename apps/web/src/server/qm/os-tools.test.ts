@@ -201,6 +201,11 @@ it("reports employee-owned Apollo and Composio connection metadata without readi
   });
   const inventory = await runQmOsTool(token, { operation: "connections_list" });
   expect(inventory).toEqual({
+    availability: {
+      business: "available",
+      managed: "available",
+      work: "available",
+    },
     business: [
       {
         app: "apollo",
@@ -236,6 +241,28 @@ it("reports employee-owned Apollo and Composio connection metadata without readi
     nextLinks: [{ href: "/settings/connections", label: "Manage connections" }],
   });
   expect(JSON.stringify(inventory)).not.toContain("private");
+});
+
+it("keeps independently available connection sources when a managed provider lookup fails", async () => {
+  mocks.connectionsList.mockResolvedValue([
+    { toolkit: "apollo", status: "connected", hasSecret: true },
+  ]);
+  mocks.managedAccounts.mockRejectedValue(new Error("provider unavailable"));
+  mocks.workApps.mockResolvedValue({ apps: [] });
+
+  const inventory = await runQmOsTool(token, { operation: "connections_list" });
+
+  expect(inventory).toMatchObject({
+    availability: {
+      business: "available",
+      managed: "unavailable",
+      work: "available",
+    },
+    business: [{ app: "apollo", connected: true }],
+    managed: [],
+    work: [],
+  });
+  expect(JSON.stringify(inventory)).not.toContain("provider unavailable");
 });
 
 it("returns an exact LinkedIn manual draft artifact and a sanitized public profile link", async () => {

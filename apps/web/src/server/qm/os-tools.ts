@@ -189,12 +189,26 @@ export async function runQmOsTool(token: string, raw: unknown) {
   let usedSales = false;
 
   if (input.operation === "connections_list") {
-    const [business, managed, work] = await Promise.all([
-      caller.connections.list(),
-      caller.connections.managedAccounts(),
-      caller.connections.workApps(),
-    ]);
+    const [businessResult, managedResult, workResult] =
+      await Promise.allSettled([
+        caller.connections.list(),
+        caller.connections.managedAccounts(),
+        caller.connections.workApps(),
+      ]);
+    const business =
+      businessResult.status === "fulfilled" ? businessResult.value : [];
+    const managed =
+      managedResult.status === "fulfilled" ? managedResult.value : [];
+    const work =
+      workResult.status === "fulfilled" ? workResult.value : { apps: [] };
     result = {
+      availability: {
+        business:
+          businessResult.status === "fulfilled" ? "available" : "unavailable",
+        managed:
+          managedResult.status === "fulfilled" ? "available" : "unavailable",
+        work: workResult.status === "fulfilled" ? "available" : "unavailable",
+      },
       business: business.map((item) => ({
         app: item.toolkit,
         connected: item.status === "connected",
