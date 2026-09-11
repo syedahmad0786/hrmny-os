@@ -34,6 +34,8 @@ export type TrpcContext = {
   portalGrant?: string | null;
   /** Feature selected from the current tRPC path for resource-scope checks. */
   requestedFeatureKey?: string | null;
+  /** Set only by the server-owned native QM caller, never from a request input. */
+  nativeOs?: boolean;
 };
 
 export async function createContext(

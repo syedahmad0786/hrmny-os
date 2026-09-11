@@ -7,6 +7,8 @@ import {
   type LeadSourceAdapter,
 } from "@hrmny/integrations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetCrmMemory } from "../crm/memory";
+import { listDeals } from "../crm/repository";
 import {
   beginIntegrationReceiptAttempt,
   completeIntegrationReceiptIfProcessing,
@@ -75,6 +77,7 @@ async function queueSearch(input: {
   employeeCountMin?: number;
   employeeCountMax?: number;
   perPage?: number;
+  nativeOs?: boolean;
   source: LeadSourceAdapter;
 }) {
   let queued: ApolloPeopleSearchRetryPayload | undefined;
@@ -93,6 +96,7 @@ async function queueSearch(input: {
       employeeCountMin: input.employeeCountMin,
       employeeCountMax: input.employeeCountMax,
       perPage: input.perPage,
+      nativeOs: input.nativeOs,
     },
     {
       leadSource: input.source,
@@ -144,7 +148,44 @@ describe("durable Apollo zero-credit search bridge", () => {
       nextAttemptAt: "2026-08-31T08:00:57.000Z",
     });
   });
-  beforeEach(() => resetIntegrationReceiptMemory());
+  beforeEach(() => {
+    resetIntegrationReceiptMemory();
+    resetCrmMemory();
+  });
+
+  it("persists only trusted native completed searches into the caller-owned CRM", async () => {
+    const source = sourceWith(async () => execution("apollo-native-1"));
+    const before = (await listDeals()).length;
+    const { queued } = await queueSearch({
+      idempotencyKey: "30000000-0000-4000-8000-000000000071",
+      titles: ["Marketing Director"],
+      nativeOs: true,
+      source,
+    });
+
+    await runScheduledApolloPeopleSearch(queued, workerDeps(source));
+
+    const deals = await listDeals();
+    expect(deals).toHaveLength(before + 1);
+    expect(deals.at(-1)).toMatchObject({
+      ownerEmployeeId: ACTOR,
+      leadSourceLane: "apollo_intent",
+    });
+  });
+
+  it("does not auto-persist an equivalent non-native search", async () => {
+    const source = sourceWith(async () => execution("apollo-web-1"));
+    const before = (await listDeals()).length;
+    const { queued } = await queueSearch({
+      idempotencyKey: "30000000-0000-4000-8000-000000000072",
+      titles: ["Marketing Director"],
+      source,
+    });
+
+    await runScheduledApolloPeopleSearch(queued, workerDeps(source));
+
+    expect(await listDeals()).toHaveLength(before);
+  });
 
   it("queues first, executes once, and replays the immutable receipt", async () => {
     const source = sourceWith(async () => execution());

@@ -37,6 +37,7 @@ import {
 } from "../integrations/resolve-keys";
 import { sendApolloSearchRetryEvent } from "../inngest/apollo-search-retry";
 import { APOLLO_PROVIDER_CONCURRENCY_KEY } from "../integrations/apollo-provider-slot";
+import { persistCompletedApolloFreeSearchToCrm } from "../crm/apollo-search-import";
 
 export const APOLLO_PEOPLE_SEARCH_OPERATION = "people.search.zero-credit";
 export const APOLLO_PEOPLE_SEARCH_JOB_KIND = "apollo_people_search";
@@ -164,6 +165,8 @@ const StoredApolloPeopleSearchPayloadSchema = z.object({
   personalEmail: z.literal(false),
   phone: z.literal(false),
   waterfalls: z.literal(false),
+  /** Present only for server-owned native QM searches. */
+  nativeOs: z.literal(true).optional(),
 });
 
 type RetrySchedule = {
@@ -291,6 +294,7 @@ function normalizedCriteria(input: {
 function requestPayload(input: {
   actorEmployeeId?: string | null;
   criteria: NormalizedSearchCriteria;
+  nativeOs?: boolean;
 }) {
   return {
     actorEmployeeId: input.actorEmployeeId ?? null,
@@ -299,6 +303,7 @@ function requestPayload(input: {
     personalEmail: false,
     phone: false,
     waterfalls: false,
+    ...(input.nativeOs ? { nativeOs: true as const } : {}),
   };
 }
 
@@ -1044,6 +1049,16 @@ async function finishSearch(input: {
     if (!current) throw new Error("APOLLO_SEARCH_RECEIPT_NOT_FOUND");
     return resultFromReceipt(input.idempotencyKey, current, true);
   }
+  const payload = StoredApolloPeopleSearchPayloadSchema.safeParse(
+    input.receipt.payload,
+  );
+  if (payload.success && payload.data.nativeOs === true) {
+    await persistCompletedApolloFreeSearchToCrm({
+      sourceSearchReceiptId: input.receipt.receiptId,
+      idempotencyKey: input.idempotencyKey,
+      actorEmployeeId: payload.data.actorEmployeeId,
+    });
+  }
   return result;
 }
 
@@ -1062,6 +1077,8 @@ export async function searchApolloPeopleFree(
     employeeCountMax?: number;
     perPage?: number;
     actorEmployeeId?: string | null;
+    /** Server-derived native QM origin; never accepted by the public input schema. */
+    nativeOs?: boolean;
   },
   deps: ApolloSearchDeps = {},
 ): Promise<ApolloPeopleSearchResult> {
@@ -1070,6 +1087,7 @@ export async function searchApolloPeopleFree(
   const payload = requestPayload({
     actorEmployeeId,
     criteria,
+    nativeOs: input.nativeOs === true,
   });
   const rawBody = JSON.stringify(payload);
   const now = (deps.now ?? (() => new Date()))();

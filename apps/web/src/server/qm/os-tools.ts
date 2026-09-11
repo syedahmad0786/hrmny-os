@@ -171,6 +171,7 @@ function context(user: SessionUser) {
     roles: user.roles,
     canViewMargin: sessionCanViewMargin(user),
     clientId: null,
+    nativeOs: true,
   };
 }
 
