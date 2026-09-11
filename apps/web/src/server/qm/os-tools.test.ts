@@ -621,7 +621,7 @@ it("keeps the route disabled by default and rejects arbitrary or oversized opera
       method: "POST",
     },
   ])
-    expect((await POST(request(body))).status).toBe(403);
+    expect((await POST(request(body))).status).toBe(400);
   vi.stubEnv("QM_OS_TOOLS_ENABLED", "0");
   expect((await POST(request({ operation: "sales_digest" }))).status).toBe(403);
   expect((await POST(request({}, ""))).status).toBe(403);
@@ -687,6 +687,21 @@ it("returns bounded Apollo schema corrections without weakening access denials",
       )
     ).status,
   ).toBe(403);
+});
+
+it("returns the existing invalid-input response for unsupported CRM fields", async () => {
+  const response = await POST(
+    request({
+      operation: "crm_deals_list",
+      search: "Tom Fux",
+    }),
+  );
+
+  expect(response.status).toBe(400);
+  await expect(response.json()).resolves.toMatchObject({
+    error: "QM_INVALID_INPUT",
+  });
+  expect(mocks.dealsList).not.toHaveBeenCalled();
 });
 
 it("adds only caller-owned CRM import receipts to a completed Apollo status", async () => {

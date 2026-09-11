@@ -447,7 +447,9 @@ export async function runQmOsTool(token: string, raw: unknown) {
     const parsed = apolloSearch.safeParse(raw);
     if (!parsed.success) throw new QmInvalidInputError(parsed.error);
   }
-  const input = inputSchema.parse(raw);
+  const parsedInput = inputSchema.safeParse(raw);
+  if (!parsedInput.success) throw new QmInvalidInputError(parsedInput.error);
+  const input = parsedInput.data;
   const fencedCrmWrite = await runFencedCrmWrite(user, input);
   if (fencedCrmWrite.handled) return fencedCrmWrite.result;
   const ctx = context(user);
