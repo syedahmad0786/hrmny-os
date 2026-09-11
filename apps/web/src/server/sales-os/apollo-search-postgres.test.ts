@@ -14,10 +14,14 @@ import {
   it,
   vi,
 } from "vitest";
-import { getDb } from "../db";
+import { getDb, withDatabaseScope } from "../db";
+import { persistCompletedApolloFreeSearchToCrm } from "../crm/apollo-search-import";
+import { listNotes } from "../crm/repository";
 import {
   completeIntegrationReceiptIfProcessing,
   hashIntegrationPayload,
+  getIntegrationReceipt,
+  recordIntegrationReceipt,
 } from "../integrations/inbox";
 import {
   disconnectGovernedApiKeyConnection,
@@ -422,6 +426,62 @@ afterEach(async () => {
 });
 
 describe("Apollo queue PostgreSQL proof", () => {
+  it("rolls back CRM rows and import lineage together, then dedupes concurrent recovery", async () => {
+    const db = getDb()!;
+    const idempotencyKey = crypto.randomUUID();
+    const externalId = `crm-atomic-${idempotencyKey}`;
+    const companyName = `CRM atomic proof ${idempotencyKey}`;
+    const search = await recordIntegrationReceipt({
+      provider: "apollo",
+      externalEventId: idempotencyKey,
+      operation: APOLLO_PEOPLE_SEARCH_OPERATION,
+      completed: true,
+      ownerEmployeeId: ACTOR,
+      rawBody: JSON.stringify({ actorEmployeeId: ACTOR }),
+      result: {
+        bridgeStatus: "completed",
+        candidates: [
+          {
+            externalId,
+            companyName,
+            fullName: "Atomic Proof",
+            source: "apollo",
+          },
+        ],
+      },
+    });
+    const input = {
+      sourceSearchReceiptId: search.receiptId,
+      idempotencyKey,
+      actorEmployeeId: ACTOR,
+    };
+    await expect(
+      db.transaction((tx) =>
+        withDatabaseScope(tx as unknown as Db, async () => {
+          await persistCompletedApolloFreeSearchToCrm(input);
+          throw new Error("INTERRUPTED_BEFORE_COMMIT");
+        }),
+      ),
+    ).rejects.toThrow("INTERRUPTED_BEFORE_COMMIT");
+    expect(
+      await getIntegrationReceipt(
+        "apollo",
+        `free-auto-import:${ACTOR}:${externalId}`,
+      ),
+    ).toBeNull();
+    const [afterRollback] = await db.execute<{ count: number }>(sql`
+      select count(*)::int as count from public.company where name = ${companyName}
+    `);
+    expect(afterRollback?.count).toBe(0);
+    const [first, second] = await Promise.all([
+      persistCompletedApolloFreeSearchToCrm(input),
+      persistCompletedApolloFreeSearchToCrm(input),
+    ]);
+    expect(first[0]?.dealId).toBe(second[0]?.dealId);
+    expect(first[0]?.contactId).toBe(second[0]?.contactId);
+    expect(await listNotes({ dealId: first[0]!.dealId })).toHaveLength(1);
+  });
+
   it("restores the newest durable search for the exact employee", async () => {
     const source = sourceWith(async () => execution("latest-search-proof"));
     const db = getDb()!;

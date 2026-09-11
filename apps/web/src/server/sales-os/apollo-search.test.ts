@@ -8,6 +8,8 @@ import {
 } from "@hrmny/integrations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetCrmMemory } from "../crm/memory";
+import { resolveActiveStaffById } from "../auth/session";
+vi.mock("../auth/session", () => ({ resolveActiveStaffById: vi.fn() }));
 import { listDeals } from "../crm/repository";
 import {
   beginIntegrationReceiptAttempt,
@@ -149,6 +151,15 @@ describe("durable Apollo zero-credit search bridge", () => {
     });
   });
   beforeEach(() => {
+    vi.mocked(resolveActiveStaffById).mockResolvedValue({
+      employeeId: ACTOR,
+      email: "actor@hrmny.co",
+      displayName: "Actor",
+      actorType: "staff",
+      clientId: null,
+      roles: ["partner"],
+      permissions: ["allow:*:*"],
+    });
     resetIntegrationReceiptMemory();
     resetCrmMemory();
   });
@@ -171,6 +182,26 @@ describe("durable Apollo zero-credit search bridge", () => {
       ownerEmployeeId: ACTOR,
       leadSourceLane: "apollo_intent",
     });
+  });
+
+  it("retries CRM persistence from the completed receipt without searching Apollo again", async () => {
+    const source = sourceWith(async () => execution("apollo-recover-crm"));
+    const { queued } = await queueSearch({
+      idempotencyKey: "30000000-0000-4000-8000-000000000073",
+      nativeOs: true,
+      source,
+    });
+    vi.mocked(resolveActiveStaffById).mockResolvedValueOnce(null);
+    await expect(
+      runScheduledApolloPeopleSearch(queued, workerDeps(source)),
+    ).rejects.toThrow("APOLLO_CRM_IMPORT_FORBIDDEN");
+    await expect(
+      runScheduledApolloPeopleSearch(queued, workerDeps(source)),
+    ).resolves.toMatchObject({ status: "completed" });
+    expect(source.searchLeadsWithReceipt).toHaveBeenCalledTimes(1);
+    expect(
+      (await listDeals()).filter((deal) => deal.ownerEmployeeId === ACTOR),
+    ).toHaveLength(1);
   });
 
   it("does not auto-persist an equivalent non-native search", async () => {

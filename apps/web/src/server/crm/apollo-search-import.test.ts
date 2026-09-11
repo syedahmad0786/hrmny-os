@@ -1,4 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveActiveStaffById } from "../auth/session";
+import { featureEnabled } from "../features";
+import { importApolloPersonToCrm } from "./apollo-import";
+vi.mock("../auth/session", () => ({ resolveActiveStaffById: vi.fn() }));
+vi.mock("../features", () => ({ featureEnabled: vi.fn() }));
 import { resetCrmMemory } from "./memory";
 import {
   createCompany,
@@ -10,6 +15,7 @@ import {
 import {
   resetIntegrationReceiptMemory,
   recordIntegrationReceipt,
+  failIntegrationReceipt,
 } from "../integrations/inbox";
 import {
   getCompletedApolloFreeSearchCrmImports,
@@ -46,6 +52,16 @@ async function completedSearch() {
 
 describe("Apollo free-search CRM persistence", () => {
   beforeEach(() => {
+    vi.mocked(resolveActiveStaffById).mockResolvedValue({
+      employeeId: ACTOR,
+      email: "actor@hrmny.co",
+      displayName: "Actor",
+      actorType: "staff",
+      clientId: null,
+      roles: ["partner"],
+      permissions: ["allow:*:*"],
+    });
+    vi.mocked(featureEnabled).mockResolvedValue(true);
     resetCrmMemory();
     resetIntegrationReceiptMemory();
   });
@@ -120,4 +136,63 @@ describe("Apollo free-search CRM persistence", () => {
       }),
     ).rejects.toThrow("APOLLO_SEARCH_IMPORT_FORBIDDEN");
   });
+
+  it("recovers a failed partial receipt without duplicating its CRM records or note", async () => {
+    const search = await completedSearch();
+    const receipt = await recordIntegrationReceipt({
+      provider: "apollo",
+      externalEventId: `free-auto-import:${ACTOR}:apollo-person-1`,
+      operation: "people.search.auto_import",
+      status: "processing",
+      ownerEmployeeId: ACTOR,
+      rawBody: JSON.stringify({
+        actorEmployeeId: ACTOR,
+        externalId: "apollo-person-1",
+      }),
+    });
+    const partial = await importApolloPersonToCrm({
+      person: {
+        externalId: "apollo-person-1",
+        fullName: "Mina Example",
+        companyName: "Example Motors",
+        source: "apollo",
+        raw: {},
+      },
+      receiptId: receipt.receiptId,
+      ownerEmployeeId: ACTOR,
+      preserveExistingFields: true,
+      dedupeReceiptNote: true,
+    });
+    await failIntegrationReceipt(receipt.receiptId, "INTERRUPTED");
+    const recovered = await persistCompletedApolloFreeSearchToCrm({
+      sourceSearchReceiptId: search.receiptId,
+      idempotencyKey: SEARCH,
+      actorEmployeeId: ACTOR,
+    });
+    expect(recovered[0]).toMatchObject({
+      status: "completed",
+      contactId: partial.contactId,
+      dealId: partial.dealId,
+    });
+    expect(await listNotes({ dealId: partial.dealId })).toHaveLength(1);
+  });
+
+  it.each(["inactive", "crm_disabled"])(
+    "refuses imports when %s",
+    async (reason) => {
+      const search = await completedSearch();
+      const before = await listDeals();
+      if (reason === "inactive")
+        vi.mocked(resolveActiveStaffById).mockResolvedValue(null);
+      else vi.mocked(featureEnabled).mockResolvedValue(false);
+      await expect(
+        persistCompletedApolloFreeSearchToCrm({
+          sourceSearchReceiptId: search.receiptId,
+          idempotencyKey: SEARCH,
+          actorEmployeeId: ACTOR,
+        }),
+      ).rejects.toThrow("APOLLO_CRM_IMPORT_FORBIDDEN");
+      expect(await listDeals()).toEqual(before);
+    },
+  );
 });

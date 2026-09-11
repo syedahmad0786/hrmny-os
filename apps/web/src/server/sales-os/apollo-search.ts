@@ -1816,6 +1816,10 @@ async function runScheduledApolloPeopleSearch(
       "apollo",
       payload.idempotencyKey,
     ).catch(() => null);
+    // Keep a completed provider result while the job retries its CRM commit.
+    // Classifying this as a provider failure would finish the job too early.
+    if (stored.nativeOs === true && dispatchReceipt?.status === "completed")
+      throw error;
     const providerDispatchEverAuthorized =
       dispatchReceipt?.result?.providerDispatchEverAuthorized === true ||
       error instanceof ApolloProviderRequestError;

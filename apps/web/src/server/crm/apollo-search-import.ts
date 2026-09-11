@@ -1,8 +1,11 @@
 import { z } from "zod";
+import { sql } from "@hrmny/db";
 import { importApolloPersonToCrm } from "./apollo-import";
+import { getDb, withDatabaseScope } from "../db";
+import { resolveActiveStaffById } from "../auth/session";
+import { featureEnabled } from "../features";
 import {
   completeIntegrationReceipt,
-  failIntegrationReceipt,
   getIntegrationReceipt,
   recordIntegrationReceipt,
 } from "../integrations/inbox";
@@ -64,6 +67,8 @@ async function completedSearch(input: {
   ) {
     throw new Error("APOLLO_SEARCH_IMPORT_FORBIDDEN");
   }
+  if (receipt.status !== "completed")
+    throw new Error("APOLLO_SEARCH_IMPORT_NOT_COMPLETED");
   const result = searchResultSchema.safeParse(receipt.result);
   if (!result.success) throw new Error("APOLLO_SEARCH_IMPORT_NOT_COMPLETED");
   return result.data;
@@ -91,6 +96,40 @@ export async function persistCompletedApolloFreeSearchToCrm(input: {
   idempotencyKey: string;
   actorEmployeeId: string;
 }): Promise<ApolloFreeSearchCrmImport[]> {
+  const db = getDb();
+  const apply = () => persistSearchCandidates(input);
+  if (!db) return apply();
+  return db.transaction(async (tx) => {
+    // ponytail: serialize bounded ten-person imports; use company locks if throughput requires it.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext('apollo-free-crm-import'))`,
+    );
+    return withDatabaseScope(tx as unknown as typeof db, apply);
+  });
+}
+
+async function assertCrmImportAuthorized(actorEmployeeId: string) {
+  const actor = await resolveActiveStaffById(actorEmployeeId);
+  if (
+    !actor ||
+    actor.actorType !== "staff" ||
+    actor.clientId !== null ||
+    !actor.roles.some((role) =>
+      ["partner", "director", "am", "account_manager"].includes(role),
+    ) ||
+    !(await featureEnabled("crm.workspace", {
+      userId: actor.employeeId,
+      roles: actor.roles,
+    }))
+  )
+    throw new Error("APOLLO_CRM_IMPORT_FORBIDDEN");
+}
+
+async function persistSearchCandidates(input: {
+  sourceSearchReceiptId: string;
+  idempotencyKey: string;
+  actorEmployeeId: string;
+}): Promise<ApolloFreeSearchCrmImport[]> {
   const parsedInput = z
     .object({
       sourceSearchReceiptId: z.string().uuid(),
@@ -99,6 +138,7 @@ export async function persistCompletedApolloFreeSearchToCrm(input: {
     })
     .parse(input);
   const search = await completedSearch(parsedInput);
+  await assertCrmImportAuthorized(parsedInput.actorEmployeeId);
   const imports: ApolloFreeSearchCrmImport[] = [];
 
   for (const candidate of search.candidates) {
@@ -128,54 +168,32 @@ export async function persistCompletedApolloFreeSearchToCrm(input: {
       throw new Error("APOLLO_SEARCH_IMPORT_FORBIDDEN");
     }
     const duplicate = completedImport(receipt.result, true);
-    if (receipt.duplicate && duplicate) {
+    if (receipt.status === "completed" && duplicate) {
       imports.push(duplicate);
       continue;
     }
-    if (receipt.duplicate) {
-      imports.push({
-        sourceSearchReceiptId: parsedInput.sourceSearchReceiptId,
-        idempotencyKey: parsedInput.idempotencyKey,
-        externalId: candidate.externalId,
-        status: receipt.status === "failed" ? "failed" : "processing",
-        duplicate: true,
-      });
-      continue;
-    }
-
-    try {
-      const imported = await importApolloPersonToCrm({
-        person: { ...candidate, raw: { freeSearch: true } },
-        receiptId: receipt.receiptId,
-        ownerEmployeeId: parsedInput.actorEmployeeId,
-        preserveExistingFields: true,
-        dedupeReceiptNote: true,
-      });
-      const result = {
-        sourceSearchReceiptId: parsedInput.sourceSearchReceiptId,
-        idempotencyKey: parsedInput.idempotencyKey,
-        externalId: candidate.externalId,
-        companyId: imported.companyId,
-        contactId: imported.contactId,
-        dealId: imported.dealId,
-        companyName: imported.companyName,
-      };
-      await completeIntegrationReceipt(receipt.receiptId, result);
-      imports.push({ ...result, status: "completed", duplicate: false });
-    } catch {
-      await failIntegrationReceipt(
-        receipt.receiptId,
-        "APOLLO_AUTO_IMPORT_FAILED",
-      );
-      imports.push({
-        sourceSearchReceiptId: parsedInput.sourceSearchReceiptId,
-        idempotencyKey: parsedInput.idempotencyKey,
-        externalId: candidate.externalId,
-        status: "failed",
-        duplicate: false,
-      });
-    }
+    // The receipt and every CRM row commit together. An interrupted attempt
+    // rolls back; an older partial receipt is reconciled by the existing dedupe.
+    const imported = await importApolloPersonToCrm({
+      person: { ...candidate, raw: { freeSearch: true } },
+      receiptId: receipt.receiptId,
+      ownerEmployeeId: parsedInput.actorEmployeeId,
+      preserveExistingFields: true,
+      dedupeReceiptNote: true,
+    });
+    const result = {
+      sourceSearchReceiptId: parsedInput.sourceSearchReceiptId,
+      idempotencyKey: parsedInput.idempotencyKey,
+      externalId: candidate.externalId,
+      companyId: imported.companyId,
+      contactId: imported.contactId,
+      dealId: imported.dealId,
+      companyName: imported.companyName,
+    };
+    await completeIntegrationReceipt(receipt.receiptId, result);
+    imports.push({ ...result, status: "completed", duplicate: false });
   }
+  await assertCrmImportAuthorized(parsedInput.actorEmployeeId);
   return imports;
 }
 
@@ -209,15 +227,11 @@ export async function getCompletedApolloFreeSearchCrmImports(input: {
           sourceSearchReceiptId: parsedInput.sourceSearchReceiptId,
           idempotencyKey: parsedInput.idempotencyKey,
           externalId: candidate.externalId,
-          companyId: "",
-          contactId: "",
-          dealId: "",
-          companyName: "",
           status: "processing" as const,
           duplicate: false,
         };
       }
-      if (completed) return completed;
+      if (receipt.status === "completed" && completed) return completed;
       return {
         sourceSearchReceiptId: parsedInput.sourceSearchReceiptId,
         idempotencyKey: parsedInput.idempotencyKey,
