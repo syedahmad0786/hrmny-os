@@ -28,6 +28,13 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   featureEnabled: vi.fn(),
   mapsSearch: vi.fn(),
+  contactsList: vi.fn(),
+  contactGet: vi.fn(),
+  contactUpdate: vi.fn(),
+  dealsList: vi.fn(),
+  dealGet: vi.fn(),
+  dealUpdate: vi.fn(),
+  dealMoveStage: vi.fn(),
 }));
 
 vi.mock("./staff-access", () => ({ qmStaff: mocks.staff }));
@@ -111,6 +118,19 @@ beforeEach(() => {
       accountSummary: mocks.accountSummary,
       nextBestAction: mocks.nextBestAction,
       draftOutreach: mocks.draftOutreach,
+    },
+    crm: {
+      contacts: {
+        list: mocks.contactsList,
+        get: mocks.contactGet,
+        update: mocks.contactUpdate,
+      },
+      deals: {
+        list: mocks.dealsList,
+        get: mocks.dealGet,
+        update: mocks.dealUpdate,
+        moveStage: mocks.dealMoveStage,
+      },
     },
     leadgen: {
       outreach: {
@@ -371,6 +391,97 @@ it("runs bounded Maps discovery only for a Sales role with CRM enabled", async (
       q: "Dubai agencies",
     }),
   ).rejects.toThrow("QM_SALES_ACCESS_DENIED");
+});
+
+it("reads and updates the canonical CRM records through existing routers", async () => {
+  const contactId = "c0000000-0000-4000-8000-000000000021";
+  mocks.contactsList.mockResolvedValue([{ contactId, firstName: "Mina" }]);
+  mocks.contactGet.mockResolvedValue({ contactId, firstName: "Mina" });
+  mocks.contactUpdate.mockResolvedValue({
+    contactId,
+    firstName: "Mina",
+    title: "CEO",
+  });
+  mocks.dealsList.mockResolvedValue([{ dealId, stage: "qualified" }]);
+  mocks.dealGet.mockResolvedValue({ dealId, stage: "qualified" });
+  mocks.dealUpdate.mockResolvedValue({
+    dealId,
+    stage: "qualified",
+    buafUrgency: true,
+  });
+
+  await expect(
+    runQmOsTool(token, { operation: "crm_contacts_list", search: "Mina" }),
+  ).resolves.toEqual([{ contactId, firstName: "Mina" }]);
+  await expect(
+    runQmOsTool(token, { operation: "crm_contact_get", contactId }),
+  ).resolves.toMatchObject({ contactId });
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_contact_update",
+      contactId,
+      title: "CEO",
+    }),
+  ).resolves.toMatchObject({ contactId, title: "CEO" });
+  expect(mocks.contactUpdate).toHaveBeenCalledWith({
+    id: contactId,
+    title: "CEO",
+  });
+
+  await expect(
+    runQmOsTool(token, { operation: "crm_deals_list", stage: "qualified" }),
+  ).resolves.toEqual([{ dealId, stage: "qualified" }]);
+  await expect(
+    runQmOsTool(token, { operation: "crm_deal_get", dealId }),
+  ).resolves.toMatchObject({ dealId });
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_deal_update",
+      dealId,
+      buafUrgency: true,
+    }),
+  ).resolves.toMatchObject({ dealId, buafUrgency: true });
+  expect(mocks.dealUpdate).toHaveBeenCalledWith({
+    id: dealId,
+    buafUrgency: true,
+  });
+});
+
+it("keeps CRM field and stage authorization inside existing guarded mutations", async () => {
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_deal_update",
+      dealId,
+      ownerEmployeeId: "c0000000-0000-4000-8000-000000000099",
+    }),
+  ).rejects.toThrow();
+  expect(mocks.dealUpdate).not.toHaveBeenCalled();
+
+  mocks.dealMoveStage.mockResolvedValue({
+    ok: false,
+    reason: "gate_blocked",
+    code: "gate_blocked",
+  });
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_deal_move_stage",
+      dealId,
+      to: "proposal",
+    }),
+  ).resolves.toMatchObject({ ok: false, code: "gate_blocked" });
+  expect(mocks.dealMoveStage).toHaveBeenCalledWith({
+    id: dealId,
+    to: "proposal",
+  });
+
+  mocks.contactUpdate.mockRejectedValueOnce(new Error("FORBIDDEN"));
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_contact_update",
+      contactId: "c0000000-0000-4000-8000-000000000021",
+      title: "CEO",
+    }),
+  ).rejects.toThrow("FORBIDDEN");
 });
 
 it("keeps the route disabled by default and rejects arbitrary or oversized operations", async () => {

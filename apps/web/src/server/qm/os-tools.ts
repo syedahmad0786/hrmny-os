@@ -112,6 +112,80 @@ const inputSchema = z.union([
   z.object({ operation: z.literal("sales_digest") }).strict(),
   z
     .object({
+      operation: z.literal("crm_contacts_list"),
+      companyId: z.string().uuid().optional(),
+      search: z.string().trim().min(1).max(200).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("crm_contact_get"),
+      contactId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("crm_deals_list"),
+      companyId: z.string().uuid().optional(),
+      stage: z.string().trim().min(1).max(120).optional(),
+      lane: z.string().trim().min(1).max(120).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("crm_deal_get"),
+      dealId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("crm_contact_update"),
+      contactId: z.string().uuid(),
+      firstName: z.string().trim().min(1).max(120).optional(),
+      lastName: z.string().trim().max(120).nullable().optional(),
+      email: z.string().email().nullable().optional(),
+      phone: z.string().trim().max(80).nullable().optional(),
+      title: z.string().trim().max(200).nullable().optional(),
+      linkedinUrl: z.string().url().max(500).nullable().optional(),
+    })
+    .strict()
+    .refine(
+      ({ operation: _operation, contactId: _contactId, ...patch }) =>
+        Object.keys(patch).length > 0,
+      { message: "At least one contact field is required" },
+    ),
+  z
+    .object({
+      operation: z.literal("crm_deal_update"),
+      dealId: z.string().uuid(),
+      opportunityName: z.string().trim().min(1).max(200).nullable().optional(),
+      sector: z.string().trim().max(160).nullable().optional(),
+      expectedCloseDate: z.string().date().nullable().optional(),
+      buafBudget: z.boolean().nullable().optional(),
+      buafUrgency: z.boolean().nullable().optional(),
+      buafAccess: z.boolean().nullable().optional(),
+      buafFit: z.boolean().nullable().optional(),
+      buafTemperature: z
+        .enum(["hot", "warm", "cool", "cold"])
+        .nullable()
+        .optional(),
+    })
+    .strict()
+    .refine(
+      ({ operation: _operation, dealId: _dealId, ...patch }) =>
+        Object.keys(patch).length > 0,
+      { message: "At least one deal field is required" },
+    ),
+  z
+    .object({
+      operation: z.literal("crm_deal_move_stage"),
+      dealId: z.string().uuid(),
+      to: z.string().trim().min(1).max(120),
+      overrideReason: z.string().trim().min(1).max(500).nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
       operation: z.literal("google_maps_search"),
       q: z.string().trim().min(2).max(200),
       ll: z.string().trim().max(100).optional(),
@@ -351,6 +425,50 @@ export async function runQmOsTool(token: string, raw: unknown) {
         break;
       case "sales_digest":
         result = await caller.salesOs.digest();
+        break;
+      case "crm_contacts_list":
+        result = await caller.crm.contacts.list({
+          ...(input.companyId ? { companyId: input.companyId } : {}),
+          ...(input.search ? { search: input.search } : {}),
+        });
+        break;
+      case "crm_contact_get":
+        result = await caller.crm.contacts.get({ id: input.contactId });
+        break;
+      case "crm_deals_list":
+        result = await caller.crm.deals.list({
+          ...(input.companyId ? { companyId: input.companyId } : {}),
+          ...(input.stage ? { stage: input.stage } : {}),
+          ...(input.lane ? { lane: input.lane } : {}),
+        });
+        break;
+      case "crm_deal_get":
+        result = await caller.crm.deals.get({ id: input.dealId });
+        break;
+      case "crm_contact_update": {
+        const {
+          operation: _operation,
+          contactId: id,
+          ...patch
+        } = input;
+        result = await caller.crm.contacts.update({ id, ...patch });
+        if (!result) throw new Error("QM_CRM_CONTACT_NOT_FOUND");
+        break;
+      }
+      case "crm_deal_update": {
+        const { operation: _operation, dealId: id, ...patch } = input;
+        result = await caller.crm.deals.update({ id, ...patch });
+        if (!result) throw new Error("QM_CRM_DEAL_NOT_FOUND");
+        break;
+      }
+      case "crm_deal_move_stage":
+        result = await caller.crm.deals.moveStage({
+          id: input.dealId,
+          to: input.to,
+          ...(input.overrideReason !== undefined
+            ? { overrideReason: input.overrideReason }
+            : {}),
+        });
         break;
       case "google_maps_search": {
         const salesRole = user.roles.some((role) =>
