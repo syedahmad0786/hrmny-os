@@ -140,7 +140,7 @@ it("enforces unique stable identifiers and denies unbound, mismatched, inactive,
         resolve(tx, {
           action: "resolve_identity",
           proof: "chat",
-          googleChatUser: `users/${subjects[1]}`,
+          googleChatUser: `users/${subjects[3]}`,
         }),
       ).resolves.toBeNull();
 
