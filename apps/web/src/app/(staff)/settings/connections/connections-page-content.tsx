@@ -5,7 +5,7 @@ import { isGoogleWorkspaceReconnectRequired } from "@/lib/google-workspace-error
 import { NATIVE_QM_ADMIN_URL, NATIVE_QM_URL } from "@/lib/native-qm";
 import { trpc } from "@/lib/trpc";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ConnectionHealth } from "./connection-health";
 import { PlatformReadyStrip } from "@/components/platform-ready-strip";
 
@@ -316,6 +316,9 @@ export function ConnectionsPageContent({
 }: {
   embedded?: boolean;
 }) {
+  const oauthPopupRef = useRef<Window | null>(null);
+  const oauthRefreshRef = useRef<number | null>(null);
+  const oauthRefreshStopRef = useRef<number | null>(null);
   const [salesOnly, setSalesOnly] = useState(false);
   useEffect(() => {
     setSalesOnly(
@@ -386,9 +389,7 @@ export function ConnectionsPageContent({
         utils.connections.salesMailboxes.invalidate(),
       ]),
   });
-  const startWorkApp = trpc.connections.startWorkAppLink.useMutation({
-    onSuccess: (result) => window.location.assign(result.redirectUrl),
-  });
+  const startWorkApp = trpc.connections.startWorkAppLink.useMutation();
   const disconnectWorkApp = trpc.connections.disconnectWorkApp.useMutation({
     onSuccess: () => void utils.connections.workApps.invalidate(),
   });
@@ -403,23 +404,17 @@ export function ConnectionsPageContent({
     retry: false,
     refetchInterval: 3_000,
   });
-  const authorizeManaged = trpc.connections.authorizeManaged.useMutation({
-    onSuccess: (result) => {
-      // Navigate immediately so Composio callback_url lands back here for reconcile.
-      window.location.assign(result.redirectUrl);
-    },
-  });
+  const authorizeManaged = trpc.connections.authorizeManaged.useMutation();
   const disconnectManaged = trpc.connections.disconnectManaged.useMutation({
     onSuccess: () => void utils.connections.managedAccounts.invalidate(),
   });
   const [keys, setKeys] = useState<Record<string, string>>({});
-  const [redirect, setRedirect] = useState<string | null>(null);
   const [oauthBanner, setOauthBanner] = useState<{
     kind: "ok" | "err";
     text: string;
   } | null>(null);
 
-  const { mutate: completeGoogleWorkspace } =
+  const completeGoogleWorkspaceMutation =
     trpc.connections.completeGoogleWorkspaceOAuth.useMutation({
       retry: false,
       onSuccess: (result) => {
@@ -438,6 +433,7 @@ export function ConnectionsPageContent({
       },
       onError: (error) => setOauthBanner({ kind: "err", text: error.message }),
     });
+  const completeGoogleWorkspace = completeGoogleWorkspaceMutation.mutate;
   useEffect(() => {
     const params = new URLSearchParams(window.location.hash.slice(1));
     if (params.get("gw") !== "complete") return;
@@ -500,19 +496,155 @@ export function ConnectionsPageContent({
     });
   }, [list.isLoading]);
 
+  useEffect(() => {
+    if (!embedded) return;
+    const receive = (event: MessageEvent) => {
+      if (
+        event.origin !== window.location.origin ||
+        event.source !== oauthPopupRef.current
+      )
+        return;
+      const data = event.data as { type?: unknown; ok?: unknown } | null;
+      if (data?.type !== "hrmny-integrations-oauth-complete") return;
+      oauthPopupRef.current = null;
+      if (oauthRefreshRef.current !== null)
+        window.clearInterval(oauthRefreshRef.current);
+      if (oauthRefreshStopRef.current !== null)
+        window.clearTimeout(oauthRefreshStopRef.current);
+      oauthRefreshRef.current = null;
+      oauthRefreshStopRef.current = null;
+      setOauthBanner({
+        kind: data.ok === false ? "err" : "ok",
+        text:
+          data.ok === false
+            ? "Provider authorization did not complete. Try connecting again."
+            : "Provider authorization returned. Connection status refreshed.",
+      });
+      void Promise.all([
+        utils.connections.list.invalidate(),
+        utils.connections.myMailboxes.invalidate(),
+        utils.connections.salesMailboxes.invalidate(),
+        utils.connections.workApps.invalidate(),
+        utils.connections.managedAccounts.invalidate(),
+        utils.connections.asanaStatus.invalidate(),
+      ]);
+    };
+    window.addEventListener("message", receive);
+    return () => window.removeEventListener("message", receive);
+  }, [embedded, utils]);
+
+  useEffect(() => {
+    if (embedded) return;
+    if (sessionStorage.getItem("hrmny-integrations-oauth") !== "1") return;
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const query = new URLSearchParams(window.location.search);
+    const googleCompletion = hash.get("gw") === "complete";
+    if (
+      list.isLoading ||
+      managedAccounts.isLoading ||
+      workApps.isLoading ||
+      (googleCompletion &&
+        !completeGoogleWorkspaceMutation.isSuccess &&
+        !completeGoogleWorkspaceMutation.isError)
+    )
+      return;
+    const ok =
+      !completeGoogleWorkspaceMutation.isError &&
+      query.get("gw") !== "error" &&
+      query.get("xero") !== "error";
+    sessionStorage.removeItem("hrmny-integrations-oauth");
+    window.opener?.postMessage(
+      { type: "hrmny-integrations-oauth-complete", ok },
+      window.location.origin,
+    );
+    const timeout = window.setTimeout(() => window.close(), 150);
+    return () => window.clearTimeout(timeout);
+  }, [
+    completeGoogleWorkspaceMutation.isError,
+    completeGoogleWorkspaceMutation.isSuccess,
+    embedded,
+    list.isLoading,
+    managedAccounts.isLoading,
+    workApps.isLoading,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (oauthRefreshRef.current !== null)
+        window.clearInterval(oauthRefreshRef.current);
+      if (oauthRefreshStopRef.current !== null)
+        window.clearTimeout(oauthRefreshStopRef.current);
+    },
+    [],
+  );
+
+  async function launchAuthorization(
+    start: () => Promise<{ redirectUrl: string }>,
+  ) {
+    const popup = embedded
+      ? window.open(
+          "about:blank",
+          "hrmny-integration-oauth",
+          "popup,width=720,height=820",
+        )
+      : null;
+    if (embedded && !popup) {
+      setOauthBanner({
+        kind: "err",
+        text: "Allow pop-ups for hrmny OS, then try connecting again.",
+      });
+      return;
+    }
+    if (popup) {
+      oauthPopupRef.current = popup;
+      popup.sessionStorage.setItem("hrmny-integrations-oauth", "1");
+    }
+    try {
+      const result = await start();
+      if (popup && !popup.closed) {
+        popup.location.replace(result.redirectUrl);
+        const refresh = () =>
+          void Promise.all([
+            utils.connections.list.invalidate(),
+            utils.connections.myMailboxes.invalidate(),
+            utils.connections.salesMailboxes.invalidate(),
+            utils.connections.workApps.invalidate(),
+            utils.connections.managedAccounts.invalidate(),
+            utils.connections.asanaStatus.invalidate(),
+          ]);
+        oauthRefreshRef.current = window.setInterval(refresh, 2_000);
+        oauthRefreshStopRef.current = window.setTimeout(() => {
+          if (oauthRefreshRef.current !== null)
+            window.clearInterval(oauthRefreshRef.current);
+          oauthRefreshRef.current = null;
+          oauthRefreshStopRef.current = null;
+        }, 2 * 60_000);
+      } else if (!embedded) window.location.assign(result.redirectUrl);
+      else {
+        setOauthBanner({
+          kind: "err",
+          text: "The provider window was closed before authorization started.",
+        });
+      }
+    } catch {
+      popup?.close();
+      oauthPopupRef.current = null;
+    }
+  }
+
   async function connectGoogleWorkspace() {
-    const result = await startGoogleWorkspaceOAuth.mutateAsync({
-      origin: window.location.origin,
-    });
-    window.location.assign(result.redirectUrl);
+    await launchAuthorization(() =>
+      startGoogleWorkspaceOAuth.mutateAsync({ origin: window.location.origin }),
+    );
   }
 
   async function requestGoogleChatReadConsent() {
-    const result = await startGoogleWorkspaceOAuth.mutateAsync({
-      origin: window.location.origin,
-      intent: "google_chat_read",
-    });
-    window.location.assign(result.redirectUrl);
+    await launchAuthorization(() =>
+      startGoogleWorkspaceOAuth.mutateAsync({
+        origin: window.location.origin,
+        intent: "google_chat_read",
+      }),
+    );
   }
 
   return (
@@ -745,20 +877,20 @@ export function ConnectionsPageContent({
                           return;
                         }
                         if (item.toolkit === "xero") {
-                          void startXeroOAuth
-                            .mutateAsync()
-                            .then((result) =>
-                              window.location.assign(result.redirectUrl),
-                            );
+                          void launchAuthorization(() =>
+                            startXeroOAuth.mutateAsync(),
+                          );
                           return;
                         }
                         if (
                           item.toolkit === "canva" ||
                           item.toolkit === "linkedin"
                         ) {
-                          void authorizeManaged
-                            .mutateAsync({ toolkit: item.toolkit })
-                            .then((result) => setRedirect(result.redirectUrl));
+                          void launchAuthorization(() =>
+                            authorizeManaged.mutateAsync({
+                              toolkit: item.toolkit,
+                            }),
+                          );
                         }
                       }}
                     >
@@ -1161,7 +1293,11 @@ export function ConnectionsPageContent({
                       variant="ghost"
                       disabled={!toolkit.allowed || authorizeManaged.isPending}
                       onClick={() =>
-                        authorizeManaged.mutate({ toolkit: toolkit.slug })
+                        void launchAuthorization(() =>
+                          authorizeManaged.mutateAsync({
+                            toolkit: toolkit.slug,
+                          }),
+                        )
                       }
                     >
                       Connect
@@ -1178,7 +1314,11 @@ export function ConnectionsPageContent({
                           !toolkit.allowed || authorizeManaged.isPending
                         }
                         onClick={() =>
-                          authorizeManaged.mutate({ toolkit: toolkit.slug })
+                          void launchAuthorization(() =>
+                            authorizeManaged.mutateAsync({
+                              toolkit: toolkit.slug,
+                            }),
+                          )
                         }
                       >
                         Connect another account
@@ -1383,7 +1523,11 @@ export function ConnectionsPageContent({
                             startWorkApp.isPending
                           }
                           onClick={() =>
-                            startWorkApp.mutate({ toolkit: item.toolkit })
+                            void launchAuthorization(() =>
+                              startWorkApp.mutateAsync({
+                                toolkit: item.toolkit,
+                              }),
+                            )
                           }
                         >
                           {item.authConfigured
@@ -1402,14 +1546,6 @@ export function ConnectionsPageContent({
         </details>
       ) : null}
 
-      {redirect ? (
-        <p className="rounded-lg border border-sand bg-white/70 p-4 text-sm">
-          Authorization ready:{" "}
-          <a className="text-ochre underline" href={redirect}>
-            open provider login
-          </a>
-        </p>
-      ) : null}
       {saveKey.error ||
       disconnect.error ||
       startOAuth.error ||
