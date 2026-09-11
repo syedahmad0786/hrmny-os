@@ -257,3 +257,47 @@ it("rejects missing credentials and oversized requests at the HTTP entry point",
   ).toBe(413);
   expect(fetcher).not.toHaveBeenCalled();
 });
+
+it("rejects a disabled feature without consuming the body and cancels chunked oversized bodies", async () => {
+  vi.stubEnv("QM_BRAIN_ENABLED", "0");
+  const disabledRequest = new Request("https://os.example/api/qm/brain", {
+    method: "POST",
+    headers: { "x-agent-capability": token },
+    body: new ReadableStream(),
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
+  const text = vi.spyOn(disabledRequest, "text");
+  expect(
+    (
+      await POST(disabledRequest)
+    ).status,
+  ).toBe(403);
+  expect(text).not.toHaveBeenCalled();
+  expect(disabledRequest.body?.locked).toBe(false);
+
+  vi.stubEnv("QM_BRAIN_ENABLED", "1");
+  let canceled = false;
+  const oversized = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("x".repeat(8_192)));
+      controller.enqueue(new TextEncoder().encode("x"));
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+  expect(
+    (
+      await POST(
+        new Request("https://os.example/api/qm/brain", {
+          method: "POST",
+          headers: { "x-agent-capability": token },
+          body: oversized,
+          duplex: "half",
+        } as RequestInit & { duplex: "half" }),
+      )
+    ).status,
+  ).toBe(413);
+  expect(canceled).toBe(true);
+  expect(fetcher).not.toHaveBeenCalled();
+});
