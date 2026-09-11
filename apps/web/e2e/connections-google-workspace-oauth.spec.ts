@@ -25,10 +25,16 @@ test.describe("Connections Google Workspace OAuth", () => {
     const chatReadConsent = page.getByTestId("conn-google-chat-read-consent");
     await expect(chatReadConsent).toBeVisible();
     await expect(chatReadConsent).toContainText(
-      /Request Google Chat read permission/i,
+      /Add Google Chat to Google Workspace/i,
     );
     await expect(chatReadConsent).toContainText(
-      /verify Space settings and members before you connect a Space to a project/i,
+      /basic account profile, Gmail read and send, Calendar event read/i,
+    );
+    await expect(chatReadConsent).toContainText(
+      /Drive read and app-file access/i,
+    );
+    await expect(chatReadConsent).toContainText(
+      /read-only access to Chat spaces and memberships/i,
     );
     await page.getByText("Connection diagnostics", { exact: true }).click();
     await expect(page.getByTestId("connections-app-policy")).toBeVisible();
@@ -133,7 +139,7 @@ test.describe("Connections Google Workspace OAuth", () => {
     await page.goto("/settings/connections", { waitUntil: "domcontentloaded" });
     const button = page
       .getByTestId("conn-google-chat-read-consent")
-      .getByRole("button", { name: /Request Google Chat read permission/i });
+      .getByRole("button", { name: /Add Google Chat to Google Workspace/i });
     await expect(button).toBeEnabled();
     await button.click();
     await expect(page).toHaveURL(/__test-google-chat-consent/);

@@ -833,12 +833,15 @@ export default function ConnectionsPage() {
                         data-testid="conn-google-chat-read-consent"
                       >
                         <p className="font-semibold text-ink">
-                          Google Chat space read permission
+                          Add Google Chat to Google Workspace
                         </p>
                         <p className="mt-1">
-                          Allow hrmny to verify Space settings and members
-                          before you connect a Space to a project. This grants
-                          read access using your own HRMNY account.
+                          This request asks Google for your basic account
+                          profile, Gmail read and send, Calendar event read,
+                          Drive read and app-file access, plus read-only access
+                          to Chat spaces and memberships. The resulting
+                          authorization also includes scopes you previously
+                          granted to hrmny.
                         </p>
                         <Button
                           type="button"
@@ -851,7 +854,7 @@ export default function ConnectionsPage() {
                           }
                           onClick={() => void requestGoogleChatReadConsent()}
                         >
-                          Request Google Chat read permission
+                          Add Google Chat to Google Workspace
                         </Button>
                       </div>
                     ) : null}
