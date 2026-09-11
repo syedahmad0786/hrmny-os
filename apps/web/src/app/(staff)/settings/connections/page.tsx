@@ -762,7 +762,7 @@ export default function ConnectionsPage() {
                         ? item.toolkit === "canva" ||
                           item.toolkit === "linkedin"
                           ? item.status === "connected"
-                            ? "Reconnect"
+                            ? "Connect another account"
                             : "Connect"
                           : item.status === "error" || item.lastError
                             ? "Reconnect"
@@ -1166,6 +1166,20 @@ export default function ConnectionsPage() {
                 ) : null}
                 {accounts.length ? (
                   <div className="mt-4 grid gap-2 border-t border-sand pt-3">
+                    <div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        disabled={
+                          !toolkit.allowed || authorizeManaged.isPending
+                        }
+                        onClick={() =>
+                          authorizeManaged.mutate({ toolkit: toolkit.slug })
+                        }
+                      >
+                        Connect another account
+                      </Button>
+                    </div>
                     {accounts.map((account, index) => (
                       <div
                         key={account.connectionAccountId}

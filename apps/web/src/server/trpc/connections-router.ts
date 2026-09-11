@@ -472,10 +472,48 @@ export function isActiveComposioRemote(
   return isActiveComposioStatus(status, isDisabled);
 }
 
+export function selectOwnedActiveComposioAccount<
+  T extends {
+    id: string;
+    user_id?: string | null;
+    status: string;
+    is_disabled?: boolean | null;
+    toolkit: { slug: string };
+  },
+>(input: {
+  employeeId: string;
+  toolkitSlug: string;
+  connectedAccountId?: string;
+  remote: readonly T[];
+}): T | undefined {
+  const eligible = input.remote.filter(
+    (candidate) =>
+      candidate.user_id === input.employeeId &&
+      candidate.toolkit.slug.toLowerCase() ===
+        input.toolkitSlug.toLowerCase() &&
+      isActiveComposioStatus(candidate.status, candidate.is_disabled),
+  );
+  if (input.connectedAccountId) {
+    const exact = eligible.find(
+      (candidate) => candidate.id === input.connectedAccountId,
+    );
+    if (!exact) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "ACCOUNT_NOT_OWNED" });
+    }
+    return exact;
+  }
+  if (eligible.length > 1) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "ACCOUNT_SELECTION_REQUIRED",
+    });
+  }
+  return eligible[0];
+}
+
 /**
- * Prefer an ACTIVE account matching the stored Composio id; otherwise any
- * ACTIVE account for the toolkit. Never let a stale INITIATED/expired id
- * block reconcile when another ACTIVE account exists (reconnect leftovers).
+ * Resolve only the remote account explicitly bound to this local row. A
+ * same-toolkit fallback would collapse multiple employee accounts together.
  */
 export function pickActiveComposioAccount<
   T extends {
@@ -502,11 +540,7 @@ export function pickActiveComposioAccount<
   ) {
     return byId;
   }
-  return input.remote.find(
-    (candidate) =>
-      candidate.toolkit.slug.toLowerCase() === slug &&
-      isActiveComposioStatus(candidate.status, candidate.is_disabled),
-  );
+  return undefined;
 }
 
 /**
@@ -1888,66 +1922,10 @@ export const connectionsRouter = router({
       }
       const db = requireDb();
       const toolkitKey = `composio:${input.toolkit}`;
-      // Re-auth / reconnect: everyone can connect their own accounts.
-      // If a row already exists, refresh the managed auth request instead of CONFLICT.
-      const [existing] = await db
-        .select({
-          id: connectionAccount.connectionAccountId,
-          externalConnectionId: connectionAccount.externalConnectionId,
-          status: connectionAccount.status,
-        })
-        .from(connectionAccount)
-        .where(
-          and(
-            eq(connectionAccount.ownerEmployeeId, employeeId),
-            eq(connectionAccount.scope, "staff"),
-            eq(connectionAccount.toolkit, toolkitKey),
-          ),
-        )
-        .limit(1);
-
       const request = await client.authorize(employeeId, input.toolkit, {
         callbackUrl: composioConnectionsCallbackUrl(),
       });
       try {
-        if (existing) {
-          if (existing.externalConnectionId) {
-            await client
-              .disconnect(existing.externalConnectionId)
-              .catch(() => undefined);
-          }
-          const [saved] = await db.transaction(async (tx) => {
-            const updated = await tx
-              .update(connectionAccount)
-              .set({
-                externalConnectionId: request.id,
-                status: "pending",
-                authType: "composio_managed",
-                label: input.toolkit,
-                updatedAt: new Date(),
-              })
-              .where(eq(connectionAccount.connectionAccountId, existing.id))
-              .returning();
-            await tx.insert(auditEvent).values({
-              actorEmployeeId: employeeId,
-              action: "connections.composio.reauthorize",
-              entityType: "connection_account",
-              entityId: existing.id,
-              after: {
-                toolkit: input.toolkit,
-                status: "pending",
-                previousStatus: existing.status,
-              },
-            });
-            return updated;
-          });
-          return {
-            connectionAccountId: saved!.connectionAccountId,
-            redirectUrl: request.redirectUrl,
-            reconnected: true as const,
-          };
-        }
-
         const [saved] = await db.transaction(async (tx) => {
           const created = await tx
             .insert(connectionAccount)
@@ -1973,7 +1951,7 @@ export const connectionsRouter = router({
         return {
           connectionAccountId: saved!.connectionAccountId,
           redirectUrl: request.redirectUrl,
-          reconnected: false as const,
+          added: true as const,
         };
       } catch (error) {
         await client.disconnect(request.id).catch(() => undefined);
@@ -2339,98 +2317,104 @@ export const connectionsRouter = router({
       return row;
     }),
 
-  canvaListDesigns: staffProcedure.query(async ({ ctx }) => {
-    await requireAllowedApp("canva");
-    const employeeId = requireEmployeeId(ctx.employeeId);
+  canvaListDesigns: staffProcedure
+    .input(
+      z.object({ connectedAccountId: z.string().min(1).optional() }).optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      await requireAllowedApp("canva");
+      const employeeId = requireEmployeeId(ctx.employeeId);
 
-    const stubDesigns = () =>
-      [
-        { id: "stub-design-1", title: "Brand kit cover (Canva stub)" },
-        { id: "stub-design-2", title: "Social template pack (Canva stub)" },
-      ] as const;
+      const stubDesigns = () =>
+        [
+          { id: "stub-design-1", title: "Brand kit cover (Canva stub)" },
+          { id: "stub-design-2", title: "Social template pack (Canva stub)" },
+        ] as const;
 
-    if (process.env.COMPOSIO_API_KEY?.trim()) {
-      try {
-        const client = requireSystemComposio();
-        const accounts = await client.listUserConnectedAccounts(employeeId);
-        const account = accounts.find(
-          (candidate) =>
-            candidate.toolkit.slug.toLowerCase() === "canva" &&
-            !candidate.is_disabled &&
-            ACTIVE_COMPOSIO_STATUSES.has(candidate.status.toUpperCase()),
-        );
-        if (account) {
-          const { listCanvaUserDesigns } = await import("@hrmny/integrations");
-          const designs = await listCanvaUserDesigns({
-            client,
-            connectedAccountId: account.id,
+      if (process.env.COMPOSIO_API_KEY?.trim()) {
+        try {
+          const client = requireSystemComposio();
+          const accounts = await client.listUserConnectedAccounts(employeeId);
+          const account = selectOwnedActiveComposioAccount({
+            employeeId,
+            toolkitSlug: "canva",
+            connectedAccountId: input?.connectedAccountId,
+            remote: accounts,
           });
-          const db = getDb();
-          if (db) {
-            const { writeAudit } = await import("../m1-persistence");
-            await writeAudit({
-              actorEmployeeId: employeeId,
-              action: "connections.canvaListDesigns",
-              entityType: "connection_account",
-              entityId: account.id,
-              before: null,
-              after: { count: designs.length, mode: "live" },
-              reason: null,
+          if (account) {
+            const { listCanvaUserDesigns } =
+              await import("@hrmny/integrations");
+            const designs = await listCanvaUserDesigns({
+              client,
+              connectedAccountId: account.id,
             });
+            const db = getDb();
+            if (db) {
+              const { writeAudit } = await import("../m1-persistence");
+              await writeAudit({
+                actorEmployeeId: employeeId,
+                action: "connections.canvaListDesigns",
+                entityType: "connection_account",
+                entityId: account.id,
+                before: null,
+                after: { count: designs.length, mode: "live" },
+                reason: null,
+              });
+            }
+            return {
+              ok: true as const,
+              designs: designs.map((d) => ({ id: d.id, title: d.title })),
+              mode: "live" as const,
+            };
           }
-          return {
-            ok: true as const,
-            designs: designs.map((d) => ({ id: d.id, title: d.title })),
-            mode: "live" as const,
-          };
+          // Composio configured but Canva OAuth missing — fall through to stub
+          // so Creative→portal demos still work until staff reconnects Canva.
+        } catch (err) {
+          if (err instanceof TRPCError) throw err;
+          throw new TRPCError({
+            code: "BAD_GATEWAY",
+            message:
+              err instanceof Error
+                ? `Canva list failed: ${err.message}`
+                : "Canva list failed",
+          });
         }
-        // Composio configured but Canva OAuth missing — fall through to stub
-        // so Creative→portal demos still work until staff reconnects Canva.
-      } catch (err) {
-        throw new TRPCError({
-          code: "BAD_GATEWAY",
-          message:
-            err instanceof Error
-              ? `Canva list failed: ${err.message}`
-              : "Canva list failed",
-        });
       }
-    }
 
-    // Stub path: no COMPOSIO_API_KEY, or key present but Canva not connected.
-    const store = getDemoStore();
-    const canva = store.connections.find(
-      (row) => row.toolkit === "canva" && row.status === "connected",
-    );
-    // Memory mode without a local Canva row still requires Connect canva.
-    if (!process.env.COMPOSIO_API_KEY?.trim() && !canva) {
+      // Stub path: no COMPOSIO_API_KEY, or key present but Canva not connected.
+      const store = getDemoStore();
+      const canva = store.connections.find(
+        (row) => row.toolkit === "canva" && row.status === "connected",
+      );
+      // Memory mode without a local Canva row still requires Connect canva.
+      if (!process.env.COMPOSIO_API_KEY?.trim() && !canva) {
+        return {
+          ok: false as const,
+          reason: "Canva not connected — use Connections → Connect canva",
+          designs: [] as { id: string; title: string }[],
+        };
+      }
+      store.appendAudit({
+        actorEmployeeId: employeeId,
+        action: "connections.canvaListDesigns",
+        entityType: "connection_account",
+        entityId: canva?.connectionAccountId ?? "canva-stub",
+        before: null,
+        after: {
+          smoke: true,
+          mode: "stub",
+          reason: process.env.COMPOSIO_API_KEY?.trim()
+            ? "composio_without_canva_account"
+            : "no_composio",
+        },
+        reason: null,
+      });
       return {
-        ok: false as const,
-        reason: "Canva not connected — use Connections → Connect canva",
-        designs: [] as { id: string; title: string }[],
+        ok: true as const,
+        designs: [...stubDesigns()],
+        mode: "stub" as const,
       };
-    }
-    store.appendAudit({
-      actorEmployeeId: employeeId,
-      action: "connections.canvaListDesigns",
-      entityType: "connection_account",
-      entityId: canva?.connectionAccountId ?? "canva-stub",
-      before: null,
-      after: {
-        smoke: true,
-        mode: "stub",
-        reason: process.env.COMPOSIO_API_KEY?.trim()
-          ? "composio_without_canva_account"
-          : "no_composio",
-      },
-      reason: null,
-    });
-    return {
-      ok: true as const,
-      designs: [...stubDesigns()],
-      mode: "stub" as const,
-    };
-  }),
+    }),
 
   /**
    * Export a Canva design (PNG) into DAM and place it in client_review for
@@ -2443,6 +2427,7 @@ export const connectionsRouter = router({
         clientId: z.string().uuid(),
         title: z.string().trim().min(1).max(180).optional(),
         advanceTask: z.boolean().optional(),
+        connectedAccountId: z.string().min(1).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -2472,12 +2457,12 @@ export const connectionsRouter = router({
         try {
           const client = requireSystemComposio();
           const accounts = await client.listUserConnectedAccounts(employeeId);
-          const account = accounts.find(
-            (candidate) =>
-              candidate.toolkit.slug.toLowerCase() === "canva" &&
-              !candidate.is_disabled &&
-              ACTIVE_COMPOSIO_STATUSES.has(candidate.status.toUpperCase()),
-          );
+          const account = selectOwnedActiveComposioAccount({
+            employeeId,
+            toolkitSlug: "canva",
+            connectedAccountId: input.connectedAccountId,
+            remote: accounts,
+          });
           if (account && !input.designId.startsWith("stub-")) {
             const { exportCanvaDesign } = await import("@hrmny/integrations");
             const exported = await exportCanvaDesign({

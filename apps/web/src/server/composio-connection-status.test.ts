@@ -4,6 +4,7 @@ import {
   isActiveComposioRemote,
   pickActiveComposioAccount,
   composioConnectionsCallbackUrl,
+  selectOwnedActiveComposioAccount,
 } from "./trpc/connections-router";
 
 describe("composioConnectionsCallbackUrl", () => {
@@ -17,6 +18,45 @@ describe("composioConnectionsCallbackUrl", () => {
     } finally {
       process.env.NEXT_PUBLIC_APP_URL = prev;
     }
+  });
+});
+
+describe("selectOwnedActiveComposioAccount", () => {
+  const account = (id: string, userId = "employee-a") => ({
+    id,
+    user_id: userId,
+    status: "ACTIVE",
+    toolkit: { slug: "canva" },
+  });
+
+  it("requires selection for multiple accounts and resolves the exact owned id", () => {
+    const remote = [account("one"), account("two")];
+    expect(() =>
+      selectOwnedActiveComposioAccount({
+        employeeId: "employee-a",
+        toolkitSlug: "canva",
+        remote,
+      }),
+    ).toThrow("ACCOUNT_SELECTION_REQUIRED");
+    expect(
+      selectOwnedActiveComposioAccount({
+        employeeId: "employee-a",
+        toolkitSlug: "canva",
+        connectedAccountId: "two",
+        remote,
+      })?.id,
+    ).toBe("two");
+  });
+
+  it("denies an exact id owned by another employee", () => {
+    expect(() =>
+      selectOwnedActiveComposioAccount({
+        employeeId: "employee-a",
+        toolkitSlug: "canva",
+        connectedAccountId: "other",
+        remote: [account("other", "employee-b")],
+      }),
+    ).toThrow("ACCOUNT_NOT_OWNED");
   });
 });
 
@@ -65,14 +105,14 @@ describe("pickActiveComposioAccount", () => {
     },
   ];
 
-  it("skips stale INITIATED id and picks ACTIVE by toolkit", () => {
+  it("does not replace a stale bound id with another active account", () => {
     expect(
       pickActiveComposioAccount({
         externalConnectionId: "stale",
         toolkitSlug: "canva",
         remote,
-      })?.id,
-    ).toBe("live");
+      }),
+    ).toBeUndefined();
   });
 
   it("keeps ACTIVE id match when stored link is live", () => {
@@ -95,7 +135,7 @@ describe("pickActiveComposioAccount", () => {
     ).toBeUndefined();
   });
 
-  it("rejects an ACTIVE stored id for a different toolkit and uses only a matching replacement", () => {
+  it("rejects an ACTIVE stored id for a different toolkit", () => {
     const gmail = {
       id: "wrong-toolkit",
       status: "ACTIVE",
@@ -108,12 +148,19 @@ describe("pickActiveComposioAccount", () => {
         remote: [gmail],
       }),
     ).toBeUndefined();
+  });
+
+  it("keeps two same-toolkit accounts isolated by their exact remote ids", () => {
+    const second = { ...remote[1]!, id: "live-two" };
     expect(
-      pickActiveComposioAccount({
-        externalConnectionId: gmail.id,
-        toolkitSlug: "CANVA",
-        remote: [gmail, ...remote],
-      })?.id,
-    ).toBe("live");
+      ["live", "live-two"].map(
+        (externalConnectionId) =>
+          pickActiveComposioAccount({
+            externalConnectionId,
+            toolkitSlug: "canva",
+            remote: [remote[1]!, second],
+          })?.id,
+      ),
+    ).toEqual(["live", "live-two"]);
   });
 });

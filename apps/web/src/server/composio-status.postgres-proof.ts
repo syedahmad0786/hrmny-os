@@ -15,7 +15,7 @@ it("corrects a mismatched live toolkit, recovers a real connection, and preserve
       displayName: "CI Composio owner",
     })),
   );
-  const [wrong, pending, privateOther] = await db
+  const [wrong, pending, privateOther, correct] = await db
     .insert(connectionAccount)
     .values([
       {
@@ -38,6 +38,13 @@ it("corrects a mismatched live toolkit, recovers a real connection, and preserve
         scope: "staff",
         status: "connected",
         externalConnectionId: "synthetic-other",
+      },
+      {
+        ownerEmployeeId: owner,
+        toolkit: "composio:canva",
+        scope: "staff",
+        status: "pending",
+        externalConnectionId: "synthetic-canva",
       },
     ])
     .returning();
@@ -77,6 +84,11 @@ it("corrects a mismatched live toolkit, recovers a real connection, and preserve
   };
   await reconcileComposioManagedStatus(db, owner, [gmail, canva]);
   expect(await read(wrong!.connectionAccountId)).toMatchObject({
+    status: "error",
+    externalConnectionId: gmail.id,
+    lastError: "COMPOSIO_ACCOUNT_NOT_ACTIVE_FOR_TOOLKIT",
+  });
+  expect(await read(correct!.connectionAccountId)).toMatchObject({
     status: "connected",
     externalConnectionId: canva.id,
     lastError: null,
@@ -84,7 +96,7 @@ it("corrects a mismatched live toolkit, recovers a real connection, and preserve
   await reconcileComposioManagedStatus(db, owner, [
     { ...canva, is_disabled: true },
   ]);
-  expect(await read(wrong!.connectionAccountId)).toMatchObject({
+  expect(await read(correct!.connectionAccountId)).toMatchObject({
     status: "error",
     externalConnectionId: canva.id,
   });
