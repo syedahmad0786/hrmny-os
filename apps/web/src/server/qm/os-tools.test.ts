@@ -24,6 +24,11 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   featureEnabled: vi.fn(),
   mapsSearch: vi.fn(),
+  workProjectsList: vi.fn(),
+  workProjectGet: vi.fn(),
+  workTaskGet: vi.fn(),
+  workTaskCreate: vi.fn(),
+  workTaskUpdate: vi.fn(),
 }));
 
 vi.mock("./staff-access", () => ({ qmStaff: mocks.staff }));
@@ -107,6 +112,17 @@ beforeEach(() => {
         draft: mocks.linkedinDraft,
         approve: mocks.approve,
         send: mocks.send,
+      },
+    },
+    work: {
+      projects: {
+        list: mocks.workProjectsList,
+        get: mocks.workProjectGet,
+      },
+      tasks: {
+        get: mocks.workTaskGet,
+        create: mocks.workTaskCreate,
+        update: mocks.workTaskUpdate,
       },
     },
   });
@@ -254,6 +270,71 @@ it("runs bounded Maps discovery only for a Sales role with CRM enabled", async (
       q: "Dubai agencies",
     }),
   ).rejects.toThrow("QM_SALES_ACCESS_DENIED");
+});
+
+it("dispatches explicit Work reads and writes while preserving router denials and project binding", async () => {
+  const projectId = "c0000000-0000-4000-8000-000000000010";
+  const otherProjectId = "c0000000-0000-4000-8000-000000000011";
+  const itemId = "c0000000-0000-4000-8000-000000000012";
+  const assigneeEmployeeId = "c0000000-0000-4000-8000-000000000013";
+  const task = { itemId, projectId, title: "Prepare launch brief" };
+  mocks.workProjectsList.mockResolvedValue([{ projectId, name: "Launch" }]);
+  mocks.workProjectGet.mockResolvedValue({
+    project: { projectId },
+    items: [task],
+  });
+  mocks.workTaskGet.mockResolvedValue(task);
+  mocks.workTaskCreate.mockResolvedValue(task);
+  mocks.workTaskUpdate.mockResolvedValue({ ...task, assigneeEmployeeId });
+
+  await expect(
+    runQmOsTool(token, { operation: "work_projects_list" }),
+  ).resolves.toEqual([{ projectId, name: "Launch" }]);
+  await expect(
+    runQmOsTool(token, { operation: "work_project_summary", projectId }),
+  ).resolves.toMatchObject({ project: { projectId }, items: [task] });
+  await runQmOsTool(token, {
+    operation: "work_task_create",
+    projectId,
+    title: task.title,
+    assigneeEmployeeId,
+  });
+  expect(mocks.workTaskCreate).toHaveBeenCalledWith({
+    projectId,
+    title: task.title,
+    assigneeEmployeeId,
+    itemType: "task",
+  });
+  await runQmOsTool(token, {
+    operation: "work_task_assign",
+    projectId,
+    itemId,
+    assigneeEmployeeId,
+  });
+  expect(mocks.workTaskUpdate).toHaveBeenCalledWith({
+    itemId,
+    assigneeEmployeeId,
+  });
+
+  await expect(
+    runQmOsTool(token, {
+      operation: "work_task_update",
+      projectId: otherProjectId,
+      itemId,
+      title: "Wrong project",
+    }),
+  ).rejects.toThrow("QM_WORK_TASK_PROJECT_MISMATCH");
+  expect(mocks.workTaskUpdate).toHaveBeenCalledTimes(1);
+
+  mocks.workTaskCreate.mockRejectedValueOnce(new Error("FORBIDDEN"));
+  mocks.staff.mockResolvedValue({ ...staff, roles: ["employee"] });
+  await expect(
+    runQmOsTool(token, {
+      operation: "work_task_create",
+      projectId,
+      title: "Unauthorized write",
+    }),
+  ).rejects.toThrow("FORBIDDEN");
 });
 
 it("keeps the route disabled by default and rejects arbitrary or oversized operations", async () => {

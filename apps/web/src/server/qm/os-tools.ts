@@ -19,6 +19,14 @@ const searchApp = z.enum([
 ]);
 const connectionApp = z.enum(["gmail", ...searchApp.options]);
 const connectedAccountId = z.string().min(1).max(200);
+const uuid = z.string().uuid();
+const workTaskFields = {
+  title: z.string().trim().min(1).max(500).optional(),
+  description: z.string().trim().max(20_000).optional(),
+  priority: z.enum(["low", "medium", "high", "urgent"]).nullable().optional(),
+  startDate: z.string().date().nullable().optional(),
+  dueAt: z.string().datetime().nullable().optional(),
+} as const;
 const apolloSearch = z
   .object({
     operation: z.literal("apollo_search"),
@@ -87,6 +95,52 @@ const inputSchema = z.union([
     .strict(),
   z.object({ operation: z.literal("apollo_latest_search") }).strict(),
   z.object({ operation: z.literal("sales_digest") }).strict(),
+  z.object({ operation: z.literal("work_projects_list") }).strict(),
+  z
+    .object({ operation: z.literal("work_project_summary"), projectId: uuid })
+    .strict(),
+  z.object({ operation: z.literal("work_task_read"), itemId: uuid }).strict(),
+  z
+    .object({
+      operation: z.literal("work_task_create"),
+      projectId: uuid,
+      sectionId: uuid.nullable().optional(),
+      title: z.string().trim().min(1).max(500),
+      description: z.string().trim().max(20_000).optional(),
+      priority: z
+        .enum(["low", "medium", "high", "urgent"])
+        .nullable()
+        .optional(),
+      assigneeEmployeeId: uuid.nullable().optional(),
+      startDate: z.string().date().nullable().optional(),
+      dueAt: z.string().datetime().nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("work_task_update"),
+      projectId: uuid,
+      itemId: uuid,
+      ...workTaskFields,
+    })
+    .strict()
+    .refine(
+      (value) =>
+        Object.keys(value).some(
+          (key) => !["operation", "projectId", "itemId"].includes(key),
+        ),
+      {
+        message: "Provide at least one task field to update",
+      },
+    ),
+  z
+    .object({
+      operation: z.literal("work_task_assign"),
+      projectId: uuid,
+      itemId: uuid,
+      assigneeEmployeeId: uuid.nullable(),
+    })
+    .strict(),
   z
     .object({
       operation: z.literal("google_maps_search"),
@@ -185,6 +239,7 @@ export async function runQmOsTool(token: string, raw: unknown) {
   let createdDraft: { id: string; version: string; hash: string } | undefined;
   let usedMaps = false;
   let usedSales = false;
+  let usedWork = false;
 
   if (
     input.operation === "connection" ||
@@ -240,6 +295,50 @@ export async function runQmOsTool(token: string, raw: unknown) {
           connectedAccountId: verified.account.id,
           emailAddress: profile.emailAddress,
         };
+      }
+    }
+  } else if (input.operation.startsWith("work_")) {
+    usedWork = true;
+    switch (input.operation) {
+      case "work_projects_list":
+        result = await caller.work.projects.list();
+        break;
+      case "work_project_summary":
+        result = await caller.work.projects.get({ projectId: input.projectId });
+        break;
+      case "work_task_read":
+        result = await caller.work.tasks.get({ itemId: input.itemId });
+        break;
+      case "work_task_create": {
+        const { operation: _operation, ...task } = input;
+        result = await caller.work.tasks.create({ ...task, itemType: "task" });
+        break;
+      }
+      case "work_task_update": {
+        const currentTask = await caller.work.tasks.get({
+          itemId: input.itemId,
+        });
+        if (currentTask.projectId !== input.projectId)
+          throw new Error("QM_WORK_TASK_PROJECT_MISMATCH");
+        const {
+          operation: _operation,
+          projectId: _projectId,
+          ...update
+        } = input;
+        result = await caller.work.tasks.update(update);
+        break;
+      }
+      case "work_task_assign": {
+        const currentTask = await caller.work.tasks.get({
+          itemId: input.itemId,
+        });
+        if (currentTask.projectId !== input.projectId)
+          throw new Error("QM_WORK_TASK_PROJECT_MISMATCH");
+        result = await caller.work.tasks.update({
+          itemId: input.itemId,
+          assigneeEmployeeId: input.assigneeEmployeeId,
+        });
+        break;
       }
     }
   } else {
@@ -362,6 +461,14 @@ export async function runQmOsTool(token: string, raw: unknown) {
     ))
   )
     throw new Error("QM_CONNECTION_CHANGED");
+  if (
+    usedWork &&
+    !(await featureEnabled("work.projects", {
+      userId: current.employeeId,
+      roles: current.roles,
+    }))
+  )
+    throw new Error("QM_WORK_ACCESS_CHANGED");
   if (
     usedSales &&
     !(await featureEnabled("crm.workspace", {
