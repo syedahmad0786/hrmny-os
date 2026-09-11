@@ -475,7 +475,7 @@ export function isActiveComposioRemote(
 export function selectOwnedActiveComposioAccount<
   T extends {
     id: string;
-    user_id: string;
+    user_id?: string | null;
     status: string;
     is_disabled?: boolean | null;
     toolkit: { slug: string };
