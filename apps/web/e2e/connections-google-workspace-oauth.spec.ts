@@ -108,36 +108,28 @@ test.describe("Connections Google Workspace OAuth", () => {
     await page.route("**/__test-google-chat-consent", (route) =>
       route.fulfill({ contentType: "text/html", body: "consent mock" }),
     );
-    await page.route("**/api/trpc/connections.list**", (route) =>
-      route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify([
-          {
-            result: {
-              data: {
-                json: [
-                  {
-                    toolkit: "google_workspace",
-                    label: "Google Workspace",
-                    authType: "oauth",
-                    ready: true,
-                    note: "Test-only enabled OAuth control.",
-                    allowed: true,
-                    connectionAccountId: null,
-                    scope: "staff",
-                    status: "disconnected",
-                    externalConnectionId: null,
-                    hasSecret: false,
-                    lastTestedAt: null,
-                    lastError: null,
-                  },
-                ],
-              },
-            },
-          },
-        ]),
-      }),
-    );
+    await page.route("**/api/trpc/**", async (route) => {
+      const url = new URL(route.request().url());
+      const names = decodeURIComponent(
+        url.pathname.split("/api/trpc/")[1]!,
+      ).split(",");
+      const listIndex = names.indexOf("connections.list");
+      if (listIndex < 0) return route.continue();
+
+      const response = await route.fetch();
+      const results = await response.json();
+      const list = results[listIndex]?.result?.data?.json;
+      if (Array.isArray(list)) {
+        const googleWorkspace = list.find(
+          (item) => item?.toolkit === "google_workspace",
+        );
+        if (googleWorkspace) {
+          googleWorkspace.ready = true;
+          googleWorkspace.allowed = true;
+        }
+      }
+      await route.fulfill({ response, status: 200, json: results });
+    });
     await page.goto("/settings/connections", { waitUntil: "domcontentloaded" });
     const button = page
       .getByTestId("conn-google-chat-read-consent")
