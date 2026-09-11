@@ -303,6 +303,19 @@ export async function listContacts(q?: {
   companyId?: string;
   search?: string;
 }): Promise<ContactRow[]> {
+  const matchesSearch = (row: ContactRow) => {
+    if (!q?.search) return true;
+    const search = q.search.toLowerCase();
+    const fullName = `${row.firstName} ${row.lastName ?? ""}`
+      .trim()
+      .toLowerCase();
+    return (
+      row.firstName.toLowerCase().includes(search) ||
+      (row.lastName ?? "").toLowerCase().includes(search) ||
+      fullName.includes(search) ||
+      (row.email ?? "").toLowerCase().includes(search)
+    );
+  };
   const rows = await withDb(
     async (db) => {
       let rows = await db.select().from(contact).orderBy(contact.firstName);
@@ -310,29 +323,13 @@ export async function listContacts(q?: {
         rows = rows.filter((r) => r.companyId === q.companyId);
       }
       let out = rows.map(mapContact);
-      if (q?.search) {
-        const s = q.search.toLowerCase();
-        out = out.filter(
-          (c) =>
-            c.firstName.toLowerCase().includes(s) ||
-            (c.lastName ?? "").toLowerCase().includes(s) ||
-            (c.email ?? "").toLowerCase().includes(s),
-        );
-      }
+      if (q?.search) out = out.filter(matchesSearch);
       return out;
     },
     () => {
       let rows = [...getCrmMemory().contacts.values()];
       if (q?.companyId) rows = rows.filter((c) => c.companyId === q.companyId);
-      if (q?.search) {
-        const s = q.search.toLowerCase();
-        rows = rows.filter(
-          (c) =>
-            c.firstName.toLowerCase().includes(s) ||
-            (c.lastName ?? "").toLowerCase().includes(s) ||
-            (c.email ?? "").toLowerCase().includes(s),
-        );
-      }
+      if (q?.search) rows = rows.filter(matchesSearch);
       return rows;
     },
   );
