@@ -1126,7 +1126,8 @@ export default function ConnectionsPage() {
                       >
                         <span className="min-w-0 truncate text-muted">
                           Account {index + 1} · ID …
-                          {account.connectionAccountId.slice(-6)} · {account.status.toLowerCase()}
+                          {account.connectionAccountId.slice(-6)} ·{" "}
+                          {account.status.toLowerCase()}
                           {account.statusReason
                             ? ` · ${account.statusReason}`
                             : ""}
