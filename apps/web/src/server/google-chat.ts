@@ -30,6 +30,15 @@ const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_CHAT_API_URL = "https://chat.googleapis.com/v1";
 const GOOGLE_CHAT_BOT_SCOPE = "https://www.googleapis.com/auth/chat.bot";
+const GOOGLE_CHAT_APP_SPACES_SCOPE =
+  "https://www.googleapis.com/auth/chat.app.spaces";
+const googleChatServiceAccountScopeSetSchema = z.enum([
+  "bot",
+  "space-proof",
+]);
+type GoogleChatServiceAccountScopeSet = z.infer<
+  typeof googleChatServiceAccountScopeSetSchema
+>;
 export const GOOGLE_CHAT_INTERACTION_JOB_KIND = "google_chat_interaction";
 export const GOOGLE_CHAT_QM_JOB_KIND = "google_chat_qm_interaction";
 export function qmGoogleChatAllowed(employeeId: string) {
@@ -254,7 +263,13 @@ export function googleChatAsyncConfigured(): boolean {
   }
 }
 
-async function googleChatAccessToken(): Promise<string> {
+export async function googleChatAccessToken(
+  scopeSet: GoogleChatServiceAccountScopeSet = "bot",
+): Promise<string> {
+  const scope =
+    googleChatServiceAccountScopeSetSchema.parse(scopeSet) === "space-proof"
+      ? GOOGLE_CHAT_APP_SPACES_SCOPE
+      : GOOGLE_CHAT_BOT_SCOPE;
   const account = configuredServiceAccount();
   const now = Math.floor(Date.now() / 1_000);
   const encode = (value: unknown) =>
@@ -262,7 +277,7 @@ async function googleChatAccessToken(): Promise<string> {
   const header = encode({ alg: "RS256", typ: "JWT" });
   const claims = encode({
     iss: account.client_email,
-    scope: GOOGLE_CHAT_BOT_SCOPE,
+    scope,
     aud: GOOGLE_TOKEN_URL,
     iat: now,
     exp: now + 3_600,

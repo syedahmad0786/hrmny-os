@@ -22,6 +22,20 @@ test.describe("Connections Google Workspace OAuth", () => {
     await expect(gwCard).not.toContainText(
       /Blocked by the organization connected-app policy/i,
     );
+    const chatReadConsent = page.getByTestId("conn-google-chat-read-consent");
+    await expect(chatReadConsent).toBeVisible();
+    await expect(chatReadConsent).toContainText(
+      /Add Google Chat to Google Workspace/i,
+    );
+    await expect(chatReadConsent).toContainText(
+      /basic account profile, Gmail read and send, Calendar event read/i,
+    );
+    await expect(chatReadConsent).toContainText(
+      /Drive read access and permission to create, edit, and delete files you use with hrmny/i,
+    );
+    await expect(chatReadConsent).toContainText(
+      /read-only access to Chat spaces and memberships/i,
+    );
     await page.getByText("Connection diagnostics", { exact: true }).click();
     await expect(page.getByTestId("connections-app-policy")).toBeVisible();
     await expect(page.getByTestId("conn-card-apollo")).not.toContainText(
@@ -59,6 +73,77 @@ test.describe("Connections Google Workspace OAuth", () => {
     await expect(page.getByTestId("connections-oauth-banner")).toContainText(
       "developer@hrmny.co",
     );
+  });
+
+  test("Chat read permission request carries the opt-in intent without opening Google", async ({
+    page,
+  }) => {
+    page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
+    let requestedIntent: string | null = null;
+    await page.route(
+      "**/api/trpc/connections.startGoogleWorkspaceOAuth**",
+      async (route) => {
+        const url = new URL(route.request().url());
+        const input =
+          route.request().postData() ?? url.searchParams.get("input") ?? "";
+        requestedIntent = input.includes("google_chat_read")
+          ? "google_chat_read"
+          : null;
+        const redirectUrl = new URL(
+          "/__test-google-chat-consent",
+          route.request().url(),
+        ).toString();
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify([
+            {
+              result: {
+                data: {
+                  json: {
+                    redirectUrl,
+                    redirectUri:
+                      "http://localhost:3000/api/integrations/google-workspace/callback",
+                  },
+                },
+              },
+            },
+          ]),
+        });
+      },
+    );
+    await page.route("**/__test-google-chat-consent", (route) =>
+      route.fulfill({ contentType: "text/html", body: "consent mock" }),
+    );
+    await page.route("**/api/trpc/**", async (route) => {
+      const url = new URL(route.request().url());
+      const names = decodeURIComponent(
+        url.pathname.split("/api/trpc/")[1]!,
+      ).split(",");
+      const listIndex = names.indexOf("connections.list");
+      if (listIndex < 0) return route.fallback();
+
+      const response = await route.fetch();
+      const results = await response.json();
+      const list = results[listIndex]?.result?.data?.json;
+      if (Array.isArray(list)) {
+        const googleWorkspace = list.find(
+          (item) => item?.toolkit === "google_workspace",
+        );
+        if (googleWorkspace) {
+          googleWorkspace.ready = true;
+          googleWorkspace.allowed = true;
+        }
+      }
+      await route.fulfill({ response, status: 200, json: results });
+    });
+    await page.goto("/settings/connections", { waitUntil: "domcontentloaded" });
+    const button = page
+      .getByTestId("conn-google-chat-read-consent")
+      .getByRole("button", { name: /Add Google Chat to Google Workspace/i });
+    await expect(button).toBeEnabled();
+    await button.click();
+    await expect(page).toHaveURL(/__test-google-chat-consent/);
+    expect(requestedIntent).toBe("google_chat_read");
   });
 
   test("pasting an n8n key saves through the backend", async ({ page }) => {
@@ -119,7 +204,9 @@ test.describe("Connections Google Workspace OAuth", () => {
     }
   });
 
-  test("mailbox hash scrolls after connection cards render", async ({ page }) => {
+  test("mailbox hash scrolls after connection cards render", async ({
+    page,
+  }) => {
     page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/settings/connections#conn-google_workspace", {
       waitUntil: "domcontentloaded",

@@ -1,8 +1,13 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { z } from "zod";
 import {
   operateQmGoogleChat,
   qmChatWorkerRequest,
 } from "@/server/qm/google-chat-worker";
+import {
+  googleIdentityLookupRequest,
+  resolveEmployeeGoogleIdentity,
+} from "@/server/qm/google-identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,11 +46,17 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "INVALID_JSON" }, { status: 400 });
   }
-  const parsed = qmChatWorkerRequest.safeParse(input);
+  const parsed = z
+    .union([qmChatWorkerRequest, googleIdentityLookupRequest])
+    .safeParse(input);
   if (!parsed.success)
     return Response.json({ error: "INVALID_INPUT" }, { status: 400 });
   try {
-    return Response.json(await operateQmGoogleChat(parsed.data), {
+    const result =
+      parsed.data.action === "resolve_identity"
+        ? { identity: await resolveEmployeeGoogleIdentity(parsed.data) }
+        : await operateQmGoogleChat(parsed.data);
+    return Response.json(result, {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {

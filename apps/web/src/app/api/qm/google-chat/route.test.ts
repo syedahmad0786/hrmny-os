@@ -1,10 +1,18 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { operateQmGoogleChat } from "@/server/qm/google-chat-worker";
+import { resolveEmployeeGoogleIdentity } from "@/server/qm/google-identity";
 import { POST } from "./route";
 
 vi.mock("@/server/qm/google-chat-worker", async (original) => ({
   ...(await original<typeof import("@/server/qm/google-chat-worker")>()),
   operateQmGoogleChat: vi.fn(async () => ({ job: null })),
+}));
+vi.mock("@/server/qm/google-identity", async (original) => ({
+  ...(await original<typeof import("@/server/qm/google-identity")>()),
+  resolveEmployeeGoogleIdentity: vi.fn(async () => ({
+    employeeId: "11111111-1111-4111-8111-111111111111",
+    principal: "developer@hrmny.co",
+  })),
 }));
 afterEach(() => {
   vi.clearAllMocks();
@@ -49,4 +57,75 @@ it("returns only safe revocation and unavailable errors", async () => {
   const response = await POST(request('{"action":"claim"}'));
   expect(response.status).toBe(503);
   expect(await response.json()).toEqual({ error: "QM_CHAT_UNAVAILABLE" });
+});
+
+it("authenticates and strictly validates identity reads without accepting employee authority", async () => {
+  vi.stubEnv("QM_CHAT_BRIDGE_TOKEN", secret);
+  const denied = await POST(
+    request(
+      JSON.stringify({
+        action: "resolve_identity",
+        proof: "chat",
+        googleChatUser: "users/123",
+      }),
+      "Bearer browser-session",
+    ),
+  );
+  expect(denied.status).toBe(403);
+  expect(resolveEmployeeGoogleIdentity).not.toHaveBeenCalled();
+
+  for (const body of [
+    {
+      action: "resolve_identity",
+      proof: "chat",
+      googleChatUser: "users/not-numeric",
+    },
+    {
+      action: "resolve_identity",
+      proof: "oidc",
+      principal: "developer@hrmny.co",
+      googleIssuer: "https://evil.example",
+      googleSubject: "123",
+    },
+    {
+      action: "resolve_identity",
+      proof: "chat",
+      googleChatUser: "users/123",
+      employeeId: "11111111-1111-4111-8111-111111111111",
+    },
+  ]) {
+    expect((await POST(request(JSON.stringify(body)))).status).toBe(400);
+  }
+  expect(resolveEmployeeGoogleIdentity).not.toHaveBeenCalled();
+
+  const response = await POST(
+    request(
+      JSON.stringify({
+        action: "resolve_identity",
+        proof: "oidc",
+        principal: "developer@hrmny.co",
+        googleIssuer: "https://accounts.google.com",
+        googleSubject: "123",
+      }),
+    ),
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    identity: {
+      employeeId: "11111111-1111-4111-8111-111111111111",
+      principal: "developer@hrmny.co",
+    },
+  });
+  const chatResponse = await POST(
+    request(
+      JSON.stringify({
+        action: "resolve_identity",
+        proof: "chat",
+        googleChatUser: "users/123",
+      }),
+    ),
+  );
+  expect(chatResponse.status).toBe(200);
+  expect(resolveEmployeeGoogleIdentity).toHaveBeenCalledTimes(2);
 });

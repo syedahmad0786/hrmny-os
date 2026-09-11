@@ -36,7 +36,7 @@ const journal = JSON.parse(
 ) as { entries: Array<{ tag: string }> };
 const apolloPriorHead = "0075_apollo_search_fencing";
 const apolloHead = "0076_apollo_people_search_serialization";
-const head = "0082_work_authority_fence";
+const head = "0083_employee_google_identity";
 assert.equal(
   journal.entries.at(-1)?.tag,
   head,
@@ -81,6 +81,18 @@ async function prepareSupabaseDatabase(connection: Sql): Promise<void> {
 }
 
 async function assertCurrentHead(connection: Sql): Promise<void> {
+  const [googleIdentity] = await connection<
+    Array<{ installed: boolean; rls: boolean; public_read: boolean }>
+  >`
+    select
+      to_regclass('public.employee_google_identity') is not null as installed,
+      (select relrowsecurity from pg_class where oid='public.employee_google_identity'::regclass) as rls,
+      has_table_privilege('authenticated', 'public.employee_google_identity', 'select') as public_read`;
+  assert.deepEqual(googleIdentity, {
+    installed: true,
+    rls: true,
+    public_read: false,
+  });
   const [workbook] = await connection<
     Array<{ owners: number; rls: boolean; public_read: boolean }>
   >`
