@@ -312,6 +312,14 @@ const WORK_APP_FAMILIES = [
 ] as const;
 
 export default function ConnectionsPage() {
+  return <ConnectionsPageContent />;
+}
+
+export function ConnectionsPageContent({
+  embedded = false,
+}: {
+  embedded?: boolean;
+}) {
   const [salesOnly, setSalesOnly] = useState(false);
   useEffect(() => {
     setSalesOnly(
@@ -536,9 +544,11 @@ export default function ConnectionsPage() {
         >
           All business tools
         </button>
-        <Link className="crm-btn" href="/crm/dashboard">
-          Back to sales
-        </Link>
+        {!embedded ? (
+          <Link className="crm-btn" href="/crm/dashboard">
+            Back to sales
+          </Link>
+        ) : null}
       </nav>
       {list.error ? (
         <p role="alert">Could not load connections: {list.error.message}</p>

@@ -96,6 +96,10 @@ export const ROUTES: RouteEntry[] = [
     expectedHeading: "Could not load outreach",
     absentButtons: ["Approve draft", "Send this email"],
   }),
+  staff("/assistant/integrations", {
+    standaloneStaff: true,
+    expectedHeading: "Connections",
+  }),
   staff("/assets"), // dev-only DAM probe — 404s unless getAuthMode()==="dev"
   staff("/benefits"),
   staff("/billing"),
