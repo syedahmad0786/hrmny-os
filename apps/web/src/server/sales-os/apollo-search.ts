@@ -1212,11 +1212,68 @@ function assertReceiptOwner(
 export async function getApolloPeopleSearchStatus(input: {
   idempotencyKey: string;
   actorEmployeeId?: string | null;
+  database?: Db;
 }): Promise<ApolloPeopleSearchResult | null> {
   const receipt = await getIntegrationReceipt("apollo", input.idempotencyKey);
   if (!receipt) return null;
   assertReceiptOwner(receipt, input.actorEmployeeId);
-  return resultFromReceipt(input.idempotencyKey, receipt, true);
+  const result = resultFromReceipt(input.idempotencyKey, receipt, true);
+  if (!new Set(["processing", "retry_scheduled"]).has(result.status)) {
+    return result;
+  }
+  const db = input.database ?? getDb();
+  if (!db) return result;
+  const [job] = await db
+    .select({
+      status: scheduledJob.status,
+      attempts: scheduledJob.attempts,
+      runAt: scheduledJob.runAt,
+      leaseExpiresAt: scheduledJob.leaseExpiresAt,
+    })
+    .from(scheduledJob)
+    .where(
+      and(
+        eq(scheduledJob.integrationInboxId, receipt.receiptId),
+        eq(scheduledJob.kind, APOLLO_PEOPLE_SEARCH_JOB_KIND),
+      ),
+    )
+    .limit(1);
+  return reconcileApolloStatusWithCurrentJob(result, job);
+}
+
+export function reconcileApolloStatusWithCurrentJob(
+  result: ApolloPeopleSearchResult,
+  job:
+    | {
+        status: string;
+        attempts: number;
+        runAt: Date | string;
+        leaseExpiresAt: Date | string | null;
+      }
+    | undefined,
+): ApolloPeopleSearchResult {
+  if (!job || !new Set(["processing", "retry_scheduled"]).has(result.status)) {
+    return result;
+  }
+  if (job.status === "pending") {
+    return {
+      ...result,
+      status: "retry_scheduled",
+      attempts: job.attempts,
+      nextAttemptAt: new Date(job.runAt).toISOString(),
+    };
+  }
+  if (job.status === "running") {
+    return {
+      ...result,
+      status: "processing",
+      attempts: job.attempts,
+      nextAttemptAt: job.leaseExpiresAt
+        ? new Date(job.leaseExpiresAt).toISOString()
+        : undefined,
+    };
+  }
+  return result;
 }
 
 export async function getLatestApolloPeopleSearch(input: {

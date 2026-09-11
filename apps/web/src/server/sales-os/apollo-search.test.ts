@@ -15,6 +15,7 @@ import {
 import {
   ApolloSearchRetryError,
   getApolloPeopleSearchStatus,
+  reconcileApolloStatusWithCurrentJob,
   revokeApolloPeopleSearch,
   runScheduledApolloPeopleSearchForTest,
   searchApolloPeopleFree,
@@ -119,6 +120,30 @@ function workerDeps(source: LeadSourceAdapter, now = NOW) {
 }
 
 describe("durable Apollo zero-credit search bridge", () => {
+  it("reports the current queued retry instead of stale receipt timing", () => {
+    const stale = {
+      receiptId: "receipt",
+      idempotencyKey: "30000000-0000-4000-8000-000000000099",
+      duplicate: true,
+      mode: "live" as const,
+      status: "retry_scheduled" as const,
+      attempts: 0,
+      candidates: [],
+      nextAttemptAt: "2026-08-31T08:00:01.000Z",
+    };
+    expect(
+      reconcileApolloStatusWithCurrentJob(stale, {
+        status: "pending",
+        attempts: 1,
+        runAt: "2026-08-31T08:00:57.000Z",
+        leaseExpiresAt: null,
+      }),
+    ).toMatchObject({
+      status: "retry_scheduled",
+      attempts: 1,
+      nextAttemptAt: "2026-08-31T08:00:57.000Z",
+    });
+  });
   beforeEach(() => resetIntegrationReceiptMemory());
 
   it("queues first, executes once, and replays the immutable receipt", async () => {
