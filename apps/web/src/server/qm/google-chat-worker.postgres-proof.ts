@@ -80,6 +80,7 @@ async function enqueue(employeeId: string) {
     receiptId: receipt.receiptId,
     externalEventId,
     employeeId,
+    conversationKind: "dm" as const,
     googleUserName: employeeId === employeeA ? "users/111" : "users/222",
     spaceName: "spaces/QmSynthetic",
     threadName: "spaces/QmSynthetic/threads/shared",

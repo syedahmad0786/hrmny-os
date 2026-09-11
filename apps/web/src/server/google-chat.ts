@@ -107,6 +107,7 @@ export const googleChatJobSchema = z.object({
   receiptId: z.string().uuid(),
   externalEventId: z.string().min(1).max(500),
   employeeId: z.string().uuid(),
+  conversationKind: z.literal("dm"),
   googleUserName: googleUserNameSchema,
   spaceName: googleSpaceNameSchema,
   threadName: googleThreadNameSchema.nullable(),
@@ -128,6 +129,9 @@ const googleChatEventSchema = z
       .object({
         name: googleSpaceNameSchema,
         displayName: z.string().max(200).optional(),
+        type: z.string().max(80).optional(),
+        spaceType: z.string().max(80).optional(),
+        singleUserBotDm: z.boolean().optional(),
       })
       .passthrough(),
     user: z
@@ -156,6 +160,20 @@ type GoogleJwk = z.infer<typeof jwkSchema>;
 type GoogleJwtClaims = z.infer<typeof jwtClaimsSchema>;
 type GoogleChatJob = z.infer<typeof googleChatJobSchema>;
 let jwksCache: { expiresAt: number; keys: GoogleJwk[] } | undefined;
+
+export function googleChatConversationKind(space: {
+  type?: string;
+  spaceType?: string;
+  singleUserBotDm?: boolean;
+}): "dm" | null {
+  if (space.type !== undefined && space.type !== "DM") return null;
+  if (space.spaceType !== undefined && space.spaceType !== "DIRECT_MESSAGE")
+    return null;
+  if (space.singleUserBotDm === false) return null;
+  return space.type === "DM" || space.singleUserBotDm === true
+    ? "dm"
+    : null;
+}
 
 function decodeJsonSegment(segment: string): unknown {
   if (!/^[A-Za-z0-9_-]+$/.test(segment)) throw new Error("JWT_INVALID");
@@ -669,6 +687,13 @@ export async function handleGoogleChatRequest(
   ) {
     return Response.json({ error: "message_scope_mismatch" }, { status: 400 });
   }
+  const conversationKind = googleChatConversationKind(event.space);
+  if (
+    (event.type === "MESSAGE" || event.type === "ADDED_TO_SPACE") &&
+    conversationKind !== "dm"
+  ) {
+    return Response.json({ error: "direct_message_required" }, { status: 403 });
+  }
   const privateReply = (text: string) =>
     Response.json({
       text,
@@ -706,6 +731,7 @@ export async function handleGoogleChatRequest(
       payload: {
         space: event.space.name,
         user: user.employeeId,
+        ...(conversationKind ? { conversationKind } : {}),
       },
     });
   } catch (error) {
@@ -737,6 +763,7 @@ export async function handleGoogleChatRequest(
           receiptId: receipt.receiptId,
           externalEventId,
           employeeId: user.employeeId,
+          conversationKind,
           googleUserName: event.user.name,
           spaceName: event.space.name,
           threadName,
