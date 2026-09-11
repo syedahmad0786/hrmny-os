@@ -2,7 +2,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createHmac } from "node:crypto";
 import { resolveActiveStaffById } from "./auth/session";
 import { requireProjectAccess } from "./trpc/work-management-router";
-import { readAuthorizedGbrain } from "./gbrain-access";
+import {
+  readAuthorizedGbrain,
+  readAuthorizedProjectGbrain,
+} from "./gbrain-access";
 import { buildChatDefaultTools } from "./trpc/chat-router";
 vi.mock("./auth/session", () => ({
   resolveActiveStaffById: vi.fn(),
@@ -71,6 +74,30 @@ it("uses current project access and server-selected sources, then rechecks befor
       sources: ["other"],
     }),
   ).rejects.toThrow();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it("uses only company and the trusted Work project for a shared-context read", async () => {
+  await readAuthorizedProjectGbrain(employeeId, projectId, {
+    operation: "search",
+    query: "launch",
+  });
+  expect(requireProjectAccess).toHaveBeenCalledTimes(2);
+  for (const [context, selectedProject] of vi.mocked(requireProjectAccess).mock
+    .calls) {
+    expect(selectedProject).toBe(projectId);
+    expect(context).toMatchObject({ requestedFeatureKey: "work.projects" });
+  }
+  const sources = JSON.parse(String(fetcher.mock.calls[0]![1]?.body)).sources;
+  expect(sources).toEqual(["hrmny-company", `hrmny-project-${projectId}`]);
+  expect(sources).not.toContain(`hrmny-personal-${employeeId}`);
+
+  await expect(
+    readAuthorizedProjectGbrain(employeeId, projectId, {
+      operation: "search",
+      query: "launch",
+      projectId: "c0000000-0000-4000-8000-000000000003",
+    }),
+  ).rejects.toThrow("GBRAIN_PROJECT_SCOPE_MISMATCH");
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 it("blocks unauthorized projects before dispatch and revocation during provider execution", async () => {

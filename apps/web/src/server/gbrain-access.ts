@@ -24,15 +24,25 @@ const requestSchema = z.discriminatedUnion("operation", [
     .strict(),
 ]);
 
+type GbrainSourceScope = {
+  includePersonal: boolean;
+  projectId?: string;
+  requireWorkFeature: boolean;
+};
+
 /** Resolve permissions afresh; never accept source IDs or employee identity from tool arguments. */
-async function sourcesForEmployee(employeeId: string, projectId?: string) {
+async function sourcesForEmployee(
+  employeeId: string,
+  scope: GbrainSourceScope,
+) {
   const user = await resolveActiveStaffById(
     z.string().uuid().parse(employeeId),
   );
   if (!user || user.actorType !== "staff" || user.clientId !== null)
     throw new Error("GBRAIN_ACCESS_DENIED");
-  const sources = ["hrmny-company", `hrmny-personal-${user.employeeId}`];
-  if (projectId) {
+  const sources = ["hrmny-company"];
+  if (scope.includePersonal) sources.push(`hrmny-personal-${user.employeeId}`);
+  if (scope.projectId) {
     await requireProjectAccess(
       {
         user,
@@ -40,10 +50,13 @@ async function sourcesForEmployee(employeeId: string, projectId?: string) {
         roles: user.roles,
         clientId: null,
         canViewMargin: sessionCanViewMargin(user),
+        requestedFeatureKey: scope.requireWorkFeature
+          ? "work.projects"
+          : undefined,
       },
-      projectId,
+      scope.projectId,
     );
-    sources.push(`hrmny-project-${projectId}`);
+    sources.push(`hrmny-project-${scope.projectId}`);
   }
   return sources;
 }
@@ -54,9 +67,30 @@ export function gbrainRetrievalConfigured() {
   );
 }
 
-export async function readAuthorizedGbrain(employeeId: string, input: unknown) {
+async function readGbrain(
+  employeeId: string,
+  input: unknown,
+  trustedProjectId?: string,
+) {
   const parsed = requestSchema.parse(input);
-  const sources = await sourcesForEmployee(employeeId, parsed.projectId);
+  if (
+    trustedProjectId &&
+    parsed.projectId &&
+    parsed.projectId !== trustedProjectId
+  )
+    throw new Error("GBRAIN_PROJECT_SCOPE_MISMATCH");
+  const scope: GbrainSourceScope = trustedProjectId
+    ? {
+        includePersonal: false,
+        projectId: trustedProjectId,
+        requireWorkFeature: true,
+      }
+    : {
+        includePersonal: true,
+        projectId: parsed.projectId,
+        requireWorkFeature: false,
+      };
+  const sources = await sourcesForEmployee(employeeId, scope);
   const secret = process.env.GBRAIN_REQUEST_SECRET;
   if (!secret || secret.length < 32 || !process.env.GBRAIN_RETRIEVAL_URL)
     throw new Error("GBRAIN_RETRIEVAL_NOT_CONFIGURED");
@@ -122,8 +156,21 @@ export async function readAuthorizedGbrain(employeeId: string, input: unknown) {
   if (result.requestId !== requestId || !Array.isArray(result.results))
     throw new Error("GBRAIN_RESPONSE_INVALID");
   // Membership can be removed while the provider is working; discard the entire response.
-  const current = await sourcesForEmployee(employeeId, parsed.projectId);
+  const current = await sourcesForEmployee(employeeId, scope);
   if (JSON.stringify(current) !== JSON.stringify(sources))
     throw new Error("GBRAIN_ACCESS_CHANGED");
   return { requestId, results: result.results };
+}
+
+export async function readAuthorizedGbrain(employeeId: string, input: unknown) {
+  return readGbrain(employeeId, input);
+}
+
+/** Internal shared-context entry point; project scope comes only from native capability verification. */
+export async function readAuthorizedProjectGbrain(
+  employeeId: string,
+  projectId: string,
+  input: unknown,
+) {
+  return readGbrain(employeeId, input, z.string().uuid().parse(projectId));
 }
