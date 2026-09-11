@@ -596,6 +596,26 @@ describe("durable Apollo zero-credit search bridge", () => {
     ).rejects.toThrow(/FORBIDDEN/);
   });
 
+  it("does not return a stale queued receipt after its durable job finishes", () => {
+    expect(
+      reconcileApolloStatusWithCurrentJob(
+        {
+          idempotencyKey: "30000000-0000-4000-8000-000000000009",
+          status: "retry_scheduled",
+          mode: "live",
+          attempts: 0,
+          candidates: [],
+        },
+        {
+          status: "completed",
+          attempts: 1,
+          runAt: NOW,
+          leaseExpiresAt: null,
+        },
+      ),
+    ).toMatchObject({ status: "processing", attempts: 1 });
+  });
+
   it("fails closed when the durable queue is unavailable", async () => {
     const source = sourceWith(async () => execution());
     await expect(

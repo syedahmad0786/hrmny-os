@@ -1238,6 +1238,19 @@ export async function getApolloPeopleSearchStatus(input: {
       ),
     )
     .limit(1);
+  if (job?.status === "completed" || job?.status === "failed") {
+    const refreshed = await getIntegrationReceipt("apollo", input.idempotencyKey);
+    if (!refreshed) throw new Error("APOLLO_SEARCH_RECEIPT_NOT_FOUND");
+    assertReceiptOwner(refreshed, input.actorEmployeeId);
+    const refreshedResult = resultFromReceipt(
+      input.idempotencyKey,
+      refreshed,
+      true,
+    );
+    if (!new Set(["processing", "retry_scheduled"]).has(refreshedResult.status)) {
+      return refreshedResult;
+    }
+  }
   return reconcileApolloStatusWithCurrentJob(result, job);
 }
 
@@ -1271,6 +1284,14 @@ export function reconcileApolloStatusWithCurrentJob(
       nextAttemptAt: job.leaseExpiresAt
         ? new Date(job.leaseExpiresAt).toISOString()
         : undefined,
+    };
+  }
+  if (job.status === "completed" || job.status === "failed") {
+    return {
+      ...result,
+      status: "processing",
+      attempts: job.attempts,
+      nextAttemptAt: undefined,
     };
   }
   return result;
@@ -1317,6 +1338,37 @@ export async function getLatestApolloPeopleSearch(input: {
   if (!stored.success || stored.data.actorEmployeeId !== actorEmployeeId) {
     return null;
   }
+  const receipt = durableReceipt(row, true);
+  assertReceiptOwner(receipt, actorEmployeeId);
+  const result = resultFromReceipt(row.idempotencyKey, receipt, true);
+  let reconciled = result;
+  if (new Set(["processing", "retry_scheduled"]).has(result.status)) {
+    const [job] = await db
+      .select({
+        status: scheduledJob.status,
+        attempts: scheduledJob.attempts,
+        runAt: scheduledJob.runAt,
+        leaseExpiresAt: scheduledJob.leaseExpiresAt,
+      })
+      .from(scheduledJob)
+      .where(
+        and(
+          eq(scheduledJob.integrationInboxId, receipt.receiptId),
+          eq(scheduledJob.kind, APOLLO_PEOPLE_SEARCH_JOB_KIND),
+        ),
+      )
+      .limit(1);
+    if (job?.status === "completed" || job?.status === "failed") {
+      const refreshed = await getIntegrationReceipt("apollo", row.idempotencyKey);
+      if (refreshed) {
+        assertReceiptOwner(refreshed, actorEmployeeId);
+        reconciled = resultFromReceipt(row.idempotencyKey, refreshed, true);
+      }
+    }
+    if (new Set(["processing", "retry_scheduled"]).has(reconciled.status)) {
+      reconciled = reconcileApolloStatusWithCurrentJob(reconciled, job);
+    }
+  }
   return {
     search: {
       idempotencyKey: row.idempotencyKey,
@@ -1332,11 +1384,7 @@ export async function getLatestApolloPeopleSearch(input: {
       employeeCountMax: stored.data.criteria.employeeCountMax,
       perPage: stored.data.criteria.perPage,
     },
-    result: resultFromReceipt(
-      row.idempotencyKey,
-      durableReceipt(row, true),
-      true,
-    ),
+    result: reconciled,
   };
 }
 
