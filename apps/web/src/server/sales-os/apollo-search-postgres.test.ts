@@ -14,10 +14,14 @@ import {
   it,
   vi,
 } from "vitest";
-import { getDb } from "../db";
+import { getDb, withDatabaseScope } from "../db";
+import { persistCompletedApolloFreeSearchToCrm } from "../crm/apollo-search-import";
+import { listNotes } from "../crm/repository";
 import {
   completeIntegrationReceiptIfProcessing,
   hashIntegrationPayload,
+  getIntegrationReceipt,
+  recordIntegrationReceipt,
 } from "../integrations/inbox";
 import {
   disconnectGovernedApiKeyConnection,
@@ -422,6 +426,67 @@ afterEach(async () => {
 });
 
 describe("Apollo queue PostgreSQL proof", () => {
+  it("rolls back CRM rows and import lineage together, then dedupes concurrent recovery", async () => {
+    const db = getDb()!;
+    const idempotencyKey = crypto.randomUUID();
+    const externalId = `crm-atomic-${idempotencyKey}`;
+    const companyName = `CRM atomic proof ${idempotencyKey}`;
+    const search = await recordIntegrationReceipt({
+      provider: "apollo",
+      externalEventId: idempotencyKey,
+      operation: APOLLO_PEOPLE_SEARCH_OPERATION,
+      completed: true,
+      ownerEmployeeId: ACTOR,
+      rawBody: JSON.stringify({ actorEmployeeId: ACTOR }),
+      result: {
+        bridgeStatus: "completed",
+        candidates: [
+          {
+            externalId,
+            companyName,
+            fullName: "Atomic Proof",
+            source: "apollo",
+          },
+        ],
+      },
+    });
+    const input = {
+      sourceSearchReceiptId: search.receiptId,
+      idempotencyKey,
+      actorEmployeeId: ACTOR,
+    };
+    // Keep this synthetic import fixture out of the latest-search proof below.
+    await db.execute(sql`
+      update public.integration_inbox set received_at = '2000-01-01T00:00:00Z'::timestamptz
+      where integration_inbox_id = ${search.receiptId}::uuid
+    `);
+    await expect(
+      db.transaction((tx) =>
+        withDatabaseScope(tx as unknown as Db, async () => {
+          await persistCompletedApolloFreeSearchToCrm(input);
+          throw new Error("INTERRUPTED_BEFORE_COMMIT");
+        }),
+      ),
+    ).rejects.toThrow("INTERRUPTED_BEFORE_COMMIT");
+    expect(
+      await getIntegrationReceipt(
+        "apollo",
+        `free-auto-import:${ACTOR}:${externalId}`,
+      ),
+    ).toBeNull();
+    const [afterRollback] = await db.execute<{ count: number }>(sql`
+      select count(*)::int as count from public.company where name = ${companyName}
+    `);
+    expect(afterRollback?.count).toBe(0);
+    const [first, second] = await Promise.all([
+      persistCompletedApolloFreeSearchToCrm(input),
+      persistCompletedApolloFreeSearchToCrm(input),
+    ]);
+    expect(first[0]?.dealId).toBe(second[0]?.dealId);
+    expect(first[0]?.contactId).toBe(second[0]?.contactId);
+    expect(await listNotes({ dealId: first[0]!.dealId })).toHaveLength(1);
+  });
+
   it("restores the newest durable search for the exact employee", async () => {
     const source = sourceWith(async () => execution("latest-search-proof"));
     const db = getDb()!;
@@ -479,6 +544,55 @@ describe("Apollo queue PostgreSQL proof", () => {
     });
     expect(first.receiptId).not.toBe(second.receiptId);
     expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+  });
+
+  it("fails a malformed completed native CRM import without reissuing Apollo", async () => {
+    const source = sourceWith(async () =>
+      execution("must-not-run-crm-contract"),
+    );
+    const pending = await searchApolloPeopleFree(
+      {
+        idempotencyKey: "41000000-0000-4000-8000-000000000049",
+        actorEmployeeId: ACTOR,
+        query: "malformed completed CRM import",
+        nativeOs: true,
+      },
+      { leadSource: source },
+    );
+    const db = getDb()!;
+    await db.execute(sql`
+      update public.integration_inbox
+      set status = 'completed', processed_at = now(),
+          result = jsonb_build_object(
+            'bridgeStatus', 'completed',
+            'candidates', jsonb_build_array(jsonb_build_object(
+              'externalId', 'malformed-crm-candidate',
+              'fullName', repeat('x', 242),
+              'source', 'apollo'
+            ))
+          )
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+    const [job] = await db.execute<{ scheduled_job_id: string }>(sql`
+      select scheduled_job_id from public.scheduled_job
+      where integration_inbox_id = ${pending.receiptId}::uuid
+    `);
+
+    await expect(
+      runApolloPeopleSearchQueuedJob(job!.scheduled_job_id, {
+        leadSource: source,
+      }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      reason: "APOLLO_SEARCH_IMPORT_NOT_COMPLETED",
+    });
+    expect(source.searchLeadsWithReceipt).not.toHaveBeenCalled();
+    await expect(
+      getApolloPeopleSearchStatus({
+        idempotencyKey: pending.idempotencyKey,
+        actorEmployeeId: ACTOR,
+      }),
+    ).resolves.toMatchObject({ status: "completed" });
   });
 
   it("uses the database clock to decide when a queued job is due", async () => {

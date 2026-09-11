@@ -1123,7 +1123,9 @@ describe("Sales research authorization", () => {
     ).toHaveLength(1);
     expect(await listNotes({ dealId: first.dealId })).toEqual([
       expect.objectContaining({
-        body: "Added Mina Lead (Marketing Director) from Apollo to Northstar Hospitality. No email was unlocked. Target market: Oman. No phone, personal email, or waterfall lookup was used.",
+        body: expect.stringMatching(
+          /^Added Mina Lead \(Marketing Director\) from Apollo to Northstar Hospitality\. No email was unlocked\. Target market: Oman\. No phone, personal email, or waterfall lookup was used\. Source receipt: [0-9a-f-]{36}\.$/,
+        ),
       }),
     ]);
     expect(await creditUsed("apollo_contact")).toBe(0);

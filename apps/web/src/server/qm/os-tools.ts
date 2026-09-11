@@ -7,6 +7,7 @@ import { outreachSnapshotHash } from "../leadgen/outreach-review";
 import { searchGoogleMapsDiscovery } from "../integrations/google-maps-search";
 import { getOutreach, type OutreachItem } from "../leadgen/store";
 import { getVerifiedWorkAppConnection } from "../trpc/connections-router";
+import { getCompletedApolloFreeSearchCrmImports } from "../crm/apollo-search-import";
 import { createCaller } from "../trpc/root";
 import { qmStaff } from "./staff-access";
 
@@ -170,12 +171,43 @@ function context(user: SessionUser) {
     roles: user.roles,
     canViewMargin: sessionCanViewMargin(user),
     clientId: null,
+    nativeOs: true,
   };
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]) {
   const normalized = (values: readonly string[]) => [...new Set(values)].sort();
   return JSON.stringify(normalized(left)) === JSON.stringify(normalized(right));
+}
+
+async function withApolloCrmImports(user: SessionUser, value: unknown) {
+  const completed = z
+    .object({
+      status: z.literal("completed"),
+      receiptId: z.string().uuid(),
+      idempotencyKey: z.string().uuid(),
+    })
+    .passthrough()
+    .safeParse(value);
+  if (!completed.success) return value;
+  const crmImports = await getCompletedApolloFreeSearchCrmImports({
+    sourceSearchReceiptId: completed.data.receiptId,
+    idempotencyKey: completed.data.idempotencyKey,
+    actorEmployeeId: user.employeeId,
+  });
+  const savedDeals = new Map(
+    crmImports
+      .filter((item) => item.status === "completed" && item.dealId)
+      .map((item) => [item.dealId!, item.companyName ?? "Saved prospect"]),
+  );
+  return {
+    ...completed.data,
+    crmImports,
+    nextLinks: [...savedDeals].map(([dealId, label]) => ({
+      href: `/crm/deals/${dealId}`,
+      label,
+    })),
+  };
 }
 
 function artifact(item: OutreachItem) {
@@ -338,17 +370,30 @@ export async function runQmOsTool(token: string, raw: unknown) {
     switch (input.operation) {
       case "apollo_search": {
         const { operation: _operation, ...query } = input;
-        result = await caller.salesOs.apollo.search(query);
+        result = await withApolloCrmImports(
+          user,
+          await caller.salesOs.apollo.search(query),
+        );
         break;
       }
       case "apollo_search_status":
-        result = await caller.salesOs.apollo.searchStatus({
-          idempotencyKey: input.idempotencyKey,
-        });
+        result = await withApolloCrmImports(
+          user,
+          await caller.salesOs.apollo.searchStatus({
+            idempotencyKey: input.idempotencyKey,
+          }),
+        );
         break;
-      case "apollo_latest_search":
-        result = await caller.salesOs.apollo.latestSearch();
+      case "apollo_latest_search": {
+        const latest = await caller.salesOs.apollo.latestSearch();
+        result = latest
+          ? {
+              ...latest,
+              result: await withApolloCrmImports(user, latest.result),
+            }
+          : null;
         break;
+      }
       case "sales_digest":
         result = await caller.salesOs.digest();
         break;

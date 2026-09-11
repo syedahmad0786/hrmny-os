@@ -37,6 +37,7 @@ import {
 } from "../integrations/resolve-keys";
 import { sendApolloSearchRetryEvent } from "../inngest/apollo-search-retry";
 import { APOLLO_PROVIDER_CONCURRENCY_KEY } from "../integrations/apollo-provider-slot";
+import { persistCompletedApolloFreeSearchToCrm } from "../crm/apollo-search-import";
 
 export const APOLLO_PEOPLE_SEARCH_OPERATION = "people.search.zero-credit";
 export const APOLLO_PEOPLE_SEARCH_JOB_KIND = "apollo_people_search";
@@ -164,6 +165,8 @@ const StoredApolloPeopleSearchPayloadSchema = z.object({
   personalEmail: z.literal(false),
   phone: z.literal(false),
   waterfalls: z.literal(false),
+  /** Present only for server-owned native QM searches. */
+  nativeOs: z.literal(true).optional(),
 });
 
 type RetrySchedule = {
@@ -291,6 +294,7 @@ function normalizedCriteria(input: {
 function requestPayload(input: {
   actorEmployeeId?: string | null;
   criteria: NormalizedSearchCriteria;
+  nativeOs?: boolean;
 }) {
   return {
     actorEmployeeId: input.actorEmployeeId ?? null,
@@ -299,6 +303,7 @@ function requestPayload(input: {
     personalEmail: false,
     phone: false,
     waterfalls: false,
+    ...(input.nativeOs ? { nativeOs: true as const } : {}),
   };
 }
 
@@ -457,6 +462,16 @@ function permanentQueueFailureReason(error: unknown): string | null {
     ],
   ]);
   return reasons.get(error.message) ?? null;
+}
+
+function permanentCrmImportFailureReason(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  return new Set([
+    "APOLLO_SEARCH_IMPORT_FORBIDDEN",
+    "APOLLO_SEARCH_IMPORT_NOT_COMPLETED",
+  ]).has(error.message)
+    ? error.message
+    : null;
 }
 
 async function executeSearch(
@@ -1044,6 +1059,16 @@ async function finishSearch(input: {
     if (!current) throw new Error("APOLLO_SEARCH_RECEIPT_NOT_FOUND");
     return resultFromReceipt(input.idempotencyKey, current, true);
   }
+  const payload = StoredApolloPeopleSearchPayloadSchema.safeParse(
+    input.receipt.payload,
+  );
+  if (payload.success && payload.data.nativeOs === true) {
+    await persistCompletedApolloFreeSearchToCrm({
+      sourceSearchReceiptId: input.receipt.receiptId,
+      idempotencyKey: input.idempotencyKey,
+      actorEmployeeId: payload.data.actorEmployeeId,
+    });
+  }
   return result;
 }
 
@@ -1062,6 +1087,8 @@ export async function searchApolloPeopleFree(
     employeeCountMax?: number;
     perPage?: number;
     actorEmployeeId?: string | null;
+    /** Server-derived native QM origin; never accepted by the public input schema. */
+    nativeOs?: boolean;
   },
   deps: ApolloSearchDeps = {},
 ): Promise<ApolloPeopleSearchResult> {
@@ -1070,6 +1097,7 @@ export async function searchApolloPeopleFree(
   const payload = requestPayload({
     actorEmployeeId,
     criteria,
+    nativeOs: input.nativeOs === true,
   });
   const rawBody = JSON.stringify(payload);
   const now = (deps.now ?? (() => new Date()))();
@@ -1239,7 +1267,10 @@ export async function getApolloPeopleSearchStatus(input: {
     )
     .limit(1);
   if (job?.status === "completed" || job?.status === "failed") {
-    const refreshed = await getIntegrationReceipt("apollo", input.idempotencyKey);
+    const refreshed = await getIntegrationReceipt(
+      "apollo",
+      input.idempotencyKey,
+    );
     if (!refreshed) throw new Error("APOLLO_SEARCH_RECEIPT_NOT_FOUND");
     assertReceiptOwner(refreshed, input.actorEmployeeId);
     const refreshedResult = resultFromReceipt(
@@ -1247,7 +1278,9 @@ export async function getApolloPeopleSearchStatus(input: {
       refreshed,
       true,
     );
-    if (!new Set(["processing", "retry_scheduled"]).has(refreshedResult.status)) {
+    if (
+      !new Set(["processing", "retry_scheduled"]).has(refreshedResult.status)
+    ) {
       return refreshedResult;
     }
   }
@@ -1359,7 +1392,10 @@ export async function getLatestApolloPeopleSearch(input: {
       )
       .limit(1);
     if (job?.status === "completed" || job?.status === "failed") {
-      const refreshed = await getIntegrationReceipt("apollo", row.idempotencyKey);
+      const refreshed = await getIntegrationReceipt(
+        "apollo",
+        row.idempotencyKey,
+      );
       if (refreshed) {
         assertReceiptOwner(refreshed, actorEmployeeId);
         reconciled = resultFromReceipt(row.idempotencyKey, refreshed, true);
@@ -1581,6 +1617,17 @@ async function runScheduledApolloPeopleSearch(
     deps.workerClaimedAt ??
     (workerDatabase ? await readDatabaseNow(workerDatabase) : now);
   let current = resultFromReceipt(payload.idempotencyKey, receipt, true);
+  // A process can die after the immutable search completion CAS and before
+  // CRM persistence. Every worker re-entry repairs that owned native receipt.
+  if (current.status === "completed" && stored.nativeOs === true) {
+    await assertQueuedActorAuthorized(stored.actorEmployeeId, deps);
+    await persistCompletedApolloFreeSearchToCrm({
+      sourceSearchReceiptId: receipt.receiptId,
+      idempotencyKey: payload.idempotencyKey,
+      actorEmployeeId: stored.actorEmployeeId,
+    });
+    return current;
+  }
   if (
     current.status === "processing" &&
     receipt.result?.bridgeStatus === "processing"
@@ -1787,6 +1834,10 @@ async function runScheduledApolloPeopleSearch(
       "apollo",
       payload.idempotencyKey,
     ).catch(() => null);
+    // Keep a completed provider result while the job retries its CRM commit.
+    // Classifying this as a provider failure would finish the job too early.
+    if (stored.nativeOs === true && dispatchReceipt?.status === "completed")
+      throw error;
     const providerDispatchEverAuthorized =
       dispatchReceipt?.result?.providerDispatchEverAuthorized === true ||
       error instanceof ApolloProviderRequestError;
@@ -2728,6 +2779,24 @@ export async function runApolloPeopleSearchQueuedJob(
         ? resultFromReceipt(payload.idempotencyKey, receipt, true)
         : null;
       if (result) return persistResult(result);
+    }
+
+    const crmImportFailure = permanentCrmImportFailureReason(error);
+    if (crmImportFailure) {
+      const updated = await updateClaimedJob({
+        status: "failed",
+        runAt: now,
+        completedAt: now,
+        result: { status: "failed", reason: crmImportFailure },
+        lastError: crmImportFailure,
+      });
+      return updated
+        ? {
+            status: "failed",
+            receiptId: payload.receiptId,
+            reason: crmImportFailure,
+          }
+        : readCurrent();
     }
 
     const permanentFailure = permanentQueueFailureReason(error);
