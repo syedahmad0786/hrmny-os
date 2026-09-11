@@ -8,6 +8,7 @@ import {
   listCompanies,
   listContacts,
   listDeals,
+  listNotes,
   updateContact,
   updateDeal,
 } from "./repository";
@@ -103,6 +104,10 @@ export async function importApolloPersonToCrm(input: {
   ownerEmployeeId?: string | null;
   existingContactId?: string | null;
   existingDealId?: string | null;
+  /** Automatic free-search imports may create missing CRM records but must not overwrite staff-maintained records. */
+  preserveExistingFields?: boolean;
+  /** Avoid a duplicate CRM note if a worker retries after persisting the record but before completing its receipt. */
+  dedupeReceiptNote?: boolean;
 }): Promise<ApolloPersonImportResult> {
   const person = input.person;
   const companyName = person.companyName?.trim() || "Unknown company";
@@ -159,18 +164,20 @@ export async function importApolloPersonToCrm(input: {
       isPrimary: true,
     });
   }
-  const updatedContact = await updateContact(contact.contactId, {
-    companyId: company.companyId,
-    ...(person.fullName?.trim()
-      ? { firstName: name.firstName, lastName: name.lastName }
-      : {}),
-    email: email ?? contact.email,
-    title: person.title ?? contact.title,
-    linkedinUrl: linkedin ?? contact.linkedinUrl,
-    emailVerified: contact.emailVerified || verified,
-    isPrimary: true,
-  });
-  contact = updatedContact ?? contact;
+  if (!input.preserveExistingFields || !reusedContact) {
+    const updatedContact = await updateContact(contact.contactId, {
+      companyId: company.companyId,
+      ...(person.fullName?.trim()
+        ? { firstName: name.firstName, lastName: name.lastName }
+        : {}),
+      email: email ?? contact.email,
+      title: person.title ?? contact.title,
+      linkedinUrl: linkedin ?? contact.linkedinUrl,
+      emailVerified: contact.emailVerified || verified,
+      isPrimary: true,
+    });
+    contact = updatedContact ?? contact;
+  }
 
   const deals = await listDeals({ companyId: company.companyId });
   const receiptDeal = input.existingDealId
@@ -179,7 +186,12 @@ export async function importApolloPersonToCrm(input: {
   let deal =
     receiptDeal?.companyId === company.companyId
       ? receiptDeal
-      : deals.find((row) => row.closeOutcome === null);
+      : deals.find(
+          (row) =>
+            row.closeOutcome === null &&
+            (!input.preserveExistingFields ||
+              row.ownerEmployeeId === (input.ownerEmployeeId ?? null)),
+        );
   const reusedDeal = Boolean(deal);
   if (!deal) {
     deal = await createDeal({
@@ -191,16 +203,17 @@ export async function importApolloPersonToCrm(input: {
       ownerEmployeeId: input.ownerEmployeeId ?? null,
     });
   } else if (
-    !deal.primaryContactId ||
-    (deal.dealId === input.existingDealId &&
-      deal.primaryContactId !== contact.contactId)
+    !input.preserveExistingFields &&
+    (!deal.primaryContactId ||
+      (deal.dealId === input.existingDealId &&
+        deal.primaryContactId !== contact.contactId))
   ) {
     deal =
       (await updateDeal(deal.dealId, {
         primaryContactId: contact.contactId,
       })) ?? deal;
   }
-  if (verified && !deal.emailVerified) {
+  if (verified && !deal.emailVerified && !input.preserveExistingFields) {
     deal = (await updateDeal(deal.dealId, { emailVerified: true })) ?? deal;
   }
 
@@ -211,13 +224,22 @@ export async function importApolloPersonToCrm(input: {
       ? "Apollo verified the saved work email."
       : "A work email was saved but is not verified."
     : "No email was unlocked.";
-  await createNote({
-    dealId: deal.dealId,
-    companyId: company.companyId,
-    contactId: contact.contactId,
-    authorEmployeeId: input.ownerEmployeeId ?? null,
-    body: `Added ${contactName}${contactTitle} from Apollo to ${company.name}. ${emailSummary}${input.market && input.market !== "UAE" ? ` Target market: ${input.market}.` : ""} No phone, personal email, or waterfall lookup was used.`,
-  });
+  const receiptMarker = `Source receipt: ${input.receiptId}.`;
+  const noteBody = `Added ${contactName}${contactTitle} from Apollo to ${company.name}. ${emailSummary}${input.market && input.market !== "UAE" ? ` Target market: ${input.market}.` : ""} No phone, personal email, or waterfall lookup was used. ${receiptMarker}`;
+  const alreadyNoted =
+    input.dedupeReceiptNote &&
+    (await listNotes({ dealId: deal.dealId })).some((note) =>
+      note.body.includes(receiptMarker),
+    );
+  if (!alreadyNoted) {
+    await createNote({
+      dealId: deal.dealId,
+      companyId: company.companyId,
+      contactId: contact.contactId,
+      authorEmployeeId: input.ownerEmployeeId ?? null,
+      body: noteBody,
+    });
+  }
 
   return {
     companyId: company.companyId,

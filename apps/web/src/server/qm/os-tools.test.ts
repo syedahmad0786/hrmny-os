@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   featureEnabled: vi.fn(),
   mapsSearch: vi.fn(),
+  crmImports: vi.fn(),
 }));
 
 vi.mock("./staff-access", () => ({ qmStaff: mocks.staff }));
@@ -42,6 +43,9 @@ vi.mock("../leadgen/store", () => ({ getOutreach: mocks.getOutreach }));
 vi.mock("../features", () => ({ featureEnabled: mocks.featureEnabled }));
 vi.mock("../integrations/google-maps-search", () => ({
   searchGoogleMapsDiscovery: mocks.mapsSearch,
+}));
+vi.mock("../crm/apollo-search-import", () => ({
+  getCompletedApolloFreeSearchCrmImports: mocks.crmImports,
 }));
 
 const employeeId = "c0000000-0000-4000-8000-000000000001";
@@ -89,6 +93,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("QM_OS_TOOLS_ENABLED", "1");
   mocks.staff.mockResolvedValue(staff);
+  mocks.crmImports.mockResolvedValue([]);
   mocks.caller.mockReturnValue({
     salesOs: {
       apollo: {
@@ -458,4 +463,39 @@ it("returns bounded Apollo schema corrections without weakening access denials",
       )
     ).status,
   ).toBe(403);
+});
+
+it("adds only caller-owned CRM import receipts to a completed Apollo status", async () => {
+  mocks.apolloStatus.mockResolvedValue({
+    status: "completed",
+    receiptId: searchId,
+    idempotencyKey: searchId,
+    candidates: [],
+  });
+  mocks.crmImports.mockResolvedValue([
+    {
+      externalId: "apollo-person-1",
+      status: "completed",
+      duplicate: false,
+      companyId: dealId,
+      contactId: dealId,
+      dealId,
+      companyName: "Example Motors",
+    },
+  ]);
+
+  await expect(
+    runQmOsTool(token, {
+      operation: "apollo_search_status",
+      idempotencyKey: searchId,
+    }),
+  ).resolves.toMatchObject({
+    status: "completed",
+    crmImports: [{ externalId: "apollo-person-1", dealId }],
+  });
+  expect(mocks.crmImports).toHaveBeenCalledWith({
+    sourceSearchReceiptId: searchId,
+    idempotencyKey: searchId,
+    actorEmployeeId: employeeId,
+  });
 });
