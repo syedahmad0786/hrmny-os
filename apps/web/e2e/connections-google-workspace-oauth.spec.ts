@@ -114,7 +114,7 @@ test.describe("Connections Google Workspace OAuth", () => {
         url.pathname.split("/api/trpc/")[1]!,
       ).split(",");
       const listIndex = names.indexOf("connections.list");
-      if (listIndex < 0) return route.continue();
+      if (listIndex < 0) return route.fallback();
 
       const response = await route.fetch();
       const results = await response.json();
