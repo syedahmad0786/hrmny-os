@@ -838,7 +838,8 @@ export default function ConnectionsPage() {
                         <p className="mt-1">
                           This request asks Google for your basic account
                           profile, Gmail read and send, Calendar event read,
-                          Drive read and app-file access, plus read-only access
+                          Drive read access and permission to create, edit, and
+                          delete files you use with hrmny, plus read-only access
                           to Chat spaces and memberships. The resulting
                           authorization also includes scopes you previously
                           granted to hrmny.

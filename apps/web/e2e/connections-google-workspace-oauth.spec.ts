@@ -31,7 +31,7 @@ test.describe("Connections Google Workspace OAuth", () => {
       /basic account profile, Gmail read and send, Calendar event read/i,
     );
     await expect(chatReadConsent).toContainText(
-      /Drive read and app-file access/i,
+      /Drive read access and permission to create, edit, and delete files you use with hrmny/i,
     );
     await expect(chatReadConsent).toContainText(
       /read-only access to Chat spaces and memberships/i,
