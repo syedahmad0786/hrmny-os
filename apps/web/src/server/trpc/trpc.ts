@@ -36,6 +36,12 @@ export type TrpcContext = {
   requestedFeatureKey?: string | null;
   /** Set only by the server-owned native QM caller, never from a request input. */
   nativeOs?: boolean;
+  /** Server-owned post-commit health notification queue for fenced mutations. */
+  deferHealthSignal?: (
+    signalKey: string,
+    severity: "info" | "warn" | "critical",
+    payload: Record<string, unknown>,
+  ) => void;
 };
 
 export async function createContext(

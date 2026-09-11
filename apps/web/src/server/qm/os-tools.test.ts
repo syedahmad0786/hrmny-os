@@ -28,10 +28,34 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   featureEnabled: vi.fn(),
   mapsSearch: vi.fn(),
+  contactsList: vi.fn(),
+  contactGet: vi.fn(),
+  contactUpdate: vi.fn(),
+  dealsList: vi.fn(),
+  dealGet: vi.fn(),
+  dealUpdate: vi.fn(),
+  dealMoveStage: vi.fn(),
+  getDb: vi.fn(),
+  transaction: vi.fn(),
+  authorizationFence: vi.fn(),
+  resolveActiveStaffById: vi.fn(),
+  withDatabaseScope: vi.fn(),
   crmImports: vi.fn(),
+  emitHealthSignal: vi.fn(),
 }));
 
 vi.mock("./staff-access", () => ({ qmStaff: mocks.staff }));
+vi.mock("../db", () => ({
+  getDb: mocks.getDb,
+  withDatabaseScope: mocks.withDatabaseScope,
+}));
+vi.mock("../auth/authorization-fence", () => ({
+  lockStaffFeatureAuthorizationInputs: mocks.authorizationFence,
+}));
+vi.mock("../auth/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../auth/session")>()),
+  resolveActiveStaffById: mocks.resolveActiveStaffById,
+}));
 vi.mock("../trpc/root", () => ({ createCaller: mocks.caller }));
 vi.mock("../trpc/connections-router", () => ({
   getVerifiedWorkAppConnection: mocks.connection,
@@ -41,6 +65,9 @@ vi.mock("../composio-connected-data-ai", () => ({
 }));
 vi.mock("../leadgen/store", () => ({ getOutreach: mocks.getOutreach }));
 vi.mock("../features", () => ({ featureEnabled: mocks.featureEnabled }));
+vi.mock("../m1-persistence", () => ({
+  emitHealthSignal: mocks.emitHealthSignal,
+}));
 vi.mock("../integrations/google-maps-search", () => ({
   searchGoogleMapsDiscovery: mocks.mapsSearch,
 }));
@@ -93,6 +120,14 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("QM_OS_TOOLS_ENABLED", "1");
   mocks.staff.mockResolvedValue(staff);
+  mocks.getDb.mockReturnValue(null);
+  mocks.withDatabaseScope.mockImplementation(
+    (_db: unknown, work: () => Promise<unknown>) => work(),
+  );
+  mocks.resolveActiveStaffById.mockResolvedValue(staff);
+  mocks.transaction.mockImplementation(
+    async (work: (tx: unknown) => Promise<unknown>) => work({}),
+  );
   mocks.crmImports.mockResolvedValue([]);
   mocks.caller.mockReturnValue({
     salesOs: {
@@ -116,6 +151,19 @@ beforeEach(() => {
       accountSummary: mocks.accountSummary,
       nextBestAction: mocks.nextBestAction,
       draftOutreach: mocks.draftOutreach,
+    },
+    crm: {
+      contacts: {
+        list: mocks.contactsList,
+        get: mocks.contactGet,
+        update: mocks.contactUpdate,
+      },
+      deals: {
+        list: mocks.dealsList,
+        get: mocks.dealGet,
+        update: mocks.dealUpdate,
+        moveStage: mocks.dealMoveStage,
+      },
     },
     leadgen: {
       outreach: {
@@ -376,6 +424,182 @@ it("runs bounded Maps discovery only for a Sales role with CRM enabled", async (
       q: "Dubai agencies",
     }),
   ).rejects.toThrow("QM_SALES_ACCESS_DENIED");
+});
+
+it("reads and updates the canonical CRM records through existing routers", async () => {
+  const contactId = "c0000000-0000-4000-8000-000000000021";
+  mocks.contactsList.mockResolvedValue([{ contactId, firstName: "Mina" }]);
+  mocks.contactGet.mockResolvedValue({ contactId, firstName: "Mina" });
+  mocks.contactUpdate.mockResolvedValue({
+    contactId,
+    firstName: "Mina",
+    title: "CEO",
+  });
+  mocks.dealsList.mockResolvedValue([{ dealId, stage: "qualified" }]);
+  mocks.dealGet.mockResolvedValue({ dealId, stage: "qualified" });
+  mocks.dealUpdate.mockResolvedValue({
+    dealId,
+    stage: "qualified",
+    buafUrgency: true,
+  });
+
+  await expect(
+    runQmOsTool(token, { operation: "crm_contacts_list", search: "Mina" }),
+  ).resolves.toMatchObject({
+    items: [{ contactId, firstName: "Mina" }],
+    total: 1,
+    truncated: false,
+  });
+  await expect(
+    runQmOsTool(token, { operation: "crm_contact_get", contactId }),
+  ).resolves.toMatchObject({ contactId });
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_contact_update",
+      contactId,
+      title: "CEO",
+    }),
+  ).resolves.toMatchObject({ contactId, title: "CEO" });
+  expect(mocks.contactUpdate).toHaveBeenCalledWith({
+    id: contactId,
+    title: "CEO",
+  });
+
+  await expect(
+    runQmOsTool(token, { operation: "crm_deals_list", stage: "qualified" }),
+  ).resolves.toMatchObject({
+    items: [{ dealId, stage: "qualified" }],
+    total: 1,
+    truncated: false,
+  });
+  await expect(
+    runQmOsTool(token, { operation: "crm_deal_get", dealId }),
+  ).resolves.toMatchObject({ dealId });
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_deal_update",
+      dealId,
+      buafUrgency: true,
+    }),
+  ).resolves.toMatchObject({ dealId, buafUrgency: true });
+  expect(mocks.dealUpdate).toHaveBeenCalledWith({
+    id: dealId,
+    buafUrgency: true,
+  });
+});
+
+it("keeps CRM field and stage authorization inside existing guarded mutations", async () => {
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_deal_update",
+      dealId,
+      ownerEmployeeId: "c0000000-0000-4000-8000-000000000099",
+    }),
+  ).rejects.toThrow();
+  expect(mocks.dealUpdate).not.toHaveBeenCalled();
+
+  mocks.dealMoveStage.mockResolvedValue({
+    ok: false,
+    reason: "gate_blocked",
+    code: "gate_blocked",
+  });
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_deal_move_stage",
+      dealId,
+      to: "proposal",
+    }),
+  ).resolves.toMatchObject({ ok: false, code: "gate_blocked" });
+  expect(mocks.dealMoveStage).toHaveBeenCalledWith({
+    id: dealId,
+    to: "proposal",
+  });
+
+  mocks.contactUpdate.mockRejectedValueOnce(new Error("FORBIDDEN"));
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_contact_update",
+      contactId: "c0000000-0000-4000-8000-000000000021",
+      title: "CEO",
+    }),
+  ).rejects.toThrow("FORBIDDEN");
+});
+
+it("locks and revalidates authorization before a Postgres CRM mutation", async () => {
+  const contactId = "c0000000-0000-4000-8000-000000000021";
+  const order: string[] = [];
+  const database = { transaction: mocks.transaction };
+  mocks.getDb.mockReturnValue(database);
+  mocks.authorizationFence.mockImplementation(async () => {
+    order.push("fence");
+  });
+  mocks.resolveActiveStaffById.mockImplementation(async () => {
+    order.push("staff");
+    return staff;
+  });
+  mocks.contactUpdate.mockImplementation(async () => {
+    order.push("write");
+    return { contactId, title: "CEO" };
+  });
+
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_contact_update",
+      contactId,
+      title: "CEO",
+    }),
+  ).resolves.toMatchObject({ contactId, title: "CEO" });
+
+  expect(order).toEqual(["fence", "staff", "write"]);
+  expect(mocks.authorizationFence).toHaveBeenCalledWith({}, employeeId);
+  expect(mocks.resolveActiveStaffById).toHaveBeenCalledWith(employeeId);
+  expect(mocks.staff).toHaveBeenCalledTimes(1);
+});
+
+it("emits a stage health signal only after the fenced transaction commits", async () => {
+  const order: string[] = [];
+  let deferred:
+    | ((
+        signalKey: string,
+        severity: "info" | "warn" | "critical",
+        payload: Record<string, unknown>,
+      ) => void)
+    | undefined;
+  mocks.getDb.mockReturnValue({ transaction: mocks.transaction });
+  mocks.transaction.mockImplementation(
+    async (work: (tx: unknown) => Promise<unknown>) => {
+      const result = await work({});
+      order.push("commit");
+      return result;
+    },
+  );
+  mocks.caller.mockImplementation(
+    (ctx: { deferHealthSignal?: typeof deferred }) => {
+      deferred = ctx.deferHealthSignal;
+      return {
+        crm: {
+          deals: {
+            moveStage: async () => {
+              order.push("write");
+              deferred?.("crm_deal_transition", "info", { dealId });
+              return { ok: true, deal: { dealId, stage: "proposal" } };
+            },
+          },
+        },
+      };
+    },
+  );
+  mocks.emitHealthSignal.mockImplementation(async () => {
+    order.push("notify");
+  });
+
+  await runQmOsTool(token, {
+    operation: "crm_deal_move_stage",
+    dealId,
+    to: "proposal",
+  });
+
+  expect(order).toEqual(["write", "commit", "notify"]);
 });
 
 it("keeps the route disabled by default and rejects arbitrary or oversized operations", async () => {

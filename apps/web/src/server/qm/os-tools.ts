@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { linkedinProfileUrl } from "@/lib/linkedin-profile";
-import { sessionCanViewMargin, type SessionUser } from "../auth/session";
+import {
+  resolveActiveStaffById,
+  sessionCanViewMargin,
+  type SessionUser,
+} from "../auth/session";
+import { lockStaffFeatureAuthorizationInputs } from "../auth/authorization-fence";
 import { searchComposioConnectedData } from "../composio-connected-data-ai";
 import { featureEnabled } from "../features";
 import { outreachSnapshotHash } from "../leadgen/outreach-review";
@@ -10,6 +15,9 @@ import { getVerifiedWorkAppConnection } from "../trpc/connections-router";
 import { getCompletedApolloFreeSearchCrmImports } from "../crm/apollo-search-import";
 import { createCaller } from "../trpc/root";
 import { qmStaff } from "./staff-access";
+import { getDb, withDatabaseScope } from "../db";
+import type { Db } from "@hrmny/db";
+import { emitHealthSignal } from "../m1-persistence";
 
 const searchApp = z.enum([
   "one_drive",
@@ -64,12 +72,7 @@ const apolloSearch = z
       .array(z.string().trim().min(2).max(120))
       .max(6)
       .optional(),
-    seniorities: z
-      .array(
-        z.enum(apolloSeniorities),
-      )
-      .max(11)
-      .optional(),
+    seniorities: z.array(z.enum(apolloSeniorities)).max(11).optional(),
     includeSimilarTitles: z.boolean().optional(),
     employeeCountMin: z.number().int().min(1).max(1_000_000).optional(),
     employeeCountMax: z.number().int().min(1).max(1_000_000).optional(),
@@ -111,6 +114,80 @@ const inputSchema = z.union([
     .strict(),
   z.object({ operation: z.literal("apollo_latest_search") }).strict(),
   z.object({ operation: z.literal("sales_digest") }).strict(),
+  z
+    .object({
+      operation: z.literal("crm_contacts_list"),
+      companyId: z.string().uuid().optional(),
+      search: z.string().trim().min(1).max(200).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("crm_contact_get"),
+      contactId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("crm_deals_list"),
+      companyId: z.string().uuid().optional(),
+      stage: z.string().trim().min(1).max(120).optional(),
+      lane: z.string().trim().min(1).max(120).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("crm_deal_get"),
+      dealId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("crm_contact_update"),
+      contactId: z.string().uuid(),
+      firstName: z.string().trim().min(1).max(120).optional(),
+      lastName: z.string().trim().max(120).nullable().optional(),
+      email: z.string().email().nullable().optional(),
+      phone: z.string().trim().max(80).nullable().optional(),
+      title: z.string().trim().max(200).nullable().optional(),
+      linkedinUrl: z.string().url().max(500).nullable().optional(),
+    })
+    .strict()
+    .refine(
+      ({ operation: _operation, contactId: _contactId, ...patch }) =>
+        Object.keys(patch).length > 0,
+      { message: "At least one contact field is required" },
+    ),
+  z
+    .object({
+      operation: z.literal("crm_deal_update"),
+      dealId: z.string().uuid(),
+      opportunityName: z.string().trim().min(1).max(200).nullable().optional(),
+      sector: z.string().trim().max(160).nullable().optional(),
+      expectedCloseDate: z.string().date().nullable().optional(),
+      buafBudget: z.boolean().nullable().optional(),
+      buafUrgency: z.boolean().nullable().optional(),
+      buafAccess: z.boolean().nullable().optional(),
+      buafFit: z.boolean().nullable().optional(),
+      buafTemperature: z
+        .enum(["hot", "warm", "cool", "cold"])
+        .nullable()
+        .optional(),
+    })
+    .strict()
+    .refine(
+      ({ operation: _operation, dealId: _dealId, ...patch }) =>
+        Object.keys(patch).length > 0,
+      { message: "At least one deal field is required" },
+    ),
+  z
+    .object({
+      operation: z.literal("crm_deal_move_stage"),
+      dealId: z.string().uuid(),
+      to: z.string().trim().min(1).max(120),
+      overrideReason: z.string().trim().min(1).max(500).nullable().optional(),
+    })
+    .strict(),
   z
     .object({
       operation: z.literal("google_maps_search"),
@@ -164,7 +241,14 @@ const inputSchema = z.union([
     .strict(),
 ]);
 
-function context(user: SessionUser) {
+function context(
+  user: SessionUser,
+  deferHealthSignal?: (
+    signalKey: string,
+    severity: "info" | "warn" | "critical",
+    payload: Record<string, unknown>,
+  ) => void,
+) {
   return {
     user,
     employeeId: user.employeeId,
@@ -172,6 +256,7 @@ function context(user: SessionUser) {
     canViewMargin: sessionCanViewMargin(user),
     clientId: null,
     nativeOs: true,
+    ...(deferHealthSignal ? { deferHealthSignal } : {}),
   };
 }
 
@@ -227,6 +312,129 @@ function artifact(item: OutreachItem) {
   };
 }
 
+function boundedCrmList(items: unknown[], href: string, label: string) {
+  return {
+    items: items.slice(0, 50),
+    total: items.length,
+    truncated: items.length > 50,
+    nextLinks: [{ href, label }],
+  };
+}
+
+function crmRecordLink(value: unknown, kind: "contacts" | "deals", id: string) {
+  if (!value || typeof value !== "object") return value;
+  return {
+    ...value,
+    nextLinks: [
+      {
+        href: `/crm/${kind}/${id}`,
+        label: kind === "contacts" ? "Open CRM contact" : "Open CRM deal",
+      },
+    ],
+  };
+}
+
+type QmOsInput = z.infer<typeof inputSchema>;
+
+function isCrmWrite(input: QmOsInput): input is Extract<
+  QmOsInput,
+  {
+    operation: "crm_contact_update" | "crm_deal_update" | "crm_deal_move_stage";
+  }
+> {
+  return [
+    "crm_contact_update",
+    "crm_deal_update",
+    "crm_deal_move_stage",
+  ].includes(input.operation);
+}
+
+async function dispatchCrmWrite(
+  caller: ReturnType<typeof createCaller>,
+  input: Extract<QmOsInput, { operation: string }>,
+) {
+  switch (input.operation) {
+    case "crm_contact_update": {
+      const { operation: _operation, contactId: id, ...patch } = input;
+      const result = crmRecordLink(
+        await caller.crm.contacts.update({ id, ...patch }),
+        "contacts",
+        id,
+      );
+      if (!result) throw new Error("QM_CRM_CONTACT_NOT_FOUND");
+      return result;
+    }
+    case "crm_deal_update": {
+      const { operation: _operation, dealId: id, ...patch } = input;
+      const result = crmRecordLink(
+        await caller.crm.deals.update({ id, ...patch }),
+        "deals",
+        id,
+      );
+      if (!result) throw new Error("QM_CRM_DEAL_NOT_FOUND");
+      return result;
+    }
+    case "crm_deal_move_stage": {
+      const result = await caller.crm.deals.moveStage({
+        id: input.dealId,
+        to: input.to,
+        ...(input.overrideReason !== undefined
+          ? { overrideReason: input.overrideReason }
+          : {}),
+      });
+      return result.ok
+        ? {
+            ...result,
+            nextLinks: [
+              { href: `/crm/deals/${input.dealId}`, label: "Open CRM deal" },
+            ],
+          }
+        : result;
+    }
+    default:
+      throw new Error("QM_CRM_WRITE_UNSUPPORTED");
+  }
+}
+
+async function runFencedCrmWrite(user: SessionUser, input: QmOsInput) {
+  if (!isCrmWrite(input)) return { handled: false as const };
+  const db = getDb();
+  if (!db) return { handled: false as const };
+  const deferredSignals: Array<{
+    signalKey: string;
+    severity: "info" | "warn" | "critical";
+    payload: Record<string, unknown>;
+  }> = [];
+  const result = await db.transaction(async (tx) => {
+    const scoped = tx as unknown as Db;
+    await lockStaffFeatureAuthorizationInputs(scoped, user.employeeId);
+    return withDatabaseScope(scoped, async () => {
+      const current = await resolveActiveStaffById(user.employeeId);
+      if (
+        !current ||
+        current.employeeId !== user.employeeId ||
+        current.email.toLowerCase() !== user.email.toLowerCase() ||
+        process.env.QM_OS_TOOLS_ENABLED !== "1"
+      )
+        throw new Error("QM_ACCESS_CHANGED");
+      return dispatchCrmWrite(
+        createCaller(
+          context(current, (signalKey, severity, payload) => {
+            deferredSignals.push({ signalKey, severity, payload });
+          }),
+        ),
+        input,
+      );
+    });
+  });
+  await Promise.all(
+    deferredSignals.map(({ signalKey, severity, payload }) =>
+      emitHealthSignal(signalKey, severity, payload).catch(() => undefined),
+    ),
+  );
+  return { handled: true as const, result };
+}
+
 export async function runQmOsTool(token: string, raw: unknown) {
   if (process.env.QM_OS_TOOLS_ENABLED !== "1")
     throw new Error("QM_OS_TOOLS_NOT_ENABLED");
@@ -240,6 +448,8 @@ export async function runQmOsTool(token: string, raw: unknown) {
     if (!parsed.success) throw new QmInvalidInputError(parsed.error);
   }
   const input = inputSchema.parse(raw);
+  const fencedCrmWrite = await runFencedCrmWrite(user, input);
+  if (fencedCrmWrite.handled) return fencedCrmWrite.result;
   const ctx = context(user);
   const caller = createCaller(ctx);
   let result: unknown;
@@ -397,6 +607,80 @@ export async function runQmOsTool(token: string, raw: unknown) {
       case "sales_digest":
         result = await caller.salesOs.digest();
         break;
+      case "crm_contacts_list":
+        result = boundedCrmList(
+          await caller.crm.contacts.list({
+            ...(input.companyId ? { companyId: input.companyId } : {}),
+            ...(input.search ? { search: input.search } : {}),
+          }),
+          "/crm/contacts",
+          "Open CRM contacts",
+        );
+        break;
+      case "crm_contact_get":
+        result = crmRecordLink(
+          await caller.crm.contacts.get({ id: input.contactId }),
+          "contacts",
+          input.contactId,
+        );
+        break;
+      case "crm_deals_list":
+        result = boundedCrmList(
+          await caller.crm.deals.list({
+            ...(input.companyId ? { companyId: input.companyId } : {}),
+            ...(input.stage ? { stage: input.stage } : {}),
+            ...(input.lane ? { lane: input.lane } : {}),
+          }),
+          "/crm/deals",
+          "Open CRM deals",
+        );
+        break;
+      case "crm_deal_get":
+        result = crmRecordLink(
+          await caller.crm.deals.get({ id: input.dealId }),
+          "deals",
+          input.dealId,
+        );
+        break;
+      case "crm_contact_update": {
+        const { operation: _operation, contactId: id, ...patch } = input;
+        result = crmRecordLink(
+          await caller.crm.contacts.update({ id, ...patch }),
+          "contacts",
+          id,
+        );
+        if (!result) throw new Error("QM_CRM_CONTACT_NOT_FOUND");
+        break;
+      }
+      case "crm_deal_update": {
+        const { operation: _operation, dealId: id, ...patch } = input;
+        result = crmRecordLink(
+          await caller.crm.deals.update({ id, ...patch }),
+          "deals",
+          id,
+        );
+        if (!result) throw new Error("QM_CRM_DEAL_NOT_FOUND");
+        break;
+      }
+      case "crm_deal_move_stage": {
+        const moved = await caller.crm.deals.moveStage({
+          id: input.dealId,
+          to: input.to,
+          ...(input.overrideReason !== undefined
+            ? { overrideReason: input.overrideReason }
+            : {}),
+        });
+        result = moved;
+        if (moved.ok) {
+          result = {
+            ...moved,
+            nextLinks: [
+              { href: `/crm/deals/${input.dealId}`, label: "Open CRM deal" },
+            ],
+          };
+        }
+        break;
+      }
       case "google_maps_search": {
         const salesRole = user.roles.some((role) =>
           ["partner", "director", "am", "account_manager"].includes(role),
