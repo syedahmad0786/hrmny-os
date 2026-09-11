@@ -601,6 +601,8 @@ describe("durable Apollo zero-credit search bridge", () => {
       reconcileApolloStatusWithCurrentJob(
         {
           idempotencyKey: "30000000-0000-4000-8000-000000000009",
+          receiptId: "30000000-0000-4000-8000-000000000019",
+          duplicate: true,
           status: "retry_scheduled",
           mode: "live",
           attempts: 0,
