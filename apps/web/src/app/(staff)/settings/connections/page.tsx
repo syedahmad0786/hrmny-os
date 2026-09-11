@@ -319,7 +319,7 @@ export default function ConnectionsPage() {
     );
   }, []);
   const utils = trpc.useUtils();
-  const [personalToolsOpen, setPersonalToolsOpen] = useState(false);
+  const personalToolsOpen = true;
   const list = trpc.connections.list.useQuery();
   const myMailboxes = trpc.connections.myMailboxes.useQuery();
   const salesMailboxes = trpc.connections.salesMailboxes.useQuery({
@@ -1036,24 +1036,21 @@ export default function ConnectionsPage() {
         ) : null}
       </section>
 
-      <details
+      <section
         className="rounded-xl border border-sand bg-white/70 p-5"
-        onToggle={(event) => setPersonalToolsOpen(event.currentTarget.open)}
+        data-testid="connections-app-grid"
       >
-        <summary className="cursor-pointer font-medium text-ink">
-          More personal tools
-        </summary>
         <div className="mt-5 flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ochre">
-              Personal tools via Composio
+              Your apps via Composio
             </p>
             <h2 className="mt-1 font-display text-2xl text-ink">
               Connect your own apps
             </h2>
             <p className="mt-1 text-sm text-muted">
-              Connect, verify, or disconnect only. hrmny OS will not read or act
-              in these tools from this screen.
+              Search approved apps, add an account, or manage accounts you
+              already connected. Each account stays private to you.
             </p>
           </div>
           <input
@@ -1070,7 +1067,7 @@ export default function ConnectionsPage() {
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {(managedToolkits.data?.items ?? []).map((toolkit) => {
-            const account = managedAccounts.data?.find(
+            const accounts = (managedAccounts.data ?? []).filter(
               (candidate) => candidate.toolkit === toolkit.slug,
             );
             return (
@@ -1079,16 +1076,29 @@ export default function ConnectionsPage() {
                 className="rounded-lg border border-sand p-4"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div>
+                  <div className="flex min-w-0 items-center gap-3">
+                    {toolkit.logo ? (
+                      <>
+                        {/* Composio supplies this provider logo with the catalog item. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={toolkit.logo}
+                          alt=""
+                          className="size-10 rounded-lg border border-sand bg-white object-contain p-1"
+                        />
+                      </>
+                    ) : null}
                     <h3 className="font-medium text-ink">{toolkit.name}</h3>
-                    <p className="mt-1 line-clamp-2 text-xs text-muted">
-                      {toolkit.description ?? toolkit.slug}
-                    </p>
                   </div>
                   <span className="rounded-full bg-cream px-2 py-1 text-[10px] font-semibold uppercase text-muted">
-                    {account?.status.toLowerCase() ?? "available"}
+                    {accounts.length
+                      ? `${accounts.length} connected`
+                      : "available"}
                   </span>
                 </div>
+                <p className="mt-3 line-clamp-2 text-xs text-muted">
+                  {toolkit.description ?? toolkit.slug}
+                </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Button
                     type="button"
@@ -1098,29 +1108,44 @@ export default function ConnectionsPage() {
                       authorizeManaged.mutate({ toolkit: toolkit.slug })
                     }
                   >
-                    {account ? "Reconnect" : "Connect"}
+                    {accounts.length ? "Add account" : "Connect"}
                   </Button>
-                  {account ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      disabled={disconnectManaged.isPending}
-                      onClick={() => {
-                        if (
-                          !window.confirm(
-                            `Disconnect ${toolkit.name}? You can reconnect it at any time.`,
-                          )
-                        )
-                          return;
-                        disconnectManaged.mutate({
-                          id: account.connectionAccountId,
-                        });
-                      }}
-                    >
-                      Disconnect
-                    </Button>
-                  ) : null}
                 </div>
+                {accounts.length ? (
+                  <div className="mt-4 grid gap-2 border-t border-sand pt-3">
+                    {accounts.map((account, index) => (
+                      <div
+                        key={account.connectionAccountId}
+                        className="flex items-center justify-between gap-2 text-xs"
+                      >
+                        <span className="min-w-0 truncate text-muted">
+                          Account {index + 1} · {account.status.toLowerCase()}
+                          {account.statusReason
+                            ? ` · ${account.statusReason}`
+                            : ""}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          disabled={disconnectManaged.isPending}
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                `Disconnect this ${toolkit.name} account? You can reconnect it at any time.`,
+                              )
+                            )
+                              return;
+                            disconnectManaged.mutate({
+                              id: account.connectionAccountId,
+                            });
+                          }}
+                        >
+                          Disconnect
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 {!toolkit.allowed ? (
                   <PolicyBlockedNote />
                 ) : (
@@ -1163,7 +1188,7 @@ export default function ConnectionsPage() {
             Next
           </Button>
         </div>
-      </details>
+      </section>
 
       {workApps.data?.apps.length ? (
         <details className="flex flex-col gap-4 rounded-xl border border-sand bg-white/70 p-5">
