@@ -267,11 +267,7 @@ it("rejects a disabled feature without consuming the body and cancels chunked ov
     duplex: "half",
   } as RequestInit & { duplex: "half" });
   const text = vi.spyOn(disabledRequest, "text");
-  expect(
-    (
-      await POST(disabledRequest)
-    ).status,
-  ).toBe(403);
+  expect((await POST(disabledRequest)).status).toBe(403);
   expect(text).not.toHaveBeenCalled();
   expect(disabledRequest.body?.locked).toBe(false);
 
