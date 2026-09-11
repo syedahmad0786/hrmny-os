@@ -195,7 +195,19 @@ async function withApolloCrmImports(user: SessionUser, value: unknown) {
     idempotencyKey: completed.data.idempotencyKey,
     actorEmployeeId: user.employeeId,
   });
-  return { ...completed.data, crmImports };
+  const savedDeals = new Map(
+    crmImports
+      .filter((item) => item.status === "completed" && item.dealId)
+      .map((item) => [item.dealId!, item.companyName ?? "Saved prospect"]),
+  );
+  return {
+    ...completed.data,
+    crmImports,
+    nextLinks: [...savedDeals].map(([dealId, label]) => ({
+      href: `/crm/deals/${dealId}`,
+      label,
+    })),
+  };
 }
 
 function artifact(item: OutreachItem) {

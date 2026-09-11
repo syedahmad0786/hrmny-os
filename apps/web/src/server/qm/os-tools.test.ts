@@ -492,6 +492,7 @@ it("adds only caller-owned CRM import receipts to a completed Apollo status", as
   ).resolves.toMatchObject({
     status: "completed",
     crmImports: [{ externalId: "apollo-person-1", dealId }],
+    nextLinks: [{ href: `/crm/deals/${dealId}`, label: "Example Motors" }],
   });
   expect(mocks.crmImports).toHaveBeenCalledWith({
     sourceSearchReceiptId: searchId,

@@ -126,7 +126,9 @@ export async function importApolloPersonToCrm(input: {
       name: companyName,
       market: input.market ?? "UAE",
       website: domain ? `https://${domain}` : null,
-      notes: "Created from a reviewed Apollo person receipt.",
+      notes: input.preserveExistingFields
+        ? "Created from a free Apollo search receipt; qualification is pending."
+        : "Created from a reviewed Apollo person receipt.",
     });
   }
 

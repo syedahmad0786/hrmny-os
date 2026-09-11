@@ -26,7 +26,7 @@ const ACTOR = "00000000-0000-4000-8000-000000000001";
 const OTHER = "00000000-0000-4000-8000-000000000002";
 const SEARCH = "00000000-0000-4000-8000-000000000010";
 
-async function completedSearch() {
+async function completedSearch(candidate: Record<string, unknown> = {}) {
   return recordIntegrationReceipt({
     provider: "apollo",
     externalEventId: SEARCH,
@@ -44,6 +44,7 @@ async function completedSearch() {
           companyName: "Example Motors",
           companyDomain: "example-motors.test",
           source: "apollo",
+          ...candidate,
         },
       ],
     },
@@ -175,6 +176,23 @@ describe("Apollo free-search CRM persistence", () => {
       dealId: partial.dealId,
     });
     expect(await listNotes({ dealId: partial.dealId })).toHaveLength(1);
+  });
+
+  it("accepts the exact text bounds emitted by Apollo People Search", async () => {
+    const search = await completedSearch({
+      externalId: "apollo-person-boundary",
+      fullName: `${"F".repeat(120)} ${"L".repeat(120)}`,
+      companyDomain: "d".repeat(255),
+    });
+    await expect(
+      persistCompletedApolloFreeSearchToCrm({
+        sourceSearchReceiptId: search.receiptId,
+        idempotencyKey: SEARCH,
+        actorEmployeeId: ACTOR,
+      }),
+    ).resolves.toMatchObject([
+      { externalId: "apollo-person-boundary", status: "completed" },
+    ]);
   });
 
   it.each(["inactive", "crm_disabled"])(

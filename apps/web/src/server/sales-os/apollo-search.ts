@@ -464,6 +464,16 @@ function permanentQueueFailureReason(error: unknown): string | null {
   return reasons.get(error.message) ?? null;
 }
 
+function permanentCrmImportFailureReason(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  return new Set([
+    "APOLLO_SEARCH_IMPORT_FORBIDDEN",
+    "APOLLO_SEARCH_IMPORT_NOT_COMPLETED",
+  ]).has(error.message)
+    ? error.message
+    : null;
+}
+
 async function executeSearch(
   source: LeadSourceAdapter,
   criteria: NormalizedSearchCriteria,
@@ -1257,7 +1267,10 @@ export async function getApolloPeopleSearchStatus(input: {
     )
     .limit(1);
   if (job?.status === "completed" || job?.status === "failed") {
-    const refreshed = await getIntegrationReceipt("apollo", input.idempotencyKey);
+    const refreshed = await getIntegrationReceipt(
+      "apollo",
+      input.idempotencyKey,
+    );
     if (!refreshed) throw new Error("APOLLO_SEARCH_RECEIPT_NOT_FOUND");
     assertReceiptOwner(refreshed, input.actorEmployeeId);
     const refreshedResult = resultFromReceipt(
@@ -1265,7 +1278,9 @@ export async function getApolloPeopleSearchStatus(input: {
       refreshed,
       true,
     );
-    if (!new Set(["processing", "retry_scheduled"]).has(refreshedResult.status)) {
+    if (
+      !new Set(["processing", "retry_scheduled"]).has(refreshedResult.status)
+    ) {
       return refreshedResult;
     }
   }
@@ -1377,7 +1392,10 @@ export async function getLatestApolloPeopleSearch(input: {
       )
       .limit(1);
     if (job?.status === "completed" || job?.status === "failed") {
-      const refreshed = await getIntegrationReceipt("apollo", row.idempotencyKey);
+      const refreshed = await getIntegrationReceipt(
+        "apollo",
+        row.idempotencyKey,
+      );
       if (refreshed) {
         assertReceiptOwner(refreshed, actorEmployeeId);
         reconciled = resultFromReceipt(row.idempotencyKey, refreshed, true);
@@ -2761,6 +2779,24 @@ export async function runApolloPeopleSearchQueuedJob(
         ? resultFromReceipt(payload.idempotencyKey, receipt, true)
         : null;
       if (result) return persistResult(result);
+    }
+
+    const crmImportFailure = permanentCrmImportFailureReason(error);
+    if (crmImportFailure) {
+      const updated = await updateClaimedJob({
+        status: "failed",
+        runAt: now,
+        completedAt: now,
+        result: { status: "failed", reason: crmImportFailure },
+        lastError: crmImportFailure,
+      });
+      return updated
+        ? {
+            status: "failed",
+            receiptId: payload.receiptId,
+            reason: crmImportFailure,
+          }
+        : readCurrent();
     }
 
     const permanentFailure = permanentQueueFailureReason(error);

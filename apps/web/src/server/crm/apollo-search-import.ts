@@ -3,6 +3,7 @@ import { sql } from "@hrmny/db";
 import { importApolloPersonToCrm } from "./apollo-import";
 import { getDb, withDatabaseScope } from "../db";
 import { resolveActiveStaffById } from "../auth/session";
+import { lockStaffFeatureAuthorizationInputs } from "../auth/authorization-fence";
 import { featureEnabled } from "../features";
 import {
   completeIntegrationReceipt,
@@ -15,10 +16,10 @@ const APOLLO_AUTO_IMPORT_OPERATION = "people.search.auto_import";
 
 const candidateSchema = z.object({
   externalId: z.string().trim().min(1).max(180),
-  fullName: z.string().trim().max(240).optional(),
+  fullName: z.string().trim().max(241).optional(),
   title: z.string().trim().max(240).optional(),
   companyName: z.string().trim().max(240).optional(),
-  companyDomain: z.string().trim().max(240).optional(),
+  companyDomain: z.string().trim().max(255).optional(),
   source: z.string().trim().min(1).max(80),
 });
 
@@ -103,6 +104,10 @@ export async function persistCompletedApolloFreeSearchToCrm(input: {
     // ponytail: serialize bounded ten-person imports; use company locks if throughput requires it.
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext('apollo-free-crm-import'))`,
+    );
+    await lockStaffFeatureAuthorizationInputs(
+      tx as unknown as typeof db,
+      input.actorEmployeeId,
     );
     return withDatabaseScope(tx as unknown as typeof db, apply);
   });
