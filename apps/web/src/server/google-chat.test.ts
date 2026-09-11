@@ -112,6 +112,7 @@ describe("Google Chat request verification", () => {
     [{ singleUserBotDm: true }, "dm"],
     [{ type: "ROOM", spaceType: "SPACE" }, null],
     [{ spaceType: "GROUP_CHAT" }, null],
+    [{ spaceType: "DIRECT_MESSAGE" }, null],
     [{ spaceType: "DIRECT_MESSAGE", singleUserBotDm: false }, null],
     [{ type: "DM", spaceType: "SPACE", singleUserBotDm: true }, null],
     [{}, null],
@@ -386,6 +387,7 @@ describe("Google Chat request verification", () => {
     const spaces = [
       { type: "ROOM", spaceType: "SPACE", singleUserBotDm: false },
       { spaceType: "GROUP_CHAT" },
+      { spaceType: "DIRECT_MESSAGE" },
       { spaceType: "DIRECT_MESSAGE", singleUserBotDm: false },
       { type: "DM", spaceType: "SPACE", singleUserBotDm: true },
       {},

@@ -170,9 +170,7 @@ export function googleChatConversationKind(space: {
   if (space.spaceType !== undefined && space.spaceType !== "DIRECT_MESSAGE")
     return null;
   if (space.singleUserBotDm === false) return null;
-  return space.type === "DM" ||
-    space.spaceType === "DIRECT_MESSAGE" ||
-    space.singleUserBotDm === true
+  return space.type === "DM" || space.singleUserBotDm === true
     ? "dm"
     : null;
 }
