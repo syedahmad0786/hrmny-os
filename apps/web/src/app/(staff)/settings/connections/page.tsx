@@ -1070,8 +1070,10 @@ export default function ConnectionsPage() {
             const accounts = (managedAccounts.data ?? []).filter(
               (candidate) => candidate.toolkit === toolkit.slug,
             );
-            const activeAccounts = accounts.filter(
-              (account) => account.status.toUpperCase() === "ACTIVE",
+            const activeAccounts = accounts.filter((account) =>
+              ["ACTIVE", "CONNECTED", "SUCCESS"].includes(
+                account.status.toUpperCase(),
+              ),
             );
             const accountBadge = activeAccounts.length
               ? `${activeAccounts.length} connected`
