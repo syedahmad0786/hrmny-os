@@ -1,5 +1,21 @@
 -- Allow several employee-owned Composio accounts for one toolkit while keeping
 -- every remote account bound to at most one local owner row.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM public.connection_account
+    WHERE owner_employee_id IS NOT NULL
+      AND toolkit LIKE 'composio:%'
+      AND scope = 'staff'
+      AND btrim(coalesce(external_connection_id, '')) <> ''
+    GROUP BY owner_employee_id, lower(btrim(external_connection_id))
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'COMPOSIO_REMOTE_BINDING_DUPLICATE';
+  END IF;
+END $$;
+
 DROP INDEX IF EXISTS public.connection_account_staff_provider_uniq;
 CREATE UNIQUE INDEX connection_account_staff_provider_uniq
   ON public.connection_account (owner_employee_id, toolkit, scope)

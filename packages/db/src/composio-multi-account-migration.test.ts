@@ -19,5 +19,9 @@ describe("0084 managed Composio multi-account migration", () => {
     );
     expect(migration).toContain("connection_account_composio_remote_uniq");
     expect(migration).toContain("lower(btrim(external_connection_id))");
+    expect(migration).toContain("COMPOSIO_REMOTE_BINDING_DUPLICATE");
+    expect(migration).not.toMatch(
+      /DELETE FROM|UPDATE public\.connection_account/i,
+    );
   });
 });
