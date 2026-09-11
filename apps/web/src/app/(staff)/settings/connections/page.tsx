@@ -1070,6 +1070,14 @@ export default function ConnectionsPage() {
             const accounts = (managedAccounts.data ?? []).filter(
               (candidate) => candidate.toolkit === toolkit.slug,
             );
+            const activeAccounts = accounts.filter(
+              (account) => account.status.toUpperCase() === "ACTIVE",
+            );
+            const accountBadge = activeAccounts.length
+              ? `${activeAccounts.length} connected`
+              : accounts.length
+                ? "needs attention"
+                : "available";
             return (
               <div
                 key={toolkit.slug}
@@ -1091,9 +1099,7 @@ export default function ConnectionsPage() {
                     <h3 className="font-medium text-ink">{toolkit.name}</h3>
                   </div>
                   <span className="rounded-full bg-cream px-2 py-1 text-[10px] font-semibold uppercase text-muted">
-                    {accounts.length
-                      ? `${accounts.length} connected`
-                      : "available"}
+                    {accountBadge}
                   </span>
                 </div>
                 <p className="mt-3 line-clamp-2 text-xs text-muted">
@@ -1119,7 +1125,8 @@ export default function ConnectionsPage() {
                         className="flex items-center justify-between gap-2 text-xs"
                       >
                         <span className="min-w-0 truncate text-muted">
-                          Account {index + 1} · {account.status.toLowerCase()}
+                          Account {index + 1} · ID …
+                          {account.connectionAccountId.slice(-6)} · {account.status.toLowerCase()}
                           {account.statusReason
                             ? ` · ${account.statusReason}`
                             : ""}
