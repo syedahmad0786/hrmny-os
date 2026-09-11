@@ -84,7 +84,7 @@ function CreativeQcPageInner() {
       staleTime: 30_000,
       retry: false,
       enabled:
-        managedAccounts.isSuccess &&
+        (managedAccounts.isSuccess || managedAccounts.isError) &&
         (canvaAccounts.length <= 1 || Boolean(selectedCanvaAccountId)),
     },
   );

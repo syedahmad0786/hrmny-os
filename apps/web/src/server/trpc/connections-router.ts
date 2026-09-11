@@ -2370,6 +2370,7 @@ export const connectionsRouter = router({
           // Composio configured but Canva OAuth missing — fall through to stub
           // so Creative→portal demos still work until staff reconnects Canva.
         } catch (err) {
+          if (err instanceof TRPCError) throw err;
           throw new TRPCError({
             code: "BAD_GATEWAY",
             message:
