@@ -1,11 +1,16 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetIntegrationReceiptMemory } from "./integrations/inbox";
+import {
+  getIntegrationReceipt,
+  resetIntegrationReceiptMemory,
+} from "./integrations/inbox";
 import { createCaller } from "./trpc/root";
 import { resolveActiveStaffById } from "./auth/session";
 import {
   googleChatAsyncConfigured,
+  googleChatConversationKind,
   googleChatEndpoint,
+  googleChatJobSchema,
   googleChatReplyMessageId,
   handleGoogleChatRequest,
   sendGoogleChatReply,
@@ -101,6 +106,44 @@ function token(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Google Chat request verification", () => {
+  it.each([
+    [{ type: "DM" }, "dm"],
+    [{ spaceType: "DIRECT_MESSAGE", singleUserBotDm: true }, "dm"],
+    [{ singleUserBotDm: true }, "dm"],
+    [{ type: "ROOM", spaceType: "SPACE" }, null],
+    [{ spaceType: "GROUP_CHAT" }, null],
+    [{ spaceType: "DIRECT_MESSAGE", singleUserBotDm: false }, null],
+    [{ type: "DM", spaceType: "SPACE", singleUserBotDm: true }, null],
+    [{}, null],
+  ])("classifies signed Chat space metadata %#", (space, expected) => {
+    expect(googleChatConversationKind(space)).toBe(expected);
+  });
+
+  it("requires the trusted DM kind on jobs before either worker can execute them", () => {
+    const job = {
+      receiptId: "550e8400-e29b-41d4-a716-446655440000",
+      externalEventId: "spaces/AAAA/messages/request-1",
+      employeeId: "c0000000-0000-4000-8000-000000000001",
+      conversationKind: "dm",
+      googleUserName: "users/123456",
+      spaceName: "spaces/AAAA",
+      threadName: "spaces/AAAA/threads/thread-1",
+      prompt: "Check delivery",
+      appOrigin: "https://hrmny-os.vercel.app",
+      externalRef: "google-chat:spaces/AAAA:root",
+      title: "Google Chat",
+    };
+    expect(googleChatJobSchema.safeParse(job).success).toBe(true);
+    expect(
+      googleChatJobSchema.safeParse({ ...job, conversationKind: "space" })
+        .success,
+    ).toBe(false);
+    expect(
+      googleChatJobSchema.safeParse({ ...job, conversationKind: undefined })
+        .success,
+    ).toBe(false);
+  });
+
   it("accepts only the exact endpoint audience and Google Chat service identity", () => {
     expect(verifyGoogleChatJwt(token(), audience, [publicJwk], now).email).toBe(
       "chat@system.gserviceaccount.com",
@@ -307,7 +350,7 @@ describe("Google Chat request verification", () => {
     const body = JSON.stringify({
       type: "ADDED_TO_SPACE",
       eventTime: "2026-09-03T12:00:00Z",
-      space: { name: "spaces/AAAA", displayName: "Sales" },
+      space: { name: "spaces/AAAA", displayName: "Sales", type: "DM" },
       user: { email: "operator@hrmny.co", displayName: "Operator" },
     });
     const send = () =>
@@ -333,6 +376,66 @@ describe("Google Chat request verification", () => {
     });
   });
 
+  it("rejects shared and ambiguous messages before creating a personal receipt or assistant turn", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ keys: [publicJwk] })),
+    );
+    const liveNow = Math.floor(Date.now() / 1_000);
+    const chatCalls = chatSend.mock.calls.length;
+    const spaces = [
+      { type: "ROOM", spaceType: "SPACE", singleUserBotDm: false },
+      { spaceType: "GROUP_CHAT" },
+      { spaceType: "DIRECT_MESSAGE", singleUserBotDm: false },
+      { type: "DM", spaceType: "SPACE", singleUserBotDm: true },
+      {},
+    ];
+    for (const [index, space] of spaces.entries()) {
+      const spaceName = `spaces/Denied${index}`;
+      const messageName = `${spaceName}/messages/request-${index}`;
+      const response = await handleGoogleChatRequest(
+        new Request(audience, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token({ exp: liveNow + 300, iat: liveNow - 10 })}`,
+          },
+          body: JSON.stringify({
+            type: "MESSAGE",
+            space: { name: spaceName, ...space },
+            user: { name: "users/123456", email: "operator@hrmny.co" },
+            message: { name: messageName, text: "Use my private context" },
+          }),
+        }),
+      );
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        error: "direct_message_required",
+      });
+      await expect(
+        getIntegrationReceipt("google-chat", messageName),
+      ).resolves.toBeNull();
+    }
+    const sharedOnboarding = await handleGoogleChatRequest(
+      new Request(audience, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token({ exp: liveNow + 300, iat: liveNow - 10 })}`,
+        },
+        body: JSON.stringify({
+          type: "ADDED_TO_SPACE",
+          eventTime: "2026-09-11T12:00:00Z",
+          space: { name: "spaces/Shared", spaceType: "SPACE" },
+          user: { name: "users/123456", email: "operator@hrmny.co" },
+        }),
+      }),
+    );
+    expect(sharedOnboarding.status).toBe(403);
+    await expect(sharedOnboarding.json()).resolves.toEqual({
+      error: "direct_message_required",
+    });
+    expect(chatSend).toHaveBeenCalledTimes(chatCalls);
+  });
+
   it("binds signed messages to staff, enables tools, and returns private replies", async () => {
     vi.stubGlobal(
       "fetch",
@@ -341,7 +444,7 @@ describe("Google Chat request verification", () => {
     const liveNow = Math.floor(Date.now() / 1_000);
     const event = {
       type: "MESSAGE",
-      space: { name: "spaces/AAAA" },
+      space: { name: "spaces/AAAA", type: "DM" },
       user: { name: "users/123456", email: "operator@hrmny.co" },
       message: {
         name: "spaces/AAAA/messages/request-1",
@@ -378,6 +481,24 @@ describe("Google Chat request verification", () => {
         clientId: null,
       }),
     );
+    const modern = await send({
+      ...event,
+      space: {
+        name: "spaces/BBBB",
+        spaceType: "DIRECT_MESSAGE",
+        singleUserBotDm: true,
+      },
+      message: {
+        ...event.message,
+        name: "spaces/BBBB/messages/request-modern",
+        thread: { name: "spaces/BBBB/threads/thread-1" },
+      },
+    });
+    expect(modern.status).toBe(200);
+    expect(await modern.json()).toMatchObject({
+      text: expect.stringContaining("Scoped task result"),
+      privateMessageViewer: { name: "users/123456" },
+    });
     chatSend.mockImplementationOnce(async () => {
       vi.mocked(resolveActiveStaffById).mockResolvedValueOnce(null);
       return {
