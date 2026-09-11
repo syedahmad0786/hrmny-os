@@ -63,12 +63,7 @@ const apolloSearch = z
       .array(z.string().trim().min(2).max(120))
       .max(6)
       .optional(),
-    seniorities: z
-      .array(
-        z.enum(apolloSeniorities),
-      )
-      .max(11)
-      .optional(),
+    seniorities: z.array(z.enum(apolloSeniorities)).max(11).optional(),
     includeSimilarTitles: z.boolean().optional(),
     employeeCountMin: z.number().int().min(1).max(1_000_000).optional(),
     employeeCountMax: z.number().int().min(1).max(1_000_000).optional(),
@@ -269,6 +264,28 @@ function artifact(item: OutreachItem) {
   };
 }
 
+function boundedCrmList(items: unknown[], href: string, label: string) {
+  return {
+    items: items.slice(0, 50),
+    total: items.length,
+    truncated: items.length > 50,
+    nextLinks: [{ href, label }],
+  };
+}
+
+function crmRecordLink(value: unknown, kind: "contacts" | "deals", id: string) {
+  if (!value || typeof value !== "object") return value;
+  return {
+    ...value,
+    nextLinks: [
+      {
+        href: `/crm/${kind}/${id}`,
+        label: kind === "contacts" ? "Open CRM contact" : "Open CRM deal",
+      },
+    ],
+  };
+}
+
 export async function runQmOsTool(token: string, raw: unknown) {
   if (process.env.QM_OS_TOOLS_ENABLED !== "1")
     throw new Error("QM_OS_TOOLS_NOT_ENABLED");
@@ -427,37 +444,57 @@ export async function runQmOsTool(token: string, raw: unknown) {
         result = await caller.salesOs.digest();
         break;
       case "crm_contacts_list":
-        result = await caller.crm.contacts.list({
-          ...(input.companyId ? { companyId: input.companyId } : {}),
-          ...(input.search ? { search: input.search } : {}),
-        });
+        result = boundedCrmList(
+          await caller.crm.contacts.list({
+            ...(input.companyId ? { companyId: input.companyId } : {}),
+            ...(input.search ? { search: input.search } : {}),
+          }),
+          "/crm/contacts",
+          "Open CRM contacts",
+        );
         break;
       case "crm_contact_get":
-        result = await caller.crm.contacts.get({ id: input.contactId });
+        result = crmRecordLink(
+          await caller.crm.contacts.get({ id: input.contactId }),
+          "contacts",
+          input.contactId,
+        );
         break;
       case "crm_deals_list":
-        result = await caller.crm.deals.list({
-          ...(input.companyId ? { companyId: input.companyId } : {}),
-          ...(input.stage ? { stage: input.stage } : {}),
-          ...(input.lane ? { lane: input.lane } : {}),
-        });
+        result = boundedCrmList(
+          await caller.crm.deals.list({
+            ...(input.companyId ? { companyId: input.companyId } : {}),
+            ...(input.stage ? { stage: input.stage } : {}),
+            ...(input.lane ? { lane: input.lane } : {}),
+          }),
+          "/crm/deals",
+          "Open CRM deals",
+        );
         break;
       case "crm_deal_get":
-        result = await caller.crm.deals.get({ id: input.dealId });
+        result = crmRecordLink(
+          await caller.crm.deals.get({ id: input.dealId }),
+          "deals",
+          input.dealId,
+        );
         break;
       case "crm_contact_update": {
-        const {
-          operation: _operation,
-          contactId: id,
-          ...patch
-        } = input;
-        result = await caller.crm.contacts.update({ id, ...patch });
+        const { operation: _operation, contactId: id, ...patch } = input;
+        result = crmRecordLink(
+          await caller.crm.contacts.update({ id, ...patch }),
+          "contacts",
+          id,
+        );
         if (!result) throw new Error("QM_CRM_CONTACT_NOT_FOUND");
         break;
       }
       case "crm_deal_update": {
         const { operation: _operation, dealId: id, ...patch } = input;
-        result = await caller.crm.deals.update({ id, ...patch });
+        result = crmRecordLink(
+          await caller.crm.deals.update({ id, ...patch }),
+          "deals",
+          id,
+        );
         if (!result) throw new Error("QM_CRM_DEAL_NOT_FOUND");
         break;
       }
@@ -469,6 +506,14 @@ export async function runQmOsTool(token: string, raw: unknown) {
             ? { overrideReason: input.overrideReason }
             : {}),
         });
+        if (result.ok) {
+          result = {
+            ...result,
+            nextLinks: [
+              { href: `/crm/deals/${input.dealId}`, label: "Open CRM deal" },
+            ],
+          };
+        }
         break;
       case "google_maps_search": {
         const salesRole = user.roles.some((role) =>

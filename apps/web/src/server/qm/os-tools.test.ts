@@ -412,7 +412,11 @@ it("reads and updates the canonical CRM records through existing routers", async
 
   await expect(
     runQmOsTool(token, { operation: "crm_contacts_list", search: "Mina" }),
-  ).resolves.toEqual([{ contactId, firstName: "Mina" }]);
+  ).resolves.toMatchObject({
+    items: [{ contactId, firstName: "Mina" }],
+    total: 1,
+    truncated: false,
+  });
   await expect(
     runQmOsTool(token, { operation: "crm_contact_get", contactId }),
   ).resolves.toMatchObject({ contactId });
@@ -430,7 +434,11 @@ it("reads and updates the canonical CRM records through existing routers", async
 
   await expect(
     runQmOsTool(token, { operation: "crm_deals_list", stage: "qualified" }),
-  ).resolves.toEqual([{ dealId, stage: "qualified" }]);
+  ).resolves.toMatchObject({
+    items: [{ dealId, stage: "qualified" }],
+    total: 1,
+    truncated: false,
+  });
   await expect(
     runQmOsTool(token, { operation: "crm_deal_get", dealId }),
   ).resolves.toMatchObject({ dealId });
