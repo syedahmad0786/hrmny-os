@@ -178,7 +178,7 @@ export default function NativeIntegrationsSessionPage() {
         Sign in with the same @hrmny.co Google Workspace account used in the
         native assistant.
       </p>
-      {state === "login" || state === "mismatch" ? (
+      {(state === "login" || state === "mismatch") && nonce && proof ? (
         <Button type="button" onClick={() => void signIn()}>
           Continue with Google
         </Button>

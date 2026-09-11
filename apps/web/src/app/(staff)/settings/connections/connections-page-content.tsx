@@ -553,6 +553,15 @@ export function ConnectionsPageContent({
       query.get("gw") !== "error" &&
       query.get("xero") !== "error";
     sessionStorage.removeItem("hrmny-integrations-oauth");
+    if (!window.opener) {
+      setOauthBanner({
+        kind: ok ? "ok" : "err",
+        text: ok
+          ? "Provider authorization returned. Return to hrmny Integrations to see your connection status."
+          : "Provider authorization did not complete. Return to hrmny Integrations and try again.",
+      });
+      return;
+    }
     window.opener?.postMessage(
       { type: "hrmny-integrations-oauth-complete", ok },
       window.location.origin,
@@ -595,11 +604,11 @@ export function ConnectionsPageContent({
       });
       return;
     }
-    if (popup) {
-      oauthPopupRef.current = popup;
-      popup.sessionStorage.setItem("hrmny-integrations-oauth", "1");
-    }
     try {
+      if (popup) {
+        oauthPopupRef.current = popup;
+        popup.sessionStorage.setItem("hrmny-integrations-oauth", "1");
+      }
       const result = await start();
       if (popup && !popup.closed) {
         popup.location.replace(result.redirectUrl);
@@ -629,6 +638,10 @@ export function ConnectionsPageContent({
     } catch {
       popup?.close();
       oauthPopupRef.current = null;
+      setOauthBanner({
+        kind: "err",
+        text: "Could not open provider authorization. Try connecting again.",
+      });
     }
   }
 
