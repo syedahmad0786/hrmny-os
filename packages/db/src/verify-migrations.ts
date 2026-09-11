@@ -36,7 +36,7 @@ const journal = JSON.parse(
 ) as { entries: Array<{ tag: string }> };
 const apolloPriorHead = "0075_apollo_search_fencing";
 const apolloHead = "0076_apollo_people_search_serialization";
-const head = "0081_crm_workbook";
+const head = "0082_work_authority_fence";
 assert.equal(
   journal.entries.at(-1)?.tag,
   head,

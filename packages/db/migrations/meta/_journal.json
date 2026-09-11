@@ -568,6 +568,13 @@
       "when": 1788649200000,
       "tag": "0081_crm_workbook",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1788998400000,
+      "tag": "0082_work_authority_fence",
+      "breakpoints": true
     }
   ]
 }
