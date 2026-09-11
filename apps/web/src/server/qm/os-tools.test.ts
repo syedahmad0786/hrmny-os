@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
   connectedSearch: vi.fn(),
   proxy: vi.fn(),
   apolloSearch: vi.fn(),
+  apolloConnection: vi.fn(),
+  connectionsList: vi.fn(),
+  managedAccounts: vi.fn(),
+  workApps: vi.fn(),
   apolloStatus: vi.fn(),
   apolloLatest: vi.fn(),
   digest: vi.fn(),
@@ -88,6 +92,7 @@ beforeEach(() => {
   mocks.caller.mockReturnValue({
     salesOs: {
       apollo: {
+        connection: mocks.apolloConnection,
         search: mocks.apolloSearch,
         searchStatus: mocks.apolloStatus,
         latestSearch: mocks.apolloLatest,
@@ -95,6 +100,11 @@ beforeEach(() => {
       digest: mocks.digest,
       research: { list: mocks.researchList },
       contacts: { list: mocks.contactList },
+    },
+    connections: {
+      list: mocks.connectionsList,
+      managedAccounts: mocks.managedAccounts,
+      workApps: mocks.workApps,
     },
     crmAi: {
       dealSummary: mocks.dealSummary,
@@ -116,6 +126,9 @@ beforeEach(() => {
   });
   mocks.getOutreach.mockResolvedValue(draft);
   mocks.featureEnabled.mockResolvedValue(true);
+  mocks.connectionsList.mockResolvedValue([]);
+  mocks.managedAccounts.mockResolvedValue([]);
+  mocks.workApps.mockResolvedValue({ apps: [] });
 });
 
 afterEach(() => vi.unstubAllEnvs());
@@ -146,6 +159,110 @@ it("runs bounded free Apollo search as the mapped employee and exposes no paid a
     await expect(runQmOsTool(token, forbidden)).rejects.toThrow();
   expect(mocks.approve).not.toHaveBeenCalled();
   expect(mocks.send).not.toHaveBeenCalled();
+});
+
+it("reports employee-owned Apollo and Composio connection metadata without reading secrets", async () => {
+  mocks.apolloConnection.mockResolvedValue({
+    configured: true,
+    principalId: employeeId,
+  });
+  await expect(
+    runQmOsTool(token, { operation: "apollo_connection" }),
+  ).resolves.toEqual({
+    configured: true,
+    principalId: employeeId,
+  });
+
+  mocks.connectionsList.mockResolvedValue([
+    {
+      toolkit: "apollo",
+      status: "connected",
+      hasSecret: true,
+      externalConnectionId: "private",
+    },
+  ]);
+  mocks.managedAccounts.mockResolvedValue([
+    {
+      toolkit: "canva",
+      connectedAccountId: "ca_owned",
+      status: "ACTIVE",
+      statusReason: null,
+    },
+  ]);
+  mocks.workApps.mockResolvedValue({
+    apps: [
+      {
+        toolkit: "slack",
+        connected: true,
+        connectedAccountId: "ca_slack",
+        connectionStatus: "ACTIVE",
+      },
+    ],
+  });
+  const inventory = await runQmOsTool(token, { operation: "connections_list" });
+  expect(inventory).toEqual({
+    availability: {
+      business: "available",
+      managed: "available",
+      work: "available",
+    },
+    business: [
+      {
+        app: "apollo",
+        connected: true,
+        status: "connected",
+        supportedOperations: [
+          "apollo_search",
+          "apollo_search_status",
+          "apollo_latest_search",
+        ],
+      },
+    ],
+    managed: [
+      {
+        app: "canva",
+        connectedAccountId: "ca_owned",
+        status: "ACTIVE",
+        statusReason: null,
+        supportedOperations: [],
+      },
+    ],
+    work: [
+      {
+        app: "slack",
+        connected: true,
+        connectedAccountId: "ca_slack",
+        status: "ACTIVE",
+        supportedOperations: ["connected_search"],
+      },
+    ],
+    usage:
+      "Use only supportedOperations shown for each app. Connected personal tools with an empty list are visible for account management but are not callable from native chat.",
+    nextLinks: [{ href: "/settings/connections", label: "Manage connections" }],
+  });
+  expect(JSON.stringify(inventory)).not.toContain("private");
+});
+
+it("keeps independently available connection sources when a managed provider lookup fails", async () => {
+  mocks.connectionsList.mockResolvedValue([
+    { toolkit: "apollo", status: "connected", hasSecret: true },
+  ]);
+  mocks.managedAccounts.mockRejectedValue(new Error("provider unavailable"));
+  mocks.workApps.mockResolvedValue({ apps: [] });
+
+  const inventory = await runQmOsTool(token, { operation: "connections_list" });
+
+  expect(inventory).toMatchObject({
+    availability: {
+      business: "available",
+      managed: "unavailable",
+      work: "available",
+    },
+    business: [{ app: "apollo", connected: true }],
+    managed: [],
+    work: [],
+  });
+  expect(JSON.stringify(inventory)).not.toContain("provider unavailable");
 });
 
 it("returns an exact LinkedIn manual draft artifact and a sanitized public profile link", async () => {

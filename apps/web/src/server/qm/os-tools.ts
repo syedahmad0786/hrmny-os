@@ -66,6 +66,8 @@ const apolloSearch = z
   );
 
 const inputSchema = z.union([
+  z.object({ operation: z.literal("connections_list") }).strict(),
+  z.object({ operation: z.literal("apollo_connection") }).strict(),
   z.object({ operation: z.literal("connection"), app: connectionApp }).strict(),
   z
     .object({
@@ -186,7 +188,67 @@ export async function runQmOsTool(token: string, raw: unknown) {
   let usedMaps = false;
   let usedSales = false;
 
-  if (
+  if (input.operation === "connections_list") {
+    const [businessResult, managedResult, workResult] =
+      await Promise.allSettled([
+        caller.connections.list(),
+        caller.connections.managedAccounts(),
+        caller.connections.workApps(),
+      ]);
+    const business =
+      businessResult.status === "fulfilled" ? businessResult.value : [];
+    const managed =
+      managedResult.status === "fulfilled" ? managedResult.value : [];
+    const work =
+      workResult.status === "fulfilled" ? workResult.value : { apps: [] };
+    result = {
+      availability: {
+        business:
+          businessResult.status === "fulfilled" ? "available" : "unavailable",
+        managed:
+          managedResult.status === "fulfilled" ? "available" : "unavailable",
+        work: workResult.status === "fulfilled" ? "available" : "unavailable",
+      },
+      business: business.map((item) => ({
+        app: item.toolkit,
+        connected: item.status === "connected",
+        status: item.status,
+        supportedOperations:
+          item.toolkit === "apollo"
+            ? ["apollo_search", "apollo_search_status", "apollo_latest_search"]
+            : [],
+      })),
+      managed: managed.map((item) => ({
+        app: item.toolkit,
+        connectedAccountId: item.connectedAccountId,
+        status: item.status,
+        statusReason: item.statusReason,
+        supportedOperations: [],
+      })),
+      work: work.apps.map((item) => ({
+        app: item.toolkit,
+        connected: item.connected,
+        connectedAccountId: item.connectedAccountId,
+        status: item.connectionStatus,
+        supportedOperations:
+          item.toolkit === "gmail"
+            ? ["gmail_profile"]
+            : searchApp.options.includes(
+                  item.toolkit as z.infer<typeof searchApp>,
+                )
+              ? ["connected_search"]
+              : [],
+      })),
+      usage:
+        "Use only supportedOperations shown for each app. Connected personal tools with an empty list are visible for account management but are not callable from native chat.",
+      nextLinks: [
+        { href: "/settings/connections", label: "Manage connections" },
+      ],
+    };
+  } else if (input.operation === "apollo_connection") {
+    usedSales = true;
+    result = await caller.salesOs.apollo.connection();
+  } else if (
     input.operation === "connection" ||
     input.operation === "connected_search" ||
     input.operation === "gmail_profile"

@@ -13,6 +13,10 @@ test.describe("Connections Google Workspace OAuth", () => {
     await expect(
       page.getByRole("heading", { name: /Connections/i }),
     ).toBeVisible({ timeout: 60_000 });
+    const appGrid = page.getByTestId("connections-app-grid");
+    await expect(appGrid).toBeVisible();
+    await expect(appGrid).toContainText("Your apps via Composio");
+    await expect(appGrid.getByPlaceholder("Search tools")).toBeVisible();
 
     const gwCard = page.getByTestId("conn-card-google_workspace");
     await expect(gwCard).toBeVisible({ timeout: 30_000 });
