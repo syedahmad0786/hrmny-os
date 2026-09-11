@@ -19,6 +19,39 @@ const searchApp = z.enum([
 ]);
 const connectionApp = z.enum(["gmail", ...searchApp.options]);
 const connectedAccountId = z.string().min(1).max(200);
+const apolloSeniorities = [
+  "owner",
+  "founder",
+  "c_suite",
+  "partner",
+  "vp",
+  "head",
+  "director",
+  "manager",
+  "senior",
+  "entry",
+  "intern",
+] as const;
+
+export class QmInvalidInputError extends Error {
+  readonly fields: string[];
+  readonly allowedValues?: { seniorities: readonly string[] };
+
+  constructor(error: z.ZodError) {
+    super("QM_INVALID_INPUT");
+    this.name = "QmInvalidInputError";
+    this.fields = [
+      ...new Set(
+        error.issues
+          .map((issue) => String(issue.path[0] ?? "request"))
+          .filter((field) => field.length <= 64),
+      ),
+    ].slice(0, 8);
+    if (this.fields.includes("seniorities"))
+      this.allowedValues = { seniorities: apolloSeniorities };
+  }
+}
+
 const apolloSearch = z
   .object({
     operation: z.literal("apollo_search"),
@@ -32,19 +65,7 @@ const apolloSearch = z
       .optional(),
     seniorities: z
       .array(
-        z.enum([
-          "owner",
-          "founder",
-          "c_suite",
-          "partner",
-          "vp",
-          "head",
-          "director",
-          "manager",
-          "senior",
-          "entry",
-          "intern",
-        ]),
+        z.enum(apolloSeniorities),
       )
       .max(11)
       .optional(),
@@ -177,8 +198,16 @@ function artifact(item: OutreachItem) {
 export async function runQmOsTool(token: string, raw: unknown) {
   if (process.env.QM_OS_TOOLS_ENABLED !== "1")
     throw new Error("QM_OS_TOOLS_NOT_ENABLED");
-  const input = inputSchema.parse(raw);
   const user = await qmStaff(token);
+  if (
+    typeof raw === "object" &&
+    raw !== null &&
+    (raw as { operation?: unknown }).operation === "apollo_search"
+  ) {
+    const parsed = apolloSearch.safeParse(raw);
+    if (!parsed.success) throw new QmInvalidInputError(parsed.error);
+  }
+  const input = inputSchema.parse(raw);
   const ctx = context(user);
   const caller = createCaller(ctx);
   let result: unknown;
