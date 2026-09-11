@@ -591,23 +591,25 @@ export async function runQmOsTool(token: string, raw: unknown) {
         if (!result) throw new Error("QM_CRM_DEAL_NOT_FOUND");
         break;
       }
-      case "crm_deal_move_stage":
-        result = await caller.crm.deals.moveStage({
+      case "crm_deal_move_stage": {
+        const moved = await caller.crm.deals.moveStage({
           id: input.dealId,
           to: input.to,
           ...(input.overrideReason !== undefined
             ? { overrideReason: input.overrideReason }
             : {}),
         });
-        if (result.ok) {
+        result = moved;
+        if (moved.ok) {
           result = {
-            ...result,
+            ...moved,
             nextLinks: [
               { href: `/crm/deals/${input.dealId}`, label: "Open CRM deal" },
             ],
           };
         }
         break;
+      }
       case "google_maps_search": {
         const salesRole = user.roles.some((role) =>
           ["partner", "director", "am", "account_manager"].includes(role),
