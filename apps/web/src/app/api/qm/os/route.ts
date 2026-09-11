@@ -1,4 +1,4 @@
-import { runQmOsTool } from "@/server/qm/os-tools";
+import { QmInvalidInputError, runQmOsTool } from "@/server/qm/os-tools";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +45,18 @@ export async function POST(request: Request) {
     return Response.json(await runQmOsTool(token, input), {
       headers: { "cache-control": "no-store" },
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof QmInvalidInputError)
+      return Response.json(
+        {
+          error: "QM_INVALID_INPUT",
+          fields: error.fields,
+          ...(error.allowedValues
+            ? { allowedValues: error.allowedValues }
+            : {}),
+        },
+        { status: 400 },
+      );
     return Response.json({ error: "QM_OS_TOOL_UNAVAILABLE" }, { status: 403 });
   }
 }

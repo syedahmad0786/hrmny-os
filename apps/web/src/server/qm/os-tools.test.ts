@@ -413,3 +413,49 @@ it("keeps the route disabled by default and rejects arbitrary or oversized opera
   } as RequestInit & { duplex: "half" });
   expect((await POST(noLength)).status).toBe(413);
 });
+
+it("returns bounded Apollo schema corrections without weakening access denials", async () => {
+  const invalid = await POST(
+    request({
+      operation: "apollo_search",
+      idempotencyKey: searchId,
+      titles: ["CEO"],
+      seniorities: ["CEO"],
+    }),
+  );
+  expect(invalid.status).toBe(400);
+  await expect(invalid.json()).resolves.toEqual({
+    error: "QM_INVALID_INPUT",
+    fields: ["seniorities"],
+    allowedValues: {
+      seniorities: [
+        "owner",
+        "founder",
+        "c_suite",
+        "partner",
+        "vp",
+        "head",
+        "director",
+        "manager",
+        "senior",
+        "entry",
+        "intern",
+      ],
+    },
+  });
+  expect(mocks.staff).toHaveBeenCalledWith(token);
+
+  mocks.staff.mockRejectedValueOnce(new Error("not authorized"));
+  expect(
+    (
+      await POST(
+        request({
+          operation: "apollo_search",
+          idempotencyKey: searchId,
+          titles: ["CEO"],
+          seniorities: ["CEO"],
+        }),
+      )
+    ).status,
+  ).toBe(403);
+});
