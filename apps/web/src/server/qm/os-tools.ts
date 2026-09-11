@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { linkedinProfileUrl } from "@/lib/linkedin-profile";
-import { sessionCanViewMargin, type SessionUser } from "../auth/session";
+import {
+  resolveActiveStaffById,
+  sessionCanViewMargin,
+  type SessionUser,
+} from "../auth/session";
+import { lockStaffFeatureAuthorizationInputs } from "../auth/authorization-fence";
 import { searchComposioConnectedData } from "../composio-connected-data-ai";
 import { featureEnabled } from "../features";
 import { outreachSnapshotHash } from "../leadgen/outreach-review";
@@ -9,6 +14,8 @@ import { getOutreach, type OutreachItem } from "../leadgen/store";
 import { getVerifiedWorkAppConnection } from "../trpc/connections-router";
 import { createCaller } from "../trpc/root";
 import { qmStaff } from "./staff-access";
+import { getDb, withDatabaseScope } from "../db";
+import type { Db } from "@hrmny/db";
 
 const searchApp = z.enum([
   "one_drive",
@@ -286,6 +293,90 @@ function crmRecordLink(value: unknown, kind: "contacts" | "deals", id: string) {
   };
 }
 
+type QmOsInput = z.infer<typeof inputSchema>;
+
+function isCrmWrite(input: QmOsInput): input is Extract<
+  QmOsInput,
+  {
+    operation: "crm_contact_update" | "crm_deal_update" | "crm_deal_move_stage";
+  }
+> {
+  return [
+    "crm_contact_update",
+    "crm_deal_update",
+    "crm_deal_move_stage",
+  ].includes(input.operation);
+}
+
+async function dispatchCrmWrite(
+  caller: ReturnType<typeof createCaller>,
+  input: Extract<QmOsInput, { operation: string }>,
+) {
+  switch (input.operation) {
+    case "crm_contact_update": {
+      const { operation: _operation, contactId: id, ...patch } = input;
+      const result = crmRecordLink(
+        await caller.crm.contacts.update({ id, ...patch }),
+        "contacts",
+        id,
+      );
+      if (!result) throw new Error("QM_CRM_CONTACT_NOT_FOUND");
+      return result;
+    }
+    case "crm_deal_update": {
+      const { operation: _operation, dealId: id, ...patch } = input;
+      const result = crmRecordLink(
+        await caller.crm.deals.update({ id, ...patch }),
+        "deals",
+        id,
+      );
+      if (!result) throw new Error("QM_CRM_DEAL_NOT_FOUND");
+      return result;
+    }
+    case "crm_deal_move_stage": {
+      const result = await caller.crm.deals.moveStage({
+        id: input.dealId,
+        to: input.to,
+        ...(input.overrideReason !== undefined
+          ? { overrideReason: input.overrideReason }
+          : {}),
+      });
+      return result.ok
+        ? {
+            ...result,
+            nextLinks: [
+              { href: `/crm/deals/${input.dealId}`, label: "Open CRM deal" },
+            ],
+          }
+        : result;
+    }
+    default:
+      throw new Error("QM_CRM_WRITE_UNSUPPORTED");
+  }
+}
+
+async function runFencedCrmWrite(user: SessionUser, input: QmOsInput) {
+  if (!isCrmWrite(input)) return { handled: false as const };
+  const db = getDb();
+  if (!db) return { handled: false as const };
+  const result = await db.transaction(async (tx) => {
+    const scoped = tx as unknown as Db;
+    await lockStaffFeatureAuthorizationInputs(scoped, user.employeeId);
+    return withDatabaseScope(scoped, async () => {
+      const current = await resolveActiveStaffById(user.employeeId);
+      if (
+        !current ||
+        current.employeeId !== user.employeeId ||
+        current.email.toLowerCase() !== user.email.toLowerCase() ||
+        process.env.QM_OS_TOOLS_ENABLED !== "1"
+      )
+        throw new Error("QM_ACCESS_CHANGED");
+      return dispatchCrmWrite(createCaller(context(current)), input);
+    });
+  });
+  return { handled: true as const, result };
+}
+
 export async function runQmOsTool(token: string, raw: unknown) {
   if (process.env.QM_OS_TOOLS_ENABLED !== "1")
     throw new Error("QM_OS_TOOLS_NOT_ENABLED");
@@ -299,6 +390,8 @@ export async function runQmOsTool(token: string, raw: unknown) {
     if (!parsed.success) throw new QmInvalidInputError(parsed.error);
   }
   const input = inputSchema.parse(raw);
+  const fencedCrmWrite = await runFencedCrmWrite(user, input);
+  if (fencedCrmWrite.handled) return fencedCrmWrite.result;
   const ctx = context(user);
   const caller = createCaller(ctx);
   let result: unknown;

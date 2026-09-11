@@ -35,9 +35,25 @@ const mocks = vi.hoisted(() => ({
   dealGet: vi.fn(),
   dealUpdate: vi.fn(),
   dealMoveStage: vi.fn(),
+  getDb: vi.fn(),
+  transaction: vi.fn(),
+  authorizationFence: vi.fn(),
+  resolveActiveStaffById: vi.fn(),
+  withDatabaseScope: vi.fn(),
 }));
 
 vi.mock("./staff-access", () => ({ qmStaff: mocks.staff }));
+vi.mock("../db", () => ({
+  getDb: mocks.getDb,
+  withDatabaseScope: mocks.withDatabaseScope,
+}));
+vi.mock("../auth/authorization-fence", () => ({
+  lockStaffFeatureAuthorizationInputs: mocks.authorizationFence,
+}));
+vi.mock("../auth/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../auth/session")>()),
+  resolveActiveStaffById: mocks.resolveActiveStaffById,
+}));
 vi.mock("../trpc/root", () => ({ createCaller: mocks.caller }));
 vi.mock("../trpc/connections-router", () => ({
   getVerifiedWorkAppConnection: mocks.connection,
@@ -96,6 +112,14 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("QM_OS_TOOLS_ENABLED", "1");
   mocks.staff.mockResolvedValue(staff);
+  mocks.getDb.mockReturnValue(null);
+  mocks.withDatabaseScope.mockImplementation(
+    (_db: unknown, work: () => Promise<unknown>) => work(),
+  );
+  mocks.resolveActiveStaffById.mockResolvedValue(staff);
+  mocks.transaction.mockImplementation(
+    async (work: (tx: unknown) => Promise<unknown>) => work({}),
+  );
   mocks.caller.mockReturnValue({
     salesOs: {
       apollo: {
@@ -490,6 +514,37 @@ it("keeps CRM field and stage authorization inside existing guarded mutations", 
       title: "CEO",
     }),
   ).rejects.toThrow("FORBIDDEN");
+});
+
+it("locks and revalidates authorization before a Postgres CRM mutation", async () => {
+  const contactId = "c0000000-0000-4000-8000-000000000021";
+  const order: string[] = [];
+  const database = { transaction: mocks.transaction };
+  mocks.getDb.mockReturnValue(database);
+  mocks.authorizationFence.mockImplementation(async () => {
+    order.push("fence");
+  });
+  mocks.resolveActiveStaffById.mockImplementation(async () => {
+    order.push("staff");
+    return staff;
+  });
+  mocks.contactUpdate.mockImplementation(async () => {
+    order.push("write");
+    return { contactId, title: "CEO" };
+  });
+
+  await expect(
+    runQmOsTool(token, {
+      operation: "crm_contact_update",
+      contactId,
+      title: "CEO",
+    }),
+  ).resolves.toMatchObject({ contactId, title: "CEO" });
+
+  expect(order).toEqual(["fence", "staff", "write"]);
+  expect(mocks.authorizationFence).toHaveBeenCalledWith({}, employeeId);
+  expect(mocks.resolveActiveStaffById).toHaveBeenCalledWith(employeeId);
+  expect(mocks.staff).toHaveBeenCalledTimes(1);
 });
 
 it("keeps the route disabled by default and rejects arbitrary or oversized operations", async () => {
