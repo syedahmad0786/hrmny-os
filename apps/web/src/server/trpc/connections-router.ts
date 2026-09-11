@@ -472,9 +472,8 @@ export function isActiveComposioRemote(
 }
 
 /**
- * Prefer an ACTIVE account matching the stored Composio id; otherwise any
- * ACTIVE account for the toolkit. Never let a stale INITIATED/expired id
- * block reconcile when another ACTIVE account exists (reconnect leftovers).
+ * Resolve only the remote account explicitly bound to this local row. A
+ * same-toolkit fallback would collapse multiple employee accounts together.
  */
 export function pickActiveComposioAccount<
   T extends {
@@ -501,11 +500,7 @@ export function pickActiveComposioAccount<
   ) {
     return byId;
   }
-  return input.remote.find(
-    (candidate) =>
-      candidate.toolkit.slug.toLowerCase() === slug &&
-      isActiveComposioStatus(candidate.status, candidate.is_disabled),
-  );
+  return undefined;
 }
 
 /**
@@ -1772,66 +1767,10 @@ export const connectionsRouter = router({
       }
       const db = requireDb();
       const toolkitKey = `composio:${input.toolkit}`;
-      // Re-auth / reconnect: everyone can connect their own accounts.
-      // If a row already exists, refresh the managed auth request instead of CONFLICT.
-      const [existing] = await db
-        .select({
-          id: connectionAccount.connectionAccountId,
-          externalConnectionId: connectionAccount.externalConnectionId,
-          status: connectionAccount.status,
-        })
-        .from(connectionAccount)
-        .where(
-          and(
-            eq(connectionAccount.ownerEmployeeId, employeeId),
-            eq(connectionAccount.scope, "staff"),
-            eq(connectionAccount.toolkit, toolkitKey),
-          ),
-        )
-        .limit(1);
-
       const request = await client.authorize(employeeId, input.toolkit, {
         callbackUrl: composioConnectionsCallbackUrl(),
       });
       try {
-        if (existing) {
-          if (existing.externalConnectionId) {
-            await client
-              .disconnect(existing.externalConnectionId)
-              .catch(() => undefined);
-          }
-          const [saved] = await db.transaction(async (tx) => {
-            const updated = await tx
-              .update(connectionAccount)
-              .set({
-                externalConnectionId: request.id,
-                status: "pending",
-                authType: "composio_managed",
-                label: input.toolkit,
-                updatedAt: new Date(),
-              })
-              .where(eq(connectionAccount.connectionAccountId, existing.id))
-              .returning();
-            await tx.insert(auditEvent).values({
-              actorEmployeeId: employeeId,
-              action: "connections.composio.reauthorize",
-              entityType: "connection_account",
-              entityId: existing.id,
-              after: {
-                toolkit: input.toolkit,
-                status: "pending",
-                previousStatus: existing.status,
-              },
-            });
-            return updated;
-          });
-          return {
-            connectionAccountId: saved!.connectionAccountId,
-            redirectUrl: request.redirectUrl,
-            reconnected: true as const,
-          };
-        }
-
         const [saved] = await db.transaction(async (tx) => {
           const created = await tx
             .insert(connectionAccount)
@@ -1857,7 +1796,7 @@ export const connectionsRouter = router({
         return {
           connectionAccountId: saved!.connectionAccountId,
           redirectUrl: request.redirectUrl,
-          reconnected: false as const,
+          added: true as const,
         };
       } catch (error) {
         await client.disconnect(request.id).catch(() => undefined);
