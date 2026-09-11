@@ -36,6 +36,16 @@ const nextConfig: NextConfig = {
           { key: "Cache-Control", value: "private, no-store" },
         ],
       },
+      {
+        source: "/assistant/integrations",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'self' https://hrmny-portal.fly.dev",
+          },
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      },
     ];
   },
   transpilePackages: [
