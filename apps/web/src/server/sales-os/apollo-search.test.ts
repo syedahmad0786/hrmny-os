@@ -15,6 +15,7 @@ import {
 import {
   ApolloSearchRetryError,
   getApolloPeopleSearchStatus,
+  reconcileApolloStatusWithCurrentJob,
   revokeApolloPeopleSearch,
   runScheduledApolloPeopleSearchForTest,
   searchApolloPeopleFree,
@@ -119,6 +120,30 @@ function workerDeps(source: LeadSourceAdapter, now = NOW) {
 }
 
 describe("durable Apollo zero-credit search bridge", () => {
+  it("reports the current queued retry instead of stale receipt timing", () => {
+    const stale = {
+      receiptId: "receipt",
+      idempotencyKey: "30000000-0000-4000-8000-000000000099",
+      duplicate: true,
+      mode: "live" as const,
+      status: "retry_scheduled" as const,
+      attempts: 0,
+      candidates: [],
+      nextAttemptAt: "2026-08-31T08:00:01.000Z",
+    };
+    expect(
+      reconcileApolloStatusWithCurrentJob(stale, {
+        status: "pending",
+        attempts: 1,
+        runAt: "2026-08-31T08:00:57.000Z",
+        leaseExpiresAt: null,
+      }),
+    ).toMatchObject({
+      status: "retry_scheduled",
+      attempts: 1,
+      nextAttemptAt: "2026-08-31T08:00:57.000Z",
+    });
+  });
   beforeEach(() => resetIntegrationReceiptMemory());
 
   it("queues first, executes once, and replays the immutable receipt", async () => {
@@ -569,6 +594,28 @@ describe("durable Apollo zero-credit search bridge", () => {
         actorEmployeeId: "20000000-0000-4000-8000-000000000002",
       }),
     ).rejects.toThrow(/FORBIDDEN/);
+  });
+
+  it("does not return a stale queued receipt after its durable job finishes", () => {
+    expect(
+      reconcileApolloStatusWithCurrentJob(
+        {
+          idempotencyKey: "30000000-0000-4000-8000-000000000009",
+          receiptId: "30000000-0000-4000-8000-000000000019",
+          duplicate: true,
+          status: "retry_scheduled",
+          mode: "live",
+          attempts: 0,
+          candidates: [],
+        },
+        {
+          status: "completed",
+          attempts: 1,
+          runAt: NOW,
+          leaseExpiresAt: null,
+        },
+      ),
+    ).toMatchObject({ status: "processing", attempts: 1 });
   });
 
   it("fails closed when the durable queue is unavailable", async () => {
