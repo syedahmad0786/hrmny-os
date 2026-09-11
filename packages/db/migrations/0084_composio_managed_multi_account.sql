@@ -23,7 +23,7 @@ CREATE UNIQUE INDEX connection_account_staff_provider_uniq
     AND NOT (toolkit = 'google_workspace' AND scope = 'staff')
     AND NOT (toolkit LIKE 'composio:%' AND scope = 'staff');
 
-CREATE UNIQUE INDEX connection_account_composio_remote_uniq
+CREATE UNIQUE INDEX IF NOT EXISTS connection_account_composio_remote_uniq
   ON public.connection_account (
     owner_employee_id,
     lower(btrim(external_connection_id))
