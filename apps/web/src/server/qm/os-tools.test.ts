@@ -40,6 +40,8 @@ const mocks = vi.hoisted(() => ({
   authorizationFence: vi.fn(),
   resolveActiveStaffById: vi.fn(),
   withDatabaseScope: vi.fn(),
+  crmImports: vi.fn(),
+  emitHealthSignal: vi.fn(),
 }));
 
 vi.mock("./staff-access", () => ({ qmStaff: mocks.staff }));
@@ -63,8 +65,14 @@ vi.mock("../composio-connected-data-ai", () => ({
 }));
 vi.mock("../leadgen/store", () => ({ getOutreach: mocks.getOutreach }));
 vi.mock("../features", () => ({ featureEnabled: mocks.featureEnabled }));
+vi.mock("../m1-persistence", () => ({
+  emitHealthSignal: mocks.emitHealthSignal,
+}));
 vi.mock("../integrations/google-maps-search", () => ({
   searchGoogleMapsDiscovery: mocks.mapsSearch,
+}));
+vi.mock("../crm/apollo-search-import", () => ({
+  getCompletedApolloFreeSearchCrmImports: mocks.crmImports,
 }));
 
 const employeeId = "c0000000-0000-4000-8000-000000000001";
@@ -120,6 +128,7 @@ beforeEach(() => {
   mocks.transaction.mockImplementation(
     async (work: (tx: unknown) => Promise<unknown>) => work({}),
   );
+  mocks.crmImports.mockResolvedValue([]);
   mocks.caller.mockReturnValue({
     salesOs: {
       apollo: {
@@ -547,6 +556,52 @@ it("locks and revalidates authorization before a Postgres CRM mutation", async (
   expect(mocks.staff).toHaveBeenCalledTimes(1);
 });
 
+it("emits a stage health signal only after the fenced transaction commits", async () => {
+  const order: string[] = [];
+  let deferred:
+    | ((
+        signalKey: string,
+        severity: "info" | "warn" | "critical",
+        payload: Record<string, unknown>,
+      ) => void)
+    | undefined;
+  mocks.getDb.mockReturnValue({ transaction: mocks.transaction });
+  mocks.transaction.mockImplementation(
+    async (work: (tx: unknown) => Promise<unknown>) => {
+      const result = await work({});
+      order.push("commit");
+      return result;
+    },
+  );
+  mocks.caller.mockImplementation(
+    (ctx: { deferHealthSignal?: typeof deferred }) => {
+      deferred = ctx.deferHealthSignal;
+      return {
+        crm: {
+          deals: {
+            moveStage: async () => {
+              order.push("write");
+              deferred?.("crm_deal_transition", "info", { dealId });
+              return { ok: true, deal: { dealId, stage: "proposal" } };
+            },
+          },
+        },
+      };
+    },
+  );
+  mocks.emitHealthSignal.mockImplementation(async () => {
+    order.push("notify");
+  });
+
+  await runQmOsTool(token, {
+    operation: "crm_deal_move_stage",
+    dealId,
+    to: "proposal",
+  });
+
+  expect(order).toEqual(["write", "commit", "notify"]);
+});
+
 it("keeps the route disabled by default and rejects arbitrary or oversized operations", async () => {
   for (const body of [
     {
@@ -632,4 +687,40 @@ it("returns bounded Apollo schema corrections without weakening access denials",
       )
     ).status,
   ).toBe(403);
+});
+
+it("adds only caller-owned CRM import receipts to a completed Apollo status", async () => {
+  mocks.apolloStatus.mockResolvedValue({
+    status: "completed",
+    receiptId: searchId,
+    idempotencyKey: searchId,
+    candidates: [],
+  });
+  mocks.crmImports.mockResolvedValue([
+    {
+      externalId: "apollo-person-1",
+      status: "completed",
+      duplicate: false,
+      companyId: dealId,
+      contactId: dealId,
+      dealId,
+      companyName: "Example Motors",
+    },
+  ]);
+
+  await expect(
+    runQmOsTool(token, {
+      operation: "apollo_search_status",
+      idempotencyKey: searchId,
+    }),
+  ).resolves.toMatchObject({
+    status: "completed",
+    crmImports: [{ externalId: "apollo-person-1", dealId }],
+    nextLinks: [{ href: `/crm/deals/${dealId}`, label: "Example Motors" }],
+  });
+  expect(mocks.crmImports).toHaveBeenCalledWith({
+    sourceSearchReceiptId: searchId,
+    idempotencyKey: searchId,
+    actorEmployeeId: employeeId,
+  });
 });

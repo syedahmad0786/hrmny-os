@@ -461,13 +461,17 @@ export const crmDealsRouter = router({
             return { auditId: row.auditEventId };
           },
           emit: async (event) => {
-            await emitHealthSignal(
-              event.name.endsWith("transition_blocked")
-                ? "gate_blocked"
-                : "crm_deal_transition",
-              event.name.endsWith("transition_blocked") ? "warn" : "info",
-              event.payload,
-            );
+            const signalKey = event.name.endsWith("transition_blocked")
+              ? "gate_blocked"
+              : "crm_deal_transition";
+            const severity = event.name.endsWith("transition_blocked")
+              ? "warn"
+              : "info";
+            if (ctx.deferHealthSignal) {
+              ctx.deferHealthSignal(signalKey, severity, event.payload);
+            } else {
+              await emitHealthSignal(signalKey, severity, event.payload);
+            }
           },
         },
       );

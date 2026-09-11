@@ -34,6 +34,14 @@ export type TrpcContext = {
   portalGrant?: string | null;
   /** Feature selected from the current tRPC path for resource-scope checks. */
   requestedFeatureKey?: string | null;
+  /** Set only by the server-owned native QM caller, never from a request input. */
+  nativeOs?: boolean;
+  /** Server-owned post-commit health notification queue for fenced mutations. */
+  deferHealthSignal?: (
+    signalKey: string,
+    severity: "info" | "warn" | "critical",
+    payload: Record<string, unknown>,
+  ) => void;
 };
 
 export async function createContext(

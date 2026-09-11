@@ -11,8 +11,10 @@ export async function lockStaffFeatureAuthorizationInputs(
     sql`lock table public.feature_override, public.permission_policy in share mode`,
   );
   await db.execute(sql`
-    select employee_id from public.employee
-    where employee_id = ${employeeId}::uuid for share
+    select employee_id
+    from public.employee
+    where employee_id = ${employeeId}::uuid
+    for share
   `);
   await db.execute(sql`
     select membership.employee_id

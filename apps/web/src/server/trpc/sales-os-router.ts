@@ -277,6 +277,7 @@ export const salesOsRouter = router({
         const result = await searchApolloPeopleFree({
           ...input,
           actorEmployeeId: ctx.employeeId,
+          nativeOs: ctx.nativeOs === true,
         });
         return result;
       }),

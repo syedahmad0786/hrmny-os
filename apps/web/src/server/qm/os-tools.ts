@@ -12,10 +12,12 @@ import { outreachSnapshotHash } from "../leadgen/outreach-review";
 import { searchGoogleMapsDiscovery } from "../integrations/google-maps-search";
 import { getOutreach, type OutreachItem } from "../leadgen/store";
 import { getVerifiedWorkAppConnection } from "../trpc/connections-router";
+import { getCompletedApolloFreeSearchCrmImports } from "../crm/apollo-search-import";
 import { createCaller } from "../trpc/root";
 import { qmStaff } from "./staff-access";
 import { getDb, withDatabaseScope } from "../db";
 import type { Db } from "@hrmny/db";
+import { emitHealthSignal } from "../m1-persistence";
 
 const searchApp = z.enum([
   "one_drive",
@@ -239,19 +241,58 @@ const inputSchema = z.union([
     .strict(),
 ]);
 
-function context(user: SessionUser) {
+function context(
+  user: SessionUser,
+  deferHealthSignal?: (
+    signalKey: string,
+    severity: "info" | "warn" | "critical",
+    payload: Record<string, unknown>,
+  ) => void,
+) {
   return {
     user,
     employeeId: user.employeeId,
     roles: user.roles,
     canViewMargin: sessionCanViewMargin(user),
     clientId: null,
+    nativeOs: true,
+    ...(deferHealthSignal ? { deferHealthSignal } : {}),
   };
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]) {
   const normalized = (values: readonly string[]) => [...new Set(values)].sort();
   return JSON.stringify(normalized(left)) === JSON.stringify(normalized(right));
+}
+
+async function withApolloCrmImports(user: SessionUser, value: unknown) {
+  const completed = z
+    .object({
+      status: z.literal("completed"),
+      receiptId: z.string().uuid(),
+      idempotencyKey: z.string().uuid(),
+    })
+    .passthrough()
+    .safeParse(value);
+  if (!completed.success) return value;
+  const crmImports = await getCompletedApolloFreeSearchCrmImports({
+    sourceSearchReceiptId: completed.data.receiptId,
+    idempotencyKey: completed.data.idempotencyKey,
+    actorEmployeeId: user.employeeId,
+  });
+  const savedDeals = new Map(
+    crmImports
+      .filter((item) => item.status === "completed" && item.dealId)
+      .map((item) => [item.dealId!, item.companyName ?? "Saved prospect"]),
+  );
+  return {
+    ...completed.data,
+    crmImports,
+    nextLinks: [...savedDeals].map(([dealId, label]) => ({
+      href: `/crm/deals/${dealId}`,
+      label,
+    })),
+  };
 }
 
 function artifact(item: OutreachItem) {
@@ -359,6 +400,11 @@ async function runFencedCrmWrite(user: SessionUser, input: QmOsInput) {
   if (!isCrmWrite(input)) return { handled: false as const };
   const db = getDb();
   if (!db) return { handled: false as const };
+  const deferredSignals: Array<{
+    signalKey: string;
+    severity: "info" | "warn" | "critical";
+    payload: Record<string, unknown>;
+  }> = [];
   const result = await db.transaction(async (tx) => {
     const scoped = tx as unknown as Db;
     await lockStaffFeatureAuthorizationInputs(scoped, user.employeeId);
@@ -371,9 +417,21 @@ async function runFencedCrmWrite(user: SessionUser, input: QmOsInput) {
         process.env.QM_OS_TOOLS_ENABLED !== "1"
       )
         throw new Error("QM_ACCESS_CHANGED");
-      return dispatchCrmWrite(createCaller(context(current)), input);
+      return dispatchCrmWrite(
+        createCaller(
+          context(current, (signalKey, severity, payload) => {
+            deferredSignals.push({ signalKey, severity, payload });
+          }),
+        ),
+        input,
+      );
     });
   });
+  await Promise.all(
+    deferredSignals.map(({ signalKey, severity, payload }) =>
+      emitHealthSignal(signalKey, severity, payload).catch(() => undefined),
+    ),
+  );
   return { handled: true as const, result };
 }
 
@@ -522,17 +580,30 @@ export async function runQmOsTool(token: string, raw: unknown) {
     switch (input.operation) {
       case "apollo_search": {
         const { operation: _operation, ...query } = input;
-        result = await caller.salesOs.apollo.search(query);
+        result = await withApolloCrmImports(
+          user,
+          await caller.salesOs.apollo.search(query),
+        );
         break;
       }
       case "apollo_search_status":
-        result = await caller.salesOs.apollo.searchStatus({
-          idempotencyKey: input.idempotencyKey,
-        });
+        result = await withApolloCrmImports(
+          user,
+          await caller.salesOs.apollo.searchStatus({
+            idempotencyKey: input.idempotencyKey,
+          }),
+        );
         break;
-      case "apollo_latest_search":
-        result = await caller.salesOs.apollo.latestSearch();
+      case "apollo_latest_search": {
+        const latest = await caller.salesOs.apollo.latestSearch();
+        result = latest
+          ? {
+              ...latest,
+              result: await withApolloCrmImports(user, latest.result),
+            }
+          : null;
         break;
+      }
       case "sales_digest":
         result = await caller.salesOs.digest();
         break;
