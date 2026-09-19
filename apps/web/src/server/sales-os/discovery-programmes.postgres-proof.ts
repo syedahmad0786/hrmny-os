@@ -63,9 +63,9 @@ it("proves Discovery publication fencing, access, CAS, immutable history, and se
   await db.execute(sql`
     insert into public.connection_account (
       connection_account_id, owner_employee_id, toolkit, scope, status
-    ) values
-      (${accountId}::uuid, ${ownerId}::uuid, 'apollo', 'staff', 'connected'),
-      (${replacementAccountId}::uuid, ${ownerId}::uuid, 'apollo', 'staff', 'connected')
+    ) values (
+      ${accountId}::uuid, ${ownerId}::uuid, 'apollo', 'staff', 'connected'
+    )
   `);
 
   const sources = defaultDiscoverySources().map((source) =>
@@ -294,6 +294,18 @@ it("proves Discovery publication fencing, access, CAS, immutable history, and se
       actorEmployeeId: adminId,
     }),
   ).rejects.toMatchObject({ code: "INVALID_CONNECTION" });
+
+  await db.execute(sql`
+    insert into public.connection_account (
+      connection_account_id, owner_employee_id, toolkit, scope, status
+    ) values (
+      ${replacementAccountId}::uuid,
+      ${ownerId}::uuid,
+      'apollo',
+      'staff',
+      'connected'
+    )
+  `);
 
   const replacementSources = editableSources(
     changedPublication.draft.sources,
