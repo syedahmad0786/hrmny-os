@@ -26,6 +26,7 @@ import {
   runApolloPeopleSearchQueuedJob,
 } from "@/server/sales-os/apollo-search";
 import { getSalesOsSettings } from "@/server/sales-os/store";
+import { SALES_RESEARCH_RUN_JOB_KIND } from "@/server/sales-os/discovery-runtime-contract";
 import {
   failGoogleChatInteractionJob,
   GOOGLE_CHAT_INTERACTION_JOB_KIND,
@@ -176,6 +177,7 @@ export async function GET(request: Request) {
     where status = 'running' and locked_at < now() - interval '10 minutes'
       and kind <> ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
       and kind <> ${GOOGLE_CHAT_QM_JOB_KIND}
+      and kind <> ${SALES_RESEARCH_RUN_JOB_KIND}
   `);
   const claimedResult = await db.execute(sql`
     with due as (
@@ -184,6 +186,7 @@ export async function GET(request: Request) {
       where status = 'pending' and run_at <= now()
         and kind <> ${APOLLO_PEOPLE_SEARCH_JOB_KIND}
         and kind <> ${GOOGLE_CHAT_QM_JOB_KIND}
+        and kind <> ${SALES_RESEARCH_RUN_JOB_KIND}
       order by run_at
       for update skip locked
       limit 20

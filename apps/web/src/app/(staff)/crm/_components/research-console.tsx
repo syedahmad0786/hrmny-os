@@ -6,6 +6,7 @@ import { trpc } from "@/lib/trpc";
 import { CrmBtn, CrmEmpty, CrmTag } from "@/components/crm/ui";
 import { CRM_MARKETS } from "@/lib/crm-markets";
 import { DiscoveryPanel } from "./discovery-panel";
+import { DiscoveryProgrammes } from "./discovery-programmes";
 
 function newSignalForm() {
   return {
@@ -63,6 +64,7 @@ export function ResearchConsole() {
   return (
     <section className="mt-6" data-testid="sales-os-research-console">
       <DiscoveryPanel />
+      <DiscoveryProgrammes />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-lg font-semibold">Research gates</h2>

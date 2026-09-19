@@ -36,7 +36,7 @@ const journal = JSON.parse(
 ) as { entries: Array<{ tag: string }> };
 const apolloPriorHead = "0075_apollo_search_fencing";
 const apolloHead = "0076_apollo_people_search_serialization";
-const head = "0084_composio_managed_multi_account";
+const head = "0085_discovery_programmes";
 assert.equal(
   journal.entries.at(-1)?.tag,
   head,
@@ -81,6 +81,58 @@ async function prepareSupabaseDatabase(connection: Sql): Promise<void> {
 }
 
 async function assertCurrentHead(connection: Sql): Promise<void> {
+  const [discovery] = await connection<Array<{ ok: boolean }>>`
+    select
+      to_regclass('public.research_programme') is not null
+      and to_regclass('public.research_programme_version') is not null
+      and to_regclass('public.research_programme_source_binding') is not null
+      and (
+        select count(*) from pg_class
+        where oid in (
+          'public.research_programme'::regclass,
+          'public.research_programme_version'::regclass,
+          'public.research_programme_source_binding'::regclass
+        ) and relrowsecurity
+      ) = 3
+      and exists (
+        select 1 from pg_trigger
+        where tgname = 'research_programme_version_immutable_trg'
+          and not tgisinternal
+      )
+      and exists (
+        select 1 from pg_trigger
+        where tgname = 'research_programme_source_connection_removed_trg'
+          and not tgisinternal
+      )
+      and exists (
+        select 1
+        from pg_constraint
+        where conrelid = 'public.research_programme_source_binding'::regclass
+          and contype = 'f'
+          and confrelid = 'public.connection_account'::regclass
+          and confdeltype = 'n'
+      )
+      and not (
+        has_table_privilege('authenticated', 'public.research_programme', 'SELECT,INSERT,UPDATE,DELETE')
+        or has_table_privilege('authenticated', 'public.research_programme_version', 'SELECT,INSERT,UPDATE,DELETE')
+        or has_table_privilege('authenticated', 'public.research_programme_source_binding', 'SELECT,INSERT,UPDATE,DELETE')
+      )
+      and (
+        not exists (select 1 from pg_roles where rolname = 'service_role')
+        or (
+          has_table_privilege('service_role', 'public.research_programme_version', 'SELECT')
+          and has_table_privilege('service_role', 'public.research_programme_version', 'INSERT')
+          and not has_table_privilege('service_role', 'public.research_programme_version', 'UPDATE')
+          and not has_table_privilege('service_role', 'public.research_programme_version', 'DELETE')
+          and not has_table_privilege('service_role', 'public.research_programme_version', 'TRUNCATE')
+        )
+      ) as ok
+  `;
+  assert.equal(
+    discovery?.ok,
+    true,
+    "Discovery programme schema is not server-only or complete.",
+  );
   const [googleIdentity] = await connection<
     Array<{ installed: boolean; rls: boolean; public_read: boolean }>
   >`

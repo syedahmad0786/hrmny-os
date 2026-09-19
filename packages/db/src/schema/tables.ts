@@ -2131,3 +2131,159 @@ export const qmCommandDecision = pgTable(
     ),
   ],
 );
+
+/** Discovery programme identity and optimistic lifecycle state (migration 0085). */
+export const researchProgramme = pgTable(
+  "research_programme",
+  {
+    researchProgrammeId: uuid("research_programme_id")
+      .defaultRandom()
+      .primaryKey(),
+    ownerEmployeeId: uuid("owner_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    reviewerEmployeeIds: uuid("reviewer_employee_ids")
+      .array()
+      .default([])
+      .notNull(),
+    state: text("state").default("draft").notNull(),
+    version: integer("version").default(1).notNull(),
+    currentDraftVersion: integer("current_draft_version").default(1).notNull(),
+    publishedVersion: integer("published_version"),
+    scheduleGeneration: integer("schedule_generation").default(0).notNull(),
+    publishedByEmployeeId: uuid("published_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    pausedByEmployeeId: uuid("paused_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    pauseReason: text("pause_reason"),
+    ...timestamps,
+  },
+  (table) => [
+    index("research_programme_owner_idx").on(
+      table.ownerEmployeeId,
+      table.updatedAt,
+    ),
+    index("research_programme_state_idx").on(table.state, table.updatedAt),
+    check(
+      "research_programme_state_chk",
+      sql`${table.state} in ('draft', 'active', 'paused', 'archived')`,
+    ),
+    check(
+      "research_programme_version_chk",
+      sql`${table.version} >= 1 and ${table.currentDraftVersion} >= 1 and ${table.scheduleGeneration} >= 0 and (${table.publishedVersion} is null or (${table.publishedVersion} >= 1 and ${table.publishedVersion} <= ${table.currentDraftVersion}))`,
+    ),
+  ],
+);
+
+/** Immutable configuration/source snapshot for one Discovery draft version. */
+export const researchProgrammeVersion = pgTable(
+  "research_programme_version",
+  {
+    researchProgrammeVersionId: uuid("research_programme_version_id")
+      .defaultRandom()
+      .primaryKey(),
+    researchProgrammeId: uuid("research_programme_id")
+      .notNull()
+      .references(() => researchProgramme.researchProgrammeId),
+    versionNumber: integer("version_number").notNull(),
+    configuration: jsonb("configuration")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    configHash: text("config_hash").notNull(),
+    createdByEmployeeId: uuid("created_by_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("research_programme_version_uniq").on(
+      table.researchProgrammeId,
+      table.versionNumber,
+    ),
+    check(
+      "research_programme_version_number_chk",
+      sql`${table.versionNumber} >= 1`,
+    ),
+    check(
+      "research_programme_version_hash_chk",
+      sql`${table.configHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+  ],
+);
+
+/** Stable binding identity and operational health, separate from draft snapshots. */
+export const researchProgrammeSourceBinding = pgTable(
+  "research_programme_source_binding",
+  {
+    researchProgrammeSourceBindingId: uuid(
+      "research_programme_source_binding_id",
+    )
+      .defaultRandom()
+      .primaryKey(),
+    researchProgrammeId: uuid("research_programme_id")
+      .notNull()
+      .references(() => researchProgramme.researchProgrammeId),
+    sourceKey: text("source_key").notNull(),
+    family: text("family").notNull(),
+    adapter: text("adapter").notNull(),
+    adapterVersion: text("adapter_version").notNull(),
+    configuration: jsonb("configuration")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    accountReferenceId: uuid("account_reference_id").references(
+      () => connectionAccount.connectionAccountId,
+      { onDelete: "set null" },
+    ),
+    enabled: boolean("enabled").default(false).notNull(),
+    required: boolean("required").default(false).notNull(),
+    capabilityState: text("capability_state").default("unverified").notNull(),
+    connectionState: text("connection_state").default("unverified").notNull(),
+    credentialGeneration: integer("credential_generation").default(0).notNull(),
+    capabilityTestReceiptId: uuid("capability_test_receipt_id").references(
+      () => integrationInbox.integrationInboxId,
+    ),
+    capabilityTestedAt: timestamp("capability_tested_at", {
+      withTimezone: true,
+    }),
+    checkpointVersion: integer("checkpoint_version").default(0).notNull(),
+    cursor: jsonb("cursor").$type<Record<string, unknown>>(),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    coverage: jsonb("coverage")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("research_programme_source_uniq").on(
+      table.researchProgrammeId,
+      table.sourceKey,
+    ),
+    index("research_programme_source_attention_idx").on(
+      table.capabilityState,
+      table.connectionState,
+      table.updatedAt,
+    ),
+    check(
+      "research_programme_source_capability_chk",
+      sql`${table.capabilityState} in ('candidate', 'unverified', 'blocked', 'manual', 'verified')`,
+    ),
+    check(
+      "research_programme_source_connection_chk",
+      sql`${table.connectionState} in ('not_required', 'unverified', 'needs_connection', 'connected', 'error')`,
+    ),
+    check(
+      "research_programme_source_generation_chk",
+      sql`${table.credentialGeneration} >= 0 and ${table.checkpointVersion} >= 0`,
+    ),
+  ],
+);

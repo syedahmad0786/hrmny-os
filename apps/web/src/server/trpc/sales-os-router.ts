@@ -57,6 +57,18 @@ import {
   consumeApolloExactApproval,
   type SalesOsSettings,
 } from "../sales-os";
+import {
+  createDiscoveryProgramme,
+  discoveryManifest,
+  discoveryProgrammeConfigSchema,
+  discoverySourceDraftSchema,
+  DiscoveryProgrammeError,
+  getDiscoveryProgramme,
+  listDiscoveryProgrammes,
+  pauseDiscoveryProgramme,
+  publishDiscoveryProgramme,
+  saveDiscoveryProgrammeDraft,
+} from "../sales-os/discovery-programmes";
 import { patchOutreach } from "../leadgen/store";
 import { requireVisibleOutreach } from "../leadgen/email-access";
 import {
@@ -116,6 +128,27 @@ const salesAdminProcedure = salesRoleProcedure(
   SALES_ADMIN_ROLES,
   "Sales administrator role required",
 );
+
+function isSalesAdmin(roles: readonly string[]) {
+  return roles.some((role) => SALES_ADMIN_ROLES.has(role));
+}
+
+async function discoveryCommand<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (!(error instanceof DiscoveryProgrammeError)) throw error;
+    const code =
+      error.code === "NOT_FOUND"
+        ? "NOT_FOUND"
+        : error.code === "FORBIDDEN"
+          ? "FORBIDDEN"
+          : error.code === "CONFLICT"
+            ? "CONFLICT"
+            : "BAD_REQUEST";
+    throw new TRPCError({ code, message: error.message });
+  }
+}
 
 const settingsPatch = z.object({
   rateCard: z
@@ -674,6 +707,106 @@ export const salesOsRouter = router({
           message: "APOLLO_DURABLE_SEARCH_RECEIPT_REQUIRED",
         });
       }),
+  }),
+
+  discovery: router({
+    manifest: salesOperatorProcedure.query(({ ctx }) =>
+      discoveryManifest(ctx.employeeId),
+    ),
+    programmes: router({
+      list: salesOperatorProcedure
+        .input(
+          z
+            .object({
+              state: z
+                .enum(["draft", "active", "paused", "archived"])
+                .optional(),
+            })
+            .optional(),
+        )
+        .query(({ ctx, input }) =>
+          listDiscoveryProgrammes({
+            actorEmployeeId: ctx.employeeId,
+            isAdmin: isSalesAdmin(ctx.roles),
+            state: input?.state,
+          }),
+        ),
+      get: salesOperatorProcedure
+        .input(z.object({ programmeId: z.string().uuid() }))
+        .query(({ ctx, input }) =>
+          discoveryCommand(() =>
+            getDiscoveryProgramme({
+              programmeId: input.programmeId,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+      create: salesOperatorProcedure
+        .input(
+          z.object({
+            config: discoveryProgrammeConfigSchema,
+            sources: z.array(discoverySourceDraftSchema).optional(),
+          }),
+        )
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            createDiscoveryProgramme({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+            }),
+          ),
+        ),
+      saveDraft: salesOperatorProcedure
+        .input(
+          z.object({
+            programmeId: z.string().uuid(),
+            expectedVersion: z.number().int().min(1),
+            config: discoveryProgrammeConfigSchema,
+            sources: z.array(discoverySourceDraftSchema),
+          }),
+        )
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            saveDiscoveryProgrammeDraft({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+      publish: salesAdminProcedure
+        .input(
+          z.object({
+            programmeId: z.string().uuid(),
+            expectedVersion: z.number().int().min(1),
+          }),
+        )
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            publishDiscoveryProgramme({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+            }),
+          ),
+        ),
+      pause: salesAdminProcedure
+        .input(
+          z.object({
+            programmeId: z.string().uuid(),
+            expectedVersion: z.number().int().min(1),
+            reason: z.string().trim().min(3).max(500),
+          }),
+        )
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            pauseDiscoveryProgramme({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+            }),
+          ),
+        ),
+    }),
   }),
 
   contacts: router({

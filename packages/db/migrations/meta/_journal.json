@@ -589,6 +589,13 @@
       "when": 1789092000000,
       "tag": "0084_composio_managed_multi_account",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1789909200000,
+      "tag": "0085_discovery_programmes",
+      "breakpoints": true
     }
   ]
 }
