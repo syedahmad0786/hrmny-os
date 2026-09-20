@@ -416,12 +416,15 @@ describe("openrouter free-model failover", () => {
   });
 
   it("applies a zero max_price filter and omits paid plugins on a pinned Discovery route", async () => {
+    const discoveryModel = "nex-agi/nex-n2.5-pro:free";
     const fetchMock = vi.fn(
       async () =>
         new Response(
           JSON.stringify({
             id: "gen-zero",
-            model: OPENROUTER_FREE_DEFAULT_MODEL,
+            model: discoveryModel,
+            provider: "Nex AGI",
+            usage: { prompt_tokens: 12, completion_tokens: 8, cost: 0 },
             choices: [{ message: { role: "assistant", content: '{"ok":true}' } }],
           }),
           { status: 200, headers: { "content-type": "application/json" } },
@@ -430,27 +433,33 @@ describe("openrouter free-model failover", () => {
     vi.stubGlobal("fetch", fetchMock);
     const provider = createProvider({
       provider: "openrouter",
-      defaultModel: OPENROUTER_FREE_DEFAULT_MODEL,
+      defaultModel: discoveryModel,
       openRouterApiKey: "sk-test",
     });
-    await provider.generate({
+    const result = await provider.generate({
       messages: [{ role: "user", content: "hi" }],
-      model: OPENROUTER_FREE_DEFAULT_MODEL,
+      model: discoveryModel,
       schema: z.object({ ok: z.boolean() }),
       allowFreeFallback: false,
       allowPlugins: false,
       webSearch: false,
       privateContext: false,
       maxPrice: { prompt: 0, completion: 0, request: 0 },
+      openRouterProviderOrder: ["Nex AGI"],
+      maxTokens: 400,
     });
     const body = JSON.parse(
       String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
     );
-    expect(body.model).toBe(OPENROUTER_FREE_DEFAULT_MODEL);
+    expect(body.model).toBe(discoveryModel);
     expect(body.provider).toEqual({
       max_price: { prompt: 0, completion: 0, request: 0 },
+      order: ["Nex AGI"],
       allow_fallbacks: false,
     });
+    expect(body.max_tokens).toBe(400);
+    expect(result.upstreamProvider).toBe("Nex AGI");
+    expect(result.providerCostUsd).toBe(0);
     expect(body.plugins).toBeUndefined();
     expect(body.tools).toBeUndefined();
     vi.unstubAllGlobals();

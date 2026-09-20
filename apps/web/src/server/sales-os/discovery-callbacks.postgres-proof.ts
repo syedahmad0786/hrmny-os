@@ -2,8 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { LLMProvider } from "@hrmny/ai";
 import { createDb, sql } from "@hrmny/db";
 import { expect, it } from "vitest";
+import { getDiscoveryCandidate } from "./discovery-candidates";
 import { acceptDiscoveryRuntimeCallback } from "./discovery-callbacks";
-import { runDiscoveryInterpretationJob } from "./discovery-callback-ingest";
+import {
+  listPendingDiscoveryInterpretationJobs,
+  runDiscoveryInterpretationJob,
+} from "./discovery-callback-ingest";
 import {
   createDiscoveryProgramme,
   DEFAULT_DISCOVERY_PROGRAMME_CONFIG,
@@ -147,6 +151,7 @@ async function seedRunningDiscoveryCallback(label: string) {
     bindingId: binding!.research_programme_source_binding_id,
     credentialGeneration: binding!.credential_generation,
     attemptToken,
+    ownerId,
   };
 }
 
@@ -194,9 +199,10 @@ async function observationCount(runId: string) {
 async function jobStatus(runId: string) {
   const [row] = await db.execute<{
     status: string;
+    lastError: string | null;
     result: Record<string, unknown> | null;
   }>(sql`
-    select status, result
+    select status, last_error as "lastError", result
     from public.scheduled_job
     where scheduled_job_id = ${runId}::uuid
   `);
@@ -339,6 +345,9 @@ it("ingests a signed public-news callback into Review and replays the same event
 });
 
 it("keeps provider completion open until durable identity interpretation finalizes", async () => {
+  const previousExecutionEnabled = process.env.DISCOVERY_EXECUTION_ENABLED;
+  process.env.DISCOVERY_EXECUTION_ENABLED = "true";
+  try {
   const seeded = await seedRunningDiscoveryCallback("callback-interpret");
   const observationId = randomUUID();
   const observations = signedCallback({
@@ -432,6 +441,7 @@ it("keeps provider completion open until durable identity interpretation finaliz
         },
         provider: "mock",
         model: "mock",
+        requestId: "or-interpret-1",
         inputTokens: 20,
         outputTokens: 10,
       };
@@ -449,6 +459,37 @@ it("keeps provider completion open until durable identity interpretation finaliz
   expect(await candidateCount(seeded.runId)).toBe(1);
   expect(await observationCount(seeded.runId)).toBe(1);
   expect(await jobStatus(seeded.runId)).toMatchObject({ status: "completed" });
+  const [created] = await db.execute<{
+    discovery_candidate_id: string;
+    request_id: string;
+  }>(sql`
+    select discovery_candidate_id::text, request_id::text
+    from public.discovery_candidate
+    where scheduled_job_id = ${seeded.runId}::uuid
+    limit 1
+  `);
+  expect(created?.request_id).toBe(observationId);
+  const reviewed = await getDiscoveryCandidate({
+    actorEmployeeId: seeded.ownerId,
+    isAdmin: false,
+    candidateId: created!.discovery_candidate_id,
+  });
+  expect(reviewed.evaluation?.packet.identityLineage).toMatchObject({
+    observationId,
+    semantic: "model",
+    provider: "mock",
+    model: "mock",
+    requestId: "or-interpret-1",
+  });
+  expect(reviewed.evaluation?.packet.provider).toBe("unavailable");
+  expect(reviewed.companyId).toBeNull();
+  } finally {
+    if (previousExecutionEnabled === undefined) {
+      delete process.env.DISCOVERY_EXECUTION_ENABLED;
+    } else {
+      process.env.DISCOVERY_EXECUTION_ENABLED = previousExecutionEnabled;
+    }
+  }
 });
 
 it("rejects late cancel_requested observations and completed completions without reversing status", async () => {
@@ -643,4 +684,350 @@ it("does not persist off-origin evidence and still accepts a Campaign ME article
   });
   expect(await candidateCount(seeded.runId)).toBe(1);
   expect(await observationCount(seeded.runId)).toBe(1);
+});
+
+function mockIdentityProvider(requestId: string, onGenerate?: () => Promise<void>): LLMProvider {
+  return {
+    name: "mock",
+    async generate() {
+      await onGenerate?.();
+      return {
+        text: JSON.stringify({
+          claims: [],
+          relevantService: null,
+          opportunityKind: "company_signal",
+          awardedAppointment: false,
+          unsupported: false,
+          companyIdentity: {
+            name: "Acme Holdings",
+            domain: null,
+            ambiguous: false,
+          },
+        }),
+        object: {
+          claims: [],
+          relevantService: null,
+          opportunityKind: "company_signal",
+          awardedAppointment: false,
+          unsupported: false,
+          companyIdentity: {
+            name: "Acme Holdings",
+            domain: null,
+            ambiguous: false,
+          },
+        },
+        provider: "mock",
+        model: "mock",
+        requestId,
+        inputTokens: 20,
+        outputTokens: 10,
+      };
+    },
+  };
+}
+
+it("persists cancellation before the interpretation final write and does not ingest", async () => {
+  const previousExecutionEnabled = process.env.DISCOVERY_EXECUTION_ENABLED;
+  process.env.DISCOVERY_EXECUTION_ENABLED = "true";
+  try {
+    const seeded = await seedRunningDiscoveryCallback("callback-cancel-before");
+    const observationId = randomUUID();
+    const observations = signedCallback({
+      schemaVersion: 1,
+      event: "sales.discovery.observations.v1",
+      runId: seeded.runId,
+      sourceId: seeded.bindingId,
+      attemptToken: seeded.attemptToken,
+      attemptGeneration: 1,
+      credentialGeneration: seeded.credentialGeneration,
+      payload: {
+        observations: [
+          {
+            observationId,
+            sourceItemKey: `campaign-me-cancel-before-${observationId}`,
+            contentHash: "e".repeat(64),
+            sourceReference: {
+              kind: "public_url",
+              url: `https://campaignme.com/latest/cancel-before-${observationId}`,
+            },
+            observedAt: "2026-09-20T06:30:00.000+04:00",
+            publishedAt: "2026-09-19T00:00:00.000Z",
+            dateEvidence: { method: "feed", precision: "day" },
+            kind: "news",
+            title: "Acme Holdings opened an agency review",
+            excerpt:
+              "Acme Holdings opened an agency review for its regional communications account.",
+            companyHints: [],
+          },
+        ],
+      },
+    });
+    expect(
+      await acceptDiscoveryRuntimeCallback({
+        rawBody: observations.rawBody,
+        headers: observations.headers,
+      }),
+    ).toEqual({ status: "accepted", eventId: observations.eventId });
+    await db.execute(sql`
+      update public.scheduled_job
+      set status = 'cancel_requested'
+      where scheduled_job_id = ${seeded.runId}::uuid
+    `);
+    expect(
+      await runDiscoveryInterpretationJob({
+        jobId: seeded.runId,
+        sourceKey: "campaign_me",
+        attemptToken: seeded.attemptToken,
+        attemptGeneration: 1,
+        provider: mockIdentityProvider("or-cancel-before"),
+      }),
+    ).toMatchObject({ status: "cancelled" });
+    expect(await candidateCount(seeded.runId)).toBe(0);
+    const row = await jobStatus(seeded.runId);
+    expect(row).toMatchObject({ status: "cancelled" });
+    const interpretation = (
+      row?.result?.sourceOutcomes as
+        | Record<string, { interpretation?: { status?: string; lastError?: string } }>
+        | undefined
+    )?.campaign_me?.interpretation;
+    expect(interpretation).toMatchObject({
+      status: "cancelled",
+      lastError: "RUN_CANCEL_REQUESTED",
+    });
+  } finally {
+    if (previousExecutionEnabled === undefined) {
+      delete process.env.DISCOVERY_EXECUTION_ENABLED;
+    } else {
+      process.env.DISCOVERY_EXECUTION_ENABLED = previousExecutionEnabled;
+    }
+  }
+});
+
+it("persists cancellation during an in-flight mock call and does not ingest", async () => {
+  const previousExecutionEnabled = process.env.DISCOVERY_EXECUTION_ENABLED;
+  process.env.DISCOVERY_EXECUTION_ENABLED = "true";
+  try {
+    const seeded = await seedRunningDiscoveryCallback("callback-cancel-during");
+    const observationId = randomUUID();
+    const observations = signedCallback({
+      schemaVersion: 1,
+      event: "sales.discovery.observations.v1",
+      runId: seeded.runId,
+      sourceId: seeded.bindingId,
+      attemptToken: seeded.attemptToken,
+      attemptGeneration: 1,
+      credentialGeneration: seeded.credentialGeneration,
+      payload: {
+        observations: [
+          {
+            observationId,
+            sourceItemKey: `campaign-me-cancel-during-${observationId}`,
+            contentHash: "f".repeat(64),
+            sourceReference: {
+              kind: "public_url",
+              url: `https://campaignme.com/latest/cancel-during-${observationId}`,
+            },
+            observedAt: "2026-09-20T06:30:00.000+04:00",
+            publishedAt: "2026-09-19T00:00:00.000Z",
+            dateEvidence: { method: "feed", precision: "day" },
+            kind: "news",
+            title: "Acme Holdings opened an agency review",
+            excerpt:
+              "Acme Holdings opened an agency review for its regional communications account.",
+            companyHints: [],
+          },
+        ],
+      },
+    });
+    expect(
+      await acceptDiscoveryRuntimeCallback({
+        rawBody: observations.rawBody,
+        headers: observations.headers,
+      }),
+    ).toEqual({ status: "accepted", eventId: observations.eventId });
+    const provider = mockIdentityProvider("or-cancel-during", async () => {
+      await db.execute(sql`
+        update public.scheduled_job
+        set status = 'cancel_requested'
+        where scheduled_job_id = ${seeded.runId}::uuid
+          and attempts = 1
+          and attempt_token = ${seeded.attemptToken}::uuid
+      `);
+    });
+    await runDiscoveryInterpretationJob({
+      jobId: seeded.runId,
+      sourceKey: "campaign_me",
+      attemptToken: seeded.attemptToken,
+      attemptGeneration: 1,
+      provider,
+    });
+    expect(await candidateCount(seeded.runId)).toBe(0);
+    const row = await jobStatus(seeded.runId);
+    expect(row).toMatchObject({ status: "cancelled" });
+    const interpretation = (
+      row?.result?.sourceOutcomes as
+        | Record<string, { interpretation?: { status?: string; lastError?: string } }>
+        | undefined
+    )?.campaign_me?.interpretation;
+    expect(interpretation).toMatchObject({
+      status: "cancelled",
+      lastError: "RUN_CANCEL_REQUESTED",
+    });
+  } finally {
+    if (previousExecutionEnabled === undefined) {
+      delete process.env.DISCOVERY_EXECUTION_ENABLED;
+    } else {
+      process.env.DISCOVERY_EXECUTION_ENABLED = previousExecutionEnabled;
+    }
+  }
+});
+
+it("lists and finalizes cancellation after a terminal cost-receipt failure", async () => {
+  const previousExecutionEnabled = process.env.DISCOVERY_EXECUTION_ENABLED;
+  process.env.DISCOVERY_EXECUTION_ENABLED = "true";
+  try {
+    const seeded = await seedRunningDiscoveryCallback("callback-cancel-terminal-cost");
+    const observationId = randomUUID();
+    const observations = signedCallback({
+      schemaVersion: 1,
+      event: "sales.discovery.observations.v1",
+      runId: seeded.runId,
+      sourceId: seeded.bindingId,
+      attemptToken: seeded.attemptToken,
+      attemptGeneration: 1,
+      credentialGeneration: seeded.credentialGeneration,
+      payload: {
+        observations: [
+          {
+            observationId,
+            sourceItemKey: `campaign-me-terminal-cost-${observationId}`,
+            contentHash: "a".repeat(64),
+            sourceReference: {
+              kind: "public_url",
+              url: `https://campaignme.com/latest/terminal-cost-${observationId}`,
+            },
+            observedAt: "2026-09-20T06:30:00.000+04:00",
+            publishedAt: "2026-09-19T00:00:00.000Z",
+            dateEvidence: { method: "feed", precision: "day" },
+            kind: "news",
+            title: "Acme Holdings opened an agency review",
+            excerpt:
+              "Acme Holdings opened an agency review for its regional communications account.",
+            companyHints: [],
+          },
+        ],
+      },
+    });
+    expect(
+      await acceptDiscoveryRuntimeCallback({
+        rawBody: observations.rawBody,
+        headers: observations.headers,
+      }),
+    ).toEqual({ status: "accepted", eventId: observations.eventId });
+    const before = await jobStatus(seeded.runId);
+    const result = structuredClone(before?.result ?? {}) as Record<string, any>;
+    const queue = result.sourceOutcomes.campaign_me.interpretation;
+    queue.status = "unavailable";
+    queue.lastError = "DISCOVERY_COST_RECEIPT_UNAVAILABLE";
+    queue.done = [...(queue.done ?? []), ...(queue.pending ?? []), ...(queue.inFlight ?? [])];
+    queue.pending = [];
+    queue.inFlight = [];
+    result.interpretationBudget = {
+      ...(result.interpretationBudget ?? {}),
+      costReceiptAvailable: false,
+    };
+    await db.execute(sql`
+      update public.scheduled_job
+      set status = 'cancel_requested', result = ${JSON.stringify(result)}::jsonb
+      where scheduled_job_id = ${seeded.runId}::uuid
+    `);
+
+    const listed = await listPendingDiscoveryInterpretationJobs({ limit: 25 });
+    const continuation = listed.find((item) => item.jobId === seeded.runId);
+    expect(continuation).toMatchObject({
+      sourceKey: "campaign_me",
+      attemptToken: seeded.attemptToken,
+      attemptGeneration: 1,
+    });
+    expect(
+      await runDiscoveryInterpretationJob({
+        ...continuation!,
+      }),
+    ).toMatchObject({ status: "cancelled" });
+    expect(await jobStatus(seeded.runId)).toMatchObject({
+      status: "cancelled",
+      lastError: "RUN_CANCEL_REQUESTED",
+    });
+    expect(await candidateCount(seeded.runId)).toBe(0);
+
+    const multi = await seedRunningDiscoveryCallback("callback-cancel-multi-source");
+    const multiObservationId = randomUUID();
+    const multiCallback = signedCallback({
+      schemaVersion: 1,
+      event: "sales.discovery.observations.v1",
+      runId: multi.runId,
+      sourceId: multi.bindingId,
+      attemptToken: multi.attemptToken,
+      attemptGeneration: 1,
+      credentialGeneration: multi.credentialGeneration,
+      payload: {
+        observations: [{
+          observationId: multiObservationId,
+          sourceItemKey: `campaign-me-multi-${multiObservationId}`,
+          contentHash: "b".repeat(64),
+          sourceReference: { kind: "public_url", url: `https://campaignme.com/latest/multi-${multiObservationId}` },
+          observedAt: "2026-09-20T06:30:00.000+04:00",
+          publishedAt: "2026-09-19T00:00:00.000Z",
+          dateEvidence: { method: "feed", precision: "day" },
+          kind: "news",
+          title: "Acme Holdings opened an agency review",
+          excerpt: "Acme Holdings opened an agency review for its regional communications account.",
+          companyHints: [],
+        }],
+      },
+    });
+    await acceptDiscoveryRuntimeCallback({
+      rawBody: multiCallback.rawBody,
+      headers: multiCallback.headers,
+    });
+    const multiBefore = await jobStatus(multi.runId);
+    const multiResult = structuredClone(multiBefore?.result ?? {}) as Record<string, any>;
+    multiResult.sourceOutcomes = {
+      a_terminal: {
+        interpretation: {
+          status: "cancelled",
+          pending: [],
+          inFlight: [],
+          done: [],
+          calls: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          lastError: "RUN_CANCEL_REQUESTED",
+        },
+      },
+      ...multiResult.sourceOutcomes,
+    };
+    await db.execute(sql`
+      update public.scheduled_job
+      set status = 'cancel_requested', result = ${JSON.stringify(multiResult)}::jsonb
+      where scheduled_job_id = ${multi.runId}::uuid
+    `);
+    const multiListed = (await listPendingDiscoveryInterpretationJobs({ limit: 25 }))
+      .find((item) => item.jobId === multi.runId);
+    expect(multiListed?.sourceKey).toBe("campaign_me");
+    expect(
+      await runDiscoveryInterpretationJob({ ...multiListed! }),
+    ).toMatchObject({ status: "cancelled" });
+    expect(await jobStatus(multi.runId)).toMatchObject({
+      status: "cancelled",
+      lastError: "RUN_CANCEL_REQUESTED",
+    });
+    expect(await candidateCount(multi.runId)).toBe(0);
+  } finally {
+    if (previousExecutionEnabled === undefined) {
+      delete process.env.DISCOVERY_EXECUTION_ENABLED;
+    } else {
+      process.env.DISCOVERY_EXECUTION_ENABLED = previousExecutionEnabled;
+    }
+  }
 });

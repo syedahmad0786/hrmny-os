@@ -51,6 +51,17 @@ it("proves Discovery review accept, replay, privacy, and no later-stage rows", a
   expect(created.evidence?.[0]?.excerptHidden).toBe(false);
   expect(created.evaluation?.packet.excerptIncluded).toBe(false);
   expect(created.evaluation?.packet.provider).toBe("unavailable");
+  expect(created.evaluation?.packet.identityLineage).toMatchObject({
+    observationId: requestId,
+    semantic: "manual",
+    provider: "unavailable",
+    model: null,
+    requestId: null,
+    sourceUrl,
+  });
+  expect(created.evaluation?.packet.identityLineage?.excerptHash).toMatch(
+    /^[0-9a-f]{64}$/,
+  );
 
   const replay = await submitDiscoveryCandidate({
     actorEmployeeId: ownerId,

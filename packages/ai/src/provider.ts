@@ -57,6 +57,8 @@ export type LLMGenerateOptions = {
   messages: LLMMessage[];
   schema?: ZodTypeAny;
   temperature?: number;
+  /** Hard response-token ceiling. Discovery public interpretation uses 400. */
+  maxTokens?: number;
   images?: LLMImageInput[];
   /** OpenRouter live web grounding, hard-capped to two searches. */
   webSearch?: boolean;
@@ -78,6 +80,8 @@ export type LLMGenerateOptions = {
    * must pass false so paid plugins cannot attach.
    */
   allowPlugins?: boolean;
+  /** Exact OpenRouter upstream order. Discovery pins its proved provider. */
+  openRouterProviderOrder?: readonly string[];
   /** Optional task hint for mock structured outputs. */
   task?:
     | "invoice_extract"
@@ -94,6 +98,10 @@ export type LLMGenerateResult = {
   provider: LLMProviderName;
   model: string;
   requestId?: string;
+  /** Upstream selected by OpenRouter, when the response discloses it. */
+  upstreamProvider?: string;
+  /** OpenRouter's observed request cost in USD, when disclosed. */
+  providerCostUsd?: number;
   inputTokens?: number;
   outputTokens?: number;
   sourceCitations?: Array<{ url: string; title?: string }>;
@@ -991,10 +999,11 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
                   model: activeModel,
                   messages: openRouterMessages(options),
                   temperature: options.temperature ?? 0.2,
-                  max_tokens: options.webSearch ? 4_096 : 2_048,
+                  max_tokens: options.maxTokens ?? (options.webSearch ? 4_096 : 2_048),
                   reasoning: { effort: "low", exclude: true },
                   ...((options.privateContext ||
                   options.maxPrice ||
+                  options.openRouterProviderOrder?.length ||
                   options.allowFreeFallback === false)
                     ? {
                         provider: {
@@ -1003,6 +1012,9 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
                             : {}),
                           ...(options.maxPrice
                             ? { max_price: options.maxPrice }
+                            : {}),
+                          ...(options.openRouterProviderOrder?.length
+                            ? { order: [...options.openRouterProviderOrder] }
                             : {}),
                           ...(options.allowFreeFallback === false
                             ? { allow_fallbacks: false }
@@ -1082,6 +1094,12 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
               provider: name,
               model: typeof raw.model === "string" ? raw.model : activeModel,
               requestId: typeof raw.id === "string" ? raw.id : undefined,
+              upstreamProvider:
+                typeof raw.provider === "string" ? raw.provider : undefined,
+              providerCostUsd:
+                typeof usage?.cost === "number" && Number.isFinite(usage.cost)
+                  ? usage.cost
+                  : undefined,
               inputTokens: Number(usage?.prompt_tokens ?? 0) || undefined,
               outputTokens: Number(usage?.completion_tokens ?? 0) || undefined,
               sourceCitations,
@@ -1198,6 +1216,7 @@ export type ModelPrice = {
  * model is added or a bill looks off. Unknown models fall back to `default`.
  */
 export const MODEL_PRICES_AED: Record<string, ModelPrice> = {
+  "nex-agi/nex-n2.5-pro:free": { inputPerMTokAed: 0, outputPerMTokAed: 0 },
   "openai/gpt-4o": { inputPerMTokAed: 9.18, outputPerMTokAed: 36.73 },
   "openai/gpt-4o-mini": { inputPerMTokAed: 0.55, outputPerMTokAed: 2.2 },
   "anthropic/claude-3.5-sonnet": {

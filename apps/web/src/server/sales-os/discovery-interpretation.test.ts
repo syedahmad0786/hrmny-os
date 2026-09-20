@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createMockProvider, type LLMProvider } from "@hrmny/ai";
+import { createMockProvider, withMetering, type LLMProvider } from "@hrmny/ai";
 import {
   discoveryInterpretationResultSchema,
+  DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL,
+  createLiveDiscoveryInterpretationProvider,
   evaluateDiscoveryEvidence,
+  interpretPublicDiscoveryExcerpt,
   resolveDiscoveryInterpretationRoute,
   resolvePublicDiscoveryCompanyIdentity,
   verifyDiscoveryZeroPriceRoute,
@@ -27,6 +30,7 @@ function providerFromObject(object: unknown): LLMProvider {
 describe("Discovery interpretation packet", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("does not invoke a provider on ordinary evaluation and labels facts separately from interpretations", async () => {
@@ -101,14 +105,14 @@ describe("Discovery interpretation packet", () => {
       excerpt: "A dated listing named a relevant UAE review.",
       provider: createMockProvider(),
     });
-    expect(empty).toEqual({ ok: false, reason: "COMPANY_IDENTITY_MISSING" });
+    expect(empty).toMatchObject({ ok: false, reason: "COMPANY_IDENTITY_MISSING" });
 
     const ambiguous = await resolvePublicDiscoveryCompanyIdentity({
       excerpt:
         "Majid Al Futtaim and Emaar Properties opened competing reviews.",
       provider: createMockProvider(),
     });
-    expect(ambiguous).toEqual({
+    expect(ambiguous).toMatchObject({
       ok: false,
       reason: "COMPANY_IDENTITY_AMBIGUOUS",
     });
@@ -128,7 +132,7 @@ describe("Discovery interpretation packet", () => {
         },
       }),
     });
-    expect(fromHeadlineOnly).toEqual({
+    expect(fromHeadlineOnly).toMatchObject({
       ok: false,
       reason: "COMPANY_IDENTITY_MISSING",
     });
@@ -142,7 +146,10 @@ describe("Discovery interpretation packet", () => {
       eventDate: "2026-09-18",
       provider: createMockProvider(),
     });
-    expect(resolved).toEqual({ ok: true, name: "Majid Al Futtaim" });
+    expect(resolved).toMatchObject({ ok: true, name: "Majid Al Futtaim" });
+    expect(resolved.ok ? resolved.receipt.requestId ?? null : "missing").toBe(
+      null,
+    );
 
     const evaluation = await evaluateDiscoveryEvidence({
       opportunityKind: "company_signal",
@@ -172,7 +179,7 @@ describe("Discovery interpretation packet", () => {
         "Majid Al Futtaim opened a regional creative review in Dubai.",
       provider: providerFromObject({ not: "a discovery result" }),
     });
-    expect(malformed).toEqual({
+    expect(malformed).toMatchObject({
       ok: false,
       reason: "INTERPRETATION_MALFORMED",
     });
@@ -263,7 +270,7 @@ describe("Discovery interpretation packet", () => {
         "Majid Al Futtaim opened a regional creative review in Dubai.",
       provider: unavailable,
     });
-    expect(resolved).toEqual({
+    expect(resolved).toMatchObject({
       ok: false,
       reason: "INTERPRETATION_PROVIDER_UNAVAILABLE",
     });
@@ -304,7 +311,7 @@ describe("Discovery interpretation packet", () => {
     });
     expect(verifyDiscoveryZeroPriceRoute("stealth/ox-alpha")).toEqual({
       ok: false,
-      reason: "DISCOVERY_PRICE_PROOF_MISSING",
+      reason: "DISCOVERY_PAID_ROUTE_REFUSED",
     });
     expect(verifyDiscoveryZeroPriceRoute("vendor/unknown:free")).toEqual({
       ok: false,
@@ -346,29 +353,50 @@ describe("Discovery interpretation packet", () => {
   });
 
   it("fails closed for unknown free models and missing spend or receipt wiring", () => {
+    const catalogNow = new Date("2026-09-20T22:12:00.000Z");
     const proof = JSON.stringify({
-      model: "stealth/ox-alpha",
-      prompt: 0,
-      completion: 0,
-      request: 0,
-      verifiedAt: "2026-09-20T00:00:00.000Z",
-      source: "openrouter_provider_catalog",
+      model: "nex-agi/nex-n2.5-pro:free",
+      prompt: "0",
+      completion: "0",
+      verifiedAt: "2026-09-20T22:10:53.025Z",
+      source: "openrouter_provider_catalog_and_runtime_probe",
+      endpoint: "Nex AGI | nex-agi/nex-n2.5-pro-20260907:free",
+      provider: "Nex AGI",
+      runtimeRequestId: "gen-proof",
+      actualCost: 0,
     });
     vi.stubEnv("OPENROUTER_API_KEY", "sk-test");
     expect(
-      verifyDiscoveryZeroPriceRoute("stealth/ox-alpha", proof, now),
+      verifyDiscoveryZeroPriceRoute("nex-agi/nex-n2.5-pro:free", proof, catalogNow),
     ).toEqual({ ok: true });
     expect(
-      verifyDiscoveryZeroPriceRoute("vendor/unknown:free", proof, now),
+      verifyDiscoveryZeroPriceRoute("vendor/unknown:free", proof, catalogNow),
     ).toEqual({ ok: false, reason: "DISCOVERY_PAID_ROUTE_REFUSED" });
+    expect(
+      verifyDiscoveryZeroPriceRoute(
+        "nex-agi/nex-n2.5-pro:free",
+        JSON.stringify({
+          model: "nex-agi/nex-n2.5-pro:free",
+          prompt: "0",
+          completion: "0",
+          verifiedAt: "2026-09-17T00:00:00.000Z",
+          source: "openrouter_provider_catalog_and_runtime_probe",
+          endpoint: "Nex AGI | nex-agi/nex-n2.5-pro-20260907:free",
+          provider: "Nex AGI",
+          runtimeRequestId: "gen-proof",
+          actualCost: 0,
+        }),
+        catalogNow,
+      ),
+    ).toEqual({ ok: false, reason: "DISCOVERY_PRICE_PROOF_STALE" });
     expect(
       resolveDiscoveryInterpretationRoute({
         enabled: true,
-        model: "stealth/ox-alpha",
+        model: "nex-agi/nex-n2.5-pro:free",
         providerName: "openrouter",
         proofJson: proof,
         monthlyCapAed: 0,
-        now,
+        now: catalogNow,
       }),
     ).toEqual({
       status: "unavailable",
@@ -378,15 +406,163 @@ describe("Discovery interpretation packet", () => {
     expect(
       resolveDiscoveryInterpretationRoute({
         enabled: true,
-        model: "stealth/ox-alpha",
+        model: "nex-agi/nex-n2.5-pro:free",
         providerName: "openrouter",
         proofJson: proof,
         monthlyCapAed: 100,
-        now,
+        now: catalogNow,
       }),
     ).toEqual({
       status: "unavailable",
       reason: "INTERPRETATION_PROVIDER_UNAVAILABLE",
     });
+  });
+
+  it("pins the proved Nex upstream and requires observed zero cost", async () => {
+    const model = "nex-agi/nex-n2.5-pro:free";
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-test");
+    vi.stubEnv(
+      "DISCOVERY_INTERPRETATION_PRICE_PROOF_JSON",
+      JSON.stringify({
+        model,
+        prompt: "0",
+        completion: "0",
+        verifiedAt: new Date().toISOString(),
+        source: "openrouter_provider_catalog_and_runtime_probe",
+        endpoint: "Nex AGI | nex-agi/nex-n2.5-pro-20260907:free",
+        provider: "Nex AGI",
+        runtimeRequestId: "gen-proof",
+        actualCost: 0,
+      }),
+    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "gen-live",
+            model,
+            provider: "Nex AGI",
+            usage: { prompt_tokens: 12, completion_tokens: 8, cost: 0 },
+            choices: [{ message: { content: "ok" } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "gen-unpriced",
+            model,
+            provider: "Nex AGI",
+            usage: { prompt_tokens: 12, completion_tokens: 8 },
+            choices: [{ message: { content: "ok" } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const create = () =>
+      createLiveDiscoveryInterpretationProvider({
+        model,
+        onCost: vi.fn(),
+        getMonthlySpendAed: async () => 0,
+        monthlyCapAed: 100,
+      });
+    await expect(
+      create().generate({ messages: [{ role: "user", content: "public excerpt" }] }),
+    ).resolves.toMatchObject({
+      model,
+      upstreamProvider: "Nex AGI",
+      providerCostUsd: 0,
+    });
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+    );
+    expect(body).toMatchObject({
+      model,
+      max_tokens: 400,
+      provider: {
+        order: ["Nex AGI"],
+        allow_fallbacks: false,
+        max_price: { prompt: 0, completion: 0, request: 0 },
+      },
+    });
+    await expect(
+      create().generate({ messages: [{ role: "user", content: "public excerpt" }] }),
+    ).rejects.toThrow("DISCOVERY_FREE_ROUTE_RUNTIME_PROOF_FAILED");
+
+    const callsBeforeOversize = fetchMock.mock.calls.length;
+    await expect(
+      create().generate({
+        messages: [
+          {
+            role: "user",
+            content: "🚀".repeat(DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL),
+          },
+        ],
+      }),
+    ).rejects.toThrow("DISCOVERY_INTERPRETATION_INPUT_CEILING_REACHED");
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeOversize);
+  });
+
+  it("rethrows cost-receipt failure through interpretation and identity resolve", async () => {
+    const generate = vi.fn(async () => ({
+      text: JSON.stringify({
+        claims: [],
+        relevantService: null,
+        opportunityKind: "company_signal",
+        awardedAppointment: false,
+        unsupported: false,
+        companyIdentity: {
+          name: "Majid Al Futtaim",
+          domain: null,
+          ambiguous: false,
+        },
+      }),
+      object: {
+        claims: [],
+        relevantService: null,
+        opportunityKind: "company_signal",
+        awardedAppointment: false,
+        unsupported: false,
+        companyIdentity: {
+          name: "Majid Al Futtaim",
+          domain: null,
+          ambiguous: false,
+        },
+      },
+      provider: "mock" as const,
+      model: "mock",
+      requestId: "or-receipt-1",
+      inputTokens: 12,
+      outputTokens: 4,
+    }));
+    const provider = withMetering(
+      { name: "mock", generate },
+      {
+        agent: "research",
+        monthlyCapAed: 100,
+        getMonthlySpendAed: async () => 0,
+        onCost: async () => {
+          throw new Error("DISCOVERY_COST_RECEIPT_UNAVAILABLE");
+        },
+      },
+    );
+    await expect(
+      interpretPublicDiscoveryExcerpt({
+        excerpt: "Majid Al Futtaim opened a regional creative review in Dubai.",
+        opportunityKind: "company_signal",
+        evidenceId: "obs-receipt",
+        provider,
+      }),
+    ).rejects.toThrow("DISCOVERY_COST_RECEIPT_UNAVAILABLE");
+    await expect(
+      resolvePublicDiscoveryCompanyIdentity({
+        excerpt: "Majid Al Futtaim opened a regional creative review in Dubai.",
+        provider,
+      }),
+    ).rejects.toThrow("DISCOVERY_COST_RECEIPT_UNAVAILABLE");
+    expect(generate).toHaveBeenCalled();
   });
 });

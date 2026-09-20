@@ -9,6 +9,7 @@ import {
   discoveryCandidate,
   discoveryObservation,
   eq,
+  scheduledJob,
   sql,
 } from "@hrmny/db";
 import { z } from "zod";
@@ -25,9 +26,12 @@ import { classifyDiscoveryReviewState } from "./discovery-evidence";
 import {
   discoveryEvidenceRoute,
   evaluateDiscoveryEvidence,
+  isCompanyNameGroundedInExcerpt,
   markDuplicateEvaluation,
+  readStoredDiscoveryIdentityLineage,
   redactHiddenEvaluation,
   type DiscoveryEvidenceEvaluation,
+  type DiscoveryIdentityLineage,
 } from "./discovery-interpretation";
 import { getDiscoveryProgramme } from "./discovery-programmes";
 import {
@@ -565,7 +569,13 @@ async function evaluateCandidateEvidence(
     | "sourceKey"
     | "observations"
   >,
-  extras?: { excerpt?: string; eventDate?: string | null; sourceUrl?: string | null; visibilityScope?: DiscoveryVisibility },
+  extras?: {
+    excerpt?: string;
+    eventDate?: string | null;
+    sourceUrl?: string | null;
+    visibilityScope?: DiscoveryVisibility;
+    identityLineage?: DiscoveryIdentityLineage;
+  },
 ) {
   const latest = row.observations[0];
   return evaluateDiscoveryEvidence({
@@ -580,7 +590,31 @@ async function evaluateCandidateEvidence(
     evidenceId: latest?.id,
     sourceKey: row.sourceKey,
     route: discoveryEvidenceRoute(row.sourceKey),
+    identityLineage: extras?.identityLineage,
   });
+}
+
+async function loadStoredIdentityLineage(
+  query: DiscoveryQuery | undefined,
+  scheduledJobId: string | null,
+  observationId: string,
+  sourceKey: string | null,
+): Promise<DiscoveryIdentityLineage | undefined> {
+  if (!query || !scheduledJobId) return undefined;
+  const [job] = await query
+    .select({
+      scheduledJobId: scheduledJob.scheduledJobId,
+      result: scheduledJob.result,
+    })
+    .from(scheduledJob)
+    .where(eq(scheduledJob.scheduledJobId, scheduledJobId))
+    .limit(1);
+  if (!job || job.scheduledJobId !== scheduledJobId) return undefined;
+  return (
+    readStoredDiscoveryIdentityLineage(job.result, observationId, {
+      sourceKey,
+    }) ?? undefined
+  );
 }
 
 async function candidateView(
@@ -590,6 +624,7 @@ async function candidateView(
   includeEvidence: boolean,
   knownCompanies?: CanonicalCompany[],
   evaluationOverride?: DiscoveryEvidenceEvaluation,
+  identityLineage?: DiscoveryIdentityLineage,
 ) {
   const companies =
     knownCompanies ??
@@ -606,8 +641,10 @@ async function candidateView(
   const evaluation = includeEvidence
     ? evaluationOverride ??
       (excerptVisible
-        ? await evaluateCandidateEvidence(row)
-        : redactHiddenEvaluation(await evaluateCandidateEvidence(row)))
+        ? await evaluateCandidateEvidence(row, { identityLineage })
+        : redactHiddenEvaluation(
+            await evaluateCandidateEvidence(row, { identityLineage }),
+          ))
     : undefined;
   return {
     id: row.id,
@@ -733,6 +770,20 @@ export async function submitDiscoveryCandidate(input: {
     evidenceId: values.requestId,
     sourceKey: values.sourceKey,
     route: discoveryEvidenceRoute(values.sourceKey),
+    identityLineage: {
+      observationId: values.requestId,
+      semantic: "manual",
+      provider: "unavailable",
+      model: null,
+      requestId: null,
+      identity: { name: values.companyName.trim() },
+      sourceUrl: sourceUrl ?? "",
+      excerptHash: sha256(values.excerpt.trim()),
+      grounded: isCompanyNameGroundedInExcerpt(
+        values.companyName,
+        values.excerpt,
+      ),
+    },
   });
   const reviewState = evaluation.reviewState;
   const missingFacts =
@@ -1217,12 +1268,40 @@ async function dbRowView(
       createdAt: observation.createdAt.toISOString(),
     })),
   };
+  const latestObservation = observations[0];
+  const identityLineage = includeEvidence
+    ? row.scheduledJobId
+      ? await loadStoredIdentityLineage(
+          query,
+          row.scheduledJobId,
+          row.requestId,
+          row.sourceKey,
+        )
+      : latestObservation
+        ? {
+            observationId: row.requestId,
+            semantic: "manual" as const,
+            provider: "unavailable",
+            model: null,
+            requestId: null,
+            identity: { name: row.companyName },
+            sourceUrl: latestObservation.sourceUrl ?? "",
+            excerptHash: latestObservation.excerptHash,
+            grounded: isCompanyNameGroundedInExcerpt(
+              row.companyName,
+              latestObservation.excerpt,
+            ),
+          }
+        : undefined
+    : undefined;
   return candidateView(
     memoryLike,
     actor.actorEmployeeId,
     actor.isAdmin,
     includeEvidence,
     companies,
+    undefined,
+    identityLineage,
   );
 }
 

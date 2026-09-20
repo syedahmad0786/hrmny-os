@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { LLMProvider } from "@hrmny/ai";
 import { and, eq, scheduledJob, sql } from "@hrmny/db";
 import { z } from "zod";
@@ -13,11 +14,17 @@ import {
   DISCOVERY_INTERPRETATION_MAX_CALLS_PER_JOB,
   DISCOVERY_INTERPRETATION_MAX_MS_PER_TICK,
   DISCOVERY_INTERPRETATION_MAX_TOKENS_PER_JOB,
+  DISCOVERY_INTERPRETATION_RESERVED_TOKENS_PER_CALL,
   createLiveDiscoveryInterpretationProvider,
   discoveryMonthlySpendAed,
+  evaluateDiscoveryEvidence,
+  isCompanyNameGroundedInExcerpt,
   persistDiscoveryInterpretationCost,
+  readStoredDiscoveryIdentityLineage,
   resolveDiscoveryInterpretationRoute,
   resolvePublicDiscoveryCompanyIdentity,
+  type DiscoveryIdentityLineage,
+  type DiscoveryModelReceipt,
 } from "./discovery-interpretation";
 import {
   DiscoveryRunPayloadV1Schema,
@@ -61,6 +68,7 @@ export type DiscoveryObservationProvenanceResult =
 export type DiscoveryObservationMapResult =
   | {
       ok: true;
+      receipt?: DiscoveryModelReceipt;
       values: {
         requestId: string;
         companyName: string;
@@ -88,7 +96,7 @@ export type DiscoveryObservationMapResult =
       strategicLane: "industry_scanning";
     };
   }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; receipt?: DiscoveryModelReceipt };
 
 export type DiscoveryInterpretationItem = {
   observationId: string;
@@ -104,7 +112,7 @@ export type DiscoveryInterpretationItem = {
 export type DiscoveryInterpretationQueue = {
   schemaVersion: 1;
   pending: DiscoveryInterpretationItem[];
-  done: Array<{ observationId: string; status: string; reason?: string }>;
+  done: DiscoveryIdentityLineage[];
   inFlight: DiscoveryInterpretationItem[];
   calls: number;
   inputTokens: number;
@@ -132,6 +140,161 @@ export function emptyDiscoveryInterpretationQueue(): DiscoveryInterpretationQueu
     claimedAt: null,
     status: "pending",
     lastError: null,
+  };
+}
+
+export type DiscoveryInterpretationBudget = {
+  schemaVersion: 1;
+  costReceiptAvailable: boolean;
+  observationIds: string[];
+  reservedCalls: number;
+  reservedTokens: number;
+  settledCalls: number;
+  settledTokens: number;
+};
+
+export function emptyDiscoveryInterpretationBudget(): DiscoveryInterpretationBudget {
+  return {
+    schemaVersion: 1,
+    costReceiptAvailable: true,
+    observationIds: [],
+    reservedCalls: 0,
+    reservedTokens: 0,
+    settledCalls: 0,
+    settledTokens: 0,
+  };
+}
+
+export function readDiscoveryInterpretationBudget(
+  result: unknown,
+): DiscoveryInterpretationBudget {
+  const reservations = asRecord(asRecord(result).budgetReservations);
+  const raw = asRecord(reservations.interpretation);
+  const observationIds = Array.isArray(raw.observationIds)
+    ? raw.observationIds.filter((id): id is string => typeof id === "string")
+    : [];
+  const reservedCalls =
+    typeof raw.reservedCalls === "number"
+      ? raw.reservedCalls
+      : observationIds.length;
+  const reservedTokens =
+    typeof raw.reservedTokens === "number"
+      ? raw.reservedTokens
+      : observationIds.length * DISCOVERY_INTERPRETATION_RESERVED_TOKENS_PER_CALL;
+  return {
+    ...emptyDiscoveryInterpretationBudget(),
+    costReceiptAvailable: raw.costReceiptAvailable !== false,
+    observationIds,
+    reservedCalls,
+    reservedTokens,
+    settledCalls: typeof raw.settledCalls === "number" ? raw.settledCalls : 0,
+    settledTokens: typeof raw.settledTokens === "number" ? raw.settledTokens : 0,
+  };
+}
+
+export function resolveDiscoveryInterpretationJobLastError(input: {
+  queueLastError: string | null;
+  costReceiptAvailable: boolean;
+  cancelled: boolean;
+}) {
+  if (!input.cancelled && !input.costReceiptAvailable)
+    return "DISCOVERY_COST_RECEIPT_UNAVAILABLE";
+  return input.queueLastError;
+}
+
+export function remainingDiscoveryInterpretationBudget(
+  budget: DiscoveryInterpretationBudget,
+) {
+  const calls = Math.max(budget.reservedCalls, budget.settledCalls);
+  const tokens = Math.max(budget.reservedTokens, budget.settledTokens);
+  return {
+    calls: Math.max(0, DISCOVERY_INTERPRETATION_MAX_CALLS_PER_JOB - calls),
+    tokens: Math.max(0, DISCOVERY_INTERPRETATION_MAX_TOKENS_PER_JOB - tokens),
+  };
+}
+
+export function reserveDiscoveryInterpretationBudget(
+  budget: DiscoveryInterpretationBudget,
+  observationIds: string[],
+):
+  | { ok: true; budget: DiscoveryInterpretationBudget }
+  | { ok: false; reason: "INTERPRETATION_CEILING_REACHED" } {
+  const fresh = observationIds.filter(
+    (id) => !budget.observationIds.includes(id),
+  );
+  if (fresh.length === 0) return { ok: true, budget };
+  const remaining = remainingDiscoveryInterpretationBudget(budget);
+  const tokens = fresh.length * DISCOVERY_INTERPRETATION_RESERVED_TOKENS_PER_CALL;
+  if (remaining.calls < fresh.length || remaining.tokens < tokens)
+    return { ok: false, reason: "INTERPRETATION_CEILING_REACHED" };
+  return {
+    ok: true,
+    budget: {
+      ...budget,
+      observationIds: [...budget.observationIds, ...fresh],
+      reservedCalls: budget.reservedCalls + fresh.length,
+      reservedTokens: budget.reservedTokens + tokens,
+    },
+  };
+}
+
+export function settleDiscoveryInterpretationBudget(
+  budget: DiscoveryInterpretationBudget,
+  actual: { calls: number; tokens: number },
+): DiscoveryInterpretationBudget {
+  return {
+    ...budget,
+    settledCalls: Math.max(budget.settledCalls, budget.settledCalls + actual.calls),
+    settledTokens: Math.max(budget.settledTokens, budget.settledTokens + actual.tokens),
+  };
+}
+
+export function writeDiscoveryInterpretationBudget(
+  result: Record<string, unknown>,
+  budget: DiscoveryInterpretationBudget,
+) {
+  return {
+    ...result,
+    budgetReservations: {
+      ...asRecord(result.budgetReservations),
+      interpretation: budget,
+    },
+  };
+}
+
+export function readDiscoveryIdentityLineage(
+  result: unknown,
+  observationId: string,
+  binding?: { sourceKey?: string | null },
+): DiscoveryIdentityLineage | null {
+  return readStoredDiscoveryIdentityLineage(result, observationId, binding);
+}
+
+function excerptSha256(excerpt: string) {
+  return createHash("sha256").update(excerpt).digest("hex");
+}
+
+function identityReceipt(input: {
+  item: DiscoveryInterpretationItem;
+  reason?: string;
+  semantic: DiscoveryIdentityLineage["semantic"];
+  provider?: string;
+  model?: string | null;
+  requestId?: string | null;
+  identity?: { name: string; domain?: string };
+  grounded?: boolean;
+}): DiscoveryIdentityLineage {
+  return {
+    observationId: input.item.observationId,
+    semantic: input.semantic,
+    provider: input.provider ?? "unavailable",
+    model: input.model ?? null,
+    requestId: input.requestId ?? null,
+    ...(input.reason ? { reason: input.reason } : {}),
+    ...(input.identity ? { identity: input.identity } : {}),
+    sourceUrl: input.item.sourceUrl,
+    excerptHash: excerptSha256(input.item.excerpt),
+    grounded: Boolean(input.grounded),
   };
 }
 
@@ -195,12 +358,15 @@ export function planDiscoveryInterpretationTick(input: {
   nowMs?: number;
   startedAtMs?: number;
   ignoreBusy?: boolean;
+  remainingCalls?: number;
+  remainingTokens?: number;
 }):
   | { action: "done" }
   | { action: "cancel" }
   | { action: "unavailable"; reason: string }
   | { action: "ceiling" }
   | { action: "busy" }
+  | { action: "uncertain"; items: DiscoveryInterpretationItem[] }
   | { action: "claim"; items: DiscoveryInterpretationItem[] } {
   if (input.cancelled) return { action: "cancel" };
   if (input.providerAvailable === false)
@@ -216,14 +382,21 @@ export function planDiscoveryInterpretationTick(input: {
       : 0;
     if (claimedAt && nowMs - claimedAt < DISCOVERY_INTERPRETATION_CLAIM_MS)
       return { action: "busy" };
+    return { action: "uncertain", items: input.queue.inFlight };
   }
   const elapsed = nowMs - (input.startedAtMs ?? nowMs);
   if (elapsed >= DISCOVERY_INTERPRETATION_MAX_MS_PER_TICK)
     return { action: "ceiling" };
+  const remainingCalls =
+    input.remainingCalls ??
+    DISCOVERY_INTERPRETATION_MAX_CALLS_PER_JOB - input.queue.calls;
+  const remainingTokens =
+    input.remainingTokens ??
+    DISCOVERY_INTERPRETATION_MAX_TOKENS_PER_JOB -
+      (input.queue.inputTokens + input.queue.outputTokens);
   if (
-    input.queue.calls >= DISCOVERY_INTERPRETATION_MAX_CALLS_PER_JOB ||
-    input.queue.inputTokens + input.queue.outputTokens >=
-      DISCOVERY_INTERPRETATION_MAX_TOKENS_PER_JOB
+    remainingCalls <= 0 ||
+    remainingTokens < DISCOVERY_INTERPRETATION_RESERVED_TOKENS_PER_CALL
   )
     return { action: "ceiling" };
   const remaining = [
@@ -239,14 +412,17 @@ export function planDiscoveryInterpretationTick(input: {
       index,
   );
   if (unique.length === 0) return { action: "done" };
-  const remainingCalls =
-    DISCOVERY_INTERPRETATION_MAX_CALLS_PER_JOB - input.queue.calls;
-  if (remainingCalls <= 0) return { action: "ceiling" };
   return {
     action: "claim",
     items: unique.slice(
       0,
-      Math.min(DISCOVERY_INTERPRETATION_BATCH_SIZE, remainingCalls),
+      Math.min(
+        DISCOVERY_INTERPRETATION_BATCH_SIZE,
+        remainingCalls,
+        Math.floor(
+          remainingTokens / DISCOVERY_INTERPRETATION_RESERVED_TOKENS_PER_CALL,
+        ),
+      ),
     ),
   };
 }
@@ -255,7 +431,7 @@ export function applyDiscoveryInterpretationProgress(
   queue: DiscoveryInterpretationQueue,
   update: {
     claimed?: DiscoveryInterpretationItem[];
-    results?: Array<{ observationId: string; status: string; reason?: string }>;
+    results?: Array<Partial<DiscoveryIdentityLineage> & { observationId: string }>;
     calls?: number;
     inputTokens?: number;
     outputTokens?: number;
@@ -274,7 +450,21 @@ export function applyDiscoveryInterpretationProgress(
     ...queue,
     pending: queue.pending.filter((item) => !claimedIds.has(item.observationId) && !doneIds.has(item.observationId)),
     inFlight: update.claimed ?? [],
-    done: [...queue.done, ...(update.results ?? [])],
+    done: [
+      ...queue.done,
+      ...(update.results ?? []).map((item) => ({
+        observationId: item.observationId,
+        semantic: item.semantic ?? "unavailable",
+        provider: item.provider ?? "unavailable",
+        model: item.model ?? null,
+        requestId: item.requestId ?? null,
+        ...(item.reason ? { reason: item.reason } : {}),
+        ...(item.identity ? { identity: item.identity } : {}),
+        sourceUrl: item.sourceUrl ?? "",
+        excerptHash: item.excerptHash ?? "",
+        grounded: Boolean(item.grounded),
+      })),
+    ],
     calls: queue.calls + (update.calls ?? 0),
     inputTokens: queue.inputTokens + (update.inputTokens ?? 0),
     outputTokens: queue.outputTokens + (update.outputTokens ?? 0),
@@ -521,13 +711,17 @@ export async function prepareDiscoveryObservationForSubmit(
     eventDate: observation.publishedAt?.slice(0, 10),
     provider,
   });
-  if (!resolved.ok) return { ok: false, reason: resolved.reason };
-  return mapDiscoveryObservationToSubmit(
-    observation,
-    sourceKey,
-    configuration,
-    resolved,
-  );
+  if (!resolved.ok)
+    return { ok: false, reason: resolved.reason, receipt: resolved.receipt };
+  return {
+    ...mapDiscoveryObservationToSubmit(
+      observation,
+      sourceKey,
+      configuration,
+      resolved,
+    ),
+    receipt: resolved.receipt,
+  };
 }
 
 export async function ingestDiscoveryCallbackObservations(input: {
@@ -595,6 +789,9 @@ export async function continueDiscoveryInterpretationQueue(input: {
   startedAtMs?: number;
   nowMs?: number;
   ignoreBusy?: boolean;
+  remainingCalls?: number;
+  remainingTokens?: number;
+  onObservationStart?: (observationId: string) => void;
 }): Promise<{
   queue: DiscoveryInterpretationQueue;
   resolved: Array<Extract<DiscoveryObservationMapResult, { ok: true }>["values"]>;
@@ -607,9 +804,35 @@ export async function continueDiscoveryInterpretationQueue(input: {
     nowMs: input.nowMs ?? Date.now(),
     startedAtMs,
     ignoreBusy: input.ignoreBusy,
+    remainingCalls: input.remainingCalls,
+    remainingTokens: input.remainingTokens,
   });
   if (plan.action === "busy")
     return { queue: input.queue, resolved: [] };
+  if (plan.action === "uncertain")
+    return {
+      queue: applyDiscoveryInterpretationProgress(input.queue, {
+        claimed: [],
+        results: plan.items.map((item) =>
+          identityReceipt({
+            item,
+            semantic: "unavailable",
+            reason: "INTERPRETATION_OUTCOME_UNCERTAIN",
+          }),
+        ),
+        status:
+          input.queue.pending.filter(
+            (item) =>
+              !plan.items.some(
+                (uncertain) => uncertain.observationId === item.observationId,
+              ),
+          ).length > 0
+            ? "pending"
+            : "unavailable",
+        lastError: "INTERPRETATION_OUTCOME_UNCERTAIN",
+      }),
+      resolved: [],
+    };
   if (plan.action === "done")
     return {
       queue: applyDiscoveryInterpretationProgress(input.queue, {
@@ -622,11 +845,13 @@ export async function continueDiscoveryInterpretationQueue(input: {
     return {
       queue: applyDiscoveryInterpretationProgress(input.queue, {
         claimed: [],
-        results: [...input.queue.pending, ...input.queue.inFlight].map((item) => ({
-          observationId: item.observationId,
-          status: "cancelled",
-          reason: "RUN_CANCEL_REQUESTED",
-        })),
+        results: [...input.queue.pending, ...input.queue.inFlight].map((item) =>
+          identityReceipt({
+            item,
+            semantic: "unavailable",
+            reason: "RUN_CANCEL_REQUESTED",
+          }),
+        ),
         status: "cancelled",
         lastError: "RUN_CANCEL_REQUESTED",
       }),
@@ -636,11 +861,13 @@ export async function continueDiscoveryInterpretationQueue(input: {
     return {
       queue: applyDiscoveryInterpretationProgress(input.queue, {
         claimed: [],
-        results: [...input.queue.pending, ...input.queue.inFlight].map((item) => ({
-          observationId: item.observationId,
-          status: "unavailable",
-          reason: plan.reason,
-        })),
+        results: [...input.queue.pending, ...input.queue.inFlight].map((item) =>
+          identityReceipt({
+            item,
+            semantic: "unavailable",
+            reason: plan.reason,
+          }),
+        ),
         status: "unavailable",
         lastError: plan.reason,
       }),
@@ -661,8 +888,7 @@ export async function continueDiscoveryInterpretationQueue(input: {
   const resolved: Array<
     Extract<DiscoveryObservationMapResult, { ok: true }>["values"]
   > = [];
-  const results: Array<{ observationId: string; status: string; reason?: string }> =
-    [];
+  const results: DiscoveryIdentityLineage[] = [];
   let calls = 0;
   for (const item of plan.items) {
     if (Date.now() - startedAtMs >= DISCOVERY_INTERPRETATION_MAX_MS_PER_TICK) {
@@ -688,6 +914,7 @@ export async function continueDiscoveryInterpretationQueue(input: {
     }
     let mapped: DiscoveryObservationMapResult;
     calls += 1;
+    input.onObservationStart?.(item.observationId);
     try {
       mapped = await prepareDiscoveryObservationForSubmit(
         {
@@ -711,21 +938,30 @@ export async function continueDiscoveryInterpretationQueue(input: {
         input.provider,
       );
     } catch {
-      const retry = plan.items.filter(
+      const failed = item;
+      const unattempted = plan.items.filter(
         (pending) =>
+          pending.observationId !== failed.observationId &&
           !results.some((done) => done.observationId === pending.observationId),
       );
       const progressed = applyDiscoveryInterpretationProgress(claimed, {
         claimed: [],
-        results,
+        results: [
+          ...results,
+          identityReceipt({
+            item: failed,
+            semantic: "unavailable",
+            reason: "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
+          }),
+        ],
         calls,
-        status: "pending",
+        status: "unavailable",
         lastError: "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
       });
       return {
         queue: {
           ...progressed,
-          pending: [...progressed.pending, ...retry],
+          pending: [...progressed.pending, ...unattempted],
           inFlight: [],
           claimedAt: null,
         },
@@ -734,13 +970,36 @@ export async function continueDiscoveryInterpretationQueue(input: {
     }
     if (mapped.ok) {
       resolved.push(mapped.values);
-      results.push({ observationId: item.observationId, status: "resolved" });
+      results.push(
+        identityReceipt({
+          item,
+          semantic: mapped.receipt ? "model" : input.provider ? "model" : "manual",
+          provider: mapped.receipt?.provider ?? input.provider?.name ?? "unavailable",
+          model: mapped.receipt?.model ?? null,
+          requestId: mapped.receipt?.requestId ?? null,
+          identity: {
+            name: mapped.values.companyName,
+            ...(mapped.values.website
+              ? { domain: new URL(mapped.values.website).hostname }
+              : {}),
+          },
+          grounded: isCompanyNameGroundedInExcerpt(
+            mapped.values.companyName,
+            item.excerpt,
+          ),
+        }),
+      );
     } else {
-      results.push({
-        observationId: item.observationId,
-        status: "unresolved",
-        reason: mapped.reason,
-      });
+      results.push(
+        identityReceipt({
+          item,
+          semantic: "unavailable",
+          reason: mapped.reason,
+          provider: mapped.receipt?.provider ?? input.provider?.name ?? "unavailable",
+          model: mapped.receipt?.model ?? null,
+          requestId: mapped.receipt?.requestId ?? null,
+        }),
+      );
     }
   }
   return {
@@ -829,6 +1088,7 @@ export async function listPendingDiscoveryInterpretationJobs(input?: {
       scheduledJobId: scheduledJob.scheduledJobId,
       attemptToken: scheduledJob.attemptToken,
       attempts: scheduledJob.attempts,
+      status: scheduledJob.status,
       result: scheduledJob.result,
     })
     .from(scheduledJob)
@@ -846,7 +1106,34 @@ export async function listPendingDiscoveryInterpretationJobs(input?: {
   }> = [];
   for (const row of rows) {
     if (!row.attemptToken) continue;
+    if (
+      row.status !== "cancel_requested" &&
+      !readDiscoveryInterpretationBudget(row.result).costReceiptAvailable
+    )
+      continue;
     const outcomes = asRecord(asRecord(row.result).sourceOutcomes);
+    if (row.status === "cancel_requested") {
+      const sources = Object.entries(outcomes);
+      const selected =
+        sources.find(([, value]) => {
+          const queue = readInterpretationQueue(asRecord(value).interpretation);
+          return ![
+            "ceiling",
+            "unavailable",
+            "cancelled",
+            "completed",
+          ].includes(queue.status);
+        }) ?? sources[0];
+      if (!selected) continue;
+      events.push({
+        jobId: row.scheduledJobId,
+        sourceKey: selected[0],
+        attemptToken: row.attemptToken,
+        attemptGeneration: row.attempts,
+      });
+      if (events.length >= limit) return events;
+      continue;
+    }
     for (const [sourceKey, value] of Object.entries(outcomes)) {
       const queue = readInterpretationQueue(asRecord(value).interpretation);
       if (
@@ -908,6 +1195,7 @@ export async function runDiscoveryInterpretationJob(input: {
   const liveReady = isDiscoveryExecutionEnabled() && route.status === "ready";
   let provider = input.provider;
   const tickUsage = { inputTokens: 0, outputTokens: 0 };
+  let currentObservationId: string | null = null;
   if (!provider && liveReady && route.status === "ready") {
     try {
       const cap = Number(process.env.LLM_MONTHLY_CAP_AED);
@@ -918,6 +1206,7 @@ export async function runDiscoveryInterpretationJob(input: {
             jobId: input.jobId,
             sourceKey: input.sourceKey,
             attemptGeneration: input.attemptGeneration,
+            observationId: currentObservationId,
           });
           tickUsage.inputTokens += event.inputTokens;
           tickUsage.outputTokens += event.outputTokens;
@@ -956,25 +1245,77 @@ export async function runDiscoveryInterpretationJob(input: {
     const source = asRecord(outcomes[input.sourceKey]);
     const queue = readInterpretationQueue(source.interpretation);
     const cancelled = job.status === "cancel_requested";
-    const planned = planDiscoveryInterpretationTick({
+    const budget = readDiscoveryInterpretationBudget(result);
+    if (!budget.costReceiptAvailable && !cancelled)
+      return { blocked: true as const, reason: "DISCOVERY_COST_RECEIPT_UNAVAILABLE" };
+    const remaining = remainingDiscoveryInterpretationBudget(budget);
+    let planned = planDiscoveryInterpretationTick({
       queue,
       cancelled,
       providerAvailable: Boolean(provider),
+      remainingCalls: remaining.calls,
+      remainingTokens: remaining.tokens,
     });
     let claimedQueue = queue;
-    if (planned.action === "claim") {
+    let nextBudget = budget;
+    if (planned.action === "uncertain") {
+      const uncertainItems = planned.items;
       claimedQueue = applyDiscoveryInterpretationProgress(queue, {
-        claimed: planned.items,
-        status: "continuing",
+        claimed: [],
+        results: uncertainItems.map((item) =>
+          identityReceipt({
+            item,
+            semantic: "unavailable",
+            reason: "INTERPRETATION_OUTCOME_UNCERTAIN",
+          }),
+        ),
+        status:
+          queue.pending.filter(
+            (item) =>
+              !uncertainItems.some(
+                (uncertain) => uncertain.observationId === item.observationId,
+              ),
+          ).length > 0
+            ? "pending"
+            : "unavailable",
+        lastError: "INTERPRETATION_OUTCOME_UNCERTAIN",
       });
       outcomes[input.sourceKey] = { ...source, interpretation: claimedQueue };
       await tx
         .update(scheduledJob)
         .set({
-          result: { ...result, sourceOutcomes: outcomes },
+          result: writeDiscoveryInterpretationBudget(
+            { ...result, sourceOutcomes: outcomes },
+            nextBudget,
+          ),
           updatedAt: new Date(),
         })
         .where(eq(scheduledJob.scheduledJobId, input.jobId));
+    } else if (planned.action === "claim") {
+      const reserved = reserveDiscoveryInterpretationBudget(
+        budget,
+        planned.items.map((item) => item.observationId),
+      );
+      if (!reserved.ok) {
+        planned = { action: "ceiling" };
+      } else {
+        nextBudget = reserved.budget;
+        claimedQueue = applyDiscoveryInterpretationProgress(queue, {
+          claimed: planned.items,
+          status: "continuing",
+        });
+        outcomes[input.sourceKey] = { ...source, interpretation: claimedQueue };
+        await tx
+          .update(scheduledJob)
+          .set({
+            result: writeDiscoveryInterpretationBudget(
+              { ...result, sourceOutcomes: outcomes },
+              nextBudget,
+            ),
+            updatedAt: new Date(),
+          })
+          .where(eq(scheduledJob.scheduledJobId, input.jobId));
+      }
     }
     return {
       cancelled,
@@ -994,13 +1335,14 @@ export async function runDiscoveryInterpretationJob(input: {
         ? reviewerIdsFromEffective(payload.data.effective)
         : [],
       programmeId: job.researchProgrammeId,
+      remaining,
     };
   });
   if (!loaded || "blocked" in loaded) return { status: "blocked", remaining: 0 };
   if (!loaded.open && !loaded.cancelled)
     return { status: "not_open", remaining: loaded.queue.pending.length };
   let progressed =
-    loaded.plan.action === "busy"
+    loaded.plan.action === "busy" || loaded.plan.action === "uncertain"
       ? { queue: loaded.queue, resolved: [] }
       : await continueDiscoveryInterpretationQueue({
           queue: loaded.queue,
@@ -1010,6 +1352,18 @@ export async function runDiscoveryInterpretationJob(input: {
           sourceKey: input.sourceKey,
           configuration: loaded.configuration,
           ignoreBusy: loaded.plan.action === "claim",
+          remainingCalls:
+            loaded.plan.action === "claim"
+              ? loaded.plan.items.length
+              : loaded.remaining.calls,
+          remainingTokens:
+            loaded.plan.action === "claim"
+              ? loaded.plan.items.length *
+                DISCOVERY_INTERPRETATION_RESERVED_TOKENS_PER_CALL
+              : loaded.remaining.tokens,
+          onObservationStart: (observationId) => {
+            currentObservationId = observationId;
+          },
         });
   if (tickUsage.inputTokens || tickUsage.outputTokens) {
     progressed = {
@@ -1020,6 +1374,32 @@ export async function runDiscoveryInterpretationJob(input: {
         outputTokens: progressed.queue.outputTokens + tickUsage.outputTokens,
       },
     };
+  }
+  const resolvedEvaluations = new Map<
+    string,
+    Awaited<ReturnType<typeof evaluateDiscoveryEvidence>>
+  >();
+  for (const values of progressed.resolved) {
+    const identityLineage = progressed.queue.done.find(
+      (item) => item.observationId === values.requestId,
+    );
+    resolvedEvaluations.set(
+      values.requestId,
+      await evaluateDiscoveryEvidence({
+        opportunityKind: values.opportunityKind,
+        excerpt: values.excerpt,
+        whyNow: values.whyNow,
+        eventDate: values.eventDate,
+        visibilityScope: values.visibilityScope ?? "public",
+        companyName: values.companyName,
+        website: values.website,
+        sourceUrl: values.sourceUrl,
+        evidenceId: values.requestId,
+        sourceKey: values.sourceKey,
+        route: "automated",
+        identityLineage,
+      }),
+    );
   }
   await db.transaction(async (tx) => {
     const [job] = await tx
@@ -1039,7 +1419,7 @@ export async function runDiscoveryInterpretationJob(input: {
       job.attempts !== input.attemptGeneration
     )
       return;
-    if (job.status === "cancel_requested") return;
+    const cancelledNow = job.status === "cancel_requested";
     if (
       loaded.programmeId &&
       loaded.ownerEmployeeId &&
@@ -1053,6 +1433,7 @@ export async function runDiscoveryInterpretationJob(input: {
           programmeId: loaded.programmeId,
           scheduledJobId: input.jobId,
           values,
+          evaluation: resolvedEvaluations.get(values.requestId),
         });
       }
     }
@@ -1061,30 +1442,70 @@ export async function runDiscoveryInterpretationJob(input: {
       result.sourceOutcomes && typeof result.sourceOutcomes === "object"
         ? { ...(result.sourceOutcomes as Record<string, unknown>) }
         : {};
+    const queueToPersist = cancelledNow
+      ? applyDiscoveryInterpretationProgress(progressed.queue, {
+          claimed: [],
+          results: [
+            ...progressed.queue.pending,
+            ...progressed.queue.inFlight,
+          ].map((item) =>
+            identityReceipt({
+              item,
+              semantic: "unavailable",
+              reason: "RUN_CANCEL_REQUESTED",
+            }),
+          ),
+          status: "cancelled",
+          lastError: "RUN_CANCEL_REQUESTED",
+        })
+      : progressed.queue;
     outcomes[input.sourceKey] = {
       ...asRecord(outcomes[input.sourceKey]),
-      interpretation: progressed.queue,
+      interpretation: queueToPersist,
     };
+    const settled = settleDiscoveryInterpretationBudget(
+      readDiscoveryInterpretationBudget(result),
+      {
+        calls: queueToPersist.calls - loaded.queue.calls,
+        tokens: tickUsage.inputTokens + tickUsage.outputTokens,
+      },
+    );
+    if (queueToPersist.lastError === "DISCOVERY_COST_RECEIPT_UNAVAILABLE")
+      settled.costReceiptAvailable = false;
     const providerTerminalStatus = result.providerTerminalStatus;
     const terminalQueue =
-      progressed.queue.status === "completed" ||
-      progressed.queue.status === "unavailable" ||
-      progressed.queue.status === "ceiling" ||
-      progressed.queue.status === "cancelled";
-    const terminal =
-      terminalQueue &&
-      !hasOpenInterpretationQueue(outcomes) &&
-      (providerTerminalStatus === "completed" ||
+      queueToPersist.status === "completed" ||
+      queueToPersist.status === "unavailable" ||
+      queueToPersist.status === "ceiling" ||
+      queueToPersist.status === "cancelled";
+    const allowedTerminal = cancelledNow
+      ? true
+      : providerTerminalStatus === "completed" ||
         providerTerminalStatus === "partial" ||
         providerTerminalStatus === "failed" ||
-        providerTerminalStatus === "cancelled")
-        ? providerTerminalStatus
+        providerTerminalStatus === "cancelled";
+    const terminal: string | null =
+      terminalQueue &&
+      !hasOpenInterpretationQueue(outcomes) &&
+      allowedTerminal &&
+      (cancelledNow || settled.costReceiptAvailable)
+        ? cancelledNow
+          ? "cancelled"
+          : String(providerTerminalStatus)
         : null;
     const now = new Date();
     await tx
       .update(scheduledJob)
       .set({
-        result: { ...result, sourceOutcomes: outcomes },
+        result: writeDiscoveryInterpretationBudget(
+          { ...result, sourceOutcomes: outcomes },
+          settled,
+        ),
+        lastError: resolveDiscoveryInterpretationJobLastError({
+          queueLastError: queueToPersist.lastError,
+          costReceiptAvailable: settled.costReceiptAvailable,
+          cancelled: cancelledNow,
+        }),
         ...(terminal
           ? {
               status: terminal,

@@ -1,7 +1,6 @@
 import {
   createProvider,
   MODEL_PRICES_AED,
-  OPENROUTER_FREE_PREVIEW_MODELS,
   withMetering,
   type CostEvent,
   type LLMProvider,
@@ -85,7 +84,14 @@ export type DiscoveryEvidenceEvaluation = {
     privateContext: false;
     excerptIncluded: boolean;
     route: DiscoveryEvidenceRoute;
+    identityLineage?: DiscoveryIdentityLineage;
   };
+};
+
+export type DiscoveryModelReceipt = {
+  provider: string;
+  model: string | null;
+  requestId: string | null;
 };
 
 export type DiscoveryCompanyIdentityResult =
@@ -93,6 +99,7 @@ export type DiscoveryCompanyIdentityResult =
       ok: true;
       name: string;
       domain?: string;
+      receipt: DiscoveryModelReceipt;
     }
   | {
       ok: false;
@@ -105,29 +112,78 @@ export type DiscoveryCompanyIdentityResult =
         | "DISCOVERY_MODEL_REQUIRED"
         | "DISCOVERY_LOCAL_INFERENCE_REFUSED"
         | "DISCOVERY_PRICE_PROOF_MISSING"
-        | "DISCOVERY_METERING_REQUIRED";
+        | "DISCOVERY_PRICE_PROOF_STALE"
+        | "DISCOVERY_METERING_REQUIRED"
+        | "DISCOVERY_COST_RECEIPT_UNAVAILABLE"
+        | "INTERPRETATION_OUTCOME_UNCERTAIN";
+      receipt?: DiscoveryModelReceipt;
     };
 
+export class DiscoveryCostReceiptError extends Error {
+  readonly code = "DISCOVERY_COST_RECEIPT_UNAVAILABLE" as const;
+  constructor() {
+    super("DISCOVERY_COST_RECEIPT_UNAVAILABLE");
+    this.name = "DiscoveryCostReceiptError";
+  }
+}
+
+export function isDiscoveryCostReceiptError(error: unknown) {
+  return (
+    error instanceof DiscoveryCostReceiptError ||
+    (error instanceof Error && error.message === "DISCOVERY_COST_RECEIPT_UNAVAILABLE")
+  );
+}
+
+/** Public-excerpt Discovery only. Do not reuse for private-context or shared development routing. */
+export const DISCOVERY_INTERPRETATION_MODELS = [
+  "nex-agi/nex-n2.5-pro:free",
+] as const;
+export const DISCOVERY_INTERPRETATION_UPSTREAM_PROVIDER = "Nex AGI" as const;
 export const DISCOVERY_INTERPRETATION_BATCH_SIZE = 5;
 export const DISCOVERY_INTERPRETATION_MAX_CALLS_PER_JOB = 8;
 export const DISCOVERY_INTERPRETATION_MAX_TOKENS_PER_JOB = 12_000;
+export const DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL = 1_600;
+export const DISCOVERY_INTERPRETATION_PROVIDER_FRAMING_BYTES_PER_CALL = 400;
+export const DISCOVERY_INTERPRETATION_MAX_OUTPUT_TOKENS_PER_CALL = 400;
+export const DISCOVERY_INTERPRETATION_RESERVED_TOKENS_PER_CALL =
+  DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL +
+  DISCOVERY_INTERPRETATION_PROVIDER_FRAMING_BYTES_PER_CALL +
+  DISCOVERY_INTERPRETATION_MAX_OUTPUT_TOKENS_PER_CALL;
 export const DISCOVERY_INTERPRETATION_MAX_MS_PER_TICK = 20_000;
 export const DISCOVERY_INTERPRETATION_CLAIM_MS = 90_000;
-export const DISCOVERY_PRICE_PROOF_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1_000;
+export const DISCOVERY_PRICE_PROOF_MAX_AGE_MS = 48 * 60 * 60 * 1_000;
 export const DISCOVERY_ZERO_PRICE = {
   prompt: 0,
   completion: 0,
   request: 0,
 } as const;
 
+const zeroPriceField = z.union([z.literal(0), z.literal("0")]);
 const discoveryZeroPriceProofSchema = z.object({
   model: z.string().min(1).max(180),
-  prompt: z.literal(0),
-  completion: z.literal(0),
-  request: z.literal(0),
+  prompt: zeroPriceField,
+  completion: zeroPriceField,
+  request: zeroPriceField.optional(),
   verifiedAt: z.string().datetime({ offset: true }),
-  source: z.literal("openrouter_provider_catalog"),
+  source: z.literal("openrouter_provider_catalog_and_runtime_probe"),
+  endpoint: z.string().min(1).max(180),
+  provider: z.literal(DISCOVERY_INTERPRETATION_UPSTREAM_PROVIDER),
+  runtimeRequestId: z.string().min(1).max(180),
+  actualCost: zeroPriceField,
 });
+
+export type DiscoveryIdentityLineage = {
+  observationId: string;
+  semantic: "model" | "manual" | "unavailable";
+  provider: string;
+  model: string | null;
+  requestId: string | null;
+  reason?: string;
+  identity?: { name: string; domain?: string };
+  sourceUrl: string;
+  excerptHash: string;
+  grounded: boolean;
+};
 
 export function discoveryEvidenceRoute(
   sourceKey: string | null | undefined,
@@ -160,6 +216,12 @@ export function redactHiddenEvaluation(
       ...evaluation.packet,
       excerptIncluded: false,
       interpretationStatus: "skipped_private",
+      identityLineage: evaluation.packet.identityLineage
+        ? {
+            ...evaluation.packet.identityLineage,
+            sourceUrl: "",
+          }
+        : undefined,
     },
   };
 }
@@ -184,7 +246,7 @@ export function isPermittedDiscoveryInterpretationModel(model: string) {
   const value = model.trim();
   if (!value) return false;
   if (value.toLowerCase() === "openrouter/free") return false;
-  return OPENROUTER_FREE_PREVIEW_MODELS.some(
+  return DISCOVERY_INTERPRETATION_MODELS.some(
     (item) => item.toLowerCase() === value.toLowerCase(),
   );
 }
@@ -192,14 +254,18 @@ export function isPermittedDiscoveryInterpretationModel(model: string) {
 export function parseDiscoveryZeroPriceProof(
   raw: string | null | undefined,
   now = new Date(),
-) {
-  if (!raw?.trim()) return null;
+):
+  | { ok: true; proof: z.infer<typeof discoveryZeroPriceProofSchema> }
+  | { ok: false; reason: "DISCOVERY_PRICE_PROOF_MISSING" | "DISCOVERY_PRICE_PROOF_STALE" } {
+  if (!raw?.trim()) return { ok: false, reason: "DISCOVERY_PRICE_PROOF_MISSING" };
   const parsed = discoveryZeroPriceProofSchema.safeParse(safeJson(raw));
-  if (!parsed.success) return null;
+  if (!parsed.success) return { ok: false, reason: "DISCOVERY_PRICE_PROOF_MISSING" };
   const verifiedAt = Date.parse(parsed.data.verifiedAt);
-  if (Number.isNaN(verifiedAt) || verifiedAt > now.getTime()) return null;
-  if (now.getTime() - verifiedAt > DISCOVERY_PRICE_PROOF_MAX_AGE_MS) return null;
-  return parsed.data;
+  if (Number.isNaN(verifiedAt) || verifiedAt > now.getTime())
+    return { ok: false, reason: "DISCOVERY_PRICE_PROOF_MISSING" };
+  if (now.getTime() - verifiedAt > DISCOVERY_PRICE_PROOF_MAX_AGE_MS)
+    return { ok: false, reason: "DISCOVERY_PRICE_PROOF_STALE" };
+  return { ok: true, proof: parsed.data };
 }
 
 export function verifyDiscoveryZeroPriceRoute(
@@ -216,8 +282,8 @@ export function verifyDiscoveryZeroPriceRoute(
     proofRaw ?? process.env.DISCOVERY_INTERPRETATION_PRICE_PROOF_JSON,
     now,
   );
-  if (!proof) return { ok: false, reason: "DISCOVERY_PRICE_PROOF_MISSING" };
-  if (proof.model !== model)
+  if (!proof.ok) return { ok: false, reason: proof.reason };
+  if (proof.proof.model !== model)
     return { ok: false, reason: "DISCOVERY_PAID_ROUTE_REFUSED" };
   const exact = MODEL_PRICES_AED[model];
   if (exact && (exact.inputPerMTokAed > 0 || exact.outputPerMTokAed > 0))
@@ -301,10 +367,12 @@ export async function persistDiscoveryInterpretationCost(
     jobId: string;
     sourceKey: string;
     attemptGeneration: number;
+    observationId?: string | null;
   },
 ): Promise<void> {
   const db = getDb();
-  if (!db) throw new Error("DISCOVERY_COST_RECEIPT_UNAVAILABLE");
+  if (!db) throw new DiscoveryCostReceiptError();
+  try {
   await db.execute(sql`
     insert into public.agent_runs (
       agent, model, input, output, tokens_in, tokens_out, cost_aed, gate_outcome
@@ -317,6 +385,7 @@ export async function persistDiscoveryInterpretationCost(
         jobId: context?.jobId ?? null,
         sourceKey: context?.sourceKey ?? null,
         attemptGeneration: context?.attemptGeneration ?? null,
+        observationId: context?.observationId ?? null,
       })}::jsonb,
       ${JSON.stringify({ provider: event.provider })}::jsonb,
       ${event.inputTokens},
@@ -325,6 +394,10 @@ export async function persistDiscoveryInterpretationCost(
       ${"not_applicable"}
     )
   `);
+  } catch (error) {
+    if (error instanceof DiscoveryCostReceiptError) throw error;
+    throw new DiscoveryCostReceiptError();
+  }
 }
 
 export function createLiveDiscoveryInterpretationProvider(input: {
@@ -346,15 +419,33 @@ export function createLiveDiscoveryInterpretationProvider(input: {
   const pinned: LLMProvider = {
     name: inner.name,
     async generate(options) {
-      return inner.generate({
+      // A token cannot represent less than one UTF-8 byte. This byte ceiling plus
+      // the fixed output cap is therefore a conservative reservation without a
+      // provider-specific tokenizer, and it is enforced before network I/O.
+      const inputBytes = Buffer.byteLength(
+        JSON.stringify(options.messages),
+        "utf8",
+      );
+      if (inputBytes > DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL)
+        throw new Error("DISCOVERY_INTERPRETATION_INPUT_CEILING_REACHED");
+      const result = await inner.generate({
         ...options,
         model: input.model,
+        maxTokens: DISCOVERY_INTERPRETATION_MAX_OUTPUT_TOKENS_PER_CALL,
         allowFreeFallback: false,
         allowPlugins: false,
+        openRouterProviderOrder: [DISCOVERY_INTERPRETATION_UPSTREAM_PROVIDER],
         webSearch: false,
         maxPrice: DISCOVERY_ZERO_PRICE,
         task: "discovery_interpret",
       });
+      if (
+        result.model !== input.model ||
+        result.upstreamProvider !== DISCOVERY_INTERPRETATION_UPSTREAM_PROVIDER ||
+        result.providerCostUsd !== 0
+      )
+        throw new Error("DISCOVERY_FREE_ROUTE_RUNTIME_PROOF_FAILED");
+      return result;
     },
   };
   return withMetering(pinned, {
@@ -380,6 +471,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
   result?: z.infer<typeof discoveryInterpretationResultSchema>;
   provider: DiscoveryInterpretationProviderName;
   model: string | null;
+  requestId: string | null;
 }> {
   const excerpt = input.excerpt.trim();
   if (!excerpt)
@@ -388,6 +480,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
       reason: "INTERPRETATION_PROVIDER_UNAVAILABLE",
       provider: "unavailable",
       model: null,
+      requestId: null,
     };
 
   let provider = input.provider;
@@ -398,6 +491,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
       reason: "INTERPRETATION_PROVIDER_UNAVAILABLE",
       provider: "unavailable",
       model: null,
+      requestId: null,
     };
   }
 
@@ -430,6 +524,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
         { role: "user", content: JSON.stringify(packet) },
       ],
     });
+    const requestId = generated.requestId ?? null;
     if (
       generated.provider !== "mock" &&
       model &&
@@ -441,6 +536,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
         reason: "DISCOVERY_PAID_ROUTE_REFUSED",
         provider: "unavailable",
         model: generated.model,
+        requestId,
       };
     }
     if (generated.provider !== "mock" && generated.model) {
@@ -451,6 +547,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
           reason: priced.reason,
           provider: "unavailable",
           model: generated.model,
+          requestId,
         };
     }
     const parsed = discoveryInterpretationResultSchema.safeParse(
@@ -462,19 +559,23 @@ export async function interpretPublicDiscoveryExcerpt(input: {
         reason: "INTERPRETATION_MALFORMED",
         provider: generated.provider,
         model: generated.model,
+        requestId,
       };
     return {
       status: "completed",
       result: parsed.data,
       provider: generated.provider,
       model: generated.model,
+      requestId,
     };
-  } catch {
+  } catch (error) {
+    if (isDiscoveryCostReceiptError(error)) throw error;
     return {
       status: "unavailable",
       reason: "INTERPRETATION_PROVIDER_UNAVAILABLE",
       provider: "unavailable",
       model: model,
+      requestId: null,
     };
   }
 }
@@ -511,25 +612,33 @@ export async function resolvePublicDiscoveryCompanyIdentity(input: {
     provider: input.provider,
     model: input.model,
   });
+  const receipt: DiscoveryModelReceipt = {
+    provider: interpreted.provider,
+    model: interpreted.model,
+    requestId: interpreted.requestId,
+  };
   if (interpreted.status === "unavailable")
     return {
       ok: false,
       reason: identityFailureReason(interpreted.reason),
+      receipt,
     };
   if (interpreted.status === "malformed" || !interpreted.result)
-    return { ok: false, reason: "INTERPRETATION_MALFORMED" };
+    return { ok: false, reason: "INTERPRETATION_MALFORMED", receipt };
   const identity = interpreted.result.companyIdentity;
-  if (!identity) return { ok: false, reason: "COMPANY_IDENTITY_MISSING" };
+  if (!identity)
+    return { ok: false, reason: "COMPANY_IDENTITY_MISSING", receipt };
   if (identity.ambiguous)
-    return { ok: false, reason: "COMPANY_IDENTITY_AMBIGUOUS" };
+    return { ok: false, reason: "COMPANY_IDENTITY_AMBIGUOUS", receipt };
   const name = identity.name?.trim().slice(0, 180) ?? "";
   if (name.length < 2 || !isCompanyNameGroundedInExcerpt(name, excerpt))
-    return { ok: false, reason: "COMPANY_IDENTITY_MISSING" };
+    return { ok: false, reason: "COMPANY_IDENTITY_MISSING", receipt };
   const domain = identity.domain?.trim().toLowerCase();
   return {
     ok: true,
     name,
     ...(domain ? { domain } : {}),
+    receipt,
   };
 }
 
@@ -548,6 +657,7 @@ export async function evaluateDiscoveryEvidence(input: {
   now?: Date;
   provider?: LLMProvider;
   model?: string;
+  identityLineage?: DiscoveryIdentityLineage;
 }): Promise<DiscoveryEvidenceEvaluation> {
   const excerpt = input.excerpt.trim();
   const whyNow = input.whyNow.trim();
@@ -663,7 +773,61 @@ export async function evaluateDiscoveryEvidence(input: {
       privateContext: false,
       excerptIncluded,
       route,
+      ...(input.identityLineage
+        ? { identityLineage: input.identityLineage }
+        : {}),
     },
+  };
+}
+
+export function readStoredDiscoveryIdentityLineage(
+  result: unknown,
+  observationId: string,
+  binding?: { sourceKey?: string | null },
+): DiscoveryIdentityLineage | null {
+  const outcomes = asUnknownRecord(asUnknownRecord(result).sourceOutcomes);
+  const entries = binding?.sourceKey
+    ? [[binding.sourceKey, outcomes[binding.sourceKey]] as [string, unknown]]
+    : Object.entries(outcomes);
+  for (const [, value] of entries) {
+    const done = asUnknownRecord(asUnknownRecord(value).interpretation).done;
+    if (!Array.isArray(done)) continue;
+    for (const item of done) {
+      const lineage = asStoredIdentityLineage(item);
+      if (lineage?.observationId === observationId) return lineage;
+    }
+  }
+  return null;
+}
+
+function asUnknownRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : {};
+}
+
+function asStoredIdentityLineage(value: unknown): DiscoveryIdentityLineage | null {
+  const record = asUnknownRecord(value);
+  if (typeof record.observationId !== "string") return null;
+  if (
+    record.semantic !== "model" &&
+    record.semantic !== "manual" &&
+    record.semantic !== "unavailable"
+  )
+    return null;
+  return {
+    observationId: record.observationId,
+    semantic: record.semantic,
+    provider: typeof record.provider === "string" ? record.provider : "unavailable",
+    model: typeof record.model === "string" ? record.model : null,
+    requestId: typeof record.requestId === "string" ? record.requestId : null,
+    ...(typeof record.reason === "string" ? { reason: record.reason } : {}),
+    ...(record.identity && typeof record.identity === "object"
+      ? { identity: record.identity as { name: string; domain?: string } }
+      : {}),
+    sourceUrl: typeof record.sourceUrl === "string" ? record.sourceUrl : "",
+    excerptHash: typeof record.excerptHash === "string" ? record.excerptHash : "",
+    grounded: Boolean(record.grounded),
   };
 }
 
@@ -678,7 +842,10 @@ function identityFailureReason(
     case "DISCOVERY_MODEL_REQUIRED":
     case "DISCOVERY_LOCAL_INFERENCE_REFUSED":
     case "DISCOVERY_PRICE_PROOF_MISSING":
+    case "DISCOVERY_PRICE_PROOF_STALE":
     case "DISCOVERY_METERING_REQUIRED":
+    case "DISCOVERY_COST_RECEIPT_UNAVAILABLE":
+    case "INTERPRETATION_OUTCOME_UNCERTAIN":
       return reason;
     default:
       return "INTERPRETATION_PROVIDER_UNAVAILABLE";
