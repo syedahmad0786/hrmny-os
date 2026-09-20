@@ -7,7 +7,11 @@ import {
 
 export const SALES_RESEARCH_RUN_JOB_KIND = "sales_research_run";
 export const DISCOVERY_CALLBACK_MAX_BYTES = 256 * 1024;
-export const DISCOVERY_CALLBACK_MAX_SKEW_SECONDS = 5 * 60;
+export const DISCOVERY_CALLBACK_MAX_SKEW_SECONDS = 30;
+export const DISCOVERY_CALLBACK_MAX_TOKEN_BYTES = 4 * 1024;
+export const DISCOVERY_CALLBACK_ISSUER = "hrmny-n8n-discovery";
+export const DISCOVERY_CALLBACK_AUDIENCE = "hrmny-os-discovery";
+export const DISCOVERY_CALLBACK_MAX_LIFETIME_SECONDS = 5 * 60;
 
 const UuidSchema = z.string().uuid();
 const IsoDateSchema = z.string().datetime({ offset: true });
@@ -199,10 +203,9 @@ type ValidationFailure = {
   ok: false;
   code:
     | "body_too_large"
-    | "missing_headers"
-    | "invalid_timestamp"
+    | "missing_token"
+    | "invalid_token"
     | "unknown_key"
-    | "invalid_signature"
     | "invalid_body"
     | "event_id_mismatch";
 };
@@ -217,19 +220,97 @@ export type DiscoveryCallbackValidation =
       keyId: string;
     };
 
-export function signDiscoveryRuntimeCallback(
+const DiscoveryTokenHeaderSchema = z
+  .object({
+    alg: z.literal("HS256"),
+    typ: z.literal("JWT"),
+    kid: z.string().regex(/^[a-z0-9._-]{1,64}$/i),
+  })
+  .strict();
+
+const DiscoveryTokenClaimsSchema = z
+  .object({
+    iss: z.literal(DISCOVERY_CALLBACK_ISSUER),
+    aud: z.literal(DISCOVERY_CALLBACK_AUDIENCE),
+    jti: UuidSchema,
+    iat: z.number().int().safe(),
+    exp: z.number().int().safe(),
+    bodyHash: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+
+function encodeJson(value: unknown) {
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+}
+
+function decodeJson(segment: string): unknown {
+  if (!/^[A-Za-z0-9_-]+$/.test(segment)) throw new Error("INVALID_TOKEN");
+  const decoded = Buffer.from(segment, "base64url");
+  if (decoded.toString("base64url") !== segment)
+    throw new Error("INVALID_TOKEN");
+  return JSON.parse(decoded.toString("utf8")) as unknown;
+}
+
+/** Test/proof helper matching the native n8n JWT node's HS256 output. */
+export function signDiscoveryRuntimeToken(
   secret: string,
-  timestamp: string,
+  keyId: string,
   rawBody: string,
+  eventId: string,
+  nowSeconds = Math.floor(Date.now() / 1_000),
 ) {
-  return createHmac("sha256", secret)
-    .update(`${timestamp}.${rawBody}`, "utf8")
-    .digest("hex");
+  const header = encodeJson({ alg: "HS256", typ: "JWT", kid: keyId });
+  const payload = encodeJson({
+    iss: DISCOVERY_CALLBACK_ISSUER,
+    aud: DISCOVERY_CALLBACK_AUDIENCE,
+    jti: eventId,
+    iat: nowSeconds,
+    exp: nowSeconds + DISCOVERY_CALLBACK_MAX_LIFETIME_SECONDS,
+    bodyHash: createHash("sha256").update(rawBody, "utf8").digest("hex"),
+  });
+  const signingInput = `${header}.${payload}`;
+  const signature = createHmac("sha256", secret)
+    .update(signingInput, "utf8")
+    .digest("base64url");
+  return `${signingInput}.${signature}`;
+}
+
+/** Loads a small rotation key ring without accepting the legacy n8n secret. */
+export function loadDiscoveryN8nCallbackKeys(
+  raw = process.env.DISCOVERY_N8N_CALLBACK_KEYS_JSON,
+): Readonly<Record<string, string>> | null {
+  if (!raw || Buffer.byteLength(raw, "utf8") > 16 * 1024) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length < 1 || entries.length > 8) return null;
+  const keys: Record<string, string> = Object.create(null) as Record<
+    string,
+    string
+  >;
+  for (const [keyId, secret] of entries) {
+    if (
+      !/^[a-z0-9._-]{1,64}$/i.test(keyId) ||
+      typeof secret !== "string" ||
+      secret !== secret.trim() ||
+      Buffer.byteLength(secret, "utf8") < 32 ||
+      Buffer.byteLength(secret, "utf8") > 512
+    )
+      return null;
+    keys[keyId] = secret;
+  }
+  return keys;
 }
 
 /**
- * Authenticates and parses a callback. Replay acceptance remains a durable
- * handler decision: compare eventId + bodyHash before committing any result.
+ * Authenticates and parses a callback signed by n8n's native JWT node. Replay
+ * acceptance remains a durable handler decision: compare eventId + bodyHash
+ * before committing any result.
  */
 export function validateDiscoveryRuntimeCallback(input: {
   rawBody: string;
@@ -242,44 +323,61 @@ export function validateDiscoveryRuntimeCallback(input: {
     return { ok: false, code: "body_too_large" };
   }
 
-  const keyId = input.headers.get("x-hrmny-key-id")?.trim();
-  const timestamp = input.headers.get("x-hrmny-timestamp")?.trim();
-  const signature = input.headers.get("x-hrmny-signature")?.trim();
-  const headerEventId = input.headers.get("x-hrmny-event-id")?.trim();
-  if (!keyId || !timestamp || !signature || !headerEventId) {
-    return { ok: false, code: "missing_headers" };
-  }
-  if (!/^[a-z0-9._-]{1,64}$/i.test(keyId)) {
-    return { ok: false, code: "unknown_key" };
+  const token = input.headers.get("x-hrmny-discovery-token")?.trim();
+  if (!token) return { ok: false, code: "missing_token" };
+  if (Buffer.byteLength(token, "utf8") > DISCOVERY_CALLBACK_MAX_TOKEN_BYTES)
+    return { ok: false, code: "invalid_token" };
+
+  const segments = token.split(".");
+  if (segments.length !== 3) return { ok: false, code: "invalid_token" };
+  const [headerSegment, claimsSegment, signatureSegment] = segments as [
+    string,
+    string,
+    string,
+  ];
+  let header: z.infer<typeof DiscoveryTokenHeaderSchema>;
+  let claims: z.infer<typeof DiscoveryTokenClaimsSchema>;
+  try {
+    header = DiscoveryTokenHeaderSchema.parse(decodeJson(headerSegment));
+    claims = DiscoveryTokenClaimsSchema.parse(decodeJson(claimsSegment));
+  } catch {
+    return { ok: false, code: "invalid_token" };
   }
 
-  const timestampSeconds = Number(timestamp);
-  const nowSeconds = input.nowSeconds ?? Math.floor(Date.now() / 1_000);
-  const maxSkewSeconds =
-    input.maxSkewSeconds ?? DISCOVERY_CALLBACK_MAX_SKEW_SECONDS;
-  if (
-    !/^\d{10,11}$/.test(timestamp) ||
-    !Number.isSafeInteger(timestampSeconds) ||
-    Math.abs(nowSeconds - timestampSeconds) > maxSkewSeconds
-  ) {
-    return { ok: false, code: "invalid_timestamp" };
-  }
-
+  const keyId = header.kid;
   const configuredKey = Object.hasOwn(input.keys, keyId)
     ? input.keys[keyId]
     : undefined;
   const secret = typeof configuredKey === "string" ? configuredKey.trim() : "";
   if (!secret) return { ok: false, code: "unknown_key" };
-  const signatureMatch = /^sha256=([0-9a-f]{64})$/i.exec(signature);
-  if (!signatureMatch) return { ok: false, code: "invalid_signature" };
-  const expected = Buffer.from(
-    signDiscoveryRuntimeCallback(secret, timestamp, input.rawBody),
-    "hex",
-  );
-  const received = Buffer.from(signatureMatch[1]!, "hex");
-  if (!timingSafeEqual(expected, received)) {
-    return { ok: false, code: "invalid_signature" };
+  if (!/^[A-Za-z0-9_-]{43}$/.test(signatureSegment))
+    return { ok: false, code: "invalid_token" };
+  const expected = createHmac("sha256", secret)
+    .update(`${headerSegment}.${claimsSegment}`, "utf8")
+    .digest();
+  const received = Buffer.from(signatureSegment, "base64url");
+  if (
+    received.length !== expected.length ||
+    !timingSafeEqual(expected, received)
+  )
+    return { ok: false, code: "invalid_token" };
+
+  const nowSeconds = input.nowSeconds ?? Math.floor(Date.now() / 1_000);
+  const clockSkewSeconds =
+    input.maxSkewSeconds ?? DISCOVERY_CALLBACK_MAX_SKEW_SECONDS;
+  if (
+    claims.exp <= claims.iat ||
+    claims.exp - claims.iat > DISCOVERY_CALLBACK_MAX_LIFETIME_SECONDS ||
+    claims.iat > nowSeconds + clockSkewSeconds ||
+    claims.exp < nowSeconds - clockSkewSeconds
+  ) {
+    return { ok: false, code: "invalid_token" };
   }
+
+  const bodyHash = createHash("sha256")
+    .update(input.rawBody, "utf8")
+    .digest("hex");
+  if (claims.bodyHash !== bodyHash) return { ok: false, code: "invalid_token" };
 
   let parsedJson: unknown;
   try {
@@ -289,7 +387,7 @@ export function validateDiscoveryRuntimeCallback(input: {
   }
   const parsed = DiscoveryRuntimeEnvelopeSchema.safeParse(parsedJson);
   if (!parsed.success) return { ok: false, code: "invalid_body" };
-  if (parsed.data.eventId !== headerEventId) {
+  if (parsed.data.eventId !== claims.jti) {
     return { ok: false, code: "event_id_mismatch" };
   }
 
@@ -297,7 +395,7 @@ export function validateDiscoveryRuntimeCallback(input: {
     ok: true,
     envelope: parsed.data,
     eventId: parsed.data.eventId,
-    bodyHash: createHash("sha256").update(input.rawBody, "utf8").digest("hex"),
+    bodyHash,
     keyId,
   };
 }

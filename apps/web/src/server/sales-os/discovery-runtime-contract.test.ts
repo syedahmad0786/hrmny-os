@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DISCOVERY_CALLBACK_MAX_BYTES,
-  signDiscoveryRuntimeCallback,
+  loadDiscoveryN8nCallbackKeys,
+  signDiscoveryRuntimeToken,
   validateDiscoveryRuntimeCallback,
 } from "./discovery-runtime-contract";
 
@@ -50,16 +51,15 @@ function body(extra: Record<string, unknown> = {}) {
   });
 }
 
-function headers(rawBody: string, timestamp = String(NOW), keyId = KEY_ID) {
+function headers(rawBody: string, nowSeconds = NOW, keyId = KEY_ID) {
   return new Headers({
-    "x-hrmny-key-id": keyId,
-    "x-hrmny-timestamp": timestamp,
-    "x-hrmny-event-id": EVENT_ID,
-    "x-hrmny-signature": `sha256=${signDiscoveryRuntimeCallback(
+    "x-hrmny-discovery-token": signDiscoveryRuntimeToken(
       SECRET,
-      timestamp,
+      keyId,
       rawBody,
-    )}`,
+      EVENT_ID,
+      nowSeconds,
+    ),
   });
 }
 
@@ -131,19 +131,19 @@ describe("Discovery runtime callback contract", () => {
         keys,
         nowSeconds: NOW,
       }),
-    ).toEqual({ ok: false, code: "invalid_signature" });
+    ).toEqual({ ok: false, code: "invalid_token" });
     expect(
       validateDiscoveryRuntimeCallback({
         rawBody,
-        headers: headers(rawBody, String(NOW - 301)),
+        headers: headers(rawBody, NOW - 331),
         keys,
         nowSeconds: NOW,
       }),
-    ).toEqual({ ok: false, code: "invalid_timestamp" });
+    ).toEqual({ ok: false, code: "invalid_token" });
     expect(
       validateDiscoveryRuntimeCallback({
         rawBody,
-        headers: headers(rawBody, String(NOW), "retired-key"),
+        headers: headers(rawBody, NOW, "retired-key"),
         keys,
         nowSeconds: NOW,
       }),
@@ -152,14 +152,21 @@ describe("Discovery runtime callback contract", () => {
       expect(
         validateDiscoveryRuntimeCallback({
           rawBody,
-          headers: headers(rawBody, String(NOW), keyId),
+          headers: headers(rawBody, NOW, keyId),
           keys,
           nowSeconds: NOW,
         }),
       ).toEqual({ ok: false, code: "unknown_key" });
     }
-    const mismatched = headers(rawBody);
-    mismatched.set("x-hrmny-event-id", "10000000-0000-4000-8000-000000000099");
+    const mismatched = new Headers({
+      "x-hrmny-discovery-token": signDiscoveryRuntimeToken(
+        SECRET,
+        KEY_ID,
+        rawBody,
+        "10000000-0000-4000-8000-000000000099",
+        NOW,
+      ),
+    });
     expect(
       validateDiscoveryRuntimeCallback({
         rawBody,
@@ -211,5 +218,18 @@ describe("Discovery runtime callback contract", () => {
         nowSeconds: NOW,
       }),
     ).toEqual({ ok: false, code: "body_too_large" });
+  });
+
+  it("loads only a bounded dedicated callback key ring", () => {
+    const secret = "s".repeat(32);
+    expect(
+      loadDiscoveryN8nCallbackKeys(JSON.stringify({ [KEY_ID]: secret })),
+    ).toMatchObject({ [KEY_ID]: secret });
+    expect(loadDiscoveryN8nCallbackKeys("{}")).toBeNull();
+    expect(
+      loadDiscoveryN8nCallbackKeys(
+        JSON.stringify({ [KEY_ID]: "too-short", constructor: secret }),
+      ),
+    ).toBeNull();
   });
 });

@@ -17,7 +17,9 @@ const journal = JSON.parse(
 
 describe("Discovery programme migration contract", () => {
   it("installs immutable versions, optimistic state, stable bindings, and server-only access", () => {
-    expect(journal.entries.at(-1)?.tag).toBe("0085_discovery_programmes");
+    expect(journal.entries.map(({ tag }) => tag)).toContain(
+      "0085_discovery_programmes",
+    );
     expect(migration).toContain(
       "CREATE TABLE IF NOT EXISTS public.research_programme (",
     );

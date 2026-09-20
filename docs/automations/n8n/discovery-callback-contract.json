@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "module": "discovery",
+  "authority": "os-owned-discovery-runtime",
+  "notCrmEventMap": true,
+  "workflowFile": "discovery-public-news.json",
+  "active": false,
+  "webhookPath": "hrmny-discovery-public-news",
+  "webhookPathEnv": "DISCOVERY_N8N_WEBHOOK_PATH",
+  "webhookPathPattern": "^hrmny-discovery-[a-z0-9-]{1,80}$",
+  "n8nBaseUrl": "https://hrmny.app.n8n.cloud",
+  "osBaseUrlEnv": "HRMNY_OS_BASE_URL",
+  "callbackPath": "/api/integrations/discovery/callback",
+  "callbackHeader": "x-hrmny-discovery-token",
+  "inboundTriggerHeader": "X-Hrmny-Os-Secret",
+  "inboundTriggerSecretEnvOs": "DISCOVERY_N8N_TRIGGER_SECRET",
+  "osKeyRingEnv": "DISCOVERY_N8N_CALLBACK_KEYS_JSON",
+  "n8nKeyIdVariable": "DISCOVERY_N8N_CALLBACK_KID",
+  "n8nJwtCredentialType": "jwtAuth",
+  "n8nJwtCredentialName": "HRMNY Discovery callback signing",
+  "issuer": "hrmny-n8n-discovery",
+  "audience": "hrmny-os-discovery",
+  "algorithm": "HS256",
+  "tokenType": "JWT",
+  "maxLifetimeSeconds": 300,
+  "maxSkewSeconds": 30,
+  "maxBodyBytes": 262144,
+  "events": [
+    "sales.discovery.observations.v1",
+    "sales.discovery.checkpoint.v1",
+    "sales.discovery.completion.v1"
+  ],
+  "claims": ["iss", "aud", "jti", "iat", "exp", "bodyHash"],
+  "headerFields": ["alg", "typ", "kid"],
+  "firstCollector": {
+    "sourceKey": "campaign_me",
+    "adapter": "rss_http",
+    "executionMode": "automatic",
+    "url": "https://campaignme.com/latest/",
+    "feedUrl": "https://campaignme.com/feed/",
+    "permittedHosts": ["campaignme.com"]
+  }
+}

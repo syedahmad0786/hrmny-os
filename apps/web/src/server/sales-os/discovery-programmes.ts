@@ -20,6 +20,14 @@ import {
   normalizeResearchEvidence,
   ResearchEvidenceError,
 } from "./research-evidence";
+import {
+  armMemoryPublishedSlot,
+  pauseMemoryProgrammeRuns,
+} from "./discovery-run-queries";
+import {
+  pauseProgrammeRunsTx,
+  schedulePublishedSlotTx,
+} from "./discovery-runs";
 
 type LifecycleState = "draft" | "active" | "paused" | "archived";
 type SourceFamily =
@@ -413,8 +421,14 @@ export type DiscoveryProgrammeConfig = z.infer<
 >;
 export type DiscoverySourceDraft = z.infer<typeof discoverySourceDraftSchema>;
 
-type SnapshotSource = DiscoverySourceDraft & DiscoverySourceManifestItem;
-type Snapshot = { config: DiscoveryProgrammeConfig; sources: SnapshotSource[] };
+export type DiscoveryProgrammeSnapshotSource = DiscoverySourceDraft &
+  DiscoverySourceManifestItem;
+export type DiscoveryProgrammeSnapshot = {
+  config: DiscoveryProgrammeConfig;
+  sources: DiscoveryProgrammeSnapshotSource[];
+};
+type SnapshotSource = DiscoveryProgrammeSnapshotSource;
+type Snapshot = DiscoveryProgrammeSnapshot;
 
 export const DEFAULT_DISCOVERY_PROGRAMME_CONFIG: DiscoveryProgrammeConfig = {
   name: "HRMNY Daily Discovery",
@@ -536,6 +550,7 @@ type MemoryProgramme = {
   pausedByEmployeeId: string | null;
   pausedAt: string | null;
   pauseReason: string | null;
+  nextDueAt: string | null;
   createdAt: string;
   updatedAt: string;
   versions: Map<
@@ -543,6 +558,16 @@ type MemoryProgramme = {
     { snapshot: Snapshot; hash: string; actor: string; createdAt: string }
   >;
   bindingIds: Map<string, string>;
+  bindings: Map<
+    string,
+    {
+      credentialGeneration: number;
+      checkpointVersion: number;
+      cursor: Record<string, unknown> | null;
+      connectionState: ConnectionState;
+      lastError: string | null;
+    }
+  >;
 };
 
 const memory = new Map<string, MemoryProgramme>();
@@ -842,7 +867,7 @@ async function detailFromDb(db: Db, row: DbProgramme) {
       new Date(),
     ),
     executionEnabled: false as const,
-    nextDueAt: null,
+    nextDueAt: row.nextDueAt?.toISOString() ?? null,
     publishedAt: row.publishedAt?.toISOString() ?? null,
     publishedByEmployeeId: row.publishedByEmployeeId,
     pausedAt: row.pausedAt?.toISOString() ?? null,
@@ -862,22 +887,23 @@ function detailFromMemory(row: MemoryProgramme) {
     version,
     hash: entry.hash,
     config: entry.snapshot.config,
-    sources: entry.snapshot.sources.map((source) =>
-      sourceView(source, {
+    sources: entry.snapshot.sources.map((source) => {
+      const binding = row.bindings.get(source.sourceKey);
+      return sourceView(source, {
         id: row.bindingIds.get(source.sourceKey) ?? "",
         adapter: source.adapter,
         adapterVersion: source.adapterVersion,
         configuration: source.configuration,
         accountReferenceId: source.accountReferenceId ?? null,
         capabilityState: source.capabilityState,
-        connectionState: source.connectionState,
-        credentialGeneration: 0,
+        connectionState: binding?.connectionState ?? source.connectionState,
+        credentialGeneration: binding?.credentialGeneration ?? 0,
         lastAttemptAt: null,
         lastSuccessAt: null,
-        lastError: null,
+        lastError: binding?.lastError ?? null,
         coverage: {},
-      }),
-    ),
+      });
+    }),
     createdAt: entry.createdAt,
     createdByEmployeeId: entry.actor,
   });
@@ -902,7 +928,7 @@ function detailFromMemory(row: MemoryProgramme) {
       new Date(),
     ),
     executionEnabled: false as const,
-    nextDueAt: null,
+    nextDueAt: row.nextDueAt,
     publishedAt: row.publishedAt,
     publishedByEmployeeId: row.publishedByEmployeeId,
     pausedAt: row.pausedAt,
@@ -1186,6 +1212,7 @@ export async function createDiscoveryProgramme(input: {
       pausedByEmployeeId: null,
       pausedAt: null,
       pauseReason: null,
+      nextDueAt: null,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
       versions: new Map([
@@ -1202,6 +1229,7 @@ export async function createDiscoveryProgramme(input: {
       bindingIds: new Map(
         snapshot.sources.map((source) => [source.sourceKey, randomUUID()]),
       ),
+      bindings: new Map(),
     };
     memory.set(id, row);
     return detailFromMemory(row);
@@ -1272,7 +1300,7 @@ export async function listDiscoveryProgrammes(input: {
   const db = getDb();
   const accessPredicate = input.isAdmin
     ? undefined
-    : sql`(${researchProgramme.ownerEmployeeId} = ${input.actorEmployeeId}::uuid or ${input.actorEmployeeId}::uuid = any(${researchProgramme.reviewerEmployeeIds}))`;
+    : sql`(${researchProgramme.ownerEmployeeId} = ${input.actorEmployeeId}::uuid or ${input.actorEmployeeId}::uuid = any(${researchProgramme.reviewerEmployeeIds}::uuid[]))`;
   const statePredicate = input.state
     ? eq(researchProgramme.state, input.state)
     : undefined;
@@ -1315,7 +1343,7 @@ export async function listDiscoveryProgrammes(input: {
     ).length,
     schedulePreview: item.schedulePreview,
     executionEnabled: false as const,
-    nextDueAt: null,
+    nextDueAt: item.nextDueAt,
     updatedAt: item.updatedAt,
   }));
 }
@@ -1503,12 +1531,36 @@ async function transitionProgramme(input: {
       row.publishedAt = now;
       row.publishedByEmployeeId = input.actorEmployeeId;
       row.pausedAt = row.pausedByEmployeeId = row.pauseReason = null;
+      row.nextDueAt = previewDiscoverySchedule(
+        snapshot.config.schedule,
+        new Date(),
+        1,
+      )[0]!;
+      armMemoryPublishedSlot({
+        programmeId: row.id,
+        programmeName: snapshot.config.name,
+        ownerEmployeeId: row.ownerEmployeeId,
+        reviewerEmployeeIds: row.reviewerEmployeeIds,
+        scheduleGeneration: row.scheduleGeneration,
+        publishedVersion: row.publishedVersion,
+        maxObservations: snapshot.config.limits.maxObservations,
+        runAt: row.nextDueAt,
+        sourceKeys: snapshot.sources
+          .filter((source) => source.enabled)
+          .map((source) => source.sourceKey),
+      });
     } else {
       row.state = "paused";
       row.scheduleGeneration += 1;
       row.pausedAt = now;
       row.pausedByEmployeeId = input.actorEmployeeId;
       row.pauseReason = input.reason ?? null;
+      row.nextDueAt = null;
+      pauseMemoryProgrammeRuns({
+        programmeId: row.id,
+        actorEmployeeId: input.actorEmployeeId,
+        reason: input.reason ?? "paused",
+      });
     }
     return detailFromMemory(row);
   }
@@ -1591,6 +1643,23 @@ async function transitionProgramme(input: {
         "PROGRAMME_VERSION_CONFLICT",
       );
     if (snapshot) await syncBindings(tx, input.programmeId, snapshot.sources);
+    if (input.action === "publish" && snapshot && draftVersion) {
+      await schedulePublishedSlotTx(tx, {
+        programmeId: input.programmeId,
+        programmeVersionId: draftVersion.researchProgrammeVersionId,
+        scheduleGeneration: existing.scheduleGeneration + 1,
+        snapshot,
+        now,
+      });
+    }
+    if (input.action === "pause") {
+      await pauseProgrammeRunsTx(tx, {
+        programmeId: input.programmeId,
+        actorEmployeeId: input.actorEmployeeId,
+        reason: input.reason ?? "paused",
+        now,
+      });
+    }
     await tx.insert(auditEvent).values({
       actorEmployeeId: input.actorEmployeeId,
       action: `sales.discovery.programme.${input.action}`,
@@ -1635,3 +1704,100 @@ export const pauseDiscoveryProgramme = (input: {
   actorEmployeeId: string;
   reason: string;
 }) => transitionProgramme({ ...input, action: "pause" });
+
+export async function reconnectDiscoverySource(input: {
+  programmeId: string;
+  sourceKey: string;
+  actorEmployeeId: string;
+  isAdmin: boolean;
+  reason: string;
+}) {
+  const programme = await getDiscoveryProgramme({
+    programmeId: input.programmeId,
+    actorEmployeeId: input.actorEmployeeId,
+    isAdmin: input.isAdmin,
+  });
+  const source = programme.draft.sources.find(
+    (item) => item.sourceKey === input.sourceKey,
+  );
+  if (!source)
+    throw new DiscoveryProgrammeError("INVALID_SOURCE", "SOURCE_NOT_FOUND");
+  const db = getDb();
+  if (!db) {
+    const row = memory.get(input.programmeId);
+    if (!row) throw new DiscoveryProgrammeError("NOT_FOUND", "PROGRAMME_NOT_FOUND");
+    const existing = row.bindings.get(input.sourceKey);
+    row.bindings.set(input.sourceKey, {
+      credentialGeneration: (existing?.credentialGeneration ?? 0) + 1,
+      checkpointVersion: (existing?.checkpointVersion ?? 0) + 1,
+      cursor: existing?.cursor ?? null,
+      connectionState:
+        source.connectionState === "not_required"
+          ? "not_required"
+          : "needs_connection",
+      lastError: null,
+    });
+    row.updatedAt = new Date().toISOString();
+    return getDiscoveryProgramme({
+      programmeId: input.programmeId,
+      actorEmployeeId: input.actorEmployeeId,
+      isAdmin: input.isAdmin,
+    });
+  }
+  const [binding] = await db
+    .select()
+    .from(researchProgrammeSourceBinding)
+    .where(
+      and(
+        eq(
+          researchProgrammeSourceBinding.researchProgrammeId,
+          input.programmeId,
+        ),
+        eq(researchProgrammeSourceBinding.sourceKey, input.sourceKey),
+      ),
+    )
+    .limit(1);
+  if (!binding)
+    throw new DiscoveryProgrammeError("INVALID_SOURCE", "SOURCE_BINDING_NOT_FOUND");
+  await db.transaction(async (tx) => {
+    await tx
+      .update(researchProgrammeSourceBinding)
+      .set({
+        credentialGeneration: binding.credentialGeneration + 1,
+        checkpointVersion: binding.checkpointVersion + 1,
+        connectionState:
+          binding.connectionState === "not_required"
+            ? "not_required"
+            : "needs_connection",
+        lastError: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        eq(
+          researchProgrammeSourceBinding.researchProgrammeSourceBindingId,
+          binding.researchProgrammeSourceBindingId,
+        ),
+      );
+    await tx.insert(auditEvent).values({
+      actorEmployeeId: input.actorEmployeeId,
+      action: "discovery.source.reconnected",
+      entityType: "research_programme",
+      entityId: input.programmeId,
+      before: {
+        sourceKey: input.sourceKey,
+        credentialGeneration: binding.credentialGeneration,
+      },
+      after: {
+        sourceKey: input.sourceKey,
+        credentialGeneration: binding.credentialGeneration + 1,
+        collectorStarted: false,
+      },
+      reason: input.reason,
+    });
+  });
+  return getDiscoveryProgramme({
+    programmeId: input.programmeId,
+    actorEmployeeId: input.actorEmployeeId,
+    isAdmin: input.isAdmin,
+  });
+}

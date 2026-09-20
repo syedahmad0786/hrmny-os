@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "module": "discovery",
+  "executionEnabled": false,
+  "executionFlag": "DISCOVERY_EXECUTION_ENABLED",
+  "inngest": {
+    "functionId": "sales-discovery-wake-v1",
+    "event": "sales/discovery.wake.v1",
+    "horizonHours": 24,
+    "retries": 2,
+    "collectsWhenDisabled": false,
+    "interpretFunctionId": "sales-discovery-interpret-v1",
+    "interpretEvent": "sales/discovery.interpret.v1"
+  },
+  "repair": {
+    "path": "/api/cron/discovery",
+    "method": "GET",
+    "secretEnv": "DISCOVERY_REPAIR_SECRET",
+    "authorization": "Bearer",
+    "collects": false
+  },
+  "genericBusinessCron": {
+    "path": "/api/cron/jobs",
+    "excludesJobKind": "sales_research_run",
+    "doNotIncreaseCadence": true
+  },
+  "vercelRepairCron": {
+    "path": "/api/cron/discovery",
+    "schedule": "*/15 * * * *",
+    "appliedInRepo": false,
+    "reason": "Do not attach Discovery to generic /api/cron/jobs. Apply the independent 15-minute repair clock only when the preview or production plan permits it. Execution stays disabled until owner-gated."
+  },
+  "n8n": {
+    "workflowFile": "discovery-public-news.json",
+    "active": false,
+    "scheduleTrigger": false,
+    "webhookPath": "hrmny-discovery-public-news",
+    "webhookPathEnv": "DISCOVERY_N8N_WEBHOOK_PATH",
+    "tenant": "https://hrmny.app.n8n.cloud"
+  }
+}

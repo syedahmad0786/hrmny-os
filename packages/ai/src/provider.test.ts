@@ -384,6 +384,78 @@ describe("openrouter free-model failover", () => {
     vi.unstubAllGlobals();
   });
 
+  it("refuses automatic free fallback when Discovery pins one model", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "rate limited" }), {
+          status: 429,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    process.env.LLM_PROVIDER = "openrouter";
+    const provider = createProvider({
+      provider: "openrouter",
+      defaultModel: OPENROUTER_FREE_DEFAULT_MODEL,
+      openRouterApiKey: "sk-test",
+    });
+    await expect(
+      provider.generate({
+        messages: [{ role: "user", content: "hi" }],
+        model: OPENROUTER_FREE_DEFAULT_MODEL,
+        allowFreeFallback: false,
+      }),
+    ).rejects.toThrow(/429|failed/i);
+    const models = fetchMock.mock.calls.map((call) =>
+      JSON.parse(String((call as unknown as [string, RequestInit])[1].body))
+        .model,
+    );
+    expect(models).toEqual([OPENROUTER_FREE_DEFAULT_MODEL]);
+    vi.unstubAllGlobals();
+  });
+
+  it("applies a zero max_price filter and omits paid plugins on a pinned Discovery route", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "gen-zero",
+            model: OPENROUTER_FREE_DEFAULT_MODEL,
+            choices: [{ message: { role: "assistant", content: '{"ok":true}' } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = createProvider({
+      provider: "openrouter",
+      defaultModel: OPENROUTER_FREE_DEFAULT_MODEL,
+      openRouterApiKey: "sk-test",
+    });
+    await provider.generate({
+      messages: [{ role: "user", content: "hi" }],
+      model: OPENROUTER_FREE_DEFAULT_MODEL,
+      schema: z.object({ ok: z.boolean() }),
+      allowFreeFallback: false,
+      allowPlugins: false,
+      webSearch: false,
+      privateContext: false,
+      maxPrice: { prompt: 0, completion: 0, request: 0 },
+    });
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+    );
+    expect(body.model).toBe(OPENROUTER_FREE_DEFAULT_MODEL);
+    expect(body.provider).toEqual({
+      max_price: { prompt: 0, completion: 0, request: 0 },
+      allow_fallbacks: false,
+    });
+    expect(body.plugins).toBeUndefined();
+    expect(body.tools).toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+
   it("extracts schema-valid JSON from finished response prose and requests response healing", async () => {
     const fetchMock = vi.fn(
       async (_url: string, _init?: RequestInit) =>
@@ -689,5 +761,74 @@ describe("openrouter free-model failover", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("discovery interpretation mock", () => {
+  it("returns awarded claims from a public packet without a live provider", async () => {
+    const mock = createMockProvider();
+    const result = await mock.generate({
+      task: "discovery_interpret",
+      webSearch: false,
+      privateContext: false,
+      messages: [
+        {
+          role: "user",
+          content: JSON.stringify({
+            excerpt: "The issuer awarded the account yesterday.",
+            evidenceId: "obs-1",
+            opportunityKind: "company_signal",
+          }),
+        },
+      ],
+    });
+    expect(result.provider).toBe("mock");
+    expect(result.object).toMatchObject({ awardedAppointment: true });
+  });
+
+  it("extracts a grounded company name and leaves ambiguous excerpts unresolved", async () => {
+    const mock = createMockProvider();
+    const named = await mock.generate({
+      task: "discovery_interpret",
+      webSearch: false,
+      privateContext: false,
+      messages: [
+        {
+          role: "user",
+          content: JSON.stringify({
+            excerpt:
+              "Majid Al Futtaim opened a regional creative review in Dubai.",
+            evidenceId: "obs-2",
+            opportunityKind: "company_signal",
+          }),
+        },
+      ],
+    });
+    expect(named.object).toMatchObject({
+      awardedAppointment: false,
+      companyIdentity: {
+        name: "Majid Al Futtaim",
+        ambiguous: false,
+      },
+    });
+    const ambiguous = await mock.generate({
+      task: "discovery_interpret",
+      webSearch: false,
+      privateContext: false,
+      messages: [
+        {
+          role: "user",
+          content: JSON.stringify({
+            excerpt:
+              "Majid Al Futtaim and Emaar Properties opened competing reviews.",
+            evidenceId: "obs-3",
+            opportunityKind: "company_signal",
+          }),
+        },
+      ],
+    });
+    expect(ambiguous.object).toMatchObject({
+      companyIdentity: { name: null, ambiguous: true },
+    });
   });
 });

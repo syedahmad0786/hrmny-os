@@ -79,7 +79,7 @@ function n8nFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const signal = init.signal
     ? AbortSignal.any([init.signal, timeout])
     : timeout;
-  return fetch(url, { ...init, signal });
+  return fetch(url, { ...init, signal, redirect: "error" });
 }
 
 /** Mock n8n — no network; used when key absent or N8N_MODE=mock. */

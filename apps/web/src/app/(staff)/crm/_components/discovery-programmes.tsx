@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import { CrmBtn, CrmEmpty, CrmTag } from "@/components/crm/ui";
+import { CRM_MARKETS } from "@/lib/crm-markets";
 import { previewDiscoverySchedule } from "@/lib/discovery-schedule";
 import { trpc } from "@/lib/trpc";
 import type { AppRouter } from "@/server/trpc/root";
@@ -28,6 +29,35 @@ const list = <T extends string>(value: string) =>
     .filter(Boolean) as T[];
 
 const joined = (value: string[]) => value.join(", ");
+
+const lines = <T extends string>(value: string) =>
+  value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean) as T[];
+
+const joinedLines = (value: string[], readable = false) =>
+  value.map((item) => (readable ? humanize(item) : item)).join("\n");
+
+const weekdays = [
+  { value: 0, label: "Sunday" },
+  { value: 1, label: "Monday" },
+  { value: 2, label: "Tuesday" },
+  { value: 3, label: "Wednesday" },
+  { value: 4, label: "Thursday" },
+  { value: 5, label: "Friday" },
+  { value: 6, label: "Saturday" },
+] as const;
+
+const rotationWeekdays = weekdays.filter(
+  (day) => day.value >= 1 && day.value <= 5,
+);
+
+const acquisitionLanes = [
+  { value: "industry_scanning", label: "Industry scanning" },
+  { value: "apollo_intent", label: "Apollo intent" },
+  { value: "relationship_led", label: "Relationship-led introductions" },
+] as const;
 
 const connectionToolkitsByAdapter: Record<string, readonly string[]> = {
   apollo_api: ["apollo"],
@@ -60,6 +90,7 @@ export function DiscoveryProgrammes() {
   const utils = trpc.useUtils();
   const access = trpc.salesOs.access.useQuery();
   const connections = trpc.connections.list.useQuery({ scope: "staff" });
+  const employees = trpc.work.members.listEmployees.useQuery();
   const manifest = trpc.salesOs.discovery.manifest.useQuery();
   const programmes = trpc.salesOs.discovery.programmes.list.useQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -175,12 +206,23 @@ export function DiscoveryProgrammes() {
     },
     onError: conflict,
   });
+  const requestRun = trpc.salesOs.discovery.programmes.requestRun.useMutation({
+    onSuccess: (result) => {
+      setNote(
+        `Run ${result.status}. Collectors stay off until execution is enabled.`,
+      );
+      void utils.salesOs.discovery.runs.invalidate();
+      void utils.salesOs.discovery.programmes.invalidate();
+    },
+    onError: (error) => setNote(error.message),
+  });
 
   const busy =
     create.isPending ||
     saveDraft.isPending ||
     publish.isPending ||
-    pause.isPending;
+    pause.isPending ||
+    requestRun.isPending;
   const detail = selected.data;
   const canEdit = access.data?.canOperate === true;
   const canPublish = access.data?.canAdmin === true;
@@ -247,6 +289,48 @@ export function DiscoveryProgrammes() {
             ),
           }
         : current,
+    );
+  };
+
+  const updateWeekdays = (weekday: number, checked: boolean) => {
+    if (!editor) return;
+    const nextWeekdays = checked
+      ? [...editor.config.schedule.weekdays, weekday].sort((a, b) => a - b)
+      : editor.config.schedule.weekdays.filter((day) => day !== weekday);
+    updateConfig("schedule", {
+      ...editor.config.schedule,
+      weekdays: nextWeekdays,
+    });
+  };
+
+  const updateOwner = (ownerEmployeeId: string) => {
+    setIsDirty(true);
+    setEditor((current) =>
+      current
+        ? {
+            ...current,
+            config: {
+              ...current.config,
+              ownerEmployeeId,
+              reviewerEmployeeIds: current.config.reviewerEmployeeIds.filter(
+                (employeeId) => employeeId !== ownerEmployeeId,
+              ),
+            },
+          }
+        : current,
+    );
+  };
+
+  const updateRotation = (
+    index: number,
+    patch: Partial<ProgrammeConfig["rotation"][number]>,
+  ) => {
+    if (!editor) return;
+    updateConfig(
+      "rotation",
+      editor.config.rotation.map((rotation, rotationIndex) =>
+        rotationIndex === index ? { ...rotation, ...patch } : rotation,
+      ),
     );
   };
 
@@ -342,6 +426,9 @@ export function DiscoveryProgrammes() {
                   : "never"}{" "}
                 · {programme.blockedSourceCount} source blocker
                 {programme.blockedSourceCount === 1 ? "" : "s"}
+                {programme.nextDueAt
+                  ? ` · Next due ${formatDubai(programme.nextDueAt)}`
+                  : ""}
               </p>
             </button>
           ))}
@@ -399,18 +486,37 @@ export function DiscoveryProgrammes() {
                   }
                 />
               </label>
+              <fieldset className="crm-field">
+                <legend>Markets</legend>
+                <div className="flex flex-wrap gap-3">
+                  {CRM_MARKETS.map((market) => (
+                    <label key={market} className="text-sm">
+                      <input
+                        type="checkbox"
+                        checked={editor.config.markets.includes(market)}
+                        disabled={
+                          !canEdit ||
+                          (editor.config.markets.length === 1 &&
+                            editor.config.markets.includes(market))
+                        }
+                        onChange={(event) =>
+                          updateConfig(
+                            "markets",
+                            event.target.checked
+                              ? [...editor.config.markets, market]
+                              : editor.config.markets.filter(
+                                  (current) => current !== market,
+                                ),
+                          )
+                        }
+                      />{" "}
+                      {market}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
               <label className="crm-field">
-                Markets (comma separated)
-                <input
-                  className="crm-input"
-                  value={joined(editor.config.markets)}
-                  onChange={(event) =>
-                    updateConfig("markets", list(event.target.value))
-                  }
-                />
-              </label>
-              <label className="crm-field">
-                Primary sectors
+                Primary sectors (comma separated)
                 <input
                   className="crm-input"
                   value={joined(editor.config.primarySectors)}
@@ -421,23 +527,37 @@ export function DiscoveryProgrammes() {
               </label>
               <label className="crm-field wide">
                 Opportunity types
-                <input
-                  className="crm-input"
-                  value={joined(editor.config.opportunityTypes)}
+                <textarea
+                  className="crm-textarea"
+                  aria-describedby="discovery-opportunity-types-help"
+                  value={joinedLines(editor.config.opportunityTypes, true)}
                   onChange={(event) =>
-                    updateConfig("opportunityTypes", list(event.target.value))
+                    updateConfig("opportunityTypes", lines(event.target.value))
                   }
                 />
+                <span
+                  id="discovery-opportunity-types-help"
+                  className="text-sm text-[var(--muted)]"
+                >
+                  One type per line, for example “agency review”.
+                </span>
               </label>
               <label className="crm-field wide">
                 Questions
                 <textarea
                   className="crm-textarea"
-                  value={joined(editor.config.questions)}
+                  aria-describedby="discovery-questions-help"
+                  value={joinedLines(editor.config.questions)}
                   onChange={(event) =>
-                    updateConfig("questions", list(event.target.value))
+                    updateConfig("questions", lines(event.target.value))
                   }
                 />
+                <span
+                  id="discovery-questions-help"
+                  className="text-sm text-[var(--muted)]"
+                >
+                  One question per line. Commas stay part of the question.
+                </span>
               </label>
               <label className="crm-field">
                 News freshness (days)
@@ -484,21 +604,124 @@ export function DiscoveryProgrammes() {
                   }
                 />
               </label>
-              <label className="crm-field">
-                Dubai start time
-                <input
-                  className="crm-input"
-                  type="time"
-                  value={editor.config.schedule.localTime}
-                  onChange={(event) =>
-                    updateConfig("schedule", {
-                      ...editor.config.schedule,
-                      localTime: event.target.value,
-                    })
-                  }
-                />
-              </label>
             </div>
+
+            <details>
+              <summary className="cursor-pointer">
+                Ownership, review and acquisition lanes
+              </summary>
+              <div className="crm-form-grid mt-3">
+                <label className="crm-field">
+                  Programme owner
+                  <select
+                    className="crm-select"
+                    value={editor.config.ownerEmployeeId}
+                    disabled={!canEdit}
+                    onChange={(event) => updateOwner(event.target.value)}
+                  >
+                    {!employees.data?.some(
+                      (employee) =>
+                        employee.employeeId === editor.config.ownerEmployeeId,
+                    ) ? (
+                      <option value={editor.config.ownerEmployeeId}>
+                        Current programme owner
+                      </option>
+                    ) : null}
+                    {(employees.data ?? []).map((employee) => (
+                      <option
+                        key={employee.employeeId}
+                        value={employee.employeeId}
+                      >
+                        {employee.displayLabel}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <fieldset className="crm-field wide">
+                  <legend>Reviewers</legend>
+                  <p className="mb-2 text-sm text-[var(--muted)]">
+                    Select up to 10 active teammates. This records review
+                    responsibility; it does not grant access.
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    {(employees.data ?? []).map((employee) => {
+                      const selectedReviewer =
+                        editor.config.reviewerEmployeeIds.includes(
+                          employee.employeeId,
+                        );
+                      const isOwner =
+                        employee.employeeId === editor.config.ownerEmployeeId;
+                      return (
+                        <label key={employee.employeeId} className="text-sm">
+                          <input
+                            type="checkbox"
+                            checked={selectedReviewer}
+                            disabled={
+                              !canEdit ||
+                              isOwner ||
+                              (!selectedReviewer &&
+                                editor.config.reviewerEmployeeIds.length >= 10)
+                            }
+                            onChange={(event) =>
+                              updateConfig(
+                                "reviewerEmployeeIds",
+                                event.target.checked
+                                  ? [
+                                      ...editor.config.reviewerEmployeeIds,
+                                      employee.employeeId,
+                                    ]
+                                  : editor.config.reviewerEmployeeIds.filter(
+                                      (employeeId) =>
+                                        employeeId !== employee.employeeId,
+                                    ),
+                              )
+                            }
+                          />{" "}
+                          {employee.displayLabel}
+                          {isOwner ? " (owner)" : ""}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+                <fieldset className="crm-field wide">
+                  <legend>Acquisition lanes</legend>
+                  <div className="flex flex-wrap gap-3">
+                    {acquisitionLanes.map((lane) => (
+                      <label key={lane.value} className="text-sm">
+                        <input
+                          type="checkbox"
+                          checked={editor.config.acquisitionLanes.includes(
+                            lane.value,
+                          )}
+                          disabled={
+                            !canEdit ||
+                            (editor.config.acquisitionLanes.length === 1 &&
+                              editor.config.acquisitionLanes.includes(
+                                lane.value,
+                              ))
+                          }
+                          onChange={(event) =>
+                            updateConfig(
+                              "acquisitionLanes",
+                              event.target.checked
+                                ? [
+                                    ...editor.config.acquisitionLanes,
+                                    lane.value,
+                                  ]
+                                : editor.config.acquisitionLanes.filter(
+                                    (current) => current !== lane.value,
+                                  ),
+                            )
+                          }
+                        />{" "}
+                        {lane.label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              </div>
+            </details>
 
             <details>
               <summary className="cursor-pointer">Advanced criteria</summary>
@@ -507,21 +730,35 @@ export function DiscoveryProgrammes() {
                   Inclusion rules
                   <textarea
                     className="crm-textarea"
-                    value={joined(editor.config.inclusionRules)}
+                    aria-describedby="discovery-inclusion-rules-help"
+                    value={joinedLines(editor.config.inclusionRules)}
                     onChange={(event) =>
-                      updateConfig("inclusionRules", list(event.target.value))
+                      updateConfig("inclusionRules", lines(event.target.value))
                     }
                   />
+                  <span
+                    id="discovery-inclusion-rules-help"
+                    className="text-sm text-[var(--muted)]"
+                  >
+                    One rule per line. Commas stay part of the rule.
+                  </span>
                 </label>
                 <label className="crm-field wide">
                   Exclusion rules
                   <textarea
                     className="crm-textarea"
-                    value={joined(editor.config.exclusionRules)}
+                    aria-describedby="discovery-exclusion-rules-help"
+                    value={joinedLines(editor.config.exclusionRules)}
                     onChange={(event) =>
-                      updateConfig("exclusionRules", list(event.target.value))
+                      updateConfig("exclusionRules", lines(event.target.value))
                     }
                   />
+                  <span
+                    id="discovery-exclusion-rules-help"
+                    className="text-sm text-[var(--muted)]"
+                  >
+                    One rule per line. Commas stay part of the rule.
+                  </span>
                 </label>
                 <label className="crm-field wide">
                   Secondary sectors
@@ -533,6 +770,257 @@ export function DiscoveryProgrammes() {
                     }
                   />
                 </label>
+              </div>
+            </details>
+
+            <details>
+              <summary className="cursor-pointer">
+                Schedule, sector rotation and run limits
+              </summary>
+              <div className="crm-form-grid mt-3">
+                <label className="crm-field">
+                  Dubai start time
+                  <input
+                    className="crm-input"
+                    type="time"
+                    value={editor.config.schedule.localTime}
+                    onChange={(event) =>
+                      updateConfig("schedule", {
+                        ...editor.config.schedule,
+                        localTime: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <fieldset className="crm-field wide">
+                  <legend>Run days</legend>
+                  <div className="flex flex-wrap gap-3">
+                    {weekdays.map((day) => (
+                      <label key={day.value} className="text-sm">
+                        <input
+                          type="checkbox"
+                          checked={editor.config.schedule.weekdays.includes(
+                            day.value,
+                          )}
+                          disabled={
+                            !canEdit ||
+                            (editor.config.schedule.weekdays.length === 1 &&
+                              editor.config.schedule.weekdays.includes(
+                                day.value,
+                              ))
+                          }
+                          onChange={(event) =>
+                            updateWeekdays(day.value, event.target.checked)
+                          }
+                        />{" "}
+                        {day.label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <label className="crm-field">
+                  Desired companies: minimum
+                  <input
+                    className="crm-input"
+                    type="number"
+                    min={0}
+                    max={200}
+                    value={editor.config.limits.desiredCompaniesMin}
+                    onChange={(event) =>
+                      updateConfig("limits", {
+                        ...editor.config.limits,
+                        desiredCompaniesMin: Number(event.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <label className="crm-field">
+                  Desired companies: maximum
+                  <input
+                    className="crm-input"
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={editor.config.limits.desiredCompaniesMax}
+                    onChange={(event) =>
+                      updateConfig("limits", {
+                        ...editor.config.limits,
+                        desiredCompaniesMax: Number(event.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <label className="crm-field">
+                  Desired market signals: minimum
+                  <input
+                    className="crm-input"
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={editor.config.limits.desiredMarketSignalsMin}
+                    onChange={(event) =>
+                      updateConfig("limits", {
+                        ...editor.config.limits,
+                        desiredMarketSignalsMin: Number(event.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <label className="crm-field">
+                  Desired market signals: maximum
+                  <input
+                    className="crm-input"
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={editor.config.limits.desiredMarketSignalsMax}
+                    onChange={(event) =>
+                      updateConfig("limits", {
+                        ...editor.config.limits,
+                        desiredMarketSignalsMax: Number(event.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <label className="crm-field">
+                  Maximum observations per run
+                  <input
+                    className="crm-input"
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={editor.config.limits.maxObservations}
+                    onChange={(event) =>
+                      updateConfig("limits", {
+                        ...editor.config.limits,
+                        maxObservations: Number(event.target.value),
+                      })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="mt-4">
+                <h5 className="font-semibold">Weekday sector rotation</h5>
+                <p className="mb-2 text-sm text-[var(--muted)]">
+                  Rotation guides eligible weekday work. It does not run or
+                  restart research.
+                </p>
+                <div className="crm-approval-stack">
+                  {editor.config.rotation.map((rotation, index) => (
+                    <div
+                      key={rotation.weekday}
+                      className="crm-form-grid crm-approval-mini"
+                    >
+                      <label className="crm-field">
+                        Weekday
+                        <select
+                          className="crm-select"
+                          value={rotation.weekday}
+                          disabled={!canEdit}
+                          onChange={(event) =>
+                            updateRotation(index, {
+                              weekday: Number(event.target.value) as
+                                1 | 2 | 3 | 4 | 5,
+                            })
+                          }
+                        >
+                          {rotationWeekdays.map((day) => (
+                            <option
+                              key={day.value}
+                              value={day.value}
+                              disabled={editor.config.rotation.some(
+                                (current, currentIndex) =>
+                                  currentIndex !== index &&
+                                  current.weekday === day.value,
+                              )}
+                            >
+                              {day.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="crm-field">
+                        Primary sector
+                        <input
+                          className="crm-input"
+                          value={rotation.primarySector}
+                          onChange={(event) =>
+                            updateRotation(index, {
+                              primarySector: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="crm-field">
+                        Secondary focus
+                        <input
+                          className="crm-input"
+                          value={rotation.secondaryFocus}
+                          onChange={(event) =>
+                            updateRotation(index, {
+                              secondaryFocus: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <CrmBtn
+                        disabled={
+                          !canEdit || editor.config.rotation.length === 1
+                        }
+                        onClick={() =>
+                          updateConfig(
+                            "rotation",
+                            editor.config.rotation.filter(
+                              (_, rotationIndex) => rotationIndex !== index,
+                            ),
+                          )
+                        }
+                      >
+                        Remove day
+                      </CrmBtn>
+                    </div>
+                  ))}
+                </div>
+                {editor.config.rotation.length < rotationWeekdays.length ? (
+                  <label className="crm-field mt-3">
+                    Add rotation day
+                    <select
+                      className="crm-select"
+                      value=""
+                      disabled={!canEdit}
+                      onChange={(event) => {
+                        const weekday = Number(event.target.value);
+                        if (!weekday) return;
+                        updateConfig("rotation", [
+                          ...editor.config.rotation,
+                          {
+                            weekday: weekday as 1 | 2 | 3 | 4 | 5,
+                            primarySector:
+                              editor.config.primarySectors[0] ??
+                              "Primary sector",
+                            secondaryFocus:
+                              editor.config.secondarySectors[0] ??
+                              "Secondary focus",
+                          },
+                        ]);
+                      }}
+                    >
+                      <option value="">Choose a weekday</option>
+                      {rotationWeekdays
+                        .filter(
+                          (day) =>
+                            !editor.config.rotation.some(
+                              (rotation) => rotation.weekday === day.value,
+                            ),
+                        )
+                        .map((day) => (
+                          <option key={day.value} value={day.value}>
+                            {day.label}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                ) : null}
               </div>
             </details>
 
@@ -768,6 +1256,29 @@ export function DiscoveryProgrammes() {
                   Pause programme
                 </CrmBtn>
               ) : null}
+              {detail && detail.state === "active" ? (
+                <CrmBtn
+                  data-testid="discovery-queue-run-now"
+                  disabled={
+                    !canEdit ||
+                    busy ||
+                    loadedVersion === null ||
+                    isDirty ||
+                    detail.executionEnabled !== false
+                  }
+                  onClick={() =>
+                    loadedVersion !== null &&
+                    requestRun.mutate({
+                      programmeId: detail.id,
+                      expectedVersion: loadedVersion,
+                      requestId: crypto.randomUUID(),
+                      overlap: "defer",
+                    })
+                  }
+                >
+                  Queue run now
+                </CrmBtn>
+              ) : null}
               {detail ? (
                 <CrmBtn
                   disabled={busy}
@@ -804,12 +1315,15 @@ export function DiscoveryProgrammes() {
               <strong>Execution status: unavailable.</strong>{" "}
               {detail?.executionEnabled === false ||
               manifest.data?.executionEnabled === false
-                ? "No Discovery schedule, collector, source test, or provider call is wired yet."
-                : "Execution state is still loading."}
+                ? "Collectors and provider calls stay off."
+                : "Execution state is still loading."}{" "}
+              {detail?.nextDueAt
+                ? `Armed next Dubai slot: ${formatDubai(detail.nextDueAt)}.`
+                : "No run is armed yet."}
               {schedulePreview.length ? (
                 <span>
                   {" "}
-                  Next Dubai times:{" "}
+                  Next configured Dubai times:{" "}
                   {schedulePreview.map(formatDubai).join(" · ")}
                 </span>
               ) : null}

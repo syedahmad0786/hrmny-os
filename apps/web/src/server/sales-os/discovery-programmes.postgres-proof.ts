@@ -100,6 +100,21 @@ it("proves Discovery publication fencing, access, CAS, immutable history, and se
     publishedVersion: 1,
     reviewerEmployeeIds: [],
   });
+  expect(firstPublication.nextDueAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  const [firstSlot] = await db.execute<{
+    status: string;
+    kind: string;
+  }>(sql`
+    select status, kind
+    from public.scheduled_job
+    where research_programme_id = ${created.id}::uuid
+      and kind = 'sales_research_run'
+      and status = 'pending'
+  `);
+  expect(firstSlot).toMatchObject({
+    status: "pending",
+    kind: "sales_research_run",
+  });
 
   const reviewerDraft = await saveDiscoveryProgrammeDraft({
     programmeId: created.id,

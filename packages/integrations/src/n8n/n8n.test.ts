@@ -112,6 +112,7 @@ describe("n8n mock adapter", () => {
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      redirect: "error",
       headers: expect.objectContaining({
         "X-Hrmny-Os-Secret": "test-outbound-secret",
       }),
