@@ -28,6 +28,32 @@ function providerFromObject(object: unknown): LLMProvider {
 }
 
 describe("Discovery interpretation packet", () => {
+  it("coerces Nex identity-only JSON into the Discovery result schema", async () => {
+    const resolved = await resolvePublicDiscoveryCompanyIdentity({
+      excerpt:
+        "talabat, a leading everyday delivery app in the MENA region, has appointed Selin Suzer as Chief Marketing Officer.",
+      provider: {
+        name: "mock",
+        async generate() {
+          return {
+            text: JSON.stringify({
+              companyName: "talabat",
+              host: null,
+              confidence: "high",
+            }),
+            provider: "mock",
+            model: "mock",
+            requestId: "gen-coerce",
+          };
+        },
+      },
+    });
+    expect(resolved).toMatchObject({
+      ok: true,
+      name: "talabat",
+      receipt: { requestId: "gen-coerce" },
+    });
+  });
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();

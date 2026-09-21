@@ -1000,7 +1000,10 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
                   messages: openRouterMessages(options),
                   temperature: options.temperature ?? 0.2,
                   max_tokens: options.maxTokens ?? (options.webSearch ? 4_096 : 2_048),
-                  reasoning: { effort: "low", exclude: true },
+                  reasoning:
+                    options.task === "discovery_interpret"
+                      ? { enabled: false, exclude: true }
+                      : { effort: "low", exclude: true },
                   ...((options.privateContext ||
                   options.maxPrice ||
                   options.openRouterProviderOrder?.length ||
