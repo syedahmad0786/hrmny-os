@@ -1153,7 +1153,6 @@ export async function listPendingDiscoveryInterpretationJobs(input?: {
     for (const [sourceKey, value] of Object.entries(outcomes)) {
       const queue = readInterpretationQueue(asRecord(value).interpretation);
       if (
-        queue.status === "ceiling" ||
         queue.status === "unavailable" ||
         queue.status === "cancelled" ||
         queue.status === "completed"
