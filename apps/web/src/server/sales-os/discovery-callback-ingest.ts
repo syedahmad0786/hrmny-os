@@ -19,6 +19,7 @@ import {
   discoveryMonthlySpendAed,
   evaluateDiscoveryEvidence,
   isCompanyNameGroundedInExcerpt,
+  isDiscoveryCostReceiptError,
   persistDiscoveryInterpretationCost,
   readStoredDiscoveryIdentityLineage,
   resolveDiscoveryInterpretationRoute,
@@ -963,14 +964,15 @@ export async function continueDiscoveryInterpretationQueue(input: {
             { event: "sales.discovery.observations.v1" }
           >["payload"]["observations"][number]["kind"],
           title: item.title,
-          excerpt: item.excerpt,
+          excerpt: item.excerpt.trim().slice(0, 2_000),
           companyHints: [],
         },
         input.sourceKey,
         input.configuration,
         input.provider,
       );
-    } catch {
+    } catch (error) {
+      if (!isDiscoveryCostReceiptError(error)) throw error;
       const failed = item;
       const unattempted = plan.items.filter(
         (pending) =>

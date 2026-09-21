@@ -349,6 +349,28 @@ describe("inactive Discovery public-news n8n artifacts", () => {
         },
       }),
     ]);
+    const longBody = `${"A group wins its first significant contract in a new market. ".repeat(80)}GISEC GLOBAL closed the final.`;
+    const gulfLong = runMapCodeWithoutUrlGlobal(
+      mapCode,
+      [
+        {
+          ...gulfEncoded,
+          guid: "gulf-news-long-item",
+          contentSnippet: "",
+          content: "",
+          "content:encoded": `<p>${longBody}</p>`,
+          "content:encodedSnippet": longBody,
+        },
+      ],
+      {
+        maxObservations: 20,
+        sourceKey: "gulf_news_business",
+        listingPathPrefix: "/business/",
+        permittedHosts: ["gulfnews.com", "www.gulfnews.com"],
+      },
+    )[0]!.json;
+    expect(gulfLong.observations[0]?.excerpt).toHaveLength(2000);
+    expect(String(gulfLong.observations[0]?.excerpt)).toContain("A group wins its first significant contract");
     expect(gulfMapped.completion).toMatchObject({
       status: "completed",
       counts: { quarantined: 2, rejected: 0 },
