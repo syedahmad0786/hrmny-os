@@ -303,6 +303,13 @@ test.describe("Discovery programme configuration", () => {
       /Saved needs review.*Collectors stay off/i,
       { timeout: 30_000 },
     );
+    await expect(page.getByTestId("discovery-candidate-list")).toBeVisible();
+    for (const heading of ["Company", "Why now", "Source", "Updated", "State", "Action"]) {
+      await expect(
+        page.getByTestId("discovery-candidate-list").locator("thead"),
+      ).toContainText(heading);
+    }
+    await expect(page.getByTestId("discovery-candidate-list")).toContainText(name);
     await expect(page.getByTestId("discovery-candidate-detail")).toContainText(
       name,
     );

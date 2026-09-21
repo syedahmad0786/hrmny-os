@@ -589,6 +589,23 @@ export function evaluateDiscoveryObservationProvenance(input: {
     if (embedded && !permitted.includes(embedded))
       return { ok: false, reason: "SOURCE_REDIRECT_PROVENANCE_REJECTED" };
   }
+  const configuredUrl =
+    typeof input.configuration.url === "string" ? input.configuration.url.trim() : "";
+  if (configuredUrl) {
+    try {
+      const configuredPath = new URL(configuredUrl).pathname.toLowerCase();
+      const requiresBusinessPath =
+        configuredPath === "/business" || configuredPath.startsWith("/business/");
+      if (
+        requiresBusinessPath &&
+        !publicUrl.pathname.toLowerCase().startsWith("/business/")
+      ) {
+        return { ok: false, reason: "SOURCE_PATH_MISMATCH" };
+      }
+    } catch {
+      return { ok: false, reason: "SOURCE_URL_INVALID" };
+    }
+  }
   return { ok: true, url: normalized };
 }
 

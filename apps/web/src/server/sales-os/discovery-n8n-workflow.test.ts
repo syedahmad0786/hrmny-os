@@ -298,6 +298,88 @@ describe("inactive Discovery public-news n8n artifacts", () => {
         },
       }),
     ]);
+
+    const gulfBusiness = {
+      link: "https://gulfnews.com/business/retail/talabat-expands-uae-dark-stores-1.123",
+      guid: "gulf-news-business-item",
+      title: "talabat expands UAE dark stores",
+      contentSnippet: "Gulf News published a business item.",
+      isoDate: "2026-09-21T00:00:00.000Z",
+    };
+    const gulfSport = {
+      ...gulfBusiness,
+      link: "https://gulfnews.com/sport/cricket/uae-vs-england-1.456",
+      guid: "gulf-news-sport-item",
+      title: "UAE vs England cricket",
+    };
+    const gulfMapped = runMapCodeWithoutUrlGlobal(
+      mapCode,
+      [gulfBusiness, gulfSport],
+      {
+        maxObservations: 20,
+        sourceKey: "gulf_news_business",
+        listingPathPrefix: "/business/",
+        permittedHosts: ["gulfnews.com", "www.gulfnews.com"],
+      },
+    )[0]!.json;
+    expect(gulfMapped.observations).toEqual([
+      expect.objectContaining({
+        sourceItemKey: gulfBusiness.guid,
+        sourceReference: {
+          kind: "public_url",
+          url: gulfBusiness.link,
+        },
+      }),
+    ]);
+    expect(gulfMapped.completion).toMatchObject({
+      status: "completed",
+      counts: { quarantined: 1, rejected: 0 },
+      checkpoint: { itemsSeen: 2, pagesSeen: 1 },
+    });
+
+    const gulfEmpty = runMapCodeWithoutUrlGlobal(
+      mapCode,
+      [gulfSport],
+      {
+        maxObservations: 20,
+        sourceKey: "gulf_news_business",
+        listingPathPrefix: "/business/",
+        permittedHosts: ["gulfnews.com", "www.gulfnews.com"],
+      },
+    )[0]!.json;
+    expect(gulfEmpty.observations).toEqual([]);
+    expect(gulfEmpty.completion).toMatchObject({
+      status: "completed",
+      counts: { ingested: 0, quarantined: 0, rejected: 0 },
+      checkpoint: { itemsSeen: 1, pagesSeen: 1 },
+    });
+    expect(gulfEmpty.completion).not.toHaveProperty("error");
+
+    const gulfMixed = runMapCodeWithoutUrlGlobal(
+      mapCode,
+      [
+        gulfSport,
+        {
+          ...gulfSport,
+          guid: "gulf-news-malformed-item",
+          link: "https://evil.example/story",
+          title: "Off-origin item",
+        },
+      ],
+      {
+        maxObservations: 20,
+        sourceKey: "gulf_news_business",
+        listingPathPrefix: "/business/",
+        permittedHosts: ["gulfnews.com", "www.gulfnews.com"],
+      },
+    )[0]!.json;
+    expect(gulfMixed.observations).toEqual([]);
+    expect(gulfMixed.completion).toMatchObject({
+      status: "completed",
+      counts: { ingested: 0, quarantined: 0, rejected: 1 },
+      checkpoint: { itemsSeen: 2, pagesSeen: 1 },
+    });
+    expect(gulfMixed.completion).not.toHaveProperty("error");
   });
 
   it("signs a Campaign ME observation the same way the workflow Code node and OS validator expect", () => {
