@@ -36,7 +36,14 @@ const journal = JSON.parse(
 ) as { entries: Array<{ tag: string }> };
 const apolloPriorHead = "0075_apollo_search_fencing";
 const apolloHead = "0076_apollo_people_search_serialization";
-const head = "0084_composio_managed_multi_account";
+const discoveryCoordinator = "0086_discovery_run_coordinator";
+const head = "0087_discovery_candidates";
+const deferredHeads = new Set([
+  apolloPriorHead,
+  apolloHead,
+  discoveryCoordinator,
+  head,
+]);
 assert.equal(
   journal.entries.at(-1)?.tag,
   head,
@@ -81,6 +88,157 @@ async function prepareSupabaseDatabase(connection: Sql): Promise<void> {
 }
 
 async function assertCurrentHead(connection: Sql): Promise<void> {
+  const [discovery] = await connection<Array<{ ok: boolean }>>`
+    select
+      to_regclass('public.research_programme') is not null
+      and to_regclass('public.research_programme_version') is not null
+      and to_regclass('public.research_programme_source_binding') is not null
+      and (
+        select count(*) from pg_class
+        where oid in (
+          'public.research_programme'::regclass,
+          'public.research_programme_version'::regclass,
+          'public.research_programme_source_binding'::regclass
+        ) and relrowsecurity
+      ) = 3
+      and exists (
+        select 1 from pg_trigger
+        where tgname = 'research_programme_version_immutable_trg'
+          and not tgisinternal
+      )
+      and exists (
+        select 1 from pg_trigger
+        where tgname = 'research_programme_source_connection_removed_trg'
+          and not tgisinternal
+      )
+      and exists (
+        select 1
+        from pg_constraint
+        where conrelid = 'public.research_programme_source_binding'::regclass
+          and contype = 'f'
+          and confrelid = 'public.connection_account'::regclass
+          and confdeltype = 'n'
+      )
+      and not (
+        has_table_privilege('authenticated', 'public.research_programme', 'SELECT,INSERT,UPDATE,DELETE')
+        or has_table_privilege('authenticated', 'public.research_programme_version', 'SELECT,INSERT,UPDATE,DELETE')
+        or has_table_privilege('authenticated', 'public.research_programme_source_binding', 'SELECT,INSERT,UPDATE,DELETE')
+      )
+      and (
+        not exists (select 1 from pg_roles where rolname = 'service_role')
+        or (
+          has_table_privilege('service_role', 'public.research_programme_version', 'SELECT')
+          and has_table_privilege('service_role', 'public.research_programme_version', 'INSERT')
+          and not has_table_privilege('service_role', 'public.research_programme_version', 'UPDATE')
+          and not has_table_privilege('service_role', 'public.research_programme_version', 'DELETE')
+          and not has_table_privilege('service_role', 'public.research_programme_version', 'TRUNCATE')
+        )
+      ) as ok
+  `;
+  assert.equal(
+    discovery?.ok,
+    true,
+    "Discovery programme schema is not server-only or complete.",
+  );
+  const [coordinator] = await connection<Array<{ ok: boolean }>>`
+    select
+      exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'research_programme'
+          and column_name = 'next_due_at'
+      )
+      and (
+        select count(*) from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'scheduled_job'
+          and column_name in (
+            'research_programme_id',
+            'research_programme_version_id',
+            'overall_deadline_at'
+          )
+      ) = 3
+      and (
+        select count(*) from pg_indexes
+        where schemaname = 'public'
+          and indexname in (
+            'scheduled_job_discovery_pending_uniq',
+            'scheduled_job_discovery_deferred_uniq',
+            'scheduled_job_discovery_active_uniq',
+            'scheduled_job_discovery_programme_history_idx'
+          )
+      ) = 4
+      and exists (
+        select 1 from pg_constraint
+        where conrelid = 'public.scheduled_job'::regclass
+          and conname = 'scheduled_job_discovery_contract_chk'
+      )
+      and exists (
+        select 1 from pg_constraint
+        where conrelid = 'public.scheduled_job'::regclass
+          and conname = 'scheduled_job_status_check'
+          and pg_get_constraintdef(oid) like '%deferred%'
+          and pg_get_constraintdef(oid) like '%cancel_requested%'
+          and pg_get_constraintdef(oid) like '%dead_letter%'
+      )
+      and exists (
+        select 1 from pg_constraint
+        where conrelid = 'public.scheduled_job'::regclass
+          and conname = 'scheduled_job_research_programme_fk'
+      )
+      and exists (
+        select 1 from pg_constraint
+        where conrelid = 'public.scheduled_job'::regclass
+          and conname = 'scheduled_job_research_programme_version_fk'
+      ) as ok
+  `;
+  assert.equal(
+    coordinator?.ok,
+    true,
+    "Discovery run coordinator schema is incomplete.",
+  );
+  const [candidates] = await connection<Array<{ ok: boolean }>>`
+    select
+      to_regclass('public.discovery_candidate') is not null
+      and to_regclass('public.discovery_observation') is not null
+      and (
+        select count(*) from pg_class
+        where oid in (
+          'public.discovery_candidate'::regclass,
+          'public.discovery_observation'::regclass
+        ) and relrowsecurity
+      ) = 2
+      and exists (
+        select 1 from pg_indexes
+        where schemaname = 'public'
+          and indexname = 'discovery_candidate_open_key_uniq'
+      )
+      and exists (
+        select 1 from pg_indexes
+        where schemaname = 'public'
+          and indexname = 'discovery_observation_content_uniq'
+      )
+      and exists (
+        select 1 from pg_constraint
+        where conrelid = 'public.discovery_candidate'::regclass
+          and conname = 'discovery_candidate_qualification_chk'
+          and pg_get_constraintdef(oid) like '%not_assessed%'
+      )
+      and exists (
+        select 1 from pg_trigger
+        where tgname = 'discovery_observation_guard_trg'
+          and not tgisinternal
+      )
+      and not (
+        has_table_privilege('authenticated', 'public.discovery_candidate', 'SELECT,INSERT,UPDATE,DELETE')
+        or has_table_privilege('authenticated', 'public.discovery_observation', 'SELECT,INSERT,UPDATE,DELETE')
+      ) as ok
+  `;
+  assert.equal(
+    candidates?.ok,
+    true,
+    "Discovery candidate store is not server-only or complete.",
+  );
   const [googleIdentity] = await connection<
     Array<{ installed: boolean; rls: boolean; public_read: boolean }>
   >`
@@ -814,7 +972,7 @@ try {
   upgrade = postgres(databaseUrl(databaseNames[1]!), options);
   await prepareSupabaseDatabase(upgrade);
   for (const { tag } of journal.entries.filter(
-    ({ tag }) => tag !== apolloPriorHead && tag !== apolloHead && tag !== head,
+    ({ tag }) => !deferredHeads.has(tag),
   )) {
     await applyMigration(upgrade, tag);
   }
@@ -857,6 +1015,8 @@ try {
   await assertMigrationRejectsRunningApollo(upgrade);
   await applyMigration(upgrade, apolloHead);
   await applyMigration(upgrade, apolloHead);
+  await applyMigration(upgrade, discoveryCoordinator);
+  await applyMigration(upgrade, discoveryCoordinator);
   await applyMigration(upgrade, head);
   await applyMigration(upgrade, head);
   await assertCurrentHead(upgrade);

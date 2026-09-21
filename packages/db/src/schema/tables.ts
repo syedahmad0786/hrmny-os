@@ -856,10 +856,15 @@ export const scheduledJob = pgTable(
       .notNull(),
     status: text("status").default("pending").notNull(),
     concurrencyKey: text("concurrency_key"),
+    researchProgrammeId: uuid("research_programme_id"),
+    researchProgrammeVersionId: uuid("research_programme_version_id"),
     attempts: integer("attempts").default(0).notNull(),
     stateVersion: integer("state_version").default(0).notNull(),
     attemptToken: uuid("attempt_token"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    overallDeadlineAt: timestamp("overall_deadline_at", {
+      withTimezone: true,
+    }),
     lockedAt: timestamp("locked_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     result: jsonb("result").$type<Record<string, unknown>>(),
@@ -874,6 +879,10 @@ export const scheduledJob = pgTable(
         sql`${table.kind} = 'apollo_people_search' and ${table.integrationInboxId} is not null`,
       ),
     check(
+      "scheduled_job_status_check",
+      sql`${table.status} in ('pending', 'running', 'completed', 'failed', 'deferred', 'cancel_requested', 'cancelled', 'coalesced', 'partial', 'dead_letter')`,
+    ),
+    check(
       "scheduled_job_apollo_concurrency_key_chk",
       sql`(${table.kind} = 'apollo_people_search' and ${table.concurrencyKey} is not null and ${table.concurrencyKey} = 'provider:apollo') or (${table.kind} <> 'apollo_people_search' and ${table.concurrencyKey} is distinct from 'provider:apollo')`,
     ),
@@ -882,6 +891,28 @@ export const scheduledJob = pgTable(
       .where(
         sql`${table.status} = 'running' and ${table.concurrencyKey} is not null`,
       ),
+    uniqueIndex("scheduled_job_discovery_pending_uniq")
+      .on(table.researchProgrammeId)
+      .where(
+        sql`${table.kind} = 'sales_research_run' and ${table.status} = 'pending'`,
+      ),
+    uniqueIndex("scheduled_job_discovery_deferred_uniq")
+      .on(table.researchProgrammeId)
+      .where(
+        sql`${table.kind} = 'sales_research_run' and ${table.status} = 'deferred'`,
+      ),
+    uniqueIndex("scheduled_job_discovery_active_uniq")
+      .on(table.researchProgrammeId)
+      .where(
+        sql`${table.kind} = 'sales_research_run' and ${table.status} in ('running', 'cancel_requested')`,
+      ),
+    index("scheduled_job_discovery_programme_history_idx")
+      .on(table.researchProgrammeId, table.createdAt)
+      .where(sql`${table.kind} = 'sales_research_run'`),
+    check(
+      "scheduled_job_discovery_contract_chk",
+      sql`${table.kind} <> 'sales_research_run' or (${table.researchProgrammeId} is not null and ${table.concurrencyKey} = 'discovery:programme:' || ${table.researchProgrammeId}::text and (${table.status} not in ('running', 'cancel_requested', 'completed', 'partial') or ${table.researchProgrammeVersionId} is not null) and (${table.status} not in ('running', 'cancel_requested') or ${table.overallDeadlineAt} is not null))`,
+    ),
   ],
 );
 
@@ -2128,6 +2159,332 @@ export const qmCommandDecision = pgTable(
           and ${table.readPrecheck} is null
         ) is true
       )`,
+    ),
+  ],
+);
+
+/** Discovery programme identity and optimistic lifecycle state (migration 0085). */
+export const researchProgramme = pgTable(
+  "research_programme",
+  {
+    researchProgrammeId: uuid("research_programme_id")
+      .defaultRandom()
+      .primaryKey(),
+    ownerEmployeeId: uuid("owner_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    reviewerEmployeeIds: uuid("reviewer_employee_ids")
+      .array()
+      .default([])
+      .notNull(),
+    state: text("state").default("draft").notNull(),
+    version: integer("version").default(1).notNull(),
+    currentDraftVersion: integer("current_draft_version").default(1).notNull(),
+    publishedVersion: integer("published_version"),
+    scheduleGeneration: integer("schedule_generation").default(0).notNull(),
+    publishedByEmployeeId: uuid("published_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    pausedByEmployeeId: uuid("paused_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    pauseReason: text("pause_reason"),
+    nextDueAt: timestamp("next_due_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("research_programme_owner_idx").on(
+      table.ownerEmployeeId,
+      table.updatedAt,
+    ),
+    index("research_programme_state_idx").on(table.state, table.updatedAt),
+    check(
+      "research_programme_state_chk",
+      sql`${table.state} in ('draft', 'active', 'paused', 'archived')`,
+    ),
+    check(
+      "research_programme_version_chk",
+      sql`${table.version} >= 1 and ${table.currentDraftVersion} >= 1 and ${table.scheduleGeneration} >= 0 and (${table.publishedVersion} is null or (${table.publishedVersion} >= 1 and ${table.publishedVersion} <= ${table.currentDraftVersion}))`,
+    ),
+  ],
+);
+
+/** Immutable configuration/source snapshot for one Discovery draft version. */
+export const researchProgrammeVersion = pgTable(
+  "research_programme_version",
+  {
+    researchProgrammeVersionId: uuid("research_programme_version_id")
+      .defaultRandom()
+      .primaryKey(),
+    researchProgrammeId: uuid("research_programme_id")
+      .notNull()
+      .references(() => researchProgramme.researchProgrammeId),
+    versionNumber: integer("version_number").notNull(),
+    configuration: jsonb("configuration")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    configHash: text("config_hash").notNull(),
+    createdByEmployeeId: uuid("created_by_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("research_programme_version_uniq").on(
+      table.researchProgrammeId,
+      table.versionNumber,
+    ),
+    check(
+      "research_programme_version_number_chk",
+      sql`${table.versionNumber} >= 1`,
+    ),
+    check(
+      "research_programme_version_hash_chk",
+      sql`${table.configHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+  ],
+);
+
+/** Stable binding identity and operational health, separate from draft snapshots. */
+export const researchProgrammeSourceBinding = pgTable(
+  "research_programme_source_binding",
+  {
+    researchProgrammeSourceBindingId: uuid(
+      "research_programme_source_binding_id",
+    )
+      .defaultRandom()
+      .primaryKey(),
+    researchProgrammeId: uuid("research_programme_id")
+      .notNull()
+      .references(() => researchProgramme.researchProgrammeId),
+    sourceKey: text("source_key").notNull(),
+    family: text("family").notNull(),
+    adapter: text("adapter").notNull(),
+    adapterVersion: text("adapter_version").notNull(),
+    configuration: jsonb("configuration")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    accountReferenceId: uuid("account_reference_id").references(
+      () => connectionAccount.connectionAccountId,
+      { onDelete: "set null" },
+    ),
+    enabled: boolean("enabled").default(false).notNull(),
+    required: boolean("required").default(false).notNull(),
+    capabilityState: text("capability_state").default("unverified").notNull(),
+    connectionState: text("connection_state").default("unverified").notNull(),
+    credentialGeneration: integer("credential_generation").default(0).notNull(),
+    capabilityTestReceiptId: uuid("capability_test_receipt_id").references(
+      () => integrationInbox.integrationInboxId,
+    ),
+    capabilityTestedAt: timestamp("capability_tested_at", {
+      withTimezone: true,
+    }),
+    checkpointVersion: integer("checkpoint_version").default(0).notNull(),
+    cursor: jsonb("cursor").$type<Record<string, unknown>>(),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    coverage: jsonb("coverage")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("research_programme_source_uniq").on(
+      table.researchProgrammeId,
+      table.sourceKey,
+    ),
+    index("research_programme_source_attention_idx").on(
+      table.capabilityState,
+      table.connectionState,
+      table.updatedAt,
+    ),
+    check(
+      "research_programme_source_capability_chk",
+      sql`${table.capabilityState} in ('candidate', 'unverified', 'blocked', 'manual', 'verified')`,
+    ),
+    check(
+      "research_programme_source_connection_chk",
+      sql`${table.connectionState} in ('not_required', 'unverified', 'needs_connection', 'connected', 'error')`,
+    ),
+    check(
+      "research_programme_source_generation_chk",
+      sql`${table.credentialGeneration} >= 0 and ${table.checkpointVersion} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Discovery Review candidate. Separate from Gate 1 company_research so
+ * acceptance never writes BUAF defaults or later-stage contact/deal rows.
+ */
+export const discoveryCandidate = pgTable(
+  "discovery_candidate",
+  {
+    discoveryCandidateId: uuid("discovery_candidate_id")
+      .defaultRandom()
+      .primaryKey(),
+    requestId: text("request_id").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    opportunityKey: text("opportunity_key").notNull(),
+    companyName: text("company_name").notNull(),
+    website: text("website"),
+    sector: text("sector"),
+    market: text("market").default("UAE").notNull(),
+    strategicLane: text("strategic_lane").default("unresolved").notNull(),
+    discoveryChannel: text("discovery_channel").notNull(),
+    opportunityKind: text("opportunity_kind").notNull(),
+    whyNow: text("why_now").notNull(),
+    relevantService: text("relevant_service"),
+    missingFacts: text("missing_facts"),
+    knownRelationship: text("known_relationship"),
+    sourceKey: text("source_key"),
+    sourceItemId: text("source_item_id"),
+    externalOpportunityId: text("external_opportunity_id"),
+    reviewState: text("review_state").default("needs_review").notNull(),
+    decisionReason: text("decision_reason"),
+    qualificationState: text("qualification_state")
+      .default("not_assessed")
+      .notNull(),
+    expectedVersion: integer("expected_version").default(1).notNull(),
+    ownerEmployeeId: uuid("owner_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    reviewerEmployeeIds: uuid("reviewer_employee_ids")
+      .array()
+      .default([])
+      .notNull(),
+    researchProgrammeId: uuid("research_programme_id").references(
+      () => researchProgramme.researchProgrammeId,
+    ),
+    scheduledJobId: uuid("scheduled_job_id").references(
+      () => scheduledJob.scheduledJobId,
+    ),
+    companyId: uuid("company_id").references(() => company.companyId),
+    createdByEmployeeId: uuid("created_by_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    decidedByEmployeeId: uuid("decided_by_employee_id").references(
+      () => employee.employeeId,
+    ),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("discovery_candidate_request_uniq").on(table.requestId),
+    uniqueIndex("discovery_candidate_open_key_uniq")
+      .on(table.opportunityKey)
+      .where(
+        sql`${table.reviewState} in ('needs_review', 'needs_evidence', 'parked', 'corrected', 'accepted')`,
+      ),
+    index("discovery_candidate_state_idx").on(
+      table.reviewState,
+      table.updatedAt,
+    ),
+    index("discovery_candidate_owner_idx").on(
+      table.ownerEmployeeId,
+      table.updatedAt,
+    ),
+    check(
+      "discovery_candidate_request_chk",
+      sql`char_length(${table.requestId}) >= 8 and char_length(${table.requestId}) <= 180`,
+    ),
+    check(
+      "discovery_candidate_hash_chk",
+      sql`${table.payloadHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "discovery_candidate_lane_chk",
+      sql`${table.strategicLane} in ('industry_scanning', 'apollo_intent', 'relationship_led', 'unresolved')`,
+    ),
+    check(
+      "discovery_candidate_channel_chk",
+      sql`${table.discoveryChannel} in ('publication', 'hiring', 'leadership', 'company_intelligence', 'intent_import', 'government', 'watchlist', 'submission', 'focused_research')`,
+    ),
+    check(
+      "discovery_candidate_kind_chk",
+      sql`${table.opportunityKind} in ('company_signal', 'hiring', 'leadership', 'tender', 'intent', 'submission')`,
+    ),
+    check(
+      "discovery_candidate_state_chk",
+      sql`${table.reviewState} in ('needs_review', 'needs_evidence', 'parked', 'rejected', 'accepted', 'corrected')`,
+    ),
+    check(
+      "discovery_candidate_qualification_chk",
+      sql`${table.qualificationState} = 'not_assessed'`,
+    ),
+    check(
+      "discovery_candidate_version_chk",
+      sql`${table.expectedVersion} >= 1`,
+    ),
+  ],
+);
+
+/** Immutable evidence row with enforced visibility. Excerpts are not logs. */
+export const discoveryObservation = pgTable(
+  "discovery_observation",
+  {
+    discoveryObservationId: uuid("discovery_observation_id")
+      .defaultRandom()
+      .primaryKey(),
+    discoveryCandidateId: uuid("discovery_candidate_id")
+      .notNull()
+      .references(() => discoveryCandidate.discoveryCandidateId),
+    visibilityScope: text("visibility_scope").default("public").notNull(),
+    sourceOwnerEmployeeId: uuid("source_owner_employee_id")
+      .notNull()
+      .references(() => employee.employeeId),
+    sourceUrl: text("source_url").notNull(),
+    excerpt: text("excerpt"),
+    excerptHash: text("excerpt_hash").notNull(),
+    publishedOrEventDate: date("published_or_event_date"),
+    observedAt: timestamp("observed_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    verificationState: text("verification_state")
+      .default("unverified")
+      .notNull(),
+    redactionState: text("redaction_state").default("none").notNull(),
+    sourceKey: text("source_key"),
+    sourceItemId: text("source_item_id"),
+    contentHash: text("content_hash").notNull(),
+    supersedesObservationId: uuid("supersedes_observation_id"),
+    retentionDeadline: timestamp("retention_deadline", { withTimezone: true }),
+    rightsPolicyRef: text("rights_policy_ref"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("discovery_observation_candidate_idx").on(
+      table.discoveryCandidateId,
+      table.createdAt,
+    ),
+    uniqueIndex("discovery_observation_content_uniq").on(
+      table.discoveryCandidateId,
+      table.contentHash,
+    ),
+    check(
+      "discovery_observation_visibility_chk",
+      sql`${table.visibilityScope} in ('public', 'restricted', 'private')`,
+    ),
+    check(
+      "discovery_observation_verification_chk",
+      sql`${table.verificationState} in ('unverified', 'dated', 'needs_evidence', 'corroborated')`,
+    ),
+    check(
+      "discovery_observation_redaction_chk",
+      sql`${table.redactionState} in ('none', 'redacted', 'tombstoned')`,
+    ),
+    check(
+      "discovery_observation_hash_chk",
+      sql`${table.excerptHash} ~ '^[a-f0-9]{64}$' and ${table.contentHash} ~ '^[a-f0-9]{64}$'`,
     ),
   ],
 );

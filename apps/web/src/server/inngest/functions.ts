@@ -14,6 +14,15 @@ import {
 } from "../google-chat";
 import { runDueFollowupDrafts } from "../leadgen/followup-scheduler";
 import { runGoogleWorkspaceOutreachMonitor } from "../leadgen/google-workspace-monitor";
+import { runDiscoveryInterpretationJob } from "../sales-os/discovery-callback-ingest";
+import {
+  DISCOVERY_INTERPRET_EVENT,
+  DISCOVERY_WAKE_EVENT,
+  dispatchPendingDiscoveryJobs,
+  executeDiscoveryInterpret,
+  executeDiscoveryWake,
+  runDiscoveryWake,
+} from "./discovery";
 
 /** Durable policy gate for the contained once-per-day Sales research proposal. */
 export const leadgenDailyFunction = inngest.createFunction(
@@ -101,10 +110,44 @@ export const salesFollowupDraftFunction = inngest.createFunction(
   },
 );
 
+export const discoveryWakeFunction = inngest.createFunction(
+  {
+    id: "sales-discovery-wake-v1",
+    triggers: [{ event: DISCOVERY_WAKE_EVENT }],
+    retries: 2,
+  },
+  async ({ event, step }) =>
+    executeDiscoveryWake(event.data, {
+      sleepUntil: (at) => step.sleepUntil("wait-for-discovery-slot", at),
+      run: (wake) => step.run("claim-and-trigger-discovery", () => runDiscoveryWake(wake)),
+      dispatchPending: () => step.run("dispatch-next-discovery-slots", dispatchPendingDiscoveryJobs),
+    }),
+);
+
+export const discoveryInterpretFunction = inngest.createFunction(
+  {
+    id: "sales-discovery-interpret-v1",
+    triggers: [{ event: DISCOVERY_INTERPRET_EVENT }],
+    retries: 2,
+    concurrency: { limit: 1 },
+  },
+  async ({ event, step }) =>
+    executeDiscoveryInterpret(event.data, {
+      run: (parsed) =>
+        step.run("claim-and-interpret-discovery", () =>
+          runDiscoveryInterpretationJob(parsed),
+        ),
+      sendEvent: (nextEvent) =>
+        step.sendEvent("schedule-next-discovery-interpret", nextEvent),
+    }),
+);
+
 export const inngestFunctions = [
   leadgenDailyFunction,
   reportSchedulerFunction,
   apolloSearchRetryFunction,
   googleChatInteractionFunction,
   salesFollowupDraftFunction,
+  discoveryWakeFunction,
+  discoveryInterpretFunction,
 ] as const;

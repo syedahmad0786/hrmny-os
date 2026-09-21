@@ -57,13 +57,38 @@ export type LLMGenerateOptions = {
   messages: LLMMessage[];
   schema?: ZodTypeAny;
   temperature?: number;
+  /** Hard response-token ceiling. Discovery public interpretation uses 400. */
+  maxTokens?: number;
   images?: LLMImageInput[];
   /** OpenRouter live web grounding, hard-capped to two searches. */
   webSearch?: boolean;
   /** Confidential employee or client context requires private provider routing. */
   privateContext?: boolean;
+  /**
+   * OpenRouter free-route failover. Default remains on for existing callers.
+   * Discovery production interpretation must pass false: one explicit model,
+   * no automatic or paid fallback.
+   */
+  allowFreeFallback?: boolean;
+  /**
+   * OpenRouter provider.max_price filter. Discovery public-news live calls
+   * must set prompt/completion/request to 0.
+   */
+  maxPrice?: { prompt: number; completion: number; request: number };
+  /**
+   * OpenRouter response-healing and similar plugins. Discovery live public-news
+   * must pass false so paid plugins cannot attach.
+   */
+  allowPlugins?: boolean;
+  /** Exact OpenRouter upstream order. Discovery pins its proved provider. */
+  openRouterProviderOrder?: readonly string[];
   /** Optional task hint for mock structured outputs. */
-  task?: "invoice_extract" | "outreach_draft" | "reply_intent" | "generic";
+  task?:
+    | "invoice_extract"
+    | "outreach_draft"
+    | "reply_intent"
+    | "discovery_interpret"
+    | "generic";
 };
 
 export type LLMGenerateResult = {
@@ -73,6 +98,10 @@ export type LLMGenerateResult = {
   provider: LLMProviderName;
   model: string;
   requestId?: string;
+  /** Upstream selected by OpenRouter, when the response discloses it. */
+  upstreamProvider?: string;
+  /** OpenRouter's observed request cost in USD, when disclosed. */
+  providerCostUsd?: number;
   inputTokens?: number;
   outputTokens?: number;
   sourceCitations?: Array<{ url: string; title?: string }>;
@@ -303,6 +332,16 @@ export function createMockProvider(
 
       if (task === "reply_intent") {
         const object = mockReplyIntent(userText);
+        return {
+          text: JSON.stringify(object),
+          object,
+          provider: "mock",
+          model: options.model ?? defaultModel,
+        };
+      }
+
+      if (task === "discovery_interpret") {
+        const object = mockDiscoveryInterpret(userText);
         return {
           text: JSON.stringify(object),
           object,
@@ -741,6 +780,129 @@ const REPLY_INTENT_RULES: Array<[RegExp, string]> = [
   ],
 ];
 
+const DISCOVERY_IDENTITY_NOISE = new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "of",
+  "for",
+  "in",
+  "on",
+  "to",
+  "uae",
+  "dubai",
+  "campaign",
+  "me",
+  "gulf",
+  "business",
+  "arabian",
+  "national",
+  "timeout",
+  "agency",
+  "agencies",
+  "review",
+  "brief",
+  "account",
+  "pitch",
+  "issuer",
+  "brand",
+  "listing",
+  "news",
+  "regional",
+  "creative",
+  "open",
+  "opened",
+  "awarded",
+  "appointed",
+  "appointment",
+]);
+
+function mockDiscoveryCompanyIdentity(
+  excerpt: string,
+  packetIdentity?: string,
+) {
+  const haystack = excerpt.trim();
+  const supplied = packetIdentity?.trim() ?? "";
+  if (
+    supplied.length >= 2 &&
+    haystack.toLowerCase().includes(supplied.toLowerCase())
+  ) {
+    return { name: supplied, domain: null as string | null, ambiguous: false };
+  }
+  const matches =
+    haystack.match(
+      /\b[A-Z][A-Za-z0-9&'’.-]+(?:\s+[A-Z][A-Za-z0-9&'’.-]+){1,5}\b/g,
+    ) ?? [];
+  const names: string[] = [];
+  for (const match of matches) {
+    const tokens = match
+      .split(/\s+/)
+      .filter(
+        (token) =>
+          !DISCOVERY_IDENTITY_NOISE.has(
+            token.toLowerCase().replace(/[^a-z0-9]/g, ""),
+          ),
+      );
+    if (tokens.length < 2) continue;
+    names.push(tokens.join(" "));
+  }
+  const unique = [...new Set(names)];
+  if (unique.length === 0)
+    return { name: null, domain: null as string | null, ambiguous: false };
+  if (unique.length > 1)
+    return { name: null, domain: null as string | null, ambiguous: true };
+  return { name: unique[0]!, domain: null, ambiguous: false };
+}
+
+/** Keyword-only Discovery claims. Never a live provider and never copies private mail. */
+export function mockDiscoveryInterpret(userText: string) {
+  let packet: {
+    excerpt?: unknown;
+    evidenceId?: unknown;
+    opportunityKind?: unknown;
+    identity?: { companyName?: unknown };
+  } = {};
+  try {
+    packet = JSON.parse(userText) as typeof packet;
+  } catch {
+    packet = {};
+  }
+  const excerptRaw = String(packet.excerpt ?? "");
+  const excerpt = excerptRaw.toLowerCase();
+  const evidenceId = String(packet.evidenceId ?? "evidence");
+  const awarded =
+    /awarded|appointed|agency of record|won the account|won the pitch/.test(
+      excerpt,
+    );
+  const suppliedIdentity =
+    typeof packet.identity?.companyName === "string"
+      ? packet.identity.companyName
+      : "";
+  return {
+    claims: [
+      {
+        id: "claim-signal",
+        kind: awarded ? "fact" : "interpretation",
+        text: awarded
+          ? "Already-awarded appointment is intelligence, not an open pitch."
+          : "The public excerpt may indicate a relevant market signal.",
+        evidenceId,
+        grounded: excerpt.length > 0,
+        disposition: awarded ? "awarded" : "actionable",
+      },
+    ],
+    relevantService: null,
+    opportunityKind: typeof packet.opportunityKind === "string"
+      ? packet.opportunityKind
+      : null,
+    awardedAppointment: awarded,
+    unsupported: false,
+    companyIdentity: mockDiscoveryCompanyIdentity(excerptRaw, suppliedIdentity),
+  };
+}
+
 /** Keyword classifier for mock/eval. ponytail: heuristic map, swap for the live model in prod. */
 export function mockReplyIntent(userText: string) {
   const match = REPLY_INTENT_RULES.find(([pattern]) => pattern.test(userText));
@@ -796,21 +958,26 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
       const signal = AbortSignal.timeout(
         options.task === "outreach_draft"
           ? 45_000
+          : options.task === "discovery_interpret"
+            ? 15_000
           : options.webSearch
             ? 180_000
             : 60_000,
       );
       if (name === "openrouter") {
-        const chain = [
-          ...new Set([
-            ...(options.webSearch && !options.privateContext
-              ? ["nvidia/nemotron-3-super-120b-a12b:free"]
-              : []),
-            ...(options.schema ? ["openrouter/free"] : []),
-            primary,
-            ...OPENROUTER_FREE_FALLBACK_MODELS,
-          ]),
-        ];
+        const chain =
+          options.allowFreeFallback === false
+            ? [primary]
+            : [
+                ...new Set([
+                  ...(options.webSearch && !options.privateContext
+                    ? ["nvidia/nemotron-3-super-120b-a12b:free"]
+                    : []),
+                  ...(options.schema ? ["openrouter/free"] : []),
+                  primary,
+                  ...OPENROUTER_FREE_FALLBACK_MODELS,
+                ]),
+              ];
         let lastError: Error | undefined;
         for (const activeModel of chain) {
           assertOpenRouterFreeRoute(activeModel);
@@ -832,10 +999,28 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
                   model: activeModel,
                   messages: openRouterMessages(options),
                   temperature: options.temperature ?? 0.2,
-                  max_tokens: options.webSearch ? 4_096 : 2_048,
+                  max_tokens: options.maxTokens ?? (options.webSearch ? 4_096 : 2_048),
                   reasoning: { effort: "low", exclude: true },
-                  ...(options.privateContext
-                    ? { provider: { data_collection: "deny", zdr: true } }
+                  ...((options.privateContext ||
+                  options.maxPrice ||
+                  options.openRouterProviderOrder?.length ||
+                  options.allowFreeFallback === false)
+                    ? {
+                        provider: {
+                          ...(options.privateContext
+                            ? { data_collection: "deny", zdr: true }
+                            : {}),
+                          ...(options.maxPrice
+                            ? { max_price: options.maxPrice }
+                            : {}),
+                          ...(options.openRouterProviderOrder?.length
+                            ? { order: [...options.openRouterProviderOrder] }
+                            : {}),
+                          ...(options.allowFreeFallback === false
+                            ? { allow_fallbacks: false }
+                            : {}),
+                        },
+                      }
                     : {}),
                   stream: false,
                   ...(options.webSearch
@@ -859,7 +1044,9 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
                   ...(options.schema
                     ? {
                         response_format: { type: "json_object" },
-                        plugins: [{ id: "response-healing" }],
+                        ...(options.allowPlugins === false
+                          ? {}
+                          : { plugins: [{ id: "response-healing" }] }),
                       }
                     : {}),
                 }),
@@ -907,6 +1094,12 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
               provider: name,
               model: typeof raw.model === "string" ? raw.model : activeModel,
               requestId: typeof raw.id === "string" ? raw.id : undefined,
+              upstreamProvider:
+                typeof raw.provider === "string" ? raw.provider : undefined,
+              providerCostUsd:
+                typeof usage?.cost === "number" && Number.isFinite(usage.cost)
+                  ? usage.cost
+                  : undefined,
               inputTokens: Number(usage?.prompt_tokens ?? 0) || undefined,
               outputTokens: Number(usage?.completion_tokens ?? 0) || undefined,
               sourceCitations,
@@ -919,6 +1112,8 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
             continue;
           }
         }
+        if (options.allowFreeFallback === false)
+          throw lastError ?? new Error("LLM provider failed");
         if (options.privateContext)
           throw new Error(
             "Private AI preparation needs an available provider with zero retention and no data collection. Configure a compatible provider before retrying.",
@@ -1021,6 +1216,7 @@ export type ModelPrice = {
  * model is added or a bill looks off. Unknown models fall back to `default`.
  */
 export const MODEL_PRICES_AED: Record<string, ModelPrice> = {
+  "nex-agi/nex-n2.5-pro:free": { inputPerMTokAed: 0, outputPerMTokAed: 0 },
   "openai/gpt-4o": { inputPerMTokAed: 9.18, outputPerMTokAed: 36.73 },
   "openai/gpt-4o-mini": { inputPerMTokAed: 0.55, outputPerMTokAed: 2.2 },
   "anthropic/claude-3.5-sonnet": {

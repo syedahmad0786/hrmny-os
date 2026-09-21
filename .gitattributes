@@ -1,0 +1,3 @@
+packages/db/migrations/0085_discovery_programmes.sql text eol=lf
+packages/db/migrations/0086_discovery_run_coordinator.sql text eol=lf
+packages/db/migrations/0087_discovery_candidates.sql text eol=lf

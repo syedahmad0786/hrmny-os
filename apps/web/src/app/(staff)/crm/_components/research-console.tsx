@@ -6,6 +6,10 @@ import { trpc } from "@/lib/trpc";
 import { CrmBtn, CrmEmpty, CrmTag } from "@/components/crm/ui";
 import { CRM_MARKETS } from "@/lib/crm-markets";
 import { DiscoveryPanel } from "./discovery-panel";
+import { DiscoveryProgrammes } from "./discovery-programmes";
+import { DiscoveryReview } from "./discovery-review";
+import { DiscoveryRuns } from "./discovery-runs";
+import { DiscoverySources } from "./discovery-sources";
 
 function newSignalForm() {
   return {
@@ -24,6 +28,9 @@ export function ResearchConsole() {
   const [feedback, setFeedback] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [signal, setSignal] = useState(newSignalForm);
+  const [view, setView] = useState<
+    "review" | "programmes" | "sources" | "runs"
+  >("review");
   const access = trpc.salesOs.access.useQuery();
   const settings = trpc.salesOs.settings.get.useQuery();
   const researched = trpc.salesOs.research.list.useQuery({
@@ -62,6 +69,37 @@ export function ResearchConsole() {
 
   return (
     <section className="mt-6" data-testid="sales-os-research-console">
+      <div
+        className="mb-4 flex flex-wrap gap-2"
+        role="tablist"
+        aria-label="Discovery views"
+      >
+        {(
+          [
+            ["review", "Review"],
+            ["programmes", "Programmes"],
+            ["sources", "Sources"],
+            ["runs", "Runs"],
+          ] as const
+        ).map(([id, label]) => (
+          <CrmBtn
+            key={id}
+            variant={view === id ? "primary" : "default"}
+            role="tab"
+            aria-selected={view === id}
+            data-testid={`discovery-view-${id}`}
+            onClick={() => setView(id)}
+          >
+            {label}
+          </CrmBtn>
+        ))}
+      </div>
+      {view === "review" ? <DiscoveryReview /> : null}
+      {view === "programmes" ? <DiscoveryProgrammes /> : null}
+      {view === "sources" ? <DiscoverySources /> : null}
+      {view === "runs" ? <DiscoveryRuns /> : null}
+      {view === "review" ? (
+      <>
       <DiscoveryPanel />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
@@ -486,6 +524,8 @@ export function ResearchConsole() {
           )}
         </div>
       </div>
+      </>
+      ) : null}
     </section>
   );
 }

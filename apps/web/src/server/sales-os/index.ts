@@ -17,3 +17,4 @@ export * from "./evolve";
 export * from "./stale";
 export * from "./funnel";
 export * from "./campaigns";
+export * from "./discovery-programmes";

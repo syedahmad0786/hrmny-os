@@ -42,6 +42,7 @@ function isPrivateIpv4(hostname: string): boolean {
 }
 
 function isPrivateIpv6(hostname: string): boolean {
+  if (!hostname.includes(":")) return false;
   const value = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   return (
     value === "::" ||

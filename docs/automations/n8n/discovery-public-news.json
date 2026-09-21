@@ -1,0 +1,397 @@
+{
+  "name": "hrmny-STAGING — discovery public news",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "6d4e1c20-8b71-4a1f-9d3e-2f0c8a91b001",
+      "name": "Discovery Public-News Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "6d4e1c20-8b71-4a1f-9d3e-2f0c8a91b000",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hrmny-discovery-public-news",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_HRMNY_DISCOVERY_TRIGGER_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "HRMNY Discovery OS trigger"
+        }
+      }
+    },
+    {
+      "id": "6d4e1c20-8b71-4a1f-9d3e-2f0c8a91b002",
+      "name": "Normalize Trigger",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const incoming = $input.first().json;\nconst trigger = incoming.body ?? incoming;\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nif (trigger.schemaVersion !== 1) throw new Error('DISCOVERY_TRIGGER_INVALID');\nif (!uuid.test(String(trigger.runId)) || !uuid.test(String(trigger.attemptToken))) throw new Error('DISCOVERY_TRIGGER_INVALID');\nconst generation = Number(trigger.attemptGeneration);\nif (!Number.isInteger(generation) || generation < 1) throw new Error('DISCOVERY_TRIGGER_INVALID');\nconst sources = Array.isArray(trigger.sources) ? trigger.sources : [];\nconst source = sources.find((item) => item && item.executionMode === 'automatic' && item.sourceKey === 'campaign_me' && uuid.test(String(item.bindingId)));\nif (!source) throw new Error('NO_AUTOMATIC_DISCOVERY_SOURCES');\nconst maxObservations = Math.min(Math.max(Number(trigger.maxObservations) || 25, 1), 25);\nreturn [{ json: { runId: trigger.runId, programmeId: trigger.programmeId, attemptToken: trigger.attemptToken, attemptGeneration: generation, sourceId: source.bindingId, credentialGeneration: Number(source.credentialGeneration) || 0, maxObservations: maxObservations } }];"
+      }
+    },
+    {
+      "id": "6d4e1c20-8b71-4a1f-9d3e-2f0c8a91b003",
+      "name": "Respond 202 Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"accepted\", \"runId\": $json.runId } }}",
+        "options": {
+          "responseCode": 202
+        }
+      }
+    },
+    {
+      "id": "6d4e1c20-8b71-4a1f-9d3e-2f0c8a91b004",
+      "name": "Read Campaign ME Feed",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        0
+      ],
+      "continueOnFail": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "https://campaignme.com/feed/",
+        "options": {}
+      }
+    },
+    {
+      "id": "6d4e1c20-8b71-4a1f-9d3e-2f0c8a91b005",
+      "name": "Map Public-News Observations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst trigger = $('Normalize Trigger').first().json;\nconst items = $input.all();\nconst feedFailed = items.some((item) => item.json && (item.json.error || item.json.level === 'error'));\nconst redirectKeys = new Set(['continue', 'dest', 'destination', 'next', 'redirect', 'redirect_uri', 'redirecturl', 'return', 'returnurl', 'target', 'u', 'url']);\nfunction publicHost(value) {\n  return String(value || '').toLowerCase().replace(/\\.$/, '').replace(/^www\\./, '');\n}\nfunction permittedUrl(raw) {\n  let parsed;\n  try { parsed = new URL(String(raw || '').trim()); } catch { return null; }\n  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;\n  if (parsed.username || parsed.password) return null;\n  if (publicHost(parsed.hostname) !== 'campaignme.com') return null;\n  for (const [key, value] of parsed.searchParams.entries()) {\n    if (!redirectKeys.has(key.toLowerCase())) continue;\n    if (!/^https?:\\/\\//i.test(value)) continue;\n    try {\n      if (publicHost(new URL(value).hostname) !== 'campaignme.com') return null;\n    } catch { return null; }\n  }\n  return parsed.toString();\n}\nfunction isoDate(value) {\n  if (!value) return null;\n  const date = new Date(String(value));\n  return Number.isNaN(date.getTime()) ? null : date.toISOString();\n}\nconst observations = [];\nif (!feedFailed) {\n  for (const item of items) {\n    if (observations.length >= trigger.maxObservations) break;\n    const row = item.json || {};\n    const url = permittedUrl(row.link || row.guid);\n    if (!url) continue;\n    const title = String(row.title || '').trim().slice(0, 500);\n    const excerpt = String(row.contentSnippet || row.content || title).trim().slice(0, 5000);\n    const sourceItemKey = String(row.guid || url).trim().slice(0, 512);\n    if (!title || !excerpt || !sourceItemKey) continue;\n    const publishedAt = isoDate(row.isoDate || row.pubDate);\n    observations.push({\n      observationId: crypto.randomUUID(),\n      sourceItemKey: sourceItemKey,\n      contentHash: crypto.createHash('sha256').update(sourceItemKey + '\\n' + url + '\\n' + title + '\\n' + excerpt, 'utf8').digest('hex'),\n      sourceReference: { kind: 'public_url', url: url },\n      observedAt: new Date().toISOString(),\n      publishedAt: publishedAt,\n      dateEvidence: { method: publishedAt ? 'feed' : 'page_metadata', precision: publishedAt ? 'day' : 'unknown' },\n      kind: 'news',\n      title: title,\n      excerpt: excerpt,\n      companyHints: []\n    });\n  }\n}\nconst lastKey = observations.length ? observations[observations.length - 1].sourceItemKey : null;\nconst checkpoint = { cursor: lastKey, providerJobId: null, itemsSeen: observations.length, pagesSeen: feedFailed ? 0 : 1 };\nconst completion = feedFailed\n  ? { status: 'failed', counts: { ingested: 0, duplicate: 0, quarantined: 0, rejected: 0 }, checkpoint: checkpoint, usage: [{ providerRequestId: null, units: 1, unitKind: 'request' }], error: { code: 'source_unavailable', retryable: true } }\n  : { status: 'completed', counts: { ingested: observations.filter((item) => item.companyHints.length > 0).length, duplicate: 0, quarantined: observations.filter((item) => item.companyHints.length === 0).length, rejected: 0 }, checkpoint: checkpoint, usage: [{ providerRequestId: null, units: 1, unitKind: 'request' }] };\nreturn [{ json: { trigger: trigger, observations: observations, completion: completion } }];"
+      }
+    },
+    {
+      "id": "6d4e1c20-8b71-4a1f-9d3e-2f0c8a91b006",
+      "name": "Prepare Discovery Callbacks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst mapped = $input.first().json;\nconst trigger = mapped.trigger;\nconst nowSeconds = Math.floor(Date.now() / 1000);\nfunction envelope(event, payload) {\n  const eventId = crypto.randomUUID();\n  const body = {\n    schemaVersion: 1,\n    event: event,\n    eventId: eventId,\n    runId: trigger.runId,\n    sourceId: trigger.sourceId,\n    attemptToken: trigger.attemptToken,\n    attemptGeneration: trigger.attemptGeneration,\n    credentialGeneration: trigger.credentialGeneration,\n    payload: payload\n  };\n  const rawBody = JSON.stringify(body);\n  return {\n    rawBody: rawBody,\n    claims: {\n      iss: 'hrmny-n8n-discovery',\n      aud: 'hrmny-os-discovery',\n      jti: eventId,\n      iat: nowSeconds,\n      exp: nowSeconds + 300,\n      bodyHash: crypto.createHash('sha256').update(rawBody, 'utf8').digest('hex')\n    }\n  };\n}\nconst observation = mapped.observations.length\n  ? envelope('sales.discovery.observations.v1', { observations: mapped.observations, checkpoint: mapped.completion.checkpoint, usage: mapped.completion.usage })\n  : null;\nconst completion = envelope('sales.discovery.completion.v1', mapped.completion);\nconst callbackUrl = String($vars.HRMNY_OS_BASE_URL || '').replace(/\\/+$/, '') + '/api/integrations/discovery/callback';\nif (!/^https:\\/\\//i.test(callbackUrl)) throw new Error('HRMNY_OS_BASE_URL_UNAVAILABLE');\nreturn [{ json: { hasObservations: Boolean(observation), observation: observation, completion: completion, callbackUrl: callbackUrl } }];"
+      }
+    },
+    {
+      "id": "6d4e1c20-8b71-4a1f-9d3e-2f0c8a91b007",
+      "name": "Has Observations",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-observations",
+              "leftValue": "={{ $json.hasObservations }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "534a45ac-d663-4fe3-89e7-f76ee1253d72",
+      "name": "Sign Observations JWT",
+      "type": "n8n-nodes-base.jwt",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        -96
+      ],
+      "parameters": {
+        "operation": "sign",
+        "useJson": true,
+        "claimsJson": "={{ JSON.stringify($('Prepare Discovery Callbacks').item.json.observation.claims) }}",
+        "headerClaims": "{}",
+        "options": {
+          "kid": "={{ $vars.DISCOVERY_N8N_CALLBACK_KID }}",
+          "algorithm": "HS256"
+        }
+      },
+      "credentials": {
+        "jwtAuth": {
+          "id": "REPLACE_WITH_HRMNY_DISCOVERY_CALLBACK_JWT_CREDENTIAL_ID",
+          "name": "HRMNY Discovery callback signing"
+        }
+      }
+    },
+    {
+      "id": "d9e378bf-1239-4011-aeab-aaa981d79182",
+      "name": "Sign Completion JWT",
+      "type": "n8n-nodes-base.jwt",
+      "typeVersion": 1,
+      "position": [
+        1792,
+        0
+      ],
+      "parameters": {
+        "operation": "sign",
+        "useJson": true,
+        "claimsJson": "={{ JSON.stringify($('Prepare Discovery Callbacks').item.json.completion.claims) }}",
+        "headerClaims": "{}",
+        "options": {
+          "kid": "={{ $vars.DISCOVERY_N8N_CALLBACK_KID }}",
+          "algorithm": "HS256"
+        }
+      },
+      "credentials": {
+        "jwtAuth": {
+          "id": "REPLACE_WITH_HRMNY_DISCOVERY_CALLBACK_JWT_CREDENTIAL_ID",
+          "name": "HRMNY Discovery callback signing"
+        }
+      }
+    },
+    {
+      "id": "c44d97a6-c4b6-475c-8576-2d65f1145a80",
+      "name": "POST Observations Callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1792,
+        -96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Prepare Discovery Callbacks').item.json.callbackUrl }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-hrmny-discovery-token",
+              "value": "={{ $json.token }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $('Prepare Discovery Callbacks').item.json.observation.rawBody }}",
+        "options": {
+          "timeout": 15000,
+          "allowUnauthorizedCerts": false
+        }
+      }
+    },
+    {
+      "id": "f097e92a-c340-4292-9d3a-ada1d4fa303a",
+      "name": "POST Completion Callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2016,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Prepare Discovery Callbacks').item.json.callbackUrl }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-hrmny-discovery-token",
+              "value": "={{ $json.token }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $('Prepare Discovery Callbacks').item.json.completion.rawBody }}",
+        "options": {
+          "timeout": 15000,
+          "allowUnauthorizedCerts": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Discovery Public-News Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Trigger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Trigger": {
+      "main": [
+        [
+          {
+            "node": "Respond 202 Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 202 Accepted": {
+      "main": [
+        [
+          {
+            "node": "Read Campaign ME Feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Campaign ME Feed": {
+      "main": [
+        [
+          {
+            "node": "Map Public-News Observations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Public-News Observations": {
+      "main": [
+        [
+          {
+            "node": "Prepare Discovery Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Observations": {
+      "main": [
+        [
+          {
+            "node": "Sign Observations JWT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sign Completion JWT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST Observations Callback": {
+      "main": [
+        [
+          {
+            "node": "Sign Completion JWT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Discovery Callbacks": {
+      "main": [
+        [
+          {
+            "node": "Has Observations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Observations JWT": {
+      "main": [
+        [
+          {
+            "node": "POST Observations Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Completion JWT": {
+      "main": [
+        [
+          {
+            "node": "POST Completion Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "hrmny": {
+      "module": "discovery",
+      "inactiveOnPurpose": true,
+      "noScheduleTrigger": true,
+      "firstCollector": "campaign_me"
+    }
+  }
+}

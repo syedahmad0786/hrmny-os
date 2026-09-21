@@ -8,7 +8,7 @@ export default function CrmResearchPage() {
     <main data-testid="crm-research">
       <CrmPageHeader
         title="Research a company"
-        description="Turn a prospect into a useful brief before writing outreach. You decide what gets saved and sent."
+        description="Review, Programmes, Sources and Runs stay separate. Discovery execution stays off until a later accepted release."
       />
       <ResearchConsole />
     </main>

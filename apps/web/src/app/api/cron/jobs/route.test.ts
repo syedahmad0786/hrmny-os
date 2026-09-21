@@ -216,4 +216,16 @@ describe("cron Apollo retention ordering", () => {
       apollo: { candidatesRedacted: 1007, redactionBacklog: false },
     });
   });
+
+  it("never resets or claims the dedicated Discovery coordinator job", async () => {
+    await GET(request());
+    const resetQuery = JSON.stringify(
+      mocks.execute.mock.calls[1]?.[0],
+    ).toLowerCase();
+    const genericClaimQuery = JSON.stringify(
+      mocks.execute.mock.calls[2]?.[0],
+    ).toLowerCase();
+    expect(resetQuery).toContain("sales_research_run");
+    expect(genericClaimQuery).toContain("sales_research_run");
+  });
 });

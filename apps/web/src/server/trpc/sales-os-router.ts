@@ -57,6 +57,53 @@ import {
   consumeApolloExactApproval,
   type SalesOsSettings,
 } from "../sales-os";
+import {
+  createDiscoveryProgramme,
+  discoveryManifest,
+  discoveryProgrammeConfigSchema,
+  discoverySourceDraftSchema,
+  DiscoveryProgrammeError,
+  getDiscoveryProgramme,
+  listDiscoveryProgrammes,
+  pauseDiscoveryProgramme,
+  publishDiscoveryProgramme,
+  saveDiscoveryProgrammeDraft,
+} from "../sales-os/discovery-programmes";
+import {
+  cancelDiscoveryRun,
+  getDiscoveryRun,
+  listDiscoveryRuns,
+  requestMemoryDiscoveryRun,
+} from "../sales-os/discovery-run-queries";
+import {
+  decideDiscoveryCandidate,
+  DiscoveryCandidateError,
+  discoveryCandidateDecideSchema,
+  discoveryCandidateListSchema,
+  discoveryCandidateSubmitSchema,
+  getDiscoveryCandidate,
+  listDiscoveryCandidates,
+  submitDiscoveryCandidate,
+} from "../sales-os/discovery-candidates";
+import { summarizeDiscoveryReview } from "../sales-os/discovery-review";
+import {
+  acceptDiscoveryPolicySuggestion,
+  DiscoveryControlError,
+  discoveryControlReconnectSchema,
+  discoveryControlRetrySchema,
+  discoveryPolicyAcceptSchema,
+  discoveryPolicyProposeSchema,
+  listDiscoveryControlQueue,
+  proposeDiscoveryPolicySuggestion,
+  reconnectDiscoveryControlSource,
+  retryDiscoverySource,
+} from "../sales-os/discovery-control";
+import {
+  DiscoveryRunError,
+  requestDiscoveryRun,
+  type DiscoveryRunErrorCode,
+} from "../sales-os/discovery-runs";
+import { getDb } from "../db";
 import { patchOutreach } from "../leadgen/store";
 import { requireVisibleOutreach } from "../leadgen/email-access";
 import {
@@ -116,6 +163,98 @@ const salesAdminProcedure = salesRoleProcedure(
   SALES_ADMIN_ROLES,
   "Sales administrator role required",
 );
+
+function isSalesAdmin(roles: readonly string[]) {
+  return roles.some((role) => SALES_ADMIN_ROLES.has(role));
+}
+
+function discoveryRunTrpcCode(
+  code: DiscoveryRunErrorCode,
+): TRPCError["code"] {
+  switch (code) {
+    case "NOT_FOUND":
+      return "NOT_FOUND";
+    case "FORBIDDEN":
+      return "FORBIDDEN";
+    case "REPLAY_CONFLICT":
+    case "STALE_FENCE":
+    case "ALREADY_CLAIMED":
+      return "CONFLICT";
+    case "INVALID_STATE":
+    case "UNSUPPORTED_EVENT":
+      return "BAD_REQUEST";
+    case "DEPENDENCY_UNAVAILABLE":
+      return "PRECONDITION_FAILED";
+    default: {
+      const unhandled: never = code;
+      return unhandled;
+    }
+  }
+}
+
+function discoveryCandidateTrpcCode(
+  code: DiscoveryCandidateError["code"],
+): TRPCError["code"] {
+  switch (code) {
+    case "NOT_FOUND":
+      return "NOT_FOUND";
+    case "FORBIDDEN":
+      return "FORBIDDEN";
+    case "CONFLICT":
+    case "REPLAY_CONFLICT":
+    case "COMPANY_LINK_CONFLICT":
+      return "CONFLICT";
+    case "COMPANY_IDENTITY_CONFLICT":
+    case "COMPANY_IDENTITY_AMBIGUOUS":
+      return "PRECONDITION_FAILED";
+    case "INVALID_STATE":
+    case "INVALID_INPUT":
+      return "BAD_REQUEST";
+    default: {
+      const unhandled: never = code;
+      return unhandled;
+    }
+  }
+}
+
+async function discoveryCommand<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof DiscoveryControlError)
+      throw new TRPCError({
+        code:
+          error.code === "NOT_FOUND"
+            ? "NOT_FOUND"
+            : error.code === "FORBIDDEN"
+              ? "FORBIDDEN"
+              : error.code === "CONFLICT"
+                ? "CONFLICT"
+                : "BAD_REQUEST",
+        message: error.message,
+      });
+    if (error instanceof DiscoveryCandidateError)
+      throw new TRPCError({
+        code: discoveryCandidateTrpcCode(error.code),
+        message: error.message,
+      });
+    if (error instanceof DiscoveryRunError)
+      throw new TRPCError({
+        code: discoveryRunTrpcCode(error.code),
+        message: error.message,
+      });
+    if (!(error instanceof DiscoveryProgrammeError)) throw error;
+    const code =
+      error.code === "NOT_FOUND"
+        ? "NOT_FOUND"
+        : error.code === "FORBIDDEN"
+          ? "FORBIDDEN"
+          : error.code === "CONFLICT"
+            ? "CONFLICT"
+            : "BAD_REQUEST";
+    throw new TRPCError({ code, message: error.message });
+  }
+}
 
 const settingsPatch = z.object({
   rateCard: z
@@ -674,6 +813,322 @@ export const salesOsRouter = router({
           message: "APOLLO_DURABLE_SEARCH_RECEIPT_REQUIRED",
         });
       }),
+  }),
+
+  discovery: router({
+    manifest: salesOperatorProcedure.query(({ ctx }) =>
+      discoveryManifest(ctx.employeeId),
+    ),
+    review: router({
+      summary: salesOperatorProcedure.query(({ ctx }) =>
+        discoveryCommand(() =>
+          summarizeDiscoveryReview({
+            actorEmployeeId: ctx.employeeId,
+            isAdmin: isSalesAdmin(ctx.roles),
+          }),
+        ),
+      ),
+      list: salesOperatorProcedure
+        .input(discoveryCandidateListSchema.optional())
+        .query(({ ctx, input }) =>
+          discoveryCommand(() =>
+            listDiscoveryCandidates({
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+              queue: input?.queue,
+            }),
+          ),
+        ),
+      get: salesOperatorProcedure
+        .input(z.object({ candidateId: z.string().uuid() }))
+        .query(({ ctx, input }) =>
+          discoveryCommand(() =>
+            getDiscoveryCandidate({
+              candidateId: input.candidateId,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+      submit: salesOperatorProcedure
+        .input(discoveryCandidateSubmitSchema)
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            submitDiscoveryCandidate({
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+              values: input,
+            }),
+          ),
+        ),
+      decide: salesOperatorProcedure
+        .input(discoveryCandidateDecideSchema)
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            decideDiscoveryCandidate({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+    }),
+    programmes: router({
+      list: salesOperatorProcedure
+        .input(
+          z
+            .object({
+              state: z
+                .enum(["draft", "active", "paused", "archived"])
+                .optional(),
+            })
+            .optional(),
+        )
+        .query(({ ctx, input }) =>
+          listDiscoveryProgrammes({
+            actorEmployeeId: ctx.employeeId,
+            isAdmin: isSalesAdmin(ctx.roles),
+            state: input?.state,
+          }),
+        ),
+      get: salesOperatorProcedure
+        .input(z.object({ programmeId: z.string().uuid() }))
+        .query(({ ctx, input }) =>
+          discoveryCommand(() =>
+            getDiscoveryProgramme({
+              programmeId: input.programmeId,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+      create: salesOperatorProcedure
+        .input(
+          z.object({
+            config: discoveryProgrammeConfigSchema,
+            sources: z.array(discoverySourceDraftSchema).optional(),
+          }),
+        )
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            createDiscoveryProgramme({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+            }),
+          ),
+        ),
+      saveDraft: salesOperatorProcedure
+        .input(
+          z.object({
+            programmeId: z.string().uuid(),
+            expectedVersion: z.number().int().min(1),
+            config: discoveryProgrammeConfigSchema,
+            sources: z.array(discoverySourceDraftSchema),
+          }),
+        )
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            saveDiscoveryProgrammeDraft({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+      publish: salesAdminProcedure
+        .input(
+          z.object({
+            programmeId: z.string().uuid(),
+            expectedVersion: z.number().int().min(1),
+          }),
+        )
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            publishDiscoveryProgramme({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+            }),
+          ),
+        ),
+      pause: salesAdminProcedure
+        .input(
+          z.object({
+            programmeId: z.string().uuid(),
+            expectedVersion: z.number().int().min(1),
+            reason: z.string().trim().min(3).max(500),
+          }),
+        )
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            pauseDiscoveryProgramme({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+            }),
+          ),
+        ),
+      requestRun: salesOperatorProcedure
+        .input(
+          z.object({
+            programmeId: z.string().uuid(),
+            expectedVersion: z.number().int().min(1),
+            requestId: z.string().uuid(),
+            overlap: z.enum(["defer", "cancel_and_restart"]),
+          }),
+        )
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(async () => {
+            if (!getDb()) {
+              const programme = await getDiscoveryProgramme({
+                programmeId: input.programmeId,
+                actorEmployeeId: ctx.employeeId,
+                isAdmin: isSalesAdmin(ctx.roles),
+              });
+              return requestMemoryDiscoveryRun({
+                programmeId: programme.id,
+                programmeName: programme.draft.config.name,
+                ownerEmployeeId: programme.ownerEmployeeId,
+                reviewerEmployeeIds: programme.reviewerEmployeeIds,
+                expectedVersion: input.expectedVersion,
+                programmeVersion: programme.version,
+                programmeState: programme.state,
+                publishedVersion: programme.publishedVersion,
+                maxObservations:
+                  (programme.published ?? programme.draft).config.limits
+                    .maxObservations,
+                scheduleGeneration: programme.scheduleGeneration,
+                sourceKeys: (programme.published ?? programme.draft).sources
+                  .filter((source) => source.enabled)
+                  .map((source) => source.sourceKey),
+                requestId: input.requestId,
+                overlap: input.overlap,
+                actorEmployeeId: ctx.employeeId,
+                isAdmin: isSalesAdmin(ctx.roles),
+              });
+            }
+            return requestDiscoveryRun({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            });
+          }),
+        ),
+    }),
+    runs: router({
+      list: salesOperatorProcedure
+        .input(
+          z
+            .object({
+              programmeId: z.string().uuid().optional(),
+              status: z
+                .enum([
+                  "pending",
+                  "running",
+                  "deferred",
+                  "cancel_requested",
+                  "completed",
+                  "partial",
+                  "failed",
+                  "cancelled",
+                  "coalesced",
+                  "dead_letter",
+                ])
+                .optional(),
+            })
+            .optional(),
+        )
+        .query(({ ctx, input }) =>
+          discoveryCommand(() =>
+            listDiscoveryRuns({
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+              programmeId: input?.programmeId,
+              status: input?.status,
+            }),
+          ),
+        ),
+      get: salesOperatorProcedure
+        .input(z.object({ runId: z.string().uuid() }))
+        .query(({ ctx, input }) =>
+          discoveryCommand(() =>
+            getDiscoveryRun({
+              runId: input.runId,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+      cancel: salesOperatorProcedure
+        .input(
+          z.object({
+            runId: z.string().uuid(),
+            expectedStateVersion: z.number().int().min(0),
+            reason: z.string().trim().min(3).max(500),
+          }),
+        )
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            cancelDiscoveryRun({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+    }),
+    control: router({
+      queue: salesOperatorProcedure.query(({ ctx }) =>
+        discoveryCommand(() =>
+          listDiscoveryControlQueue({
+            actorEmployeeId: ctx.employeeId,
+            isAdmin: isSalesAdmin(ctx.roles),
+          }),
+        ),
+      ),
+      retry: salesOperatorProcedure
+        .input(discoveryControlRetrySchema)
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            retryDiscoverySource({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+      reconnect: salesOperatorProcedure
+        .input(discoveryControlReconnectSchema)
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            reconnectDiscoveryControlSource({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+      proposePolicy: salesOperatorProcedure
+        .input(discoveryPolicyProposeSchema)
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            proposeDiscoveryPolicySuggestion({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+      acceptPolicy: salesAdminProcedure
+        .input(discoveryPolicyAcceptSchema)
+        .mutation(({ ctx, input }) =>
+          discoveryCommand(() =>
+            acceptDiscoveryPolicySuggestion({
+              ...input,
+              actorEmployeeId: ctx.employeeId,
+              isAdmin: isSalesAdmin(ctx.roles),
+            }),
+          ),
+        ),
+    }),
   }),
 
   contacts: router({
