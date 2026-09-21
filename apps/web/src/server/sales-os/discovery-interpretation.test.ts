@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockProvider, withMetering, type LLMProvider } from "@hrmny/ai";
 import {
+  buildDiscoveryInterpretationMessages,
   discoveryInterpretationResultSchema,
   DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL,
   createLiveDiscoveryInterpretationProvider,
@@ -327,6 +328,221 @@ describe("Discovery interpretation packet", () => {
     });
     expect(openPitch.disposition).toBe("actionable");
     expect(openPitch.reviewState).toBe("needs_review");
+  });
+
+  it("fails when mandatory packet fields alone exceed the generate ceiling", () => {
+    const fitted = buildDiscoveryInterpretationMessages({
+      schemaVersion: 1,
+      route: "automated",
+      identity: { companyName: "x".repeat(180), host: "example.invalid" },
+      opportunityKind: "company_signal",
+      eventDate: "2026-09-21",
+      excerpt: "short",
+      evidenceId: "e".repeat(1800),
+    });
+    expect(fitted.ok).toBe(false);
+    if (fitted.ok) throw new Error("expected mandatory ceiling");
+    expect(fitted.reason).toBe("DISCOVERY_INTERPRETATION_INPUT_CEILING_REACHED");
+    expect(fitted.mandatoryBytes).toBeGreaterThanOrEqual(
+      DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL,
+    );
+  });
+
+  it("clips a curly-apostrophe Gulf excerpt on a UTF-8 boundary and keeps structured fields", () => {
+    const excerpt = ("London: Britain’s air traffic control. " + "A".repeat(1800)).slice(0, 2000);
+    const fitted = buildDiscoveryInterpretationMessages({
+      schemaVersion: 1,
+      route: "automated",
+      identity: { companyName: "", host: null },
+      opportunityKind: "company_signal",
+      eventDate: "2026-09-21",
+      excerpt,
+      evidenceId: "23492230-698a-470d-b880-7cde9bf861e3",
+    });
+    expect(fitted.ok).toBe(true);
+    if (!fitted.ok) throw new Error("expected fitted packet");
+    expect(fitted.requestBytes).toBeLessThanOrEqual(
+      DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL,
+    );
+    expect(fitted.boundedExcerpt).toBe(true);
+    const packet = JSON.parse(fitted.messages[1]!.content) as {
+      excerpt: string;
+      evidenceId: string;
+      identity: { companyName: string; host: string | null };
+    };
+    expect(packet.evidenceId).toBe("23492230-698a-470d-b880-7cde9bf861e3");
+    expect(packet.identity).toEqual({ companyName: "", host: null });
+    expect(excerpt.startsWith(packet.excerpt)).toBe(true);
+    expect(packet.excerpt.includes("�")).toBe(false);
+  });
+
+  it("does not treat a suffix-only model claim as a grounded fact", async () => {
+    const prefix = "London: Britain’s air traffic control provider suffered another technical failure. ";
+    const suffix = "HiddenCorp won a confidential regional mandate.";
+    const excerpt = (prefix + "A".repeat(1800) + suffix).slice(0, 4000);
+    const generate = vi.fn(async () => ({
+      text: JSON.stringify({
+        claims: [
+          {
+            id: "fact-hidden",
+            kind: "fact",
+            text: "HiddenCorp won a confidential regional mandate.",
+            evidenceId: "evidence",
+            grounded: true,
+            disposition: "actionable",
+          },
+        ],
+        relevantService: null,
+        opportunityKind: "company_signal",
+        awardedAppointment: false,
+        unsupported: false,
+        companyIdentity: { name: null, domain: null, ambiguous: false },
+      }),
+      object: {
+        claims: [
+          {
+            id: "fact-hidden",
+            kind: "fact",
+            text: "HiddenCorp won a confidential regional mandate.",
+            evidenceId: "evidence",
+            grounded: true,
+            disposition: "actionable",
+          },
+        ],
+        relevantService: null,
+        opportunityKind: "company_signal",
+        awardedAppointment: false,
+        unsupported: false,
+        companyIdentity: { name: null, domain: null, ambiguous: false },
+      },
+      provider: "mock" as const,
+      model: "mock",
+      requestId: "gen-suffix-claim",
+    }));
+    const evaluation = await evaluateDiscoveryEvidence({
+      opportunityKind: "company_signal",
+      excerpt,
+      whyNow: "A dated public business item.",
+      eventDate: "2026-09-21",
+      visibilityScope: "public",
+      companyName: "Gulf News",
+      sourceUrl: "https://gulfnews.com/business/aviation/uk-air-traffic-system-hit-again-25000-ryanair-passengers-disrupted-1.500682742",
+      evidenceId: "evidence",
+      sourceKey: "gulf_news_business",
+      provider: { name: "mock", generate },
+    });
+    expect(generate).toHaveBeenCalled();
+    expect(evaluation.facts.some((fact) => fact.text.includes("HiddenCorp"))).toBe(false);
+    expect(evaluation.interpretations.some((item) => item.text.includes("HiddenCorp") && item.grounded)).toBe(false);
+  });
+
+  it("rejects a company name that appears only after the bounded generate cut", async () => {
+    const prefix = "London: Britain’s air traffic control provider suffered another technical failure. ";
+    const suffix = "HiddenCorp won a confidential regional mandate.";
+    const excerpt = (prefix + "A".repeat(1800) + suffix).slice(0, 4000);
+    const generate = vi.fn(async (options: { messages: Array<{ content: string }> }) => {
+      const packet = JSON.parse(options.messages[1]!.content) as { excerpt: string };
+      expect(packet.excerpt.includes("HiddenCorp")).toBe(false);
+      return {
+        text: JSON.stringify({
+          claims: [],
+          relevantService: null,
+          opportunityKind: "company_signal",
+          awardedAppointment: false,
+          unsupported: false,
+          companyIdentity: { name: "HiddenCorp", domain: null, ambiguous: false },
+        }),
+        object: {
+          claims: [],
+          relevantService: null,
+          opportunityKind: "company_signal",
+          awardedAppointment: false,
+          unsupported: false,
+          companyIdentity: { name: "HiddenCorp", domain: null, ambiguous: false },
+        },
+        provider: "mock" as const,
+        model: "mock",
+        requestId: "gen-suffix-only",
+      };
+    });
+    const resolved = await resolvePublicDiscoveryCompanyIdentity({
+      excerpt,
+      provider: { name: "mock", generate },
+    });
+    expect(generate).toHaveBeenCalled();
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: "COMPANY_IDENTITY_MISSING",
+      receipt: { requestId: "gen-suffix-only", boundedExcerpt: true },
+    });
+  });
+
+  it("clips a 2000-character Gulf packet into the generate ceiling instead of failing unavailable", async () => {
+    const generate = vi.fn(async (options: { messages: Array<{ content: string }> }) => {
+      const bytes = Buffer.byteLength(JSON.stringify(options.messages), "utf8");
+      expect(bytes).toBeLessThanOrEqual(DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL);
+      const packet = JSON.parse(options.messages[1]!.content) as { excerpt: string };
+      expect(packet.excerpt.length).toBeGreaterThan(8);
+      expect(packet.excerpt.length).toBeLessThan(2000);
+      return {
+        text: JSON.stringify({
+          claims: [],
+          relevantService: null,
+          opportunityKind: "company_signal",
+          awardedAppointment: false,
+          unsupported: false,
+          companyIdentity: { name: null, domain: null, ambiguous: false },
+        }),
+        object: {
+          claims: [],
+          relevantService: null,
+          opportunityKind: "company_signal",
+          awardedAppointment: false,
+          unsupported: false,
+          companyIdentity: { name: null, domain: null, ambiguous: false },
+        },
+        provider: "mock" as const,
+        model: "mock",
+        requestId: "gen-clipped-gulf",
+      };
+    });
+    const excerpt = "A group wins its first significant contract in a new market. ".repeat(40).slice(0, 2000);
+    const resolved = await resolvePublicDiscoveryCompanyIdentity({
+      excerpt,
+      provider: { name: "mock", generate },
+    });
+    expect(generate).toHaveBeenCalled();
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: "COMPANY_IDENTITY_MISSING",
+      receipt: {
+        requestId: "gen-clipped-gulf",
+        boundedExcerpt: true,
+      },
+    });
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) throw new Error("expected missing identity");
+    expect(resolved.receipt?.boundedExcerptBytes).toBeLessThanOrEqual(
+      DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL,
+    );
+  });
+
+  it("keeps identity unresolved when a generate ceiling is actually reached", async () => {
+    const ceiling: LLMProvider = {
+      name: "openrouter",
+      async generate() {
+        throw new Error("DISCOVERY_INTERPRETATION_INPUT_CEILING_REACHED");
+      },
+    };
+    const excerpt = "A group wins its first significant contract in a new market. ".repeat(40).slice(0, 2000);
+    const resolved = await resolvePublicDiscoveryCompanyIdentity({
+      excerpt,
+      provider: ceiling,
+    });
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: "DISCOVERY_INTERPRETATION_INPUT_CEILING_REACHED",
+    });
   });
 
   it("keeps identity unresolved when the interpretation provider is unavailable", async () => {

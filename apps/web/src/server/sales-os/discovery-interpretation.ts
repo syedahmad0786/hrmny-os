@@ -53,7 +53,7 @@ export const discoveryInterpretationPacketSchema = z.object({
   }),
   opportunityKind: z.string(),
   eventDate: z.string().nullable(),
-  excerpt: z.string().max(2_000),
+  excerpt: z.string().max(5_000),
   evidenceId: z.string(),
 });
 
@@ -92,6 +92,9 @@ export type DiscoveryModelReceipt = {
   provider: string;
   model: string | null;
   requestId: string | null;
+  boundedExcerpt?: boolean;
+  boundedExcerptBytes?: number;
+  boundedRequestBytes?: number;
 };
 
 export type DiscoveryCompanyIdentityResult =
@@ -115,6 +118,7 @@ export type DiscoveryCompanyIdentityResult =
         | "DISCOVERY_PRICE_PROOF_STALE"
         | "DISCOVERY_METERING_REQUIRED"
         | "DISCOVERY_COST_RECEIPT_UNAVAILABLE"
+        | "DISCOVERY_INTERPRETATION_INPUT_CEILING_REACHED"
         | "DISCOVERY_FREE_ROUTE_RUNTIME_PROOF_FAILED"
         | "INTERPRETATION_OUTCOME_UNCERTAIN";
       receipt?: DiscoveryModelReceipt;
@@ -159,6 +163,87 @@ export const DISCOVERY_ZERO_PRICE = {
   request: 0,
 } as const;
 
+const DISCOVERY_INTERPRETATION_SYSTEM =
+  "Interpret only the supplied public excerpt. Return evidence-grounded company identity. Leave unknown or ambiguous identity unresolved. Do not invent a company from a headline. Reject already-awarded agency wins as open opportunities. Do not invent budget, authority, or intent.";
+
+export function utf8ByteLength(value: string) {
+  return Buffer.byteLength(value, "utf8");
+}
+
+export function clipUtf8Prefix(value: string, maxBytes: number) {
+  if (maxBytes <= 0) return "";
+  const buffer = Buffer.from(value, "utf8");
+  if (buffer.length <= maxBytes) return value;
+  let end = Math.min(maxBytes, buffer.length);
+  while (end > 0 && ((buffer[end] ?? 0) & 0xc0) === 0x80) end -= 1;
+  return buffer.subarray(0, end).toString("utf8");
+}
+
+export function buildDiscoveryInterpretationMessages(packet: {
+  schemaVersion: 1;
+  route: string;
+  identity: { companyName: string; host: string | null };
+  opportunityKind: string;
+  eventDate: string | null;
+  excerpt: string;
+  evidenceId: string;
+}) {
+  const system = DISCOVERY_INTERPRETATION_SYSTEM;
+  const mandatoryPacket = { ...packet, excerpt: "" };
+  const mandatoryMessages = [
+    { role: "system" as const, content: system },
+    { role: "user" as const, content: JSON.stringify(mandatoryPacket) },
+  ];
+  const mandatoryBytes = utf8ByteLength(JSON.stringify(mandatoryMessages));
+  if (mandatoryBytes >= DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL) {
+    return {
+      ok: false as const,
+      reason: "DISCOVERY_INTERPRETATION_INPUT_CEILING_REACHED" as const,
+      mandatoryBytes,
+    };
+  }
+  let low = 0;
+  let high = utf8ByteLength(packet.excerpt);
+  let fitted = "";
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const candidate = clipUtf8Prefix(packet.excerpt, mid);
+    const messages = [
+      { role: "system" as const, content: system },
+      { role: "user" as const, content: JSON.stringify({ ...packet, excerpt: candidate }) },
+    ];
+    const bytes = utf8ByteLength(JSON.stringify(messages));
+    if (bytes <= DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL) {
+      fitted = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  const messages = [
+    { role: "system" as const, content: system },
+    { role: "user" as const, content: JSON.stringify({ ...packet, excerpt: fitted }) },
+  ];
+  const requestBytes = utf8ByteLength(JSON.stringify(messages));
+  if (!fitted || requestBytes > DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL) {
+    return {
+      ok: false as const,
+      reason: "DISCOVERY_INTERPRETATION_INPUT_CEILING_REACHED" as const,
+      mandatoryBytes,
+      requestBytes,
+    };
+  }
+  return {
+    ok: true as const,
+    messages,
+    excerpt: fitted,
+    boundedExcerpt: fitted !== packet.excerpt,
+    requestBytes,
+    mandatoryBytes,
+  };
+}
+
+
 const zeroPriceField = z.union([z.literal(0), z.literal("0")]);
 const discoveryZeroPriceProofSchema = z.object({
   model: z.string().min(1).max(180),
@@ -184,6 +269,9 @@ export type DiscoveryIdentityLineage = {
   sourceUrl: string;
   excerptHash: string;
   grounded: boolean;
+  boundedExcerpt?: boolean;
+  boundedExcerptBytes?: number;
+  boundedRequestBytes?: number;
 };
 
 export function discoveryEvidenceRoute(
@@ -480,6 +568,10 @@ export async function interpretPublicDiscoveryExcerpt(input: {
   provider: DiscoveryInterpretationProviderName;
   model: string | null;
   requestId: string | null;
+  boundedExcerpt?: boolean;
+  boundedExcerptBytes?: number;
+  boundedRequestBytes?: number;
+  sentExcerpt?: string;
 }> {
   const excerpt = input.excerpt.trim();
   if (!excerpt)
@@ -489,10 +581,11 @@ export async function interpretPublicDiscoveryExcerpt(input: {
       provider: "unavailable",
       model: null,
       requestId: null,
+      boundedExcerpt: false,
     };
 
-  let provider = input.provider;
-  let model = input.model?.trim() || null;
+  const provider = input.provider;
+  const model = input.model?.trim() || null;
   if (!provider) {
     return {
       status: "unavailable",
@@ -500,6 +593,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
       provider: "unavailable",
       model: null,
       requestId: null,
+      boundedExcerpt: false,
     };
   }
 
@@ -512,6 +606,17 @@ export async function interpretPublicDiscoveryExcerpt(input: {
     excerpt,
     evidenceId: input.evidenceId,
   });
+  const fitted = buildDiscoveryInterpretationMessages(packet);
+  if (!fitted.ok) {
+    return {
+      status: "unavailable",
+      reason: fitted.reason,
+      provider: "unavailable",
+      model,
+      requestId: null,
+      boundedExcerpt: false,
+    };
+  }
 
   try {
     const generated = await provider.generate({
@@ -522,16 +627,15 @@ export async function interpretPublicDiscoveryExcerpt(input: {
       webSearch: false,
       privateContext: false,
       maxPrice: DISCOVERY_ZERO_PRICE,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Interpret only the supplied public excerpt. Return evidence-grounded company identity. Leave unknown or ambiguous identity unresolved. Do not invent a company from a headline. Reject already-awarded agency wins as open opportunities. Do not invent budget, authority, or intent.",
-        },
-        { role: "user", content: JSON.stringify(packet) },
-      ],
+      messages: fitted.messages,
     });
     const requestId = generated.requestId ?? null;
+    const bounded = {
+      boundedExcerpt: fitted.boundedExcerpt,
+      boundedExcerptBytes: utf8ByteLength(fitted.excerpt),
+      boundedRequestBytes: fitted.requestBytes,
+      sentExcerpt: fitted.excerpt,
+    };
     if (
       generated.provider !== "mock" &&
       model &&
@@ -544,6 +648,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
         provider: "unavailable",
         model: generated.model,
         requestId,
+        ...bounded,
       };
     }
     if (generated.provider !== "mock" && generated.model) {
@@ -555,6 +660,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
           provider: "unavailable",
           model: generated.model,
           requestId,
+          ...bounded,
         };
     }
     const parsed = coerceDiscoveryInterpretationResult(
@@ -567,6 +673,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
         provider: generated.provider,
         model: generated.model,
         requestId,
+        ...bounded,
       };
     return {
       status: "completed",
@@ -574,6 +681,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
       provider: generated.provider,
       model: generated.model,
       requestId,
+      ...bounded,
     };
   } catch (error) {
     if (isDiscoveryCostReceiptError(error)) throw error;
@@ -590,6 +698,10 @@ export async function interpretPublicDiscoveryExcerpt(input: {
       provider: "unavailable",
       model: model,
       requestId,
+      boundedExcerpt: fitted.boundedExcerpt,
+      boundedExcerptBytes: utf8ByteLength(fitted.excerpt),
+      boundedRequestBytes: fitted.requestBytes,
+      sentExcerpt: fitted.excerpt,
     };
   }
 }
@@ -630,6 +742,13 @@ export async function resolvePublicDiscoveryCompanyIdentity(input: {
     provider: interpreted.provider,
     model: interpreted.model,
     requestId: interpreted.requestId,
+    ...(interpreted.boundedExcerpt ? { boundedExcerpt: true } : {}),
+    ...(typeof interpreted.boundedExcerptBytes === "number"
+      ? { boundedExcerptBytes: interpreted.boundedExcerptBytes }
+      : {}),
+    ...(typeof interpreted.boundedRequestBytes === "number"
+      ? { boundedRequestBytes: interpreted.boundedRequestBytes }
+      : {}),
   };
   if (interpreted.status === "unavailable")
     return {
@@ -645,7 +764,8 @@ export async function resolvePublicDiscoveryCompanyIdentity(input: {
   if (identity.ambiguous)
     return { ok: false, reason: "COMPANY_IDENTITY_AMBIGUOUS", receipt };
   const name = identity.name?.trim().slice(0, 180) ?? "";
-  if (name.length < 2 || !isCompanyNameGroundedInExcerpt(name, excerpt))
+  const sentExcerpt = interpreted.sentExcerpt ?? excerpt;
+  if (name.length < 2 || !isCompanyNameGroundedInExcerpt(name, sentExcerpt))
     return { ok: false, reason: "COMPANY_IDENTITY_MISSING", receipt };
   const domain = identity.domain?.trim().toLowerCase();
   return {
@@ -744,7 +864,8 @@ export async function evaluateDiscoveryEvidence(input: {
       }
       for (const claim of interpreted.result.claims) {
         const grounded =
-          claim.grounded && isClaimGroundedInExcerpt(claim.text, excerpt);
+          claim.grounded &&
+          isClaimGroundedInExcerpt(claim.text, interpreted.sentExcerpt ?? excerpt);
         if (claim.kind === "fact" && grounded) {
           facts.push({ id: claim.id, text: claim.text });
           continue;
@@ -842,6 +963,13 @@ function asStoredIdentityLineage(value: unknown): DiscoveryIdentityLineage | nul
     sourceUrl: typeof record.sourceUrl === "string" ? record.sourceUrl : "",
     excerptHash: typeof record.excerptHash === "string" ? record.excerptHash : "",
     grounded: Boolean(record.grounded),
+    ...(record.boundedExcerpt === true ? { boundedExcerpt: true } : {}),
+    ...(typeof record.boundedExcerptBytes === "number"
+      ? { boundedExcerptBytes: record.boundedExcerptBytes }
+      : {}),
+    ...(typeof record.boundedRequestBytes === "number"
+      ? { boundedRequestBytes: record.boundedRequestBytes }
+      : {}),
   };
 }
 
@@ -925,6 +1053,7 @@ function identityFailureReason(
     case "DISCOVERY_PRICE_PROOF_STALE":
     case "DISCOVERY_METERING_REQUIRED":
     case "DISCOVERY_COST_RECEIPT_UNAVAILABLE":
+    case "DISCOVERY_INTERPRETATION_INPUT_CEILING_REACHED":
     case "DISCOVERY_FREE_ROUTE_RUNTIME_PROOF_FAILED":
     case "INTERPRETATION_OUTCOME_UNCERTAIN":
       return reason;

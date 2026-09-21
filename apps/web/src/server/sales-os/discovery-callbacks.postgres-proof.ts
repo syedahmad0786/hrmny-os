@@ -1031,3 +1031,48 @@ it("lists and finalizes cancellation after a terminal cost-receipt failure", asy
     }
   }
 });
+
+it("does not recover or rewrite completed or failed interpretation jobs", async () => {
+  const previousExecutionEnabled = process.env.DISCOVERY_EXECUTION_ENABLED;
+  process.env.DISCOVERY_EXECUTION_ENABLED = "true";
+  try {
+    for (const status of ["completed", "failed"] as const) {
+      const seeded = await seedRunningDiscoveryCallback(`callback-terminal-${status}`);
+      await db.execute(sql`
+        update public.scheduled_job
+        set status = ${status},
+            completed_at = statement_timestamp(),
+            result = coalesce(result, '{}'::jsonb) || ${JSON.stringify({
+              budgetReservations: {
+                interpretation: {
+                  schemaVersion: 1,
+                  reservedCalls: 1,
+                  reservedTokens: 2400,
+                  settledCalls: 1,
+                  settledTokens: 0,
+                  observationIds: [],
+                  costReceiptAvailable: false,
+                },
+              },
+            })}::jsonb
+        where scheduled_job_id = ${seeded.runId}::uuid
+      `);
+      expect(
+        await runDiscoveryInterpretationJob({
+          jobId: seeded.runId,
+          sourceKey: "campaign_me",
+          attemptToken: seeded.attemptToken,
+          attemptGeneration: 1,
+        }),
+      ).toEqual({ status: "blocked", remaining: 0 });
+      const after = await jobStatus(seeded.runId);
+      expect(after).toMatchObject({ status });
+    }
+  } finally {
+    if (previousExecutionEnabled === undefined) {
+      delete process.env.DISCOVERY_EXECUTION_ENABLED;
+    } else {
+      process.env.DISCOVERY_EXECUTION_ENABLED = previousExecutionEnabled;
+    }
+  }
+});
