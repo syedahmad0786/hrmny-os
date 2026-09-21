@@ -14,7 +14,6 @@ import {
   planDiscoveryInterpretationTick,
   prepareDiscoveryObservationForSubmit,
   readDiscoveryIdentityLineage,
-  recoverFalsePacketCostLock,
   remainingDiscoveryInterpretationBudget,
   remainingDiscoveryInterpretationBudgetForQueue,
   reserveDiscoveryInterpretationBudget,
@@ -121,7 +120,7 @@ describe("Discovery callback ingest mapping", () => {
     ).toBe("RUN_CANCEL_REQUESTED");
   });
 
-  it("unlocks a false packet cost lock without clearing a real missing receipt", () => {
+  it("continues a >2000 excerpt without throwing the packet schema", async () => {
     const excerpt = `${"A group wins its first significant contract in a new market. ".repeat(80)}GISEC GLOBAL closed the final.`;
     const item = {
       observationId: observation.observationId,
@@ -134,65 +133,52 @@ describe("Discovery callback ingest mapping", () => {
       kind: "news",
       contentHash: "a".repeat(64),
     };
-    const recovered = recoverFalsePacketCostLock({
-      budget: {
-        ...emptyDiscoveryInterpretationBudget(),
-        costReceiptAvailable: false,
-      },
+    const generate = vi.fn(async (options: { messages: Array<{ content: string }> }) => {
+      const packet = JSON.parse(options.messages[1]!.content) as { excerpt: string };
+      expect(packet.excerpt.length).toBeLessThanOrEqual(2000);
+      return {
+        text: JSON.stringify({
+          claims: [],
+          relevantService: null,
+          opportunityKind: "company_signal",
+          awardedAppointment: false,
+          unsupported: false,
+          companyIdentity: { name: null, domain: null, ambiguous: false },
+        }),
+        object: {
+          claims: [],
+          relevantService: null,
+          opportunityKind: "company_signal",
+          awardedAppointment: false,
+          unsupported: false,
+          companyIdentity: { name: null, domain: null, ambiguous: false },
+        },
+        provider: "mock" as const,
+        model: "mock",
+        requestId: "gen-oversize-continue",
+      };
+    });
+    const continued = await continueDiscoveryInterpretationQueue({
       queue: {
         ...emptyDiscoveryInterpretationQueue(),
         pending: [item],
-        done: [
-          {
-            observationId: item.observationId,
-            semantic: "unavailable",
-            provider: "openrouter",
-            model: "nex-agi/nex-n2.5-pro:free",
-            requestId: "gen-packet",
-            reason: "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
-            sourceUrl: item.sourceUrl,
-            excerptHash: createHash("sha256").update(excerpt).digest("hex"),
-            grounded: false,
-          },
-        ],
-        status: "unavailable",
-        lastError: "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
+        status: "pending",
+      },
+      provider: { name: "mock", generate },
+      sourceKey: "gulf_news_business",
+      configuration: {
+        url: "https://gulfnews.com/business",
+        feedUrl: "https://gulfnews.com/rss",
+        permittedHosts: ["gulfnews.com", "www.gulfnews.com"],
       },
     });
-    expect(recovered.budget.costReceiptAvailable).toBe(true);
-    expect(recovered.queue.lastError).toBeNull();
-    expect(recovered.queue.done).toEqual([]);
-    expect(recovered.queue.pending).toHaveLength(1);
-    expect(clipDiscoveryInterpretationExcerpt(excerpt)).toHaveLength(2000);
-
-    const realBlock = recoverFalsePacketCostLock({
-      budget: {
-        ...emptyDiscoveryInterpretationBudget(),
-        costReceiptAvailable: false,
-      },
-      queue: {
-        ...emptyDiscoveryInterpretationQueue(),
-        pending: [{ ...item, excerpt: excerpt.slice(0, 180) }],
-        done: [
-          {
-            observationId: item.observationId,
-            semantic: "unavailable",
-            provider: "unavailable",
-            model: null,
-            requestId: null,
-            reason: "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
-            sourceUrl: item.sourceUrl,
-            excerptHash: createHash("sha256").update(excerpt.slice(0, 180)).digest("hex"),
-            grounded: false,
-          },
-        ],
-        status: "unavailable",
-        lastError: "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
-      },
+    expect(generate).toHaveBeenCalled();
+    expect(continued.queue.done[0]).toMatchObject({
+      excerptHash: createHash("sha256").update(excerpt).digest("hex"),
+      boundedExcerpt: true,
     });
-    expect(realBlock.budget.costReceiptAvailable).toBe(false);
-    expect(realBlock.queue.lastError).toBe("DISCOVERY_COST_RECEIPT_UNAVAILABLE");
   });
+
   it("resolves the frozen binding and rejects a stale credential generation", () => {
     expect(
       resolveDiscoveryCallbackSource(effective, bindingId, 2),
@@ -829,6 +815,48 @@ describe("Discovery callback ingest mapping", () => {
       observation.observationId,
     );
     expect(stored).toEqual(progressed.queue.done[0]);
+    const longExcerpt = ("A group wins its first significant contract in a new market. ").repeat(40).slice(0, 2000);
+    const longGenerate = vi.fn(async (options: { messages: Array<{ content: string }> }) => {
+      const packet = JSON.parse(options.messages[1]!.content) as { excerpt: string };
+      expect(packet.excerpt.length).toBeLessThan(2000);
+      return generate.mock.results[0]!.value;
+    });
+    const longProgressed = await continueDiscoveryInterpretationQueue({
+      queue: {
+        ...emptyDiscoveryInterpretationQueue(),
+        pending: [
+          {
+            observationId: observation.observationId,
+            sourceItemKey: observation.sourceItemKey,
+            excerpt: longExcerpt,
+            title: observation.title,
+            publishedAt: observation.publishedAt,
+            sourceUrl: observation.sourceReference.url,
+            kind: observation.kind,
+            contentHash: observation.contentHash,
+          },
+        ],
+      },
+      provider: { name: "mock", generate: longGenerate },
+      sourceKey: "campaign_me",
+      configuration: effective.sources[0]!.configuration,
+    });
+    expect(longProgressed.queue.done[0]).toMatchObject({
+      boundedExcerpt: true,
+      excerptHash: createHash("sha256").update(longExcerpt).digest("hex"),
+    });
+    expect(longProgressed.queue.done[0]?.boundedExcerptBytes).toBeLessThanOrEqual(1600);
+    expect(longProgressed.queue.done[0]?.boundedRequestBytes).toBeLessThanOrEqual(1600);
+    const storedLong = readDiscoveryIdentityLineage(
+      {
+        sourceOutcomes: {
+          campaign_me: { interpretation: longProgressed.queue },
+        },
+      },
+      observation.observationId,
+    );
+    expect(storedLong).toEqual(longProgressed.queue.done[0]);
+    expect(storedLong?.boundedRequestBytes).toBe(longProgressed.queue.done[0]?.boundedRequestBytes);
     const evaluation = await evaluateDiscoveryEvidence({
       opportunityKind: "company_signal",
       excerpt: named.excerpt,

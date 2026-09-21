@@ -236,56 +236,6 @@ export function clipDiscoveryInterpretationExcerpt(excerpt: string) {
   return excerpt.trim().slice(0, DISCOVERY_PACKET_EXCERPT_LIMIT);
 }
 
-function isFalsePacketCostLock(input: {
-  budget: DiscoveryInterpretationBudget;
-  queue: DiscoveryInterpretationQueue;
-}) {
-  if (input.budget.costReceiptAvailable) return false;
-  if (input.queue.lastError !== "DISCOVERY_COST_RECEIPT_UNAVAILABLE") return false;
-  const locked = input.queue.done.find(
-    (item) => item.reason === "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
-  );
-  if (!locked) return false;
-  const original = [...input.queue.pending, ...input.queue.inFlight].find(
-    (item) => item.observationId === locked.observationId,
-  );
-  if (!original) return false;
-  return (
-    original.excerpt.trim().length > DISCOVERY_PACKET_EXCERPT_LIMIT &&
-    excerptSha256(original.excerpt) === locked.excerptHash
-  );
-}
-
-export function recoverFalsePacketCostLock(input: {
-  budget: DiscoveryInterpretationBudget;
-  queue: DiscoveryInterpretationQueue;
-}): {
-  budget: DiscoveryInterpretationBudget;
-  queue: DiscoveryInterpretationQueue;
-} {
-  if (!isFalsePacketCostLock(input)) return input;
-  const lockedIds = new Set(
-    input.queue.done
-      .filter((item) => item.reason === "DISCOVERY_COST_RECEIPT_UNAVAILABLE")
-      .map((item) => item.observationId),
-  );
-  return {
-    budget: { ...input.budget, costReceiptAvailable: true },
-    queue: {
-      ...input.queue,
-      done: input.queue.done.filter((item) => !lockedIds.has(item.observationId)),
-      pending: [
-        ...input.queue.pending,
-        ...input.queue.inFlight.filter((item) => lockedIds.has(item.observationId)),
-      ],
-      inFlight: [],
-      claimedAt: null,
-      status: "pending",
-      lastError: null,
-    },
-  };
-}
-
 export function reserveDiscoveryInterpretationBudget(
   budget: DiscoveryInterpretationBudget,
   observationIds: string[],
@@ -356,6 +306,9 @@ function identityReceipt(input: {
   requestId?: string | null;
   identity?: { name: string; domain?: string };
   grounded?: boolean;
+  boundedExcerpt?: boolean;
+  boundedExcerptBytes?: number;
+  boundedRequestBytes?: number;
 }): DiscoveryIdentityLineage {
   return {
     observationId: input.item.observationId,
@@ -368,6 +321,13 @@ function identityReceipt(input: {
     sourceUrl: input.item.sourceUrl,
     excerptHash: excerptSha256(input.item.excerpt),
     grounded: Boolean(input.grounded),
+    ...(input.boundedExcerpt ? { boundedExcerpt: true } : {}),
+    ...(typeof input.boundedExcerptBytes === "number"
+      ? { boundedExcerptBytes: input.boundedExcerptBytes }
+      : {}),
+    ...(typeof input.boundedRequestBytes === "number"
+      ? { boundedRequestBytes: input.boundedRequestBytes }
+      : {}),
   };
 }
 
@@ -536,6 +496,13 @@ export function applyDiscoveryInterpretationProgress(
         sourceUrl: item.sourceUrl ?? "",
         excerptHash: item.excerptHash ?? "",
         grounded: Boolean(item.grounded),
+        ...(item.boundedExcerpt ? { boundedExcerpt: true } : {}),
+        ...(typeof item.boundedExcerptBytes === "number"
+          ? { boundedExcerptBytes: item.boundedExcerptBytes }
+          : {}),
+        ...(typeof item.boundedRequestBytes === "number"
+          ? { boundedRequestBytes: item.boundedRequestBytes }
+          : {}),
       })),
     ],
     calls: queue.calls + (update.calls ?? 0),
@@ -1078,6 +1045,9 @@ export async function continueDiscoveryInterpretationQueue(input: {
             mapped.values.companyName,
             item.excerpt,
           ),
+          boundedExcerpt: mapped.receipt?.boundedExcerpt,
+          boundedExcerptBytes: mapped.receipt?.boundedExcerptBytes,
+          boundedRequestBytes: mapped.receipt?.boundedRequestBytes,
         }),
       );
     } else {
@@ -1089,6 +1059,9 @@ export async function continueDiscoveryInterpretationQueue(input: {
           provider: mapped.receipt?.provider ?? input.provider?.name ?? "unavailable",
           model: mapped.receipt?.model ?? null,
           requestId: mapped.receipt?.requestId ?? null,
+          boundedExcerpt: mapped.receipt?.boundedExcerpt,
+          boundedExcerptBytes: mapped.receipt?.boundedExcerptBytes,
+          boundedRequestBytes: mapped.receipt?.boundedRequestBytes,
         }),
       );
     }
@@ -1326,6 +1299,8 @@ export async function runDiscoveryInterpretationJob(input: {
       job.attempts !== input.attemptGeneration
     )
       return { blocked: true as const, reason: "RUN_ATTEMPT_MISMATCH" };
+    if (job.status !== "running" && job.status !== "cancel_requested")
+      return { blocked: true as const, reason: "RUN_NOT_OPEN" };
     const payload = DiscoveryRunPayloadV1Schema.safeParse(job.payload);
     const result = (job.result ?? {}) as Record<string, unknown>;
     const outcomes =
@@ -1335,12 +1310,8 @@ export async function runDiscoveryInterpretationJob(input: {
     const source = asRecord(outcomes[input.sourceKey]);
     const loadedQueue = readInterpretationQueue(source.interpretation);
     const cancelled = job.status === "cancel_requested";
-    const recovered = recoverFalsePacketCostLock({
-      budget: readDiscoveryInterpretationBudget(result),
-      queue: loadedQueue,
-    });
-    const budget = recovered.budget;
-    const queue = recovered.queue;
+    const budget = readDiscoveryInterpretationBudget(result);
+    const queue = loadedQueue;
     if (!budget.costReceiptAvailable && !cancelled)
       return { blocked: true as const, reason: "DISCOVERY_COST_RECEIPT_UNAVAILABLE" };
     const remaining = remainingDiscoveryInterpretationBudgetForQueue(
@@ -1516,6 +1487,8 @@ export async function runDiscoveryInterpretationJob(input: {
       job.attemptToken !== input.attemptToken ||
       job.attempts !== input.attemptGeneration
     )
+      return;
+    if (job.status !== "running" && job.status !== "cancel_requested")
       return;
     const cancelledNow = job.status === "cancel_requested";
     if (
