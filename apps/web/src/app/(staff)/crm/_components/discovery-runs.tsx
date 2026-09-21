@@ -49,7 +49,7 @@ export function DiscoveryRuns() {
     onSuccess: (result) => {
       setSelectedId(result.runId);
       setNote(
-        `Run ${result.status}. Collectors stay off until execution is enabled.`,
+        `Run ${result.status}. ${selectedProgramme?.executionEnabled ? "Collection can start." : "Collectors stay off until execution is enabled."}`,
       );
       void utils.salesOs.discovery.runs.invalidate();
     },
@@ -66,7 +66,7 @@ export function DiscoveryRuns() {
   const canRequest =
     access.data?.canOperate === true &&
     selectedProgramme?.state === "active" &&
-    selectedProgramme.executionEnabled === false;
+    selectedProgramme.executionEnabled === true;
 
   return (
     <section className="crm-panel mb-5" data-testid="discovery-runs">
@@ -74,8 +74,7 @@ export function DiscoveryRuns() {
         <div>
           <h3>Research runs</h3>
           <p>
-            These rows are the armed or historical Discovery slots. Execution
-            stays unavailable, so a queued run is not a source collection.
+            These rows are the armed or historical Discovery slots. A queued run starts collection only when execution is enabled.
           </p>
         </div>
         <CrmBtn
@@ -115,9 +114,13 @@ export function DiscoveryRuns() {
           </select>
         </label>
         <p className="crm-note" data-testid="discovery-runs-execution-status">
-          <strong>Execution status: unavailable.</strong> Collectors and
-          provider calls stay off. A pending slot is a schedule reservation
-          only.
+          <strong>
+            Execution status:{" "}
+            {selectedProgramme?.executionEnabled ? "available" : "unavailable"}.
+          </strong>{" "}
+          {selectedProgramme?.executionEnabled
+            ? "Queue run now can start collection for the selected programme."
+            : "Collectors and provider calls stay off. A pending slot is a schedule reservation only."}
         </p>
         {note ? (
           <p className="crm-note" data-testid="discovery-run-note" role="status">
