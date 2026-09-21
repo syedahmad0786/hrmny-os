@@ -141,7 +141,7 @@ export const DISCOVERY_INTERPRETATION_MODELS = [
 export const DISCOVERY_INTERPRETATION_UPSTREAM_PROVIDER = "Nex AGI" as const;
 export const DISCOVERY_INTERPRETATION_BATCH_SIZE = 5;
 export const DISCOVERY_INTERPRETATION_MAX_CALLS_PER_JOB = 8;
-export const DISCOVERY_INTERPRETATION_MAX_TOKENS_PER_JOB = 12_000;
+export const DISCOVERY_INTERPRETATION_MAX_TOKENS_PER_JOB = 19_200;
 export const DISCOVERY_INTERPRETATION_MAX_INPUT_BYTES_PER_CALL = 1_600;
 export const DISCOVERY_INTERPRETATION_PROVIDER_FRAMING_BYTES_PER_CALL = 400;
 export const DISCOVERY_INTERPRETATION_MAX_OUTPUT_TOKENS_PER_CALL = 400;
@@ -550,10 +550,10 @@ export async function interpretPublicDiscoveryExcerpt(input: {
           requestId,
         };
     }
-    const parsed = discoveryInterpretationResultSchema.safeParse(
+    const parsed = coerceDiscoveryInterpretationResult(
       generated.object ?? safeJson(generated.text),
     );
-    if (!parsed.success)
+    if (!parsed)
       return {
         status: "malformed",
         reason: "INTERPRETATION_MALFORMED",
@@ -563,7 +563,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
       };
     return {
       status: "completed",
-      result: parsed.data,
+      result: parsed,
       provider: generated.provider,
       model: generated.model,
       requestId,
@@ -829,6 +829,59 @@ function asStoredIdentityLineage(value: unknown): DiscoveryIdentityLineage | nul
     excerptHash: typeof record.excerptHash === "string" ? record.excerptHash : "",
     grounded: Boolean(record.grounded),
   };
+}
+
+
+function coerceDiscoveryInterpretationResult(
+  value: unknown,
+): z.infer<typeof discoveryInterpretationResultSchema> | null {
+  const direct = discoveryInterpretationResultSchema.safeParse(value);
+  if (direct.success) return direct.data;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const nested =
+    row.companyIdentity && typeof row.companyIdentity === "object" && !Array.isArray(row.companyIdentity)
+      ? (row.companyIdentity as Record<string, unknown>)
+      : {};
+  const hasIdentityShape =
+    typeof nested.name === "string" ||
+    typeof nested.domain === "string" ||
+    typeof row.companyName === "string" ||
+    typeof row.domain === "string" ||
+    typeof row.host === "string";
+  if (!hasIdentityShape) return null;
+  const host =
+    typeof row.host === "string"
+      ? row.host
+      : typeof nested.host === "string"
+        ? nested.host
+        : null;
+  const coerced = {
+    claims: Array.isArray(row.claims) ? row.claims : [],
+    relevantService: typeof row.relevantService === "string" ? row.relevantService : null,
+    opportunityKind: typeof row.opportunityKind === "string" ? row.opportunityKind : null,
+    awardedAppointment: typeof row.awardedAppointment === "boolean" ? row.awardedAppointment : false,
+    unsupported: typeof row.unsupported === "boolean" ? row.unsupported : false,
+    companyIdentity: {
+      name:
+        typeof nested.name === "string"
+          ? nested.name
+          : typeof row.companyName === "string"
+            ? row.companyName
+            : null,
+      domain:
+        typeof nested.domain === "string"
+          ? nested.domain
+          : typeof row.domain === "string"
+            ? row.domain
+            : host && host.includes(".")
+              ? host
+              : null,
+      ambiguous: typeof nested.ambiguous === "boolean" ? nested.ambiguous : false,
+    },
+  };
+  const parsed = discoveryInterpretationResultSchema.safeParse(coerced);
+  return parsed.success ? parsed.data : null;
 }
 
 function identityFailureReason(

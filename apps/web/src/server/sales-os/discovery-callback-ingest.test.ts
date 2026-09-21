@@ -13,6 +13,7 @@ import {
   prepareDiscoveryObservationForSubmit,
   readDiscoveryIdentityLineage,
   remainingDiscoveryInterpretationBudget,
+  remainingDiscoveryInterpretationBudgetForQueue,
   reserveDiscoveryInterpretationBudget,
   resolveDiscoveryCallbackSource,
   resolveDiscoveryInterpretationJobLastError,
@@ -589,11 +590,11 @@ describe("Discovery callback ingest mapping", () => {
 
     const sourceA = reserveDiscoveryInterpretationBudget(
       emptyDiscoveryInterpretationBudget(),
-      reservedIds.slice(0, 4),
+      reservedIds.slice(0, tokenBoundedCalls - 1),
     );
     expect(sourceA).toMatchObject({
       ok: true,
-      budget: { reservedCalls: 4 },
+      budget: { reservedCalls: tokenBoundedCalls - 1 },
     });
     if (!sourceA.ok) throw new Error("expected source A reserve");
     const sourceBOverflow = Array.from(
@@ -606,7 +607,7 @@ describe("Discovery callback ingest mapping", () => {
     ).toEqual({ ok: false, reason: "INTERPRETATION_CEILING_REACHED" });
     const sourceB = reserveDiscoveryInterpretationBudget(
       sourceA.budget,
-      reservedIds.slice(4, 5),
+      reservedIds.slice(tokenBoundedCalls - 1, tokenBoundedCalls),
     );
     expect(sourceB).toMatchObject({
       ok: true,
@@ -617,6 +618,33 @@ describe("Discovery callback ingest mapping", () => {
       calls: DISCOVERY_INTERPRETATION_MAX_CALLS_PER_JOB - tokenBoundedCalls,
       tokens: 0,
     });
+    expect(
+      remainingDiscoveryInterpretationBudgetForQueue(
+        sourceB.budget,
+        reservedIds.slice(0, 1),
+      ),
+    ).toEqual({
+      calls: DISCOVERY_INTERPRETATION_MAX_CALLS_PER_JOB - tokenBoundedCalls + 1,
+      tokens: DISCOVERY_INTERPRETATION_RESERVED_TOKENS_PER_CALL,
+    });
+    expect(
+      planDiscoveryInterpretationTick({
+        queue: {
+          ...emptyDiscoveryInterpretationQueue(),
+          pending: crashedQueue.pending.slice(0, 1),
+          calls: 0,
+        },
+        providerAvailable: true,
+        remainingCalls: remainingDiscoveryInterpretationBudgetForQueue(
+          sourceB.budget,
+          reservedIds.slice(0, 1),
+        ).calls,
+        remainingTokens: remainingDiscoveryInterpretationBudgetForQueue(
+          sourceB.budget,
+          reservedIds.slice(0, 1),
+        ).tokens,
+      }).action,
+    ).toBe("claim");
     expect(
       planDiscoveryInterpretationTick({
         queue: {

@@ -213,6 +213,22 @@ export function remainingDiscoveryInterpretationBudget(
   };
 }
 
+export function remainingDiscoveryInterpretationBudgetForQueue(
+  budget: DiscoveryInterpretationBudget,
+  observationIds: string[],
+) {
+  const remaining = remainingDiscoveryInterpretationBudget(budget);
+  const alreadyReserved = observationIds.filter((id) =>
+    budget.observationIds.includes(id),
+  ).length;
+  return {
+    calls: remaining.calls + alreadyReserved,
+    tokens:
+      remaining.tokens +
+      alreadyReserved * DISCOVERY_INTERPRETATION_RESERVED_TOKENS_PER_CALL,
+  };
+}
+
 export function reserveDiscoveryInterpretationBudget(
   budget: DiscoveryInterpretationBudget,
   observationIds: string[],
@@ -1248,7 +1264,10 @@ export async function runDiscoveryInterpretationJob(input: {
     const budget = readDiscoveryInterpretationBudget(result);
     if (!budget.costReceiptAvailable && !cancelled)
       return { blocked: true as const, reason: "DISCOVERY_COST_RECEIPT_UNAVAILABLE" };
-    const remaining = remainingDiscoveryInterpretationBudget(budget);
+    const remaining = remainingDiscoveryInterpretationBudgetForQueue(
+      budget,
+      [...queue.inFlight, ...queue.pending].map((item) => item.observationId),
+    );
     let planned = planDiscoveryInterpretationTick({
       queue,
       cancelled,

@@ -735,6 +735,39 @@ describe("openrouter free-model failover", () => {
     }
   });
 
+  it("disables reasoning on discovery interpretation so the token cap is not consumed by hidden tokens", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          id: "gen-discovery",
+          model: "nex-agi/nex-n2.5-pro:free",
+          provider: "Nex AGI",
+          usage: { prompt_tokens: 12, completion_tokens: 8, cost: 0 },
+          choices: [{ message: { content: "{\"ok\":true}" } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await createProvider({
+        provider: "openrouter",
+        defaultModel: "nex-agi/nex-n2.5-pro:free",
+        openRouterApiKey: "sk-test",
+      }).generate({
+        task: "discovery_interpret",
+        model: "nex-agi/nex-n2.5-pro:free",
+        messages: [{ role: "user", content: "public excerpt" }],
+        allowFreeFallback: false,
+        maxTokens: 400,
+      });
+      const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+      expect(body.reasoning).toEqual({ enabled: false, exclude: true });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps privacy restrictions on every fallback and blocks private web search", async () => {
     const fetchMock = vi.fn(
       async () =>
