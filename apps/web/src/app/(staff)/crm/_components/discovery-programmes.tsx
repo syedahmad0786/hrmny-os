@@ -1264,7 +1264,7 @@ export function DiscoveryProgrammes() {
                     busy ||
                     loadedVersion === null ||
                     isDirty ||
-                    detail.executionEnabled !== false
+                    detail.executionEnabled !== true
                   }
                   onClick={() =>
                     loadedVersion !== null &&
@@ -1312,11 +1312,13 @@ export function DiscoveryProgrammes() {
               </p>
             ) : null}
             <div className="crm-note" data-testid="discovery-execution-status">
-              <strong>Execution status: unavailable.</strong>{" "}
-              {detail?.executionEnabled === false ||
-              manifest.data?.executionEnabled === false
-                ? "Collectors and provider calls stay off."
-                : "Execution state is still loading."}{" "}
+              <strong>
+                Execution status:{" "}
+                {detail?.executionEnabled ? "available" : "unavailable"}.
+              </strong>{" "}
+              {detail?.executionEnabled
+                ? "Published criteria can start collectors."
+                : "Collectors and provider calls stay off."}{" "}
               {detail?.nextDueAt
                 ? `Armed next Dubai slot: ${formatDubai(detail.nextDueAt)}.`
                 : "No run is armed yet."}

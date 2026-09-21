@@ -21,6 +21,7 @@ import {
 import {
   DiscoveryRunError,
   SALES_RESEARCH_RUN_JOB_KIND,
+  isDiscoveryExecutionEnabled,
 } from "./discovery-runs";
 
 export const DISCOVERY_SOURCE_OUTCOME_STATES = [
@@ -276,7 +277,7 @@ export async function listDiscoveryControlQueue(input: {
     });
   }
   return {
-    executionEnabled: false as const,
+    executionEnabled: isDiscoveryExecutionEnabled(),
     collectorStarted: false as const,
     items,
     health: {
@@ -408,7 +409,7 @@ function applyRetry(
   const nextReservations = { ...reservations, [reservationKey]: reservation };
   hooks.persist(nextOutcomes, nextReservations);
   return {
-    executionEnabled: false as const,
+    executionEnabled: isDiscoveryExecutionEnabled(),
     collectorStarted: false as const,
     paidCallAuthorized: false as const,
     sourceKey: input.sourceKey,
@@ -440,7 +441,7 @@ export async function reconnectDiscoveryControlSource(input: {
   if (!source)
     throw new DiscoveryControlError("NOT_FOUND", "SOURCE_NOT_FOUND");
   return {
-    executionEnabled: false as const,
+    executionEnabled: isDiscoveryExecutionEnabled(),
     collectorStarted: false as const,
     programmeId: programme.id,
     sourceKey: input.sourceKey,
@@ -510,7 +511,7 @@ export async function acceptDiscoveryPolicySuggestion(input: {
   if (suggestion.status === "accepted") {
     return {
       ...suggestion,
-      executionEnabled: false as const,
+      executionEnabled: isDiscoveryExecutionEnabled(),
       collectorStarted: false as const,
       publishedVersion: suggestion.appliedVersion,
       maxObservations: suggestion.maxObservations,
@@ -557,7 +558,7 @@ export async function acceptDiscoveryPolicySuggestion(input: {
   policySuggestions.set(suggestion.suggestionId, suggestion);
   return {
     ...suggestion,
-    executionEnabled: false as const,
+    executionEnabled: isDiscoveryExecutionEnabled(),
     collectorStarted: false as const,
     appliedVersion: published.publishedVersion,
     publishedVersion: published.publishedVersion,

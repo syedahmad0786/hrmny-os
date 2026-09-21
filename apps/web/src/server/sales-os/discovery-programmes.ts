@@ -27,6 +27,7 @@ import {
 import {
   pauseProgrammeRunsTx,
   schedulePublishedSlotTx,
+  isDiscoveryExecutionEnabled,
 } from "./discovery-runs";
 
 type LifecycleState = "draft" | "active" | "paused" | "archived";
@@ -866,7 +867,7 @@ async function detailFromDb(db: Db, row: DbProgramme) {
       draft.config.schedule,
       new Date(),
     ),
-    executionEnabled: false as const,
+    executionEnabled: isDiscoveryExecutionEnabled(),
     nextDueAt: row.nextDueAt?.toISOString() ?? null,
     publishedAt: row.publishedAt?.toISOString() ?? null,
     publishedByEmployeeId: row.publishedByEmployeeId,
@@ -927,7 +928,7 @@ function detailFromMemory(row: MemoryProgramme) {
       draft.config.schedule,
       new Date(),
     ),
-    executionEnabled: false as const,
+    executionEnabled: isDiscoveryExecutionEnabled(),
     nextDueAt: row.nextDueAt,
     publishedAt: row.publishedAt,
     publishedByEmployeeId: row.publishedByEmployeeId,
@@ -1178,7 +1179,7 @@ export function discoveryManifest(actorEmployeeId: string) {
     config,
     sources,
     schedulePreview: previewDiscoverySchedule(config.schedule, new Date()),
-    executionEnabled: false as const,
+    executionEnabled: isDiscoveryExecutionEnabled(),
   };
 }
 
@@ -1342,7 +1343,7 @@ export async function listDiscoveryProgrammes(input: {
       (blocker) => blocker.sourceKey,
     ).length,
     schedulePreview: item.schedulePreview,
-    executionEnabled: false as const,
+    executionEnabled: isDiscoveryExecutionEnabled(),
     nextDueAt: item.nextDueAt,
     updatedAt: item.updatedAt,
   }));
@@ -1677,7 +1678,7 @@ async function transitionProgramme(input: {
           input.action === "publish"
             ? existing.currentDraftVersion
             : existing.publishedVersion,
-        executionEnabled: false,
+        executionEnabled: isDiscoveryExecutionEnabled(),
       },
       reason: input.reason,
     });
