@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createMockProvider, withMetering, type LLMProvider } from "@hrmny/ai";
 import {
   admitDiscoveryCallbackObservations,
   applyDiscoveryInterpretationProgress,
+  clipDiscoveryInterpretationExcerpt,
   continueDiscoveryInterpretationQueue,
   emptyDiscoveryInterpretationBudget,
   emptyDiscoveryInterpretationQueue,
@@ -12,6 +14,7 @@ import {
   planDiscoveryInterpretationTick,
   prepareDiscoveryObservationForSubmit,
   readDiscoveryIdentityLineage,
+  recoverFalsePacketCostLock,
   remainingDiscoveryInterpretationBudget,
   remainingDiscoveryInterpretationBudgetForQueue,
   reserveDiscoveryInterpretationBudget,
@@ -116,6 +119,79 @@ describe("Discovery callback ingest mapping", () => {
         cancelled: true,
       }),
     ).toBe("RUN_CANCEL_REQUESTED");
+  });
+
+  it("unlocks a false packet cost lock without clearing a real missing receipt", () => {
+    const excerpt = `${"A group wins its first significant contract in a new market. ".repeat(80)}GISEC GLOBAL closed the final.`;
+    const item = {
+      observationId: observation.observationId,
+      sourceItemKey: "gulf-packet-lock",
+      excerpt,
+      title: "UAE corporate tax risk can begin with one ordinary business decision",
+      publishedAt: "2026-09-21T00:00:00.000Z",
+      sourceUrl:
+        "https://gulfnews.com/business/analysis/uae-corporate-tax-risk-can-begin-with-one-ordinary-business-decision-1.500682575",
+      kind: "news",
+      contentHash: "a".repeat(64),
+    };
+    const recovered = recoverFalsePacketCostLock({
+      budget: {
+        ...emptyDiscoveryInterpretationBudget(),
+        costReceiptAvailable: false,
+      },
+      queue: {
+        ...emptyDiscoveryInterpretationQueue(),
+        pending: [item],
+        done: [
+          {
+            observationId: item.observationId,
+            semantic: "unavailable",
+            provider: "openrouter",
+            model: "nex-agi/nex-n2.5-pro:free",
+            requestId: "gen-packet",
+            reason: "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
+            sourceUrl: item.sourceUrl,
+            excerptHash: createHash("sha256").update(excerpt).digest("hex"),
+            grounded: false,
+          },
+        ],
+        status: "unavailable",
+        lastError: "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
+      },
+    });
+    expect(recovered.budget.costReceiptAvailable).toBe(true);
+    expect(recovered.queue.lastError).toBeNull();
+    expect(recovered.queue.done).toEqual([]);
+    expect(recovered.queue.pending).toHaveLength(1);
+    expect(clipDiscoveryInterpretationExcerpt(excerpt)).toHaveLength(2000);
+
+    const realBlock = recoverFalsePacketCostLock({
+      budget: {
+        ...emptyDiscoveryInterpretationBudget(),
+        costReceiptAvailable: false,
+      },
+      queue: {
+        ...emptyDiscoveryInterpretationQueue(),
+        pending: [{ ...item, excerpt: excerpt.slice(0, 180) }],
+        done: [
+          {
+            observationId: item.observationId,
+            semantic: "unavailable",
+            provider: "unavailable",
+            model: null,
+            requestId: null,
+            reason: "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
+            sourceUrl: item.sourceUrl,
+            excerptHash: createHash("sha256").update(excerpt.slice(0, 180)).digest("hex"),
+            grounded: false,
+          },
+        ],
+        status: "unavailable",
+        lastError: "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
+      },
+    });
+    expect(realBlock.budget.costReceiptAvailable).toBe(false);
+    expect(realBlock.queue.lastError).toBe("DISCOVERY_COST_RECEIPT_UNAVAILABLE");
   });
   it("resolves the frozen binding and rejects a stale credential generation", () => {
     expect(

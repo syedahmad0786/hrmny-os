@@ -306,6 +306,16 @@ describe("inactive Discovery public-news n8n artifacts", () => {
       contentSnippet: "Gulf News published a business item.",
       isoDate: "2026-09-21T00:00:00.000Z",
     };
+    const gulfEncoded = {
+      link: "https://gulfnews.com/business/corporate-news/from-350-applications-to-one-champion-school-of-cyber-defense-final-stage-at-gisec-global-2026-1.500682401",
+      guid: "gulf-news-encoded-item",
+      title: "From 350+ applications to one champion: School of Cyber Defense final stage at GISEC GLOBAL 2026",
+      contentSnippet: "",
+      content: "",
+      "content:encoded": "<p>The second edition of the School of Cyber Defense competition reached its final at GISEC GLOBAL 2026.</p>",
+      "content:encodedSnippet": "The second edition of the School of Cyber Defense competition reached its final at GISEC GLOBAL 2026.",
+      isoDate: "2026-09-21T00:00:00.000Z",
+    };
     const gulfSport = {
       ...gulfBusiness,
       link: "https://gulfnews.com/sport/cricket/uae-vs-england-1.456",
@@ -314,7 +324,7 @@ describe("inactive Discovery public-news n8n artifacts", () => {
     };
     const gulfMapped = runMapCodeWithoutUrlGlobal(
       mapCode,
-      [gulfBusiness, gulfSport],
+      [gulfBusiness, gulfEncoded, gulfSport],
       {
         maxObservations: 20,
         sourceKey: "gulf_news_business",
@@ -330,11 +340,42 @@ describe("inactive Discovery public-news n8n artifacts", () => {
           url: gulfBusiness.link,
         },
       }),
+      expect.objectContaining({
+        sourceItemKey: gulfEncoded.guid,
+        excerpt: gulfEncoded["content:encodedSnippet"],
+        sourceReference: {
+          kind: "public_url",
+          url: gulfEncoded.link,
+        },
+      }),
     ]);
+    const longBody = `${"A group wins its first significant contract in a new market. ".repeat(80)}GISEC GLOBAL closed the final.`;
+    const gulfLong = runMapCodeWithoutUrlGlobal(
+      mapCode,
+      [
+        {
+          ...gulfEncoded,
+          guid: "gulf-news-long-item",
+          contentSnippet: "",
+          content: "",
+          "content:encoded": `<p>${longBody}</p>`,
+          "content:encodedSnippet": longBody,
+        },
+      ],
+      {
+        maxObservations: 20,
+        sourceKey: "gulf_news_business",
+        listingPathPrefix: "/business/",
+        permittedHosts: ["gulfnews.com", "www.gulfnews.com"],
+      },
+    )[0]!.json;
+    const longObservations = gulfLong.observations as Array<{ excerpt?: string }>;
+    expect(longObservations[0]?.excerpt).toHaveLength(2000);
+    expect(String(longObservations[0]?.excerpt)).toContain("A group wins its first significant contract");
     expect(gulfMapped.completion).toMatchObject({
       status: "completed",
-      counts: { quarantined: 1, rejected: 0 },
-      checkpoint: { itemsSeen: 2, pagesSeen: 1 },
+      counts: { quarantined: 2, rejected: 0 },
+      checkpoint: { itemsSeen: 3, pagesSeen: 1 },
     });
 
     const gulfEmpty = runMapCodeWithoutUrlGlobal(
