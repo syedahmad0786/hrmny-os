@@ -254,36 +254,20 @@ test.describe("Discovery programme configuration", () => {
       .getByText(name, { exact: true })
       .click();
     await expect(page.getByTestId("discovery-queue-run-now")).toBeVisible();
-    await page.getByTestId("discovery-queue-run-now").click();
-    await expect(page.getByTestId("discovery-programme-note")).toContainText(
-      /Run pending.*Collectors stay off/i,
-      { timeout: 30_000 },
+    await expect(page.getByTestId("discovery-queue-run-now")).toBeDisabled();
+    await expect(page.getByTestId("discovery-execution-status")).toContainText(
+      /Execution status:\s*unavailable/i,
+    );
+    await expect(page.getByTestId("discovery-execution-status")).toContainText(
+      /Collectors and provider calls stay off/i,
     );
     await page.getByTestId("discovery-view-runs").click();
     await expect(
       page.getByTestId("discovery-runs-execution-status"),
-    ).toContainText(/Execution status: unavailable/i);
-    await expect(page.getByTestId("discovery-runs")).toContainText(name);
+    ).toContainText(/Execution status:\s*unavailable/i);
+    await expect(page.getByTestId("discovery-request-run")).toBeDisabled();
     await page.screenshot({
       path: "e2e/runtime-proof/discovery-runs.png",
-      fullPage: true,
-    });
-    await page
-      .locator('[data-testid^="discovery-run-"]')
-      .filter({ hasText: name })
-      .filter({ hasText: "pending" })
-      .first()
-      .click();
-    await expect(page.getByTestId("discovery-run-detail")).toContainText(
-      /n8n has not claimed this run/i,
-    );
-    await page.getByTestId("discovery-cancel-run").click();
-    await expect(page.getByTestId("discovery-run-note")).toContainText(
-      /cancelled.*No collector was started/i,
-      { timeout: 30_000 },
-    );
-    await page.screenshot({
-      path: "e2e/runtime-proof/discovery-run-cancelled.png",
       fullPage: true,
     });
   });
