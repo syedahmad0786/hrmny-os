@@ -485,6 +485,8 @@ export async function acceptDiscoveryPolicySuggestion(input: {
   actorEmployeeId: string;
   isAdmin: boolean;
 }) {
+  if (!input.isAdmin)
+    throw new DiscoveryControlError("FORBIDDEN", "SALES_ADMIN_REQUIRED");
   const suggestion = policySuggestions.get(input.suggestionId);
   if (!suggestion)
     throw new DiscoveryControlError("NOT_FOUND", "POLICY_SUGGESTION_NOT_FOUND");

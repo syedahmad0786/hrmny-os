@@ -188,6 +188,16 @@ describe("Discovery ongoing control", () => {
     expect(queued.items.some((item) => item.id === suggestion.suggestionId)).toBe(
       true,
     );
+    await expect(
+      acceptDiscoveryPolicySuggestion({
+        suggestionId: suggestion.suggestionId,
+        actorEmployeeId: ownerId,
+        isAdmin: false,
+      }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "SALES_ADMIN_REQUIRED",
+    });
     const accepted = await acceptDiscoveryPolicySuggestion({
       suggestionId: suggestion.suggestionId,
       actorEmployeeId: adminId,

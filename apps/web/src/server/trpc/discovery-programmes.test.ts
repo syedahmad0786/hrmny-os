@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetMemoryDiscoveryCandidates } from "../sales-os/discovery-candidates";
+import { resetMemoryDiscoveryControl } from "../sales-os/discovery-control";
 import {
   resetMemoryDiscoveryRuns,
   setMemoryDiscoveryRunStatusForTest,
@@ -43,6 +44,34 @@ describe("Discovery programme contract", () => {
     vi.stubEnv("DATABASE_MODE", "memory");
     resetMemoryDiscoveryRuns();
     resetMemoryDiscoveryCandidates();
+    resetMemoryDiscoveryControl();
+  });
+
+  it("keeps policy proposals operator-owned but policy acceptance admin-only", async () => {
+    const am = caller(resolveDevUser("am"));
+    const partner = caller(resolveDevUser("partner"));
+    const manifest = await am.salesOs.discovery.manifest();
+    const created = await am.salesOs.discovery.programmes.create({
+      config: manifest.config,
+      sources: sourceDrafts(manifest.sources),
+    });
+    const suggestion = await am.salesOs.discovery.control.proposePolicy({
+      programmeId: created.id,
+      maxObservations: 40,
+      reason: "Lower the observation cap for future scheduled research runs",
+    });
+
+    await expect(
+      am.salesOs.discovery.control.acceptPolicy({
+        suggestionId: suggestion.suggestionId,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await expect(
+      partner.salesOs.discovery.control.acceptPolicy({
+        suggestionId: suggestion.suggestionId,
+      }),
+    ).resolves.toMatchObject({ maxObservations: 40 });
   });
 
   it("keeps unverified source truth visible and rejects unsafe URLs", async () => {

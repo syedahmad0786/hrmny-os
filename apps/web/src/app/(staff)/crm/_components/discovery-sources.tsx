@@ -58,6 +58,7 @@ export function DiscoverySources() {
     onError: (error) => setNote(error.message),
   });
   const canOperate = access.data?.canOperate === true;
+  const canAdmin = access.data?.canAdmin === true;
 
   return (
     <section className="crm-panel mb-5" data-testid="discovery-sources">
@@ -188,7 +189,7 @@ export function DiscoverySources() {
                       Retry from checkpoint
                     </CrmBtn>
                   ) : null}
-                  {canOperate && item.kind === "policy_suggestion" ? (
+                  {canAdmin && item.kind === "policy_suggestion" ? (
                     <CrmBtn
                       data-testid={`discovery-control-accept-policy-${item.id}`}
                       disabled={acceptPolicy.isPending}

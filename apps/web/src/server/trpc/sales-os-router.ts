@@ -1117,7 +1117,7 @@ export const salesOsRouter = router({
             }),
           ),
         ),
-      acceptPolicy: salesOperatorProcedure
+      acceptPolicy: salesAdminProcedure
         .input(discoveryPolicyAcceptSchema)
         .mutation(({ ctx, input }) =>
           discoveryCommand(() =>
