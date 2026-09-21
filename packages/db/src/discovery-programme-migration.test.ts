@@ -33,6 +33,12 @@ describe("Discovery programme migration contract", () => {
     expect(migration).toContain("research_programme_version_immutable_trg");
     expect(migration).toContain("research_programme_version_no_truncate_trg");
     expect(migration).toContain(
+      "ON FUNCTION public.research_programme_version_immutable()",
+    );
+    expect(migration).toMatch(
+      /ON FUNCTION public\.research_programme_version_immutable\(\)\s+FROM PUBLIC/,
+    );
+    expect(migration).toContain(
       "CREATE TABLE IF NOT EXISTS public.research_programme_source_binding (",
     );
     expect(migration).toContain(

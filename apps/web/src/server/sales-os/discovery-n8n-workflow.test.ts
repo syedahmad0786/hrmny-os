@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { runInNewContext, Script } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { DISCOVERY_WAKE_EVENT } from "@/server/inngest/discovery";
 import { evaluateDiscoveryObservationProvenance } from "./discovery-callback-ingest";
@@ -56,6 +57,24 @@ function nodeCode(workflow: JsonRecord, name: string) {
   return jsCode;
 }
 
+function runMapCodeWithoutUrlGlobal(code: string, rows: JsonRecord[]) {
+  return runInNewContext(`(function () { ${code}\n})()`, {
+    require(moduleName: string) {
+      if (moduleName !== "crypto") throw new Error("MODULE_NOT_ALLOWED");
+      return {
+        createHash,
+        randomUUID: () => "10000000-0000-4000-8000-000000000099",
+      };
+    },
+    $: () => ({
+      first: () => ({ json: { maxObservations: 20 } }),
+    }),
+    $input: {
+      all: () => rows.map((json) => ({ json })),
+    },
+  }) as Array<{ json: JsonRecord }>;
+}
+
 describe("inactive Discovery public-news n8n artifacts", () => {
   const workflow = readJson("docs/automations/n8n/discovery-public-news.json");
   const contract = readJson("docs/automations/n8n/discovery-callback-contract.json");
@@ -80,6 +99,19 @@ describe("inactive Discovery public-news n8n artifacts", () => {
     expect(serialized).not.toMatch(/n8n-nodes-base\.scheduleTrigger/);
     expect(serialized).not.toMatch(/BEGIN [A-Z]+ PRIVATE KEY/);
     expect(serialized).not.toMatch(/sk_live|sk-ant|whsec_|postgres(ql)?:\/\//i);
+  });
+
+  it("compiles every workflow Code node as JavaScript", () => {
+    const nodes = workflow.nodes as JsonRecord[];
+    for (const node of nodes.filter(
+      (candidate) => candidate.type === "n8n-nodes-base.code",
+    )) {
+      const code = nodeCode(workflow, String(node.name));
+      expect(
+        () => new Script(`(function () { ${code}\n})`),
+        String(node.name),
+      ).not.toThrow();
+    }
   });
 
   it("binds the webhook, callback, and Campaign ME feed to the existing OS contract", () => {
@@ -181,6 +213,56 @@ describe("inactive Discovery public-news n8n artifacts", () => {
         (item) => item.path === "/api/cron/discovery",
       ),
     ).toBe(false);
+  });
+
+  it("maps pinned Campaign ME URLs when the n8n Cloud URL global is absent", () => {
+    const mapCode = nodeCode(workflow, "Map Public-News Observations");
+    expect(mapCode).not.toContain("new URL");
+    const valid = {
+      link: "https://campaignme.com/latest/agency-wins-brief/",
+      guid: "campaign-me-valid-item",
+      title: "Agency wins a regional brief",
+      contentSnippet: "Campaign ME published a public-news item.",
+      isoDate: "2026-09-20T00:00:00.000Z",
+    };
+    const mapped = runMapCodeWithoutUrlGlobal(mapCode, [
+      valid,
+      { ...valid, guid: "external", link: "https://evil.example/story" },
+    ])[0]!.json;
+    expect(mapped.observations).toEqual([
+      expect.objectContaining({
+        sourceItemKey: valid.guid,
+        sourceReference: {
+          kind: "public_url",
+          url: valid.link,
+        },
+      }),
+    ]);
+    expect(mapped.completion).toMatchObject({
+      status: "completed",
+      counts: { quarantined: 1, rejected: 1 },
+    });
+
+    for (const link of [
+      "https://evil.example/story",
+      "https://campaignme.com/story?redirect=https://evil.example",
+      "https://campaignme.com/story#fragment",
+      "https://user@campaignme.com/story",
+      "https://campaignme.com:443/story",
+      "https://campaignme.com//evil.example/story",
+      "https://campaignme.com\\evil.example/story",
+      "https://campaignme.com/story\nnext",
+    ]) {
+      const rejected = runMapCodeWithoutUrlGlobal(mapCode, [
+        { ...valid, guid: link, link },
+      ])[0]!.json;
+      expect(rejected.observations, link).toEqual([]);
+      expect(rejected.completion, link).toMatchObject({
+        status: "failed",
+        counts: { rejected: 1 },
+        error: { code: "contract_invalid", retryable: false },
+      });
+    }
   });
 
   it("signs a Campaign ME observation the same way the workflow Code node and OS validator expect", () => {
