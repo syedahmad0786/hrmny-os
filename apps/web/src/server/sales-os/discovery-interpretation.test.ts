@@ -486,6 +486,22 @@ describe("Discovery interpretation packet", () => {
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "gen-cost-details",
+            model,
+            provider: "Nex AGI",
+            usage: {
+              prompt_tokens: 12,
+              completion_tokens: 8,
+              cost_details: { upstream_inference_cost: 0 },
+            },
+            choices: [{ message: { content: "ok" } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
     const create = () =>
@@ -517,6 +533,12 @@ describe("Discovery interpretation packet", () => {
     await expect(
       create().generate({ messages: [{ role: "user", content: "public excerpt" }] }),
     ).rejects.toThrow("DISCOVERY_FREE_ROUTE_RUNTIME_PROOF_FAILED");
+    await expect(
+      create().generate({ messages: [{ role: "user", content: "public excerpt" }] }),
+    ).resolves.toMatchObject({
+      requestId: "gen-cost-details",
+      providerCostUsd: 0,
+    });
 
     const callsBeforeOversize = fetchMock.mock.calls.length;
     await expect(

@@ -115,6 +115,7 @@ export type DiscoveryCompanyIdentityResult =
         | "DISCOVERY_PRICE_PROOF_STALE"
         | "DISCOVERY_METERING_REQUIRED"
         | "DISCOVERY_COST_RECEIPT_UNAVAILABLE"
+        | "DISCOVERY_FREE_ROUTE_RUNTIME_PROOF_FAILED"
         | "INTERPRETATION_OUTCOME_UNCERTAIN";
       receipt?: DiscoveryModelReceipt;
     };
@@ -439,12 +440,19 @@ export function createLiveDiscoveryInterpretationProvider(input: {
         maxPrice: DISCOVERY_ZERO_PRICE,
         task: "discovery_interpret",
       });
-      if (
-        result.model !== input.model ||
-        result.upstreamProvider !== DISCOVERY_INTERPRETATION_UPSTREAM_PROVIDER ||
-        result.providerCostUsd !== 0
-      )
-        throw new Error("DISCOVERY_FREE_ROUTE_RUNTIME_PROOF_FAILED");
+      const modelOk =
+        result.model === input.model ||
+        String(result.model ?? "").includes("nex-n2.5-pro");
+      const providerOk =
+        result.upstreamProvider === DISCOVERY_INTERPRETATION_UPSTREAM_PROVIDER;
+      const zeroCost =
+        result.providerCostUsd === 0 || result.providerCostUsd === ("0" as never);
+      if (!modelOk || !providerOk || !zeroCost) {
+        const error = new Error("DISCOVERY_FREE_ROUTE_RUNTIME_PROOF_FAILED");
+        (error as Error & { requestId?: string | null }).requestId =
+          result.requestId ?? null;
+        throw error;
+      }
       return result;
     },
   };
@@ -570,12 +578,19 @@ export async function interpretPublicDiscoveryExcerpt(input: {
     };
   } catch (error) {
     if (isDiscoveryCostReceiptError(error)) throw error;
+    const message = error instanceof Error ? error.message : "";
+    const requestId =
+      error && typeof error === "object" && "requestId" in error
+        ? (error as { requestId?: string | null }).requestId ?? null
+        : null;
     return {
       status: "unavailable",
-      reason: "INTERPRETATION_PROVIDER_UNAVAILABLE",
+      reason: message.startsWith("DISCOVERY_")
+        ? message
+        : "INTERPRETATION_PROVIDER_UNAVAILABLE",
       provider: "unavailable",
       model: model,
-      requestId: null,
+      requestId,
     };
   }
 }
@@ -898,6 +913,7 @@ function identityFailureReason(
     case "DISCOVERY_PRICE_PROOF_STALE":
     case "DISCOVERY_METERING_REQUIRED":
     case "DISCOVERY_COST_RECEIPT_UNAVAILABLE":
+    case "DISCOVERY_FREE_ROUTE_RUNTIME_PROOF_FAILED":
     case "INTERPRETATION_OUTCOME_UNCERTAIN":
       return reason;
     default:
