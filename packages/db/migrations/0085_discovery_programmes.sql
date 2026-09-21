@@ -113,6 +113,10 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL
+  ON FUNCTION public.research_programme_version_immutable()
+  FROM PUBLIC;
+
 DO $$ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger
