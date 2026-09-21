@@ -94,9 +94,10 @@ export const DISCOVERY_SOURCE_MANIFEST: readonly DiscoverySourceManifestItem[] =
     publication(
       "communicate_online",
       "Communicate Online",
-      "https://communicateonline.me",
-      "unverified",
-      "Homepage responded, but no feed declaration or runtime collector was verified.",
+      "https://communicateonline.me/",
+      "candidate",
+      "Publisher-declared feed parsed locally; runtime rights and 30-day coverage remain unverified.",
+      "https://communicateonline.me/feed/",
     ),
     publication(
       "gulf_business",
@@ -623,7 +624,7 @@ function normalizeSnapshot(
     return {
       ...manifest,
       ...draft,
-      configuration: { ...draft.configuration },
+      configuration: { ...manifest.configuration, ...draft.configuration },
     };
   });
   return { config, sources };
