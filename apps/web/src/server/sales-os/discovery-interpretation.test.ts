@@ -54,6 +54,28 @@ describe("Discovery interpretation packet", () => {
       receipt: { requestId: "gen-coerce" },
     });
   });
+
+  it("keeps identity-only JSON even when the live provider would have parsed a full schema", async () => {
+    const generate = vi.fn(async (options) => {
+      expect(options.schema).toBeUndefined();
+      return {
+        text: JSON.stringify({ companyName: "talabat" }),
+        provider: "mock" as const,
+        model: "mock",
+        requestId: "gen-live-identity",
+      };
+    });
+    const resolved = await resolvePublicDiscoveryCompanyIdentity({
+      excerpt:
+        "talabat, a leading everyday delivery app in the MENA region, has appointed Selin Suzer as Chief Marketing Officer.",
+      provider: { name: "mock", generate },
+    });
+    expect(resolved).toMatchObject({
+      ok: true,
+      name: "talabat",
+      receipt: { requestId: "gen-live-identity" },
+    });
+  });
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();

@@ -1044,10 +1044,10 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
                         max_tool_calls: 2,
                       }
                     : {}),
-                  ...(options.schema
+                  ...(options.schema || options.task === "discovery_interpret"
                     ? {
                         response_format: { type: "json_object" },
-                        ...(options.allowPlugins === false
+                        ...(options.allowPlugins === false || options.task === "discovery_interpret"
                           ? {}
                           : { plugins: [{ id: "response-healing" }] }),
                       }
