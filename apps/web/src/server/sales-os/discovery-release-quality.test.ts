@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetCrmMemory } from "../crm/memory";
 import {
   resetMemoryDiscoveryCandidates,
@@ -22,10 +22,14 @@ const actor = {
 
 describe("Discovery release-quality fixture set", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(DISCOVERY_RELEASE_QUALITY_NOW);
     vi.stubEnv("DATABASE_MODE", "memory");
     resetMemoryDiscoveryCandidates();
     resetCrmMemory();
   });
+
+  afterEach(() => vi.useRealTimers());
 
   it("runs 40 representative cases and reports the concrete gate list", async () => {
     const coverage = discoveryReleaseQualityCoverage();
