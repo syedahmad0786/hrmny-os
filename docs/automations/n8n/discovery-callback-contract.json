@@ -30,14 +30,52 @@
     "sales.discovery.checkpoint.v1",
     "sales.discovery.completion.v1"
   ],
-  "claims": ["iss", "aud", "jti", "iat", "exp", "bodyHash"],
-  "headerFields": ["alg", "typ", "kid"],
+  "claims": [
+    "iss",
+    "aud",
+    "jti",
+    "iat",
+    "exp",
+    "bodyHash"
+  ],
+  "headerFields": [
+    "alg",
+    "typ",
+    "kid"
+  ],
   "firstCollector": {
     "sourceKey": "campaign_me",
     "adapter": "rss_http",
     "executionMode": "automatic",
     "url": "https://campaignme.com/latest/",
     "feedUrl": "https://campaignme.com/feed/",
-    "permittedHosts": ["campaignme.com"]
-  }
+    "permittedHosts": [
+      "campaignme.com",
+      "www.campaignme.com"
+    ]
+  },
+  "collectors": [
+    {
+      "sourceKey": "campaign_me",
+      "adapter": "rss_http",
+      "executionMode": "automatic",
+      "url": "https://campaignme.com/latest/",
+      "feedUrl": "https://campaignme.com/feed/",
+      "permittedHosts": [
+        "campaignme.com",
+        "www.campaignme.com"
+      ]
+    },
+    {
+      "sourceKey": "communicate_online",
+      "adapter": "rss_http",
+      "executionMode": "automatic",
+      "url": "https://communicateonline.me/",
+      "feedUrl": "https://communicateonline.me/feed/",
+      "permittedHosts": [
+        "communicateonline.me",
+        "www.communicateonline.me"
+      ]
+    }
+  ]
 }

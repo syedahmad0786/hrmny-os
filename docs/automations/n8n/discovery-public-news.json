@@ -1,5 +1,5 @@
 {
-  "name": "hrmny-STAGING — discovery public news",
+  "name": "hrmny-STAGING \u2014 discovery public news",
   "active": false,
   "settings": {
     "executionOrder": "v1"
@@ -40,7 +40,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const incoming = $input.first().json;\nconst trigger = incoming.body ?? incoming;\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nif (trigger.schemaVersion !== 1) throw new Error('DISCOVERY_TRIGGER_INVALID');\nif (!uuid.test(String(trigger.runId)) || !uuid.test(String(trigger.attemptToken))) throw new Error('DISCOVERY_TRIGGER_INVALID');\nconst generation = Number(trigger.attemptGeneration);\nif (!Number.isInteger(generation) || generation < 1) throw new Error('DISCOVERY_TRIGGER_INVALID');\nconst sources = Array.isArray(trigger.sources) ? trigger.sources : [];\nconst source = sources.find((item) => item && item.executionMode === 'automatic' && item.sourceKey === 'campaign_me' && uuid.test(String(item.bindingId)));\nif (!source) throw new Error('NO_AUTOMATIC_DISCOVERY_SOURCES');\nconst maxObservations = Math.min(Math.max(Number(trigger.maxObservations) || 25, 1), 25);\nreturn [{ json: { runId: trigger.runId, programmeId: trigger.programmeId, attemptToken: trigger.attemptToken, attemptGeneration: generation, sourceId: source.bindingId, credentialGeneration: Number(source.credentialGeneration) || 0, maxObservations: maxObservations } }];"
+        "jsCode": "const incoming = $input.first().json;\nconst trigger = incoming.body ?? incoming;\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nif (trigger.schemaVersion !== 1) throw new Error('DISCOVERY_TRIGGER_INVALID');\nif (!uuid.test(String(trigger.runId)) || !uuid.test(String(trigger.attemptToken))) throw new Error('DISCOVERY_TRIGGER_INVALID');\nconst generation = Number(trigger.attemptGeneration);\nif (!Number.isInteger(generation) || generation < 1) throw new Error('DISCOVERY_TRIGGER_INVALID');\nconst sources = Array.isArray(trigger.sources) ? trigger.sources : [];\nconst source = sources.find((item) => {\n  if (!item || item.executionMode !== 'automatic' || !uuid.test(String(item.bindingId))) return false;\n  const feedUrl = String(item.configuration && item.configuration.feedUrl || '');\n  return /^https:\\/\\/[a-z0-9.-]+\\/feed\\/?$/i.test(feedUrl);\n});\nif (!source) throw new Error('NO_AUTOMATIC_DISCOVERY_SOURCES');\nconst feedUrl = String(source.configuration.feedUrl);\nconst feedHost = feedUrl.slice('https://'.length).split('/')[0].toLowerCase();\nconst permittedHosts = [feedHost];\nif (feedHost.startsWith('www.')) permittedHosts.push(feedHost.slice(4));\nelse permittedHosts.push('www.' + feedHost);\nconst maxObservations = Math.min(Math.max(Number(trigger.maxObservations) || 25, 1), 25);\nreturn [{ json: { runId: trigger.runId, programmeId: trigger.programmeId, attemptToken: trigger.attemptToken, attemptGeneration: generation, sourceId: source.bindingId, sourceKey: source.sourceKey, credentialGeneration: Number(source.credentialGeneration) || 0, maxObservations: maxObservations, feedUrl: feedUrl, permittedHosts: permittedHosts } }];"
       }
     },
     {
@@ -62,7 +62,7 @@
     },
     {
       "id": "6d4e1c20-8b71-4a1f-9d3e-2f0c8a91b004",
-      "name": "Read Campaign ME Feed",
+      "name": "Read Public News Feed",
       "type": "n8n-nodes-base.rssFeedRead",
       "typeVersion": 1.2,
       "position": [
@@ -72,7 +72,7 @@
       "continueOnFail": true,
       "onError": "continueRegularOutput",
       "parameters": {
-        "url": "https://campaignme.com/feed/",
+        "url": "={{ $json.feedUrl }}",
         "options": {}
       }
     },
@@ -88,7 +88,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const crypto = require('crypto');\nconst trigger = $('Normalize Trigger').first().json;\nconst items = $input.all();\nconst feedFailed = items.some((item) => item.json && (item.json.error || item.json.level === 'error'));\nconst permittedHosts = new Set(['campaignme.com', 'www.campaignme.com']);\nfunction permittedUrl(raw) {\n  const value = String(raw || '');\n  if (!value || value !== value.trim()) return null;\n  const match = /^https:\\/\\/([a-z0-9.-]+)(\\/[^?#\\\\\\u0000-\\u0020\\u007f]*)$/i.exec(value);\n  if (!match || match[2].startsWith('//')) return null;\n  const host = match[1].toLowerCase();\n  if (!permittedHosts.has(host)) return null;\n  return 'https://' + host + match[2];\n}\nfunction isoDate(value) {\n  if (!value) return null;\n  const date = new Date(String(value));\n  return Number.isNaN(date.getTime()) ? null : date.toISOString();\n}\nconst observations = [];\nlet rejectedCount = 0;\nif (!feedFailed) {\n  for (const item of items) {\n    if (observations.length >= trigger.maxObservations) break;\n    const row = item.json || {};\n    const url = permittedUrl(row.link || row.guid);\n    if (!url) { rejectedCount += 1; continue; }\n    const title = String(row.title || '').trim().slice(0, 500);\n    const excerpt = String(row.contentSnippet || row.content || title).trim().slice(0, 5000);\n    const sourceItemKey = String(row.guid || url).trim().slice(0, 512);\n    if (!title || !excerpt || !sourceItemKey) { rejectedCount += 1; continue; }\n    const publishedAt = isoDate(row.isoDate || row.pubDate);\n    observations.push({\n      observationId: crypto.randomUUID(),\n      sourceItemKey: sourceItemKey,\n      contentHash: crypto.createHash('sha256').update(sourceItemKey + '\\n' + url + '\\n' + title + '\\n' + excerpt, 'utf8').digest('hex'),\n      sourceReference: { kind: 'public_url', url: url },\n      observedAt: new Date().toISOString(),\n      publishedAt: publishedAt,\n      dateEvidence: { method: publishedAt ? 'feed' : 'page_metadata', precision: publishedAt ? 'day' : 'unknown' },\n      kind: 'news',\n      title: title,\n      excerpt: excerpt,\n      companyHints: []\n    });\n  }\n}\nconst allRejected = !feedFailed && items.length > 0 && observations.length === 0;\nconst lastKey = observations.length ? observations[observations.length - 1].sourceItemKey : null;\nconst checkpoint = { cursor: lastKey, providerJobId: null, itemsSeen: observations.length, pagesSeen: feedFailed ? 0 : 1 };\nconst completion = feedFailed\n  ? { status: 'failed', counts: { ingested: 0, duplicate: 0, quarantined: 0, rejected: 0 }, checkpoint: checkpoint, usage: [{ providerRequestId: null, units: 1, unitKind: 'request' }], error: { code: 'source_unavailable', retryable: true } }\n  : allRejected\n    ? { status: 'failed', counts: { ingested: 0, duplicate: 0, quarantined: 0, rejected: rejectedCount }, checkpoint: checkpoint, usage: [{ providerRequestId: null, units: 1, unitKind: 'request' }], error: { code: 'contract_invalid', retryable: false } }\n    : { status: 'completed', counts: { ingested: observations.filter((item) => item.companyHints.length > 0).length, duplicate: 0, quarantined: observations.filter((item) => item.companyHints.length === 0).length, rejected: rejectedCount }, checkpoint: checkpoint, usage: [{ providerRequestId: null, units: 1, unitKind: 'request' }] };\nreturn [{ json: { trigger: trigger, observations: observations, completion: completion } }];"
+        "jsCode": "const crypto = require('crypto');\nconst trigger = $('Normalize Trigger').first().json;\nconst items = $input.all();\nconst feedFailed = items.some((item) => item.json && (item.json.error || item.json.level === 'error'));\nconst permittedHosts = new Set(Array.isArray(trigger.permittedHosts) ? trigger.permittedHosts.map((item) => String(item).toLowerCase()) : []);\nfunction permittedUrl(raw) {\n  const value = String(raw || '');\n  if (!value || value !== value.trim()) return null;\n  const match = /^https:\\/\\/([a-z0-9.-]+)(\\/[^?#\\\\\\u0000-\\u0020\\u007f]*)$/i.exec(value);\n  if (!match || match[2].startsWith('//')) return null;\n  const host = match[1].toLowerCase();\n  if (!permittedHosts.has(host)) return null;\n  return 'https://' + host + match[2];\n}\nfunction isoDate(value) {\n  if (!value) return null;\n  const date = new Date(String(value));\n  return Number.isNaN(date.getTime()) ? null : date.toISOString();\n}\nconst observations = [];\nlet rejectedCount = 0;\nif (!feedFailed) {\n  for (const item of items) {\n    if (observations.length >= trigger.maxObservations) break;\n    const row = item.json || {};\n    const url = permittedUrl(row.link || row.guid);\n    if (!url) { rejectedCount += 1; continue; }\n    const title = String(row.title || '').trim().slice(0, 500);\n    const excerpt = String(row.contentSnippet || row.content || title).trim().slice(0, 5000);\n    const sourceItemKey = String(row.guid || url).trim().slice(0, 512);\n    if (!title || !excerpt || !sourceItemKey) { rejectedCount += 1; continue; }\n    const publishedAt = isoDate(row.isoDate || row.pubDate);\n    observations.push({\n      observationId: crypto.randomUUID(),\n      sourceItemKey: sourceItemKey,\n      contentHash: crypto.createHash('sha256').update(sourceItemKey + '\\n' + url + '\\n' + title + '\\n' + excerpt, 'utf8').digest('hex'),\n      sourceReference: { kind: 'public_url', url: url },\n      observedAt: new Date().toISOString(),\n      publishedAt: publishedAt,\n      dateEvidence: { method: publishedAt ? 'feed' : 'page_metadata', precision: publishedAt ? 'day' : 'unknown' },\n      kind: 'news',\n      title: title,\n      excerpt: excerpt,\n      companyHints: []\n    });\n  }\n}\nconst allRejected = !feedFailed && items.length > 0 && observations.length === 0;\nconst lastKey = observations.length ? observations[observations.length - 1].sourceItemKey : null;\nconst checkpoint = { cursor: lastKey, providerJobId: null, itemsSeen: observations.length, pagesSeen: feedFailed ? 0 : 1 };\nconst completion = feedFailed\n  ? { status: 'failed', counts: { ingested: 0, duplicate: 0, quarantined: 0, rejected: 0 }, checkpoint: checkpoint, usage: [{ providerRequestId: null, units: 1, unitKind: 'request' }], error: { code: 'source_unavailable', retryable: true } }\n  : allRejected\n    ? { status: 'failed', counts: { ingested: 0, duplicate: 0, quarantined: 0, rejected: rejectedCount }, checkpoint: checkpoint, usage: [{ providerRequestId: null, units: 1, unitKind: 'request' }], error: { code: 'contract_invalid', retryable: false } }\n    : { status: 'completed', counts: { ingested: observations.filter((item) => item.companyHints.length > 0).length, duplicate: 0, quarantined: observations.filter((item) => item.companyHints.length === 0).length, rejected: rejectedCount }, checkpoint: checkpoint, usage: [{ providerRequestId: null, units: 1, unitKind: 'request' }] };\nreturn [{ json: { trigger: trigger, observations: observations, completion: completion } }];"
       }
     },
     {
@@ -292,14 +292,14 @@
       "main": [
         [
           {
-            "node": "Read Campaign ME Feed",
+            "node": "Read Public News Feed",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Read Campaign ME Feed": {
+    "Read Public News Feed": {
       "main": [
         [
           {
@@ -391,7 +391,11 @@
       "module": "discovery",
       "inactiveOnPurpose": true,
       "noScheduleTrigger": true,
-      "firstCollector": "campaign_me"
+      "firstCollector": "campaign_me",
+      "collectors": [
+        "campaign_me",
+        "communicate_online"
+      ]
     }
   }
 }

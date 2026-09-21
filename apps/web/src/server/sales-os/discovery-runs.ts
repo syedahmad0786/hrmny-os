@@ -1732,8 +1732,6 @@ export async function authorizeDiscoveryOutboundStep(input: {
       !payload.effective
     )
       throw new DiscoveryRunError("STALE_FENCE", "RUN_ATTEMPT_MISMATCH");
-    if (result.n8nClaim)
-      throw new DiscoveryRunError("ALREADY_CLAIMED", "N8N_EXECUTION_ALREADY_CLAIMED");
     await reauthorizeEffectiveTx(tx, payload.effective);
     if (
       payload.effective.runtime.n8nConnectionAccountId !==

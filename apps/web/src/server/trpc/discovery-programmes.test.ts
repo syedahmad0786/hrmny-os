@@ -150,7 +150,21 @@ describe("Discovery programme contract", () => {
       reopened.draft.sources.find(
         (source) => source.sourceKey === "campaign_me",
       )?.configuration,
-    ).toEqual({ url: "https://campaignme.com/latest/" });
+    ).toEqual({
+      url: "https://campaignme.com/latest/",
+      feedUrl: "https://campaignme.com/feed/",
+    });
+    expect(
+      reopened.draft.sources.find(
+        (source) => source.sourceKey === "communicate_online",
+      ),
+    ).toMatchObject({
+      capabilityState: "candidate",
+      configuration: {
+        url: "https://communicateonline.me/",
+        feedUrl: "https://communicateonline.me/feed/",
+      },
+    });
   });
 
   it("enforces ownership, admin publish, and one-winner optimistic updates", async () => {

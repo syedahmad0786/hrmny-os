@@ -8,8 +8,10 @@ import {
   type DiscoveryInterpretationQueue,
 } from "./discovery-callback-ingest";
 import { scheduleDiscoveryInterpretation } from "../inngest/discovery";
+import { triggerDiscoveryN8n } from "./discovery-n8n";
 import { DiscoveryCandidateError } from "./discovery-candidates";
 import {
+  buildDiscoveryN8nTrigger,
   DiscoveryRunError,
   DiscoveryRunPayloadV1Schema,
   DISCOVERY_HEARTBEAT_LEASE_MS,
@@ -72,6 +74,29 @@ function mergeInterpretationQueue(
         ? current.lastError
         : incoming.lastError,
   } satisfies DiscoveryInterpretationQueue;
+}
+
+function unfinishedAutomaticFeedSources(
+  effective:
+    | {
+        sources: Array<{
+          sourceKey: string;
+          enabled: boolean;
+          executionMode: "automatic" | "manual";
+          configuration: Record<string, unknown>;
+        }>;
+      }
+    | null
+    | undefined,
+  sourceOutcomes: Record<string, unknown>,
+) {
+  return (effective?.sources ?? []).filter((source) => {
+    if (!source.enabled || source.executionMode !== "automatic") return false;
+    if (typeof source.configuration.feedUrl !== "string" || !source.configuration.feedUrl)
+      return false;
+    const outcome = asOutcomeRecord(sourceOutcomes[source.sourceKey]);
+    return outcome.lastEvent !== "sales.discovery.completion.v1";
+  });
 }
 
 function hasPendingInterpretation(result: Record<string, unknown>) {
@@ -172,13 +197,14 @@ function applyEnvelope(
   envelope: DiscoveryRuntimeEnvelope,
   bodyHash: string,
   sourceKey: string,
-  ingest?: {
+  ingest: {
     ingested: number;
     duplicate: number;
     replay: number;
     quarantined: number;
     interpretation?: DiscoveryInterpretationQueue;
-  },
+  } | undefined,
+  remainingFeedSourceKeys: string[],
 ): { result: Record<string, unknown>; terminalStatus: string | null } {
   const sourceOutcomes =
     result.sourceOutcomes && typeof result.sourceOutcomes === "object"
@@ -224,16 +250,22 @@ function applyEnvelope(
     case "sales.discovery.checkpoint.v1":
       return { result: next, terminalStatus: null };
     case "sales.discovery.completion.v1": {
+      const moreFeeds = remainingFeedSourceKeys.length > 0;
       const completed = {
         ...next,
-        outcome: envelope.payload.status,
-        providerTerminalStatus: envelope.payload.status,
+        ...(moreFeeds
+          ? {}
+          : {
+              outcome: envelope.payload.status,
+              providerTerminalStatus: envelope.payload.status,
+            }),
       };
       return {
         result: completed,
-        terminalStatus: hasPendingInterpretation(completed)
-          ? null
-          : envelope.payload.status,
+        terminalStatus:
+          moreFeeds || hasPendingInterpretation(completed)
+            ? null
+            : envelope.payload.status,
       };
     }
     default: {
@@ -339,12 +371,32 @@ export async function acceptDiscoveryRuntimeCallback(input: {
           maxObservations: maxObservationsFromEffective(payload.data.effective),
         });
       }
+      const currentResult = (job.result ?? {}) as Record<string, unknown>;
+      const previewOutcomes =
+        currentResult.sourceOutcomes && typeof currentResult.sourceOutcomes === "object"
+          ? { ...(currentResult.sourceOutcomes as Record<string, unknown>) }
+          : {};
+      if (envelope.event === "sales.discovery.completion.v1") {
+        previewOutcomes[resolved.source.sourceKey] = {
+          ...asOutcomeRecord(previewOutcomes[resolved.source.sourceKey]),
+          lastEvent: envelope.event,
+        };
+      }
+      const remainingFeedSources = unfinishedAutomaticFeedSources(
+        payload.data.effective,
+        previewOutcomes,
+      ).filter((source) => source.sourceKey !== resolved.source.sourceKey || envelope.event !== "sales.discovery.completion.v1");
+      const remainingAfterThis =
+        envelope.event === "sales.discovery.completion.v1"
+          ? remainingFeedSources
+          : unfinishedAutomaticFeedSources(payload.data.effective, previewOutcomes);
       const applied = applyEnvelope(
-        (job.result ?? {}) as Record<string, unknown>,
+        currentResult,
         envelope,
         validated.bodyHash,
         resolved.source.sourceKey,
         ingest,
+        remainingAfterThis.map((source) => source.sourceKey),
       );
       const terminal =
         job.status === "cancel_requested"
@@ -397,6 +449,27 @@ export async function acceptDiscoveryRuntimeCallback(input: {
           job.researchProgrammeId,
           now,
         );
+      const retrigger =
+        !terminal &&
+        envelope.event === "sales.discovery.completion.v1" &&
+        remainingAfterThis.length > 0 &&
+        job.attemptToken &&
+        job.overallDeadlineAt &&
+        payload.data.effective
+          ? buildDiscoveryN8nTrigger({
+              jobId: job.scheduledJobId,
+              programmeId: payload.data.programmeId,
+              attemptToken: job.attemptToken,
+              attempts: job.attempts,
+              overallDeadlineAt: job.overallDeadlineAt,
+              effective: {
+                ...payload.data.effective,
+                sources: payload.data.effective.sources.filter((source) =>
+                  remainingAfterThis.some((item) => item.sourceKey === source.sourceKey),
+                ),
+              },
+            })
+          : null;
       return {
         status: "accepted" as const,
         eventId: envelope.eventId,
@@ -407,6 +480,7 @@ export async function acceptDiscoveryRuntimeCallback(input: {
         sourceKey: resolved.source.sourceKey,
         attemptToken: envelope.attemptToken,
         attemptGeneration: envelope.attemptGeneration,
+        retrigger,
       };
     });
     if (
@@ -420,6 +494,12 @@ export async function acceptDiscoveryRuntimeCallback(input: {
         attemptToken: accepted.attemptToken,
         attemptGeneration: accepted.attemptGeneration,
       });
+    if (
+      accepted.status === "accepted" &&
+      "retrigger" in accepted &&
+      accepted.retrigger
+    )
+      await triggerDiscoveryN8n(accepted.retrigger);
     return accepted.status === "accepted" || accepted.status === "replay"
       ? { status: accepted.status, eventId: accepted.eventId }
       : accepted;

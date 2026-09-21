@@ -57,7 +57,14 @@ function nodeCode(workflow: JsonRecord, name: string) {
   return jsCode;
 }
 
-function runMapCodeWithoutUrlGlobal(code: string, rows: JsonRecord[]) {
+function runMapCodeWithoutUrlGlobal(
+  code: string,
+  rows: JsonRecord[],
+  trigger: JsonRecord = {
+    maxObservations: 20,
+    permittedHosts: ["campaignme.com", "www.campaignme.com"],
+  },
+) {
   return runInNewContext(`(function () { ${code}\n})()`, {
     require(moduleName: string) {
       if (moduleName !== "crypto") throw new Error("MODULE_NOT_ALLOWED");
@@ -67,7 +74,7 @@ function runMapCodeWithoutUrlGlobal(code: string, rows: JsonRecord[]) {
       };
     },
     $: () => ({
-      first: () => ({ json: { maxObservations: 20 } }),
+      first: () => ({ json: trigger }),
     }),
     $input: {
       all: () => rows.map((json) => ({ json })),
@@ -152,8 +159,8 @@ describe("inactive Discovery public-news n8n artifacts", () => {
       url: "https://campaignme.com/latest/",
       feedUrl: "https://campaignme.com/feed/",
     });
-    expect(nodeByName(workflow, "Read Campaign ME Feed").parameters).toMatchObject({
-      url: "https://campaignme.com/feed/",
+    expect(nodeByName(workflow, "Read Public News Feed").parameters).toMatchObject({
+      url: "={{ $json.feedUrl }}",
     });
     const serialized = JSON.stringify(workflow);
     expect(serialized).toContain("x-hrmny-discovery-token");
@@ -178,12 +185,15 @@ describe("inactive Discovery public-news n8n artifacts", () => {
         options: { algorithm: "HS256" },
       });
     }
+    const normalizeCode = nodeCode(workflow, "Normalize Trigger");
+    expect(normalizeCode).toContain("configuration.feedUrl");
+    expect(normalizeCode).toContain("permittedHosts");
     const mapCode = nodeCode(workflow, "Map Public-News Observations");
-    expect(mapCode).toContain("campaignme.com");
+    expect(mapCode).toContain("trigger.permittedHosts");
     expect(mapCode).toContain("public_url");
     expect(mapCode).toContain("quarantined: observations.filter");
     expect(mapCode).toContain("companyHints.length === 0");
-    expect(mapCode).not.toContain("communicateonline.me");
+    expect(mapCode).not.toContain("new URL");
   });
 
   it("does not attach the Discovery repair clock to the generic Vercel cron", () => {
@@ -263,6 +273,31 @@ describe("inactive Discovery public-news n8n artifacts", () => {
         error: { code: "contract_invalid", retryable: false },
       });
     }
+
+    const communicate = {
+      link: "https://communicateonline.me/news/fp7-mccann-mullenlowe-to-merge-as-mccann-mena/",
+      guid: "https://communicateonline.me/?p=30643",
+      title: "FP7 McCann, MullenLowe to merge as McCann MENA",
+      contentSnippet: "Communicate Online published a public-news item.",
+      isoDate: "2026-09-21T06:44:43.000Z",
+    };
+    const communicateMapped = runMapCodeWithoutUrlGlobal(
+      mapCode,
+      [communicate],
+      {
+        maxObservations: 20,
+        permittedHosts: ["communicateonline.me", "www.communicateonline.me"],
+      },
+    )[0]!.json;
+    expect(communicateMapped.observations).toEqual([
+      expect.objectContaining({
+        sourceItemKey: communicate.guid,
+        sourceReference: {
+          kind: "public_url",
+          url: communicate.link,
+        },
+      }),
+    ]);
   });
 
   it("signs a Campaign ME observation the same way the workflow Code node and OS validator expect", () => {
