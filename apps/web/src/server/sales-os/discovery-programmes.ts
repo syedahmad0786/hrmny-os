@@ -117,8 +117,9 @@ export const DISCOVERY_SOURCE_MANIFEST: readonly DiscoverySourceManifestItem[] =
       "gulf_news_business",
       "Gulf News Business",
       "https://gulfnews.com/business",
-      "unverified",
-      "The listing responded but hit the bounded payload limit; extraction remains unverified.",
+      "candidate",
+      "Publisher-declared feed parsed locally; runtime rights and 30-day coverage remain unverified.",
+      "https://gulfnews.com/feed",
     ),
     publication(
       "khaleej_times_business",

@@ -76,6 +76,17 @@
         "communicateonline.me",
         "www.communicateonline.me"
       ]
+    },
+    {
+      "sourceKey": "gulf_news_business",
+      "adapter": "rss_http",
+      "executionMode": "automatic",
+      "url": "https://gulfnews.com/business",
+      "feedUrl": "https://gulfnews.com/feed",
+      "permittedHosts": [
+        "gulfnews.com",
+        "www.gulfnews.com"
+      ]
     }
   ]
 }

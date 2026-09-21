@@ -911,4 +911,61 @@ describe("Discovery callback ingest mapping", () => {
       }),
     ).toEqual({ action: "done" });
   });
+
+  it("keeps leftover pending items continuable after a two-source 12-call reservation", () => {
+    const firstWave = Array.from(
+      { length: 12 },
+      (_, index) =>
+        `30000000-0000-4000-8000-00000000${String(index).padStart(4, "0")}`,
+    );
+    const leftoverId = "40000000-0000-4000-8000-000000000001";
+    const reserved = reserveDiscoveryInterpretationBudget(
+      emptyDiscoveryInterpretationBudget(),
+      firstWave,
+    );
+    expect(reserved).toMatchObject({
+      ok: true,
+      budget: { reservedCalls: 12 },
+    });
+    if (!reserved.ok) throw new Error("expected first-wave reserve");
+    const leftover = reserveDiscoveryInterpretationBudget(reserved.budget, [
+      leftoverId,
+    ]);
+    expect(leftover).toMatchObject({
+      ok: true,
+      budget: { reservedCalls: 13 },
+    });
+    if (!leftover.ok) throw new Error("expected leftover reserve");
+    const remaining = remainingDiscoveryInterpretationBudgetForQueue(
+      leftover.budget,
+      [leftoverId],
+    );
+    expect(remaining.calls).toBeGreaterThan(0);
+    expect(
+      planDiscoveryInterpretationTick({
+        queue: {
+          ...emptyDiscoveryInterpretationQueue(),
+          pending: [
+            {
+              observationId: leftoverId,
+              sourceItemKey: "leftover-campaign-me",
+              contentHash: "d".repeat(64),
+              sourceUrl:
+                "https://campaignme.com/talabat-appoints-selin-suzer-as-chief-marketing-officer/",
+              title: "talabat appoints Selin Süzer as Chief Marketing Officer",
+              excerpt:
+                "talabat appointed Selin Süzer as Chief Marketing Officer.",
+              publishedAt: "2026-09-21T00:00:00.000Z",
+              kind: "news",
+            },
+          ],
+          status: "ceiling",
+          lastError: "INTERPRETATION_CEILING_REACHED",
+        },
+        providerAvailable: true,
+        remainingCalls: remaining.calls,
+        remainingTokens: remaining.tokens,
+      }).action,
+    ).toBe("claim");
+  });
 });
