@@ -763,6 +763,8 @@ describe("openrouter free-model failover", () => {
       });
       const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
       expect(body.reasoning).toEqual({ enabled: false, exclude: true });
+      expect(body.response_format).toEqual({ type: "json_object" });
+      expect(body.plugins).toBeUndefined();
     } finally {
       vi.unstubAllGlobals();
     }

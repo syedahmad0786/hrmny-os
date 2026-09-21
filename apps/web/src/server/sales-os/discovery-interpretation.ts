@@ -522,7 +522,6 @@ export async function interpretPublicDiscoveryExcerpt(input: {
       webSearch: false,
       privateContext: false,
       maxPrice: DISCOVERY_ZERO_PRICE,
-      schema: discoveryInterpretationResultSchema,
       messages: [
         {
           role: "system",
