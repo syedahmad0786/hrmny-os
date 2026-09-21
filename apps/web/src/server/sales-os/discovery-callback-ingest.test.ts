@@ -358,6 +358,25 @@ describe("Discovery callback ingest mapping", () => {
         configuration,
       ),
     ).toEqual({ ok: false, reason: "SOURCE_ORIGIN_MISMATCH" });
+    const gulfConfiguration = {
+      url: "https://gulfnews.com/business",
+      feedUrl: "https://gulfnews.com/feed",
+    };
+    expect(
+      evaluateDiscoveryObservationProvenance({
+        url: "https://gulfnews.com/business/retail/talabat-expands-uae-dark-stores-1.123",
+        configuration: gulfConfiguration,
+      }),
+    ).toEqual({
+      ok: true,
+      url: "https://gulfnews.com/business/retail/talabat-expands-uae-dark-stores-1.123",
+    });
+    expect(
+      evaluateDiscoveryObservationProvenance({
+        url: "https://gulfnews.com/sport/cricket/uae-vs-england-1.456",
+        configuration: gulfConfiguration,
+      }),
+    ).toEqual({ ok: false, reason: "SOURCE_PATH_MISMATCH" });
   });
 
   it("refuses an empty automatic collector trigger", () => {

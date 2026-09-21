@@ -1,7 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { CrmBtn, CrmEmpty, CrmTag } from "@/components/crm/ui";
+import { formatRelative } from "@/components/crm/format";
+import {
+  CompanyCell,
+  CrmBtn,
+  CrmEmpty,
+  CrmTableShell,
+  CrmTag,
+} from "@/components/crm/ui";
 import { CRM_MARKETS } from "@/lib/crm-markets";
 import { trpc } from "@/lib/trpc";
 
@@ -12,6 +19,19 @@ const queues = [
   ["accepted", "Accepted"],
   ["rejected", "Rejected"],
 ] as const;
+
+function sourceLabel(sourceKey: string | null) {
+  return sourceKey?.replaceAll("_", " ") || "Operator";
+}
+
+function stateKind(
+  state: string,
+): "warn" | "info" | "success" | "danger" {
+  if (state === "accepted") return "success";
+  if (state === "rejected") return "danger";
+  if (state === "parked") return "info";
+  return "warn";
+}
 
 function newSubmission() {
   return {
@@ -96,8 +116,8 @@ export function DiscoveryReview() {
               : "Candidate store: operator submissions only."}
           </strong>{" "}
           {summary.data?.executionEnabled
-            ? "Collectors can write Review candidates. This is not accepted Discovery coverage until remaining sources, schedules and recovery are proved."
-            : "Collectors stay off. This is not accepted Discovery coverage."}
+            ? "Collectors can write Review candidates."
+            : "Collectors stay off."}
         </p>
         {summary.error ? <p role="alert">{summary.error.message}</p> : null}
         {summary.data ? (
@@ -314,24 +334,75 @@ export function DiscoveryReview() {
         ) : null}
 
         {candidates.data?.length ? (
-          <ul className="space-y-2" data-testid="discovery-candidate-list">
-            {candidates.data.map((candidate) => (
-              <li key={candidate.id}>
-                <button
-                  type="button"
-                  className="crm-approval-mini w-full text-left"
-                  data-testid={`discovery-candidate-${candidate.id}`}
-                  onClick={() => setSelectedId(candidate.id)}
-                >
-                  <strong>{candidate.companyName}</strong>
-                  <p>
-                    {candidate.opportunityKind.replaceAll("_", " ")} ·{" "}
-                    {candidate.reviewState.replaceAll("_", " ")}
-                  </p>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <CrmTableShell
+            foot={`${candidates.data.length} in this queue`}
+          >
+            <table
+              className="crm-table"
+              data-testid="discovery-candidate-list"
+            >
+              <thead>
+                <tr>
+                  <th scope="col">Company</th>
+                  <th scope="col">Why now</th>
+                  <th scope="col">Source</th>
+                  <th scope="col">Updated</th>
+                  <th scope="col">State</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {candidates.data.map((candidate) => {
+                  const actionLabel =
+                    candidate.reviewState === "needs_review"
+                      ? `Review ${candidate.companyName}`
+                      : `Open company ${candidate.companyName}`;
+                  return (
+                    <tr
+                      key={candidate.id}
+                      data-testid={`discovery-candidate-${candidate.id}`}
+                      className={
+                        selectedId === candidate.id
+                          ? "bg-[var(--muted-surface-soft)]"
+                          : undefined
+                      }
+                    >
+                      <td>
+                        <CompanyCell
+                          name={candidate.companyName}
+                          subtitle={candidate.market}
+                        />
+                      </td>
+                      <td title={candidate.whyNow}>
+                        <span className="block max-w-[28rem] truncate">
+                          {candidate.whyNow}
+                        </span>
+                      </td>
+                      <td>{sourceLabel(candidate.sourceKey)}</td>
+                      <td>{formatRelative(candidate.updatedAt)}</td>
+                      <td>
+                        <CrmTag kind={stateKind(candidate.reviewState)}>
+                          {candidate.reviewState.replaceAll("_", " ")}
+                        </CrmTag>
+                      </td>
+                      <td>
+                        <CrmBtn
+                          variant="ghost"
+                          aria-label={actionLabel}
+                          aria-pressed={selectedId === candidate.id}
+                          onClick={() => setSelectedId(candidate.id)}
+                        >
+                          {candidate.reviewState === "needs_review"
+                            ? "Review"
+                            : "Open"}
+                        </CrmBtn>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </CrmTableShell>
         ) : (
           <CrmEmpty
             title="No Discovery candidates in this queue"
