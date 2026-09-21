@@ -558,7 +558,7 @@ export async function interpretPublicDiscoveryExcerpt(input: {
         };
     }
     const parsed = coerceDiscoveryInterpretationResult(
-      generated.object ?? safeJson(generated.text),
+      generated.object ?? unwrapDiscoveryInterpretationValue(generated.text),
     );
     if (!parsed)
       return {
@@ -846,9 +846,22 @@ function asStoredIdentityLineage(value: unknown): DiscoveryIdentityLineage | nul
 }
 
 
+function unwrapDiscoveryInterpretationValue(value: unknown): unknown {
+  if (typeof value === "string") return unwrapDiscoveryInterpretationValue(safeJson(value));
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const row = value as Record<string, unknown>;
+  for (const key of ["output", "result", "data", "json", "message"]) {
+    const nested = row[key];
+    if (nested && nested !== value) return unwrapDiscoveryInterpretationValue(nested);
+  }
+  if (typeof row.content === "string") return unwrapDiscoveryInterpretationValue(row.content);
+  return value;
+}
+
 function coerceDiscoveryInterpretationResult(
   value: unknown,
 ): z.infer<typeof discoveryInterpretationResultSchema> | null {
+  value = unwrapDiscoveryInterpretationValue(value);
   const direct = discoveryInterpretationResultSchema.safeParse(value);
   if (direct.success) return direct.data;
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -921,9 +934,24 @@ function identityFailureReason(
 }
 
 function safeJson(text: string) {
+  const trimmed = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
   try {
-    return JSON.parse(text) as unknown;
+    return JSON.parse(trimmed) as unknown;
   } catch {
-    return null;
+    const start = Math.min(
+      ...["{", "["].map((token) => {
+        const index = trimmed.indexOf(token);
+        return index < 0 ? Number.POSITIVE_INFINITY : index;
+      }),
+    );
+    if (!Number.isFinite(start)) return null;
+    try {
+      return JSON.parse(trimmed.slice(start).replace(/\s*```$/, "")) as unknown;
+    } catch {
+      return null;
+    }
   }
 }

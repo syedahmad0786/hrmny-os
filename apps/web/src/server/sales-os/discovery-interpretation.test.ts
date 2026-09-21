@@ -76,6 +76,29 @@ describe("Discovery interpretation packet", () => {
       receipt: { requestId: "gen-live-identity" },
     });
   });
+
+  it("coerces fenced or wrapped Nex JSON into a grounded company identity", async () => {
+    const resolved = await resolvePublicDiscoveryCompanyIdentity({
+      excerpt:
+        "The second edition of the School of Cyber Defense competition reached its final at GISEC GLOBAL 2026.",
+      provider: {
+        name: "mock",
+        async generate() {
+          return {
+            text: '```json\n{"output":{"companyName":"GISEC GLOBAL","ambiguous":false}}\n```',
+            provider: "mock",
+            model: "mock",
+            requestId: "gen-fence",
+          };
+        },
+      },
+    });
+    expect(resolved).toMatchObject({
+      ok: true,
+      name: "GISEC GLOBAL",
+      receipt: { requestId: "gen-fence" },
+    });
+  });
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
