@@ -1071,6 +1071,15 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
               throw new Error("LLM provider returned no text");
             }
             const usage = raw.usage as Record<string, unknown> | undefined;
+            const costDetails = usage?.cost_details as
+              Record<string, unknown> | undefined;
+            const observedCost =
+              typeof usage?.cost === "number" && Number.isFinite(usage.cost)
+                ? usage.cost
+                : typeof costDetails?.upstream_inference_cost === "number" &&
+                    Number.isFinite(costDetails.upstream_inference_cost)
+                  ? costDetails.upstream_inference_cost
+                  : undefined;
             const serverToolUse = usage?.server_tool_use as
               Record<string, unknown> | undefined;
             const sourceCitations = (
@@ -1099,10 +1108,7 @@ export function createProvider(config: CreateProviderConfig = {}): LLMProvider {
               requestId: typeof raw.id === "string" ? raw.id : undefined,
               upstreamProvider:
                 typeof raw.provider === "string" ? raw.provider : undefined,
-              providerCostUsd:
-                typeof usage?.cost === "number" && Number.isFinite(usage.cost)
-                  ? usage.cost
-                  : undefined,
+              providerCostUsd: observedCost,
               inputTokens: Number(usage?.prompt_tokens ?? 0) || undefined,
               outputTokens: Number(usage?.completion_tokens ?? 0) || undefined,
               sourceCitations,

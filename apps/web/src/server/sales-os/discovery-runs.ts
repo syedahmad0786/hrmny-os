@@ -156,6 +156,10 @@ const DiscoveryRunResultSchema = z
     budgetReservations: z.record(z.unknown()).default({}),
     outcome: z.string().max(120).nullable().default(null),
     cancel: z.record(z.unknown()).nullable().default(null),
+    providerTerminalStatus: z
+      .enum(["completed", "partial", "failed", "cancelled"])
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -539,12 +543,14 @@ export async function promoteDeferredAfterTerminalTx(
   const payload = parsePayload(deferred.payload);
   payload.slot.trigger = "deferred";
   payload.slot.deferredThrough = now.toISOString();
+  const context = await currentPublishedContextTx(tx, programmeId);
   await tx
     .update(scheduledJob)
     .set({
       status: "pending",
       runAt: now,
       payload,
+      researchProgrammeVersionId: context.version.researchProgrammeVersionId,
       stateVersion: sql`${scheduledJob.stateVersion} + 1`,
       updatedAt: now,
     })
@@ -1496,8 +1502,13 @@ export async function handleDiscoveryWake(
         status: "paused" as const,
         nextWakeAt: iso(context.programme.nextDueAt),
       };
+    if (context.programme.scheduleGeneration !== event.scheduleGeneration)
+      return {
+        status: "stale" as const,
+        nextWakeAt: iso(context.programme.nextDueAt),
+      };
     if (
-      context.programme.scheduleGeneration !== event.scheduleGeneration ||
+      job.researchProgrammeVersionId &&
       job.researchProgrammeVersionId !==
         context.version.researchProgrammeVersionId
     )
