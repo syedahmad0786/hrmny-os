@@ -8,7 +8,7 @@ export default function CrmResearchPage() {
     <main data-testid="crm-research">
       <CrmPageHeader
         title="Research a company"
-        description="Review, Programmes, Sources and Runs stay separate. Discovery execution stays off until a later accepted release."
+        description="Review, Programmes, Sources and Runs stay separate. Collectors write Review candidates from published criteria."
       />
       <ResearchConsole />
     </main>
