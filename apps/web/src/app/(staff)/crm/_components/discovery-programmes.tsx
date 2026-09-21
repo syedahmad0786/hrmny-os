@@ -190,7 +190,7 @@ export function DiscoveryProgrammes() {
     onSuccess: (programme) => {
       hydrate(programme);
       setNote(
-        `Published version ${programme.publishedVersion}. Execution is not wired yet.`,
+        `Published version ${programme.publishedVersion}. ${programme.executionEnabled ? "Collectors can start from published criteria." : "Execution is not wired yet."}`,
       );
       void refresh(programme.id);
     },
@@ -209,7 +209,7 @@ export function DiscoveryProgrammes() {
   const requestRun = trpc.salesOs.discovery.programmes.requestRun.useMutation({
     onSuccess: (result) => {
       setNote(
-        `Run ${result.status}. Collectors stay off until execution is enabled.`,
+        `Run ${result.status}. ${detail?.executionEnabled ? "Collection can start." : "Collectors stay off until execution is enabled."}`,
       );
       void utils.salesOs.discovery.runs.invalidate();
       void utils.salesOs.discovery.programmes.invalidate();

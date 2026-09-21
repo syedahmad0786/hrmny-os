@@ -60,8 +60,8 @@ describe("Discovery review API", () => {
       needsEvidence: 0,
       candidateStoreReady: true,
       candidateStoreAccepted: false,
-      executionEnabled: false,
     });
+    expect(typeof summary.executionEnabled).toBe("boolean");
     const listed = await am.salesOs.discovery.review.list({
       queue: "needs_review",
     });

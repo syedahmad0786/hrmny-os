@@ -90,8 +90,14 @@ export function DiscoveryReview() {
       </div>
       <div className="crm-panel-body space-y-4">
         <p className="crm-note" data-testid="discovery-review-status">
-          <strong>Candidate store: operator submissions only.</strong>{" "}
-          Collectors stay off. This is not accepted Discovery coverage.
+          <strong>
+            {summary.data?.executionEnabled
+              ? "Candidate store includes collector results."
+              : "Candidate store: operator submissions only."}
+          </strong>{" "}
+          {summary.data?.executionEnabled
+            ? "Collectors can write Review candidates. This is not accepted Discovery coverage until remaining sources, schedules and recovery are proved."
+            : "Collectors stay off. This is not accepted Discovery coverage."}
         </p>
         {summary.error ? <p role="alert">{summary.error.message}</p> : null}
         {summary.data ? (

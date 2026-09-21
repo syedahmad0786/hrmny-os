@@ -1,13 +1,14 @@
 import { countDiscoveryReviewQueues } from "./discovery-candidates";
 import { listDiscoveryProgrammes } from "./discovery-programmes";
 import { listDiscoveryRuns } from "./discovery-run-queries";
+import { isDiscoveryExecutionEnabled } from "./discovery-runs";
 
 export type DiscoveryReviewSummary = {
   needsReview: number;
   needsEvidence: number;
   researchRunning: number;
   sourcesNeedingAttention: number;
-  executionEnabled: false;
+  executionEnabled: boolean;
   candidateStoreReady: true;
   candidateStoreAccepted: false;
 };
@@ -30,7 +31,7 @@ export async function summarizeDiscoveryReview(input: {
     sourcesNeedingAttention: programmes.filter(
       (programme) => programme.blockedSourceCount > 0,
     ).length,
-    executionEnabled: false,
+    executionEnabled: isDiscoveryExecutionEnabled(),
     candidateStoreReady: true,
     candidateStoreAccepted: false,
   };
