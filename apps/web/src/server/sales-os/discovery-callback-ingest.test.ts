@@ -4,7 +4,6 @@ import { createMockProvider, withMetering, type LLMProvider } from "@hrmny/ai";
 import {
   admitDiscoveryCallbackObservations,
   applyDiscoveryInterpretationProgress,
-  clipDiscoveryInterpretationExcerpt,
   continueDiscoveryInterpretationQueue,
   emptyDiscoveryInterpretationBudget,
   emptyDiscoveryInterpretationQueue,

@@ -174,8 +174,8 @@ export function clipUtf8Prefix(value: string, maxBytes: number) {
   if (maxBytes <= 0) return "";
   const buffer = Buffer.from(value, "utf8");
   if (buffer.length <= maxBytes) return value;
-  let end = maxBytes;
-  while (end > 0 && (buffer[end] & 0xc0) === 0x80) end -= 1;
+  let end = Math.min(maxBytes, buffer.length);
+  while (end > 0 && ((buffer[end] ?? 0) & 0xc0) === 0x80) end -= 1;
   return buffer.subarray(0, end).toString("utf8");
 }
 
@@ -584,8 +584,8 @@ export async function interpretPublicDiscoveryExcerpt(input: {
       boundedExcerpt: false,
     };
 
-  let provider = input.provider;
-  let model = input.model?.trim() || null;
+  const provider = input.provider;
+  const model = input.model?.trim() || null;
   if (!provider) {
     return {
       status: "unavailable",
