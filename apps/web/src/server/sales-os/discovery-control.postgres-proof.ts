@@ -3,6 +3,7 @@ import { createDb, sql } from "@hrmny/db";
 import { expect, it } from "vitest";
 import {
   acceptDiscoveryPolicySuggestion,
+  listDiscoveryControlQueue,
   proposeDiscoveryPolicySuggestion,
   reconnectDiscoveryControlSource,
   retryDiscoverySource,
@@ -26,6 +27,95 @@ if (
 const db = createDb(databaseUrl);
 const ownerId = randomUUID();
 const adminId = randomUUID();
+
+it("limits retry queue visibility to programme owners, reviewers, and administrators", async () => {
+  const queueOwnerId = randomUUID();
+  const queueReviewerId = randomUUID();
+  const queueOutsiderId = randomUUID();
+  const queueAdminId = randomUUID();
+  await db.execute(sql`
+    insert into public.employee (employee_id, display_name, email)
+    values
+      (${queueOwnerId}::uuid, 'Queue owner', ${`queue-owner-${queueOwnerId}@example.invalid`}),
+      (${queueReviewerId}::uuid, 'Queue reviewer', ${`queue-reviewer-${queueReviewerId}@example.invalid`}),
+      (${queueOutsiderId}::uuid, 'Queue outsider', ${`queue-outsider-${queueOutsiderId}@example.invalid`}),
+      (${queueAdminId}::uuid, 'Queue admin', ${`queue-admin-${queueAdminId}@example.invalid`})
+  `);
+
+  const created = await createDiscoveryProgramme({
+    actorEmployeeId: queueOwnerId,
+    config: {
+      ...DEFAULT_DISCOVERY_PROGRAMME_CONFIG,
+      name: `Queue isolation proof ${randomUUID()}`,
+      ownerEmployeeId: queueOwnerId,
+      reviewerEmployeeIds: [queueReviewerId],
+    },
+    sources: defaultDiscoverySources(),
+  });
+  const published = await publishDiscoveryProgramme({
+    programmeId: created.id,
+    expectedVersion: created.version,
+    actorEmployeeId: queueAdminId,
+  });
+  const requested = await requestDiscoveryRun({
+    programmeId: published.id,
+    expectedVersion: published.version,
+    requestId: randomUUID(),
+    overlap: "defer",
+    actorEmployeeId: queueOwnerId,
+    isAdmin: false,
+  });
+  const privateError = `private-queue-error-${randomUUID()}`;
+  await db.execute(sql`
+    update public.scheduled_job
+    set result = coalesce(result, '{}'::jsonb) || ${JSON.stringify({
+      sourceOutcomes: {
+        communicate_online: {
+          sourceKey: "communicate_online",
+          status: "failed",
+          lastEvent: "sales.discovery.completion.v1",
+          checkpoint: {
+            cursor: "private-page",
+            providerJobId: "private-provider-job",
+            itemsSeen: 1,
+            pagesSeen: 1,
+          },
+          retryable: true,
+          retryCount: 0,
+          lastError: privateError,
+        },
+      },
+    })}::jsonb
+    where scheduled_job_id = ${requested.runId}::uuid
+  `);
+
+  const inputs = [
+    { actorEmployeeId: queueOwnerId, isAdmin: false },
+    { actorEmployeeId: queueReviewerId, isAdmin: false },
+    { actorEmployeeId: queueAdminId, isAdmin: true },
+  ];
+  for (const input of inputs) {
+    const queue = await listDiscoveryControlQueue(input);
+    expect(queue.items).toContainEqual(
+      expect.objectContaining({
+        kind: "source_retry",
+        programmeId: published.id,
+        runId: requested.runId,
+        sourceKey: "communicate_online",
+        reason: privateError,
+      }),
+    );
+  }
+
+  const outsiderQueue = await listDiscoveryControlQueue({
+    actorEmployeeId: queueOutsiderId,
+    isAdmin: false,
+  });
+  expect(outsiderQueue.items.some((item) => item.runId === requested.runId)).toBe(
+    false,
+  );
+  expect(JSON.stringify(outsiderQueue)).not.toContain(privateError);
+}, 20_000);
 
 it("retries one failed source from checkpoint and leaves the completed sibling intact", async () => {
   await db.execute(sql`

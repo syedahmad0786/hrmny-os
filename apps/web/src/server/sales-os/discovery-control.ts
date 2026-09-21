@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, scheduledJob, sql } from "@hrmny/db";
+import { and, eq, researchProgramme, scheduledJob, sql } from "@hrmny/db";
 import { z } from "zod";
 import { getDb } from "../db";
 import {
@@ -18,7 +18,10 @@ import {
   listMemoryDiscoveryRuns,
   recordMemoryDiscoverySourceOutcomes,
 } from "./discovery-run-queries";
-import { DiscoveryRunError } from "./discovery-runs";
+import {
+  DiscoveryRunError,
+  SALES_RESEARCH_RUN_JOB_KIND,
+} from "./discovery-runs";
 
 export const DISCOVERY_SOURCE_OUTCOME_STATES = [
   "completed",
@@ -225,6 +228,13 @@ export async function listDiscoveryControlQueue(input: {
       pushRetryItems(items, run.runId, run.programmeId, run.sourceOutcomes);
     }
   } else {
+    const access = input.isAdmin
+      ? undefined
+      : sql`(${researchProgramme.ownerEmployeeId} = ${input.actorEmployeeId}::uuid or ${input.actorEmployeeId}::uuid = any(${researchProgramme.reviewerEmployeeIds}::uuid[]))`;
+    const predicates = [
+      eq(scheduledJob.kind, SALES_RESEARCH_RUN_JOB_KIND),
+      access,
+    ].filter(Boolean);
     const rows = await db
       .select({
         runId: scheduledJob.scheduledJobId,
@@ -232,7 +242,14 @@ export async function listDiscoveryControlQueue(input: {
         result: scheduledJob.result,
       })
       .from(scheduledJob)
-      .where(eq(scheduledJob.kind, "sales_research_run"));
+      .innerJoin(
+        researchProgramme,
+        eq(
+          scheduledJob.researchProgrammeId,
+          researchProgramme.researchProgrammeId,
+        ),
+      )
+      .where(and(...predicates));
     for (const row of rows) {
       if (!row.programmeId) continue;
       pushRetryItems(
