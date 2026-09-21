@@ -230,6 +230,62 @@ export function remainingDiscoveryInterpretationBudgetForQueue(
   };
 }
 
+const DISCOVERY_PACKET_EXCERPT_LIMIT = 2_000;
+
+export function clipDiscoveryInterpretationExcerpt(excerpt: string) {
+  return excerpt.trim().slice(0, DISCOVERY_PACKET_EXCERPT_LIMIT);
+}
+
+function isFalsePacketCostLock(input: {
+  budget: DiscoveryInterpretationBudget;
+  queue: DiscoveryInterpretationQueue;
+}) {
+  if (input.budget.costReceiptAvailable) return false;
+  if (input.queue.lastError !== "DISCOVERY_COST_RECEIPT_UNAVAILABLE") return false;
+  const locked = input.queue.done.find(
+    (item) => item.reason === "DISCOVERY_COST_RECEIPT_UNAVAILABLE",
+  );
+  if (!locked) return false;
+  const original = [...input.queue.pending, ...input.queue.inFlight].find(
+    (item) => item.observationId === locked.observationId,
+  );
+  if (!original) return false;
+  return (
+    original.excerpt.trim().length > DISCOVERY_PACKET_EXCERPT_LIMIT &&
+    excerptSha256(original.excerpt) === locked.excerptHash
+  );
+}
+
+export function recoverFalsePacketCostLock(input: {
+  budget: DiscoveryInterpretationBudget;
+  queue: DiscoveryInterpretationQueue;
+}): {
+  budget: DiscoveryInterpretationBudget;
+  queue: DiscoveryInterpretationQueue;
+} {
+  if (!isFalsePacketCostLock(input)) return input;
+  const lockedIds = new Set(
+    input.queue.done
+      .filter((item) => item.reason === "DISCOVERY_COST_RECEIPT_UNAVAILABLE")
+      .map((item) => item.observationId),
+  );
+  return {
+    budget: { ...input.budget, costReceiptAvailable: true },
+    queue: {
+      ...input.queue,
+      done: input.queue.done.filter((item) => !lockedIds.has(item.observationId)),
+      pending: [
+        ...input.queue.pending,
+        ...input.queue.inFlight.filter((item) => lockedIds.has(item.observationId)),
+      ],
+      inFlight: [],
+      claimedAt: null,
+      status: "pending",
+      lastError: null,
+    },
+  };
+}
+
 export function reserveDiscoveryInterpretationBudget(
   budget: DiscoveryInterpretationBudget,
   observationIds: string[],
@@ -964,7 +1020,7 @@ export async function continueDiscoveryInterpretationQueue(input: {
             { event: "sales.discovery.observations.v1" }
           >["payload"]["observations"][number]["kind"],
           title: item.title,
-          excerpt: item.excerpt.trim().slice(0, 2_000),
+          excerpt: clipDiscoveryInterpretationExcerpt(item.excerpt),
           companyHints: [],
         },
         input.sourceKey,
@@ -1277,9 +1333,14 @@ export async function runDiscoveryInterpretationJob(input: {
         ? { ...(result.sourceOutcomes as Record<string, unknown>) }
         : {};
     const source = asRecord(outcomes[input.sourceKey]);
-    const queue = readInterpretationQueue(source.interpretation);
+    const loadedQueue = readInterpretationQueue(source.interpretation);
     const cancelled = job.status === "cancel_requested";
-    const budget = readDiscoveryInterpretationBudget(result);
+    const recovered = recoverFalsePacketCostLock({
+      budget: readDiscoveryInterpretationBudget(result),
+      queue: loadedQueue,
+    });
+    const budget = recovered.budget;
+    const queue = recovered.queue;
     if (!budget.costReceiptAvailable && !cancelled)
       return { blocked: true as const, reason: "DISCOVERY_COST_RECEIPT_UNAVAILABLE" };
     const remaining = remainingDiscoveryInterpretationBudgetForQueue(

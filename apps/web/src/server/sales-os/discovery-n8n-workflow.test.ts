@@ -369,8 +369,9 @@ describe("inactive Discovery public-news n8n artifacts", () => {
         permittedHosts: ["gulfnews.com", "www.gulfnews.com"],
       },
     )[0]!.json;
-    expect(gulfLong.observations[0]?.excerpt).toHaveLength(2000);
-    expect(String(gulfLong.observations[0]?.excerpt)).toContain("A group wins its first significant contract");
+    const longObservations = gulfLong.observations as Array<{ excerpt?: string }>;
+    expect(longObservations[0]?.excerpt).toHaveLength(2000);
+    expect(String(longObservations[0]?.excerpt)).toContain("A group wins its first significant contract");
     expect(gulfMapped.completion).toMatchObject({
       status: "completed",
       counts: { quarantined: 2, rejected: 0 },
