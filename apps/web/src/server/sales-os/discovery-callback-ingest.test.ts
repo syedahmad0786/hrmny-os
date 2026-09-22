@@ -243,6 +243,45 @@ describe("Discovery callback ingest mapping", () => {
     ).toEqual({ ok: false, reason: "COMPANY_IDENTITY_MISSING" });
   });
 
+  it("does not attach an ungrounded hint domain to a resolved company", () => {
+    const mapped = mapDiscoveryObservationToSubmit(
+      {
+        ...observation,
+        excerpt:
+          "Majid Al Futtaim opened a regional creative review in Dubai.",
+        companyHints: [
+          {
+            name: "Women in Advertising 2026",
+            domain: "women-in-advertising.example",
+          },
+        ],
+      },
+      "campaign_me",
+      effective.sources[0]!.configuration,
+      { name: "Majid Al Futtaim", domain: "majidalfuttaim.com" },
+    );
+    expect(mapped).toEqual({
+      ok: true,
+      values: {
+        requestId: observation.observationId,
+        companyName: "Majid Al Futtaim",
+        website: "https://majidalfuttaim.com",
+        discoveryChannel: "publication",
+        opportunityKind: "company_signal",
+        whyNow: "Agency opens a regional creative review",
+        sourceKey: "campaign_me",
+        sourceItemId: "publisher-guid-42",
+        externalOpportunityId: "publisher-guid-42",
+        sourceUrl: "https://campaignme.com/latest/public-news-42",
+        excerpt:
+          "Majid Al Futtaim opened a regional creative review in Dubai.",
+        eventDate: "2026-09-19",
+        visibilityScope: "public",
+        strategicLane: "industry_scanning",
+      },
+    });
+  });
+
   it("does not promote an ungrounded title-as-company hint into Review", () => {
     const titleAsCompany = {
       ...observation,

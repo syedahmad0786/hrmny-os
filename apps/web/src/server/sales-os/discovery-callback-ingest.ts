@@ -724,16 +724,20 @@ export function mapDiscoveryObservationToSubmit(
     isCompanyNameGroundedInExcerpt(resolvedName, excerpt)
       ? resolvedName
       : "";
-  const companyName = groundedHint || groundedResolved;
+  // Prefer interpreted resolved identity over collector hints when both are grounded.
+  const companyName = groundedResolved || groundedHint;
   if (companyName.length < 2)
     return { ok: false, reason: "COMPANY_IDENTITY_MISSING" };
   if (excerpt.length < 8) return { ok: false, reason: "EXCERPT_TOO_SHORT" };
   const whyNow = observation.title.trim().slice(0, 2_000);
   if (whyNow.length < 8) return { ok: false, reason: "WHY_NOW_TOO_SHORT" };
   const eventDate = observation.publishedAt?.slice(0, 10);
-  const domain = groundedHint
-    ? hint?.domain || resolvedIdentity?.domain
-    : resolvedIdentity?.domain || hint?.domain;
+  // Keep name/domain paired to the chosen grounded source only.
+  const domain = groundedResolved
+    ? resolvedIdentity?.domain
+    : groundedHint
+      ? hint?.domain
+      : undefined;
   return {
     ok: true,
     values: {
