@@ -225,6 +225,28 @@ describe("inactive Discovery public-news n8n artifacts", () => {
     ).toBe(false);
   });
 
+  it("keeps an independent GitHub Actions Discovery repair caller", () => {
+    const workflow = readRepoFile(
+      ".github/workflows/discovery-repair.yml",
+    ).text;
+    const jobsWorkflow = readRepoFile(".github/workflows/scheduler.yml").text;
+    expect(workflow).toContain('cron: "*/15 * * * *"');
+    expect(workflow).toContain("workflow_dispatch");
+    expect(workflow).toContain("/api/cron/discovery");
+    expect(workflow).toContain("secrets.HRMNY_DISCOVERY_REPAIR_SECRET");
+    expect(workflow).toContain("vars.HRMNY_DISCOVERY_REPAIR_BASE_URL");
+    expect(workflow).toContain(
+      "secrets.HRMNY_DISCOVERY_VERCEL_PROTECTION_BYPASS",
+    );
+    expect(workflow).toContain("x-vercel-protection-bypass");
+    expect(workflow).toContain("ok !== true");
+    expect(workflow).not.toMatch(/ENDPOINT=.*\/api\/cron\/jobs/);
+    expect(workflow).not.toContain('"/api/cron/jobs"');
+    expect(workflow).not.toContain("HRMNY_CRON_SECRET");
+    expect(jobsWorkflow).not.toContain("/api/cron/discovery");
+    expect(jobsWorkflow).not.toContain("HRMNY_DISCOVERY_REPAIR_SECRET");
+  });
+
   it("maps pinned Campaign ME URLs when the n8n Cloud URL global is absent", () => {
     const mapCode = nodeCode(workflow, "Map Public-News Observations");
     expect(mapCode).not.toContain("new URL");

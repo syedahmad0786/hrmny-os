@@ -1,0 +1,70 @@
+# Independent Discovery recovery clock.
+# Calls GET /api/cron/discovery only. Does not collect sources or change the generic business cron.
+# GitHub schedule is best-effort and is not a hard 15-minute SLA.
+name: hrmny OS Discovery repair
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discovery-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call Discovery repair endpoint
+        env:
+          DISCOVERY_REPAIR_BASE_URL: ${{ vars.HRMNY_DISCOVERY_REPAIR_BASE_URL }}
+          DISCOVERY_REPAIR_SECRET: ${{ secrets.HRMNY_DISCOVERY_REPAIR_SECRET }}
+          VERCEL_PROTECTION_BYPASS: ${{ secrets.HRMNY_DISCOVERY_VERCEL_PROTECTION_BYPASS }}
+        run: |
+          set -euo pipefail
+          test -n "${DISCOVERY_REPAIR_BASE_URL:-}"
+          test -n "${DISCOVERY_REPAIR_SECRET:-}"
+          test -n "${VERCEL_PROTECTION_BYPASS:-}"
+          if ! printf '%s' "${DISCOVERY_REPAIR_BASE_URL}" | grep -Eq '^https://[A-Za-z0-9.-]+\.vercel\.app/?$'; then
+            echo "HRMNY_DISCOVERY_REPAIR_BASE_URL must be an https *.vercel.app host" >&2
+            exit 1
+          fi
+          BASE_URL="${DISCOVERY_REPAIR_BASE_URL%/}"
+          ENDPOINT="${BASE_URL}/api/cron/discovery"
+          RESPONSE_FILE="$(mktemp)"
+          HEADER_FILE="$(mktemp)"
+          HTTP_STATUS="$(curl --silent --show-error --retry 2 --retry-connrefused \
+            --output "${RESPONSE_FILE}" --dump-header "${HEADER_FILE}" --write-out "%{http_code}" \
+            -H "Authorization: Bearer ${DISCOVERY_REPAIR_SECRET}" \
+            -H "x-vercel-protection-bypass: ${VERCEL_PROTECTION_BYPASS}" \
+            "${ENDPOINT}")"
+          unset DISCOVERY_REPAIR_SECRET VERCEL_PROTECTION_BYPASS
+          echo "endpoint_host=$(printf '%s' "${BASE_URL}" | sed -E 's#^https://##')"
+          echo "http_status=${HTTP_STATUS}"
+          if [ "${HTTP_STATUS}" != "200" ]; then
+            echo "Discovery repair failed: expected HTTP 200" >&2
+            exit 1
+          fi
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const body = readFileSync(process.argv[1], "utf8");
+            let parsed;
+            try { parsed = JSON.parse(body); }
+            catch { console.error("Discovery repair failed: response was not JSON"); process.exit(1); }
+            if (parsed?.ok !== true) {
+              console.error("Discovery repair failed: ok!=true");
+              process.exit(1);
+            }
+            const summary = {
+              ok: true,
+              reconciliation: parsed.reconciliation ?? null,
+              dispatchStatus: parsed.dispatch?.status ?? null,
+              interpretationStatus: parsed.interpretation?.status ?? null,
+            };
+            console.log(JSON.stringify(summary));
+          ' "${RESPONSE_FILE}"
