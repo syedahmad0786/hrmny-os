@@ -234,7 +234,9 @@ export function DiscoveryRuns({
               </p>
             ) : (
               <p className="text-sm text-[var(--muted)]">
-                No frozen collector snapshot yet. Execution is still disabled.
+                {selectedProgramme?.executionEnabled
+                  ? "No frozen collector snapshot yet. Sources freeze when this run is claimed for collection."
+                  : "No frozen collector snapshot yet. Collectors stay off until execution is enabled."}
               </p>
             )}
             {canCancel ? (

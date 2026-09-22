@@ -354,6 +354,15 @@ describe("Discovery programme contract", () => {
     expect(published.readiness.blockers).toContainEqual(
       expect.objectContaining({ code: "EXECUTION_DISABLED", sourceKey: null }),
     );
+    expect(published.readiness.ready).toBe(false);
+    vi.stubEnv("DISCOVERY_EXECUTION_ENABLED", "true");
+    const enabled = await partner.salesOs.discovery.programmes.get({
+      programmeId: created.id,
+    });
+    expect(enabled.executionEnabled).toBe(true);
+    expect(enabled.readiness.blockers).not.toContainEqual(
+      expect.objectContaining({ code: "EXECUTION_DISABLED" }),
+    );
     await expect(
       partner.salesOs.discovery.programmes.pause({
         programmeId: created.id,
@@ -373,7 +382,7 @@ describe("Discovery programme contract", () => {
     ).resolves.toMatchObject({
       state: "paused",
       version: published.version + 1,
-      executionEnabled: false,
+      executionEnabled: true,
       nextDueAt: null,
     });
   });
