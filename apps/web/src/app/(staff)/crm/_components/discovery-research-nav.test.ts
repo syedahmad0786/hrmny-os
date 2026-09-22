@@ -64,6 +64,13 @@ describe("discovery research navigation", () => {
       }),
     ).toBe(`/crm/research?view=sources&programmeId=${programmeId}`);
 
+    expect(buildDiscoveryResearchHref({ view: "sources" })).toBe(
+      "/crm/research?view=sources",
+    );
+    expect(buildDiscoveryResearchHref({ view: "runs" })).toBe(
+      "/crm/research?view=runs",
+    );
+
     expect(
       buildDiscoveryResearchHref(
         { view: "review", candidateId, queue: "accepted" },
