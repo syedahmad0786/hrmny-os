@@ -53,7 +53,7 @@ test.describe("Sales research proposal boundary", () => {
     await proposal.getByRole("button", { name: "Approve" }).click();
     await expect(proposal).toHaveCount(0, { timeout: 30_000 });
     await expect(
-      page.locator(".crm-panel").filter({
+      page.locator("aside.crm-panel").filter({
         has: page.getByRole("heading", { name: "Approved — find people" }),
       }),
     ).toContainText(company);
