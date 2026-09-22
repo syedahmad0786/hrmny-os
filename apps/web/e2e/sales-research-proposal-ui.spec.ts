@@ -5,7 +5,7 @@ async function openLegacyResearch(
 ) {
   const details = page.getByTestId("sales-os-legacy-research");
   await expect(details).toBeVisible({ timeout: 60_000 });
-  await details.locator("summary").click();
+  await details.locator(":scope > summary").click();
 }
 
 async function fillSourcedProposal(
