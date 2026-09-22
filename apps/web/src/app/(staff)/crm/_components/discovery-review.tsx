@@ -11,7 +11,9 @@ import {
 } from "@/components/crm/ui";
 import { CRM_MARKETS } from "@/lib/crm-markets";
 import { trpc } from "@/lib/trpc";
+import Link from "next/link";
 import {
+  buildDiscoveryResearchHref,
   safeExternalHttpsUrl,
   type DiscoveryQueue,
   type DiscoveryResearchNav,
@@ -168,11 +170,10 @@ export function DiscoveryReview({
                   : "Queue empty"}
               </CrmTag>
             </article>
-            <button
-              type="button"
+            <Link
+              href={buildDiscoveryResearchHref({ view: "runs" })}
               className="crm-approval-mini text-left"
               data-testid="discovery-review-open-runs"
-              onClick={() => onNavigate?.({ view: "runs" })}
             >
               <strong>Research running</strong>
               <p data-testid="discovery-review-research-running">
@@ -183,12 +184,11 @@ export function DiscoveryReview({
                   ? "Open Runs to inspect or cancel"
                   : "No collector in flight"}
               </CrmTag>
-            </button>
-            <button
-              type="button"
+            </Link>
+            <Link
+              href={buildDiscoveryResearchHref({ view: "sources" })}
               className="crm-approval-mini text-left"
               data-testid="discovery-review-open-sources"
-              onClick={() => onNavigate?.({ view: "sources" })}
             >
               <strong>Sources needing attention</strong>
               <p data-testid="discovery-review-sources-attention">
@@ -203,7 +203,7 @@ export function DiscoveryReview({
                   ? "Open Sources for programme health"
                   : "No programme blockers"}
               </CrmTag>
-            </button>
+            </Link>
           </div>
         ) : (
           <CrmEmpty title="Loading Discovery review counts" />
