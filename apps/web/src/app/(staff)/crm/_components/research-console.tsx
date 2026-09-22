@@ -444,7 +444,7 @@ function ResearchConsoleInner() {
           </div>
         </div>
 
-        <aside className="crm-panel">
+        <aside className="crm-panel" data-testid="sales-os-approved-panel">
           <div className="crm-panel-head">
             <h3>Approved — find people</h3>
             <CrmTag kind="success">{(approved.data ?? []).length}</CrmTag>
