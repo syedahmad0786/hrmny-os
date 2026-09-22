@@ -228,7 +228,9 @@ export function DiscoveryProgrammes({
   const requestRun = trpc.salesOs.discovery.programmes.requestRun.useMutation({
     onSuccess: (result) => {
       setNote(
-        `Run ${result.status}. ${detail?.executionEnabled ? "Collection can start." : "Collectors stay off until execution is enabled."}`,
+        result.status === "deferred"
+          ? "Manual run queued behind the existing scheduled or active run."
+          : `Run queued. ${detail?.executionEnabled ? "Collection can start." : "Collectors stay off until execution is enabled."}`,
       );
       void utils.salesOs.discovery.runs.invalidate();
       void utils.salesOs.discovery.programmes.invalidate();
@@ -1310,11 +1312,11 @@ export function DiscoveryProgrammes({
                       programmeId: detail.id,
                       expectedVersion: loadedVersion,
                       requestId: crypto.randomUUID(),
-                      overlap: "defer",
+                      overlap: "defer_scheduled",
                     })
                   }
                 >
-                  Queue run now
+                  Queue manual run
                 </CrmBtn>
               ) : null}
               {detail ? (

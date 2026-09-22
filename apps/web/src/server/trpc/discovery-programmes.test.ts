@@ -276,27 +276,34 @@ describe("Discovery programme contract", () => {
       programmeId: created.id,
       expectedVersion: published.version,
       requestId,
-      overlap: "defer",
+      overlap: "defer_scheduled",
     });
-    expect(requested.status).toBe("pending");
+    expect(requested.status).toBe("deferred");
     const replayed = await am.salesOs.discovery.programmes.requestRun({
       programmeId: created.id,
       expectedVersion: published.version,
       requestId,
-      overlap: "defer",
+      overlap: "defer_scheduled",
     });
     expect(replayed).toEqual(requested);
     const listed = await am.salesOs.discovery.runs.list({
       programmeId: created.id,
     });
     expect(listed.some((run) => run.runId === requested.runId)).toBe(true);
+    expect(listed).toContainEqual(
+      expect.objectContaining({
+        runId: scheduled[0]!.runId,
+        status: "pending",
+        trigger: "scheduled",
+      }),
+    );
     const detail = await am.salesOs.discovery.runs.get({
       runId: requested.runId,
     });
     expect(detail).toMatchObject({
       runId: requested.runId,
-      status: "pending",
-      trigger: "manual",
+      status: "deferred",
+      trigger: "deferred",
       executionEnabled: false,
       collectorStarted: false,
       n8nClaimed: false,
@@ -315,7 +322,7 @@ describe("Discovery programme contract", () => {
       am.salesOs.discovery.runs.cancel({
         runId: requested.runId,
         expectedStateVersion: detail.stateVersion,
-        reason: "Operator cancelled the armed Discovery slot",
+        reason: "Operator cancelled the deferred manual run",
       }),
     ).resolves.toMatchObject({
       runId: requested.runId,

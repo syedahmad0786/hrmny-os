@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   withDatabaseScope: vi.fn(),
   crmImports: vi.fn(),
   emitHealthSignal: vi.fn(),
+  submitDiscoveryCandidate: vi.fn(),
 }));
 
 vi.mock("./staff-access", () => ({ qmStaff: mocks.staff }));
@@ -73,6 +74,12 @@ vi.mock("../integrations/google-maps-search", () => ({
 }));
 vi.mock("../crm/apollo-search-import", () => ({
   getCompletedApolloFreeSearchCrmImports: mocks.crmImports,
+}));
+vi.mock("../sales-os/discovery-candidates", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("../sales-os/discovery-candidates")
+  >()),
+  submitDiscoveryCandidate: mocks.submitDiscoveryCandidate,
 }));
 
 const employeeId = "c0000000-0000-4000-8000-000000000001";
@@ -182,6 +189,10 @@ beforeEach(() => {
   mocks.connectionsList.mockResolvedValue([]);
   mocks.managedAccounts.mockResolvedValue([]);
   mocks.workApps.mockResolvedValue({ apps: [] });
+  mocks.submitDiscoveryCandidate.mockResolvedValue({
+    id: "c0000000-0000-4000-8000-000000000099",
+    reviewState: "needs_review",
+  });
 });
 
 afterEach(() => vi.unstubAllEnvs());
@@ -212,6 +223,41 @@ it("runs bounded free Apollo search as the mapped employee and exposes no paid a
     await expect(runQmOsTool(token, forbidden)).rejects.toThrow();
   expect(mocks.approve).not.toHaveBeenCalled();
   expect(mocks.send).not.toHaveBeenCalled();
+});
+
+it("writes QM evidence through the authenticated idempotent Discovery path", async () => {
+  const runId = "c0000000-0000-4000-8000-000000000051";
+  const programmeId = "c0000000-0000-4000-8000-000000000052";
+  const conversationId = "c0000000-0000-4000-8000-000000000053";
+  const requestId = "c0000000-0000-4000-8000-000000000054";
+
+  await expect(
+    runQmOsTool(token, {
+      operation: "discovery_candidate_submit",
+      runId,
+      programmeId,
+      conversationId,
+      requestId,
+      companyName: "Example Motors",
+      whyNow: "Example Motors announced a new regional growth programme.",
+      sourceUrl: "https://example.com/news/growth",
+      excerpt: "Example Motors announced a new regional growth programme.",
+      sourceKey: "campaign_me",
+    }),
+  ).resolves.toMatchObject({ reviewState: "needs_review" });
+
+  expect(mocks.submitDiscoveryCandidate).toHaveBeenCalledWith({
+    actorEmployeeId: employeeId,
+    isAdmin: true,
+    runId,
+    provenance: { provider: "qm", conversationId },
+    values: expect.objectContaining({
+      requestId,
+      programmeId,
+      sourceItemId: conversationId,
+      sourceKey: "campaign_me",
+    }),
+  });
 });
 
 it("reports employee-owned Apollo and Composio connection metadata without reading secrets", async () => {
