@@ -711,18 +711,29 @@ export function mapDiscoveryObservationToSubmit(
   if (!provenance.ok) return provenance;
   const mapped = observationKindMapping(observation.kind);
   const hint = observation.companyHints[0];
-  const companyName =
-    hint?.name.trim().slice(0, 180) ||
-    resolvedIdentity?.name.trim().slice(0, 180) ||
-    "";
+  const excerpt = observation.excerpt.trim().slice(0, 2_000);
+  const hintName = hint?.name.trim().slice(0, 180) || "";
+  const resolvedName = resolvedIdentity?.name.trim().slice(0, 180) || "";
+  // Fail closed: never promote an ungrounded collector hint (e.g. title-as-company).
+  const groundedHint =
+    hintName.length >= 2 && isCompanyNameGroundedInExcerpt(hintName, excerpt)
+      ? hintName
+      : "";
+  const groundedResolved =
+    resolvedName.length >= 2 &&
+    isCompanyNameGroundedInExcerpt(resolvedName, excerpt)
+      ? resolvedName
+      : "";
+  const companyName = groundedHint || groundedResolved;
   if (companyName.length < 2)
     return { ok: false, reason: "COMPANY_IDENTITY_MISSING" };
-  const excerpt = observation.excerpt.trim().slice(0, 2_000);
   if (excerpt.length < 8) return { ok: false, reason: "EXCERPT_TOO_SHORT" };
   const whyNow = observation.title.trim().slice(0, 2_000);
   if (whyNow.length < 8) return { ok: false, reason: "WHY_NOW_TOO_SHORT" };
   const eventDate = observation.publishedAt?.slice(0, 10);
-  const domain = hint?.domain || resolvedIdentity?.domain;
+  const domain = groundedHint
+    ? hint?.domain || resolvedIdentity?.domain
+    : resolvedIdentity?.domain || hint?.domain;
   return {
     ok: true,
     values: {
