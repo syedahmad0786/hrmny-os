@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
 
+async function openLegacyResearch(
+  page: import("@playwright/test").Page,
+) {
+  const details = page.getByTestId("sales-os-legacy-research");
+  await expect(details).toBeVisible({ timeout: 60_000 });
+  await details.locator("summary").click();
+}
+
 async function fillSourcedProposal(
   page: import("@playwright/test").Page,
   input: { company: string; evidence: string },
@@ -29,9 +37,8 @@ test.describe("Sales research proposal boundary", () => {
 
     await page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/research", { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("sales-os-signal-form")).toBeVisible({
-      timeout: 60_000,
-    });
+    await openLegacyResearch(page);
+    await expect(page.getByTestId("sales-os-signal-form")).toBeVisible();
     await expect(page.getByTestId("sales-os-run-research")).toHaveCount(0);
 
     await fillSourcedProposal(page, { company, evidence });
@@ -59,6 +66,7 @@ test.describe("Sales research proposal boundary", () => {
     const company = `E2E HR Read Only ${suffix}`;
     await page.setExtraHTTPHeaders({ "x-dev-role": "partner" });
     await page.goto("/crm/research", { waitUntil: "domcontentloaded" });
+    await openLegacyResearch(page);
     await fillSourcedProposal(page, {
       company,
       evidence: `https://sources.hrmny.co/e2e/hr-read-only-${suffix}`,
@@ -67,6 +75,7 @@ test.describe("Sales research proposal boundary", () => {
     await page.setExtraHTTPHeaders({ "x-dev-role": "hr" });
     await page.reload({ waitUntil: "domcontentloaded" });
 
+    await openLegacyResearch(page);
     await expect(page.getByTestId("sales-os-research-view-only")).toBeVisible({
       timeout: 60_000,
     });
@@ -87,9 +96,8 @@ test.describe("Sales research proposal boundary", () => {
     await page.setExtraHTTPHeaders({ "x-dev-role": "am" });
     await page.goto("/crm/research", { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByTestId("sales-os-signal-form")).toBeVisible({
-      timeout: 60_000,
-    });
+    await openLegacyResearch(page);
+    await expect(page.getByTestId("sales-os-signal-form")).toBeVisible();
     const suffix = Date.now();
     await fillSourcedProposal(page, {
       company: `E2E Mobile Signal ${suffix}`,

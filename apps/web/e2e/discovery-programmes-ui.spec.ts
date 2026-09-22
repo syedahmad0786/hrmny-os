@@ -282,6 +282,10 @@ test.describe("Discovery programme configuration", () => {
     await expect(page.getByTestId("discovery-review")).toBeVisible({
       timeout: 60_000,
     });
+    await page
+      .getByTestId("discovery-candidate-submit-details")
+      .locator("summary")
+      .click();
     await page.getByTestId("discovery-candidate-name").fill(name);
     await page
       .getByTestId("discovery-candidate-website")
