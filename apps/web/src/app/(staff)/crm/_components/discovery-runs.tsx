@@ -105,7 +105,7 @@ export function DiscoveryRuns({
         </div>
         <CrmBtn
           data-testid="discovery-request-run"
-          disabled={!canRequest || requestRun.isPending || !selectedProgramme}
+          disabled={!programmeId || !canRequest || requestRun.isPending || !selectedProgramme}
           onClick={() => {
             if (!selectedProgramme) return;
             requestRun.mutate({
@@ -143,11 +143,18 @@ export function DiscoveryRuns({
         <p className="crm-note" data-testid="discovery-runs-execution-status">
           <strong>
             Execution status:{" "}
-            {selectedProgramme?.executionEnabled ? "available" : "unavailable"}.
+            {!programmeId
+              ? "choose a programme"
+              : selectedProgramme?.executionEnabled
+                ? "available"
+                : "unavailable"}
+            .
           </strong>{" "}
-          {selectedProgramme?.executionEnabled
-            ? "Queue run now can start collection for the selected programme."
-            : "Collectors and provider calls stay off. A pending slot is a schedule reservation only."}
+          {!programmeId
+            ? "Queue run now stays off until a programme is selected. All programmes remain listed below."
+            : selectedProgramme?.executionEnabled
+              ? "Queue run now can start collection for the selected programme."
+              : "Collectors and provider calls stay off. A pending slot is a schedule reservation only."}
         </p>
         {note ? (
           <p className="crm-note" data-testid="discovery-run-note" role="status">

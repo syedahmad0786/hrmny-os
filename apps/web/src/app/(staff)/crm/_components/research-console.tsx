@@ -132,7 +132,12 @@ function ResearchConsoleInner() {
           onNavigate={navigate}
         />
       ) : null}
-      {view === "sources" ? <DiscoverySources /> : null}
+      {view === "sources" ? (
+        <DiscoverySources
+          programmeId={nav.programmeId}
+          onNavigate={navigate}
+        />
+      ) : null}
       {view === "runs" ? (
         <DiscoveryRuns
           programmeId={nav.programmeId}

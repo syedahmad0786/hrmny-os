@@ -168,18 +168,28 @@ export function DiscoveryReview({
                   : "Queue empty"}
               </CrmTag>
             </article>
-            <article className="crm-approval-mini">
+            <button
+              type="button"
+              className="crm-approval-mini text-left"
+              data-testid="discovery-review-open-runs"
+              onClick={() => onNavigate?.({ view: "runs" })}
+            >
               <strong>Research running</strong>
               <p data-testid="discovery-review-research-running">
                 {summary.data.researchRunning}
               </p>
               <CrmTag kind={summary.data.researchRunning ? "warn" : "info"}>
                 {summary.data.researchRunning
-                  ? "Cancel requested or in flight"
+                  ? "Open Runs to inspect or cancel"
                   : "No collector in flight"}
               </CrmTag>
-            </article>
-            <article className="crm-approval-mini">
+            </button>
+            <button
+              type="button"
+              className="crm-approval-mini text-left"
+              data-testid="discovery-review-open-sources"
+              onClick={() => onNavigate?.({ view: "sources" })}
+            >
               <strong>Sources needing attention</strong>
               <p data-testid="discovery-review-sources-attention">
                 {summary.data.sourcesNeedingAttention}
@@ -190,10 +200,10 @@ export function DiscoveryReview({
                 }
               >
                 {summary.data.sourcesNeedingAttention
-                  ? "Blocked required sources"
+                  ? "Open Sources for programme health"
                   : "No programme blockers"}
               </CrmTag>
-            </article>
+            </button>
           </div>
         ) : (
           <CrmEmpty title="Loading Discovery review counts" />

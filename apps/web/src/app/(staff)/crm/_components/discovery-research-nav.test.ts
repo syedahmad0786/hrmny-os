@@ -27,6 +27,18 @@ describe("discovery research navigation", () => {
 
     expect(
       parseDiscoveryResearchNav(
+        new URLSearchParams(`view=sources&programmeId=${programmeId}`),
+      ),
+    ).toEqual({
+      view: "sources",
+      candidateId: null,
+      programmeId,
+      runId: null,
+      queue: "needs_review",
+    });
+
+    expect(
+      parseDiscoveryResearchNav(
         new URLSearchParams(`candidateId=${candidateId}&queue=parked`),
       ),
     ).toEqual({
@@ -44,6 +56,13 @@ describe("discovery research navigation", () => {
         runId,
       }),
     ).toBe(`/crm/research?view=runs&programmeId=${programmeId}&runId=${runId}`);
+
+    expect(
+      buildDiscoveryResearchHref({
+        view: "sources",
+        programmeId,
+      }),
+    ).toBe(`/crm/research?view=sources&programmeId=${programmeId}`);
 
     expect(
       buildDiscoveryResearchHref(

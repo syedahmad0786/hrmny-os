@@ -1049,11 +1049,25 @@ export function DiscoveryProgrammes({
             </details>
 
             <div>
-              <h4 className="mb-2 font-semibold">Source manifest</h4>
+              <h4 className="mb-2 font-semibold">Programme source bindings</h4>
               <p className="mb-3 text-sm text-[var(--muted)]">
-                Connection and capability come from verified server state. All
-                manifest sources are retained; disabled sources are not removed.
-                Saving a change does not test or enable a collector.
+                Edit whether this programme uses each source. Source health,
+                reconnect and recovery live on Sources. Saving a change does
+                not test or enable a collector.
+              </p>
+              <p className="mb-3">
+                <CrmBtn
+                  variant="ghost"
+                  data-testid="discovery-open-source-health"
+                  onClick={() =>
+                    onNavigate?.({
+                      view: "sources",
+                      programmeId: selectedId,
+                    })
+                  }
+                >
+                  Open source health
+                </CrmBtn>
               </p>
               <div className="crm-approval-stack">
                 {sources.map((source) => {

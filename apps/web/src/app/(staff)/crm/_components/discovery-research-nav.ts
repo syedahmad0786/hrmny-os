@@ -55,7 +55,11 @@ export function parseDiscoveryResearchNav(
     nav.candidateId = null;
     nav.queue = "needs_review";
   }
-  if (nav.view !== "programmes" && nav.view !== "runs") {
+  if (
+    nav.view !== "programmes" &&
+    nav.view !== "runs" &&
+    nav.view !== "sources"
+  ) {
     nav.programmeId = null;
   }
   if (nav.view !== "runs") {
@@ -88,7 +92,11 @@ export function buildDiscoveryResearchHref(
     merged.candidateId = null;
     merged.queue = "needs_review";
   }
-  if (merged.view !== "programmes" && merged.view !== "runs") {
+  if (
+    merged.view !== "programmes" &&
+    merged.view !== "runs" &&
+    merged.view !== "sources"
+  ) {
     merged.programmeId = null;
   }
   if (merged.view !== "runs") {
@@ -104,7 +112,9 @@ export function buildDiscoveryResearchHref(
     params.set("candidateId", merged.candidateId);
   }
   if (
-    (merged.view === "programmes" || merged.view === "runs") &&
+    (merged.view === "programmes" ||
+      merged.view === "runs" ||
+      merged.view === "sources") &&
     merged.programmeId
   ) {
     params.set("programmeId", merged.programmeId);
