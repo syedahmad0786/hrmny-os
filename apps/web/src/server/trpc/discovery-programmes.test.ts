@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetMemoryDiscoveryCandidates } from "../sales-os/discovery-candidates";
 import { resetMemoryDiscoveryControl } from "../sales-os/discovery-control";
 import {
@@ -41,10 +41,15 @@ function sourceDrafts(
 
 describe("Discovery programme contract", () => {
   beforeEach(() => {
+    vi.unstubAllEnvs();
     vi.stubEnv("DATABASE_MODE", "memory");
     resetMemoryDiscoveryRuns();
     resetMemoryDiscoveryCandidates();
     resetMemoryDiscoveryControl();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("keeps policy proposals operator-owned but policy acceptance admin-only", async () => {
@@ -356,13 +361,26 @@ describe("Discovery programme contract", () => {
     );
     expect(published.readiness.ready).toBe(false);
     vi.stubEnv("DISCOVERY_EXECUTION_ENABLED", "true");
+    const clean = await am.salesOs.discovery.programmes.create({
+      config: manifest.config,
+      sources: sourceDrafts(
+        manifest.sources.map((source) => ({
+          ...source,
+          enabled: false,
+          required: false,
+        })),
+      ),
+    });
     const enabled = await partner.salesOs.discovery.programmes.get({
-      programmeId: created.id,
+      programmeId: clean.id,
     });
     expect(enabled.executionEnabled).toBe(true);
     expect(enabled.readiness.blockers).not.toContainEqual(
       expect.objectContaining({ code: "EXECUTION_DISABLED" }),
     );
+    expect(enabled.readiness.ready).toBe(true);
+    vi.unstubAllEnvs();
+    vi.stubEnv("DATABASE_MODE", "memory");
     await expect(
       partner.salesOs.discovery.programmes.pause({
         programmeId: created.id,
@@ -382,7 +400,7 @@ describe("Discovery programme contract", () => {
     ).resolves.toMatchObject({
       state: "paused",
       version: published.version + 1,
-      executionEnabled: true,
+      executionEnabled: false,
       nextDueAt: null,
     });
   });
