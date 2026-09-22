@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc";
 import { CrmBtn, CrmEmpty, CrmTag } from "@/components/crm/ui";
 import { CRM_MARKETS } from "@/lib/crm-markets";
@@ -10,6 +11,12 @@ import { DiscoveryProgrammes } from "./discovery-programmes";
 import { DiscoveryReview } from "./discovery-review";
 import { DiscoveryRuns } from "./discovery-runs";
 import { DiscoverySources } from "./discovery-sources";
+import {
+  buildDiscoveryResearchHref,
+  parseDiscoveryResearchNav,
+  type DiscoveryResearchNav,
+  type DiscoveryView,
+} from "./discovery-research-nav";
 
 function newSignalForm() {
   return {
@@ -24,13 +31,31 @@ function newSignalForm() {
 }
 
 export function ResearchConsole() {
+  return (
+    <Suspense fallback={null}>
+      <ResearchConsoleInner />
+    </Suspense>
+  );
+}
+
+function ResearchConsoleInner() {
   const utils = trpc.useUtils();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const nav = useMemo(
+    () => parseDiscoveryResearchNav(searchParams),
+    [searchParams],
+  );
+  const navigate = useCallback(
+    (next: Partial<DiscoveryResearchNav> & { view?: DiscoveryView }) => {
+      router.push(buildDiscoveryResearchHref(next, nav), { scroll: false });
+    },
+    [nav, router],
+  );
   const [feedback, setFeedback] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [signal, setSignal] = useState(newSignalForm);
-  const [view, setView] = useState<
-    "review" | "programmes" | "sources" | "runs"
-  >("review");
+  const view = nav.view;
   const access = trpc.salesOs.access.useQuery();
   const settings = trpc.salesOs.settings.get.useQuery();
   const researched = trpc.salesOs.research.list.useQuery({
@@ -88,18 +113,39 @@ export function ResearchConsole() {
             role="tab"
             aria-selected={view === id}
             data-testid={`discovery-view-${id}`}
-            onClick={() => setView(id)}
+            onClick={() => navigate({ view: id })}
           >
             {label}
           </CrmBtn>
         ))}
       </div>
-      {view === "review" ? <DiscoveryReview /> : null}
-      {view === "programmes" ? <DiscoveryProgrammes /> : null}
-      {view === "sources" ? <DiscoverySources /> : null}
-      {view === "runs" ? <DiscoveryRuns /> : null}
       {view === "review" ? (
-      <>
+        <DiscoveryReview
+          candidateId={nav.candidateId}
+          queue={nav.queue}
+          onNavigate={navigate}
+        />
+      ) : null}
+      {view === "programmes" ? (
+        <DiscoveryProgrammes
+          programmeId={nav.programmeId}
+          onNavigate={navigate}
+        />
+      ) : null}
+      {view === "sources" ? <DiscoverySources /> : null}
+      {view === "runs" ? (
+        <DiscoveryRuns
+          programmeId={nav.programmeId}
+          runId={nav.runId}
+          onNavigate={navigate}
+        />
+      ) : null}
+      {view === "review" ? (
+      <details className="crm-panel mb-4" data-testid="sales-os-legacy-research">
+        <summary className="crm-panel-head cursor-pointer font-semibold">
+          Manual research gates
+        </summary>
+        <div className="crm-panel-body space-y-4">
       <DiscoveryPanel />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
@@ -524,7 +570,8 @@ export function ResearchConsole() {
           )}
         </div>
       </div>
-      </>
+        </div>
+      </details>
       ) : null}
     </section>
   );

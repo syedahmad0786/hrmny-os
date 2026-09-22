@@ -7,8 +7,8 @@ export default function CrmResearchPage() {
   return (
     <main data-testid="crm-research">
       <CrmPageHeader
-        title="Research a company"
-        description="Review, Programmes, Sources and Runs stay separate. Collectors write Review candidates from published criteria."
+        title="Discovery research"
+        description="Review, Programmes, Sources and Runs stay bookmarkable. Collectors write Review candidates from published criteria."
       />
       <ResearchConsole />
     </main>

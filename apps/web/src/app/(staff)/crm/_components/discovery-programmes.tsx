@@ -7,6 +7,10 @@ import { CRM_MARKETS } from "@/lib/crm-markets";
 import { previewDiscoverySchedule } from "@/lib/discovery-schedule";
 import { trpc } from "@/lib/trpc";
 import type { AppRouter } from "@/server/trpc/root";
+import type {
+  DiscoveryResearchNav,
+  DiscoveryView,
+} from "./discovery-research-nav";
 
 type DiscoveryInput = inferRouterInputs<AppRouter>["salesOs"]["discovery"];
 type ProgrammeDetail =
@@ -86,14 +90,24 @@ function sourceTag(kind: string) {
   return "info" as const;
 }
 
-export function DiscoveryProgrammes() {
+type DiscoveryProgrammesProps = {
+  programmeId?: string | null;
+  onNavigate?: (
+    next: Partial<DiscoveryResearchNav> & { view?: DiscoveryView },
+  ) => void;
+};
+
+export function DiscoveryProgrammes({
+  programmeId = null,
+  onNavigate,
+}: DiscoveryProgrammesProps) {
   const utils = trpc.useUtils();
   const access = trpc.salesOs.access.useQuery();
   const connections = trpc.connections.list.useQuery({ scope: "staff" });
   const employees = trpc.work.members.listEmployees.useQuery();
   const manifest = trpc.salesOs.discovery.manifest.useQuery();
   const programmes = trpc.salesOs.discovery.programmes.list.useQuery();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(programmeId);
   const [loadedProgrammeId, setLoadedProgrammeId] = useState<string | null>(
     null,
   );
@@ -104,6 +118,11 @@ export function DiscoveryProgrammes() {
     { programmeId: selectedId ?? "" },
     { enabled: Boolean(selectedId) },
   );
+  useEffect(() => setSelectedId(programmeId), [programmeId]);
+  const selectProgramme = (id: string | null) => {
+    setSelectedId(id);
+    onNavigate?.({ view: "programmes", programmeId: id });
+  };
   const [editor, setEditor] = useState<Editor | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
@@ -167,7 +186,7 @@ export function DiscoveryProgrammes() {
 
   const create = trpc.salesOs.discovery.programmes.create.useMutation({
     onSuccess: (programme) => {
-      setSelectedId(programme.id);
+      selectProgramme(programme.id);
       hydrate(programme);
       setNote(
         `Draft saved as version ${programme.draftVersion}. It does not start research.`,
@@ -213,6 +232,11 @@ export function DiscoveryProgrammes() {
       );
       void utils.salesOs.discovery.runs.invalidate();
       void utils.salesOs.discovery.programmes.invalidate();
+      onNavigate?.({
+        view: "runs",
+        programmeId: detail?.id ?? selectedId,
+        runId: result.runId,
+      });
     },
     onError: (error) => setNote(error.message),
   });
@@ -399,7 +423,7 @@ export function DiscoveryProgrammes() {
                 setIsDirty(false);
                 setLoadedProgrammeId(null);
                 setLoadedVersion(null);
-                setSelectedId(programme.id);
+                selectProgramme(programme.id);
               }}
             >
               <div className="flex items-center justify-between gap-2">
