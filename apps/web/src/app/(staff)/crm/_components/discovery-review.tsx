@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatRelative } from "@/components/crm/format";
 import {
   CompanyCell,
@@ -11,6 +11,12 @@ import {
 } from "@/components/crm/ui";
 import { CRM_MARKETS } from "@/lib/crm-markets";
 import { trpc } from "@/lib/trpc";
+import {
+  safeExternalHttpsUrl,
+  type DiscoveryQueue,
+  type DiscoveryResearchNav,
+  type DiscoveryView,
+} from "./discovery-research-nav";
 
 const queues = [
   ["needs_review", "Needs review"],
@@ -48,13 +54,23 @@ function newSubmission() {
   };
 }
 
-export function DiscoveryReview() {
+type DiscoveryReviewProps = {
+  candidateId?: string | null;
+  queue?: DiscoveryQueue;
+  onNavigate?: (
+    next: Partial<DiscoveryResearchNav> & { view?: DiscoveryView },
+  ) => void;
+};
+
+export function DiscoveryReview({
+  candidateId = null,
+  queue = "needs_review",
+  onNavigate,
+}: DiscoveryReviewProps) {
   const utils = trpc.useUtils();
   const access = trpc.salesOs.access.useQuery();
   const summary = trpc.salesOs.discovery.review.summary.useQuery();
-  const [queue, setQueue] =
-    useState<(typeof queues)[number][0]>("needs_review");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(candidateId);
   const [form, setForm] = useState(newSubmission);
   const [reason, setReason] = useState("");
   const [linkCompanyId, setLinkCompanyId] = useState("");
@@ -68,9 +84,16 @@ export function DiscoveryReview() {
     { search: selected.data?.companyName },
     { enabled: Boolean(selected.data?.companyName) },
   );
+  useEffect(() => setSelectedId(candidateId), [candidateId]);
+  const selectCandidate = (id: string | null) => {
+    setSelectedId(id);
+    onNavigate?.({ view: "review", candidateId: id, queue });
+  };
+  const selectQueue = (nextQueue: DiscoveryQueue) =>
+    onNavigate?.({ view: "review", queue: nextQueue, candidateId: null });
   const submit = trpc.salesOs.discovery.review.submit.useMutation({
     onSuccess: (candidate) => {
-      setSelectedId(candidate.id);
+      selectCandidate(candidate.id);
       setForm(newSubmission());
       setNote(
         `Saved ${candidate.reviewState.replaceAll("_", " ")}. Collectors stay off.`,
@@ -81,7 +104,7 @@ export function DiscoveryReview() {
   });
   const decide = trpc.salesOs.discovery.review.decide.useMutation({
     onSuccess: (candidate) => {
-      setSelectedId(candidate.id);
+      selectCandidate(candidate.id);
       setReason("");
       setNote(
         candidate.reviewState === "accepted"
@@ -145,18 +168,28 @@ export function DiscoveryReview() {
                   : "Queue empty"}
               </CrmTag>
             </article>
-            <article className="crm-approval-mini">
+            <button
+              type="button"
+              className="crm-approval-mini text-left"
+              data-testid="discovery-review-open-runs"
+              onClick={() => onNavigate?.({ view: "runs" })}
+            >
               <strong>Research running</strong>
               <p data-testid="discovery-review-research-running">
                 {summary.data.researchRunning}
               </p>
               <CrmTag kind={summary.data.researchRunning ? "warn" : "info"}>
                 {summary.data.researchRunning
-                  ? "Cancel requested or in flight"
+                  ? "Open Runs to inspect or cancel"
                   : "No collector in flight"}
               </CrmTag>
-            </article>
-            <article className="crm-approval-mini">
+            </button>
+            <button
+              type="button"
+              className="crm-approval-mini text-left"
+              data-testid="discovery-review-open-sources"
+              onClick={() => onNavigate?.({ view: "sources" })}
+            >
               <strong>Sources needing attention</strong>
               <p data-testid="discovery-review-sources-attention">
                 {summary.data.sourcesNeedingAttention}
@@ -167,17 +200,21 @@ export function DiscoveryReview() {
                 }
               >
                 {summary.data.sourcesNeedingAttention
-                  ? "Blocked required sources"
+                  ? "Open Sources for programme health"
                   : "No programme blockers"}
               </CrmTag>
-            </article>
+            </button>
           </div>
         ) : (
           <CrmEmpty title="Loading Discovery review counts" />
         )}
 
         {canOperate ? (
-          <form
+          <details data-testid="discovery-candidate-submit-details">
+            <summary className="cursor-pointer font-medium">
+              Submit operator evidence
+            </summary>
+            <form
             className="space-y-3"
             data-testid="discovery-candidate-submit"
             onSubmit={(event) => {
@@ -198,7 +235,6 @@ export function DiscoveryReview() {
               });
             }}
           >
-            <h4>Submit operator evidence</h4>
             <p className="text-sm text-[var(--muted)]">
               Use a public HTTPS source. Private excerpts stay hidden from
               people who do not own or review the candidate.
@@ -311,7 +347,8 @@ export function DiscoveryReview() {
             >
               Save for review
             </CrmBtn>
-          </form>
+            </form>
+          </details>
         ) : null}
 
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="Review queues">
@@ -320,7 +357,7 @@ export function DiscoveryReview() {
               key={id}
               variant={queue === id ? "primary" : "default"}
               data-testid={`discovery-review-queue-${id}`}
-              onClick={() => setQueue(id)}
+              onClick={() => selectQueue(id)}
             >
               {label}
             </CrmBtn>
@@ -390,7 +427,7 @@ export function DiscoveryReview() {
                           variant="ghost"
                           aria-label={actionLabel}
                           aria-pressed={selectedId === candidate.id}
-                          onClick={() => setSelectedId(candidate.id)}
+                          onClick={() => selectCandidate(candidate.id)}
                         >
                           {candidate.reviewState === "needs_review"
                             ? "Review"
@@ -421,6 +458,38 @@ export function DiscoveryReview() {
               assessed
             </p>
             <p>{detail.whyNow}</p>
+            <div
+              className="flex flex-wrap gap-2"
+              data-testid="discovery-candidate-provenance"
+            >
+              {detail.programmeId ? (
+                <CrmBtn
+                  variant="ghost"
+                  onClick={() =>
+                    onNavigate?.({
+                      view: "programmes",
+                      programmeId: detail.programmeId,
+                    })
+                  }
+                >
+                  Open programme
+                </CrmBtn>
+              ) : null}
+              {detail.runId ? (
+                <CrmBtn
+                  variant="ghost"
+                  onClick={() =>
+                    onNavigate?.({
+                      view: "runs",
+                      programmeId: detail.programmeId,
+                      runId: detail.runId,
+                    })
+                  }
+                >
+                  Open producing run
+                </CrmBtn>
+              ) : null}
+            </div>
             {detail.companyId ? (
               <p data-testid="discovery-candidate-company">
                 Linked company {detail.companyId}
@@ -441,7 +510,22 @@ export function DiscoveryReview() {
                       {item.excerpt}
                     </p>
                   )}
-                  {item.sourceUrl ? <p>{item.sourceUrl}</p> : null}
+                  {item.sourceUrl ? (
+                    safeExternalHttpsUrl(item.sourceUrl) ? (
+                      <p>
+                        <a
+                          className="underline"
+                          href={safeExternalHttpsUrl(item.sourceUrl)!}
+                          rel="noopener noreferrer"
+                          target="_blank"
+                        >
+                          {item.sourceUrl}
+                        </a>
+                      </p>
+                    ) : (
+                      <p>{item.sourceUrl}</p>
+                    )
+                  ) : null}
                 </div>
               ))}
             </div>

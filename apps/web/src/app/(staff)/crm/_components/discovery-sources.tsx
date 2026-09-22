@@ -1,8 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CrmBtn, CrmEmpty, CrmTag } from "@/components/crm/ui";
 import { trpc } from "@/lib/trpc";
+import type {
+  DiscoveryResearchNav,
+  DiscoveryView,
+} from "./discovery-research-nav";
 
 function sourceKind(state: string) {
   if (state === "blocked" || state === "error") return "danger" as const;
@@ -12,14 +16,25 @@ function sourceKind(state: string) {
   return "info" as const;
 }
 
-export function DiscoverySources() {
+type DiscoverySourcesProps = {
+  programmeId?: string | null;
+  onNavigate?: (
+    next: Partial<DiscoveryResearchNav> & { view?: DiscoveryView },
+  ) => void;
+};
+
+export function DiscoverySources({
+  programmeId = null,
+  onNavigate,
+}: DiscoverySourcesProps) {
   const utils = trpc.useUtils();
   const access = trpc.salesOs.access.useQuery();
   const manifest = trpc.salesOs.discovery.manifest.useQuery();
   const programmes = trpc.salesOs.discovery.programmes.list.useQuery();
   const queue = trpc.salesOs.discovery.control.queue.useQuery();
   const [note, setNote] = useState<string | null>(null);
-  const [policyProgrammeId, setPolicyProgrammeId] = useState("");
+  const [policyProgrammeId, setPolicyProgrammeId] = useState(programmeId ?? "");
+  useEffect(() => setPolicyProgrammeId(programmeId ?? ""), [programmeId]);
   const [policyCap, setPolicyCap] = useState("40");
   const reconnect = trpc.salesOs.discovery.control.reconnect.useMutation({
     onSuccess: (result) => {
@@ -64,10 +79,10 @@ export function DiscoverySources() {
     <section className="crm-panel mb-5" data-testid="discovery-sources">
       <div className="crm-panel-head">
         <div>
-          <h3>Research sources</h3>
+          <h3>Source health</h3>
           <p>
-            Required families stay visible even when blocked. A listed source is
-            not an accepted collector.
+            Required families stay visible even when blocked. Edit bindings on
+            the selected programme. A listed source is not an accepted collector.
           </p>
         </div>
       </div>
@@ -83,6 +98,25 @@ export function DiscoverySources() {
             : "s"}{" "}
           currently show source blockers.
         </p>
+
+        {programmeId ? (
+          <p className="crm-note" data-testid="discovery-sources-programme">
+            Showing health for the selected programme.{" "}
+            <CrmBtn
+              variant="ghost"
+              data-testid="discovery-sources-open-programme"
+              onClick={() =>
+                onNavigate?.({ view: "programmes", programmeId })
+              }
+            >
+              Open programme bindings
+            </CrmBtn>
+          </p>
+        ) : (
+          <p className="crm-note" data-testid="discovery-sources-programme">
+            Select a programme to inspect its source health. No programme is chosen automatically.
+          </p>
+        )}
         <div data-testid="discovery-control-queue">
           <p data-testid="discovery-control-health">
             Action queue: {queue.data?.items.length ?? 0} · retryable{" "}
@@ -96,11 +130,9 @@ export function DiscoverySources() {
               data-testid="discovery-policy-propose"
               onSubmit={(event) => {
                 event.preventDefault();
-                const programmeId =
-                  policyProgrammeId || programmes.data?.[0]?.id;
-                if (!programmeId) return;
+                if (!policyProgrammeId) return;
                 proposePolicy.mutate({
-                  programmeId,
+                  programmeId: policyProgrammeId,
                   maxObservations: Number(policyCap),
                   reason:
                     "Operator proposed a structured observation-cap change for later runs",
@@ -112,9 +144,17 @@ export function DiscoverySources() {
                 <select
                   className="crm-select"
                   data-testid="discovery-policy-programme"
-                  value={policyProgrammeId || programmes.data?.[0]?.id || ""}
-                  onChange={(event) => setPolicyProgrammeId(event.target.value)}
+                  value={policyProgrammeId}
+                  onChange={(event) => {
+                    const nextProgrammeId = event.target.value;
+                    setPolicyProgrammeId(nextProgrammeId);
+                    onNavigate?.({
+                      view: "sources",
+                      programmeId: nextProgrammeId || null,
+                    });
+                  }}
                 >
+                  <option value="">Select a programme</option>
                   {(programmes.data ?? []).map((programme) => (
                     <option key={programme.id} value={programme.id}>
                       {programme.name}

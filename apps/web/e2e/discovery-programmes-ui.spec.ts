@@ -206,6 +206,18 @@ test.describe("Discovery programme configuration", () => {
     await expect(page.getByTestId("discovery-review-needs-review")).toHaveText(
       /^\d+$/,
     );
+    await page.getByTestId("discovery-review-open-runs").click();
+    await expect(page.getByTestId("discovery-runs")).toBeVisible();
+    await expect(
+      page.getByTestId("discovery-runs-execution-status"),
+    ).toContainText(/choose a programme/i);
+    await expect(page.getByTestId("discovery-request-run")).toBeDisabled();
+    await page.getByTestId("discovery-view-review").click();
+    await page.getByTestId("discovery-review-open-sources").click();
+    await expect(page.getByTestId("discovery-sources")).toBeVisible();
+    await expect(page.getByTestId("discovery-sources-programme")).toContainText(
+      /No programme is chosen automatically/i,
+    );
     await page.screenshot({
       path: "e2e/runtime-proof/discovery-review.png",
       fullPage: true,
@@ -261,6 +273,12 @@ test.describe("Discovery programme configuration", () => {
     await expect(page.getByTestId("discovery-execution-status")).toContainText(
       /Collectors and provider calls stay off/i,
     );
+    await page.getByTestId("discovery-open-source-health").click();
+    await expect(page.getByTestId("discovery-sources-programme")).toContainText(
+      /Showing health for the selected programme/i,
+    );
+    await page.getByTestId("discovery-sources-open-programme").click();
+    await expect(page.getByTestId("discovery-programmes")).toBeVisible();
     await page.getByTestId("discovery-view-runs").click();
     await expect(
       page.getByTestId("discovery-runs-execution-status"),
@@ -282,6 +300,10 @@ test.describe("Discovery programme configuration", () => {
     await expect(page.getByTestId("discovery-review")).toBeVisible({
       timeout: 60_000,
     });
+    await page
+      .getByTestId("discovery-candidate-submit-details")
+      .locator("summary")
+      .click();
     await page.getByTestId("discovery-candidate-name").fill(name);
     await page
       .getByTestId("discovery-candidate-website")

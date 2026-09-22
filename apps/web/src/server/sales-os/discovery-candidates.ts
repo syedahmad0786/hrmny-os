@@ -668,6 +668,7 @@ async function candidateView(
     expectedVersion: row.expectedVersion,
     ownerEmployeeId: row.ownerEmployeeId,
     programmeId: row.programmeId,
+    runId: row.runId,
     companyId: row.companyId,
     executionEnabled: false as const,
     candidateStoreAccepted: false as const,

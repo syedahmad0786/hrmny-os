@@ -1,8 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CrmBtn, CrmEmpty, CrmTag } from "@/components/crm/ui";
 import { trpc } from "@/lib/trpc";
+import type {
+  DiscoveryResearchNav,
+  DiscoveryView,
+} from "./discovery-research-nav";
 
 const formatDubai = (value: string) =>
   new Intl.DateTimeFormat("en-GB", {
@@ -22,12 +26,24 @@ function statusKind(status: string) {
   return "info" as const;
 }
 
-export function DiscoveryRuns() {
+type DiscoveryRunsProps = {
+  programmeId?: string | null;
+  runId?: string | null;
+  onNavigate?: (
+    next: Partial<DiscoveryResearchNav> & { view?: DiscoveryView },
+  ) => void;
+};
+
+export function DiscoveryRuns({
+  programmeId: programmeIdProp = null,
+  runId = null,
+  onNavigate,
+}: DiscoveryRunsProps) {
   const utils = trpc.useUtils();
   const access = trpc.salesOs.access.useQuery();
   const programmes = trpc.salesOs.discovery.programmes.list.useQuery();
-  const [programmeId, setProgrammeId] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [programmeId, setProgrammeId] = useState(programmeIdProp ?? "");
+  const [selectedId, setSelectedId] = useState<string | null>(runId);
   const [note, setNote] = useState<string | null>(null);
   const runs = trpc.salesOs.discovery.runs.list.useQuery({
     ...(programmeId ? { programmeId } : {}),
@@ -36,6 +52,16 @@ export function DiscoveryRuns() {
     { runId: selectedId ?? "" },
     { enabled: Boolean(selectedId) },
   );
+  useEffect(() => setProgrammeId(programmeIdProp ?? ""), [programmeIdProp]);
+  useEffect(() => setSelectedId(runId), [runId]);
+  const selectRun = (id: string | null, nextProgrammeId = programmeId) => {
+    setSelectedId(id);
+    onNavigate?.({
+      view: "runs",
+      programmeId: nextProgrammeId || null,
+      runId: id,
+    });
+  };
   const cancel = trpc.salesOs.discovery.runs.cancel.useMutation({
     onSuccess: (run) => {
       setNote(
@@ -47,7 +73,7 @@ export function DiscoveryRuns() {
   });
   const requestRun = trpc.salesOs.discovery.programmes.requestRun.useMutation({
     onSuccess: (result) => {
-      setSelectedId(result.runId);
+      selectRun(result.runId, selectedProgramme?.id ?? programmeId);
       setNote(
         `Run ${result.status}. ${selectedProgramme?.executionEnabled ? "Collection can start." : "Collectors stay off until execution is enabled."}`,
       );
@@ -79,7 +105,7 @@ export function DiscoveryRuns() {
         </div>
         <CrmBtn
           data-testid="discovery-request-run"
-          disabled={!canRequest || requestRun.isPending || !selectedProgramme}
+          disabled={!programmeId || !canRequest || requestRun.isPending || !selectedProgramme}
           onClick={() => {
             if (!selectedProgramme) return;
             requestRun.mutate({
@@ -101,8 +127,9 @@ export function DiscoveryRuns() {
             data-testid="discovery-run-programme-filter"
             value={programmeId}
             onChange={(event) => {
-              setProgrammeId(event.target.value);
-              setSelectedId(null);
+              const nextProgrammeId = event.target.value;
+              setProgrammeId(nextProgrammeId);
+              selectRun(null, nextProgrammeId);
             }}
           >
             <option value="">All programmes I can see</option>
@@ -116,11 +143,18 @@ export function DiscoveryRuns() {
         <p className="crm-note" data-testid="discovery-runs-execution-status">
           <strong>
             Execution status:{" "}
-            {selectedProgramme?.executionEnabled ? "available" : "unavailable"}.
+            {!programmeId
+              ? "choose a programme"
+              : selectedProgramme?.executionEnabled
+                ? "available"
+                : "unavailable"}
+            .
           </strong>{" "}
-          {selectedProgramme?.executionEnabled
-            ? "Queue run now can start collection for the selected programme."
-            : "Collectors and provider calls stay off. A pending slot is a schedule reservation only."}
+          {!programmeId
+            ? "Queue run now stays off until a programme is selected. All programmes remain listed below."
+            : selectedProgramme?.executionEnabled
+              ? "Queue run now can start collection for the selected programme."
+              : "Collectors and provider calls stay off. A pending slot is a schedule reservation only."}
         </p>
         {note ? (
           <p className="crm-note" data-testid="discovery-run-note" role="status">
@@ -141,7 +175,9 @@ export function DiscoveryRuns() {
                 type="button"
                 className={`crm-approval-mini text-left ${selectedId === run.runId ? "is-focused" : ""}`}
                 data-testid={`discovery-run-${run.runId}`}
-                onClick={() => setSelectedId(run.runId)}
+                onClick={() =>
+                  selectRun(run.runId, programmeId || run.programmeId)
+                }
               >
                 <div className="flex items-center justify-between gap-2">
                   <strong>{run.programmeName}</strong>
