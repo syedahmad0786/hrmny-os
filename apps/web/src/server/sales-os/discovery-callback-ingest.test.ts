@@ -288,7 +288,7 @@ describe("Discovery callback ingest mapping", () => {
       title: "Women in Advertising 2026: The new holiday masterminds",
       excerpt:
         "Take a moment to picture the traditional Middle Eastern family holiday ad. For years, the industry relied on familiar, comfortable tropes.",
-      companyHints: [{ name: "Women in Advertising 2026" }],
+      companyHints: [{ name: "Women in Advertising 2026", domain: null }],
     };
     expect(
       mapDiscoveryObservationToSubmit(

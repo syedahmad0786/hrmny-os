@@ -238,7 +238,7 @@ it("ingests a signed public-news callback into Review and replays the same event
           kind: "news",
           title: "Public news collector opened a dated review",
           excerpt:
-            "Campaign ME published a dated listing that names a relevant UAE review.",
+            `Callback News ${observationId.slice(0, 8)} published a dated Campaign ME listing that names a relevant UAE review.`,
           companyHints: [
             {
               name: `Callback News ${observationId.slice(0, 8)}`,
@@ -525,7 +525,7 @@ it("rejects late cancel_requested observations and completed completions without
           kind: "news",
           title: "Late cancelled collector must not open review",
           excerpt:
-            "A dated Campaign ME listing arrived after the operator cancelled the run.",
+            `Cancel News ${observationId.slice(0, 8)} published a dated Campaign ME listing after the operator cancelled the run.`,
           companyHints: [
             {
               name: `Cancel News ${observationId.slice(0, 8)}`,
@@ -624,7 +624,7 @@ it("does not persist off-origin evidence and still accepts a Campaign ME article
           kind: "news",
           title: "Off-origin listing must not become evidence",
           excerpt:
-            "A dated listing from another publication is not Campaign ME provenance.",
+            `Foreign News ${foreignId.slice(0, 8)} published a dated listing that is not Campaign ME provenance.`,
           companyHints: [
             {
               name: `Foreign News ${foreignId.slice(0, 8)}`,
@@ -667,7 +667,7 @@ it("does not persist off-origin evidence and still accepts a Campaign ME article
           kind: "news",
           title: "Campaign ME article stays on the frozen origin",
           excerpt:
-            "A dated Campaign ME listing remains permitted public-news evidence.",
+            `Origin News ${validId.slice(0, 8)} published a dated Campaign ME listing that remains permitted public-news evidence.`,
           companyHints: [
             {
               name: `Origin News ${validId.slice(0, 8)}`,
