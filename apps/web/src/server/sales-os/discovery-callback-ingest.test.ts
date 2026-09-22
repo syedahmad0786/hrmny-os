@@ -97,7 +97,7 @@ const observation = {
   },
   kind: "news" as const,
   title: "Agency opens a regional creative review",
-  excerpt: "A dated Campaign ME listing named a relevant UAE review.",
+  excerpt: "Example LLC opened a dated Campaign ME listing for a relevant UAE review.",
   companyHints: [{ name: "Example LLC", domain: "example.com" }],
 };
 
@@ -225,7 +225,7 @@ describe("Discovery callback ingest mapping", () => {
         sourceItemId: "publisher-guid-42",
         externalOpportunityId: "publisher-guid-42",
         sourceUrl: "https://campaignme.com/latest/public-news-42",
-        excerpt: "A dated Campaign ME listing named a relevant UAE review.",
+        excerpt: "Example LLC opened a dated Campaign ME listing for a relevant UAE review.",
         eventDate: "2026-09-19",
         visibilityScope: "public",
         strategicLane: "industry_scanning",
@@ -241,6 +241,72 @@ describe("Discovery callback ingest mapping", () => {
         effective.sources[0]!.configuration,
       ),
     ).toEqual({ ok: false, reason: "COMPANY_IDENTITY_MISSING" });
+  });
+
+  it("does not attach an ungrounded hint domain to a resolved company", () => {
+    const mapped = mapDiscoveryObservationToSubmit(
+      {
+        ...observation,
+        excerpt:
+          "Majid Al Futtaim opened a regional creative review in Dubai.",
+        companyHints: [
+          {
+            name: "Women in Advertising 2026",
+            domain: "women-in-advertising.example",
+          },
+        ],
+      },
+      "campaign_me",
+      effective.sources[0]!.configuration,
+      { name: "Majid Al Futtaim", domain: "majidalfuttaim.com" },
+    );
+    expect(mapped).toEqual({
+      ok: true,
+      values: {
+        requestId: observation.observationId,
+        companyName: "Majid Al Futtaim",
+        website: "https://majidalfuttaim.com",
+        discoveryChannel: "publication",
+        opportunityKind: "company_signal",
+        whyNow: "Agency opens a regional creative review",
+        sourceKey: "campaign_me",
+        sourceItemId: "publisher-guid-42",
+        externalOpportunityId: "publisher-guid-42",
+        sourceUrl: "https://campaignme.com/latest/public-news-42",
+        excerpt:
+          "Majid Al Futtaim opened a regional creative review in Dubai.",
+        eventDate: "2026-09-19",
+        visibilityScope: "public",
+        strategicLane: "industry_scanning",
+      },
+    });
+  });
+
+  it("does not promote an ungrounded title-as-company hint into Review", () => {
+    const titleAsCompany = {
+      ...observation,
+      title: "Women in Advertising 2026: The new holiday masterminds",
+      excerpt:
+        "Take a moment to picture the traditional Middle Eastern family holiday ad. For years, the industry relied on familiar, comfortable tropes.",
+      companyHints: [{ name: "Women in Advertising 2026", domain: null }],
+    };
+    expect(
+      mapDiscoveryObservationToSubmit(
+        titleAsCompany,
+        "campaign_me",
+        effective.sources[0]!.configuration,
+      ),
+    ).toEqual({ ok: false, reason: "COMPANY_IDENTITY_MISSING" });
+    const admission = admitDiscoveryCallbackObservations({
+      observations: [titleAsCompany],
+      sourceKey: "campaign_me",
+      configuration: effective.sources[0]!.configuration,
+      maxObservations: 40,
+    });
+    expect(admission.admitted).toEqual([]);
+    expect(admission.quarantined).toBe(1);
+    expect(admission.pendingInterpretation).toHaveLength(1);
+    expect(admission.pendingInterpretation[0]?.title).toBe(titleAsCompany.title);
   });
 
   it("resolves a grounded public-news company from the excerpt and leaves unknown identity unresolved", async () => {
@@ -269,7 +335,11 @@ describe("Discovery callback ingest mapping", () => {
     });
 
     const missing = await prepareDiscoveryObservationForSubmit(
-      { ...observation, companyHints: [] },
+      {
+        ...observation,
+        companyHints: [],
+        excerpt: "A dated Campaign ME listing named a relevant UAE review.",
+      },
       "campaign_me",
       configuration,
       createMockProvider(),
