@@ -75,7 +75,9 @@ export function DiscoveryRuns({
     onSuccess: (result) => {
       selectRun(result.runId, selectedProgramme?.id ?? programmeId);
       setNote(
-        `Run ${result.status}. ${selectedProgramme?.executionEnabled ? "Collection can start." : "Collectors stay off until execution is enabled."}`,
+        result.status === "deferred"
+          ? "Manual run queued behind the existing scheduled or active run."
+          : `Run queued. ${selectedProgramme?.executionEnabled ? "Collection can start." : "Collectors stay off until execution is enabled."}`,
       );
       void utils.salesOs.discovery.runs.invalidate();
     },
@@ -112,11 +114,11 @@ export function DiscoveryRuns({
               programmeId: selectedProgramme.id,
               expectedVersion: selectedProgramme.version,
               requestId: crypto.randomUUID(),
-              overlap: "defer",
+              overlap: "defer_scheduled",
             });
           }}
         >
-          Queue run now
+          Queue manual run
         </CrmBtn>
       </div>
       <div className="crm-panel-body space-y-4">

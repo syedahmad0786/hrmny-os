@@ -624,7 +624,7 @@ export async function requestDiscoveryRun(input: {
   programmeId: string;
   expectedVersion: number;
   requestId: string;
-  overlap: "defer" | "cancel_and_restart";
+  overlap: "defer" | "defer_scheduled" | "cancel_and_restart";
   actorEmployeeId: string;
   isAdmin: boolean;
 }): Promise<{
@@ -637,7 +637,7 @@ export async function requestDiscoveryRun(input: {
       programmeId: UuidSchema,
       expectedVersion: z.number().int().positive(),
       requestId: UuidSchema,
-      overlap: z.enum(["defer", "cancel_and_restart"]),
+      overlap: z.enum(["defer", "defer_scheduled", "cancel_and_restart"]),
       actorEmployeeId: UuidSchema,
       isAdmin: z.boolean(),
     })
@@ -679,7 +679,7 @@ export async function requestDiscoveryRun(input: {
         return {
           status: "deferred" as const,
           runId: replayed.scheduledJobId,
-          nextWakeAt: now.toISOString(),
+          nextWakeAt: replayed.runAt.toISOString(),
         };
       throw new DiscoveryRunError(
         "REPLAY_CONFLICT",
@@ -696,8 +696,24 @@ export async function requestDiscoveryRun(input: {
       )
       .limit(1)
       .for("update");
-    if (active) {
-      if (parsed.overlap === "cancel_and_restart" && active.status === "running")
+    const [scheduledPending] =
+      !active && parsed.overlap === "defer_scheduled"
+        ? await tx
+            .select({ id: scheduledJob.scheduledJobId })
+            .from(scheduledJob)
+            .where(
+              sql`${scheduledJob.kind} = ${SALES_RESEARCH_RUN_JOB_KIND}
+                and ${scheduledJob.researchProgrammeId} = ${parsed.programmeId}::uuid
+                and ${scheduledJob.status} = 'pending'`,
+            )
+            .limit(1)
+            .for("update")
+        : [];
+    if (active || scheduledPending) {
+      if (
+        parsed.overlap === "cancel_and_restart" &&
+        active?.status === "running"
+      )
         await tx
           .update(scheduledJob)
           .set({

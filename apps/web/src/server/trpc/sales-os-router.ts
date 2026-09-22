@@ -972,7 +972,11 @@ export const salesOsRouter = router({
             programmeId: z.string().uuid(),
             expectedVersion: z.number().int().min(1),
             requestId: z.string().uuid(),
-            overlap: z.enum(["defer", "cancel_and_restart"]),
+            overlap: z.enum([
+              "defer",
+              "defer_scheduled",
+              "cancel_and_restart",
+            ]),
           }),
         )
         .mutation(({ ctx, input }) =>

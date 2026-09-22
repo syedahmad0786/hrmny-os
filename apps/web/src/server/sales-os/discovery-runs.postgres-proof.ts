@@ -145,7 +145,7 @@ it("proves one pending Discovery slot, exact request replay, and pause cancellat
     programmeId: created.id,
     expectedVersion: republished.version,
     requestId,
-    overlap: "defer",
+    overlap: "defer_scheduled",
     actorEmployeeId: ownerId,
     isAdmin: false,
   });
@@ -153,12 +153,12 @@ it("proves one pending Discovery slot, exact request replay, and pause cancellat
     programmeId: created.id,
     expectedVersion: republished.version,
     requestId,
-    overlap: "defer",
+    overlap: "defer_scheduled",
     actorEmployeeId: ownerId,
     isAdmin: false,
   });
   expect(replay).toEqual(first);
-  expect(first.status).toBe("pending");
+  expect(first.status).toBe("deferred");
 
   await expect(
     requestDiscoveryRun({
@@ -184,6 +184,9 @@ it("proves one pending Discovery slot, exact request replay, and pause cancellat
   `);
   expect(
     afterManual.find((row) => row.status === "pending")?.count,
+  ).toBe(1);
+  expect(
+    afterManual.find((row) => row.status === "deferred")?.count,
   ).toBe(1);
 
   const manual = await getDiscoveryRun({

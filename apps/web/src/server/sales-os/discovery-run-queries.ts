@@ -414,7 +414,7 @@ export function requestMemoryDiscoveryRun(input: {
   scheduleGeneration: number;
   sourceKeys: string[];
   requestId: string;
-  overlap: "defer" | "cancel_and_restart";
+  overlap: "defer" | "defer_scheduled" | "cancel_and_restart";
   actorEmployeeId: string;
   isAdmin: boolean;
 }): { status: "pending" | "deferred"; runId: string; nextWakeAt: string } {
@@ -445,7 +445,11 @@ export function requestMemoryDiscoveryRun(input: {
       replayed.status === "running" ||
       replayed.status === "cancel_requested"
     )
-      return { status: "deferred", runId: replayed.runId, nextWakeAt: now };
+      return {
+        status: "deferred",
+        runId: replayed.runId,
+        nextWakeAt: replayed.runAt,
+      };
     throw new DiscoveryRunError(
       "REPLAY_CONFLICT",
       "MANUAL_REQUEST_ALREADY_TERMINAL",
@@ -456,8 +460,18 @@ export function requestMemoryDiscoveryRun(input: {
       run.programmeId === input.programmeId &&
       (run.status === "running" || run.status === "cancel_requested"),
   );
-  if (active) {
-    if (input.overlap === "cancel_and_restart" && active.status === "running") {
+  const scheduledPending =
+    !active && input.overlap === "defer_scheduled"
+      ? [...memoryRuns.values()].find(
+          (run) =>
+            run.programmeId === input.programmeId && run.status === "pending",
+        )
+      : undefined;
+  if (active || scheduledPending) {
+    if (
+      input.overlap === "cancel_and_restart" &&
+      active?.status === "running"
+    ) {
       active.status = "cancel_requested";
       active.cancelReason = "manual_restart";
       active.updatedAt = now;

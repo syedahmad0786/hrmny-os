@@ -34,6 +34,7 @@ import {
   type DiscoveryIdentityLineage,
 } from "./discovery-interpretation";
 import { getDiscoveryProgramme } from "./discovery-programmes";
+import { getDiscoveryRun } from "./discovery-run-queries";
 import {
   normalizeResearchCompanyName,
   normalizeResearchEvidence,
@@ -740,8 +741,28 @@ export async function submitDiscoveryCandidate(input: {
   actorEmployeeId: string;
   isAdmin: boolean;
   values: SubmitInput;
+  runId?: string;
+  provenance?: { provider: "qm"; conversationId: string };
 }) {
   const values = discoveryCandidateSubmitSchema.parse(input.values);
+  const runId = input.runId ? z.string().uuid().parse(input.runId) : undefined;
+  const provenance = input.provenance
+    ? z
+        .object({ provider: z.literal("qm"), conversationId: z.string().uuid() })
+        .parse(input.provenance)
+    : undefined;
+  if (runId) {
+    const run = await getDiscoveryRun({
+      runId,
+      actorEmployeeId: input.actorEmployeeId,
+      isAdmin: input.isAdmin,
+    });
+    if (!values.programmeId || run.programmeId !== values.programmeId)
+      throw new DiscoveryCandidateError(
+        "INVALID_INPUT",
+        "CANDIDATE_RUN_PROGRAMME_CONFLICT",
+      );
+  }
   const sourceUrl = normalizeSourceUrl(values.sourceUrl);
   const website = normalizeOptionalWebsite(values.website);
   const eventDate = values.eventDate ?? null;
@@ -754,6 +775,8 @@ export async function submitDiscoveryCandidate(input: {
   const payloadHash = sha256(
     canonicalJson({
       ...values,
+      runId,
+      provenance,
       sourceUrl,
       website,
       excerpt: values.excerpt.trim(),
@@ -774,9 +797,9 @@ export async function submitDiscoveryCandidate(input: {
     identityLineage: {
       observationId: values.requestId,
       semantic: "manual",
-      provider: "unavailable",
+      provider: provenance?.provider ?? "unavailable",
       model: null,
-      requestId: null,
+      requestId: provenance?.conversationId ?? null,
       identity: { name: values.companyName.trim() },
       sourceUrl: sourceUrl ?? "",
       excerptHash: sha256(values.excerpt.trim()),
@@ -864,7 +887,7 @@ export async function submitDiscoveryCandidate(input: {
       ownerEmployeeId: ownership.ownerEmployeeId,
       reviewerEmployeeIds: ownership.reviewerEmployeeIds,
       programmeId: ownership.programmeId,
-      runId: null,
+      runId: runId ?? null,
       companyId: null,
       createdByEmployeeId: input.actorEmployeeId,
       decidedByEmployeeId: null,
@@ -876,7 +899,9 @@ export async function submitDiscoveryCandidate(input: {
     memoryCandidates.set(id, row);
     memoryByRequest.set(values.requestId, id);
     recordMemoryAudit({
-      action: "discovery.candidate.submitted",
+      action: provenance
+        ? "discovery.candidate.qm_submitted"
+        : "discovery.candidate.submitted",
       entityId: id,
       actorEmployeeId: input.actorEmployeeId,
       before: {},
@@ -886,8 +911,12 @@ export async function submitDiscoveryCandidate(input: {
         observationId: observation.id,
         excerptHash: observation.excerptHash,
         visibilityScope: observation.visibilityScope,
+        runId: runId ?? null,
+        provenance: provenance ?? null,
       },
-      reason: "Operator submitted evidenced Discovery candidate",
+      reason: provenance
+        ? "QM submitted source-backed Discovery evidence"
+        : "Operator submitted evidenced Discovery candidate",
     });
     return candidateView(row, input.actorEmployeeId, input.isAdmin, true);
   }
@@ -962,6 +991,7 @@ export async function submitDiscoveryCandidate(input: {
         ownerEmployeeId: ownership.ownerEmployeeId,
         reviewerEmployeeIds: ownership.reviewerEmployeeIds,
         researchProgrammeId: ownership.programmeId,
+        scheduledJobId: runId ?? null,
         createdByEmployeeId: input.actorEmployeeId,
       })
       .returning();
@@ -985,7 +1015,9 @@ export async function submitDiscoveryCandidate(input: {
       .returning();
     await tx.insert(auditEvent).values({
       actorEmployeeId: input.actorEmployeeId,
-      action: "discovery.candidate.submitted",
+      action: provenance
+        ? "discovery.candidate.qm_submitted"
+        : "discovery.candidate.submitted",
       entityType: "discovery_candidate",
       entityId: created.discoveryCandidateId,
       before: {},
@@ -995,8 +1027,12 @@ export async function submitDiscoveryCandidate(input: {
         observationId: observation?.discoveryObservationId ?? null,
         excerptHash,
         visibilityScope: values.visibilityScope,
+        scheduledJobId: runId ?? null,
+        provenance: provenance ?? null,
       },
-      reason: "Operator submitted evidenced Discovery candidate",
+      reason: provenance
+        ? "QM submitted source-backed Discovery evidence"
+        : "Operator submitted evidenced Discovery candidate",
     });
     return loadDbView(tx, created.discoveryCandidateId, input, true);
   });

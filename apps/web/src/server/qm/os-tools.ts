@@ -19,6 +19,10 @@ import { getDb, withDatabaseScope } from "../db";
 import type { Db } from "@hrmny/db";
 import { emitHealthSignal } from "../m1-persistence";
 import { PRODUCTION_APP_ORIGIN } from "../google-workspace-oauth";
+import {
+  discoveryCandidateSubmitSchema,
+  submitDiscoveryCandidate,
+} from "../sales-os/discovery-candidates";
 
 const searchApp = z.enum([
   "one_drive",
@@ -115,6 +119,15 @@ const inputSchema = z.union([
     .strict(),
   z.object({ operation: z.literal("apollo_latest_search") }).strict(),
   z.object({ operation: z.literal("sales_digest") }).strict(),
+  discoveryCandidateSubmitSchema
+    .omit({ sourceItemId: true })
+    .extend({
+      operation: z.literal("discovery_candidate_submit"),
+      programmeId: z.string().uuid(),
+      runId: z.string().uuid(),
+      conversationId: z.string().uuid(),
+    })
+    .strict(),
   z
     .object({
       operation: z.literal("crm_contacts_list"),
@@ -617,6 +630,39 @@ export async function runQmOsTool(token: string, raw: unknown) {
       case "sales_digest":
         result = await caller.salesOs.digest();
         break;
+      case "discovery_candidate_submit": {
+        const salesRole = user.roles.some((role) =>
+          ["partner", "director", "am", "account_manager"].includes(role),
+        );
+        if (
+          !salesRole ||
+          !(await featureEnabled("crm.workspace", {
+            userId: user.employeeId,
+            roles: user.roles,
+          }))
+        )
+          throw new Error("QM_SALES_ACCESS_DENIED");
+        const {
+          operation: _operation,
+          runId,
+          conversationId,
+          ...values
+        } = input;
+        result = await submitDiscoveryCandidate({
+          actorEmployeeId: user.employeeId,
+          isAdmin: user.roles.some((role) =>
+            ["partner", "director"].includes(role),
+          ),
+          runId,
+          provenance: { provider: "qm", conversationId },
+          values: {
+            ...values,
+            sourceKey: values.sourceKey ?? "qm_agent",
+            sourceItemId: conversationId,
+          },
+        });
+        break;
+      }
       case "crm_contacts_list":
         result = boundedCrmList(
           await caller.crm.contacts.list({
