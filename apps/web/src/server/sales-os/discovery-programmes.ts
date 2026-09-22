@@ -758,13 +758,15 @@ function readiness(sources: ReturnType<typeof sourceView>[]) {
         message: `${source.displayName}: ${source.statusReason}`,
       });
   }
-  blockers.push({
-    code: "EXECUTION_DISABLED" as const,
-    sourceKey: null,
-    message:
-      "Research execution is not available yet. Configuration can be saved.",
-  });
-  return { ready: false, blockers };
+  if (!isDiscoveryExecutionEnabled()) {
+    blockers.push({
+      code: "EXECUTION_DISABLED" as const,
+      sourceKey: null,
+      message:
+        "Research execution is not available yet. Configuration can be saved.",
+    });
+  }
+  return { ready: blockers.length === 0, blockers };
 }
 
 type DbProgramme = typeof researchProgramme.$inferSelect;
